@@ -17,6 +17,9 @@ import { MainColor } from '../lib/main-color';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi } from '@/lib/auth';
 
+// 引入 AdjudicatorEditor 和新类型
+import AdjudicatorEditor from '../components/AdjudicatorEditor';
+
 // 导入拆分的组件
 import AuthModal from '../components/CharManager/AuthModal';
 import SaveCardModal from '../components/CharManager/SaveCardModal';
@@ -576,93 +579,6 @@ const CharacterManagerPage: React.FC = () => {
 
     }, [characterData, originalData]);
 
-
-    // 【v0.3.0 新增】渲染内嵌随机事件的编辑器
-    const renderAdjudicationEventsEditor = () => {
-        // 从角色数据中获取事件数组，如果不存在则默认为空数组
-        const events = characterData.adjudicationEvents || [];
-
-        // 添加新事件的处理函数
-        const handleAddEvent = () => {
-            const newEvent = { event: '', probability: 50 };
-            // 更新角色数据状态，将新事件添加到数组末尾
-            handleFieldChange('adjudicationEvents', [...events, newEvent]);
-        };
-
-        // 删除事件的处理函数
-        const handleDeleteEvent = (index: number) => {
-            // 创建一个新数组，其中不包含指定索引的事件
-            const newEvents = events.filter((_: any, i: number) => i !== index);
-            // 更新角色数据状态
-            handleFieldChange('adjudicationEvents', newEvents);
-        };
-
-        // 渲染UI
-        return (
-            <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
-                <legend className="text-sm font-semibold px-2 text-gray-600">🎲 内嵌随机事件管理</legend>
-                <div className="space-y-4">
-                    {events.map((event: any, index: number) => (
-                        <div key={index} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                            {/* 事件描述输入框 */}
-                            <div className="flex items-center justify-between gap-2">
-                                <label htmlFor={`adj-event-${index}`} className="text-xs font-medium text-gray-600 flex-shrink-0">事件描述</label>
-                                <button
-                                    onClick={() => handleDeleteEvent(index)}
-                                    className="text-red-500 hover:text-red-700 font-bold p-1 text-lg leading-none rounded-full hover:bg-red-100"
-                                    aria-label="删除此事件"
-                                >
-                                    &times;
-                                </button>
-                            </div>
-                            <textarea
-                                id={`adj-event-${index}`}
-                                value={event.event}
-                                onChange={(e) => handleFieldChange(`adjudicationEvents.${index}.event`, e.target.value)}
-                                placeholder="输入需要判定的事件（最多60字）"
-                                maxLength={60}
-                                rows={2}
-                                className="input-field mt-1"
-                            />
-                            {/* 成功率输入框 */}
-                            <div className="flex items-center gap-3 mt-2">
-                                <label htmlFor={`adj-prob-${index}`} className="text-xs font-medium text-gray-600">成功率</label>
-                                <input
-                                    type="range"
-                                    min="1"
-                                    max="100"
-                                    value={event.probability}
-                                    onChange={(e) => handleFieldChange(`adjudicationEvents.${index}.probability`, parseInt(e.target.value, 10))}
-                                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                                />
-                                <div className="relative w-24 flex-shrink-0">
-                                    <input
-                                        type="number"
-                                        id={`adj-prob-${index}`}
-                                        min="1"
-                                        max="100"
-                                        value={event.probability}
-                                        onChange={(e) => handleFieldChange(`adjudicationEvents.${index}.probability`, parseInt(e.target.value, 10))}
-                                        className="input-field !my-0 w-full text-center pr-6"
-                                    />
-                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">%</span>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                    {/* 添加事件按钮 */}
-                    <button
-                        type="button"
-                        onClick={handleAddEvent}
-                        className="text-sm text-blue-600 hover:underline mt-2"
-                    >
-                        + 添加随机事件
-                    </button>
-                </div>
-            </fieldset>
-        );
-    };
-
     // 递归渲染表单
     // 【修正】渲染表单的递归函数，移除了未被使用的变量以修复ESLint报错
     const renderFormFields = (data: any, path: string = ''): React.ReactNode => {
@@ -671,7 +587,7 @@ const CharacterManagerPage: React.FC = () => {
 
         const keyOrder = [
             'codename', 'name', 'appearance', 'magicConstruct', 'wonderlandRule',
-            'blooming', 'analysis', 'userAnswers', 'arena_history'
+            'blooming', 'analysis', 'userAnswers', 'arena_history', 'adjudicationEvents'
         ];
 
         const sortedKeys = Object.keys(data).sort((a, b) => {
@@ -1060,8 +976,6 @@ const CharacterManagerPage: React.FC = () => {
                                     </div>
                                 )}
 
-                                {/* 【v0.3.0 新增】调用内嵌随机事件编辑器 */}
-                                {renderAdjudicationEventsEditor()}
                                 {/* 历战记录管理模块 - 只对角色数据显示 */}
                                 {!isScenarioData(characterData) && characterData.arena_history && (
                                     <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
@@ -1078,6 +992,17 @@ const CharacterManagerPage: React.FC = () => {
                                                 <button onClick={handleClearHistory} className="text-xs bg-red-100 text-red-800 px-3 py-1 rounded hover:bg-red-200">清除所有记录</button>
                                             </div>
                                         </div>
+                                    </fieldset>
+                                )}
+
+                                {/* [新增] 内嵌随机事件管理模块 - 始终显示 */}
+                                {!isScenarioData(characterData) && (
+                                    <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
+                                        <legend className="text-sm font-semibold px-2 text-gray-600">🎲 内嵌随机事件管理</legend>
+                                        <AdjudicatorEditor
+                                            events={characterData.adjudicationEvents || []}
+                                            onEventsChange={(newEvents) => handleFieldChange('adjudicationEvents', newEvents)}
+                                        />
                                     </fieldset>
                                 )}
 
