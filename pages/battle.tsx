@@ -87,6 +87,23 @@ type Combatant = (CombatantData | RandomCombatantPlaceholder) & { teamId?: numbe
 // 定义故事/战斗模式类型
 type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 
+// 辅助函数：用于检测是否为旧版的随机判定器格式
+// 通过检查数组中的对象是否包含旧的 'event' 和 'probability' 键，
+// 并且不包含新格式特有的 'type' 键，来做出判断。
+const isLegacyAdjudicatorFormat = (events: any[]): boolean => {
+    if (!Array.isArray(events) || events.length === 0) {
+        return false;
+    }
+    const firstEvent = events[0];
+    return (
+        typeof firstEvent === 'object' &&
+        firstEvent !== null &&
+        typeof firstEvent.event === 'string' &&
+        typeof firstEvent.probability === 'number' &&
+        typeof firstEvent.type === 'undefined'
+    );
+};
+
 const BattlePage: React.FC = () => {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
@@ -354,7 +371,6 @@ const BattlePage: React.FC = () => {
 
     // 统一处理文件上传和粘贴
     const processJsonData = async (jsonText: string, sourceName: string) => {
-        // [SRS 3.2.2] 兼容性加载核心逻辑
         let parsedData;
         try {
             parsedData = JSON.parse(jsonText);
@@ -371,6 +387,7 @@ const BattlePage: React.FC = () => {
 
         const loadedCombatants: CombatantData[] = [];
         const newAdjudicationEvents: AdjudicatorEvent[] = [];
+        let legacyWarningTriggered = false; // 用于避免重复显示警告
 
         for (const item of dataArray) {
             const itemName = item.codename || item.name || sourceName;
@@ -384,23 +401,33 @@ const BattlePage: React.FC = () => {
                 const verificationResponse = await fetch('/api/verify-origin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
                 const { isValid } = await verificationResponse.json();
 
-                loadedCombatants.push({ type, data: item, filename: itemName, isValid, isPreset: false, isNonStandard: false });
-
-                // 检查并加载内嵌的随机判定事件
-                if (Array.isArray(item.adjudicationEvents)) {
-                    item.adjudicationEvents.forEach((event: any) => {
-                         // v0.4.0: 此处仅简单加载，不进行深度验证，交由编辑器处理
-                        newAdjudicationEvents.push(event as AdjudicatorEvent);
-                    });
+                // 检查并处理内嵌的随机判定事件
+                if (Array.isArray(item.adjudicationEvents) && item.adjudicationEvents.length > 0) {
+                    // 调用新增的辅助函数进行检测
+                    if (isLegacyAdjudicatorFormat(item.adjudicationEvents)) {
+                        // 如果是旧格式，则忽略数据并设置警告
+                        if (!legacyWarningTriggered) {
+                            setError(`⚠️ 文件 "${itemName}" 包含旧版随机事件，已被忽略。请前往【角色管理中心】加载并保存该文件以自动升级格式。`);
+                            legacyWarningTriggered = true;
+                        }
+                        // 从角色数据中删除旧字段，防止其污染后续逻辑
+                        delete item.adjudicationEvents;
+                    } else {
+                        // 如果是新格式，则正常加载
+                        newAdjudicationEvents.push(...(item.adjudicationEvents as AdjudicatorEvent[]));
+                    }
                 }
 
-            } catch {
+                loadedCombatants.push({ type, data: item, filename: itemName, isValid, isPreset: false, isNonStandard: false });
+
+            } catch (e) { // 捕获所有类型的错误
                 if (item && (item.codename || item.name)) {
                     setError(`✔️ 文件 "${itemName}" 格式不完全规范，已通过兼容模式加载。`);
                     const type = item.codename ? 'magical-girl' : 'canshou';
                     loadedCombatants.push({ type, data: item, filename: itemName, isValid: false, isPreset: false, isNonStandard: true });
                 } else {
-                    throw new Error(`文件 "${itemName}" 格式不规范，缺少必需的 "codename" 或 "name" 字段。`);
+                    const errorMessage = e instanceof Error ? e.message : '未知错误';
+                    throw new Error(`文件 "${itemName}" 格式不规范或处理失败: ${errorMessage}`);
                 }
             }
         }
