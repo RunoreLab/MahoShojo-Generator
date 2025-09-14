@@ -162,8 +162,12 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage }) => {
           <div className="result-value text-sm italic">{canshou.researcherNotes}</div>
         </div>
         
-        {/* 新增：历战记录展示区 */}
-        {canshou.arena_history && canshou.arena_history.entries.length > 0 && (
+        {/*
+          【修复】对历战记录进行健壮性检查。
+          修改后：在尝试访问 .entries 之前，先确保 canshou.arena_history 和 canshou.arena_history.entries 都存在且为数组。
+          这样可以防止因数据格式不规范（如 arena_history 为 null 或 entries 不是数组）导致的页面崩溃。
+        */}
+        {canshou.arena_history && Array.isArray(canshou.arena_history.entries) && canshou.arena_history.entries.length > 0 && (
           <div className="result-item">
             <button onClick={() => setIsHistoryVisible(!isHistoryVisible)} className="result-label w-full text-left bg-transparent border-none cursor-pointer">
               {isHistoryVisible ? '▼' : '▶'} 📜 历战记录
