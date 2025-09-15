@@ -30,7 +30,7 @@ export default function EditCardForm({ card, onSave, onCancel }: EditCardFormPro
           className="input-field text-sm"
           rows={2}
           placeholder="描述"
-          maxLength={64}
+          maxLength={120}
         />
         <div className="flex items-center gap-2">
           <input

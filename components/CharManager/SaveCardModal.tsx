@@ -121,7 +121,7 @@ export default function SaveCardModal({
               className="input-field"
               rows={3}
               placeholder="请输入数据卡描述"
-              maxLength={64}
+              maxLength={120}
               disabled={isSaving}
             />
           </div>
