@@ -40,7 +40,7 @@ export default function SaveCardModal({
     } else {
       document.body.style.overflow = 'unset';
     }
-    
+
     return () => {
       document.body.style.overflow = 'unset';
     };
@@ -49,16 +49,16 @@ export default function SaveCardModal({
   if (!isOpen) return null;
 
   const modalContent = (
-    <div 
+    <div
       className="fixed inset-0 flex items-center justify-center p-4"
-      style={{ 
+      style={{
         zIndex: 999999,
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
         backdropFilter: 'blur(4px)'
       }}
       onClick={onClose}
     >
-      <div 
+      <div
         className="bg-white rounded-lg p-6 max-w-md w-full relative shadow-2xl"
         style={{ zIndex: 1000000 }}
         onClick={(e) => e.stopPropagation()}
@@ -106,7 +106,7 @@ export default function SaveCardModal({
               onChange={(e) => onNameChange(e.target.value)}
               className="input-field"
               placeholder="请输入数据卡名称"
-              maxLength={50}
+              maxLength={20}
               disabled={isSaving}
             />
           </div>
@@ -121,7 +121,7 @@ export default function SaveCardModal({
               className="input-field"
               rows={3}
               placeholder="请输入数据卡描述"
-              maxLength={50}
+              maxLength={64}
               disabled={isSaving}
             />
           </div>

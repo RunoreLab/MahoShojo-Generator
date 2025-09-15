@@ -22,6 +22,7 @@ export default function EditCardForm({ card, onSave, onCancel }: EditCardFormPro
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           className="input-field"
           placeholder="名称"
+          maxLength={20}
         />
         <textarea
           value={formData.description}
@@ -29,7 +30,7 @@ export default function EditCardForm({ card, onSave, onCancel }: EditCardFormPro
           className="input-field text-sm"
           rows={2}
           placeholder="描述"
-          maxLength={50}
+          maxLength={64}
         />
         <div className="flex items-center gap-2">
           <input
