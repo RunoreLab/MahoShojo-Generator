@@ -101,7 +101,7 @@ export default function DataCard({
   // 分享功能 - 复制卡片名称和UUID到剪贴板
   const handleShare = async () => {
     try {
-      const shareText = `【${typeMap[type]}：${name}】${id}`;
+      const shareText = `魔法少女竞技场的【${name}】向你发出了邀请！（ID：${id}）✨\n快来 https://mahoshojo.colanns.me/battle 生成新的故事吧！\n在数据库的搜索框粘贴ID即可加载${typeMap[type]}档案！`;
       await navigator.clipboard.writeText(shareText);
       setShareStatus('copied');
       setTimeout(() => setShareStatus('idle'), 2000);
