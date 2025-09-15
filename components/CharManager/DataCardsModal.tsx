@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import DataCard from '../DataCard';
 import EditCardForm from './EditCardForm';
+import DataCardDetailsModal from '../DataCardDetailsModal';
 import { config } from '@/lib/config';
 
 interface DataCardsModalProps {
@@ -36,7 +37,16 @@ export default function DataCardsModal({
   onShareCard,
   userCapacity = config.DEFAULT_DATA_CARD_CAPACITY
 }: DataCardsModalProps) {
+  const [selectedCard, setSelectedCard] = useState<any | null>(null);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+
   if (!isOpen) return null;
+
+  // 处理查看详情
+  const handleViewDetails = (card: any) => {
+    setSelectedCard(card);
+    setShowDetailsModal(true);
+  };
 
   const totalPages = Math.ceil(dataCards.length / cardsPerPage);
   const paginatedCards = dataCards.slice(
@@ -99,6 +109,7 @@ export default function DataCardsModal({
                       likeCount={card.like_count}
                       author={author}
                       isOwner={true}
+                      onViewDetails={() => handleViewDetails(card)}
                       onDownload={() => {
                         // 下载功能
                         const dataToDownload = JSON.parse(card.data);
@@ -147,6 +158,30 @@ export default function DataCardsModal({
           </>
         )}
       </div>
+
+      {/* 详情模态框 */}
+      {selectedCard && (
+        <DataCardDetailsModal
+          isOpen={showDetailsModal}
+          onClose={() => {
+            setShowDetailsModal(false);
+            setSelectedCard(null);
+          }}
+          card={{
+            id: selectedCard.id,
+            name: selectedCard.name,
+            description: selectedCard.description,
+            type: selectedCard.type,
+            data: selectedCard.data,
+            isPublic: selectedCard.is_public,
+            usageCount: selectedCard.usage_count,
+            likeCount: selectedCard.like_count,
+            author: '我',
+            createdAt: selectedCard.created_at,
+            updatedAt: selectedCard.updated_at
+          }}
+        />
+      )}
     </div>
   );
 }
