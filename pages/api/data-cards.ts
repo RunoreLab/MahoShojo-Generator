@@ -77,8 +77,22 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
+        // 检查数据卡内容大小 (32KB 限制)
+        const dataString = JSON.stringify(data);
+        const dataSize = new TextEncoder().encode(dataString).length;
+        const maxSize = 32 * 1024; // 32KB
+        
+        if (dataSize > maxSize) {
+          return new Response(JSON.stringify({ 
+            error: `数据卡内容过大，最大允许 ${maxSize / 1024}KB，当前大小 ${(dataSize / 1024).toFixed(1)}KB` 
+          }), {
+            status: 413, // Payload Too Large
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
         // 敏感词检查
-        const textToCheck = `${name} ${description || ''} ${JSON.stringify(data)}`;
+        const textToCheck = `${name} ${description || ''} ${dataString}`;
         const sensitiveWordResult = await quickCheck(textToCheck);
         
         if (sensitiveWordResult.hasSensitiveWords) {

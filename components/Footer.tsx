@@ -36,6 +36,9 @@ export default function Footer({ className = "footer", textWhite = false }: Foot
         &nbsp;强力支持
       </p>
       <p>
+        <a href="https://docs.qq.com/form/page/DYmdrdWFQdmZCSGdZ" target="_blank" rel="noopener noreferrer" className="footer-link">反馈问题</a>
+      </p>
+      <p>
         <a href="https://github.com/colasama/MahoShojo-Generator" target="_blank" rel="noopener noreferrer" className="footer-link">colasama/MahoShojo-Generator</a>
       </p>
     </footer>
