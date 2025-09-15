@@ -136,7 +136,7 @@ export const authApi = {
   // 登录
   async login(username: string, authKey: string, turnstileToken: string): Promise<{
     success: boolean;
-    user?: { id: number; username: string };
+    user?: { id: number; username: string; prefix?: string | null };
     error?: string;
   }> {
     try {
@@ -163,7 +163,7 @@ export const authApi = {
   // 验证当前认证状态
   async verify(): Promise<{
     success: boolean;
-    user?: { id: number; username: string };
+    user?: { id: number; username: string; prefix?: string | null };
   }> {
     const authHeader = await authStorage.getAuthHeader();
     if (!authHeader) {
@@ -196,12 +196,23 @@ export const authApi = {
 // 数据卡 API
 export const dataCardApi = {
   // 获取所有数据卡
-  async getCards(): Promise<any[]> {
+  async getCards(search?: string, sortBy?: 'likes' | 'usage' | 'created_at'): Promise<any[]> {
     const authHeader = await authStorage.getAuthHeader();
     if (!authHeader) return [];
 
     try {
-      const response = await fetch('/api/data-cards', {
+      const searchParams = new URLSearchParams();
+      if (search) {
+        searchParams.append('search', search);
+      }
+      if (sortBy) {
+        searchParams.append('sortBy', sortBy);
+      }
+      
+      const queryString = searchParams.toString();
+      const url = `/api/data-cards${queryString ? `?${queryString}` : ''}`;
+      
+      const response = await fetch(url, {
         headers: { 'Authorization': authHeader }
       });
 
@@ -213,6 +224,27 @@ export const dataCardApi = {
     } catch (error) {
       console.error('Get cards error:', error);
       return [];
+    }
+  },
+
+  // 获取用户数据卡容量
+  async getUserCapacity(): Promise<number | null> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return null;
+
+    try {
+      const response = await fetch('/api/user-capacity', {
+        headers: { 'Authorization': authHeader }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return data.capacity || null;
+      }
+      return null;
+    } catch (error) {
+      console.error('Get user capacity error:', error);
+      return null;
     }
   },
 

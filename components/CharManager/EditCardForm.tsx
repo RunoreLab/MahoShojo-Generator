@@ -26,7 +26,7 @@ export default function EditCardForm({ card, onSave, onCancel }: EditCardFormPro
         <textarea
           value={formData.description}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-          className="input-field"
+          className="input-field text-sm"
           rows={2}
           placeholder="描述"
           maxLength={50}

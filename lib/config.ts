@@ -225,6 +225,9 @@ export const config = {
   // [新增] 升华功能配置
   ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING: getAllowGuidedSublimationNativeSigning(),
 
+  // 数据卡管理配置
+  DEFAULT_DATA_CARD_CAPACITY: 20,
+
   // 魔法少女生成配置
   MAGICAL_GIRL_GENERATION: {
     temperature: 0.8,

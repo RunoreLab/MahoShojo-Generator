@@ -3,8 +3,11 @@ import {
   createDataCardWithAuthor, 
   getUserDataCards, 
   updateDataCard, 
-  deleteDataCard 
+  deleteDataCard,
+  getUserDataCardCapacity
 } from '@/lib/d1';
+import { config } from '@/lib/config';
+import { quickCheck } from '@/lib/sensitive-word-filter';
 
 export const runtime = 'edge';
 
@@ -38,7 +41,11 @@ export default async function handler(req: Request): Promise<Response> {
     case 'GET':
       // 获取用户的所有数据卡
       try {
-        const cards = await getUserDataCards(userId);
+        const url = new URL(req.url);
+        const search = url.searchParams.get('search'); // 搜索关键词
+        const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'created_at' | null; // 排序方式
+        
+        const cards = await getUserDataCards(userId, search || undefined, sortBy || undefined);
         return new Response(JSON.stringify({ success: true, cards }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
@@ -66,6 +73,32 @@ export default async function handler(req: Request): Promise<Response> {
         if (type !== 'character' && type !== 'scenario') {
           return new Response(JSON.stringify({ error: '无效的数据卡类型' }), {
             status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        // 敏感词检查
+        const textToCheck = `${name} ${description || ''} ${JSON.stringify(data)}`;
+        const sensitiveWordResult = await quickCheck(textToCheck);
+        
+        if (sensitiveWordResult.hasSensitiveWords) {
+          return new Response(JSON.stringify({ 
+            error: 'SENSITIVE_WORD_DETECTED',
+            redirect: '/arrested'
+          }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        // 检查用户数据卡数量限制
+        const existingCards = await getUserDataCards(userId);
+        const userCapacity = await getUserDataCardCapacity(userId, config.DEFAULT_DATA_CARD_CAPACITY);
+        if (existingCards.length >= userCapacity) {
+          return new Response(JSON.stringify({ 
+            error: `数据卡数量已达上限（${userCapacity}个），请删除部分数据卡后再试` 
+          }), {
+            status: 429, // Too Many Requests
             headers: { 'Content-Type': 'application/json' }
           });
         }
@@ -113,6 +146,20 @@ export default async function handler(req: Request): Promise<Response> {
         if (!id) {
           return new Response(JSON.stringify({ error: '缺少数据卡ID' }), {
             status: 400,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        // 敏感词检查
+        const textToCheck = `${name || ''} ${description || ''}`;
+        const sensitiveWordResult = await quickCheck(textToCheck);
+        
+        if (sensitiveWordResult.hasSensitiveWords) {
+          return new Response(JSON.stringify({ 
+            error: 'SENSITIVE_WORD_DETECTED',
+            redirect: '/arrested'
+          }), {
+            status: 403,
             headers: { 'Content-Type': 'application/json' }
           });
         }

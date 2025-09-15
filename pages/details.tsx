@@ -9,6 +9,8 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import Link from 'next/link';
 import TachieGenerator from '../components/TachieGenerator';
 import { generateRandomMagicalGirl } from '../lib/random-character-generator';
+import SaveToCloudButton from '../components/SaveToCloudButton';
+import Footer from '../components/Footer';
 
 interface Questionnaire {
   questions: string[];
@@ -464,26 +466,26 @@ const DetailsPage: React.FC = () => {
                     开始回答问卷
                   </button>
                   <button
-                      onClick={() => {
-                          setIsGenerating(true);
-                          setError(null);
-                          try {
-                              // 直接同步调用，移除 await
-                              const data = generateRandomMagicalGirl();
-                              setMagicalGirlDetails(data);
-                              setShowIntroduction(false);
-                          } catch (err) {
-                              console.error('随机生成失败: ', err);
-                              setError('随机生成失败，请稍后再试。');
-                          } finally {
-                              setIsGenerating(false);
-                          }
-                      }}
-                      disabled={isGenerating}
-                      className="generate-button text-lg flex-1"
-                      style={{ background: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                    onClick={() => {
+                      setIsGenerating(true);
+                      setError(null);
+                      try {
+                        // 直接同步调用，移除 await
+                        const data = generateRandomMagicalGirl();
+                        setMagicalGirlDetails(data);
+                        setShowIntroduction(false);
+                      } catch (err) {
+                        console.error('随机生成失败: ', err);
+                        setError('随机生成失败，请稍后再试。');
+                      } finally {
+                        setIsGenerating(false);
+                      }
+                    }}
+                    disabled={isGenerating}
+                    className="generate-button text-lg flex-1"
+                    style={{ background: 'linear-gradient(to right, #22c55e, #16a34a)' }}
                   >
-                      {isGenerating ? '生成中...' : '快速随机生成'}
+                    {isGenerating ? '生成中...' : '快速随机生成'}
                   </button>
                 </div>
                 {/* 修改结束 */}
@@ -727,7 +729,14 @@ const DetailsPage: React.FC = () => {
               <div className="card" style={{ marginTop: '1rem' }}>
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>保存人物设定</h3>
-                  <SaveJsonButton magicalGirlDetails={magicalGirlDetails} answers={answers} />
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <SaveJsonButton magicalGirlDetails={magicalGirlDetails} answers={answers} />
+                    <SaveToCloudButton
+                      data={{ ...magicalGirlDetails, userAnswers: answers }}
+                      buttonText="保存到云端"
+                      style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                    />
+                  </div>
                   {/* 新增：前往竞技场的入口 */}
                   <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
                     <p className="text-sm text-gray-600 mb-2">
@@ -752,32 +761,13 @@ const DetailsPage: React.FC = () => {
             </>
           )}
 
-          <footer className="footer text-white">
-            <p>
-              交流群：<a href="https://qun.qq.com/universal-share/share?ac=1&busi_data=eyJncm91cENvZGUiOiIxMDU5ODMwOTUyIiwidG9rZW4iOiJNUFN6UVpBRVZNNU9COWpBa21DU1lxczRObXhiKy9kSzEvbHhOcnNpT1RBZUVVU3dtZ2hUQjJVNGtuYk5ISDhrIiwidWluIjoiMTAxOTcyNzcxMCJ9&data=DxfxSXDeGY3mgLKqoTGEoHkfqpums19TEW8Alu5Ikc3uCmV0O8YkLVLyRTMOp61VjFN387-7QL8-j2AFHUX2QXq525oXb8rl0lNhm0K453Q&svctype=5&tempid=h5_group_info" target="_blank" rel="noopener noreferrer" className="footer-link">1059830952</a>
-            </p>
-            <p className="text-white">
-              竞技场、问卷与系统设计 <a href="https://github.com/notuhao" target="_blank" rel="noopener noreferrer" className="footer-link">@末伏之夜</a>
-            </p>
-            <p className="text-white">
-              <a href="https://github.com/colasama" target="_blank" rel="noopener noreferrer" className="footer-link">@Colanns</a> 急速出品
-            </p>
-            <p className="text-white">
-              本项目 AI 能力由&nbsp;
-              <a href="https://github.com/KouriChat/KouriChat" target="_blank" rel="noopener noreferrer" className="footer-link">KouriChat</a> &&nbsp;
-              <a href="https://api.kourichat.com/" target="_blank" rel="noopener noreferrer" className="footer-link">Kouri API</a>
-              &nbsp;强力支持
-            </p>
-            <p className="text-white">
-              <a href="https://github.com/colasama/MahoShojo-Generator" target="_blank" rel="noopener noreferrer" className="footer-link">colasama/MahoShojo-Generator</a>
-            </p>
-          </footer>
+          <Footer textWhite={true} />
         </div>
 
         {/* Image Modal */}
         {showImageModal && savedImageUrl && (
-          <div className="fixed inset-0 bg-black flex items-center justify-center z-50"
-            style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem' }}
+          <div className="fixed inset-0 bg-black flex items-center justify-center"
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem', zIndex: 1000 }}
           >
             <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
               <div className="flex justify-between items-center m-0 absolute top-0 right-0">

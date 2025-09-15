@@ -7,6 +7,8 @@ import Link from 'next/link';
 import CanshouCard, { CanshouDetails } from '../components/CanshouCard';
 import { CANSHOU_LORE } from '../lib/canshou-lore';
 import { generateRandomCanshou } from '../lib/random-character-generator';
+import SaveToCloudButton from '../components/SaveToCloudButton';
+import Footer from '../components/Footer';
 
 // 定义问卷和问题的类型
 interface Question {
@@ -312,29 +314,29 @@ const CanshouPage: React.FC = () => {
             {showIntroduction ? (
               <div className="text-center">
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                    <button onClick={() => setShowIntroduction(false)} className="generate-button text-lg flex-1">开始调查</button>
-                    <button
-                        onClick={() => { // 移除 async
-                            setSubmitting(true);
-                            setError(null);
-                            try {
-                                // 直接同步调用，移除 await
-                                const data = generateRandomCanshou();
-                                setCanshouDetails(data);
-                                setShowIntroduction(false);
-                            } catch (err) {
-                                console.error('随机生成失败: ', err);
-                                setError('随机生成失败，请稍后再试。');
-                            } finally {
-                                setSubmitting(false);
-                            }
-                        }}
-                        disabled={submitting}
-                        className="generate-button text-lg flex-1"
-                        style={{ background: 'linear-gradient(to right, #7e22ce, #a855f7)' }}
-                    >
-                        {submitting ? '生成中...' : '快速随机生成'}
-                    </button>
+                  <button onClick={() => setShowIntroduction(false)} className="generate-button text-lg flex-1">开始调查</button>
+                  <button
+                    onClick={() => { // 移除 async
+                      setSubmitting(true);
+                      setError(null);
+                      try {
+                        // 直接同步调用，移除 await
+                        const data = generateRandomCanshou();
+                        setCanshouDetails(data);
+                        setShowIntroduction(false);
+                      } catch (err) {
+                        console.error('随机生成失败: ', err);
+                        setError('随机生成失败，请稍后再试。');
+                      } finally {
+                        setSubmitting(false);
+                      }
+                    }}
+                    disabled={submitting}
+                    className="generate-button text-lg flex-1"
+                    style={{ background: 'linear-gradient(to right, #7e22ce, #a855f7)' }}
+                  >
+                    {submitting ? '生成中...' : '快速随机生成'}
+                  </button>
                 </div>
                 <div className="mt-8">
                   <Link href="/" className="footer-link">返回首页</Link>
@@ -463,7 +465,14 @@ const CanshouPage: React.FC = () => {
                 <div className="card" style={{ marginTop: '1rem' }}>
                   <div className="text-center">
                     <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
-                    <SaveJsonButton canshouDetails={canshouDetails} answers={answers} />
+                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                      <SaveJsonButton canshouDetails={canshouDetails} answers={answers} />
+                      <SaveToCloudButton
+                        data={{ ...canshouDetails, userAnswers: answers }}
+                        buttonText="保存到云端"
+                        style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                      />
+                    </div>
                     <button
                       onClick={handleRegenerate}
                       disabled={submitting || isCooldown}
@@ -499,26 +508,7 @@ const CanshouPage: React.FC = () => {
             )}
           </div>
 
-          <footer className="footer text-gray-300">
-            <p>
-              交流群：<a href="https://qun.qq.com/universal-share/share?ac=1&busi_data=eyJncm91cENvZGUiOiIxMDU5ODMwOTUyIiwidG9rZW4iOiJNUFN6UVpBRVZNNU9COWpBa21DU1lxczRObXhiKy9kSzEvbHhOcnNpT1RBZUVVU3dtZ2hUQjJVNGtuYk5ISDhrIiwidWluIjoiMTAxOTcyNzcxMCJ9&data=DxfxSXDeGY3mgLKqoTGEoHkfqpums19TEW8Alu5Ikc3uCmV0O8YkLVLyRTMOp61VjFN387-7QL8-j2AFHUX2QXq525oXb8rl0lNhm0K453Q&svctype=5&tempid=h5_group_info" target="_blank" rel="noopener noreferrer" className="footer-link">1059830952</a>
-            </p>
-            <p>
-              设计与制作 <a href="https://github.com/notuhao" target="_blank" rel="noopener noreferrer" className="footer-link">@末伏之夜</a>
-            </p>
-            <p>
-              <a href="https://github.com/colasama" target="_blank" rel="noopener noreferrer" className="footer-link">@Colanns</a> 急速出品
-            </p>
-            <p>
-              本项目 AI 能力由&nbsp;
-              <a href="https://github.com/KouriChat/KouriChat" target="_blank" rel="noopener noreferrer" className="footer-link">KouriChat</a> &&nbsp;
-              <a href="https://api.kourichat.com/" target="_blank" rel="noopener noreferrer" className="footer-link">Kouri API</a>
-              &nbsp;强力支持
-            </p>
-            <p>
-              <a href="https://github.com/colasama/MahoShojo-Generator" target="_blank" rel="noopener noreferrer" className="footer-link">colasama/MahoShojo-Generator</a>
-            </p>
-          </footer>
+          <Footer textWhite={true} />
         </div>
       </div>
 

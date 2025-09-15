@@ -18,7 +18,8 @@ export {
   getUserByUsername,
   getUserByEmail,
   getUserByAuthKey,
-  verifyUserLogin
+  verifyUserLogin,
+  getUserDataCardCapacity
 } from './database/users';
 
 // 重新导出数据卡相关功能
@@ -30,7 +31,10 @@ export {
   updateDataCard,
   deleteDataCard,
   verifyCardOwnership,
-  getPublicDataCards
+  getPublicDataCards,
+  getDataCardById,
+  incrementDataCardLike,
+  incrementDataCardUsage
 } from './database/data-cards';
 
 // 重新导出竞技场相关功能

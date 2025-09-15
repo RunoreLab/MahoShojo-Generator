@@ -33,12 +33,13 @@ export async function createDataCardWithAuthor(
 ): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
     // 如果是公开卡，先检查是否有同名
-    if (isPublic) {
-      const exists = await checkPublicCardNameExists(name, type);
-      if (exists) {
-        return { success: false, error: '已存在同名的公开数据卡，请修改名称' };
-      }
-    }
+    // 暂时取消检查
+    // if (isPublic) {
+    //   const exists = await checkPublicCardNameExists(name, type);
+    //   if (exists) {
+    //     return { success: false, error: '已存在同名的公开数据卡，请修改名称' };
+    //   }
+    // }
     
     // 创建包含作者信息的数据对象
     const dataWithAuthor = JSON.stringify({
@@ -94,12 +95,33 @@ export async function createDataCard(
 }
 
 // 获取用户的所有数据卡
-export async function getUserDataCards(userId: number): Promise<any[]> {
+export async function getUserDataCards(
+  userId: number, 
+  search?: string,
+  sortBy?: 'likes' | 'usage' | 'created_at'
+): Promise<any[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT * FROM data_cards WHERE user_id = ? ORDER BY updated_at DESC',
-      [userId]
-    ) as any;
+    let sql = 'SELECT * FROM data_cards WHERE user_id = ?';
+    const params: any[] = [userId];
+    
+    if (search) {
+      sql += ' AND (name LIKE ? OR description LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+    
+    // 添加排序逻辑
+    let orderBy = 'updated_at DESC'; // 默认按更新时间排序
+    if (sortBy === 'likes') {
+      orderBy = 'like_count DESC, updated_at DESC';
+    } else if (sortBy === 'usage') {
+      orderBy = 'usage_count DESC, updated_at DESC';
+    } else if (sortBy === 'created_at') {
+      orderBy = 'created_at DESC';
+    }
+    
+    sql += ` ORDER BY ${orderBy}`;
+    
+    const result = await queryFromD1(sql, params) as any;
     
     if (result.success && result.result && result.result[0]?.results) {
       return result.result[0].results;
@@ -179,11 +201,61 @@ export async function verifyCardOwnership(cardId: string, userId: number): Promi
   }
 }
 
+// 通过ID获取单个数据卡（公开或私有）
+export async function getDataCardById(cardId: string, isPublic: boolean = false): Promise<any | null> {
+  try {
+    const result = await queryFromD1(
+      'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.id = ? AND dc.is_public = ?',
+      [cardId, isPublic ? 1 : 0]
+    ) as any;
+    
+    if (result.success && result.result && result.result[0]?.results?.length > 0) {
+      return result.result[0].results[0];
+    }
+    return null;
+  } catch (error) {
+    console.error("通过ID获取数据卡失败:", error);
+    return null;
+  }
+}
+
+// 增加数据卡的点赞数
+export async function incrementDataCardLike(cardId: string): Promise<boolean> {
+  try {
+    const result = await queryFromD1(
+      'UPDATE data_cards SET like_count = like_count + 1 WHERE id = ? AND is_public = 1',
+      [cardId]
+    ) as any;
+    
+    return result.success && result.result && result.result[0]?.meta?.changes > 0;
+  } catch (error) {
+    console.error("增加数据卡点赞数失败:", error);
+    return false;
+  }
+}
+
+// 增加数据卡的使用次数
+export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
+  try {
+    const result = await queryFromD1(
+      'UPDATE data_cards SET usage_count = usage_count + 1 WHERE id = ? AND is_public = 1',
+      [cardId]
+    ) as any;
+    
+    return result.success && result.result && result.result[0]?.meta?.changes > 0;
+  } catch (error) {
+    console.error("增加数据卡使用次数失败:", error);
+    return false;
+  }
+}
+
 // 获取公开的数据卡列表
 export async function getPublicDataCards(
   limit: number = 20,
   offset: number = 0,
-  type?: 'character' | 'scenario'
+  type?: 'character' | 'scenario',
+  search?: string,
+  sortBy?: 'likes' | 'usage' | 'created_at'
 ): Promise<any[]> {
   try {
     let sql = 'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1';
@@ -194,7 +266,20 @@ export async function getPublicDataCards(
       params.push(type);
     }
     
-    sql += ' ORDER BY dc.created_at DESC LIMIT ? OFFSET ?';
+    if (search) {
+      sql += ' AND (dc.name LIKE ? OR dc.description LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+    
+    // 添加排序逻辑
+    let orderBy = 'dc.created_at DESC'; // 默认按创建时间排序
+    if (sortBy === 'likes') {
+      orderBy = 'dc.like_count DESC, dc.created_at DESC';
+    } else if (sortBy === 'usage') {
+      orderBy = 'dc.usage_count DESC, dc.created_at DESC';
+    }
+    
+    sql += ` ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
     params.push(limit, offset);
     
     const result = await queryFromD1(sql, params) as any;

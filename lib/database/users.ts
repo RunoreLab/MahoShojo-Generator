@@ -75,7 +75,7 @@ export async function getUserByAuthKey(authKey: string): Promise<any> {
 export async function verifyUserLogin(username: string, authKey: string): Promise<any> {
   try {
     const result = await queryFromD1(
-      'SELECT id, username FROM users WHERE username = ? AND auth_key = ?',
+      'SELECT id, username, prefix FROM users WHERE username = ? AND auth_key = ?',
       [username, authKey]
     ) as any;
     
@@ -92,5 +92,26 @@ export async function verifyUserLogin(username: string, authKey: string): Promis
   } catch (error) {
     console.error("验证登录失败:", error);
     return null;
+  }
+}
+
+// 获取用户数据卡容量限制
+export async function getUserDataCardCapacity(userId: number, defaultCapacity: number): Promise<number> {
+  try {
+    const result = await queryFromD1(
+      'SELECT slot_count FROM users WHERE id = ?',
+      [userId]
+    ) as any;
+    
+    if (result.success && result.result && result.result[0]?.results?.length > 0) {
+      const user = result.result[0].results[0];
+      const slotCount = user.slot_count;
+      // 如果 slot_count 为 0 或 null，使用默认值
+      return (slotCount && slotCount > 0) ? slotCount : defaultCapacity;
+    }
+    return defaultCapacity;
+  } catch (error) {
+    console.error("获取用户数据卡容量失败:", error);
+    return defaultCapacity;
   }
 }

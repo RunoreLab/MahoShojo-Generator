@@ -7,7 +7,9 @@ import { useRouter } from 'next/router';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
 import { webcrypto } from 'crypto';
+import { config } from '@/lib/config';
 import TachieGenerator from '../components/TachieGenerator';
+import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
@@ -15,11 +17,15 @@ import { MainColor } from '../lib/main-color';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi } from '@/lib/auth';
 
+// 引入 AdjudicatorEditor 和新类型
+import AdjudicatorEditor from '../components/AdjudicatorEditor';
+
 // 导入拆分的组件
 import AuthModal from '../components/CharManager/AuthModal';
 import SaveCardModal from '../components/CharManager/SaveCardModal';
 import DataCardsModal from '../components/CharManager/DataCardsModal';
 import ScenarioEditor from '../components/ScenarioEditor';
+import { UserWithTitle } from '../components/UserTitle';
 
 // 兼容 Edge 和 Node.js 环境的 crypto API
 const randomUUID = typeof crypto !== 'undefined' ? crypto.randomUUID.bind(crypto) : webcrypto.randomUUID.bind(webcrypto);
@@ -108,6 +114,7 @@ const CharacterManagerPage: React.FC = () => {
 
     // 数据卡管理相关状态
     const [userDataCards, setUserDataCards] = useState<any[]>([]);
+    const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
     const [showDataCardsModal, setShowDataCardsModal] = useState(false);
     const [editingCard, setEditingCard] = useState<any | null>(null);
     const [showSaveCardModal, setShowSaveCardModal] = useState(false);
@@ -136,11 +143,17 @@ const CharacterManagerPage: React.FC = () => {
     // 用于控制粘贴区域折叠/展开的状态，默认为折叠
     const [isPasteAreaVisible, setIsPasteAreaVisible] = useState(false);
 
-    // 加载用户数据卡
+    // 加载用户数据卡和容量
     const loadUserDataCards = useCallback(async () => {
         if (!isAuthenticated) return;
-        const cards = await dataCardApi.getCards();
+        const [cards, capacity] = await Promise.all([
+            dataCardApi.getCards(),
+            dataCardApi.getUserCapacity()
+        ]);
         setUserDataCards(cards);
+        if (capacity !== null) {
+            setUserCapacity(capacity);
+        }
     }, [isAuthenticated]);
 
     useEffect(() => {
@@ -181,7 +194,7 @@ const CharacterManagerPage: React.FC = () => {
         // 打开保存弹窗，设置默认值
         const isScenario = isScenarioData(characterData);
         const type = isScenario ? 'scenario' : 'character';
-        const defaultName = isScenario 
+        const defaultName = isScenario
             ? (characterData.title || characterData.name || '')
             : (characterData.codename || characterData.name || '');
         const defaultDescription = `${type === 'character' ? '角色' : '情景'}数据卡`;
@@ -206,7 +219,17 @@ const CharacterManagerPage: React.FC = () => {
         setSaveCardError(null);
 
         try {
+            // 前端敏感词检查
             const type = isScenarioData(characterData) ? 'scenario' : 'character';
+            const textToCheck = `${newCardForm.name} ${newCardForm.description} ${JSON.stringify(characterData)}`;
+            const sensitiveWordResult = await quickCheck(textToCheck);
+
+            if (sensitiveWordResult.hasSensitiveWords) {
+                // 直接跳转到 /arrested 页面
+                router.push('/arrested');
+                return;
+            }
+
             const result = await dataCardApi.createCard(
                 type,
                 newCardForm.name,
@@ -222,6 +245,11 @@ const CharacterManagerPage: React.FC = () => {
                 setSaveCardError(null);
                 loadUserDataCards();
             } else {
+                // 检查是否是敏感词错误，如果是则跳转到 /arrest
+                if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
+                    router.push('/arrested');
+                    return;
+                }
                 setSaveCardError(result.error || '保存失败');
             }
         } finally {
@@ -257,12 +285,27 @@ const CharacterManagerPage: React.FC = () => {
 
     // 更新数据卡信息
     const handleUpdateDataCard = async (id: string, name: string, description: string, isPublic?: boolean) => {
+        // 前端敏感词检查
+        const textToCheck = `${name} ${description}`;
+        const sensitiveWordResult = await quickCheck(textToCheck);
+
+        if (sensitiveWordResult.hasSensitiveWords) {
+            // 直接跳转到 /arrested 页面
+            router.push('/arrested');
+            return;
+        }
+
         const result = await dataCardApi.updateCard(id, name, description, isPublic);
         if (result.success) {
             setEditingCard(null);
             loadUserDataCards();
             setMessage({ type: 'success', text: '数据卡信息已更新' });
         } else {
+            // 检查是否是敏感词错误，如果是则跳转到 /arrested
+            if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
+                router.push('/arrested');
+                return;
+            }
             setMessage({ type: 'error', text: result.error || '更新失败' });
         }
     };
@@ -495,7 +538,7 @@ const CharacterManagerPage: React.FC = () => {
                 const key = keys[i];
                 const nextKey = keys[i + 1];
                 const isNextKeyNumeric = !isNaN(parseInt(nextKey, 10));
-                
+
                 if (isNextKeyNumeric && !Array.isArray(current[key])) {
                     current[key] = [];
                 } else if (!isNextKeyNumeric && !isObject(current[key])) {
@@ -536,102 +579,15 @@ const CharacterManagerPage: React.FC = () => {
 
     }, [characterData, originalData]);
 
-
-    // 【v0.3.0 新增】渲染内嵌随机事件的编辑器
-    const renderAdjudicationEventsEditor = () => {
-        // 从角色数据中获取事件数组，如果不存在则默认为空数组
-        const events = characterData.adjudicationEvents || [];
-    
-        // 添加新事件的处理函数
-        const handleAddEvent = () => {
-            const newEvent = { event: '', probability: 50 };
-            // 更新角色数据状态，将新事件添加到数组末尾
-            handleFieldChange('adjudicationEvents', [...events, newEvent]);
-        };
-    
-        // 删除事件的处理函数
-        const handleDeleteEvent = (index: number) => {
-            // 创建一个新数组，其中不包含指定索引的事件
-            const newEvents = events.filter((_: any, i: number) => i !== index);
-            // 更新角色数据状态
-            handleFieldChange('adjudicationEvents', newEvents);
-        };
-    
-        // 渲染UI
-        return (
-            <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
-                <legend className="text-sm font-semibold px-2 text-gray-600">🎲 内嵌随机事件管理</legend>
-                <div className="space-y-4">
-                    {events.map((event: any, index: number) => (
-                        <div key={index} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                            {/* 事件描述输入框 */}
-                            <div className="flex items-center justify-between gap-2">
-                                <label htmlFor={`adj-event-${index}`} className="text-xs font-medium text-gray-600 flex-shrink-0">事件描述</label>
-                                <button
-                                    onClick={() => handleDeleteEvent(index)}
-                                    className="text-red-500 hover:text-red-700 font-bold p-1 text-lg leading-none rounded-full hover:bg-red-100"
-                                    aria-label="删除此事件"
-                                >
-                                    &times;
-                                </button>
-                            </div>
-                            <textarea
-                                id={`adj-event-${index}`}
-                                value={event.event}
-                                onChange={(e) => handleFieldChange(`adjudicationEvents.${index}.event`, e.target.value)}
-                                placeholder="输入需要判定的事件（最多60字）"
-                                maxLength={60}
-                                rows={2}
-                                className="input-field mt-1"
-                            />
-                            {/* 成功率输入框 */}
-                            <div className="flex items-center gap-3 mt-2">
-                                <label htmlFor={`adj-prob-${index}`} className="text-xs font-medium text-gray-600">成功率</label>
-                                <input
-                                    type="range"
-                                    min="1"
-                                    max="100"
-                                    value={event.probability}
-                                    onChange={(e) => handleFieldChange(`adjudicationEvents.${index}.probability`, parseInt(e.target.value, 10))}
-                                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                                />
-                                <div className="relative w-24 flex-shrink-0">
-                                    <input
-                                        type="number"
-                                        id={`adj-prob-${index}`}
-                                        min="1"
-                                        max="100"
-                                        value={event.probability}
-                                        onChange={(e) => handleFieldChange(`adjudicationEvents.${index}.probability`, parseInt(e.target.value, 10))}
-                                        className="input-field !my-0 w-full text-center pr-6"
-                                    />
-                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">%</span>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                    {/* 添加事件按钮 */}
-                    <button
-                        type="button"
-                        onClick={handleAddEvent}
-                        className="text-sm text-blue-600 hover:underline mt-2"
-                    >
-                        + 添加随机事件
-                    </button>
-                </div>
-            </fieldset>
-        );
-    };
-
     // 递归渲染表单
-// 【修正】渲染表单的递归函数，移除了未被使用的变量以修复ESLint报错
+    // 【修正】渲染表单的递归函数，移除了未被使用的变量以修复ESLint报错
     const renderFormFields = (data: any, path: string = ''): React.ReactNode => {
         // 渲染顺序：基本信息 -> 外观 -> 魔装 -> 奇境 -> 繁开 -> 分析 -> 问卷 -> 历战记录
         if (!isObject(data)) return null;
 
         const keyOrder = [
             'codename', 'name', 'appearance', 'magicConstruct', 'wonderlandRule',
-            'blooming', 'analysis', 'userAnswers', 'arena_history'
+            'blooming', 'analysis', 'userAnswers', 'arena_history', 'adjudicationEvents'
         ];
 
         const sortedKeys = Object.keys(data).sort((a, b) => {
@@ -879,14 +835,19 @@ const CharacterManagerPage: React.FC = () => {
                                     <div className="flex justify-between items-center">
                                         <div className="text-left">
                                             <p className="text-sm text-gray-600">当前用户</p>
-                                            <p className="font-semibold text-pink-700">{user?.username}</p>
+                                            <UserWithTitle
+                                                username={user?.username || ''}
+                                                prefix={user?.prefix}
+                                                usernameClassName="font-semibold text-pink-700"
+                                                titleClassName="ml-1"
+                                            />
                                         </div>
                                         <div className="space-x-2">
                                             <button
                                                 onClick={() => setShowDataCardsModal(true)}
                                                 className="px-3 py-1 text-sm bg-pink-600 text-white rounded hover:bg-pink-700"
                                             >
-                                                我的数据卡 ({userDataCards.length})
+                                                我的数据卡 ({userDataCards.length}/{userCapacity})
                                             </button>
                                             <button
                                                 onClick={logout}
@@ -926,6 +887,7 @@ const CharacterManagerPage: React.FC = () => {
                                             <li><span className="font-semibold">编辑数据：</span>可视化地查看并修改角色的各项设定，包括调整历战记录和新增的“内嵌随机事件”。</li>
                                             <li><span className="font-semibold">一键换名：</span>修改名称后，可一键替换档案中所有旧名称。</li>
                                             <li><span className="font-semibold">生成立绘：</span>加载角色后，展开下方的“立绘生成”模块，可为你的角色创建立绘。</li>
+                                            <li><span className="font-semibold">编辑情景：</span>响应用户呼声，现在可以在这里编辑情景文件了。</li>
                                             <li><span className="font-semibold">保存与导出：</span>完成修改后，可下载新的 <code>.json</code> 文件或将内容复制到剪贴板。</li>
                                         </ul>
                                     </div>
@@ -1015,8 +977,6 @@ const CharacterManagerPage: React.FC = () => {
                                     </div>
                                 )}
 
-                                {/* 【v0.3.0 新增】调用内嵌随机事件编辑器 */}
-                                {renderAdjudicationEventsEditor()}
                                 {/* 历战记录管理模块 - 只对角色数据显示 */}
                                 {!isScenarioData(characterData) && characterData.arena_history && (
                                     <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
@@ -1033,6 +993,17 @@ const CharacterManagerPage: React.FC = () => {
                                                 <button onClick={handleClearHistory} className="text-xs bg-red-100 text-red-800 px-3 py-1 rounded hover:bg-red-200">清除所有记录</button>
                                             </div>
                                         </div>
+                                    </fieldset>
+                                )}
+
+                                {/* [新增] 内嵌随机事件管理模块 - 始终显示 */}
+                                {!isScenarioData(characterData) && (
+                                    <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
+                                        <legend className="text-sm font-semibold px-2 text-gray-600">🎲 内嵌随机事件管理</legend>
+                                        <AdjudicatorEditor
+                                            events={characterData.adjudicationEvents || []}
+                                            onEventsChange={(newEvents) => handleFieldChange('adjudicationEvents', newEvents)}
+                                        />
                                     </fieldset>
                                 )}
 
@@ -1068,7 +1039,7 @@ const CharacterManagerPage: React.FC = () => {
                             </div>
                         )}
                     </div>
-                    
+
                     {/* 【新增】角色卡片预览与生成区域 */}
                     {characterData && !isLoading && (
                         <div className="card mt-6">
@@ -1097,7 +1068,7 @@ const CharacterManagerPage: React.FC = () => {
 
                     {/* 立绘生成 - 只对角色数据显示 */}
                     {!isScenarioData(characterData) && (
-                        <div className="card mt-6">
+                        <div className="card" style={{ marginTop: '1rem' }}>
                             <button
                                 onClick={() => setIsTachieVisible(!isTachieVisible)}
                                 className="w-full text-left text-lg font-bold text-gray-800"
@@ -1115,6 +1086,7 @@ const CharacterManagerPage: React.FC = () => {
                     <div className="text-center mt-8">
                         <Link href="/" className="footer-link">返回首页</Link>
                     </div>
+                    <Footer />
                 </div>
 
                 {/* 【新增】用于移动端长按保存的图片模态框 */}
@@ -1161,6 +1133,7 @@ const CharacterManagerPage: React.FC = () => {
                 onLoadCard={handleLoadDataCard}
                 onCancelEdit={() => setEditingCard(null)}
                 onShareCard={handleShareDataCard}
+                userCapacity={userCapacity}
             />
 
             {/* 保存数据卡弹窗 */}
@@ -1181,6 +1154,8 @@ const CharacterManagerPage: React.FC = () => {
                 onPublicChange={(value) => setNewCardForm({ ...newCardForm, isPublic: value })}
                 error={saveCardError}
                 isSaving={isSavingCard}
+                currentCardCount={userDataCards.length}
+                userCapacity={userCapacity}
             />
         </>
     );

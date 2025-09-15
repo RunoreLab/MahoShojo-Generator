@@ -4,6 +4,7 @@ import { authApi, authStorage } from './auth';
 export interface User {
   id: number;
   username: string;
+  prefix?: string | null;
 }
 
 export function useAuth() {

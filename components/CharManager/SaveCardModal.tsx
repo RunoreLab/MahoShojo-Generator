@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { config } from '@/lib/config';
 
 interface SaveCardModalProps {
   isOpen: boolean;
@@ -12,6 +14,8 @@ interface SaveCardModalProps {
   onPublicChange: (value: boolean) => void;
   error: string | null;
   isSaving?: boolean;
+  currentCardCount?: number;
+  userCapacity?: number;
 }
 
 export default function SaveCardModal({
@@ -25,13 +29,40 @@ export default function SaveCardModal({
   onDescriptionChange,
   onPublicChange,
   error,
-  isSaving = false
+  isSaving = false,
+  currentCardCount = 0,
+  userCapacity = config.DEFAULT_DATA_CARD_CAPACITY
 }: SaveCardModalProps) {
+  // 阻止背景滚动
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full relative">
+  const modalContent = (
+    <div 
+      className="fixed inset-0 flex items-center justify-center p-4"
+      style={{ 
+        zIndex: 999999,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        backdropFilter: 'blur(4px)'
+      }}
+      onClick={onClose}
+    >
+      <div 
+        className="bg-white rounded-lg p-6 max-w-md w-full relative shadow-2xl"
+        style={{ zIndex: 1000000 }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl leading-none"
@@ -39,7 +70,24 @@ export default function SaveCardModal({
         >
           ×
         </button>
-        <h2 className="text-xl font-bold mb-4 pr-8">保存数据卡</h2>
+        <div className="flex justify-between items-center mb-4 pr-8">
+          <h2 className="text-xl font-bold">保存数据卡</h2>
+          <div className="text-sm text-gray-600">
+            {currentCardCount}/{userCapacity}
+          </div>
+        </div>
+
+        {/* 容量警告 */}
+        {currentCardCount >= userCapacity && (
+          <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm">
+            ⚠️ 数据卡数量已达上限（{userCapacity}个），请先删除部分数据卡
+          </div>
+        )}
+        {currentCardCount >= userCapacity - 5 && currentCardCount < userCapacity && (
+          <div className="mb-4 p-3 bg-yellow-100 text-yellow-700 rounded-md text-sm">
+            ⚠️ 数据卡容量即将用完（{currentCardCount}/{userCapacity}）
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm">
@@ -101,10 +149,10 @@ export default function SaveCardModal({
           <div className="flex gap-2">
             <button
               onClick={onSave}
-              disabled={!name.trim() || isSaving}
-              className={`flex-1 generate-button ${(!name.trim() || isSaving) ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={!name.trim() || isSaving || currentCardCount >= userCapacity}
+              className={`flex-1 generate-button ${(!name.trim() || isSaving || currentCardCount >= userCapacity) ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              {isSaving ? '保存中...' : '保存'}
+              {isSaving ? '保存中...' : (currentCardCount >= userCapacity ? '容量已满' : '保存')}
             </button>
             <button
               onClick={onClose}
@@ -124,4 +172,7 @@ export default function SaveCardModal({
       </div>
     </div>
   );
+
+  // 使用 Portal 将模态框渲染到 document.body
+  return typeof window !== 'undefined' ? createPortal(modalContent, document.body) : null;
 }

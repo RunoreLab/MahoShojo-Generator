@@ -44,7 +44,8 @@ export default async function handler(req: Request): Promise<Response> {
       success: true,
       user: {
         id: user.id,
-        username: user.username
+        username: user.username,
+        prefix: user.prefix
       }
     }), {
       status: 200,
