@@ -8,6 +8,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
 import { webcrypto } from 'crypto';
 import { config } from '@/lib/config';
+import { validateDataCard } from '@/lib/schemas';
 import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
@@ -470,13 +471,15 @@ const CharacterManagerPage: React.FC = () => {
                 throw new Error('无效的文件格式。');
             }
 
-            // 检测文件类型
-            const isCharacterFile = Boolean(data.codename || (data.name && (data.attributes || data.skills || data.transformationSpell)));
-            const isScenarioFile = Boolean(data.title && data.elements && (data.scenario_type || data.elements.events));
-
-            if (!isCharacterFile && !isScenarioFile) {
-                throw new Error('无效的文件格式。请确保是有效的角色或情景文件。');
+            // 使用 Zod Schema 验证文件格式
+            const validationResult = validateDataCard(data);
+            
+            if (!validationResult.success) {
+                throw new Error(validationResult.error || '无效的文件格式。请确保是有效的角色或情景文件。');
             }
+
+            const isCharacterFile = validationResult.type === 'character' || validationResult.type === 'canshou';
+            const isScenarioFile = validationResult.type === 'scenario';
 
             // 调用API验证原生性
             const verificationResponse = await fetch('/api/verify-origin', {
