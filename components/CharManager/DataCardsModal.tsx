@@ -13,7 +13,7 @@ interface DataCardsModalProps {
   cardsPerPage: number;
   onPageChange: (page: number) => void;
   onEditCard: (card: any) => void;
-  onUpdateCard: (id: string, name: string, description: string, isPublic: boolean) => void;
+  onUpdateCard: (id: string, name: string, description: string, isPublic: boolean | number) => void;
   onDeleteCard: (id: string) => void;
   onLoadCard: (card: any) => void;
   onCancelEdit: () => void;
@@ -92,7 +92,7 @@ export default function DataCardsModal({
                     <EditCardForm
                       key={card.id}
                       card={editingCard}
-                      onSave={(name, description, isPublic) => 
+                      onSave={(name, description, isPublic) =>
                         onUpdateCard(card.id, name, description, isPublic)
                       }
                       onCancel={onCancelEdit}
@@ -113,8 +113,8 @@ export default function DataCardsModal({
                       onDownload={() => {
                         // 下载功能
                         const dataToDownload = JSON.parse(card.data);
-                        const blob = new Blob([JSON.stringify(dataToDownload, null, 2)], { 
-                          type: 'application/json' 
+                        const blob = new Blob([JSON.stringify(dataToDownload, null, 2)], {
+                          type: 'application/json'
                         });
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
