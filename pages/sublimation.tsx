@@ -108,6 +108,7 @@ const SublimationPage: React.FC = () => {
     // [新增] 用于管理高级选项的状态
     const [fieldsToPreserve, setFieldsToPreserve] = useState<string[]>([]);
     const [isAdvancedVisible, setIsAdvancedVisible] = useState(false);
+    const [isDowngrade, setIsDowngrade] = useState(false); // 是否使用轻量模型
 
     const { isCooldown, startCooldown, remainingTime } = useCooldown('sublimationCooldown', 60000);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -182,11 +183,11 @@ const SublimationPage: React.FC = () => {
         if (obj === null || typeof obj !== 'object') {
             return obj;
         }
-        
+
         if (Array.isArray(obj)) {
             return obj.map(removePrivateKeys);
         }
-        
+
         const cleaned: any = {};
         for (const key in obj) {
             if (!key.startsWith('_')) {
@@ -201,10 +202,10 @@ const SublimationPage: React.FC = () => {
         try {
             // 解析数据卡内容
             let cardData = typeof card.data === 'string' ? JSON.parse(card.data) : card.data;
-            
+
             // 删除以 _ 开头的键
             cardData = removePrivateKeys(cardData);
-            
+
             // 验证数据是否包含历战记录
             if (!cardData.arena_history) {
                 setError('❌ 选择的角色缺少必需的"历战记录"（arena_history）属性，无法进行升华。');
@@ -215,7 +216,7 @@ const SublimationPage: React.FC = () => {
             setFileName(`${card.name}(来自数据库)`);
             setShowBattleDataModal(false);
             setError(null);
-            
+
         } catch (err) {
             setError(`❌ 数据卡加载失败: ${err instanceof Error ? err.message : '未知错误'}`);
         }
@@ -252,6 +253,7 @@ const SublimationPage: React.FC = () => {
                     language: selectedLanguage,
                     userGuidance: userGuidance.trim(),
                     fieldsToPreserve: fieldsToPreserve, // [新增] 发送需要保留的字段列表
+                    isDowngrade: isDowngrade,
                 }),
             });
 
@@ -474,6 +476,23 @@ const SublimationPage: React.FC = () => {
                                     <option key={lang.code} value={lang.code}>{lang.name}</option>
                                 ))}
                             </select>
+                        </div>
+
+                        {/* 轻量模型选项 */}
+                        <div className="input-group">
+                            <div className="flex items-center gap-3">
+                                <label className="flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={isDowngrade}
+                                        onChange={(e) => setIsDowngrade(e.target.checked)}
+                                        className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                        disabled={isGenerating}
+                                    />
+                                    <span className="ml-2 text-sm font-medium text-gray-700">使用轻量模型</span>
+                                </label>
+                                <span className="text-xs text-gray-500">显著提高成功率和速度，但是可能降低输出质量</span>
+                            </div>
                         </div>
 
                         {/* 成功提示信息 */}

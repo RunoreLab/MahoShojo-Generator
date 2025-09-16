@@ -17,6 +17,7 @@ export interface GenerationConfig<T, I = string> {
   schema: z.ZodSchema<T>;
   taskName: string;
   maxTokens: number;
+  modelOverride?: string; // 新增：可选的模型覆盖参数
 }
 
 const createAIClient = (provider: AIProvider) => {
@@ -135,6 +136,11 @@ export async function generateWithAI<T, I = string>(
   const expandedProviders = expandProviders(baseProviders);
   log.debug(`展开后的提供商数量: ${expandedProviders.length}`);
 
+  // 如果有模型覆盖，记录日志
+  if (generationConfig.modelOverride) {
+    log.info(`使用模型覆盖: ${generationConfig.modelOverride}`);
+  }
+
   // 如果没有指定策略，从配置中读取
   const strategy = loadBalanceStrategy || (config.LOAD_BALANCE_STRATEGY as LoadBalanceStrategy) || LoadBalanceStrategy.RANDOM;
 
@@ -186,8 +192,8 @@ export async function generateWithAI<T, I = string>(
     }
 
     const retryCount = provider.retryCount ?? 1;
-    // 从可能的多个模型中选择一个
-    const selectedModel = selectRandomModel(provider.model);
+    // 从可能的多个模型中选择一个，如果有模型覆盖则使用覆盖的模型
+    const selectedModel = generationConfig.modelOverride || selectRandomModel(provider.model);
     log.info(`开始使用提供商: ${provider.name} 模型: ${selectedModel} 重试次数: ${retryCount}`);
 
     // 对当前提供商进行重试
