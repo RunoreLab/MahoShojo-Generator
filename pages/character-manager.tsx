@@ -119,7 +119,7 @@ const CharacterManagerPage: React.FC = () => {
     const [showDataCardsModal, setShowDataCardsModal] = useState(false);
     const [editingCard, setEditingCard] = useState<any | null>(null);
     const [showSaveCardModal, setShowSaveCardModal] = useState(false);
-    const [newCardForm, setNewCardForm] = useState({ name: '', description: '', isPublic: false });
+    const [newCardForm, setNewCardForm] = useState({ name: '', description: '', isPublic: 0 });
     const [saveCardError, setSaveCardError] = useState<string | null>(null);
     const [isSavingCard, setIsSavingCard] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
@@ -204,7 +204,7 @@ const CharacterManagerPage: React.FC = () => {
         setNewCardForm({
             name: defaultName,
             description: defaultDescription,
-            isPublic: false
+            isPublic: 0
         });
         setSaveCardError(null);
         setShowSaveCardModal(true);
@@ -241,9 +241,9 @@ const CharacterManagerPage: React.FC = () => {
             );
 
             if (result.success) {
-                setMessage({ type: 'success', text: `数据卡保存成功！${newCardForm.isPublic ? '（公开）' : '（私有）'}` });
+                setMessage({ type: 'success', text: `数据卡保存成功！${newCardForm.isPublic === 1 ? '（公开）' : '（私有）'}` });
                 setShowSaveCardModal(false);
-                setNewCardForm({ name: '', description: '', isPublic: false });
+                setNewCardForm({ name: '', description: '', isPublic: 0 });
                 setSaveCardError(null);
                 loadUserDataCards();
             } else {
@@ -286,7 +286,7 @@ const CharacterManagerPage: React.FC = () => {
     };
 
     // 更新数据卡信息
-    const handleUpdateDataCard = async (id: string, name: string, description: string, isPublic?: boolean) => {
+    const handleUpdateDataCard = async (id: string, name: string, description: string, isPublic?: number) => {
         // 前端敏感词检查
         const textToCheck = `${name} ${description}`;
         const sensitiveWordResult = await quickCheck(textToCheck);
@@ -1151,7 +1151,7 @@ const CharacterManagerPage: React.FC = () => {
                 isOpen={showSaveCardModal}
                 onClose={() => {
                     setShowSaveCardModal(false);
-                    setNewCardForm({ name: '', description: '', isPublic: false });
+                    setNewCardForm({ name: '', description: '', isPublic: 0 });
                     setSaveCardError(null);
                     setIsSavingCard(false);
                 }}

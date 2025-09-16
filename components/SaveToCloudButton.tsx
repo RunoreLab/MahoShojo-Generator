@@ -29,7 +29,7 @@ export default function SaveToCloudButton({
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [cardName, setCardName] = useState('');
   const [cardDescription, setCardDescription] = useState('');
-  const [isPublic, setIsPublic] = useState(false);
+  const [isPublic, setIsPublic] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
@@ -69,7 +69,7 @@ export default function SaveToCloudButton({
 
     setCardName(defaultName);
     setCardDescription(defaultDescription);
-    setIsPublic(false);
+    setIsPublic(0);
     setSaveError(null);
     setShowSaveModal(true);
   };
@@ -104,11 +104,11 @@ export default function SaveToCloudButton({
       );
 
       if (result.success) {
-        alert(`数据卡保存成功！${isPublic ? '（公开）' : '（私有）'}`);
+        alert(`数据卡保存成功！${isPublic === 1 ? '（公开）' : '（私有）'}`);
         setShowSaveModal(false);
         setCardName('');
         setCardDescription('');
-        setIsPublic(false);
+        setIsPublic(0);
         setSaveError(null);
         // 重新加载用户数据卡数量
         loadUserDataCards();

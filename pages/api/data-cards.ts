@@ -124,7 +124,7 @@ export default async function handler(req: Request): Promise<Response> {
           name,
           description || '',
           JSON.stringify(data),
-          isPublic || false
+          isPublic ?? 0
         );
 
         if (!result.success) {

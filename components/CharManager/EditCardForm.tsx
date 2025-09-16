@@ -4,7 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 
 interface EditCardFormProps {
   card: any;
-  onSave: (name: string, description: string, isPublic: boolean | number) => void;
+  onSave: (name: string, description: string, isPublic: number) => void;
   onCancel: () => void;
 }
 
@@ -12,7 +12,7 @@ export default function EditCardForm({ card, onSave, onCancel }: EditCardFormPro
   const [formData, setFormData] = React.useState({
     name: card.name,
     description: card.description || '',
-    isPublic: card.is_public === 1 ? true : card.is_public === -1 ? false : false // 封禁时也显示为false
+    isPublic: card.is_public === 1 // 只有值为1时才显示为选中
   });
 
   const isBanned = isDataCardBanned(card);
@@ -59,7 +59,7 @@ export default function EditCardForm({ card, onSave, onCancel }: EditCardFormPro
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => onSave(formData.name, formData.description, isBanned ? -1 : formData.isPublic)}
+            onClick={() => onSave(formData.name, formData.description, isBanned ? -1 : (formData.isPublic ? 1 : 0))}
             className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
           >
             保存

@@ -13,7 +13,7 @@ interface DataCardsModalProps {
   cardsPerPage: number;
   onPageChange: (page: number) => void;
   onEditCard: (card: any) => void;
-  onUpdateCard: (id: string, name: string, description: string, isPublic: boolean | number) => void;
+  onUpdateCard: (id: string, name: string, description: string, isPublic: number) => void;
   onDeleteCard: (id: string) => void;
   onLoadCard: (card: any) => void;
   onCancelEdit: () => void;
