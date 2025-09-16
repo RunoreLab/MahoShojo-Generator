@@ -80,7 +80,7 @@ export default async function handler(req: Request): Promise<Response> {
         // 检查数据卡内容大小 (32KB 限制)
         const dataString = JSON.stringify(data);
         const dataSize = new TextEncoder().encode(dataString).length;
-        const maxSize = 32 * 1024; // 32KB
+        const maxSize = 150 * 1024; // 150KB
         
         if (dataSize > maxSize) {
           return new Response(JSON.stringify({ 
