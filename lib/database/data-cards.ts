@@ -293,3 +293,32 @@ export async function getPublicDataCards(
     return [];
   }
 }
+
+/**
+ * [新增] 从数据库中随机获取一个公开的数据卡。
+ * @param type - 'character' 或 'scenario'，用于指定要获取的数据卡类型。
+ * @returns {Promise<any | null>} 返回一个随机的数据卡对象，如果没有符合条件的则返回 null。
+ */
+export async function getRandomPublicCard(
+  type: 'character' | 'scenario'
+): Promise<any | null> {
+  try {
+    // D1 数据库支持 RANDOM() 函数，这使得随机选择非常高效。
+    const result = await queryFromD1(
+      'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? ORDER BY RANDOM() LIMIT 1',
+      [type]
+    ) as any;
+    
+    // 检查查询是否成功，以及是否真的返回了结果
+    if (result.success && result.result && result.result[0]?.results?.length > 0) {
+      // 返回找到的第一个（也是唯一一个）结果
+      return result.result[0].results[0];
+    }
+    // 如果没有找到任何数据卡，则返回 null
+    return null;
+  } catch (error) {
+    console.error("获取随机公开数据卡失败:", error);
+    // 在发生错误时也返回 null
+    return null;
+  }
+}

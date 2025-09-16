@@ -187,6 +187,14 @@ const BattlePage: React.FC = () => {
     const [adjudicationResults, setAdjudicationResults] = useState<AdjudicationResult[] | null>(null);
     const [storyLength, setStoryLength] = useState('default');
 
+    /**
+     * @description 用于跟踪随机匹配功能的加载状态。
+     * - null: 未在加载
+     * - 'character': 正在随机匹配角色
+     * - 'scenario': 正在随机匹配情景
+     */
+    const [isMatching, setIsMatching] = useState<string | null>(null);
+
     // 加载语言列表
     useEffect(() => {
         fetch('/languages.json')
@@ -561,6 +569,52 @@ const BattlePage: React.FC = () => {
 
         } catch (err) {
             setError(`❌ 数据卡加载失败: ${err instanceof Error ? err.message : '未知错误'}`);
+        }
+    };
+
+    /**
+     * @description 处理随机匹配角色或情景的逻辑。
+     * @param type - 'character' 或 'scenario'
+     */
+    const handleRandomMatch = async (type: 'character' | 'scenario') => {
+        // 检查角色数量上限
+        if (type === 'character' && combatants.length >= 4) {
+            setError('最多只能选择 4 位参战者。');
+            return;
+        }
+
+        // 设置加载状态，并向用户显示提示信息
+        setIsMatching(type);
+        setError(`正在从数据库中随机寻找一位公开的${type === 'character' ? '角色' : '情景'}...`);
+
+        try {
+            const response = await fetch(`/api/random-public-card?type=${type}`);
+            const result = await response.json();
+
+            // 处理API返回的错误
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || '无法获取随机数据');
+            }
+            
+            // API返回的数据在 result.card 中
+            const card = result.card;
+            // 卡片的核心数据是存储为JSON字符串的，需要解析
+            const cardData = JSON.parse(card.data);
+            
+            // 将获取到的数据传递给通用的选择处理器
+            await handleSelectDataCard({
+                ...cardData,
+                _cardId: card.id,
+                _cardName: card.name,
+                _isPublic: card.is_public,
+                _author: card.username || '未知'
+            });
+
+        } catch (err) {
+            setError(`❌ 随机匹配失败: ${err instanceof Error ? err.message : '未知错误'}`);
+        } finally {
+            // 清除加载状态
+            setIsMatching(null);
         }
     };
 
@@ -972,7 +1026,7 @@ const BattlePage: React.FC = () => {
                             <ol className="list-decimal list-inside space-y-1">
                                 <li>前往<Link href="/details" className="footer-link">【奇妙妖精大调查】</Link>或<Link href="/canshou" className="footer-link">【研究院残兽调查】</Link>页面，生成角色并下载其【设定文件】。</li>
                                 <li>收集 2-4 位角色的设定文件（.json 格式）。</li>
-                                <li>在此处选择预设角色或上传你收集到的设定文件。</li>
+                                <li>在此处选择预设角色、上传设定文件，也可以加入随机生成角色或使用【随机匹配】功能从数据库中抽取其他用户分享的角色</li>
                                 <li>选择一个模式，然后敬请期待在「命运的舞台」之上发生的故事吧！</li>
                             </ol>
                         </div>
@@ -989,19 +1043,26 @@ const BattlePage: React.FC = () => {
                                     disabled={isGenerating || combatants.length >= 4}
                                     className="flex-1 px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                                 >
-                                    从在线角色数据库中选择
+                                    浏览在线角色库
                                 </button>
-                                {!isAuthenticated && (
-                                    <div className="flex-1 text-xs text-gray-500 flex items-center px-2">
-                                        <Link
-                                            href="/character-manager"
-                                            className="text-pink-600 hover:text-pink-800 underline"
-                                        >
-                                            登录后可访问私有数据卡
-                                        </Link>
-                                    </div>
-                                )}
+                                <button
+                                    onClick={() => handleRandomMatch('character')}
+                                    disabled={isGenerating || isMatching !== null || combatants.length >= 4}
+                                    className="flex-1 px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                                >
+                                    {isMatching === 'character' ? '匹配中...' : '随机匹配角色'}
+                                </button>
                             </div>
+                            {!isAuthenticated && (
+                                <div className="text-xs text-gray-500 flex items-center px-2 mt-2">
+                                    <Link
+                                        href="/character-manager"
+                                        className="text-pink-600 hover:text-pink-800 underline"
+                                    >
+                                        登录后可访问私有数据卡
+                                    </Link>
+                                </div>
+                            )}
                         </div>
 
                         <div className="input-group">
@@ -1021,20 +1082,55 @@ const BattlePage: React.FC = () => {
                             )}
                         </div>
 
-                        {/* 新增：情景粘贴区 */}
+                        {/* 情景粘贴区 */}
                         {battleMode === 'scenario' && (
-                            <div className="mb-6">
-                                <button onClick={() => setIsScenarioPasteAreaVisible(!isScenarioPasteAreaVisible)} className="text-purple-700 hover:underline cursor-pointer mb-2 font-semibold">
-                                    {isScenarioPasteAreaVisible ? '▼ 折叠情景粘贴区域' : '▶ 展开情景粘贴区域 (手机端推荐)'}
-                                </button>
-                                {isScenarioPasteAreaVisible && (
-                                    <div className="input-group mt-2">
-                                        <textarea value={pastedScenarioJson} onChange={(e) => setPastedScenarioJson(e.target.value)} placeholder="在此处粘贴一个情景的设定文件(.json)内容..." className="input-field resize-y h-24" disabled={isGenerating} />
-                                        <button onClick={handlePasteAndLoadScenario} disabled={!pastedScenarioJson.trim() || isGenerating} className="generate-button mt-2 mb-0" style={{ backgroundColor: '#8b5cf6', backgroundImage: 'linear-gradient(to right, #8b5cf6, #a78bfa)' }}>从文本加载情景</button>
+                            <div className="mt-4">
+                                <div className="mb-4">
+                                    <h3 className="input-label">选择情景</h3>
+                                    <div className="flex gap-2 mb-4">
+                                        <button
+                                            onClick={handleOpenScenarioDataModal}
+                                            disabled={isGenerating}
+                                            className="flex-1 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                                        >
+                                            浏览在线情景库
+                                        </button>
+                                        <button
+                                            onClick={() => handleRandomMatch('scenario')}
+                                            disabled={isGenerating || isMatching !== null}
+                                            className="flex-1 px-4 py-2 bg-teal-500 text-white rounded hover:bg-teal-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                                        >
+                                            {isMatching === 'scenario' ? '匹配中...' : '随机匹配情景'}
+                                        </button>
                                     </div>
-                                )}
+                                    {!isAuthenticated && (
+                                        <div className="flex-1 text-xs text-gray-500 flex items-center px-2">
+                                            <Link
+                                                href="/character-manager"
+                                                className="text-green-600 hover:text-green-800 underline"
+                                            >
+                                                登录后可访问私有数据卡
+                                            </Link>
+                                        </div>
+                                    )}
+                                </div>
+                                <label htmlFor="scenario-upload" className="input-label">上传情景文件 (.json)</label>
+                                <input id="scenario-upload" type="file" accept=".json" onChange={handleScenarioFileChange} disabled={isGenerating} className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed"/>
+                                {scenarioFileName && (<p className="text-xs text-gray-500 mt-2">已加载情景: <span className="font-bold text-green-600">{scenarioFileName}</span>{isScenarioNative && <span className="text-xs text-green-600 ml-1 font-semibold">(原生)</span>}</p>)}
                             </div>
                         )}
+                        
+                        {battleMode === 'scenario' && (<div className="mb-6">
+                            <button onClick={() => setIsScenarioPasteAreaVisible(!isScenarioPasteAreaVisible)} className="text-purple-700 hover:underline cursor-pointer mb-2 font-semibold">
+                                {isScenarioPasteAreaVisible ? '▼ 折叠情景粘贴区域' : '▶ 展开情景粘贴区域 (手机端推荐)'}
+                            </button>
+                            {isScenarioPasteAreaVisible && (
+                                <div className="input-group mt-2">
+                                    <textarea value={pastedScenarioJson} onChange={(e) => setPastedScenarioJson(e.target.value)} placeholder="在此处粘贴一个情景的设定文件(.json)内容..." className="input-field resize-y h-24" disabled={isGenerating} />
+                                    <button onClick={handlePasteAndLoadScenario} disabled={!pastedScenarioJson.trim() || isGenerating} className="generate-button mt-2 mb-0" style={{ backgroundColor: '#8b5cf6', backgroundImage: 'linear-gradient(to right, #8b5cf6, #a78bfa)' }}>从文本加载情景</button>
+                                </div>
+                            )}
+                        </div>)}
 
                         {/* --- 已选角色列表 --- */}
                         {combatants.length > 0 && (
@@ -1218,29 +1314,6 @@ const BattlePage: React.FC = () => {
                         {/* --- 情景模式UI --- */}
                         {battleMode === 'scenario' && (
                             <div className="mt-4">
-                                <div className="mb-4">
-                                    <h3 className="input-label">选择情景</h3>
-                                    <div className="flex gap-2 mb-4">
-                                        <button
-                                            onClick={handleOpenScenarioDataModal}
-                                            disabled={isGenerating}
-                                            className="flex-1 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                                        >
-                                            从在线情景数据库中选择
-                                        </button>
-                                        {!isAuthenticated && (
-                                            <div className="flex-1 text-xs text-gray-500 flex items-center px-2">
-                                                <Link
-                                                    href="/character-manager"
-                                                    className="text-green-600 hover:text-green-800 underline"
-                                                >
-                                                    登录后可访问私有数据卡
-                                                </Link>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
                                 <label htmlFor="scenario-upload" className="input-label">上传情景文件 (.json)</label>
                                 <input
                                     id="scenario-upload"
