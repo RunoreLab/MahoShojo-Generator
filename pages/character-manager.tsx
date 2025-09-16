@@ -8,7 +8,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
 import { webcrypto } from 'crypto';
 import { config } from '@/lib/config';
-import { validateDataCard } from '@/lib/schemas';
+import { validateDataCard, ValidationResult } from '@/lib/schemas';
 import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
@@ -131,6 +131,7 @@ const CharacterManagerPage: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [message, setMessage] = useState<{ type: 'info' | 'error' | 'success', text: string } | null>(null);
     const [copiedStatus, setCopiedStatus] = useState(false);
+    const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
     // 【新增】图片保存模态框的状态
     const [showImageModal, setShowImageModal] = useState(false);
     const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
@@ -473,10 +474,10 @@ const CharacterManagerPage: React.FC = () => {
 
             // 使用 Zod Schema 验证文件格式
             const validationResult = validateDataCard(data);
-            
-            if (!validationResult.success) {
-                throw new Error(validationResult.error || '无效的文件格式。请确保是有效的角色或情景文件。');
-            }
+            setValidationResult(validationResult);
+            // if (!validationResult.success) {
+            //     throw new Error(validationResult.error || '无效的文件格式。请确保是有效的角色或情景文件。');
+            // }
 
             const isCharacterFile = validationResult.type === 'character' || validationResult.type === 'canshou';
             const isScenarioFile = validationResult.type === 'scenario';
@@ -1012,13 +1013,19 @@ const CharacterManagerPage: React.FC = () => {
 
                                 <div className="mt-8 pt-4 border-t space-y-2">
                                     {isAuthenticated && characterData && (
-                                        <button
-                                            onClick={handleSaveAsDataCard}
-                                            className="generate-button w-full"
-                                            style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
-                                        >
-                                            保存到云端
-                                        </button>
+                                        validationResult?.success ? (
+                                            <button
+                                                onClick={handleSaveAsDataCard}
+                                                className="generate-button w-full"
+                                                style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
+                                            >
+                                                保存到云端
+                                            </button>
+                                        ) : validationResult?.error && (
+                                            <div className="w-full p-3 bg-red-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm text-center">
+                                                该文件疑似包含额外字段，暂时不可上传云端
+                                            </div>
+                                        )
                                     )}
                                     <button onClick={() => handleSaveChanges('download')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full">
                                         {isLoading ? '处理中...' : '保存修改并下载'}

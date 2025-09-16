@@ -3,25 +3,25 @@ import { z } from 'zod';
 // 情景数据卡的 Zod Schema
 export const ScenarioSchema = z.object({
   title: z.string(),
-  scenario_type: z.string(),
-  description: z.string(),
+  scenario_type: z.string().optional(),
+  description: z.string().optional(),
   elements: z.object({
     scene: z.object({
-      time: z.string(),
-      place: z.string(),
-      features: z.string(),
-    }),
+      time: z.string().optional(),
+      place: z.string().optional(),
+      features: z.string().optional(),
+    }).optional(),
     roles: z.array(z.object({
-      name: z.string(),
-      description: z.string(),
-    })),
-    events: z.string(),
-    atmosphere: z.string(),
-    development: z.array(z.string()),
+      name: z.string().optional(),
+      description: z.string().optional(),
+    })).optional(),
+    events: z.string().optional(),
+    atmosphere: z.string().optional(),
+    development: z.array(z.string()).optional(),
   }),
   metadata: z.object({
-    created_at: z.string(),
-    signature: z.string(),
+    created_at: z.string().optional(),
+    signature: z.string().optional(),
   }).optional(),
 }).catchall(z.unknown())
   .superRefine((data, ctx) => {
