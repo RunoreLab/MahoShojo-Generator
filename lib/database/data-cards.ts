@@ -29,7 +29,7 @@ export async function createDataCardWithAuthor(
   name: string,
   description: string,
   data: string,
-  isPublic: boolean = false
+  isPublic: boolean | number = false
 ): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
     // 如果是公开卡，先检查是否有同名
@@ -53,7 +53,7 @@ export async function createDataCardWithAuthor(
     
     const result = await queryFromD1(
       'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [uuid, userId, type, name, description, dataWithAuthor, isPublic ? 1 : 0]
+      [uuid, userId, type, name, description, dataWithAuthor, typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0)]
     ) as any;
     
     if (result.success && result.result) {
@@ -73,7 +73,7 @@ export async function createDataCard(
   name: string,
   description: string,
   data: string,
-  isPublic: boolean = false
+  isPublic: boolean | number = false
 ): Promise<string | null> {
   try {
     // 生成 UUID 作为主键
@@ -81,7 +81,7 @@ export async function createDataCard(
     
     const result = await queryFromD1(
       'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [uuid, userId, type, name, description, data, isPublic ? 1 : 0]
+      [uuid, userId, type, name, description, data, typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0)]
     ) as any;
     
     if (result.success && result.result) {
@@ -139,7 +139,7 @@ export async function updateDataCard(
   userId: number,
   name: string,
   description: string,
-  isPublic?: boolean
+  isPublic?: boolean | number
 ): Promise<boolean> {
   try {
     let sql = 'UPDATE data_cards SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP';
@@ -147,7 +147,7 @@ export async function updateDataCard(
     
     if (isPublic !== undefined) {
       sql += ', is_public = ?';
-      params.push(isPublic ? 1 : 0);
+      params.push(typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0));
     }
     
     sql += ' WHERE id = ? AND user_id = ?';
@@ -320,5 +320,25 @@ export async function getRandomPublicCard(
     console.error("获取随机公开数据卡失败:", error);
     // 在发生错误时也返回 null
     return null;
+  }
+}
+
+// 检查数据卡是否被封禁
+export function isDataCardBanned(card: any): boolean {
+  return card && card.is_public === -1;
+}
+
+// 获取数据卡状态描述
+export function getDataCardStatus(card: any): { status: 'public' | 'private' | 'banned', label: string, color: string } {
+  if (!card) {
+    return { status: 'private', label: '私有', color: 'gray' };
+  }
+  
+  if (card.is_public === -1) {
+    return { status: 'banned', label: '封禁', color: 'red' };
+  } else if (card.is_public === 1) {
+    return { status: 'public', label: '公开', color: 'green' };
+  } else {
+    return { status: 'private', label: '私有', color: 'gray' };
   }
 }

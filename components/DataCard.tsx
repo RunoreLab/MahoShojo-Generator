@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Heart, Share, Info } from 'lucide-react';
+import { Download, Heart, Share, Info, Ban, AlertTriangle } from 'lucide-react';
 import { isCardLiked, addLikedCard } from '@/lib/localStorage';
+import { getDataCardStatus } from '@/lib/database/data-cards';
 
 interface DataCardProps {
   id: string; // Changed from number to string for UUID
   name: string;
   description: string;
   type: 'character' | 'scenario';
-  isPublic: boolean;
+  isPublic: boolean | number; // 支持 -1 表示封禁
   usageCount?: number;
   likeCount?: number;
   author?: string;
@@ -61,7 +62,8 @@ export default function DataCard({
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
 
-    if (!isPublic || liked || liking) return;
+    const cardStatus = getDataCardStatus({ is_public: isPublic });
+    if (cardStatus.status !== 'public' || liked || liking) return;
 
     try {
       setLiking(true);
@@ -100,6 +102,9 @@ export default function DataCard({
 
   // 分享功能 - 复制卡片名称和UUID到剪贴板
   const handleShare = async () => {
+    const cardStatus = getDataCardStatus({ is_public: isPublic });
+    if (cardStatus.status !== 'public') return;
+    
     try {
       const shareText = `魔法少女竞技场的【${name}】向你发出了邀请！（ID：${id}）✨\n快来 https://mahoshojo.colanns.me/battle 生成新的故事吧！\n在数据库的搜索框粘贴ID即可加载${typeMap[type]}档案！`;
       await navigator.clipboard.writeText(shareText);
@@ -122,6 +127,7 @@ export default function DataCard({
       }
     }
   };
+  const cardStatus = getDataCardStatus({ is_public: isPublic });
   const bgColor = type === 'scenario'
     ? 'bg-white border-gray-200 hover:border-green-400'
     : 'bg-white border-gray-200 hover:border-pink-400';
@@ -139,9 +145,15 @@ export default function DataCard({
         <div className="flex items-start justify-between gap-2 mb-2">
           <h4 className={`font-semibold text-lg ${textColor} flex-1`}>{name}</h4>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <span className={`text-xs px-2 py-1 rounded ${isPublic ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-              }`}>
-              {isPublic ? '公开' : '私有'}
+            <span className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
+              cardStatus.status === 'banned' 
+                ? 'bg-red-100 text-red-700 border border-red-200' 
+                : cardStatus.status === 'public' 
+                ? 'bg-green-100 text-green-700' 
+                : 'bg-gray-100 text-gray-700'
+            }`}>
+              {cardStatus.status === 'banned' && <Ban className="w-3 h-3" />}
+              {cardStatus.label}
             </span>
             {type === 'scenario' && (
               <span className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded">
@@ -158,6 +170,12 @@ export default function DataCard({
 
         {/* 描述内容 */}
         <div className='mb-1'>
+          {cardStatus.status === 'banned' && (
+            <div className="flex items-center gap-1 p-2 mb-2 bg-red-50 border border-red-200 rounded text-red-700 text-xs">
+              <AlertTriangle className="w-4 h-4" />
+              此数据卡已被封禁，无法进行公开操作
+            </div>
+          )}
           {description && (
             <p className={`text-sm line-clamp-2 ${subTextColor}`}>
               {description}
@@ -180,16 +198,21 @@ export default function DataCard({
           {/* 点赞按钮和计数 */}
           <button
             onClick={handleLike}
-            className={`flex items-center gap-1 transition-colors ${!isPublic
-              ? 'text-gray-400 cursor-not-allowed'
-              : liked
+            className={`flex items-center gap-1 transition-colors ${
+              cardStatus.status !== 'public'
+                ? 'text-gray-400 cursor-not-allowed'
+                : liked
                 ? 'text-red-500'
                 : liking
                   ? 'text-red-300'
                   : 'text-gray-500 hover:text-red-500'
-              }`}
-            disabled={!isPublic || liked || liking}
-            title={!isPublic ? '私有数据卡无法点赞' : liked ? '已点赞' : '点赞'}
+            }`}
+            disabled={cardStatus.status !== 'public' || liked || liking}
+            title={
+              cardStatus.status === 'banned' ? '封禁数据卡无法点赞' :
+              cardStatus.status === 'private' ? '私有数据卡无法点赞' : 
+              liked ? '已点赞' : '点赞'
+            }
           >
             <Heart className={`w-4 h-4 ${liked ? 'fill-current' : ''}`} />
             <span>{currentLikeCount}</span>
@@ -205,21 +228,26 @@ export default function DataCard({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (isPublic) {
+              if (cardStatus.status === 'public') {
                 handleShare();
                 onShare?.();
               }
             }}
-            className={`flex items-center gap-1 transition-colors ${isPublic
-              ? 'text-gray-500 hover:text-blue-500'
-              : 'text-gray-400 cursor-not-allowed'
-              }`}
-            title={isPublic ? `分享：${name} ${id}` : '私有数据卡不允许分享'}
-            disabled={!isPublic}
+            className={`flex items-center gap-1 transition-colors ${
+              cardStatus.status === 'public'
+                ? 'text-gray-500 hover:text-blue-500'
+                : 'text-gray-400 cursor-not-allowed'
+            }`}
+            title={
+              cardStatus.status === 'public' ? `分享：${name} ${id}` :
+              cardStatus.status === 'banned' ? '封禁数据卡不允许分享' :
+              '私有数据卡不允许分享'
+            }
+            disabled={cardStatus.status !== 'public'}
           >
             <Share className="w-4 h-4" />
             <span className="text-xs">
-              {!isPublic ? '不可分享' : (shareStatus === 'copied' ? '已复制！' : '分享')}
+              {cardStatus.status !== 'public' ? '不可分享' : (shareStatus === 'copied' ? '已复制！' : '分享')}
             </span>
           </button>
 
