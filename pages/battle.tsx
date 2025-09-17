@@ -515,17 +515,6 @@ const BattlePage: React.FC = () => {
             // 构造文件名显示
             const filename = `${originalCardName || (cleanedCardData.codename || cleanedCardData.name || cleanedCardData.title || '未命名')}.json`;
 
-            // 检查是否已存在同名文件
-            if (combatants.some(c => c.filename === filename)) {
-                setError(`❌ 已添加同名角色: ${filename}`);
-                return;
-            }
-
-            if (combatants.length >= 4) {
-                setError('❌ 最多只能添加4位角色。');
-                return;
-            }
-
             // 根据数据类型判断是角色还是情景
             if (cleanedCardData.title && cleanedCardData.elements) {
                 // 这是情景数据卡，在情景模式下处理
@@ -545,6 +534,18 @@ const BattlePage: React.FC = () => {
                 setScenarioFileName(filename);
                 setIsScenarioNative(isValid || false);
                 setError(null);
+                return;
+            }
+
+            // 这是角色数据卡，检查角色数量限制
+            if (combatants.length >= 4) {
+                setError('❌ 最多只能添加4位角色。');
+                return;
+            }
+
+            // 检查是否已存在同名文件
+            if (combatants.some(c => c.filename === filename)) {
+                setError(`❌ 已添加同名角色: ${filename}`);
                 return;
             }
 
