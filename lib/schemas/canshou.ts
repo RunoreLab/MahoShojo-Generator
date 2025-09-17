@@ -1,5 +1,25 @@
 import { z } from 'zod';
 
+const keyList = [
+  'name',
+  'appearance',
+  'materialAndSkin',
+  'featuresAndAppendages',
+  'coreConcept',
+  'coreEmotion',
+  'evolutionStage',
+  'attackMethod',
+  'specialAbility',
+  'origin',
+  'birthEnvironment',
+  'researcherNotes',
+  'templateId',
+  'userAnswers',
+  'signature',
+  'arena_history',
+  'isPreset',
+  'adjudicationEvents'
+];
 // 残兽数据卡的 Zod Schema
 export const CanshouSchema = z.object({
   name: z.string(),
@@ -8,15 +28,23 @@ export const CanshouSchema = z.object({
   featuresAndAppendages: z.string().optional(),
   coreConcept: z.string().optional(),
   coreEmotion: z.string().optional(),
-  evolutionStage: z.string().optional() ,
+  evolutionStage: z.string().optional(),
   attackMethod: z.string().optional(),
   specialAbility: z.string().optional(),
   origin: z.string().optional(),
   birthEnvironment: z.string().optional(),
   researcherNotes: z.string().optional(),
   templateId: z.string().optional(),
-  userAnswers: z.record(z.string()).optional(),
+  userAnswers: z.union([z.record(z.string()), z.array(z.string())]).optional(),
+  isPreset: z.boolean().optional(),
   signature: z.string().optional(),
+  adjudicationEvents: z.array(z.object({
+    id: z.string().optional(),
+    description: z.string().optional(),
+    type: z.string().optional(),
+    probability: z.number().optional(),
+    outcomes: z.array(z.string().optional()).optional(),
+  })).optional(),
   arena_history: z.object({
     attributes: z.object({
       world_line_id: z.string().optional(),
@@ -42,7 +70,7 @@ export const CanshouSchema = z.object({
 }).catchall(z.unknown())
   .superRefine((data, ctx) => {
     for (const key in data) {
-      if (!['name', 'appearance', 'materialAndSkin', 'featuresAndAppendages', 'coreConcept', 'coreEmotion', 'evolutionStage', 'attackMethod', 'specialAbility', 'origin', 'birthEnvironment', 'researcherNotes', 'templateId', 'userAnswers', 'signature', 'arena_history'].includes(key) && !key.startsWith('_')) {
+      if (!keyList.includes(key) && !key.startsWith('_')) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [key],
