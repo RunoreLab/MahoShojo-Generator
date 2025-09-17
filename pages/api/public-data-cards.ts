@@ -1,3 +1,5 @@
+// pages/api/public-data-cards.ts
+
 import { getPublicDataCards, getDataCardById } from '@/lib/d1';
 
 export const runtime = 'edge';
@@ -18,6 +20,14 @@ export default async function handler(req: Request): Promise<Response> {
     const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'created_at' | null; // 排序方式
     const limit = parseInt(url.searchParams.get('limit') || '12');
     const offset = parseInt(url.searchParams.get('offset') || '0');
+
+    // 【新增】解析高级筛选参数
+    const author = url.searchParams.get('author');
+    const minLikes = url.searchParams.get('minLikes');
+    const maxLikes = url.searchParams.get('maxLikes');
+    const minUsage = url.searchParams.get('minUsage');
+    const maxUsage = url.searchParams.get('maxUsage');
+
 
     // 如果提供了ID，则获取单个数据卡
     if (id) {
@@ -42,7 +52,19 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     // 获取公开数据卡列表，支持搜索和类型过滤
-    const cards = await getPublicDataCards(limit, offset, type as 'character' | 'scenario' | undefined, search || undefined, sortBy || undefined);
+    // 【修改】将新增的筛选参数传递给数据库函数
+    const cards = await getPublicDataCards(
+        limit, 
+        offset, 
+        type as 'character' | 'scenario' | undefined, 
+        search || undefined, 
+        sortBy || undefined,
+        author || undefined,
+        minLikes ? parseInt(minLikes) : undefined,
+        maxLikes ? parseInt(maxLikes) : undefined,
+        minUsage ? parseInt(minUsage) : undefined,
+        maxUsage ? parseInt(maxUsage) : undefined
+    );
 
     return new Response(JSON.stringify({
       success: true,

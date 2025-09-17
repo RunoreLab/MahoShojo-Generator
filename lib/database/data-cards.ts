@@ -249,29 +249,63 @@ export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
   }
 }
 
-// 获取公开的数据卡列表
+/**
+ * 获取公开的数据卡列表，增加了完整的筛选功能。
+ * @param author - 作者用户名 (精确匹配)
+ * @param minLikes - 最小点赞数
+ * @param maxLikes - 最大点赞数
+ * @param minUsage - 最少使用数
+ * @param maxUsage - 最多使用数
+ */
 export async function getPublicDataCards(
   limit: number = 20,
   offset: number = 0,
   type?: 'character' | 'scenario',
   search?: string,
-  sortBy?: 'likes' | 'usage' | 'created_at'
+  sortBy?: 'likes' | 'usage' | 'created_at',
+  author?: string,
+  minLikes?: number,
+  maxLikes?: number,
+  minUsage?: number,
+  maxUsage?: number
 ): Promise<any[]> {
   try {
+    // 基础查询语句
     let sql = 'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1';
     const params: any[] = [];
     
+    // -- 动态构建 WHERE 子句 --
+    // 这是一个稳健的实践，可以根据传入的参数动态添加过滤条件
     if (type) {
       sql += ' AND dc.type = ?';
       params.push(type);
     }
-    
     if (search) {
       sql += ' AND (dc.name LIKE ? OR dc.description LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
     }
+    if (author) {
+      sql += ' AND u.username = ?';
+      params.push(author);
+    }
+    if (minLikes !== undefined && minLikes !== null) {
+      sql += ' AND dc.like_count >= ?';
+      params.push(minLikes);
+    }
+    if (maxLikes !== undefined && maxLikes !== null) {
+      sql += ' AND dc.like_count <= ?';
+      params.push(maxLikes);
+    }
+    if (minUsage !== undefined && minUsage !== null) {
+      sql += ' AND dc.usage_count >= ?';
+      params.push(minUsage);
+    }
+    if (maxUsage !== undefined && maxUsage !== null) {
+      sql += ' AND dc.usage_count <= ?';
+      params.push(maxUsage);
+    }
     
-    // 添加排序逻辑
+    // -- 排序逻辑 --
     let orderBy = 'dc.created_at DESC'; // 默认按创建时间排序
     if (sortBy === 'likes') {
       orderBy = 'dc.like_count DESC, dc.created_at DESC';
