@@ -140,6 +140,8 @@ const BattlePage: React.FC = () => {
     const [loadingPreset, setLoadingPreset] = useState<string | null>(null);
     // 新增：用于控制是否使用历战记录的状态
     const [useArenaHistory, setUseArenaHistory] = useState(true);
+    // 新增：用于控制是否使用轻量模型的状态（默认不启用）
+    const [isDowngrade, setIsDowngrade] = useState(false);
 
 
     // 冷却状态钩子，设置为2分钟
@@ -865,6 +867,7 @@ const BattlePage: React.FC = () => {
                     teams: Object.keys(teams).length > 0 ? teams : undefined, // 发送分队信息
                     language: selectedLanguage,
                     useArenaHistory: useArenaHistory, // 传递是否使用历战记录的选项
+                    isDowngrade: isDowngrade, // 传递是否使用轻量模型的选项
                     adjudicationEvents: adjudicationEvents, // v0.4.0 新增
                     storyLength: storyLength,
                 }),
@@ -1337,7 +1340,7 @@ const BattlePage: React.FC = () => {
                                     className="h-4 w-4 rounded border-gray-300 text-pink-600 focus:ring-pink-500 mr-2 disabled:opacity-50"
                                     disabled={isGenerating}
                                 />
-                                使用角色的“历战记录”
+                                使用角色的&ldquo;历战记录&rdquo;
                             </label>
                             <p className="text-xs text-gray-500 mt-1">
                                 默认启用。AI会参考角色的过往经历来创作故事。取消勾选后，AI将视其为初次登场，且旧的历战记录不会被保留。
@@ -1415,6 +1418,23 @@ const BattlePage: React.FC = () => {
                                     <option key={lang.code} value={lang.code}>{lang.name}</option>
                                 ))}
                             </select>
+                        </div>
+
+                        {/* 轻量模型选项 */}
+                        <div className="input-group">
+                            <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={isDowngrade}
+                                    onChange={(e) => setIsDowngrade(e.target.checked)}
+                                    className="h-4 w-4 rounded border-gray-300 text-pink-600 focus:ring-pink-500 mr-2 disabled:opacity-50"
+                                    disabled={isGenerating}
+                                />
+                                使用轻量模型
+                            </label>
+                            <p className="text-xs text-gray-500 mt-1">
+                                启用后可显著提高成功率和速度，但可能降低输出质量。
+                            </p>
                         </div>
 
                         <button onClick={handleGenerate}
