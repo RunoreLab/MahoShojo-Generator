@@ -108,7 +108,7 @@ const SublimationPage: React.FC = () => {
     // [新增] 用于管理高级选项的状态
     const [fieldsToPreserve, setFieldsToPreserve] = useState<string[]>([]);
     const [isAdvancedVisible, setIsAdvancedVisible] = useState(false);
-    const [isDowngrade, setIsDowngrade] = useState(false); // 是否使用轻量模型
+    const [isDowngrade, setIsDowngrade] = useState(true); // 是否使用轻量模型（默认勾选）
 
     const { isCooldown, startCooldown, remainingTime } = useCooldown('sublimationCooldown', 60000);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
