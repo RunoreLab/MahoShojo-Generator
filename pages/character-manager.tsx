@@ -988,7 +988,7 @@ const CharacterManagerPage: React.FC = () => {
                                         <div className="space-y-4">
                                             {characterData.arena_history.entries?.map((entry: any) => (
                                                 <div key={entry.id} className="flex items-start justify-between bg-gray-50 p-2 rounded">
-                                                    <p className="text-xs truncate" title={entry.title}>{entry.id}: {entry.title}</p>
+                                                    <p className="text-xs" title={entry.title}>{entry.id}: {entry.title}</p>
                                                     <button onClick={() => handleDeleteHistoryEntry(entry.id)} className="text-red-500 hover:text-red-700 text-xs font-bold px-2">删除</button>
                                                 </div>
                                             ))}
