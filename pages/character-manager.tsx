@@ -1023,7 +1023,7 @@ const CharacterManagerPage: React.FC = () => {
                                             </button>
                                         ) : validationResult?.error && (
                                             <div className="w-full p-3 bg-red-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm text-center">
-                                                该文件疑似包含额外字段，暂时不可上传云端
+                                                该文件疑似包含额外字段，暂时不可上传云端 <br /> {validationResult?.error}
                                             </div>
                                         )
                                     )}
@@ -1109,10 +1109,10 @@ const CharacterManagerPage: React.FC = () => {
                         </div>
                     </div>
                 )}
-            </div>
+            </div >
 
             {/* 认证模态框 */}
-            <AuthModal
+            < AuthModal
                 isOpen={showAuthModal}
                 onClose={() => {
                     setShowAuthModal(false);
@@ -1126,7 +1126,7 @@ const CharacterManagerPage: React.FC = () => {
             />
 
             {/* 数据卡管理模态框 */}
-            <DataCardsModal
+            < DataCardsModal
                 isOpen={showDataCardsModal}
                 onClose={() => {
                     setShowDataCardsModal(false);
@@ -1147,7 +1147,7 @@ const CharacterManagerPage: React.FC = () => {
             />
 
             {/* 保存数据卡弹窗 */}
-            <SaveCardModal
+            < SaveCardModal
                 isOpen={showSaveCardModal}
                 onClose={() => {
                     setShowSaveCardModal(false);
