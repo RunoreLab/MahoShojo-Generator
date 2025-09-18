@@ -542,6 +542,10 @@ const DetailsPage: React.FC = () => {
                   </h2>
                 </div>
 
+                <p className="text-xs text-center text-gray-500 mb-4 -mt-2 px-4">
+                  请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。
+                </p>
+
                 {/* 输入框 */}
                 <div className="input-group">
                   <textarea
