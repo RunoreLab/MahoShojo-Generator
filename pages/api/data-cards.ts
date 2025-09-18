@@ -11,8 +11,16 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 
 export const runtime = 'edge';
 
+// [v0.4.2] 扩展 User 类型以包含新字段
+interface AuthenticatedUser {
+  id: number;
+  username: string;
+  is_review_exempt: number; // 0 or 1
+  is_admin: number; // 0 or 1
+}
+
 // 辅助函数：从请求头获取用户认证信息
-async function getUserFromAuth(req: Request): Promise<{ id: number; username: string } | null> {
+async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
   const authHeader = req.headers.get('authorization');
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -20,6 +28,7 @@ async function getUserFromAuth(req: Request): Promise<{ id: number; username: st
   }
 
   const authKey = authHeader.substring(7);
+  // getUserByAuthKey 返回 user 表的所有字段，所以这里能直接获取到 is_review_exempt
   const user = await getUserByAuthKey(authKey);
   
   return user;
@@ -117,14 +126,18 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
+        // [v0.4.2 核心逻辑] 根据用户豁免状态决定审查状态
+        const reviewStatus = user.is_review_exempt === 1 ? 'approved' : 'pending';
+
         const result = await createDataCardWithAuthor(
           userId,
           user.username,
           type,
           name,
           description || '',
-          JSON.stringify(data),
-          isPublic ?? 0
+          dataString,
+          isPublic ?? 0,
+          reviewStatus // 传入新的审查状态
         );
 
         if (!result.success) {
