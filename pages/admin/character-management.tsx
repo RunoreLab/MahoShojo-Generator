@@ -287,7 +287,7 @@ Your entire response MUST be a single, valid JSON array of objects, with no othe
 
 Example format:
 [
-  { "id": "...", "suggestion": "approved", "reason": "含有成人内容：内容涉及色情。" },
+  { "id": "...", "suggestion": "approved", "reason": "虽存在部分擦边内容，但不存在明显不适宜的内容。" },
   { "id": "...", "suggestion": "rejected", "reason": "令人不适的内容：恐怖猎奇的行为。" }
 ]
 
