@@ -260,13 +260,12 @@ const CharacterManagerPage: React.FC = () => {
     };
 
     // 加载数据卡
-    const handleLoadDataCard = (card: any) => {
+    const handleLoadDataCard = async (card: any) => {
         try {
-            const data = JSON.parse(card.data);
-            setCharacterData(data);
-            setOriginalData(JSON.parse(JSON.stringify(data)));
+            // card.data 是一个 JSON 字符串，我们直接将其传递给统一的加载处理函数
+            await processJsonData(card.data);
             setShowDataCardsModal(false);
-            setMessage({ type: 'success', text: `已加载数据卡: ${card.name}` });
+            // 成功消息现在由 processJsonData 内部处理，这里无需重复设置
         } catch {
             setMessage({ type: 'error', text: '加载数据卡失败' });
         }
