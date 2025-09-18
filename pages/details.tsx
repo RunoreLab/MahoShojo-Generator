@@ -457,7 +457,11 @@ const DetailsPage: React.FC = () => {
                   你在魔法少女道路上的潜力和表现将会如何？<br />
                   <p style={{ fontSize: '0.8rem', marginTop: '1rem', color: '#999', fontStyle: 'italic' }}>本测试设定来源于小说《下班，然后变成魔法少女》</p>
                 </div>
-                {/* 修改开始 */}
+                {/* 注意事项 */}
+                <div className="mb-6 p-3 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-sm text-left rounded-r-lg">
+                  <p className="font-bold">⚠️ 注意事项</p>
+                  <p className="mt-1">请勿在问卷中输入任何真实的隐私信息，或任何不适宜、攻击性或不符合公序良俗的内容。所有回答仅用于生成虚拟角色，并且将会被储存在角色信息中。</p>
+                </div>
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <button
                     onClick={handleStartQuestionnaire}
@@ -488,7 +492,7 @@ const DetailsPage: React.FC = () => {
                     {isGenerating ? '生成中...' : '快速随机生成'}
                   </button>
                 </div>
-                {/* 修改结束 */}
+
                 {/* 返回首页链接 */}
                 <div className="text-center" style={{ marginTop: '2rem' }}>
                   <button
