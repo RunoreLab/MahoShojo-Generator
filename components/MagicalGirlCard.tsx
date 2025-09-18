@@ -248,7 +248,12 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         )}
 
         {/* --- 历战记录展示区 --- */}
-        {magicalGirl.arena_history && magicalGirl.arena_history.entries.length > 0 && (
+        {/*
+          【健壮性修复】
+          在访问 .entries 之前，增加 Array.isArray() 检查。
+          这可以防止因数据格式不规范（如 arena_history 存在但 entries 缺失或不是数组）而导致的页面崩溃。
+        */}
+        {magicalGirl.arena_history && Array.isArray(magicalGirl.arena_history.entries) && magicalGirl.arena_history.entries.length > 0 && (
           <div className="result-item">
             <button onClick={() => setIsHistoryVisible(!isHistoryVisible)} className="result-label w-full text-left bg-transparent border-none cursor-pointer">
               {isHistoryVisible ? '▼' : '▶'} 📜 历战记录

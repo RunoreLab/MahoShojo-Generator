@@ -200,20 +200,27 @@ const SublimationPage: React.FC = () => {
     // 处理从数据库选择的角色数据卡
     const handleSelectDataCard = async (card: any) => {
         try {
-            // 解析数据卡内容
-            let cardData = typeof card.data === 'string' ? JSON.parse(card.data) : card.data;
+            // =================================================================
+            // 【核心修正】
+            // 错误原因：原代码错误地认为从模态框返回的 card 对象还包含一个 .data 属性，
+            //           因此尝试执行 `JSON.parse(card.data)`，但此时 card.data 是 undefined，
+            //           导致后续逻辑中处理的角色数据为 undefined，从而引发崩溃。
+            // 解决方案：直接使用从模态框回调函数中接收到的 card 对象本身，因为它已经是
+            //           我们需要的、解析好的完整角色数据。
+            // =================================================================
+            const cardData = card; // 直接使用回调对象，不再访问 .data
 
-            // 删除以 _ 开头的键
-            cardData = removePrivateKeys(cardData);
+            // 删除内部使用的私有键（以_开头）
+            const cleanedCardData = removePrivateKeys(cardData);
 
             // 验证数据是否包含历战记录
-            if (!cardData.arena_history) {
+            if (!cleanedCardData.arena_history) {
                 setError('❌ 选择的角色缺少必需的"历战记录"（arena_history）属性，无法进行升华。');
                 return;
             }
 
-            setCharacterData(cardData);
-            setFileName(`${card.name}(来自数据库)`);
+            setCharacterData(cleanedCardData);
+            setFileName(`${card._cardName || '未命名'}(来自数据库)`); // 使用内部传递的_cardName
             setShowBattleDataModal(false);
             setError(null);
 
