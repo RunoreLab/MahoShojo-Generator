@@ -52,7 +52,7 @@ const CharacterManagementPage: React.FC = () => {
   const [aiReviewResults, setAiReviewResults] = useState<AiReviewResult[]>([]);
   const [markedActions, setMarkedActions] = useState<Record<string, 'approve' | 'reject'>>({});
   const [aiBatchSize, setAiBatchSize] = useState(10);
-  const [aiModel, setAiModel] = useState('gemini-1.5-flash');
+  const [aiModel, setAiModel] = useState('gemini-2.5-flash-lite');
   const [externalReviewContent, setExternalReviewContent] = useState(''); // [新增] 外部审查粘贴内容
   const [copyStatus, setCopyStatus] = useState(''); // [新增] 复制按钮状态
 
@@ -487,8 +487,25 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                                       <input type="number" value={aiBatchSize} onChange={e => setAiBatchSize(parseInt(e.target.value))} className="input-field w-24 mt-1" min="1" max="50" />
                                   </div>
                                   <div>
-                                      <label className="text-sm font-medium">使用模型</label>
-                                      <select value={aiModel} onChange={e => setAiModel(e.target.value)} className="input-field mt-1"><option value="gemini-1.5-flash">Gemini 1.5 Flash</option></select>
+                                    <label className="text-sm font-medium">使用模型</label>
+                                    <select value={aiModel} onChange={e => setAiModel(e.target.value)} className="input-field mt-1">
+                                        {/* Google Models */}
+                                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                                        <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                                        
+                                        {/* Grok Models */}
+                                        <option value="grok-2">Grok 2</option>
+                                        <option value="grok-3">Grok 3</option>
+                                        <option value="grok-3-fast">Grok 3 Fast</option>
+                                        <option value="grok-3-mini">Grok 3 Mini</option>
+                                        <option value="grok-3-mini-fast">Grok 3 Mini Fast</option>
+                                        <option value="grok-4">Grok 4</option>
+
+                                        {/* Qwen Models */}
+                                        <option value="qwen-plus-latest">Qwen Plus (Latest)</option>
+                                        <option value="qwen-turbo-latest">Qwen Turbo (Latest)</option>
+                                      </select>
                                   </div>
                                   <button onClick={handleStartAiReview} disabled={isAiReviewing} className="admin-button-sm bg-indigo-500 hover:bg-indigo-600 self-end">
                                       {isAiReviewing ? '审查中...' : `开始审查`}

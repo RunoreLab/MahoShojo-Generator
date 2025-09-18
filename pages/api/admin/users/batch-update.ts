@@ -3,7 +3,7 @@
 import { batchUpdateUsers } from '@/lib/database/admin';
 import type { NextRequest } from 'next/server';
 
-export const runtime = 'edge';
+export const runtime = 'experimental-edge';
 
 export default async function handler(req: NextRequest) {
   if (req.method !== 'PUT') {

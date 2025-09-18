@@ -3,7 +3,7 @@
 import { batchUpdateDataCards } from '@/lib/database/admin';
 import type { NextRequest } from 'next/server';
 
-export const runtime = 'edge';
+export const runtime = 'experimental-edge';
 
 export default async function handler(req: NextRequest) {
   // 根据您的要求，此阶段暂不进行管理员身份验证
