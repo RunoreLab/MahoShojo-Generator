@@ -221,22 +221,54 @@ const CharacterManagerPage: React.FC = () => {
         setSaveCardError(null);
 
         try {
-            // 前端敏感词检查
-            const type = isScenarioData(characterData) ? 'scenario' : 'character';
-            const textToCheck = `${newCardForm.name} ${newCardForm.description} ${JSON.stringify(characterData)}`;
+            // 核心修复：在创建数据卡之前，对数据进行最终的原生性处理
+            let finalData = { ...characterData };
+
+            // 1. 判断是否需要重新签名或移除签名
+            if (isNative && !hasLostNativeness) {
+                // 情况一：数据为原生且未被破坏，需要获取一个新的有效签名
+                setMessage({ type: 'info', text: '正在请求服务器进行原生性签名认证...' });
+                const response = await fetch('/api/resign-data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(finalData),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    if (errorData.shouldRedirect) {
+                        router.push({
+                            pathname: '/arrested',
+                            query: { reason: errorData.reason || '编辑内容不合规' }
+                        });
+                        return; // 中断执行
+                    }
+                    throw new Error(errorData.message || '签名服务器认证失败');
+                }
+                finalData = await response.json(); // 使用服务器返回的、带有最新有效签名的数据
+                setMessage({ type: 'success', text: '原生性签名认证成功！' });
+
+            } else {
+                // 情况二：数据为衍生数据（非原生或已失去原生性），必须移除签名
+                delete finalData.signature;
+            }
+
+            // 2. 前端敏感词检查 (使用处理后的 finalData)
+            const type = isScenarioData(finalData) ? 'scenario' : 'character';
+            const textToCheck = `${newCardForm.name} ${newCardForm.description} ${JSON.stringify(finalData)}`;
             const sensitiveWordResult = await quickCheck(textToCheck);
 
             if (sensitiveWordResult.hasSensitiveWords) {
-                // 直接跳转到 /arrested 页面
                 router.push('/arrested');
                 return;
             }
 
+            // 3. 调用 API 创建数据卡 (使用处理后的 finalData)
             const result = await dataCardApi.createCard(
                 type,
                 newCardForm.name,
                 newCardForm.description,
-                characterData,
+                finalData, // 使用经过原生性处理的数据
                 newCardForm.isPublic
             );
 
@@ -245,15 +277,17 @@ const CharacterManagerPage: React.FC = () => {
                 setShowSaveCardModal(false);
                 setNewCardForm({ name: '', description: '', isPublic: 0 });
                 setSaveCardError(null);
-                loadUserDataCards();
+                loadUserDataCards(); // 重新加载列表
             } else {
-                // 检查是否是敏感词错误，如果是则跳转到 /arrest
                 if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
                     router.push('/arrested');
                     return;
                 }
                 setSaveCardError(result.error || '保存失败');
             }
+        } catch (error) {
+            // 捕获签名或API调用中可能出现的任何错误
+            setSaveCardError(error instanceof Error ? error.message : '保存过程中发生未知错误');
         } finally {
             setIsSavingCard(false);
         }
