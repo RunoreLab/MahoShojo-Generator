@@ -10,6 +10,8 @@ import { debounce } from 'lodash';
 interface DataCard {
   id: string;
   name: string;
+  description: string;
+  data: string; // 确保 data 字段存在
   type: 'character' | 'scenario';
   is_public: -1 | 0 | 1;
   review_status: 'pending' | 'approved' | 'rejected';
@@ -18,6 +20,14 @@ interface DataCard {
   usage_count: number;
   created_at: string;
   updated_at: string;
+}
+
+// AI审查结果类型
+interface AiReviewResult {
+    id: string;
+    name: string;
+    suggestion: 'approved' | 'rejected';
+    reason: string;
 }
 
 const CharacterManagementPage: React.FC = () => {
@@ -34,23 +44,18 @@ const CharacterManagementPage: React.FC = () => {
     type: '',
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [isExporting, setIsExporting] = useState(false); // [新增] 导出状态
+  const [isExporting, setIsExporting] = useState(false);
 
-  // 从 URL 查询参数初始化筛选器状态
-  useEffect(() => {
-    if (router.isReady) {
-      setFilters(prev => ({
-        ...prev,
-        page: parseInt(router.query.page as string || '1', 10),
-        search: router.query.search as string || '',
-        reviewStatus: router.query.reviewStatus as string || '',
-        isPublic: router.query.isPublic as string || '',
-        type: router.query.type as string || '',
-      }));
-    }
-  }, [router.isReady, router.query]);
+  // AI 审查相关状态
+  const [showAiReviewModal, setShowAiReviewModal] = useState(false);
+  const [isAiReviewing, setIsAiReviewing] = useState(false);
+  const [aiReviewResults, setAiReviewResults] = useState<AiReviewResult[]>([]);
+  const [markedActions, setMarkedActions] = useState<Record<string, 'approve' | 'reject'>>({});
+  const [aiBatchSize, setAiBatchSize] = useState(10);
+  const [aiModel, setAiModel] = useState('gemini-1.5-flash');
+  const [externalReviewContent, setExternalReviewContent] = useState(''); // [新增] 外部审查粘贴内容
+  const [copyStatus, setCopyStatus] = useState(''); // [新增] 复制按钮状态
 
-  // 获取数据
   const fetchData = useCallback(async (currentFilters: typeof filters) => {
     setLoading(true);
     setSelectedIds(new Set());
@@ -74,74 +79,63 @@ const CharacterManagementPage: React.FC = () => {
       setLoading(false);
     }
   }, []);
-
-  // 当筛选器状态变化时，更新URL并获取数据
+  
   useEffect(() => {
     if (router.isReady) {
-      const query: { [key: string]: any } = {};
-      if (filters.page > 1) query.page = filters.page;
-      if (filters.search) query.search = filters.search;
-      if (filters.reviewStatus) query.reviewStatus = filters.reviewStatus;
-      if (filters.isPublic) query.isPublic = filters.isPublic;
-      if (filters.type) query.type = filters.type;
-
-      router.push({
-        pathname: '/admin/character-management',
-        query: query,
-      }, undefined, { shallow: true });
-      
-      fetchData(filters);
+      const newFilters = {
+        page: parseInt(router.query.page as string || '1', 10),
+        limit: 20,
+        search: router.query.search as string || '',
+        reviewStatus: router.query.reviewStatus as string || '',
+        isPublic: router.query.isPublic as string || '',
+        type: router.query.type as string || '',
+      };
+      setFilters(newFilters);
+      fetchData(newFilters);
     }
-  }, [filters, router, fetchData]);
-  
-  const debouncedSetSearch = useCallback(
-    debounce((value: string) => {
-      setFilters(prev => ({ ...prev, search: value, page: 1 }));
-    }, 500),
-    []
-  );
+  }, [router.isReady, router.query, fetchData]);
+
+  const updateUrl = useCallback((newFilters: typeof filters) => {
+      const query: { [key: string]: any } = {};
+      if (newFilters.page > 1) query.page = newFilters.page;
+      if (newFilters.search) query.search = newFilters.search;
+      if (newFilters.reviewStatus) query.reviewStatus = newFilters.reviewStatus;
+      if (newFilters.isPublic) query.isPublic = newFilters.isPublic;
+      if (newFilters.type) query.type = newFilters.type;
+      
+      router.push({ pathname: router.pathname, query }, undefined, { shallow: true });
+  }, [router]);
+
+  const debouncedUpdateUrl = useCallback(debounce(updateUrl, 300), [updateUrl]);
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    if (name === 'search') {
-      const input = e.target as HTMLInputElement;
-      debouncedSetSearch(input.value);
-    } else {
-      setFilters(prev => ({ ...prev, [name]: value, page: 1 }));
+    const newFilters = { ...filters, [name]: value, page: 1 };
+    setFilters(newFilters);
+    debouncedUpdateUrl(newFilters);
+  };
+  
+  const handlePageChange = (newPage: number) => {
+    if (newPage > 0 && newPage <= Math.ceil(total / filters.limit)) {
+      const newFilters = { ...filters, page: newPage };
+      setFilters(newFilters);
+      updateUrl(newFilters);
     }
   };
 
-  const handlePageChange = (newPage: number) => {
-    if (newPage > 0 && newPage <= Math.ceil(total / filters.limit)) {
-      setFilters(prev => ({ ...prev, page: newPage }));
-    }
-  };
-  
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      setSelectedIds(new Set(dataCards.map(card => card.id)));
-    } else {
-      setSelectedIds(new Set());
-    }
+    setSelectedIds(e.target.checked ? new Set(dataCards.map(card => card.id)) : new Set());
   };
 
   const handleSelectOne = (id: string) => {
     const newSelectedIds = new Set(selectedIds);
-    if (newSelectedIds.has(id)) {
-      newSelectedIds.delete(id);
-    } else {
-      newSelectedIds.add(id);
-    }
+    newSelectedIds.has(id) ? newSelectedIds.delete(id) : newSelectedIds.add(id);
     setSelectedIds(newSelectedIds);
   };
 
   const handleBatchAction = async (action: string, value?: any) => {
-    if (selectedIds.size === 0) {
-      alert('请至少选择一个项目');
-      return;
-    }
-    const confirmMessage = `确定要对选中的 ${selectedIds.size} 个项目执行此操作吗？`;
-    if (!window.confirm(confirmMessage)) return;
+    if (selectedIds.size === 0) return alert('请至少选择一个项目');
+    if (!window.confirm(`确定要对选中的 ${selectedIds.size} 个项目执行此操作吗？`)) return;
 
     try {
       const response = await fetch('/api/admin/data-cards/batch-update', {
@@ -153,12 +147,11 @@ const CharacterManagementPage: React.FC = () => {
       alert('操作成功！');
       fetchData(filters);
     } catch (error) {
-      alert('操作失败，请查看控制台');
-      console.error('批量操作失败:', error);
+      alert(`操作失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   };
 
-  // [新增] 批量导出处理函数
+  // 批量导出处理函数
   const handleExport = async () => {
     if (selectedIds.size === 0) {
       alert('请至少选择一个项目进行导出');
@@ -196,9 +189,153 @@ const CharacterManagementPage: React.FC = () => {
     }
   };
 
+  // --- AI 审查处理函数 ---
+  const handleOpenAiReview = () => {
+    setAiReviewResults([]);
+    setMarkedActions({});
+    setExternalReviewContent('');
+    setCopyStatus('');
+    setShowAiReviewModal(true);
+  };
+
+  const handleStartAiReview = async () => {
+    const pendingCards = dataCards.filter(card => card.review_status === 'pending');
+    const idsToReview = pendingCards.slice(0, aiBatchSize).map(card => card.id);
+
+    if (idsToReview.length === 0) {
+      alert('当前筛选条件下没有待审查的内容。');
+      return;
+    }
+    
+    setIsAiReviewing(true);
+    setAiReviewResults([]);
+    try {
+      const response = await fetch('/api/admin/ai-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cardIds: idsToReview, model: aiModel }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'AI审查请求失败');
+      setAiReviewResults(result.reviews);
+    } catch (error) {
+      alert(`AI审查失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsAiReviewing(false);
+    }
+  };
+
+  const handleMarkAction = (id: string, action: 'approve' | 'reject') => {
+    setMarkedActions(prev => ({ ...prev, [id]: action }));
+  };
+
+  const handleExecuteMarkedActions = async () => {
+    const actionsToExecute = Object.entries(markedActions);
+    if (actionsToExecute.length === 0) return alert('没有已标记的操作');
+
+    const approveIds = actionsToExecute.filter(([, action]) => action === 'approve').map(([id]) => id);
+    const rejectIds = actionsToExecute.filter(([, action]) => action === 'reject').map(([id]) => id);
+
+    if (!window.confirm(`即将通过 ${approveIds.length} 项，拒绝 ${rejectIds.length} 项。是否继续？`)) return;
+
+    try {
+      if (approveIds.length > 0) {
+        await fetch('/api/admin/data-cards/batch-update', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cardIds: approveIds, action: 'approve' }),
+        });
+      }
+      if (rejectIds.length > 0) {
+        await fetch('/api/admin/data-cards/batch-update', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cardIds: rejectIds, action: 'reject' }),
+        });
+      }
+      alert('操作成功！');
+      setShowAiReviewModal(false);
+      fetchData(filters); // 刷新主列表
+    } catch (error) {
+      alert(`执行失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  // [新增] 外部审查 - 复制内容到剪贴板
+  const handleCopyToClipboard = () => {
+    const pendingCards = dataCards.filter(card => card.review_status === 'pending');
+    if (pendingCards.length === 0) {
+      alert('当前筛选条件下没有待审查的内容。');
+      return;
+    }
+
+    const cardsToCopy = pendingCards.map(card => ({
+        id: card.id,
+        content: {
+            name: card.name,
+            description: card.description,
+            data: JSON.parse(card.data) // 解析 data 字符串为 JSON 对象
+        }
+    }));
+    
+    const promptForLLM = `
+You are a content moderator. Please review the following data cards based on our content policy (no politics, hate speech, explicit content, etc.). 
+For each card, provide your suggestion ('approved' or 'rejected') and a brief reason in Chinese. 
+Your entire response MUST be a single, valid JSON array of objects, with no other text before or after it.
+
+Example format:
+[
+  { "id": "...", "suggestion": "approved", "reason": "含有成人内容：内容涉及色情。" },
+  { "id": "...", "suggestion": "rejected", "reason": "令人不适的内容：恐怖猎奇的行为。" }
+]
+
+Here is the batch of data cards to review:
+
+${JSON.stringify(cardsToCopy, null, 2)}
+`;
+    navigator.clipboard.writeText(promptForLLM).then(() => {
+        setCopyStatus(`已成功复制 ${cardsToCopy.length} 条待审查内容到剪贴板！`);
+        setTimeout(() => setCopyStatus(''), 3000);
+    }).catch(err => {
+        alert('复制失败，请检查浏览器权限。');
+        console.error('复制失败:', err);
+    });
+  };
+
+  // [新增] 外部审查 - 解析并应用结果
+  const handleParseAndApply = () => {
+      if (!externalReviewContent.trim()) {
+          alert('请将外部 AI 的审查结果粘贴到文本框中。');
+          return;
+      }
+      try {
+          const parsedResults = JSON.parse(externalReviewContent);
+          if (!Array.isArray(parsedResults)) {
+              throw new Error('粘贴的内容不是一个有效的 JSON 数组。');
+          }
+          
+          // 验证数组中的每个对象是否符合格式
+          const validatedResults: AiReviewResult[] = parsedResults.map(item => {
+              if (!item.id || !item.suggestion || !['approved', 'rejected'].includes(item.suggestion) || typeof item.reason === 'undefined') {
+                  throw new Error(`解析失败：对象 ${JSON.stringify(item)} 缺少 id, suggestion, 或 reason 字段。`);
+              }
+              const originalCard = dataCards.find(c => c.id === item.id);
+              return {
+                  id: item.id,
+                  name: originalCard?.name || item.id,
+                  suggestion: item.suggestion,
+                  reason: item.reason
+              };
+          });
+
+          setAiReviewResults(validatedResults);
+          setExternalReviewContent(''); // 清空文本框
+          alert(`成功解析并加载了 ${validatedResults.length} 条审查建议！`);
+      } catch (error) {
+          alert(`解析失败: ${error instanceof Error ? error.message : '无效的JSON格式'}`);
+          console.error('解析外部审查结果失败:', error);
+      }
+  };
 
   const totalPages = Math.ceil(total / filters.limit);
-  
   const getReviewStatusBadge = (status: DataCard['review_status']) => {
       const map = {
           pending: { text: '待审查', color: 'bg-yellow-100 text-yellow-800' },
@@ -207,7 +344,6 @@ const CharacterManagementPage: React.FC = () => {
       };
       return <span className={`px-2 py-1 text-xs font-medium rounded-full ${map[status].color}`}>{map[status].text}</span>;
   };
-  
   const getPublicStatusBadge = (status: DataCard['is_public']) => {
       const map = {
           '1': { text: '公开', color: 'bg-blue-100 text-blue-800' },
@@ -272,13 +408,13 @@ const CharacterManagementPage: React.FC = () => {
                 <button onClick={() => handleBatchAction('set_public_status', 1)} className="admin-button-sm bg-blue-500 hover:bg-blue-600">设为公开</button>
                 <button onClick={() => handleBatchAction('set_public_status', 0)} className="admin-button-sm bg-gray-500 hover:bg-gray-600">设为私有</button>
                 <button onClick={() => handleBatchAction('set_public_status', -1)} className="admin-button-sm bg-zinc-500 hover:bg-zinc-600">设为封禁</button>
-                {/* [修改] 激活导出按钮 */}
                 <button onClick={handleExport} className="admin-button-sm bg-teal-500 hover:bg-teal-600 disabled:opacity-50" disabled={isExporting || selectedIds.size === 0}>
                   {isExporting ? '导出中...' : '导出选中项'}
                 </button>
+                <button onClick={handleOpenAiReview} className="admin-button-sm bg-indigo-500 hover:bg-indigo-600">AI 辅助审查</button>
             </div>
           </div>
-
+          
           {/* 数据表格 */}
           <div className="bg-white rounded-lg shadow-sm overflow-x-auto">
             <table className="w-full text-sm text-left text-gray-500">
@@ -328,6 +464,73 @@ const CharacterManagementPage: React.FC = () => {
           )}
         </div>
       </div>
+      
+      {/* AI 辅助审查模态框 */}
+      {showAiReviewModal && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+                  <div className="flex justify-between items-center p-4 border-b">
+                      <h2 className="text-lg font-bold">AI 辅助审查</h2>
+                      <button onClick={() => setShowAiReviewModal(false)} className="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+                  </div>
+                  <div className="flex-grow flex flex-col md:flex-row overflow-hidden">
+                      {/* 左侧控制与结果区 */}
+                      <div className="w-full md:w-1/2 flex flex-col border-r">
+                          <div className="p-4 space-y-4">
+                              <div className="flex items-center gap-4">
+                                  <div>
+                                      <label className="text-sm font-medium">单次处理数量</label>
+                                      <input type="number" value={aiBatchSize} onChange={e => setAiBatchSize(parseInt(e.target.value))} className="input-field w-24 mt-1" min="1" max="50" />
+                                  </div>
+                                  <div>
+                                      <label className="text-sm font-medium">使用模型</label>
+                                      <select value={aiModel} onChange={e => setAiModel(e.target.value)} className="input-field mt-1"><option value="gemini-1.5-flash">Gemini 1.5 Flash</option></select>
+                                  </div>
+                                  <button onClick={handleStartAiReview} disabled={isAiReviewing} className="admin-button-sm bg-indigo-500 hover:bg-indigo-600 self-end">
+                                      {isAiReviewing ? '审查中...' : `开始审查`}
+                                  </button>
+                              </div>
+                              <p className="text-xs text-gray-500">将从当前筛选结果中，选取最多 {aiBatchSize} 项“待审查”的内容进行分析。</p>
+                          </div>
+                          <div className="flex-grow overflow-y-auto p-4 border-t">
+                              {isAiReviewing && <div className="text-center">AI 正在努力分析中...</div>}
+                              {aiReviewResults.length === 0 && !isAiReviewing && <div className="text-center text-gray-500">暂无审查结果</div>}
+                              {aiReviewResults.length > 0 && (
+                                  <div className="space-y-2">
+                                      {aiReviewResults.map(res => (
+                                          <div key={res.id} className="p-3 bg-gray-50 rounded-lg border">
+                                              <p className="font-semibold">{res.name}</p>
+                                              <p className={`text-sm font-bold ${res.suggestion === 'approved' ? 'text-green-600' : 'text-red-600'}`}>AI建议: {res.suggestion === 'approved' ? '通过' : '拒绝'}</p>
+                                              <p className="text-xs text-gray-600 italic">理由: {res.reason}</p>
+                                              <div className="mt-2 flex gap-2">
+                                                  <label className="flex items-center text-xs cursor-pointer"><input type="radio" name={`action-${res.id}`} onChange={() => handleMarkAction(res.id, 'approve')} checked={markedActions[res.id] === 'approve'}/><span className="ml-1">采纳并通过</span></label>
+                                                  <label className="flex items-center text-xs cursor-pointer"><input type="radio" name={`action-${res.id}`} onChange={() => handleMarkAction(res.id, 'reject')} checked={markedActions[res.id] === 'reject'}/><span className="ml-1">采纳并拒绝</span></label>
+                                              </div>
+                                          </div>
+                                      ))}
+                                  </div>
+                              )}
+                          </div>
+                      </div>
+                      {/* 右侧外部工作流 */}
+                      <div className="w-full md:w-1/2 flex flex-col">
+                          <div className="p-4">
+                              <h3 className="font-semibold mb-2">外部 AI 审查工作流</h3>
+                              <button onClick={handleCopyToClipboard} className="admin-button-sm bg-gray-600 hover:bg-gray-700 w-full mb-2">1. 复制内容以供外部审查</button>
+                              {copyStatus && <p className="text-xs text-green-600 text-center mb-2">{copyStatus}</p>}
+                              <textarea value={externalReviewContent} onChange={e => setExternalReviewContent(e.target.value)} placeholder="2. 在此处粘贴外部 AI 返回的 JSON 数组结果..." className="input-field w-full h-32 resize-y"></textarea>
+                              <button onClick={handleParseAndApply} className="admin-button-sm bg-blue-600 hover:bg-blue-700 w-full mt-2">3. 解析并应用建议</button>
+                          </div>
+                      </div>
+                  </div>
+                  <div className="p-4 border-t flex justify-end">
+                      <button onClick={handleExecuteMarkedActions} disabled={Object.keys(markedActions).length === 0} className="admin-button-sm bg-green-600 hover:bg-green-700">
+                          执行所有已标记操作 ({Object.keys(markedActions).length})
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
     </>
   );
 };
