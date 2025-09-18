@@ -1,6 +1,6 @@
 // pages/admin/character-management.tsx
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -106,7 +106,7 @@ const CharacterManagementPage: React.FC = () => {
       router.push({ pathname: router.pathname, query }, undefined, { shallow: true });
   }, [router]);
 
-  const debouncedUpdateUrl = useCallback(debounce(updateUrl, 300), [updateUrl]);
+  const debouncedUpdateUrl = useMemo(() => debounce(updateUrl, 300), [updateUrl]);
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -129,7 +129,11 @@ const CharacterManagementPage: React.FC = () => {
 
   const handleSelectOne = (id: string) => {
     const newSelectedIds = new Set(selectedIds);
-    newSelectedIds.has(id) ? newSelectedIds.delete(id) : newSelectedIds.add(id);
+    if (newSelectedIds.has(id)) {
+        newSelectedIds.delete(id);
+    } else {
+        newSelectedIds.add(id);
+    }
     setSelectedIds(newSelectedIds);
   };
 

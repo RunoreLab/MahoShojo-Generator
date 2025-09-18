@@ -20,6 +20,8 @@ const AiReviewSuggestionSchema = z.object({
 const AiReviewResponseSchema = z.object({
   reviews: z.array(AiReviewSuggestionSchema),
 });
+// 从 Zod schema 推断出单个审查建议的 TypeScript 类型
+type AiReviewSuggestion = z.infer<typeof AiReviewSuggestionSchema>;
 
 // 3. 定义 API 的 Handler
 export default async function handler(req: NextRequest) {
@@ -77,8 +79,8 @@ export default async function handler(req: NextRequest) {
 
     const aiResult = await generateWithAI({}, generationConfig);
 
-    // 7. 将数据库信息与AI结果合并，返回给前端更完整的数据
-    const fullReviews = aiResult.reviews.map(review => {
+// 7. 将数据库信息与AI结果合并，返回给前端更完整的数据
+    const fullReviews = aiResult.reviews.map((review: AiReviewSuggestion) => {
         const originalCard = cardsToReview.find(c => c.id === review.id);
         return {
             ...review,

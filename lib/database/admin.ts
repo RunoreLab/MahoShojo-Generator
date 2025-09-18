@@ -29,8 +29,8 @@ export async function getAdminDataCards(filters: {
   } = filters;
 
   const offset = (page - 1) * limit;
-  let whereClauses: string[] = [];
-  let params: (string | number)[] = [];
+  const whereClauses: string[] = [];
+  const params: (string | number)[] = [];
 
   // --- 动态构建 WHERE 子句 ---
   if (reviewStatus) {
@@ -100,8 +100,8 @@ export async function batchUpdateDataCards(
 ): Promise<boolean> {
   if (cardIds.length === 0) return true;
 
-  let setClauses: string[] = [];
-  let params: (string | number)[] = [];
+  const setClauses: string[] = [];
+  const params: (string | number)[] = [];
 
   if (updates.review_status) {
     setClauses.push('review_status = ?');
@@ -184,5 +184,146 @@ export async function getCardsForReview(cardIds: string[]): Promise<{ id: string
   } catch (error) {
     console.error('[Admin] 获取审查数据失败:', error);
     throw error;
+  }
+}
+
+/**
+ * [Admin] 获取用户列表，支持复杂的多维度筛选和分页
+ * @param filters - 包含所有筛选条件的对
+ * @returns 返回查询到的用户数组及总数
+ */
+export async function getAdminUsers(filters: {
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  search?: string; // 搜索用户名
+  regDateStart?: string;
+  regDateEnd?: string;
+  loginDateStart?: string;
+  loginDateEnd?: string;
+  status?: 'normal' | 'banned' | 'exempt';
+}) {
+  const {
+    page = 1,
+    limit = 20,
+    sortBy = 'created_at',
+    sortOrder = 'desc',
+    search,
+    regDateStart,
+    regDateEnd,
+    loginDateStart,
+    loginDateEnd,
+    status,
+  } = filters;
+
+  const offset = (page - 1) * limit;
+  const whereClauses: string[] = [];
+  const params: (string | number)[] = [];
+
+  // --- 动态构建 WHERE 子句 ---
+  if (search) {
+    whereClauses.push('u.username LIKE ?');
+    params.push(`%${search}%`);
+  }
+  if (regDateStart) {
+    whereClauses.push('u.created_at >= ?');
+    params.push(regDateStart);
+  }
+  if (regDateEnd) {
+    whereClauses.push('u.created_at <= ?');
+    params.push(regDateEnd);
+  }
+  if (loginDateStart) {
+    whereClauses.push('u.last_login_at >= ?');
+    params.push(loginDateStart);
+  }
+  if (loginDateEnd) {
+    whereClauses.push('u.last_login_at <= ?');
+    params.push(loginDateEnd);
+  }
+  if (status) {
+    if (status === 'banned') {
+      whereClauses.push("u.is_banned IS NOT NULL AND u.is_banned != ''");
+    } else if (status === 'exempt') {
+      whereClauses.push('u.is_review_exempt = 1');
+    } else if (status === 'normal') {
+      whereClauses.push("(u.is_banned IS NULL OR u.is_banned = '') AND u.is_review_exempt = 0");
+    }
+  }
+
+  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  // D1 不支持在 FROM 子句中使用复杂的子查询，所以我们将使用 LEFT JOIN 和 COUNT
+  const dataSql = `
+    SELECT
+      u.id, u.username, u.email, u.created_at, u.last_login_at, u.is_banned, u.is_review_exempt,
+      COUNT(dc.id) as total_cards,
+      SUM(CASE WHEN dc.is_public = 1 THEN 1 ELSE 0 END) as public_cards,
+      SUM(CASE WHEN dc.is_public = -1 THEN 1 ELSE 0 END) as banned_cards,
+      SUM(CASE WHEN dc.review_status = 'rejected' THEN 1 ELSE 0 END) as rejected_cards
+    FROM users u
+    LEFT JOIN data_cards dc ON u.id = dc.user_id
+    ${whereSql}
+    GROUP BY u.id
+    ORDER BY u.${sortBy} ${sortOrder.toUpperCase()}
+    LIMIT ? OFFSET ?;
+  `;
+
+  const countSql = `SELECT COUNT(id) as total FROM users u ${whereSql};`;
+
+  try {
+    const dataParams = [...params, limit, offset];
+    const countParams = [...params];
+
+    const dataResult = (await queryFromD1(dataSql, dataParams)) as any;
+    const countResult = (await queryFromD1(countSql, countParams)) as any;
+
+    const users = dataResult.success ? dataResult.result[0]?.results || [] : [];
+    const total = countResult.success ? countResult.result[0]?.results[0]?.total || 0 : 0;
+
+    return { users, total };
+  } catch (error) {
+    console.error('[Admin] 获取用户列表失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * [Admin] 批量更新用户的状态
+ * @param userIds - 要更新的用户ID数组
+ * @param updates - 要更新的字段和值, e.g., { is_review_exempt: 1 }
+ * @returns 返回操作是否成功的布尔值
+ */
+export async function batchUpdateUsers(
+  userIds: number[],
+  updates: { is_review_exempt?: 0 | 1; is_banned?: string | null }
+): Promise<boolean> {
+  if (userIds.length === 0) return true;
+
+  const setClauses: string[] = [];
+  const params: (string | number | null)[] = [];
+
+  if (updates.is_review_exempt !== undefined) {
+    setClauses.push('is_review_exempt = ?');
+    params.push(updates.is_review_exempt);
+  }
+  if (updates.is_banned !== undefined) {
+    setClauses.push('is_banned = ?');
+    params.push(updates.is_banned);
+  }
+
+  if (setClauses.length === 0) return false;
+
+  const placeholders = userIds.map(() => '?').join(', ');
+  const sql = `UPDATE users SET ${setClauses.join(', ')} WHERE id IN (${placeholders})`;
+  const finalParams = [...params, ...userIds];
+
+  try {
+    const result = (await queryFromD1(sql, finalParams)) as any;
+    return result.success;
+  } catch (error) {
+    console.error('[Admin] 批量更新用户失败:', error);
+    return false;
   }
 }

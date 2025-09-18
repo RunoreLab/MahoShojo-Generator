@@ -19,7 +19,7 @@ export default async function handler(req: NextRequest) {
       return new Response(JSON.stringify({ success: false, error: '缺少必要参数: cardIds 和 action' }), { status: 400 });
     }
 
-    let updates: { review_status?: 'approved' | 'rejected'; is_public?: 0 | 1 | -1 } = {};
+    const updates: { review_status?: 'approved' | 'rejected'; is_public?: 0 | 1 | -1 } = {};
 
     // 根据 action 构建 updates 对象
     switch (action) {
