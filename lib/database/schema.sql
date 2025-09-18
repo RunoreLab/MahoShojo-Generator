@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS users (
   is_banned TEXT,
   slot_count INTEGER,
   registration_ip TEXT,
-  prefix TEXT
+  prefix TEXT,
+  is_review_exempt INTEGER NOT NULL DEFAULT 0, -- [新增 v0.4.2] 审查豁免状态 (0=false, 1=true)
+  is_admin INTEGER NOT NULL DEFAULT 0          -- [新增 v0.4.2] 管理员状态 (0=false, 1=true)，由于管理后台仅在本地部署，目前不需要登录账号并验证管理员身份。
 );
 
 CREATE INDEX idx_users_username ON users(username);
@@ -54,11 +56,12 @@ CREATE TABLE IF NOT EXISTS data_cards (
   name TEXT NOT NULL,
   description TEXT,
   data TEXT NOT NULL,
-  is_public BOOLEAN NOT NULL DEFAULT 0,  -- 0 = 私有, 1 = 公开
+  is_public INTEGER NOT NULL DEFAULT 0,  -- [类型变更] 0=私有, 1=公开, -1=封禁
   usage_count INTEGER DEFAULT 0,
   like_count INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  review_status TEXT NOT NULL DEFAULT 'pending' CHECK(review_status IN ('pending', 'approved', 'rejected')), -- [新增 v0.4.2] 审查状态
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -67,3 +70,4 @@ CREATE INDEX idx_data_cards_type ON data_cards(type);
 CREATE INDEX idx_data_cards_is_public ON data_cards(is_public);
 CREATE INDEX idx_data_cards_usage_count ON data_cards(usage_count);
 CREATE INDEX idx_data_cards_like_count ON data_cards(like_count);
+CREATE INDEX idx_data_cards_review_status ON data_cards(review_status); -- [新增 v0.4.2] 为新字段添加索引以优化查询
