@@ -11,9 +11,6 @@ interface SaveToCloudButtonProps {
   buttonText?: string;
   className?: string;
   style?: React.CSSProperties;
-  // 新增 props 用于接收原生性状态
-  isNative?: boolean;
-  hasLostNativeness?: boolean;
 }
 
 // 检测是否为情景文件
@@ -25,10 +22,7 @@ export default function SaveToCloudButton({
   data,
   buttonText = "保存到云端",
   className = "generate-button",
-  style = {},
-  // 接收原生性状态，提供默认值以兼容旧用法
-  isNative = false,
-  hasLostNativeness = false,
+  style = {}
 }: SaveToCloudButtonProps) {
   const router = useRouter();
   const { isAuthenticated } = useAuth();
@@ -68,6 +62,12 @@ export default function SaveToCloudButton({
       alert('请先登录后再保存到云端');
       return;
     }
+    
+    // 如果没有数据，则不显示模态框
+    if (!data) {
+        alert('没有可保存的数据。');
+        return;
+    }
 
     // 根据数据类型生成默认名称和描述
     const isScenario = isScenarioData(data);
@@ -94,22 +94,10 @@ export default function SaveToCloudButton({
     setSaveError(null);
 
     try {
-      // 核心修复：与 character-manager 页面相同的原生性处理逻辑
-      let finalData = { ...data };
-
-      if (isNative && !hasLostNativeness) {
-        // 保持原生性，需要重新签名
-        const response = await fetch('/api/resign-data', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(finalData),
-        });
-        if (!response.ok) throw new Error('签名服务器认证失败');
-        finalData = await response.json();
-      } else {
-        // 衍生数据，移除签名
-        delete finalData.signature;
-      }
+      // 修正：直接使用 props 传入的 data 对象。
+      // 该对象由后端 API 生成，已包含了正确的签名状态。
+      // 本组件不再负责任何签名相关的逻辑判断。
+      const finalData = { ...data };
       
       // 前端敏感词检查
       const type = isScenarioData(finalData) ? 'scenario' : 'character';
@@ -125,7 +113,7 @@ export default function SaveToCloudButton({
         type,
         cardName,
         cardDescription,
-        finalData, // 使用处理后的数据
+        finalData, // 直接使用最终数据
         isPublic
       );
 
@@ -136,7 +124,6 @@ export default function SaveToCloudButton({
         setCardDescription('');
         setIsPublic(0);
         setSaveError(null);
-        // 重新加载用户数据卡数量
         loadUserDataCards();
       } else {
         if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
