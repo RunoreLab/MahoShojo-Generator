@@ -21,7 +21,7 @@ const AdminHomePage: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* 内容管理入口 */}
-              <Link href="/admin/character-management" legacyBehavior>
+              <Link href="/admin//content-management" legacyBehavior>
                 <a className="block p-6 bg-purple-50 rounded-lg border border-purple-200 hover:shadow-xl hover:border-purple-400 transition-all duration-300">
                   <div className="flex items-center text-purple-700 mb-2">
                     <FileText className="w-8 h-8" />
@@ -34,11 +34,11 @@ const AdminHomePage: React.FC = () => {
               </Link>
 
               {/* 用户管理入口 */}
-              <Link href="/admin/user-management" legacyBehavior>
+              <Link href="/admin/user-dashboard" legacyBehavior>
                 <a className="block p-6 bg-blue-50 rounded-lg border border-blue-200 hover:shadow-xl hover:border-blue-400 transition-all duration-300">
                   <div className="flex items-center text-blue-700 mb-2">
                     <Users className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">用户管理</h2>
+                    <h2 className="text-xl font-semibold ml-3">用户状态</h2>
                   </div>
                   <p className="text-gray-600 text-sm">
                     查询、筛选和管理平台用户，设置用户状态与权限。

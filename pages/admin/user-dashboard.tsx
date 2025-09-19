@@ -1,4 +1,4 @@
-// pages/admin/user-management.tsx
+// pages/admin/user-dashboard.tsx
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Head from 'next/head';

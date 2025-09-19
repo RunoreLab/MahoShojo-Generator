@@ -1,4 +1,4 @@
-// pages/admin/character-management.tsx
+// pages/admin/content-management.tsx
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Head from 'next/head';
