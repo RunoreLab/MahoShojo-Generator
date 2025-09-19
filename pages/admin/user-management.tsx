@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Save, X, Users, UserCheck, UserX, AlertTriangle } from 'lucide-react';
+import Link from 'next/link'; // 导入 Link 组件
 
 interface User {
   id: number;
@@ -157,6 +158,17 @@ export default function UserManagement() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
       <div className="w-full px-8 py-8">
+        {/*
+          【新增】返回管理主页的链接
+          - 使用 Next.js 的 Link 组件以实现客户端路由，避免页面刷新。
+          - 添加了简单的样式使其易于识别和点击。
+        */}
+        <div className="mb-6">
+          <Link href="/admin">
+            <span className="text-sm text-purple-600 hover:underline cursor-pointer">&larr; 返回管理后台主页</span>
+          </Link>
+        </div>
+
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center justify-center gap-2">
             <Users className="w-8 h-8 text-purple-600" />
@@ -272,7 +284,7 @@ export default function UserManagement() {
                     </button>
                     <button
                       onClick={resetEditing}
-                      className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                      className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-600"
                     >
                       <X className="w-4 h-4" />
                       重置

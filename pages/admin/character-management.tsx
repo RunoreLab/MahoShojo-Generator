@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Save, X, Database, Eye, Ban, CheckCircle, AlertTriangle, Calendar, User, Hash } from 'lucide-react';
 import { getDataCardStatus } from '@/lib/database/data-cards';
+import Link from 'next/link';
 
 interface DataCard {
   id: string;
@@ -158,6 +159,13 @@ export default function CharacterManagement() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
+        <div className="w-full px-8 pt-8">
+          <div className="mb-6">
+            <Link href="/admin">
+              <span className="text-sm text-purple-600 hover:underline cursor-pointer">&larr; 返回管理后台主页</span>
+            </Link>
+          </div>
+        </div>
       <div className="w-full px-8 py-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center justify-center gap-2">
