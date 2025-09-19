@@ -1,6 +1,7 @@
 // pages/api/admin/users.ts
 
 import { getAdminUsers } from '@/lib/database/admin';
+import { getUserByUsername } from '@/lib/database/users';
 import type { NextRequest } from 'next/server';
 
 export const runtime = 'experimental-edge';
@@ -12,6 +13,22 @@ export default async function handler(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
+
+    // 兼容旧版 user-management 页面根据 username 查询单个用户的请求
+    const username = searchParams.get('username');
+    if (username) {
+      const user = await getUserByUsername(username);
+      if (user) {
+        return new Response(JSON.stringify(user), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } else {
+        return new Response(JSON.stringify({ error: '用户未找到' }), { status: 404 });
+      }
+    }
+
+    // 新版 user-dashboard 页面完整的筛选和统计功能
     const filters = {
       page: parseInt(searchParams.get('page') || '1', 10),
       limit: parseInt(searchParams.get('limit') || '20', 10),
@@ -23,6 +40,7 @@ export default async function handler(req: NextRequest) {
       status: searchParams.get('status') as any || undefined,
     };
     
+    // 清理掉值为 undefined 的筛选条件
     Object.keys(filters).forEach(key => (filters as any)[key] === undefined && delete (filters as any)[key]);
 
     const { users, total } = await getAdminUsers(filters);
