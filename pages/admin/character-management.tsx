@@ -5,6 +5,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { debounce } from 'lodash';
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 
 // 定义数据卡类型接口
 interface DataCard {
@@ -32,6 +33,9 @@ interface AiReviewResult {
 
 const CharacterManagementPage: React.FC = () => {
   const router = useRouter();
+  const [selectedCardDetails, setSelectedCardDetails] = useState<DataCard | null>(null);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+
   const [dataCards, setDataCards] = useState<DataCard[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -135,6 +139,11 @@ const CharacterManagementPage: React.FC = () => {
         newSelectedIds.add(id);
     }
     setSelectedIds(newSelectedIds);
+  };
+
+  const handleViewDetails = (card: DataCard) => {
+    setSelectedCardDetails(card);
+    setIsDetailsModalOpen(true);
   };
 
   const handleBatchAction = async (action: string, value?: any) => {
@@ -430,26 +439,57 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                   <th scope="col" className="px-6 py-3">公开状态</th>
                   <th scope="col" className="px-6 py-3">审查状态</th>
                   <th scope="col" className="px-6 py-3">点赞/使用</th>
+                  <th scope="col" className="px-6 py-3">内容预览</th>
                   <th scope="col" className="px-6 py-3">更新时间</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={7} className="text-center p-8">加载中...</td></tr>
+                  <tr><td colSpan={8} className="text-center p-8">加载中...</td></tr>
                 ) : dataCards.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center p-8">未找到符合条件的数据</td></tr>
+                  <tr><td colSpan={8} className="text-center p-8">未找到符合条件的数据</td></tr>
                 ) : (
                   dataCards.map(card => (
                     <tr key={card.id} className="bg-white border-b hover:bg-gray-50">
                       <td className="p-4"><input type="checkbox" onChange={() => handleSelectOne(card.id)} checked={selectedIds.has(card.id)} /></td>
                       <td className="px-6 py-4">
-                        <div className="font-medium text-gray-900">{card.name}</div>
+                        <button
+                          onClick={() => handleViewDetails(card)}
+                          className="font-medium text-purple-600 hover:underline text-left"
+                        >
+                          {card.name}
+                        </button>
                         <div className="text-xs text-gray-500">by {card.username}</div>
                       </td>
                       <td className="px-6 py-4">{card.type === 'character' ? '角色' : '情景'}</td>
                       <td className="px-6 py-4">{getPublicStatusBadge(card.is_public)}</td>
                       <td className="px-6 py-4">{getReviewStatusBadge(card.review_status)}</td>
                       <td className="px-6 py-4">{card.like_count} / {card.usage_count}</td>
+                      {/* 内容预览列 */}
+                      <td className="px-6 py-4 text-xs text-gray-500 max-w-xs">
+                        {(() => {
+                            // 定义无意义的默认描述
+                            const defaultDescriptions = ['角色数据卡', '情景数据卡'];
+                            // 判断当前描述是否有意义
+                            const isMeaningfulDescription = card.description && !defaultDescriptions.includes(card.description.trim());
+                            
+                            // 如果描述有意义，则显示描述；否则，显示data字段的内容
+                            const contentToShow = isMeaningfulDescription ? card.description : card.data;
+                            let titleToShow = contentToShow;
+                            try {
+                                // 为悬浮提示（title）美化JSON格式
+                                if (!isMeaningfulDescription) {
+                                    titleToShow = JSON.stringify(JSON.parse(card.data), null, 2);
+                                }
+                            } catch(e) { /* 忽略解析错误 */ }
+
+                            return (
+                                <p className="truncate" title={titleToShow}>
+                                    {contentToShow}
+                                </p>
+                            );
+                        })()}
+                      </td>
                       <td className="px-6 py-4">{new Date(card.updated_at).toLocaleString()}</td>
                     </tr>
                   ))
@@ -551,6 +591,26 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                   </div>
               </div>
           </div>
+      )}
+      {/* 详情弹窗组件 */}
+      {selectedCardDetails && (
+        <DataCardDetailsModal
+          isOpen={isDetailsModalOpen}
+          onClose={() => setIsDetailsModalOpen(false)}
+          card={{
+            id: selectedCardDetails.id,
+            name: selectedCardDetails.name,
+            description: selectedCardDetails.description,
+            type: selectedCardDetails.type,
+            data: selectedCardDetails.data,
+            isPublic: selectedCardDetails.is_public === 1,
+            usageCount: selectedCardDetails.usage_count,
+            likeCount: selectedCardDetails.like_count,
+            author: selectedCardDetails.username,
+            createdAt: selectedCardDetails.created_at,
+            updatedAt: selectedCardDetails.updated_at
+          }}
+        />
       )}
     </>
   );
