@@ -313,6 +313,11 @@ const CanshouPage: React.FC = () => {
 
             {showIntroduction ? (
               <div className="text-center">
+                {/* 注意事项 */}
+                <div className="mb-6 p-3 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-sm text-left rounded-r-lg">
+                  <p className="font-bold">⚠️ 注意事项</p>
+                  <p className="mt-1">请勿在问卷中输入任何真实的隐私信息，或任何不适宜、攻击性、不符合公序良俗的内容。所有回答将被用于生成虚拟角色，并且将会被储存在角色信息中。</p>
+                </div>
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <button onClick={() => setShowIntroduction(false)} className="generate-button text-lg flex-1">开始调查</button>
                   <button
@@ -382,6 +387,10 @@ const CanshouPage: React.FC = () => {
                     })}
                   </div>
                 )}
+
+                <p className="text-xs text-center text-gray-500 mb-4 -mt-2 px-4">
+                  请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。
+                </p>
 
                 {(currentQuestion.type === 'text' || currentQuestion.allowCustom) && (
                   <div className="input-group">

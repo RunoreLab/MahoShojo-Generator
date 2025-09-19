@@ -63,6 +63,8 @@ export default function DataCardDetailsModal({
             if (key.startsWith('_')) return null;
             // 跳过 metadata 字段
             if (key === 'metadata') return null;
+            // 跳过问卷答案字段
+            if (key === 'userAnswers') return null;
 
             return (
               <div key={key} className="border-l-2 border-gray-200 pl-3">

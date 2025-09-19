@@ -1,537 +1,619 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Save, X, Database, Eye, Ban, CheckCircle, AlertTriangle, Calendar, User, Hash } from 'lucide-react';
-import { getDataCardStatus } from '@/lib/database/data-cards';
+// pages/admin/character-management.tsx
 
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Head from 'next/head';
+import Link from 'next/link';
+import { useRouter } from 'next/router';
+import { debounce } from 'lodash';
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
+
+// 定义数据卡类型接口
 interface DataCard {
   id: string;
-  user_id: number;
-  type: 'character' | 'scenario';
   name: string;
   description: string;
-  data: string;
-  is_public: number;
-  usage_count: number;
+  data: string; // 确保 data 字段存在
+  type: 'character' | 'scenario';
+  is_public: -1 | 0 | 1;
+  review_status: 'pending' | 'approved' | 'rejected';
+  username: string;
   like_count: number;
+  usage_count: number;
   created_at: string;
   updated_at: string;
-  username?: string;
 }
 
-interface EditFormData {
-  name: string;
-  description: string;
-  is_public: number;
+// AI审查结果类型
+interface AiReviewResult {
+    id: string;
+    name: string;
+    suggestion: 'approved' | 'rejected';
+    reason: string;
 }
 
-export default function CharacterManagement() {
-  const [cards, setCards] = useState<DataCard[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCard, setSelectedCard] = useState<DataCard | null>(null);
-  const [editingCard, setEditingCard] = useState<EditFormData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [typeFilter, setTypeFilter] = useState<'all' | 'character' | 'scenario'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'public' | 'private' | 'banned'>('all');
-  const [viewingData, setViewingData] = useState(false);
+const CharacterManagementPage: React.FC = () => {
+  const router = useRouter();
+  const [selectedCardDetails, setSelectedCardDetails] = useState<DataCard | null>(null);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
 
-  // 获取所有角色卡
-  const fetchCards = async (page = 1, search = '', type = typeFilter, status = statusFilter) => {
+  const [dataCards, setDataCards] = useState<DataCard[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState({
+    page: 1,
+    limit: 20,
+    search: '',
+    reviewStatus: '',
+    isPublic: '',
+    type: '',
+  });
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isExporting, setIsExporting] = useState(false);
+
+  // AI 审查相关状态
+  const [showAiReviewModal, setShowAiReviewModal] = useState(false);
+  const [isAiReviewing, setIsAiReviewing] = useState(false);
+  const [aiReviewResults, setAiReviewResults] = useState<AiReviewResult[]>([]);
+  const [markedActions, setMarkedActions] = useState<Record<string, 'approve' | 'reject'>>({});
+  const [aiBatchSize, setAiBatchSize] = useState(10);
+  const [aiModel, setAiModel] = useState('gemini-2.5-flash-lite');
+  const [externalReviewContent, setExternalReviewContent] = useState(''); // [新增] 外部审查粘贴内容
+  const [copyStatus, setCopyStatus] = useState(''); // [新增] 复制按钮状态
+
+  const fetchData = useCallback(async (currentFilters: typeof filters) => {
     setLoading(true);
+    setSelectedIds(new Set());
     try {
       const params = new URLSearchParams({
-        page: page.toString(),
-        limit: '20',
-        ...(search && { search }),
-        ...(type !== 'all' && { type }),
-        ...(status !== 'all' && { status })
+        page: currentFilters.page.toString(),
+        limit: currentFilters.limit.toString(),
+        search: currentFilters.search,
+        reviewStatus: currentFilters.reviewStatus,
+        isPublic: currentFilters.isPublic,
+        type: currentFilters.type,
       });
-
-      const response = await fetch(`/api/admin/data-cards?${params}`);
-      if (response.ok) {
-        const data = await response.json();
-        setCards(data.cards || []);
-        setTotalPages(data.totalPages || 1);
-        setCurrentPage(data.currentPage || 1);
-      } else {
-        setMessage({ type: 'error', text: '获取角色卡列表失败' });
-      }
+      const response = await fetch(`/api/admin/data-cards?${params.toString()}`);
+      if (!response.ok) throw new Error('获取数据失败');
+      const data = await response.json();
+      setDataCards(data.cards);
+      setTotal(data.total);
     } catch (error) {
-      setMessage({ type: 'error', text: '获取角色卡列表失败: ' + error });
+      console.error(error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+  
+  useEffect(() => {
+    if (router.isReady) {
+      const newFilters = {
+        page: parseInt(router.query.page as string || '1', 10),
+        limit: 20,
+        search: router.query.search as string || '',
+        reviewStatus: router.query.reviewStatus as string || '',
+        isPublic: router.query.isPublic as string || '',
+        type: router.query.type as string || '',
+      };
+      setFilters(newFilters);
+      fetchData(newFilters);
+    }
+  }, [router.isReady, router.query, fetchData]);
 
-  // 搜索角色卡
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await fetchCards(1, searchTerm, typeFilter, statusFilter);
-  };
+  const updateUrl = useCallback((newFilters: typeof filters) => {
+      const query: { [key: string]: any } = {};
+      if (newFilters.page > 1) query.page = newFilters.page;
+      if (newFilters.search) query.search = newFilters.search;
+      if (newFilters.reviewStatus) query.reviewStatus = newFilters.reviewStatus;
+      if (newFilters.isPublic) query.isPublic = newFilters.isPublic;
+      if (newFilters.type) query.type = newFilters.type;
+      
+      router.push({ pathname: router.pathname, query }, undefined, { shallow: true });
+  }, [router]);
 
-  // 获取单个角色卡详情
-  const fetchCardDetails = async (cardId: string) => {
-    setLoading(true);
-    try {
-      const response = await fetch(`/api/admin/data-cards?id=${encodeURIComponent(cardId)}`);
-      if (response.ok) {
-        const card = await response.json();
-        setSelectedCard(card);
-        setEditingCard({
-          name: card.name,
-          description: card.description || '',
-          is_public: card.is_public
-        });
-      } else {
-        setMessage({ type: 'error', text: '获取角色卡详情失败' });
-      }
-    } catch (error) {
-      setMessage({ type: 'error', text: '获取角色卡详情失败: ' + error });
-    } finally {
-      setLoading(false);
+  const debouncedUpdateUrl = useMemo(() => debounce(updateUrl, 300), [updateUrl]);
+
+  const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    const newFilters = { ...filters, [name]: value, page: 1 };
+    setFilters(newFilters);
+    debouncedUpdateUrl(newFilters);
+  };
+  
+  const handlePageChange = (newPage: number) => {
+    if (newPage > 0 && newPage <= Math.ceil(total / filters.limit)) {
+      const newFilters = { ...filters, page: newPage };
+      setFilters(newFilters);
+      updateUrl(newFilters);
     }
   };
 
-  // 保存角色卡更新
-  const saveCardUpdate = async () => {
-    if (!editingCard || !selectedCard) return;
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSelectedIds(e.target.checked ? new Set(dataCards.map(card => card.id)) : new Set());
+  };
 
-    setLoading(true);
+  const handleSelectOne = (id: string) => {
+    const newSelectedIds = new Set(selectedIds);
+    if (newSelectedIds.has(id)) {
+        newSelectedIds.delete(id);
+    } else {
+        newSelectedIds.add(id);
+    }
+    setSelectedIds(newSelectedIds);
+  };
+
+  const handleViewDetails = (card: DataCard) => {
+    setSelectedCardDetails(card);
+    setIsDetailsModalOpen(true);
+  };
+
+  const handleBatchAction = async (action: string, value?: any) => {
+    if (selectedIds.size === 0) return alert('请至少选择一个项目');
+    if (!window.confirm(`确定要对选中的 ${selectedIds.size} 个项目执行此操作吗？`)) return;
+
     try {
-      const response = await fetch(`/api/admin/data-cards/${selectedCard.id}`, {
+      const response = await fetch('/api/admin/data-cards/batch-update', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: editingCard.name,
-          description: editingCard.description,
-          is_public: editingCard.is_public
-        })
+        body: JSON.stringify({ cardIds: Array.from(selectedIds), action, value }),
       });
-
-      if (response.ok) {
-        const updatedCard = await response.json();
-        setSelectedCard(updatedCard);
-        setCards(cards.map(c => c.id === updatedCard.id ? updatedCard : c));
-        setEditingCard({
-          name: updatedCard.name,
-          description: updatedCard.description || '',
-          is_public: updatedCard.is_public
-        });
-        setMessage({ type: 'success', text: '角色卡信息更新成功' });
-      } else {
-        setMessage({ type: 'error', text: '更新角色卡信息失败' });
-      }
+      if (!response.ok) throw new Error('操作失败');
+      alert('操作成功！');
+      fetchData(filters);
     } catch (error) {
-      setMessage({ type: 'error', text: '更新角色卡信息失败: ' + error });
-    } finally {
-      setLoading(false);
+      alert(`操作失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   };
 
-  // 重置编辑表单
-  const resetEditing = () => {
-    if (selectedCard) {
-      setEditingCard({
-        name: selectedCard.name,
-        description: selectedCard.description || '',
-        is_public: selectedCard.is_public
+  // 批量导出处理函数
+  const handleExport = async () => {
+    if (selectedIds.size === 0) {
+      alert('请至少选择一个项目进行导出');
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const response = await fetch('/api/admin/export-data-cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cardIds: Array.from(selectedIds) }),
       });
+      if (!response.ok) throw new Error('导出失败');
+
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error || '导出失败');
+
+      // 创建并下载JSON文件
+      const jsonData = JSON.stringify(result.data, null, 2);
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `exported_data_cards_${new Date().toISOString()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+    } catch (error) {
+      alert('导出失败，请查看控制台');
+      console.error('导出失败:', error);
+    } finally {
+      setIsExporting(false);
     }
   };
 
-  // 查看角色卡数据
-  const viewCardData = () => {
-    setViewingData(true);
+  // --- AI 审查处理函数 ---
+  const handleOpenAiReview = () => {
+    setAiReviewResults([]);
+    setMarkedActions({});
+    setExternalReviewContent('');
+    setCopyStatus('');
+    setShowAiReviewModal(true);
   };
 
-  useEffect(() => {
-    fetchCards();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleStartAiReview = async () => {
+    const pendingCards = dataCards.filter(card => card.review_status === 'pending');
+    const idsToReview = pendingCards.slice(0, aiBatchSize).map(card => card.id);
 
-  useEffect(() => {
-    if (message) {
-      const timer = setTimeout(() => setMessage(null), 5000);
-      return () => clearTimeout(timer);
+    if (idsToReview.length === 0) {
+      alert('当前筛选条件下没有待审查的内容。');
+      return;
     }
-  }, [message]);
+    
+    setIsAiReviewing(true);
+    setAiReviewResults([]);
+    try {
+      const response = await fetch('/api/admin/ai-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cardIds: idsToReview, model: aiModel }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'AI审查请求失败');
+      setAiReviewResults(result.reviews);
+    } catch (error) {
+      alert(`AI审查失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsAiReviewing(false);
+    }
+  };
+
+  const handleMarkAction = (id: string, action: 'approve' | 'reject') => {
+    setMarkedActions(prev => ({ ...prev, [id]: action }));
+  };
+
+  const handleExecuteMarkedActions = async () => {
+    const actionsToExecute = Object.entries(markedActions);
+    if (actionsToExecute.length === 0) return alert('没有已标记的操作');
+
+    const approveIds = actionsToExecute.filter(([, action]) => action === 'approve').map(([id]) => id);
+    const rejectIds = actionsToExecute.filter(([, action]) => action === 'reject').map(([id]) => id);
+
+    if (!window.confirm(`即将通过 ${approveIds.length} 项，拒绝 ${rejectIds.length} 项。是否继续？`)) return;
+
+    try {
+      if (approveIds.length > 0) {
+        await fetch('/api/admin/data-cards/batch-update', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cardIds: approveIds, action: 'approve' }),
+        });
+      }
+      if (rejectIds.length > 0) {
+        await fetch('/api/admin/data-cards/batch-update', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cardIds: rejectIds, action: 'reject' }),
+        });
+      }
+      alert('操作成功！');
+      setShowAiReviewModal(false);
+      fetchData(filters); // 刷新主列表
+    } catch (error) {
+      alert(`执行失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  // [新增] 外部审查 - 复制内容到剪贴板
+  const handleCopyToClipboard = () => {
+    const pendingCards = dataCards.filter(card => card.review_status === 'pending');
+    if (pendingCards.length === 0) {
+      alert('当前筛选条件下没有待审查的内容。');
+      return;
+    }
+
+    const cardsToCopy = pendingCards.map(card => ({
+        id: card.id,
+        content: {
+            name: card.name,
+            description: card.description,
+            data: JSON.parse(card.data) // 解析 data 字符串为 JSON 对象
+        }
+    }));
+    
+    const promptForLLM = `
+You are a content moderator. Please review the following data cards based on our content policy (no politics, hate speech, explicit content, etc.). 
+For each card, provide your suggestion ('approved' or 'rejected') and a brief reason in Chinese. 
+Your entire response MUST be a single, valid JSON array of objects, with no other text before or after it.
+
+Example format:
+[
+  { "id": "...", "suggestion": "approved", "reason": "虽存在部分擦边内容，但不存在明显不适宜的内容。" },
+  { "id": "...", "suggestion": "rejected", "reason": "令人不适的内容：恐怖猎奇的行为。" }
+]
+
+Here is the batch of data cards to review:
+
+${JSON.stringify(cardsToCopy, null, 2)}
+`;
+    navigator.clipboard.writeText(promptForLLM).then(() => {
+        setCopyStatus(`已成功复制 ${cardsToCopy.length} 条待审查内容到剪贴板！`);
+        setTimeout(() => setCopyStatus(''), 3000);
+    }).catch(err => {
+        alert('复制失败，请检查浏览器权限。');
+        console.error('复制失败:', err);
+    });
+  };
+
+  // [新增] 外部审查 - 解析并应用结果
+  const handleParseAndApply = () => {
+      if (!externalReviewContent.trim()) {
+          alert('请将外部 AI 的审查结果粘贴到文本框中。');
+          return;
+      }
+      try {
+          const parsedResults = JSON.parse(externalReviewContent);
+          if (!Array.isArray(parsedResults)) {
+              throw new Error('粘贴的内容不是一个有效的 JSON 数组。');
+          }
+          
+          // 验证数组中的每个对象是否符合格式
+          const validatedResults: AiReviewResult[] = parsedResults.map(item => {
+              if (!item.id || !item.suggestion || !['approved', 'rejected'].includes(item.suggestion) || typeof item.reason === 'undefined') {
+                  throw new Error(`解析失败：对象 ${JSON.stringify(item)} 缺少 id, suggestion, 或 reason 字段。`);
+              }
+              const originalCard = dataCards.find(c => c.id === item.id);
+              return {
+                  id: item.id,
+                  name: originalCard?.name || item.id,
+                  suggestion: item.suggestion,
+                  reason: item.reason
+              };
+          });
+
+          setAiReviewResults(validatedResults);
+          setExternalReviewContent(''); // 清空文本框
+          alert(`成功解析并加载了 ${validatedResults.length} 条审查建议！`);
+      } catch (error) {
+          alert(`解析失败: ${error instanceof Error ? error.message : '无效的JSON格式'}`);
+          console.error('解析外部审查结果失败:', error);
+      }
+  };
+
+  const totalPages = Math.ceil(total / filters.limit);
+  const getReviewStatusBadge = (status: DataCard['review_status']) => {
+      const map = {
+          pending: { text: '待审查', color: 'bg-yellow-100 text-yellow-800' },
+          approved: { text: '已通过', color: 'bg-green-100 text-green-800' },
+          rejected: { text: '未通过', color: 'bg-red-100 text-red-800' },
+      };
+      return <span className={`px-2 py-1 text-xs font-medium rounded-full ${map[status].color}`}>{map[status].text}</span>;
+  };
+  const getPublicStatusBadge = (status: DataCard['is_public']) => {
+      const map = {
+          '1': { text: '公开', color: 'bg-blue-100 text-blue-800' },
+          '0': { text: '私有', color: 'bg-gray-100 text-gray-800' },
+          '-1': { text: '封禁', color: 'bg-zinc-200 text-zinc-800 font-bold' },
+      };
+      const key = String(status);
+      return <span className={`px-2 py-1 text-xs font-medium rounded-full ${map[key as keyof typeof map].color}`}>{map[key as keyof typeof map].text}</span>;
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
-      <div className="w-full px-8 py-8">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center justify-center gap-2">
-            <Database className="w-8 h-8 text-purple-600" />
-            角色卡管理系统
-          </h1>
-          <p className="text-gray-600">管理和审核所有用户创建的角色卡和情景卡</p>
-        </div>
-
-        {message && (
-          <div className={`mb-6 p-4 rounded-lg ${message.type === 'success' ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-100 text-red-700 border border-red-200'}`}>
-            {message.text}
+    <>
+      <Head>
+        <title>内容档案管理 - Admin</title>
+      </Head>
+      <div className="min-h-screen bg-gray-50 p-4">
+        <div className="max-w-7xl mx-auto">
+          <div className="mb-4">
+            <Link href="/admin">
+              <span className="text-sm text-purple-600 hover:underline cursor-pointer">&larr; 返回管理后台主页</span>
+            </Link>
           </div>
-        )}
+          <h1 className="text-2xl font-bold text-gray-800 mb-4">内容档案管理</h1>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* 角色卡列表面板 */}
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <h2 className="text-xl font-bold mb-4 text-gray-800">角色卡列表</h2>
+          {/* 筛选器区域 */}
+          <div className="bg-white p-4 rounded-lg shadow-sm mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <input
+                type="text"
+                name="search"
+                defaultValue={router.query.search || ''} // 使用 router.query 初始化以避免UI跳动
+                onChange={handleFilterChange}
+                placeholder="搜索名称、描述、作者..."
+                className="input-field"
+              />
+              <select name="reviewStatus" value={filters.reviewStatus} onChange={handleFilterChange} className="input-field">
+                <option value="">所有审查状态</option>
+                <option value="pending">待审查</option>
+                <option value="approved">已通过</option>
+                <option value="rejected">未通过</option>
+              </select>
+              <select name="isPublic" value={filters.isPublic} onChange={handleFilterChange} className="input-field">
+                <option value="">所有公开状态</option>
+                <option value="1">公开</option>
+                <option value="0">私有</option>
+                <option value="-1">封禁</option>
+              </select>
+              <select name="type" value={filters.type} onChange={handleFilterChange} className="input-field">
+                <option value="">所有类型</option>
+                <option value="character">角色</option>
+                <option value="scenario">情景</option>
+              </select>
+            </div>
+          </div>
 
-              {/* 搜索表单 */}
-              <form onSubmit={handleSearch} className="mb-4">
-                <div className="flex gap-2 mb-3">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="搜索角色卡名称..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
-                  >
-                    搜索
-                  </button>
-                </div>
-
-                {/* 过滤器 */}
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  <select
-                    value={typeFilter}
-                    onChange={(e) => setTypeFilter(e.target.value as any)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
-                  >
-                    <option value="all">所有类型</option>
-                    <option value="character">角色卡</option>
-                    <option value="scenario">情景卡</option>
-                  </select>
-
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as any)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
-                  >
-                    <option value="all">所有状态</option>
-                    <option value="public">公开</option>
-                    <option value="private">私有</option>
-                    <option value="banned">封禁</option>
-                  </select>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => fetchCards(1, searchTerm, typeFilter, statusFilter)}
-                  className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm"
-                >
-                  应用筛选
+          {/* 操作栏 */}
+          <div className="bg-white p-4 rounded-lg shadow-sm mb-4 flex flex-wrap items-center gap-2">
+            <span className="text-sm text-gray-600 mr-4">选中 {selectedIds.size} / {dataCards.length} 项 (共 {total} 项)</span>
+            <div className="flex-grow flex flex-wrap gap-2">
+                <button onClick={() => handleBatchAction('approve')} className="admin-button-sm bg-green-500 hover:bg-green-600">通过审查</button>
+                <button onClick={() => handleBatchAction('reject')} className="admin-button-sm bg-red-500 hover:bg-red-600">拒绝审查</button>
+                <button onClick={() => handleBatchAction('set_public_status', 1)} className="admin-button-sm bg-blue-500 hover:bg-blue-600">设为公开</button>
+                <button onClick={() => handleBatchAction('set_public_status', 0)} className="admin-button-sm bg-gray-500 hover:bg-gray-600">设为私有</button>
+                <button onClick={() => handleBatchAction('set_public_status', -1)} className="admin-button-sm bg-zinc-500 hover:bg-zinc-600">设为封禁</button>
+                <button onClick={handleExport} className="admin-button-sm bg-teal-500 hover:bg-teal-600 disabled:opacity-50" disabled={isExporting || selectedIds.size === 0}>
+                  {isExporting ? '导出中...' : '导出选中项'}
                 </button>
-              </form>
-
-              {/* 角色卡列表 */}
-              <div className="space-y-2 max-h-96 overflow-y-auto">
+                <button onClick={handleOpenAiReview} className="admin-button-sm bg-indigo-500 hover:bg-indigo-600">AI 辅助审查</button>
+            </div>
+          </div>
+          
+          {/* 数据表格 */}
+          <div className="bg-white rounded-lg shadow-sm overflow-x-auto">
+            <table className="w-full text-sm text-left text-gray-500">
+              <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                  <th scope="col" className="p-4"><input type="checkbox" onChange={handleSelectAll} checked={selectedIds.size === dataCards.length && dataCards.length > 0} /></th>
+                  <th scope="col" className="px-6 py-3">名称 / 作者</th>
+                  <th scope="col" className="px-6 py-3">类型</th>
+                  <th scope="col" className="px-6 py-3">公开状态</th>
+                  <th scope="col" className="px-6 py-3">审查状态</th>
+                  <th scope="col" className="px-6 py-3">点赞/使用</th>
+                  <th scope="col" className="px-6 py-3">内容预览</th>
+                  <th scope="col" className="px-6 py-3">更新时间</th>
+                </tr>
+              </thead>
+              <tbody>
                 {loading ? (
-                  <div className="text-center py-4 text-gray-500">加载中...</div>
-                ) : cards.length === 0 ? (
-                  <div className="text-center py-4 text-gray-500">没有找到角色卡</div>
+                  <tr><td colSpan={8} className="text-center p-8">加载中...</td></tr>
+                ) : dataCards.length === 0 ? (
+                  <tr><td colSpan={8} className="text-center p-8">未找到符合条件的数据</td></tr>
                 ) : (
-                  cards.map((card) => {
-                    const cardStatus = getDataCardStatus(card);
-                    return (
-                      <div
-                        key={card.id}
-                        onClick={() => fetchCardDetails(card.id)}
-                        className={`p-3 rounded-lg border cursor-pointer transition-colors hover:bg-gray-50 ${selectedCard?.id === card.id ? 'border-purple-500 bg-purple-50' : 'border-gray-200'
-                          }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-medium text-sm">{card.name}</span>
-                          <div className="flex items-center gap-1">
-                            <span className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${cardStatus.status === 'banned'
-                              ? 'bg-red-100 text-red-700'
-                              : cardStatus.status === 'public'
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-gray-100 text-gray-700'
-                              }`}>
-                              {cardStatus.status === 'banned' && <Ban className="w-3 h-3" />}
-                              {cardStatus.status === 'public' && <CheckCircle className="w-3 h-3" />}
-                              {cardStatus.label}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="text-xs text-gray-500 mb-1">
-                          {card.type === 'character' ? '角色卡' : '情景卡'} | 作者: {card.username}
-                        </div>
-                        <div className="text-xs text-gray-400">
-                          ❤️ {card.like_count} | 📥 {card.usage_count}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* 分页 */}
-              {totalPages > 1 && (
-                <div className="flex justify-center gap-2 mt-4">
-                  <button
-                    onClick={() => fetchCards(currentPage - 1, searchTerm, typeFilter, statusFilter)}
-                    disabled={currentPage === 1 || loading}
-                    className="px-3 py-1 bg-gray-200 text-gray-700 rounded disabled:opacity-50"
-                  >
-                    上一页
-                  </button>
-                  <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded">
-                    {currentPage} / {totalPages}
-                  </span>
-                  <button
-                    onClick={() => fetchCards(currentPage + 1, searchTerm, typeFilter, statusFilter)}
-                    disabled={currentPage === totalPages || loading}
-                    className="px-3 py-1 bg-gray-200 text-gray-700 rounded disabled:opacity-50"
-                  >
-                    下一页
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 角色卡详情面板 */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold text-gray-800">角色卡详情</h2>
-                {selectedCard && editingCard && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={viewCardData}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                    >
-                      <Eye className="w-4 h-4" />
-                      查看数据
-                    </button>
-                    <button
-                      onClick={saveCardUpdate}
-                      disabled={loading}
-                      className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-                    >
-                      <Save className="w-4 h-4" />
-                      保存
-                    </button>
-                    <button
-                      onClick={resetEditing}
-                      className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-                    >
-                      <X className="w-4 h-4" />
-                      重置
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {selectedCard ? (
-                <div className="space-y-6">
-                  {/* 基础信息 */}
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">角色卡ID</label>
-                      <div className="flex items-center gap-2">
-                        <Hash className="w-4 h-4 text-gray-400" />
-                        <input
-                          type="text"
-                          value={selectedCard.id}
-                          disabled
-                          className="flex-1 p-3 border border-gray-300 rounded-lg bg-gray-50 text-xs font-mono"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">类型</label>
-                      <input
-                        type="text"
-                        value={selectedCard.type === 'character' ? '角色卡' : '情景卡'}
-                        disabled
-                        className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">创建者</label>
-                      <div className="flex items-center gap-2">
-                        <User className="w-4 h-4 text-gray-400" />
-                        <input
-                          type="text"
-                          value={selectedCard.username || '未知用户'}
-                          disabled
-                          className="flex-1 p-3 border border-gray-300 rounded-lg bg-gray-50"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">用户ID</label>
-                      <input
-                        type="text"
-                        value={selectedCard.user_id}
-                        disabled
-                        className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50"
-                      />
-                    </div>
-                  </div>
-
-                  {/* 可编辑字段 */}
-                  <div className="border-t pt-6">
-                    <h3 className="text-lg font-semibold mb-4 text-gray-800">可编辑设置</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">名称</label>
-                        <input
-                          type="text"
-                          value={editingCard ? editingCard.name : selectedCard.name}
-                          onChange={(e) => editingCard && setEditingCard({ ...editingCard, name: e.target.value })}
-                          className="w-full p-3 border border-gray-300 rounded-lg bg-white"
-                          maxLength={50}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
-                        <textarea
-                          value={editingCard ? editingCard.description : selectedCard.description}
-                          onChange={(e) => editingCard && setEditingCard({ ...editingCard, description: e.target.value })}
-                          className="w-full p-3 border border-gray-300 rounded-lg bg-white"
-                          rows={3}
-                          maxLength={200}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          状态设置
-                          {editingCard?.is_public === -1 && <AlertTriangle className="inline w-4 h-4 ml-1 text-red-500" />}
-                        </label>
-                        <select
-                          value={editingCard ? editingCard.is_public : selectedCard.is_public}
-                          onChange={(e) => editingCard && setEditingCard({ ...editingCard, is_public: parseInt(e.target.value) })}
-                          className={`w-full p-3 border border-gray-300 rounded-lg bg-white ${editingCard?.is_public === -1 ? 'border-red-300 bg-red-50' : ''
-                            }`}
+                  dataCards.map(card => (
+                    <tr key={card.id} className="bg-white border-b hover:bg-gray-50">
+                      <td className="p-4"><input type="checkbox" onChange={() => handleSelectOne(card.id)} checked={selectedIds.has(card.id)} /></td>
+                      <td className="px-6 py-4">
+                        <button
+                          onClick={() => handleViewDetails(card)}
+                          className="font-medium text-purple-600 hover:underline text-left"
                         >
-                          <option value={0}>私有</option>
-                          <option value={1}>公开</option>
-                          <option value={-1}>封禁</option>
-                        </select>
-                        {editingCard?.is_public === -1 && (
-                          <p className="text-xs text-red-600 mt-1">
-                            封禁后，该角色卡将无法被其他用户查看或使用
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                          {card.name}
+                        </button>
+                        <div className="text-xs text-gray-500">by {card.username}</div>
+                      </td>
+                      <td className="px-6 py-4">{card.type === 'character' ? '角色' : '情景'}</td>
+                      <td className="px-6 py-4">{getPublicStatusBadge(card.is_public)}</td>
+                      <td className="px-6 py-4">{getReviewStatusBadge(card.review_status)}</td>
+                      <td className="px-6 py-4">{card.like_count} / {card.usage_count}</td>
+                      {/* 内容预览列 */}
+                      <td className="px-6 py-4 text-xs text-gray-500 max-w-xs">
+                        {(() => {
+                            // 定义无意义的默认描述
+                            const defaultDescriptions = ['角色数据卡', '情景数据卡'];
+                            // 判断当前描述是否有意义
+                            const isMeaningfulDescription = card.description && !defaultDescriptions.includes(card.description.trim());
+                            
+                            // 如果描述有意义，则显示描述；否则，显示data字段的内容
+                            const contentToShow = isMeaningfulDescription ? card.description : card.data;
+                            let titleToShow = contentToShow;
+                            try {
+                                // 为悬浮提示（title）美化JSON格式
+                                if (!isMeaningfulDescription) {
+                                    titleToShow = JSON.stringify(JSON.parse(card.data), null, 2);
+                                }
+                            } catch(e) { /* 忽略解析错误 */ }
 
-                  {/* 统计信息 */}
-                  <div className="border-t pt-6">
-                    <h3 className="text-lg font-semibold mb-4 text-gray-800">统计信息</h3>
-                    <div className="grid md:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">点赞数</label>
-                        <input
-                          type="text"
-                          value={selectedCard.like_count || 0}
-                          disabled
-                          className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">使用次数</label>
-                        <input
-                          type="text"
-                          value={selectedCard.usage_count || 0}
-                          disabled
-                          className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">当前状态</label>
-                        <div className={`w-full p-3 border border-gray-300 rounded-lg text-center font-medium ${getDataCardStatus(selectedCard).status === 'banned'
-                          ? 'bg-red-50 text-red-700 border-red-300'
-                          : getDataCardStatus(selectedCard).status === 'public'
-                            ? 'bg-green-50 text-green-700 border-green-300'
-                            : 'bg-gray-50 text-gray-700'
-                          }`}>
-                          {getDataCardStatus(selectedCard).label}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 时间信息 */}
-                  <div className="border-t pt-6">
-                    <h3 className="text-lg font-semibold mb-4 text-gray-800">时间信息</h3>
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">创建时间</label>
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-gray-400" />
-                          <input
-                            type="text"
-                            value={selectedCard.created_at ? new Date(selectedCard.created_at).toLocaleString('zh-CN') : ''}
-                            disabled
-                            className="flex-1 p-3 border border-gray-300 rounded-lg bg-gray-50"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">更新时间</label>
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-gray-400" />
-                          <input
-                            type="text"
-                            value={selectedCard.updated_at ? new Date(selectedCard.updated_at).toLocaleString('zh-CN') : ''}
-                            disabled
-                            className="flex-1 p-3 border border-gray-300 rounded-lg bg-gray-50"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-12 text-gray-500">
-                  <Database className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <p>请从左侧列表选择一个角色卡查看详情</p>
-                </div>
-              )}
-            </div>
+                            return (
+                                <p className="truncate" title={titleToShow}>
+                                    {contentToShow}
+                                </p>
+                            );
+                        })()}
+                      </td>
+                      <td className="px-6 py-4">{new Date(card.updated_at).toLocaleString()}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
+
+          {/* 分页 */}
+          {totalPages > 1 && (
+              <div className="flex justify-between items-center mt-4 text-sm">
+                  <button onClick={() => handlePageChange(filters.page - 1)} disabled={loading || filters.page <= 1} className="admin-button-sm">上一页</button>
+                  <span>第 {filters.page} / {totalPages} 页 (共 {total} 项)</span>
+                  <button onClick={() => handlePageChange(filters.page + 1)} disabled={loading || filters.page >= totalPages} className="admin-button-sm">下一页</button>
+              </div>
+          )}
         </div>
-
-        {/* 数据查看模态框 */}
-        {viewingData && selectedCard && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg max-w-4xl max-h-[80vh] overflow-hidden">
-              <div className="p-6 border-b">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-bold">角色卡原始数据</h3>
-                  <button
-                    onClick={() => setViewingData(false)}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-              <div className="p-6 overflow-y-auto max-h-[60vh]">
-                <pre className="text-sm bg-gray-50 p-4 rounded-lg overflow-x-auto whitespace-pre-wrap">
-                  {JSON.stringify(JSON.parse(selectedCard.data), null, 2)}
-                </pre>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
-    </div>
+      
+      {/* AI 辅助审查模态框 */}
+      {showAiReviewModal && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+                  <div className="flex justify-between items-center p-4 border-b">
+                      <h2 className="text-lg font-bold">AI 辅助审查</h2>
+                      <button onClick={() => setShowAiReviewModal(false)} className="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+                  </div>
+                  <div className="flex-grow flex flex-col md:flex-row overflow-hidden">
+                      {/* 左侧控制与结果区 */}
+                      <div className="w-full md:w-1/2 flex flex-col border-r">
+                          <div className="p-4 space-y-4">
+                              <div className="flex items-center gap-4">
+                                  <div>
+                                      <label className="text-sm font-medium">单次处理数量</label>
+                                      <input type="number" value={aiBatchSize} onChange={e => setAiBatchSize(parseInt(e.target.value))} className="input-field w-24 mt-1" min="1" max="50" />
+                                  </div>
+                                  <div>
+                                    <label className="text-sm font-medium">使用模型</label>
+                                    <select value={aiModel} onChange={e => setAiModel(e.target.value)} className="input-field mt-1">
+                                        {/* Google Models */}
+                                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                                        <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                                        
+                                        {/* Grok Models */}
+                                        <option value="grok-2">Grok 2</option>
+                                        <option value="grok-3">Grok 3</option>
+                                        <option value="grok-3-fast">Grok 3 Fast</option>
+                                        <option value="grok-3-mini">Grok 3 Mini</option>
+                                        <option value="grok-3-mini-fast">Grok 3 Mini Fast</option>
+                                        <option value="grok-4">Grok 4</option>
+
+                                        {/* Qwen Models */}
+                                        <option value="qwen-plus-latest">Qwen Plus (Latest)</option>
+                                        <option value="qwen-turbo-latest">Qwen Turbo (Latest)</option>
+                                      </select>
+                                  </div>
+                                  <button onClick={handleStartAiReview} disabled={isAiReviewing} className="admin-button-sm bg-indigo-500 hover:bg-indigo-600 self-end">
+                                      {isAiReviewing ? '审查中...' : `开始审查`}
+                                  </button>
+                              </div>
+                              <p className="text-xs text-gray-500">将从当前筛选结果中，选取最多 {aiBatchSize} 项“待审查”的内容进行分析。</p>
+                          </div>
+                          <div className="flex-grow overflow-y-auto p-4 border-t">
+                              {isAiReviewing && <div className="text-center">AI 正在努力分析中...</div>}
+                              {aiReviewResults.length === 0 && !isAiReviewing && <div className="text-center text-gray-500">暂无审查结果</div>}
+                              {aiReviewResults.length > 0 && (
+                                  <div className="space-y-2">
+                                      {aiReviewResults.map(res => (
+                                          <div key={res.id} className="p-3 bg-gray-50 rounded-lg border">
+                                              <p className="font-semibold">{res.name}</p>
+                                              <p className={`text-sm font-bold ${res.suggestion === 'approved' ? 'text-green-600' : 'text-red-600'}`}>AI建议: {res.suggestion === 'approved' ? '通过' : '拒绝'}</p>
+                                              <p className="text-xs text-gray-600 italic">理由: {res.reason}</p>
+                                              <div className="mt-2 flex gap-2">
+                                                  <label className="flex items-center text-xs cursor-pointer"><input type="radio" name={`action-${res.id}`} onChange={() => handleMarkAction(res.id, 'approve')} checked={markedActions[res.id] === 'approve'}/><span className="ml-1">采纳并通过</span></label>
+                                                  <label className="flex items-center text-xs cursor-pointer"><input type="radio" name={`action-${res.id}`} onChange={() => handleMarkAction(res.id, 'reject')} checked={markedActions[res.id] === 'reject'}/><span className="ml-1">采纳并拒绝</span></label>
+                                              </div>
+                                          </div>
+                                      ))}
+                                  </div>
+                              )}
+                          </div>
+                      </div>
+                      {/* 右侧外部工作流 */}
+                      <div className="w-full md:w-1/2 flex flex-col">
+                          <div className="p-4">
+                              <h3 className="font-semibold mb-2">外部 AI 审查工作流</h3>
+                              <button onClick={handleCopyToClipboard} className="admin-button-sm bg-gray-600 hover:bg-gray-700 w-full mb-2">1. 复制内容以供外部审查</button>
+                              {copyStatus && <p className="text-xs text-green-600 text-center mb-2">{copyStatus}</p>}
+                              <textarea value={externalReviewContent} onChange={e => setExternalReviewContent(e.target.value)} placeholder="2. 在此处粘贴外部 AI 返回的 JSON 数组结果..." className="input-field w-full h-32 resize-y"></textarea>
+                              <button onClick={handleParseAndApply} className="admin-button-sm bg-blue-600 hover:bg-blue-700 w-full mt-2">3. 解析并应用建议</button>
+                          </div>
+                      </div>
+                  </div>
+                  <div className="p-4 border-t flex justify-end">
+                      <button onClick={handleExecuteMarkedActions} disabled={Object.keys(markedActions).length === 0} className="admin-button-sm bg-green-600 hover:bg-green-700">
+                          执行所有已标记操作 ({Object.keys(markedActions).length})
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+      {/* 详情弹窗组件 */}
+      {selectedCardDetails && (
+        <DataCardDetailsModal
+          isOpen={isDetailsModalOpen}
+          onClose={() => setIsDetailsModalOpen(false)}
+          card={{
+            id: selectedCardDetails.id,
+            name: selectedCardDetails.name,
+            description: selectedCardDetails.description,
+            type: selectedCardDetails.type,
+            data: selectedCardDetails.data,
+            isPublic: selectedCardDetails.is_public === 1,
+            usageCount: selectedCardDetails.usage_count,
+            likeCount: selectedCardDetails.like_count,
+            author: selectedCardDetails.username,
+            createdAt: selectedCardDetails.created_at,
+            updatedAt: selectedCardDetails.updated_at
+          }}
+        />
+      )}
+    </>
   );
-}
+};
+
+export default CharacterManagementPage;

@@ -116,7 +116,7 @@ const createDynamicSchema = (baseSchema: z.ZodObject<any>, fieldsToPreserve: str
 // 2. AI Prompt 配置
 // =================================================================
 
-const createGenerationConfig = (characterData: any, language: string, userGuidance: string | null, fieldsToPreserve: string[]): GenerationConfig<any, any> => {
+const createGenerationConfig = (characterData: any, language: string, userGuidance: string | null, fieldsToPreserve: string[], isDowngrade: boolean = false): GenerationConfig<any, any> => {
   const isMagicalGirl = !!characterData.codename;
   const characterType = isMagicalGirl ? '魔法少女' : '残兽';
   const nameField = isMagicalGirl ? 'codename' : 'name';
@@ -181,6 +181,7 @@ ${userAnswersReviewSection}
     schema: finalSchema,
     taskName: "角色成长升华",
     maxTokens: 8192,
+    modelOverride: isDowngrade ? "gemini-2.5-flash-lite" : undefined, // 使用降级模型
   };
 };
 
@@ -224,7 +225,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
   try {
     const body = await req.json();
-    const { language = 'zh-CN', userGuidance = '', fieldsToPreserve = [], ...originalCharacterData } = body; 
+    const { language = 'zh-CN', userGuidance = '', fieldsToPreserve = [], isDowngrade = false, ...originalCharacterData } = body; 
     const finalUserGuidance = userGuidance.trim() || null;
 
     // 安全检查
@@ -238,7 +239,7 @@ async function handler(req: NextRequest): Promise<Response> {
     }
 
     const isNative = await verifySignature(originalCharacterData);
-    const generationConfig = createGenerationConfig(originalCharacterData, language, finalUserGuidance, fieldsToPreserve);
+    const generationConfig = createGenerationConfig(originalCharacterData, language, finalUserGuidance, fieldsToPreserve, isDowngrade);
     
     const aiResult = await generateWithAI(null, generationConfig);
     const updatedDataFromAI = aiResult.updatedCharacterData;

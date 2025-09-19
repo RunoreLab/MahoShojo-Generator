@@ -249,7 +249,7 @@ export const dataCardApi = {
   },
 
   // 创建数据卡
-  async createCard(type: 'character' | 'scenario', name: string, description: string, data: any, isPublic: boolean = false): Promise<{
+  async createCard(type: 'character' | 'scenario', name: string, description: string, data: any, isPublic: number = 0): Promise<{
     success: boolean;
     id?: number;
     error?: string;
@@ -278,7 +278,7 @@ export const dataCardApi = {
   },
 
   // 更新数据卡
-  async updateCard(id: string, name: string, description: string, isPublic?: boolean): Promise<{
+  async updateCard(id: string, name: string, description: string, isPublic?: number): Promise<{
     success: boolean;
     error?: string;
   }> {

@@ -8,10 +8,10 @@ interface SaveCardModalProps {
   onSave: () => void;
   name: string;
   description: string;
-  isPublic: boolean;
+  isPublic: number;
   onNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
-  onPublicChange: (value: boolean) => void;
+  onPublicChange: (value: number) => void;
   error: string | null;
   isSaving?: boolean;
   currentCardCount?: number;
@@ -130,8 +130,8 @@ export default function SaveCardModal({
             <input
               type="checkbox"
               id="newCardPublic"
-              checked={isPublic}
-              onChange={(e) => onPublicChange(e.target.checked)}
+              checked={isPublic === 1}
+              onChange={(e) => onPublicChange(e.target.checked ? 1 : 0)}
               className="w-4 h-4 text-purple-600 rounded"
               disabled={isSaving}
             />
@@ -140,7 +140,7 @@ export default function SaveCardModal({
             </label>
           </div>
 
-          {isPublic && (
+          {isPublic === 1 && (
             <div className="p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
               ⚠️ 公开的数据卡将对所有用户可见
             </div>

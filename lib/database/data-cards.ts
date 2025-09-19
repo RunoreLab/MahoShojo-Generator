@@ -29,7 +29,8 @@ export async function createDataCardWithAuthor(
   name: string,
   description: string,
   data: string,
-  isPublic: boolean | number = false
+  isPublic: boolean | number = false,
+  reviewStatus: 'pending' | 'approved' // [v0.4.2 新增] 传入审查状态
 ): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
     // 如果是公开卡，先检查是否有同名
@@ -52,8 +53,8 @@ export async function createDataCardWithAuthor(
     const uuid = generateUUID();
     
     const result = await queryFromD1(
-      'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [uuid, userId, type, name, description, dataWithAuthor, typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0)]
+      'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public, review_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [uuid, userId, type, name, description, dataWithAuthor, typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0), reviewStatus]
     ) as any;
     
     if (result.success && result.result) {
@@ -139,7 +140,8 @@ export async function updateDataCard(
   userId: number,
   name: string,
   description: string,
-  isPublic?: boolean | number
+  isPublic?: boolean | number,
+  reviewStatus?: 'pending' | 'approved' | 'rejected' // [v0.4.2 新增] 允许更新审查状态
 ): Promise<boolean> {
   try {
     let sql = 'UPDATE data_cards SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP';
@@ -149,7 +151,13 @@ export async function updateDataCard(
       sql += ', is_public = ?';
       params.push(typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0));
     }
-    
+
+    // [v0.4.2 新增] 如果传入了 reviewStatus，则一并更新
+    if (reviewStatus) {
+        sql += ', review_status = ?';
+        params.push(reviewStatus);
+    }
+
     sql += ' WHERE id = ? AND user_id = ?';
     params.push(id, userId);
     
@@ -204,10 +212,15 @@ export async function verifyCardOwnership(cardId: string, userId: number): Promi
 // 通过ID获取单个数据卡（公开或私有）
 export async function getDataCardById(cardId: string, isPublic: boolean = false): Promise<any | null> {
   try {
-    const result = await queryFromD1(
-      'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.id = ? AND dc.is_public = ?',
-      [cardId, isPublic ? 1 : 0]
-    ) as any;
+    let sql = 'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.id = ?';
+    const params: any[] = [cardId];
+
+    // [v0.4.2 修改] 如果是查询公开卡，则必须是通过审查的
+    if (isPublic) {
+        sql += " AND dc.is_public = 1 AND dc.review_status = 'approved'";
+    }
+    
+    const result = await queryFromD1(sql, params) as any;
     
     if (result.success && result.result && result.result[0]?.results?.length > 0) {
       return result.result[0].results[0];
@@ -223,7 +236,7 @@ export async function getDataCardById(cardId: string, isPublic: boolean = false)
 export async function incrementDataCardLike(cardId: string): Promise<boolean> {
   try {
     const result = await queryFromD1(
-      'UPDATE data_cards SET like_count = like_count + 1 WHERE id = ? AND is_public = 1',
+      "UPDATE data_cards SET like_count = like_count + 1 WHERE id = ? AND is_public = 1 AND review_status = 'approved'",
       [cardId]
     ) as any;
     
@@ -238,7 +251,7 @@ export async function incrementDataCardLike(cardId: string): Promise<boolean> {
 export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
   try {
     const result = await queryFromD1(
-      'UPDATE data_cards SET usage_count = usage_count + 1 WHERE id = ? AND is_public = 1',
+      "UPDATE data_cards SET usage_count = usage_count + 1 WHERE id = ? AND is_public = 1 AND review_status = 'approved'",
       [cardId]
     ) as any;
     
@@ -249,29 +262,63 @@ export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
   }
 }
 
-// 获取公开的数据卡列表
+/**
+ * 获取公开的数据卡列表，增加了完整的筛选功能。
+ * @param author - 作者用户名 (精确匹配)
+ * @param minLikes - 最小点赞数
+ * @param maxLikes - 最大点赞数
+ * @param minUsage - 最少使用数
+ * @param maxUsage - 最多使用数
+ */
 export async function getPublicDataCards(
   limit: number = 20,
   offset: number = 0,
   type?: 'character' | 'scenario',
   search?: string,
-  sortBy?: 'likes' | 'usage' | 'created_at'
+  sortBy?: 'likes' | 'usage' | 'created_at',
+  author?: string,
+  minLikes?: number,
+  maxLikes?: number,
+  minUsage?: number,
+  maxUsage?: number
 ): Promise<any[]> {
   try {
-    let sql = 'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1';
+    // 基础查询语句
+    let sql = "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.review_status = 'approved'";
     const params: any[] = [];
     
+    // -- 动态构建 WHERE 子句 --
+    // 这是一个稳健的实践，可以根据传入的参数动态添加过滤条件
     if (type) {
       sql += ' AND dc.type = ?';
       params.push(type);
     }
-    
     if (search) {
       sql += ' AND (dc.name LIKE ? OR dc.description LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
     }
+    if (author) {
+      sql += ' AND u.username = ?';
+      params.push(author);
+    }
+    if (minLikes !== undefined && minLikes !== null) {
+      sql += ' AND dc.like_count >= ?';
+      params.push(minLikes);
+    }
+    if (maxLikes !== undefined && maxLikes !== null) {
+      sql += ' AND dc.like_count <= ?';
+      params.push(maxLikes);
+    }
+    if (minUsage !== undefined && minUsage !== null) {
+      sql += ' AND dc.usage_count >= ?';
+      params.push(minUsage);
+    }
+    if (maxUsage !== undefined && maxUsage !== null) {
+      sql += ' AND dc.usage_count <= ?';
+      params.push(maxUsage);
+    }
     
-    // 添加排序逻辑
+    // -- 排序逻辑 --
     let orderBy = 'dc.created_at DESC'; // 默认按创建时间排序
     if (sortBy === 'likes') {
       orderBy = 'dc.like_count DESC, dc.created_at DESC';
@@ -305,7 +352,7 @@ export async function getRandomPublicCard(
   try {
     // D1 数据库支持 RANDOM() 函数，这使得随机选择非常高效。
     const result = await queryFromD1(
-      'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? ORDER BY RANDOM() LIMIT 1',
+      "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' ORDER BY RANDOM() LIMIT 1",
       [type]
     ) as any;
     

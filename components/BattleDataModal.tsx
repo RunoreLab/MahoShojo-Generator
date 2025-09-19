@@ -1,3 +1,5 @@
+// components/BattleDataModal.tsx
+
 import React, { useState, useEffect, useCallback } from 'react';
 import DataCard from './DataCard';
 import SortSelector from './SortSelector';
@@ -5,12 +7,22 @@ import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi } from '@/lib/auth';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
+import { ChevronDown, Filter } from 'lucide-react';
 
 interface BattleDataModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectCard: (card: any) => void;
   selectedType: 'character' | 'scenario';
+}
+
+// 【新增】筛选条件的状态接口
+interface Filters {
+  author: string;
+  minLikes: string;
+  maxLikes: string;
+  minUsage: string;
+  maxUsage: string;
 }
 
 export default function BattleDataModal({
@@ -32,6 +44,12 @@ export default function BattleDataModal({
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const cardsPerPage = 12;
 
+  // 【新增】高级筛选的状态
+  const initialFilters: Filters = { author: '', minLikes: '', maxLikes: '', minUsage: '', maxUsage: '' };
+  const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+
   // 获取用户的数据卡
   const loadUserDataCards = useCallback(async (searchTerm?: string, sortBy?: 'likes' | 'usage' | 'created_at') => {
     if (!isAuthenticated) return;
@@ -49,20 +67,14 @@ export default function BattleDataModal({
     }
   }, [isAuthenticated, selectedType]);
 
-  // 通过 ID 获取数据卡并显示在列表中（不直接使用）
+  // 通过 ID 获取数据卡并显示在列表中
   const loadCardByIdForDisplay = useCallback(async (cardId: string) => {
     try {
       setIsLoading(true);
       const response = await fetch(`/api/public-data-cards?id=${cardId}`);
       if (response.ok) {
         const result = await response.json();
-        if (result.success && result.card) {
-          // 将找到的数据卡设置到公开数据卡列表中显示
-          setPublicDataCards([result.card]);
-        } else {
-          // 未找到数据卡，清空列表
-          setPublicDataCards([]);
-        }
+        setPublicDataCards(result.success && result.card ? [result.card] : []);
       } else {
         setPublicDataCards([]);
       }
@@ -74,32 +86,37 @@ export default function BattleDataModal({
     }
   }, []);
 
-  // 获取公开数据卡
-  const loadPublicDataCards = useCallback(async (searchTerm?: string, page: number = 1, sortBy?: 'likes' | 'usage' | 'created_at') => {
+  // 【修改】获取公开数据卡，现在会接收所有筛选条件
+  const loadPublicDataCards = useCallback(async (
+    page: number = 1,
+    currentSortBy: 'likes' | 'usage' | 'created_at',
+    currentSearchTerm?: string,
+    currentFilters?: Filters
+  ) => {
     try {
       setIsLoading(true);
       const offset = (page - 1) * cardsPerPage;
-      const searchParams = new URLSearchParams({
+      const params = new URLSearchParams({
         type: selectedType,
         limit: cardsPerPage.toString(),
-        offset: offset.toString()
+        offset: offset.toString(),
+        sortBy: currentSortBy
       });
 
-      if (searchTerm) {
-        searchParams.append('search', searchTerm);
-      }
-      
-      if (sortBy) {
-        searchParams.append('sortBy', sortBy);
+      if (currentSearchTerm) params.append('search', currentSearchTerm);
+      // 【新增】将高级筛选条件添加到请求参数中
+      if (currentFilters) {
+        if (currentFilters.author) params.append('author', currentFilters.author);
+        if (currentFilters.minLikes) params.append('minLikes', currentFilters.minLikes);
+        if (currentFilters.maxLikes) params.append('maxLikes', currentFilters.maxLikes);
+        if (currentFilters.minUsage) params.append('minUsage', currentFilters.minUsage);
+        if (currentFilters.maxUsage) params.append('maxUsage', currentFilters.maxUsage);
       }
 
-      const response = await fetch(`/api/public-data-cards?${searchParams}`);
+      const response = await fetch(`/api/public-data-cards?${params}`);
       if (response.ok) {
         const result = await response.json();
-        if (result.success) {
-          const cards = result.cards || [];
-          setPublicDataCards(cards);
-        }
+        setPublicDataCards(result.success ? (result.cards || []) : []);
       }
     } catch (error) {
       console.error('获取公开数据卡失败:', error);
@@ -126,45 +143,34 @@ export default function BattleDataModal({
     const match = debouncedSearchQuery.match(uuidRegex);
 
     if (match) {
-      // 如果检测到 UUID，通过 ID 搜索并展示在列表中
-      const cardId = match[0];
-      loadCardByIdForDisplay(cardId);
+      loadCardByIdForDisplay(match[0]);
     } else {
-      // 否则进行搜索
-      const trimmedQuery = debouncedSearchQuery.trim();
-      if (trimmedQuery) {
-        loadPublicDataCards(trimmedQuery, 1, sortBy);
-      } else if (debouncedSearchQuery === '') {
-        // 只有在搜索框完全清空时才重新加载所有数据
-        loadPublicDataCards(undefined, 1, sortBy);
-      }
+      loadPublicDataCards(1, sortBy, debouncedSearchQuery.trim() || undefined, filters);
     }
-
-    // 重置到第一页
     setCurrentPage(1);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearchQuery, isOpen, loadCardByIdForDisplay, loadPublicDataCards]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearchQuery, isOpen, loadCardByIdForDisplay]);
+
 
   // 当模态框打开时加载数据
   useEffect(() => {
     if (isOpen) {
       setCurrentPage(1);
-      setSearchQuery(''); // 清空搜索
+      setSearchQuery('');
+      setFilters(initialFilters); // 清空高级筛选
 
-      // 根据登录状态设置默认标签页
       if (isAuthenticated) {
         setActiveTab('my');
-        loadUserDataCards();
+        loadUserDataCards(undefined, sortBy);
       } else {
         setActiveTab('public');
       }
-
-      loadPublicDataCards(undefined, 1, sortBy);
+      loadPublicDataCards(1, sortBy);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, selectedType, isAuthenticated, loadUserDataCards, loadPublicDataCards]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, selectedType, isAuthenticated]);
 
-  // 处理卡片选择并增加使用次数
+  // 处理卡片选择
   const handleSelectCard = async (card: any) => {
     try {
       // 解析数据卡的JSON内容
@@ -195,7 +201,7 @@ export default function BattleDataModal({
           console.error('增加使用次数失败:', error);
         }
       }
-      
+
       onSelectCard({
         ...cardData,
         _cardId: card.id,
@@ -209,18 +215,40 @@ export default function BattleDataModal({
     }
   };
 
-  // 处理搜索输入 - 简化版，只更新输入值
-  const handleSearchInput = (query: string) => {
-    setSearchQuery(query);
+  // 【新增】处理高级筛选输入变化
+  const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFilters(prev => ({ ...prev, [name]: value }));
+  };
+
+  // 【新增】应用高级筛选
+  const applyFilters = () => {
+    setCurrentPage(1);
+    loadPublicDataCards(1, sortBy, debouncedSearchQuery.trim() || undefined, filters);
+  };
+
+  // 【新增】重置高级筛选
+  const resetFilters = () => {
+    setFilters(initialFilters);
+    setCurrentPage(1);
+    loadPublicDataCards(1, sortBy, debouncedSearchQuery.trim() || undefined, initialFilters);
+  };
+
+  // 【新增】处理作者点击事件
+  const handleAuthorClick = (authorName: string) => {
+    if (activeTab !== 'public') return;
+    const newFilters = { ...initialFilters, author: authorName };
+    setFilters(newFilters);
+    setCurrentPage(1);
+    setShowAdvancedFilters(true); // 展开筛选器让用户看到
+    loadPublicDataCards(1, sortBy, '', newFilters);
   };
 
   // 处理页码变化
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
     if (activeTab === 'public') {
-      // 对于公开标签页，需要重新加载数据
-      const searchTerm = debouncedSearchQuery.trim() || undefined;
-      loadPublicDataCards(searchTerm, newPage, sortBy);
+      loadPublicDataCards(newPage, sortBy, debouncedSearchQuery.trim() || undefined, filters);
     }
   };
 
@@ -228,203 +256,102 @@ export default function BattleDataModal({
   const handleSortChange = (newSortBy: 'likes' | 'usage' | 'created_at') => {
     setSortBy(newSortBy);
     setCurrentPage(1);
-    
-    // 根据当前活跃的标签页重新加载数据，不改变标签页
     if (activeTab === 'my') {
-      const searchTerm = debouncedSearchQuery.trim() || undefined;
-      loadUserDataCards(searchTerm, newSortBy);
+      loadUserDataCards(debouncedSearchQuery.trim() || undefined, newSortBy);
     } else if (activeTab === 'public') {
-      const searchTerm = debouncedSearchQuery.trim() || undefined;
-      loadPublicDataCards(searchTerm, 1, newSortBy);
+      loadPublicDataCards(1, newSortBy, debouncedSearchQuery.trim() || undefined, filters);
     }
   };
 
-  // 处理查看详情
-  const handleViewDetails = (card: any) => {
-    setSelectedCard(card);
-    setShowDetailsModal(true);
-  };
-
-  // 移除原来的过滤函数
   if (!isOpen) return null;
 
-  // 对于我的数据卡，使用客户端分页
   const userTotalPages = activeTab === 'my' ? Math.ceil(userDataCards.length / cardsPerPage) : 1;
-  const paginatedUserCards = activeTab === 'my'
-    ? userDataCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage)
-    : [];
-
-  // 对于公开数据卡，使用服务端分页，直接显示获取的数据
+  const paginatedUserCards = activeTab === 'my' ? userDataCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage) : [];
   const displayCards = activeTab === 'my' ? paginatedUserCards : publicDataCards;
-
   const typeLabel = selectedType === 'character' ? '角色' : '情景';
+  const isFilterActive = Object.values(filters).some(v => v !== '');
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg mx-4 p-6 max-w-7xl w-full max-h-[90vh] overflow-hidden flex flex-col relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl leading-none z-10"
-          aria-label="关闭"
-        >
-          ×
-        </button>
-
+        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">×</button>
         <h2 className="text-xl font-bold mb-4 pr-8">选择{typeLabel}数据卡</h2>
 
-        {/* 搜索框和排序 */}
+        {/* 筛选和排序区域 */}
         <div className="mb-2">
-          <div className="flex gap-2 mb-2">
-            <div className="flex-1 relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => handleSearchInput(e.target.value)}
-                placeholder={`搜索${typeLabel}名称或粘贴分享链接...`}
-                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm"
-              />
-              {searchQuery && searchQuery !== debouncedSearchQuery && (
-                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                  <div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              )}
+          <div className="flex flex-wrap gap-2 mb-2 items-center">
+            <div className="flex-1 relative min-w-[250px]">
+              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={`搜索${typeLabel}名称或粘贴分享链接...`} className="w-full input-field pr-10" />
+              {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
             </div>
-            <SortSelector 
-              value={sortBy} 
-              onChange={handleSortChange}
-              className="flex-shrink-0"
-            />
+            <SortSelector value={sortBy} onChange={handleSortChange} />
+            <button onClick={() => setShowAdvancedFilters(!showAdvancedFilters)} className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+              <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+            </button>
           </div>
-          <p className="text-xs text-gray-500">
-            💡 支持搜索{typeLabel}的完整名称，或粘贴分享内容来查找特定数据卡
-          </p>
+          {/* 【新增】高级筛选面板 */}
+          {showAdvancedFilters && activeTab === 'public' && (
+            <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">作者</label>
+                  <input type="text" name="author" value={filters.author} onChange={handleFilterChange} placeholder="输入作者名" className="input-field" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">点赞数</label>
+                  <div className="flex gap-2">
+                    <input type="number" name="minLikes" value={filters.minLikes} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                    <input type="number" name="maxLikes" value={filters.maxLikes} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">使用数</label>
+                  <div className="flex gap-2">
+                    <input type="number" name="minUsage" value={filters.minUsage} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                    <input type="number" name="maxUsage" value={filters.maxUsage} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={resetFilters} className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">重置</button>
+                <button onClick={applyFilters} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700">应用筛选</button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 标签页切换 */}
         <div className="flex gap-2 mb-4">
-          {isAuthenticated && (
-            <button
-              onClick={() => {
-                setActiveTab('my');
-                setCurrentPage(1);
-                const searchTerm = debouncedSearchQuery.trim() || undefined;
-                loadUserDataCards(searchTerm, sortBy);
-              }}
-              className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'my'
-                ? 'bg-pink-500 text-white'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-            >
-              我的{typeLabel} ({userDataCards.length})
-            </button>
-          )}
-          <button
-            onClick={() => {
-              setActiveTab('public');
-              setCurrentPage(1);
-              // 重新加载公开数据卡的第一页
-              loadPublicDataCards(debouncedSearchQuery.trim() || undefined, 1, sortBy);
-            }}
-            className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public'
-              ? 'bg-pink-500 text-white'
-              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-          >
-            公开{typeLabel}
-          </button>
+          {isAuthenticated && <button onClick={() => { setActiveTab('my'); setCurrentPage(1); loadUserDataCards(undefined, sortBy); }} className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'my' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}>我的{typeLabel} ({userDataCards.length})</button>}
+          <button onClick={() => { setActiveTab('public'); setCurrentPage(1); loadPublicDataCards(1, sortBy, '', filters); }} className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}>公开{typeLabel}</button>
         </div>
 
         {/* 内容区域 */}
         <div className="flex-1 overflow-auto">
-          {isLoading ? (
-            <div className="flex justify-center items-center h-32">
-              <div className="text-gray-500">加载中...</div>
-            </div>
-          ) : displayCards.length === 0 ? (
-            <div className="text-center text-gray-500 py-8">
-              {searchQuery ? (
-                <>
-                  <div className="mb-2">未找到匹配的{typeLabel}数据卡</div>
-                  <div className="text-sm">尝试修改搜索关键词或清空搜索框查看所有数据卡</div>
-                  <button
-                    onClick={() => {
-                      setSearchQuery('');
-                    }}
-                    className="mt-2 px-3 py-1 bg-pink-500 text-white rounded text-sm hover:bg-pink-600"
-                  >
-                    清空搜索
-                  </button>
-                </>
-              ) : (
-                activeTab === 'my' ?
-                  `暂无${typeLabel}数据卡` :
-                  `暂无公开的${typeLabel}数据卡`
-              )}
-            </div>
-          ) : (
-            <>
-              {/* 数据卡网格 */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-stretch">
-                {displayCards.map((card: any) => {
-                  const author = activeTab === 'public' ? (card.username || '未知') : '我';
-
-                  return (
-                    <div
-                      key={card.id}
-                      className="cursor-pointer transition-transform h-full"
-                      onClick={() => handleSelectCard(card)}
-                    >
-                      <DataCard
-                        id={card.id}
-                        name={card.name}
-                        description={card.description}
-                        type={card.type}
-                        isPublic={card.is_public}
-                        usageCount={card.usage_count}
-                        likeCount={card.like_count}
-                        author={author}
-                        onViewDetails={() => handleViewDetails(card)}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
+          {isLoading ? <div className="flex justify-center items-center h-full"><div className="text-gray-500">加载中...</div></div>
+            : displayCards.length === 0 ? <div className="text-center text-gray-500 py-8">暂无数据卡</div>
+              : <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {displayCards.map((card: any) => (
+                  <div key={card.id} className="cursor-pointer h-full" onClick={() => handleSelectCard(card)}>
+                    <DataCard
+                      id={card.id} name={card.name} description={card.description} type={card.type} isPublic={card.is_public}
+                      usageCount={card.usage_count} likeCount={card.like_count} author={activeTab === 'public' ? (card.username || '未知') : '我'}
+                      onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
+                      onAuthorClick={handleAuthorClick} // 【新增】传递作者点击处理函数
+                    />
+                  </div>
+                ))}
+              </div>}
         </div>
-        {/* 分页控件 */}
-        {(
-          (activeTab === 'my' && userDataCards.length > cardsPerPage) ||
-          (activeTab === 'public' && (displayCards.length === cardsPerPage || currentPage > 1))
-        ) && (
-            <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
-              <button
-                onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1 rounded text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400"
-              >
-                上一页
-              </button>
-              <span className="text-sm text-gray-600">
-                第 {currentPage} 页{activeTab === 'my' ? ` / ${userTotalPages}` : ''}
-              </span>
-              <button
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={
-                  activeTab === 'my'
-                    ? currentPage >= userTotalPages
-                    : displayCards.length < cardsPerPage
-                }
-                className="px-3 py-1 rounded text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400"
-              >
-                下一页
-              </button>
-            </div>
-          )}
-        {/* 底部提示 */}
-        <div className="mt-4 text-center text-sm text-gray-500">
-          点击数据卡即可加载到竞技场中
-        </div>
+        
+        {/* 分页与底部 */}
+        {((activeTab === 'my' && userDataCards.length > cardsPerPage) || (activeTab === 'public' && (displayCards.length >= cardsPerPage || currentPage > 1))) &&
+          <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
+            <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="page-button">上一页</button>
+            <span className="text-sm text-gray-600">第 {currentPage} 页{activeTab === 'my' ? ` / ${userTotalPages}` : ''}</span>
+            <button onClick={() => handlePageChange(currentPage + 1)} disabled={activeTab === 'my' ? currentPage >= userTotalPages : displayCards.length < cardsPerPage} className="page-button">下一页</button>
+          </div>
+        }
       </div>
 
       {/* 详情模态框 */}

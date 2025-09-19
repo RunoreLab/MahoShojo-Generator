@@ -9,7 +9,7 @@ interface SortSelectorProps {
 export default function SortSelector({ value, onChange, className = '' }: SortSelectorProps) {
   const sortOptions = [
     { value: 'created_at', label: '发布时间' },
-    { value: 'likes', label: '人气' },
+    { value: 'likes', label: '点赞数' },
     { value: 'usage', label: '使用数' }
   ] as const;
 

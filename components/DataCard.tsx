@@ -22,6 +22,7 @@ interface DataCardProps {
   onShare?: () => void;
   onLikeSuccess?: () => void;
   onViewDetails?: () => void; // 新增查看详情回调
+  onAuthorClick?: (authorName: string) => void;
 }
 
 const typeMap = {
@@ -47,6 +48,7 @@ export default function DataCard({
   onShare,
   onLikeSuccess,
   onViewDetails,
+  onAuthorClick,
 }: DataCardProps) {
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied'>('idle');
   const [liked, setLiked] = useState(false);
@@ -185,17 +187,29 @@ export default function DataCard({
       </div>
 
       {/* 底部区域 */}
-      <div className="flex gap-3 text-sm justify-between mt-auto">
-        {/* 作者 */}
+      <div className="flex items-center justify-between mt-auto">
+        {/* 作者信息现在是一个可点击的按钮 (如果 onAuthorClick 存在) */}
         {author && (
-          <p className={`text-xs leading-[20px] ${subTextColor}`}>
-            作者: {author}
-          </p>
+          onAuthorClick ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation(); // 阻止事件冒泡，防止触发整个卡片的点击事件
+                onAuthorClick(author);
+              }}
+              className={`text-xs ${subTextColor} hover:text-purple-600 hover:underline transition-colors`}
+              title={`筛选作者: ${author}`}
+            >
+              作者: {author}
+            </button>
+          ) : (
+            <p className={`text-xs leading-[20px] ${subTextColor}`}>
+              作者: {author}
+            </p>
+          )
         )}
-        {/* 统计信息 */}
-        <div className="flex gap-3 text-sm justify-end">
-
-          {/* 点赞按钮和计数 */}
+        
+        {/* 点赞按钮和计数 */}
+        <div className="flex gap-3 text-sm justify-end flex-shrink-0">
           <button
             onClick={handleLike}
             className={`flex items-center gap-1 transition-colors ${

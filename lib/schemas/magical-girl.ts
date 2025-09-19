@@ -11,7 +11,8 @@ const keyList = [
   'userAnswers',
   'signature',
   'arena_history',
-  'isPreset'
+  'isPreset',
+  'adjudicationEvents'
 ];
 
 // 魔法少女数据卡的 Zod Schema
@@ -78,6 +79,13 @@ export const MagicalGirlSchema = z.object({
       }).optional(),
     })).optional(),
   }).optional(),
+  adjudicationEvents: z.array(z.object({
+    id: z.string().optional(),
+    description: z.string().optional(),
+    type: z.string().optional(),
+    probability: z.number().optional(),
+    outcomes: z.array(z.string().optional()).optional(),
+  })).optional(),
 }).catchall(z.unknown())
   .superRefine((data, ctx) => {
     for (const key in data) {

@@ -119,7 +119,7 @@ const CharacterManagerPage: React.FC = () => {
     const [showDataCardsModal, setShowDataCardsModal] = useState(false);
     const [editingCard, setEditingCard] = useState<any | null>(null);
     const [showSaveCardModal, setShowSaveCardModal] = useState(false);
-    const [newCardForm, setNewCardForm] = useState({ name: '', description: '', isPublic: false });
+    const [newCardForm, setNewCardForm] = useState({ name: '', description: '', isPublic: 0 });
     const [saveCardError, setSaveCardError] = useState<string | null>(null);
     const [isSavingCard, setIsSavingCard] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
@@ -204,7 +204,7 @@ const CharacterManagerPage: React.FC = () => {
         setNewCardForm({
             name: defaultName,
             description: defaultDescription,
-            isPublic: false
+            isPublic: 0
         });
         setSaveCardError(null);
         setShowSaveCardModal(true);
@@ -221,52 +221,85 @@ const CharacterManagerPage: React.FC = () => {
         setSaveCardError(null);
 
         try {
-            // 前端敏感词检查
-            const type = isScenarioData(characterData) ? 'scenario' : 'character';
-            const textToCheck = `${newCardForm.name} ${newCardForm.description} ${JSON.stringify(characterData)}`;
+            // 核心修复：在创建数据卡之前，对数据进行最终的原生性处理
+            let finalData = { ...characterData };
+
+            // 1. 判断是否需要重新签名或移除签名
+            if (isNative && !hasLostNativeness) {
+                // 情况一：数据为原生且未被破坏，需要获取一个新的有效签名
+                setMessage({ type: 'info', text: '正在请求服务器进行原生性签名认证...' });
+                const response = await fetch('/api/resign-data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(finalData),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    if (errorData.shouldRedirect) {
+                        router.push({
+                            pathname: '/arrested',
+                            query: { reason: errorData.reason || '编辑内容不合规' }
+                        });
+                        return; // 中断执行
+                    }
+                    throw new Error(errorData.message || '签名服务器认证失败');
+                }
+                finalData = await response.json(); // 使用服务器返回的、带有最新有效签名的数据
+                setMessage({ type: 'success', text: '原生性签名认证成功！' });
+
+            } else {
+                // 情况二：数据为衍生数据（非原生或已失去原生性），必须移除签名
+                delete finalData.signature;
+            }
+
+            // 2. 前端敏感词检查 (使用处理后的 finalData)
+            const type = isScenarioData(finalData) ? 'scenario' : 'character';
+            const textToCheck = `${newCardForm.name} ${newCardForm.description} ${JSON.stringify(finalData)}`;
             const sensitiveWordResult = await quickCheck(textToCheck);
 
             if (sensitiveWordResult.hasSensitiveWords) {
-                // 直接跳转到 /arrested 页面
                 router.push('/arrested');
                 return;
             }
 
+            // 3. 调用 API 创建数据卡 (使用处理后的 finalData)
             const result = await dataCardApi.createCard(
                 type,
                 newCardForm.name,
                 newCardForm.description,
-                characterData,
+                finalData, // 使用经过原生性处理的数据
                 newCardForm.isPublic
             );
 
             if (result.success) {
-                setMessage({ type: 'success', text: `数据卡保存成功！${newCardForm.isPublic ? '（公开）' : '（私有）'}` });
+                setMessage({ type: 'success', text: `数据卡保存成功！${newCardForm.isPublic === 1 ? '（公开）' : '（私有）'}` });
                 setShowSaveCardModal(false);
-                setNewCardForm({ name: '', description: '', isPublic: false });
+                setNewCardForm({ name: '', description: '', isPublic: 0 });
                 setSaveCardError(null);
-                loadUserDataCards();
+                loadUserDataCards(); // 重新加载列表
             } else {
-                // 检查是否是敏感词错误，如果是则跳转到 /arrest
                 if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
                     router.push('/arrested');
                     return;
                 }
                 setSaveCardError(result.error || '保存失败');
             }
+        } catch (error) {
+            // 捕获签名或API调用中可能出现的任何错误
+            setSaveCardError(error instanceof Error ? error.message : '保存过程中发生未知错误');
         } finally {
             setIsSavingCard(false);
         }
     };
 
     // 加载数据卡
-    const handleLoadDataCard = (card: any) => {
+    const handleLoadDataCard = async (card: any) => {
         try {
-            const data = JSON.parse(card.data);
-            setCharacterData(data);
-            setOriginalData(JSON.parse(JSON.stringify(data)));
+            // card.data 是一个 JSON 字符串，我们直接将其传递给统一的加载处理函数
+            await processJsonData(card.data);
             setShowDataCardsModal(false);
-            setMessage({ type: 'success', text: `已加载数据卡: ${card.name}` });
+            // 成功消息现在由 processJsonData 内部处理，这里无需重复设置
         } catch {
             setMessage({ type: 'error', text: '加载数据卡失败' });
         }
@@ -286,7 +319,7 @@ const CharacterManagerPage: React.FC = () => {
     };
 
     // 更新数据卡信息
-    const handleUpdateDataCard = async (id: string, name: string, description: string, isPublic?: boolean) => {
+    const handleUpdateDataCard = async (id: string, name: string, description: string, isPublic?: number) => {
         // 前端敏感词检查
         const textToCheck = `${name} ${description}`;
         const sensitiveWordResult = await quickCheck(textToCheck);
@@ -988,7 +1021,7 @@ const CharacterManagerPage: React.FC = () => {
                                         <div className="space-y-4">
                                             {characterData.arena_history.entries?.map((entry: any) => (
                                                 <div key={entry.id} className="flex items-start justify-between bg-gray-50 p-2 rounded">
-                                                    <p className="text-xs truncate" title={entry.title}>{entry.id}: {entry.title}</p>
+                                                    <p className="text-xs" title={entry.title}>{entry.id}: {entry.title}</p>
                                                     <button onClick={() => handleDeleteHistoryEntry(entry.id)} className="text-red-500 hover:text-red-700 text-xs font-bold px-2">删除</button>
                                                 </div>
                                             ))}
@@ -1023,7 +1056,7 @@ const CharacterManagerPage: React.FC = () => {
                                             </button>
                                         ) : validationResult?.error && (
                                             <div className="w-full p-3 bg-red-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm text-center">
-                                                该文件疑似包含额外字段，暂时不可上传云端
+                                                该文件疑似包含额外字段，暂时不可上传云端 <br /> {validationResult?.error}
                                             </div>
                                         )
                                     )}
@@ -1109,10 +1142,10 @@ const CharacterManagerPage: React.FC = () => {
                         </div>
                     </div>
                 )}
-            </div>
+            </div >
 
             {/* 认证模态框 */}
-            <AuthModal
+            < AuthModal
                 isOpen={showAuthModal}
                 onClose={() => {
                     setShowAuthModal(false);
@@ -1126,7 +1159,7 @@ const CharacterManagerPage: React.FC = () => {
             />
 
             {/* 数据卡管理模态框 */}
-            <DataCardsModal
+            < DataCardsModal
                 isOpen={showDataCardsModal}
                 onClose={() => {
                     setShowDataCardsModal(false);
@@ -1147,11 +1180,11 @@ const CharacterManagerPage: React.FC = () => {
             />
 
             {/* 保存数据卡弹窗 */}
-            <SaveCardModal
+            < SaveCardModal
                 isOpen={showSaveCardModal}
                 onClose={() => {
                     setShowSaveCardModal(false);
-                    setNewCardForm({ name: '', description: '', isPublic: false });
+                    setNewCardForm({ name: '', description: '', isPublic: 0 });
                     setSaveCardError(null);
                     setIsSavingCard(false);
                 }}

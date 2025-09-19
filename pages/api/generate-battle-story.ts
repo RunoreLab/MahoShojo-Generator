@@ -623,6 +623,7 @@ async function handler(req: NextRequest): Promise<Response> {
         teams, 
         language = 'zh-CN', 
         useArenaHistory = true,
+        isDowngrade = false, // 新增：是否使用轻量模型
         adjudicationEvents, // v0.4.0 新增
         storyLength
     } = await req.json();
@@ -755,6 +756,7 @@ async function handler(req: NextRequest): Promise<Response> {
         schema: BattleReportCoreSchema,
         taskName: `生成${mode}模式故事`,
         maxTokens: 8192,
+        modelOverride: isDowngrade ? "gemini-2.5-flash-lite" : undefined, // 使用轻量模型
     };
 
     const aiResult = await generateWithAI({ combatants }, generationConfig);

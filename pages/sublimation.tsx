@@ -108,6 +108,7 @@ const SublimationPage: React.FC = () => {
     // [新增] 用于管理高级选项的状态
     const [fieldsToPreserve, setFieldsToPreserve] = useState<string[]>([]);
     const [isAdvancedVisible, setIsAdvancedVisible] = useState(false);
+    const [isDowngrade, setIsDowngrade] = useState(true); // 是否使用轻量模型（默认勾选）
 
     const { isCooldown, startCooldown, remainingTime } = useCooldown('sublimationCooldown', 60000);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -182,11 +183,11 @@ const SublimationPage: React.FC = () => {
         if (obj === null || typeof obj !== 'object') {
             return obj;
         }
-        
+
         if (Array.isArray(obj)) {
             return obj.map(removePrivateKeys);
         }
-        
+
         const cleaned: any = {};
         for (const key in obj) {
             if (!key.startsWith('_')) {
@@ -199,23 +200,30 @@ const SublimationPage: React.FC = () => {
     // 处理从数据库选择的角色数据卡
     const handleSelectDataCard = async (card: any) => {
         try {
-            // 解析数据卡内容
-            let cardData = typeof card.data === 'string' ? JSON.parse(card.data) : card.data;
-            
-            // 删除以 _ 开头的键
-            cardData = removePrivateKeys(cardData);
-            
+            // =================================================================
+            // 【核心修正】
+            // 错误原因：原代码错误地认为从模态框返回的 card 对象还包含一个 .data 属性，
+            //           因此尝试执行 `JSON.parse(card.data)`，但此时 card.data 是 undefined，
+            //           导致后续逻辑中处理的角色数据为 undefined，从而引发崩溃。
+            // 解决方案：直接使用从模态框回调函数中接收到的 card 对象本身，因为它已经是
+            //           我们需要的、解析好的完整角色数据。
+            // =================================================================
+            const cardData = card; // 直接使用回调对象，不再访问 .data
+
+            // 删除内部使用的私有键（以_开头）
+            const cleanedCardData = removePrivateKeys(cardData);
+
             // 验证数据是否包含历战记录
-            if (!cardData.arena_history) {
+            if (!cleanedCardData.arena_history) {
                 setError('❌ 选择的角色缺少必需的"历战记录"（arena_history）属性，无法进行升华。');
                 return;
             }
 
-            setCharacterData(cardData);
-            setFileName(`${card.name}(来自数据库)`);
+            setCharacterData(cleanedCardData);
+            setFileName(`${card._cardName || '未命名'}(来自数据库)`); // 使用内部传递的_cardName
             setShowBattleDataModal(false);
             setError(null);
-            
+
         } catch (err) {
             setError(`❌ 数据卡加载失败: ${err instanceof Error ? err.message : '未知错误'}`);
         }
@@ -252,6 +260,7 @@ const SublimationPage: React.FC = () => {
                     language: selectedLanguage,
                     userGuidance: userGuidance.trim(),
                     fieldsToPreserve: fieldsToPreserve, // [新增] 发送需要保留的字段列表
+                    isDowngrade: isDowngrade,
                 }),
             });
 
@@ -474,6 +483,23 @@ const SublimationPage: React.FC = () => {
                                     <option key={lang.code} value={lang.code}>{lang.name}</option>
                                 ))}
                             </select>
+                        </div>
+
+                        {/* 轻量模型选项 */}
+                        <div className="input-group">
+                            <div className="flex items-center gap-3">
+                                <label className="flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={isDowngrade}
+                                        onChange={(e) => setIsDowngrade(e.target.checked)}
+                                        className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                        disabled={isGenerating}
+                                    />
+                                    <span className="ml-2 text-sm font-medium text-gray-700">使用轻量模型</span>
+                                </label>
+                                <span className="text-xs text-gray-500">显著提高成功率和速度，但是可能降低输出质量</span>
+                            </div>
                         </div>
 
                         {/* 成功提示信息 */}

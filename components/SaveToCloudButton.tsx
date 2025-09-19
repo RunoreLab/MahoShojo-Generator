@@ -29,7 +29,7 @@ export default function SaveToCloudButton({
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [cardName, setCardName] = useState('');
   const [cardDescription, setCardDescription] = useState('');
-  const [isPublic, setIsPublic] = useState(false);
+  const [isPublic, setIsPublic] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
@@ -43,13 +43,17 @@ export default function SaveToCloudButton({
   }, [isAuthenticated]);
 
   const loadUserDataCards = async () => {
-    const [cards, capacity] = await Promise.all([
-      dataCardApi.getCards(),
-      dataCardApi.getUserCapacity()
-    ]);
-    setUserDataCards(cards);
-    if (capacity !== null) {
-      setUserCapacity(capacity);
+    try {
+        const [cards, capacity] = await Promise.all([
+            dataCardApi.getCards(),
+            dataCardApi.getUserCapacity()
+        ]);
+        setUserDataCards(cards);
+        if (capacity !== null) {
+            setUserCapacity(capacity);
+        }
+    } catch (error) {
+        console.error("加载用户数据卡失败:", error);
     }
   };
 
@@ -57,6 +61,12 @@ export default function SaveToCloudButton({
     if (!isAuthenticated) {
       alert('请先登录后再保存到云端');
       return;
+    }
+    
+    // 如果没有数据，则不显示模态框
+    if (!data) {
+        alert('没有可保存的数据。');
+        return;
     }
 
     // 根据数据类型生成默认名称和描述
@@ -69,7 +79,7 @@ export default function SaveToCloudButton({
 
     setCardName(defaultName);
     setCardDescription(defaultDescription);
-    setIsPublic(false);
+    setIsPublic(0);
     setSaveError(null);
     setShowSaveModal(true);
   };
@@ -84,13 +94,17 @@ export default function SaveToCloudButton({
     setSaveError(null);
 
     try {
+      // 修正：直接使用 props 传入的 data 对象。
+      // 该对象由后端 API 生成，已包含了正确的签名状态。
+      // 本组件不再负责任何签名相关的逻辑判断。
+      const finalData = { ...data };
+      
       // 前端敏感词检查
-      const type = isScenarioData(data) ? 'scenario' : 'character';
-      const textToCheck = `${cardName} ${cardDescription} ${JSON.stringify(data)}`;
+      const type = isScenarioData(finalData) ? 'scenario' : 'character';
+      const textToCheck = `${cardName} ${cardDescription} ${JSON.stringify(finalData)}`;
       const sensitiveWordResult = await quickCheck(textToCheck);
 
       if (sensitiveWordResult.hasSensitiveWords) {
-        // 直接跳转到 /arrested 页面
         router.push('/arrested');
         return;
       }
@@ -99,21 +113,19 @@ export default function SaveToCloudButton({
         type,
         cardName,
         cardDescription,
-        data,
+        finalData, // 直接使用最终数据
         isPublic
       );
 
       if (result.success) {
-        alert(`数据卡保存成功！${isPublic ? '（公开）' : '（私有）'}`);
+        alert(`数据卡保存成功！${isPublic === 1 ? '（公开）' : '（私有）'}`);
         setShowSaveModal(false);
         setCardName('');
         setCardDescription('');
-        setIsPublic(false);
+        setIsPublic(0);
         setSaveError(null);
-        // 重新加载用户数据卡数量
         loadUserDataCards();
       } else {
-        // 检查是否是敏感词错误，如果是则跳转到 /arrested
         if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
           router.push('/arrested');
           return;
@@ -133,6 +145,7 @@ export default function SaveToCloudButton({
         onClick={handleSaveClick}
         className={className}
         style={style}
+        disabled={!data} // 如果没有数据则禁用
       >
         {buttonText}
       </button>
