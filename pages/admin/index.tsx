@@ -1,37 +1,119 @@
 // pages/admin/index.tsx
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { FileText, Users, FileCheck, UserCog } from 'lucide-react';
+import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff } from 'lucide-react';
 
 /**
- * @fileoverview 后台管理系统的统一入口页面。
+ * @fileoverview 后台管理系统的统一入口和数据仪表盘。
  * @description
- * 该页面经过重新设计，以网格布局展示了四个核心的管理模块。
- * 其中两个模块（内容档案管理、用户状态仪表盘）是当前版本的高级管理工具，
- * 另外两个模块（角色卡管理、用户管理）来自86a5338版本，
- * 提供了更简洁、快速的单项编辑功能。
- * 这样的布局使得不同需求的管理操作都能快速找到入口。
+ * 该页面现在具备以下功能：
+ * 1. 在页面加载时，异步从新的API端点获取平台核心统计数据。
+ * 2. 以信息卡片的形式直观展示这些数据，为管理员提供快速概览。
+ * 3. 保留原有的四大管理模块入口，并优化了视觉样式。
  */
+
+// 定义统计数据和单个统计卡片的类型
+interface DashboardStats {
+  totalUsers: number;
+  totalDataCards: number;
+  pendingReviewCount: number;
+  bannedUsersCount: number;
+  bannedDataCardsCount: number;
+  newUsersToday: number;
+  newDataCardsToday: number;
+}
+
+interface StatCardProps {
+  title: string;
+  value: number;
+  icon: React.ElementType;
+  color: string;
+  note?: string;
+}
+
+// 统计卡片组件
+const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, color, note }) => (
+  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between">
+    <div>
+      <div className="flex items-center gap-4">
+        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${color}`}>
+          <Icon className="w-6 h-6 text-white" />
+        </div>
+        <div>
+          <p className="text-gray-500 text-sm font-medium">{title}</p>
+          <p className="text-3xl font-bold text-gray-800">{value}</p>
+        </div>
+      </div>
+    </div>
+    {note && <p className="text-xs text-gray-400 mt-3">{note}</p>}
+  </div>
+);
+
+
 const AdminHomePage: React.FC = () => {
+  // 定义存储统计数据和加载状态的state
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // 在组件挂载时通过useEffect获取数据
+  useEffect(() => {
+    const fetchStats = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch('/api/admin/dashboard-stats');
+        if (!response.ok) {
+          throw new Error('获取统计数据失败');
+        }
+        const data = await response.json();
+        if (data.success) {
+          setStats(data.stats);
+        }
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, []); // 空依赖数组确保只在挂载时运行一次
+
   return (
     <>
       <Head>
         <title>管理后台 - MahoShojo Generator</title>
       </Head>
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-        <div className="container mx-auto max-w-4xl">
-          <div className="bg-white rounded-2xl shadow-xl p-8">
-            <div className="text-center mb-10">
-              <h1 className="text-4xl font-bold text-gray-800 tracking-tight">MahoShojo Generator</h1>
-              <p className="text-lg text-gray-500 mt-2">管理后台</p>
-            </div>
+      <div className="min-h-screen bg-gray-100 p-4 sm:p-6 md:p-8">
+        <div className="container mx-auto max-w-6xl">
+          <div className="text-center mb-10">
+            <h1 className="text-4xl font-bold text-gray-800 tracking-tight">MahoShojo Generator</h1>
+            <p className="text-lg text-gray-500 mt-2">管理仪表盘</p>
+          </div>
 
-            {/* 使用2x2网格布局来展示四个管理页面入口 */}
+          {/* 数据统计卡片区域 */}
+          <div className="mb-10">
+            <h2 className="text-xl font-semibold text-gray-700 mb-4">平台概览</h2>
+            {loading ? (
+              <div className="text-center p-8 bg-white rounded-lg shadow-sm">加载中...</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <StatCard title="待审查内容" value={stats?.pendingReviewCount ?? 0} icon={Clock} color="bg-yellow-500" note="需要管理员尽快处理" />
+                <StatCard title="今日新增用户" value={stats?.newUsersToday ?? 0} icon={UserPlus} color="bg-green-500" />
+                <StatCard title="今日新增档案" value={stats?.newDataCardsToday ?? 0} icon={FilePlus} color="bg-blue-500" />
+                <StatCard title="违规档案总数" value={stats?.bannedDataCardsCount ?? 0} icon={AlertTriangle} color="bg-red-500" />
+                <StatCard title="用户总数" value={stats?.totalUsers ?? 0} icon={Users} color="bg-teal-500" />
+                <StatCard title="档案总数" value={stats?.totalDataCards ?? 0} icon={FileText} color="bg-indigo-500" />
+                <StatCard title="封禁用户数" value={stats?.bannedUsersCount ?? 0} icon={ShieldOff} color="bg-gray-600" />
+              </div>
+            )}
+          </div>
+          
+          {/* 管理模块入口 */}
+          <div>
+            <h2 className="text-xl font-semibold text-gray-700 mb-4">管理工具</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-              {/* 入口 1: 内容档案管理 */}
               <Link href="/admin/content-management" legacyBehavior>
                 <a className="admin-card bg-purple-50 border-purple-200 hover:border-purple-400">
                   <div className="flex items-center text-purple-700 mb-3">
@@ -44,7 +126,6 @@ const AdminHomePage: React.FC = () => {
                 </a>
               </Link>
 
-              {/* 入口 2: 用户状态管理 */}
               <Link href="/admin/user-dashboard" legacyBehavior>
                 <a className="admin-card bg-blue-50 border-blue-200 hover:border-blue-400">
                   <div className="flex items-center text-blue-700 mb-3">
@@ -57,7 +138,6 @@ const AdminHomePage: React.FC = () => {
                 </a>
               </Link>
 
-              {/* 入口 3: 角色卡管理 */}
               <Link href="/admin/character-management" legacyBehavior>
                 <a className="admin-card bg-pink-50 border-pink-200 hover:border-pink-400">
                   <div className="flex items-center text-pink-700 mb-3">
@@ -70,7 +150,6 @@ const AdminHomePage: React.FC = () => {
                 </a>
               </Link>
 
-              {/* 入口 4: 用户管理 */}
               <Link href="/admin/user-management" legacyBehavior>
                 <a className="admin-card bg-teal-50 border-teal-200 hover:border-teal-400">
                   <div className="flex items-center text-teal-700 mb-3">
@@ -94,7 +173,6 @@ const AdminHomePage: React.FC = () => {
           </div>
         </div>
       </div>
-      {/* 增加一些内联样式以美化卡片效果 */}
       <style jsx>{`
         .admin-card {
           display: block;

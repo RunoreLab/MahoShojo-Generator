@@ -3,6 +3,82 @@
 import { queryFromD1 } from './core';
 
 /**
+ * [新增] 获取仪表盘所需的各项统计数据。
+ * @description
+ * 该函数通过并发执行多个独立的聚合查询来收集核心指标。
+ * D1数据库不支持在单次请求中执行多条语句，因此我们使用 Promise.all 来并行处理，以提高性能。
+ * @returns {Promise<object>} 返回一个包含所有统计数据的对象。
+ */
+export async function getDashboardStats(): Promise<{
+  totalUsers: number;
+  totalDataCards: number;
+  pendingReviewCount: number;
+  bannedUsersCount: number;
+  bannedDataCardsCount: number;
+  newUsersToday: number;
+  newDataCardsToday: number;
+}> {
+  try {
+    // 定义所有需要执行的查询
+    const queries = {
+      totalUsers: "SELECT COUNT(id) as total FROM users;",
+      totalDataCards: "SELECT COUNT(id) as total FROM data_cards;",
+      pendingReviewCount: "SELECT COUNT(id) as total FROM data_cards WHERE review_status = 'pending';",
+      bannedUsersCount: "SELECT COUNT(id) as total FROM users WHERE is_banned IS NOT NULL AND is_banned != '';",
+      bannedDataCardsCount: "SELECT COUNT(id) as total FROM data_cards WHERE is_public = -1;",
+      // 注意：D1 使用 strftime 和 'now', 'localtime' 来处理日期
+      newUsersToday: "SELECT COUNT(id) as total FROM users WHERE DATE(created_at) = DATE('now', 'localtime');",
+      newDataCardsToday: "SELECT COUNT(id) as total FROM data_cards WHERE DATE(created_at) = DATE('now', 'localtime');",
+    };
+
+    // 使用 Promise.all 并行执行所有查询
+    const results = await Promise.all(
+      Object.values(queries).map(sql => queryFromD1(sql))
+    );
+
+    // 辅助函数，用于安全地从查询结果中提取计数值
+    const getCount = (result: any): number => {
+      // D1 API的返回结构可能有多层嵌套
+      return result?.result?.[0]?.results?.[0]?.total || 0;
+    };
+    
+    // 将查询结果映射到最终的返回对象
+    const [
+      totalUsersResult,
+      totalDataCardsResult,
+      pendingReviewCountResult,
+      bannedUsersCountResult,
+      bannedDataCardsCountResult,
+      newUsersTodayResult,
+      newDataCardsTodayResult
+    ] = results;
+
+    return {
+      totalUsers: getCount(totalUsersResult),
+      totalDataCards: getCount(totalDataCardsResult),
+      pendingReviewCount: getCount(pendingReviewCountResult),
+      bannedUsersCount: getCount(bannedUsersCountResult),
+      bannedDataCardsCount: getCount(bannedDataCardsCountResult),
+      newUsersToday: getCount(newUsersTodayResult),
+      newDataCardsToday: getCount(newDataCardsTodayResult),
+    };
+
+  } catch (error) {
+    console.error('[Admin] 获取仪表盘统计数据失败:', error);
+    // 在出错时返回一组默认值，避免前端崩溃
+    return {
+      totalUsers: 0,
+      totalDataCards: 0,
+      pendingReviewCount: 0,
+      bannedUsersCount: 0,
+      bannedDataCardsCount: 0,
+      newUsersToday: 0,
+      newDataCardsToday: 0,
+    };
+  }
+}
+
+/**
  * [Admin] 获取数据卡列表，支持多维度筛选和分页
  * @param filters - 包含所有筛选条件的对
  * @returns 返回查询到的数据卡数组
