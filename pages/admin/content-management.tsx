@@ -55,7 +55,7 @@ const CharacterManagementPage: React.FC = () => {
   const [isAiReviewing, setIsAiReviewing] = useState(false);
   const [aiReviewResults, setAiReviewResults] = useState<AiReviewResult[]>([]);
   const [markedActions, setMarkedActions] = useState<Record<string, 'approve' | 'reject'>>({});
-  const [aiBatchSize, setAiBatchSize] = useState(10);
+  const [aiBatchSize, setAiBatchSize] = useState(20);
   const [aiModel, setAiModel] = useState('gemini-2.5-flash-lite');
   const [externalReviewContent, setExternalReviewContent] = useState(''); // [新增] 外部审查粘贴内容
   const [copyStatus, setCopyStatus] = useState(''); // [新增] 复制按钮状态
@@ -564,8 +564,8 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                                               <p className={`text-sm font-bold ${res.suggestion === 'approved' ? 'text-green-600' : 'text-red-600'}`}>AI建议: {res.suggestion === 'approved' ? '通过' : '拒绝'}</p>
                                               <p className="text-xs text-gray-600 italic">理由: {res.reason}</p>
                                               <div className="mt-2 flex gap-2">
-                                                  <label className="flex items-center text-xs cursor-pointer"><input type="radio" name={`action-${res.id}`} onChange={() => handleMarkAction(res.id, 'approve')} checked={markedActions[res.id] === 'approve'}/><span className="ml-1">采纳并通过</span></label>
-                                                  <label className="flex items-center text-xs cursor-pointer"><input type="radio" name={`action-${res.id}`} onChange={() => handleMarkAction(res.id, 'reject')} checked={markedActions[res.id] === 'reject'}/><span className="ml-1">采纳并拒绝</span></label>
+                                                  <label className="flex items-center text-xs cursor-pointer"><input type="radio" name={`action-${res.id}`} onChange={() => handleMarkAction(res.id, 'approve')} checked={markedActions[res.id] === 'approve'}/><span className="ml-1">通过</span></label>
+                                                  <label className="flex items-center text-xs cursor-pointer"><input type="radio" name={`action-${res.id}`} onChange={() => handleMarkAction(res.id, 'reject')} checked={markedActions[res.id] === 'reject'}/><span className="ml-1">拒绝</span></label>
                                               </div>
                                           </div>
                                       ))}
