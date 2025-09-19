@@ -17,8 +17,8 @@ export default async function handler(req: NextRequest) {
     // 兼容旧版 character-management 页面根据 id 查询单个卡片的请求
     const id = searchParams.get('id');
     if (id) {
-        // 注意：这里调用的是公开和私有均可查询的函数
-        const card = await getDataCardById(id, false);
+        // 调用通用的数据卡查询函数
+        const card = await getDataCardById(id, false); // false 表示不限制为必须公开
         if (card) {
             return new Response(JSON.stringify(card), { status: 200 });
         } else {
@@ -33,7 +33,8 @@ export default async function handler(req: NextRequest) {
     let isPublicValue = searchParams.get('isPublic') as '0' | '1' | '-1' | undefined;
     const statusValue = searchParams.get('status');
 
-    if (statusValue && statusValue !== 'all') {
+    // 兼容旧版页面的 'status' 参数
+    if (statusValue && statusValue !== 'all' && !isPublicValue) {
         if (statusValue === 'public') isPublicValue = '1';
         else if (statusValue === 'private') isPublicValue = '0';
         else if (statusValue === 'banned') isPublicValue = '-1';
@@ -46,17 +47,32 @@ export default async function handler(req: NextRequest) {
       sortBy: searchParams.get('sortBy') || 'updated_at',
       sortOrder: (searchParams.get('sortOrder') as 'asc' | 'desc') || 'desc',
       reviewStatus: searchParams.get('reviewStatus') as 'pending' | 'approved' | 'rejected' | undefined,
-      isPublic: searchParams.get('isPublic') as '0' | '1' | '-1' | undefined,
+      isPublic: isPublicValue, // <-- 使用处理后的 isPublicValue
       type: searchParams.get('type') as 'character' | 'scenario' | undefined,
       search: searchParams.get('search') || undefined,
     };
     
-    // 清理掉值为 undefined 的筛选条件
-    Object.keys(filters).forEach(key => (filters as any)[key] === undefined && delete (filters as any)[key]);
+    // 清理掉值为 undefined 或空的筛选条件
+    Object.keys(filters).forEach(key => {
+        const filterKey = key as keyof typeof filters;
+        if (filters[filterKey] === undefined || filters[filterKey] === '') {
+            delete (filters as any)[filterKey];
+        }
+    });
 
+    // 调用数据库函数获取数据
     const { cards, total } = await getAdminDataCards(filters);
 
-    return new Response(JSON.stringify({ success: true, cards, total, page: filters.page, limit: filters.limit }), {
+    // 为了兼容旧版 character-management 页面的分页逻辑，返回 totalPages 和 currentPage
+    const totalPages = Math.ceil(total / (filters.limit || 20));
+
+    return new Response(JSON.stringify({ 
+        success: true, 
+        cards, 
+        total, 
+        currentPage: filters.page,
+        totalPages: totalPages
+    }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
