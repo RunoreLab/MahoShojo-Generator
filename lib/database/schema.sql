@@ -39,9 +39,7 @@ CREATE TABLE IF NOT EXISTS users (
   is_banned TEXT,
   slot_count INTEGER,
   registration_ip TEXT,
-  prefix TEXT,
-  -- [v0.4.2 新增] 豁免审查资格字段
-  is_review_exempt BOOLEAN NOT NULL DEFAULT 0 -- 0 = false (默认), 1 = true
+  prefix TEXT
 );
 
 CREATE INDEX idx_users_username ON users(username);
@@ -56,9 +54,7 @@ CREATE TABLE IF NOT EXISTS data_cards (
   name TEXT NOT NULL,
   description TEXT,
   data TEXT NOT NULL,
-  -- [v0.4.2 修改] 字段类型从 BOOLEAN 变更为 INTEGER 以支持多状态
-  -- 状态码定义: 1 (公开), 0 (私有), -1 (封禁), 2 (待审查), -2 (未通过审查)
-  is_public INTEGER NOT NULL DEFAULT 0,
+  is_public BOOLEAN NOT NULL DEFAULT 0,  -- 0 = 私有, 1 = 公开
   usage_count INTEGER DEFAULT 0,
   like_count INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
