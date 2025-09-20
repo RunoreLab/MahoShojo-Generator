@@ -2,6 +2,8 @@
 
 import React, { useRef } from 'react';
 import { snapdom } from '@zumer/snapdom';
+// 1. [新增] 导入随机判定结果的类型定义
+import { AdjudicationResult } from '@/types/arena';
 
 export interface NewsReport {
   headline: string;
@@ -20,6 +22,8 @@ export interface NewsReport {
   // 可选的用户引导信息字段
   userGuidance?: string;
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
+  // 2. [新增] 为战报数据接口增加随机判定结果字段
+  adjudicationResults?: AdjudicationResult[];
 }
 
 interface BattleReportCardProps {
@@ -103,7 +107,19 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
 
   // 处理保存为Markdown文件
   const handleSaveMarkdown = () => {
-    // 新增：在Markdown中加入用户引导信息
+    // 3. [修改] 在Markdown中加入随机判定记录
+    const adjudicationMarkdown = report.adjudicationResults && report.adjudicationResults.length > 0
+        ? `
+---
+
+## 随机判定记录
+${report.adjudicationResults.map(res => {
+    const prefix = ' '.repeat(res.depth * 2); // 根据深度添加缩进
+    return `${prefix}- **事件**: ${res.description}\n${prefix}  - **结果**: ${res.outcome} (${res.details})`;
+}).join('\n')}
+`
+        : '';
+
     const markdownContent = `
 # ${report.headline}
 **来源：${report.reporterInfo.publication} | 记者：${report.reporterInfo.name}**
@@ -128,6 +144,7 @@ ${report.userGuidance ? `
 
 ## 故事引导
 > ${report.userGuidance}` : ''}
+${adjudicationMarkdown}
     `.trim();
 
     // 创建Blob对象并触发下载
@@ -177,7 +194,6 @@ ${report.userGuidance ? `
           )}  
         </div>
         
-
         <div className="result-item">
           <div className="result-value">
             <p className="text-sm opacity-90 whitespace-pre-line">{report.article.body}</p>
@@ -208,6 +224,26 @@ ${report.userGuidance ? `
               <p className="text-sm opacity-90 italic">“{report.userGuidance}”</p>
             </div>
           </div>
+        )}
+
+        {/* 4. [新增] 随机判定结果的渲染区域 */}
+        {report.adjudicationResults && report.adjudicationResults.length > 0 && (
+            <div className="result-item" style={{ borderLeft: '4px solid #4ade80', background: 'rgba(0,0,0,0.2)' }}>
+                <div className="result-label">🎲 随机判定记录</div>
+                <div className="result-value space-y-2 text-sm">
+                    {report.adjudicationResults.map((result, index) => (
+                        <div key={index} style={{ marginLeft: `${result.depth * 16}px` }}>
+                            <p className="opacity-90">
+                                {result.depth > 0 && <span className="text-gray-400">↳ </span>}
+                                <span className="font-semibold">{result.description}</span>
+                            </p>
+                            <p className="text-xs opacity-70">
+                                判定结果: <span className={`font-bold ${result.outcome === '成功' ? 'text-green-400' : result.outcome === '失败' ? 'text-red-400' : 'text-blue-400'}`}>{result.outcome}</span> ({result.details})
+                            </p>
+                        </div>
+                    ))}
+                </div>
+            </div>
         )}
 
         {/* 按钮容器 */}
