@@ -908,7 +908,13 @@ const BattlePage: React.FC = () => {
             // 加入后置生成敏感词检测
             if (await checkSensitiveWords(JSON.stringify(result.report))) return;
 
-            setNewsReport(result.report);
+            // 将战报和随机判定结果合并后再设置 state
+            const reportWithAdjudication = {
+                ...result.report,
+                adjudicationResults: result.adjudicationResults,
+            };
+
+            setNewsReport(reportWithAdjudication);
             setUpdatedCombatants(result.updatedCombatants);
             // v0.4.0 新增: 更新判定结果状态
             if (result.adjudicationResults) {
