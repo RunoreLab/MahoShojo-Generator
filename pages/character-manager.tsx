@@ -695,7 +695,15 @@ const CharacterManagerPage: React.FC = () => {
                         {typeof value === 'string' && value.length > 80 ?
                             <textarea id={currentPath} value={value as string} onChange={(e) => handleFieldChange(currentPath, e.target.value)} rows={3} className="input-field" />
                             :
-                            <input type="text" id={currentPath} value={value as any} onChange={(e) => handleFieldChange(currentPath, e.target.value)} className="input-field" />
+                            <input 
+                                type="text" 
+                                id={currentPath} 
+                                value={value as any} 
+                                onChange={(e) => handleFieldChange(currentPath, e.target.value)} 
+                                className="input-field"
+                                // 当字段为 codename 或 name 时，限制最大长度为30
+                                maxLength={(key === 'codename' || key === 'name') ? 30 : undefined}
+                            />
                         }
                         {currentPath === 'codename' && (
                             <button onClick={handleRandomCodename} type="button" className="ml-2 px-3 py-1.5 text-xs font-semibold text-white bg-pink-500 rounded-lg hover:bg-pink-600">随机</button>
