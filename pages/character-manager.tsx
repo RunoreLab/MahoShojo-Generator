@@ -701,8 +701,8 @@ const CharacterManagerPage: React.FC = () => {
                                 value={value as any} 
                                 onChange={(e) => handleFieldChange(currentPath, e.target.value)} 
                                 className="input-field"
-                                // 当字段为 codename 或 name 时，限制最大长度为30
-                                maxLength={(key === 'codename' || key === 'name') ? 30 : undefined}
+                                // 当字段为 codename 或 name 时，限制最大长度为20
+                                maxLength={(key === 'codename' || key === 'name') ? 20 : undefined}
                             />
                         }
                         {currentPath === 'codename' && (
