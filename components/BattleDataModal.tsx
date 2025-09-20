@@ -335,9 +335,10 @@ export default function BattleDataModal({
                   <div key={card.id} className="cursor-pointer h-full" onClick={() => handleSelectCard(card)}>
                     <DataCard
                       id={card.id} name={card.name} description={card.description} type={card.type} isPublic={card.is_public}
+                      reviewStatus={card.review_status}
                       usageCount={card.usage_count} likeCount={card.like_count} author={activeTab === 'public' ? (card.username || '未知') : '我'}
                       onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
-                      onAuthorClick={handleAuthorClick} // 【新增】传递作者点击处理函数
+                      onAuthorClick={handleAuthorClick}
                     />
                   </div>
                 ))}
