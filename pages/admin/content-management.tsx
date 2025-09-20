@@ -99,6 +99,23 @@ const CharacterManagementPage: React.FC = () => {
     }
   }, [router.isReady, router.query, fetchData]);
 
+  // useEffect 钩子，用于在 AI 审查结果加载后自动更新操作标记。
+  useEffect(() => {
+    if (aiReviewResults.length > 0) {
+        const newMarkedActions: Record<string, 'approve' | 'reject'> = {};
+        aiReviewResults.forEach(result => {
+            // 注意: AI 返回的建议可能是 'approved'/'rejected'，
+            // 而我们的状态管理使用的是 'approve'/'reject'，这里做一个简单的映射。
+            if (result.suggestion === 'approved') {
+                newMarkedActions[result.id] = 'approve';
+            } else if (result.suggestion === 'rejected') {
+                newMarkedActions[result.id] = 'reject';
+            }
+        });
+        setMarkedActions(newMarkedActions);
+    }
+  }, [aiReviewResults]); // 依赖项是 aiReviewResults
+
   const updateUrl = useCallback((newFilters: typeof filters) => {
       const query: { [key: string]: any } = {};
       if (newFilters.page > 1) query.page = newFilters.page;
