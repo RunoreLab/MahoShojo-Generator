@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Heart, Share, Info, Ban, AlertTriangle } from 'lucide-react';
+import { Download, Heart, Share, Info, Ban, AlertTriangle, Clock, XCircle } from 'lucide-react'; // 新增 Clock, XCircle 图标
 import { isCardLiked, addLikedCard } from '@/lib/localStorage';
 import { getDataCardStatus } from '@/lib/database/data-cards';
 
@@ -9,6 +9,7 @@ interface DataCardProps {
   description: string;
   type: 'character' | 'scenario';
   isPublic: boolean | number; // 支持 -1 表示封禁
+  reviewStatus?: 'pending' | 'approved' | 'rejected'; // 新增：审查状态属性
   usageCount?: number;
   likeCount?: number;
   author?: string;
@@ -36,6 +37,7 @@ export default function DataCard({
   description,
   type,
   isPublic,
+  reviewStatus,
   usageCount = 0,
   likeCount = 0,
   author,
@@ -147,6 +149,18 @@ export default function DataCard({
         <div className="flex items-start justify-between gap-2 mb-2">
           <h4 className={`font-semibold text-lg ${textColor} flex-1`}>{name}</h4>
           <div className="flex items-center gap-2 flex-shrink-0">
+            {reviewStatus === 'pending' && isPublic === 1 && (
+              <span className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-yellow-100 text-yellow-800 border border-yellow-200">
+                <Clock className="w-3 h-3" />
+                审查中
+              </span>
+            )}
+            {reviewStatus === 'rejected' && (
+              <span className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-red-100 text-red-800 border border-red-200">
+                <XCircle className="w-3 h-3" />
+                未通过
+              </span>
+            )}
             <span className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
               cardStatus.status === 'banned' 
                 ? 'bg-red-100 text-red-700 border border-red-200' 

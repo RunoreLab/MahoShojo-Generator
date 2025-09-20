@@ -1142,54 +1142,55 @@ const BattlePage: React.FC = () => {
                                             : (c.type === 'magical-girl' ? '(魔法少女)' : '(残兽)');
                                         const isCorrected = !isPlaceholder && correctedFiles[name];
 
-                                        return (
-                                            <li key={key} className="flex justify-between items-center group">
-                                                <div className="flex items-center flex-grow">
-                                                    <span className="truncate mr-2" title={name}>
-                                                        {name}
-                                                        <span className="text-xs text-gray-500 ml-1">{typeDisplay}</span>
-                                                        {!isPlaceholder && c.isPreset && <span className="text-xs text-purple-600 ml-1">(预设)</span>}
-                                                        {!isPlaceholder && c.isValid && <span className="text-xs text-green-600 ml-1">(原生)</span>}
-                                                        {isCorrected && <span className="text-xs text-yellow-600 ml-2">(格式已修正)</span>}
-                                                        {!isPlaceholder && c.isNonStandard && <span className="text-xs text-orange-500 ml-1 font-semibold">(非规范格式)</span>}
-                                                    </span>
-                                                    {/* 分队选择器 (占位符不可分队) */}
-                                                    {!isPlaceholder && (
-                                                        <select
-                                                            value={c.teamId || 0}
-                                                            onChange={(e) => handleTeamChange(c.filename, parseInt(e.target.value))}
-                                                            className="text-xs border border-gray-300 rounded px-1 py-0.5 bg-white disabled:opacity-50"
-                                                            disabled={isGenerating}
-                                                        >
-                                                            <option value={0}>无分队</option>
-                                                            <option value={1}>队伍 1</option>
-                                                            <option value={2}>队伍 2</option>
-                                                            <option value={3}>队伍 3</option>
-                                                            <option value={4}>队伍 4</option>
-                                                        </select>
-                                                    )}
-                                                </div>
-                                                <div className="flex items-center">
-                                                    {isCorrected && (
-                                                        <div className="flex gap-2 mr-2">
-                                                            <button onClick={() => handleDownloadCorrectedJson(name)} disabled={isGenerating} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">下载</button>
-                                                            <button onClick={() => handleCopyCorrectedJson(name)} disabled={isGenerating} className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 w-16">{copiedStatus[name] ? '已复制!' : '复制'}</button>
+                                                return (
+                                                    <li key={key} className="flex justify-between items-start group gap-2">
+                                                        <div className="flex items-center flex-grow min-w-0">
+                                                            <span className="break-words mr-2" title={name}>
+                                                                {name}
+                                                                <span className="text-xs text-gray-500 ml-1">{typeDisplay}</span>
+                                                                {!isPlaceholder && c.isPreset && <span className="text-xs text-purple-600 ml-1">(预设)</span>}
+                                                                {!isPlaceholder && c.isValid && <span className="text-xs text-green-600 ml-1">(原生)</span>}
+                                                                {isCorrected && <span className="text-xs text-yellow-600 ml-2">(格式已修正)</span>}
+                                                                {!isPlaceholder && c.isNonStandard && <span className="text-xs text-orange-500 ml-1 font-semibold">(非规范格式)</span>}
+                                                            </span>
+                                                            {/* 分队选择器 (占位符不可分队) */}
+                                                            {!isPlaceholder && (
+                                                                <select
+                                                                    value={c.teamId || 0}
+                                                                    onChange={(e) => handleTeamChange(c.filename, parseInt(e.target.value))}
+                                                                    className="text-xs border border-gray-300 rounded px-1 py-0.5 bg-white disabled:opacity-50 ml-auto" // 使用 ml-auto 保持在右侧
+                                                                    disabled={isGenerating}
+                                                                >
+                                                                    <option value={0}>无分队</option>
+                                                                    <option value={1}>队伍 1</option>
+                                                                    <option value={2}>队伍 2</option>
+                                                                    <option value={3}>队伍 3</option>
+                                                                    <option value={4}>队伍 4</option>
+                                                                </select>
+                                                            )}
                                                         </div>
-                                                    )}
-                                                    {/* 单个删除按钮 */}
-                                                    <button
-                                                        onClick={() => !isGenerating && handleRemoveCombatant(key)}
-                                                        className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'}`}
-                                                        aria-label={`移除 ${name}`}
-                                                        disabled={isGenerating}
-                                                    >
-                                                        X
-                                                    </button>
-                                                </div>
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
+                                                        <div className="flex items-center flex-shrink-0">
+                                                            {isCorrected && (
+                                                                <div className="flex gap-2 mr-2">
+                                                                    <button onClick={() => handleDownloadCorrectedJson(name)} disabled={isGenerating} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">下载</button>
+                                                                    <button onClick={() => handleCopyCorrectedJson(name)} disabled={isGenerating} className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 w-16">{copiedStatus[name] ? '已复制!' : '复制'}</button>
+                                                                </div>
+                                                            )}
+                                                            {/* 单个删除按钮 */}
+                                                            <button
+                                                                onClick={() => !isGenerating && handleRemoveCombatant(key)}
+                                                                className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'}`}
+                                                                aria-label={`移除 ${name}`}
+                                                                disabled={isGenerating}
+                                                            >
+                                                                X
+                                                            </button>
+                                                        </div>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+
                                 {/* --- 历战记录超限提示 --- */}
                                 {combatants.some(c => 'data' in c && c.data.arena_history?.entries?.length > 20) && (
                                     <div className="mt-3 text-xs text-gray-500">

@@ -105,6 +105,7 @@ export default function DataCardsModal({
                       description={card.description}
                       type={card.type}
                       isPublic={card.is_public}
+                      reviewStatus={card.review_status}
                       usageCount={card.usage_count}
                       likeCount={card.like_count}
                       author={author}
