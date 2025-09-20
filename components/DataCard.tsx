@@ -149,7 +149,7 @@ export default function DataCard({
         <div className="flex items-start justify-between gap-2 mb-2">
           <h4 className={`font-semibold text-lg ${textColor} flex-1`}>{name}</h4>
           <div className="flex items-center gap-2 flex-shrink-0">
-            {reviewStatus === 'pending' && (
+            {reviewStatus === 'pending' && isPublic === 1 && (
               <span className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-yellow-100 text-yellow-800 border border-yellow-200">
                 <Clock className="w-3 h-3" />
                 审查中
