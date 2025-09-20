@@ -127,6 +127,14 @@ const sensitiveWordsConfig = {
         "5aSp5a6J6Zeo",
         "5rue57qz",
         "5pSv6YKj",
+        // 涉政人物
+        "546L5rSq5paH",
+        "5byg5pil5qGl",
+        "5rGf6Z2S",
+        "5aea5paH5YWD",
+        "5p6X5b2q",
+        "5q+b5bK46Iux",
+        "5aSp55qH",
         // Abuse
         "6LSx55Wc",
         "5YK76YC8",
