@@ -224,9 +224,42 @@ const updateCombatantsWithHistory = async (
     const participantNames = combatants.map(c => c.data.codename || c.data.name);
     const nowISO = new Date().toISOString();
 
+    // =================================================================
+    // 【紧急安全修复：V20240927-Hotfix】处理重名角色的原生性伪造漏洞
+    // =================================================================
+    // 核心思路：如果存在名称相同但原生性(isNative)标记不同的角色，则将所有同名角色都视为非原生，以杜绝漏洞。
+
+    // 步骤 1: 收集所有出战角色的名称及其原生性状态。
+    // 使用 Map 来存储每个名称对应的原生性状态列表 (true/false)。
+    const nameToNativenessMap = new Map<string, boolean[]>();
+    combatants.forEach(c => {
+        const name = c.data.codename || c.data.name;
+        if (!nameToNativenessMap.has(name)) {
+            nameToNativenessMap.set(name, []);
+        }
+        nameToNativenessMap.get(name)!.push(c.isNative);
+    });
+
+    // 步骤 2: 找出所有存在原生性冲突的重名角色。
+    // 如果一个角色的名字同时关联了 true 和 false 两种原生性状态，
+    // 就意味着存在冲突，需要进行特殊处理。
+    const conflictingNames = new Set<string>();
+    for (const [name, nativenessStates] of nameToNativenessMap.entries()) {
+        const hasNative = nativenessStates.includes(true);
+        const hasNonNative = nativenessStates.includes(false);
+        if (hasNative && hasNonNative) {
+            conflictingNames.add(name);
+            log.warn(`检测到原生性冲突的角色名称: "${name}"。该角色的所有实例在此次战斗中将被视为非原生处理。`);
+        }
+    }
+    // =================================================================
+    // 修复逻辑结束
+    // =================================================================
+
     // 检查是否有非原生数据参与（角色或情景）
     const isScenarioNative = scenario ? await verifySignature(scenario) : true;
-    const isAnyNonNative = combatants.some(c => !c.isNative) || (report.mode === 'scenario' && !isScenarioNative);
+    // 判定条件修改：如果角色名在冲突列表里，也算作非原生参与者
+    const isAnyNonNative = combatants.some(c => !c.isNative || conflictingNames.has(c.data.codename || c.data.name)) || (report.mode === 'scenario' && !isScenarioNative);
 
     for (const combatant of combatants) {
         // 深拷贝以避免副作用
@@ -289,8 +322,15 @@ const updateCombatantsWithHistory = async (
             history.entries.push(newEntry);
             characterData.arena_history = history;
 
-            // 只有记录了战斗，才需要考虑重新签名
-            if (combatant.isNative) {
+            // 步骤 3: 【应用修复策略】在决定是否签名之前，检查当前角色名称是否存在于冲突列表中。
+            let shouldSign = combatant.isNative; // 默认继承原始状态
+            if (conflictingNames.has(characterName)) {
+                // 如果存在冲突，则强制将此角色视为非原生，无论其原始 isNative 标志是什么。
+                shouldSign = false;
+            }
+
+            // 根据最终的 shouldSign 决定是生成新签名还是删除旧签名
+            if (shouldSign) {
                 characterData.signature = await generateSignature(characterData);
             } else {
                 delete characterData.signature;
