@@ -23,7 +23,7 @@ export async function getDashboardStats(): Promise<{
     const queries = {
       totalUsers: "SELECT COUNT(id) as total FROM users;",
       totalDataCards: "SELECT COUNT(id) as total FROM data_cards;",
-      pendingReviewCount: "SELECT COUNT(id) as total FROM data_cards WHERE review_status = 'pending';",
+      pendingReviewCount: "SELECT COUNT(id) as total FROM data_cards WHERE review_status = 'pending' AND is_public = 1;",
       bannedUsersCount: "SELECT COUNT(id) as total FROM users WHERE is_banned IS NOT NULL AND is_banned != '';",
       bannedDataCardsCount: "SELECT COUNT(id) as total FROM data_cards WHERE is_public = -1;",
       // 注意：D1 使用 strftime 和 'now', 'localtime' 来处理日期
