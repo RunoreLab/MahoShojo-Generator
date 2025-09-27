@@ -685,10 +685,6 @@
       "meaning": "Good News/Glad tidings/loyalty"
     },
     {
-      "name": "薰衣草",
-      "meaning": "Faithful"
-    },
-    {
       "name": "虎百合",
       "meaning": "Wealth"
     },
@@ -719,10 +715,6 @@
     {
       "name": "三色堇",
       "meaning": "Thoughtful/Caring"
-    },
-    {
-      "name": "牡丹",
-      "meaning": "Bravery"
     },
     {
       "name": "白玫",
@@ -969,10 +961,6 @@
       "meaning": "Resignation and good-bye"
     },
     {
-      "name": "萱草",
-      "meaning": "Forgetting worries"
-    },
-    {
       "name": "一串红",
       "meaning": "Honey, I'm yours"
     },
@@ -1019,10 +1007,6 @@
     {
       "name": "当归",
       "meaning": "Inspiration"
-    },
-    {
-      "name": "菊花",
-      "meaning": "Cheerfulness"
     },
     {
       "name": "黄百合",
@@ -1141,7 +1125,7 @@
       "meaning": "纯真的爱"
     },
     {
-      "name": "荔枝花",
+      "name": "荔枝",
       "meaning": "美好的承诺"
     },
     {
@@ -1163,6 +1147,98 @@
     {
       "name": "酢浆草",
       "meaning": "璀璨的心、绝不舍弃你"
+    },
+    {
+      "name": "茱萸",
+      "meaning": "Remembrance, Warding off evil"
+    },
+    {
+      "name": "杨柳",
+      "meaning": "Parting, Nostalgia"
+    },
+    {
+      "name": "红豆",
+      "meaning": "Acacia, Longing"
+    },
+    {
+      "name": "萱草",
+      "meaning": "Mother's love, Forgetting worries"
+    },
+    {
+      "name": "豆蔻",
+      "meaning": "Youthful beauty of a young girl"
+    },
+    {
+      "name": "芭蕉",
+      "meaning": "Sorrow of a lonely traveler"
+    },
+    {
+      "name": "梅花",
+      "meaning": "Perseverance and purity"
+    },
+    {
+      "name": "菊花",
+      "meaning": "Longevity and resilience"
+    },
+    {
+      "name": "兰花",
+      "meaning": "Elegance and virtue"
+    },
+    {
+      "name": "梧桐",
+      "meaning": "Sadness and sorrow"
+    },
+    {
+      "name": "松柏",
+      "meaning": "Integrity and perseverance"
+    },
+    {
+      "name": "胡杨",
+      "meaning": ""
+    },
+    {
+      "name": "青冈栎",
+      "meaning": ""
+    },
+    {
+      "name": "三角梅",
+      "meaning": ""
+    },
+    {
+      "name": "檀花",
+      "meaning": ""
+    },
+    {
+      "name": "金丝楠",
+      "meaning": ""
+    },
+    {
+      "name": "海桐",
+      "meaning": ""
+    },
+    {
+      "name": "石榴",
+      "meaning": ""
+    },
+    {
+      "name": "海棠",
+      "meaning": ""
+    },
+    {
+      "name": "云杉",
+      "meaning": ""
+    },
+    {
+      "name": "苏铁",
+      "meaning": ""
+    },
+    {
+      "name": "丹凤",
+      "meaning": ""
+    },
+    {
+      "name": "紫荆",
+      "meaning": ""
     }
   ]
 }
