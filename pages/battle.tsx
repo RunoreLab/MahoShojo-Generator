@@ -1466,6 +1466,16 @@ const BattlePage: React.FC = () => {
                                 点击加入QQ交流群
                             </a>
                         </div>
+                        <div className="text-center mt-3">
+                            <a
+                                href="https://pd.qq.com/s/brisxifbl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm text-blue-600 hover:underline font-semibold"
+                            >
+                                点击加入腾讯频道
+                            </a>
+                        </div>
                         {error && <div className={`p-4 rounded-md my-4 text-sm whitespace-pre-wrap ${error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}`}>{error}</div>}
                     </div>
 
