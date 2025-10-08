@@ -299,8 +299,10 @@ export async function getAdminUsers(filters: {
 
   // --- 动态构建 WHERE 子句 ---
   if (search) {
-    whereClauses.push('u.username LIKE ?');
-    params.push(`%${search}%`);
+    // 搜索范围包括用户名和邮箱，方便管理员通过邮件或用户名定位用户
+    whereClauses.push('(u.username LIKE ? OR u.email LIKE ?)');
+    const searchTerm = `%${search}%`;
+    params.push(searchTerm, searchTerm);
   }
   if (regDateStart) {
     whereClauses.push('u.created_at >= ?');

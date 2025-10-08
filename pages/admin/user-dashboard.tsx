@@ -165,7 +165,14 @@ const UserManagementPage: React.FC = () => {
 
           <div className="bg-white p-4 rounded-lg shadow-sm mb-4 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <input type="text" name="search" defaultValue={filters.search} onChange={handleFilterChange} placeholder="搜索用户名..." className="input-field"/>
+              <input 
+                  type="text" 
+                  name="search" 
+                  defaultValue={filters.search} 
+                  onChange={handleFilterChange} 
+                  placeholder="搜索用户名或邮箱..."
+                  className="input-field"
+              />
               <select name="status" value={filters.status} onChange={handleFilterChange} className="input-field">
                 <option value="">所有状态</option>
                 <option value="normal">正常</option>
