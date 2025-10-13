@@ -3,6 +3,8 @@ import { Resend } from 'resend';
 import { getUserByUsername } from '@/lib/d1';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
+export const runtime = 'edge';
+
 const GENERIC_MESSAGE = '如果您输入的内容正确，密码则会发送到您的邮箱中。 \n 如果输入的内容不正确，则不会有密码发送。';
 
 type RecoveryResponse =
