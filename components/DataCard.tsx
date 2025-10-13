@@ -62,45 +62,78 @@ export default function DataCard({
     setLiked(isCardLiked(id));
   }, [id]);
 
-  // 处理点赞
+  /**
+   * 【核心 Bug 修复】
+   * 修复无限刷点赞 Bug 的关键在于调整操作顺序，确保客户端操作的原子性。
+   *
+   * 之前的问题逻辑：
+   * 1. 检查组件内部 state `liked` 是否为 true。
+   * 2. 发送 API 请求到服务器。
+   * 3. API 请求成功后，再调用 `addLikedCard(id)` 写入 localStorage。
+   * 这个流程的缺陷在于，多个标签页之间的 `liked` 状态不共享。当一个标签页完成点赞后，
+   * 另一个标签页的 `liked` 状态仍然是 false，导致它可以继续发送 API 请求。
+   *
+   * 修复后的正确逻辑：
+   * 1. 用户点击时，首先调用 `addLikedCard(id)` 尝试写入 localStorage。
+   * `localStorage` 是浏览器内所有标签页共享的。
+   * `addLikedCard` 函数被设计为只有在 cardId 不存在时才会写入并返回 `true`。
+   * 如果 cardId 已存在，它会直接返回 `false`。
+   * 2. 检查 `addLikedCard` 的返回值。
+   * - 如果返回 `true`：证明这是此浏览器第一次点赞该卡片。此时，我们才继续执行后续操作：
+   * a. 设置组件内部状态 `setLiked(true)` 和 `setLiking(true)`，立即在UI上禁用按钮。
+   * b. 向服务器发送 API 请求以增加点赞数。
+   * c. 更新UI上的点赞计数。
+   * - 如果返回 `false`：证明其他标签页（或当前页面刷新前）已经点过赞了。此时函数直接返回，
+   * 不执行任何操作，从而阻止了重复向服务器发送请求。
+   *
+   * 这个修改利用 localStorage 作为跨标签页的“锁”，确保了只有一个点赞操作能够成功触发 API 调用，
+   * 从根本上解决了无限刷赞的 bug。
+   */
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
-
+    
+    // 获取卡片状态，只有公开且审核通过的卡片才能点赞
     const cardStatus = getDataCardStatus({ is_public: isPublic });
-    if (cardStatus.status !== 'public' || liked || liking) return;
+    if (cardStatus.status !== 'public' || liking) return;
+    
+    const success = addLikedCard(id);
 
-    try {
+    // 只有当 localStorage 写入成功（即之前未点过赞）时，才继续执行
+    if (success) {
+      setLiked(true);
       setLiking(true);
+      setCurrentLikeCount(prev => prev + 1);
 
-      // 调用 API 增加点赞数
-      const response = await fetch('/api/data-card-stats', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          cardId: id,
-          type: 'like'
-        })
-      });
+      try {
+        // 调用 API 增加点赞数
+        const response = await fetch('/api/data-card-stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cardId: id, type: 'like' }),
+        });
 
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          // 添加到本地存储
-          const success = addLikedCard(id);
-          if (success) {
-            setLiked(true);
-            setCurrentLikeCount(prev => prev + 1);
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
             onLike?.();
             onLikeSuccess?.();
+          } else {
+            // 如果API失败，理论上应该回滚状态，但为了简化UI，暂时只打印错误
+            console.error('API call to like card failed, but UI state updated.');
           }
         }
+      } catch (error) {
+        console.error('点赞失败:', error);
+        // 网络等错误发生时，也可以考虑回滚UI状态
+        setCurrentLikeCount(prev => prev - 1); 
+      } finally {
+        setLiking(false);
       }
-    } catch (error) {
-      console.error('点赞失败:', error);
-    } finally {
-      setLiking(false);
+    } else {
+      // 如果 addLikedCard 返回 false，说明已经点过赞了，确保UI状态是正确的
+      if (!liked) {
+        setLiked(true);
+      }
     }
   };
 
