@@ -14,7 +14,7 @@ import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
-import { MainColor } from '../lib/main-color';
+import { MainColor } from '@/lib/main-color';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi } from '@/lib/auth';
 
@@ -26,7 +26,7 @@ import AuthModal from '../components/CharManager/AuthModal';
 import SaveCardModal from '../components/CharManager/SaveCardModal';
 import DataCardsModal from '../components/CharManager/DataCardsModal';
 import ScenarioEditor from '../components/ScenarioEditor';
-import { UserWithTitle } from '../components/UserTitle';
+import { UserWithTitle } from '@/components/UserTitle';
 
 // 兼容 Edge 和 Node.js 环境的 crypto API
 const randomUUID = typeof crypto !== 'undefined' ? crypto.randomUUID.bind(crypto) : webcrypto.randomUUID.bind(webcrypto);
@@ -911,6 +911,12 @@ const CharacterManagerPage: React.FC = () => {
                                         >
                                             登录 / 注册
                                         </button>
+                                        <Link
+                                            href="/password-recovery"
+                                            className="ml-3 text-sm text-purple-600 hover:text-purple-700 underline"
+                                        >
+                                            找回密码
+                                        </Link>
                                     </div>
                                 )}
                             </div>
