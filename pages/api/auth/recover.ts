@@ -1,4 +1,3 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
 import { getUserByUsername } from '@/lib/d1';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
@@ -6,33 +5,57 @@ export const runtime = 'edge';
 
 const GENERIC_MESSAGE = '如果您输入的内容正确，密码则会发送到您的邮箱中。 \n 如果输入的内容不正确，则不会有密码发送。';
 
-type RecoveryResponse =
-  | { success: true; message: string }
-  | { success: false; error: string };
-
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<RecoveryResponse>
-) {
+export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ success: false, error: 'Method not allowed' });
+    return new Response(
+      JSON.stringify({ success: false, error: 'Method not allowed' }),
+      {
+        status: 405,
+        headers: {
+          'Content-Type': 'application/json',
+          Allow: 'POST'
+        }
+      }
+    );
   }
 
-  const { username, email, turnstileToken } = req.body as {
-    username?: string;
-    email?: string;
-    turnstileToken?: string;
-  };
+  let payload: { username?: string; email?: string; turnstileToken?: string };
+
+  try {
+    payload = await req.json();
+  } catch (error) {
+    console.error('Failed to parse recovery payload:', error);
+    return new Response(
+      JSON.stringify({ success: false, error: '请求体格式错误' }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+  }
+
+  const { username, email, turnstileToken } = payload;
 
   if (!username || !email || !turnstileToken) {
-    return res.status(400).json({ success: false, error: '用户名、邮箱和验证码均不能为空' });
+    return new Response(
+      JSON.stringify({ success: false, error: '用户名、邮箱和验证码均不能为空' }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
   }
 
   const isTurnstileValid = await verifyTurnstileToken(turnstileToken);
 
   if (!isTurnstileValid) {
-    return res.status(400).json({ success: false, error: '安全验证失败，请重新验证' });
+    return new Response(
+      JSON.stringify({ success: false, error: '安全验证失败，请重新验证' }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
   }
 
   const normalizedEmail = email.trim().toLowerCase();
@@ -77,9 +100,21 @@ export default async function handler(
       }
     }
 
-    return res.status(200).json({ success: true, message: GENERIC_MESSAGE });
+    return new Response(
+      JSON.stringify({ success: true, message: GENERIC_MESSAGE }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
   } catch (error) {
     console.error('Password recovery error:', error);
-    return res.status(500).json({ success: false, error: '服务器错误，请稍后重试' });
+    return new Response(
+      JSON.stringify({ success: false, error: '服务器错误，请稍后重试' }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
   }
 }
