@@ -1,5 +1,4 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Resend } from 'resend';
 import { getUserByUsername } from '@/lib/d1';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
@@ -49,15 +48,26 @@ export default async function handler(
         if (!apiKey) {
           console.error('RESEND_API_KEY is not configured.');
         } else {
-          const resend = new Resend(apiKey);
           try {
-            await resend.emails.send({
-              from: '魔事院档案馆 <recovery@send.colanns.me>',
-              to: normalizedEmail,
-              subject: '魔法少女生成器 ~ 密钥找回',
-              text: `您好 ${user.username},\n\n以下是您请求找回的登录密钥，之后请妥善保管哦：\n${user.auth_key}\n\n如果这不是您的操作，请忽略此邮件。`,
-              html: `<p>您好 <strong>${user.username}</strong>,</p><p>以下是您请求找回的登录密钥，之后请妥善保管哦：</p><p style="font-size:16px;font-weight:bold;">${user.auth_key}</p><p>如果这不是您的操作，请忽略此邮件。</p>`
+            const response = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+              },
+              body: JSON.stringify({
+                from: '魔事院档案馆 <recovery@send.colanns.me>',
+                to: [normalizedEmail],
+                subject: '魔法少女生成器 ~ 密钥找回',
+                html: `<p>您好 <strong>${user.username}</strong>,</p><p>以下是您请求找回的登录密钥，之后请妥善保管哦：</p><p style="font-size:16px;font-weight:bold;">${user.auth_key}</p><p>如果这不是您的操作，请忽略此邮件。</p>`,
+                text: `您好 ${user.username},\n\n以下是您请求找回的登录密钥，之后请妥善保管哦：\n${user.auth_key}\n\n如果这不是您的操作，请忽略此邮件。`
+              })
             });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              console.error('Failed to send recovery email:', response.status, errorText);
+            }
           } catch (emailError) {
             console.error('Failed to send recovery email:', emailError);
           }
