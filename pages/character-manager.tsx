@@ -877,28 +877,46 @@ const CharacterManagerPage: React.FC = () => {
                                 {authLoading ? (
                                     <p className="text-sm text-gray-600">加载中...</p>
                                 ) : isAuthenticated ? (
-                                    <div className="flex justify-between items-center">
-                                        <div className="text-left">
-                                            <p className="text-sm text-gray-600">当前用户</p>
-                                            <UserWithTitle
-                                                username={user?.username || ''}
-                                                prefix={user?.prefix}
-                                                usernameClassName="font-semibold text-pink-700"
-                                                titleClassName="ml-1"
-                                            />
-                                        </div>
-                                        <div className="space-x-2">
-                                            <button
-                                                onClick={() => setShowDataCardsModal(true)}
-                                                className="px-3 py-1 text-sm bg-pink-600 text-white rounded hover:bg-pink-700"
-                                            >
-                                                我的数据卡 ({userDataCards.length}/{userCapacity})
-                                            </button>
+                                    <div className="space-y-3">
+                                        {/* 用户信息行 */}
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center">
+                                                <span className="text-sm text-gray-600">欢迎回来，</span>
+                                                <UserWithTitle
+                                                    username={user?.username || ''}
+                                                    prefix={user?.prefix}
+                                                    usernameClassName="text-sm text-pink-700"
+                                                    titleClassName="text-xs"
+                                                />
+                                            </div>
+                                            <div>
+                                                <Link
+                                                    href="/redeem"
+                                                    className="mr-2 px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
+                                                >
+                                                兑换
+                                                </Link>
                                             <button
                                                 onClick={logout}
-                                                className="px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600"
+                                                className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
                                             >
                                                 退出登录
+                                            </button>
+                                            </div>
+                                        </div>
+
+                                        {/* 操作按钮行 */}
+                                        <div className="flex items-end justify-between">
+                                            <button
+                                                onClick={() => setShowDataCardsModal(true)}
+                                                className="flex items-center cursor-pointer justify-center w-full gap-2 px-8 py-2.5 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors font-medium"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                                </svg>
+                                                <span className="text-sm">
+                                                    我的数据卡 <span className="font-bold">({userDataCards.length}/{userCapacity})</span>
+                                                </span>
                                             </button>
                                         </div>
                                     </div>

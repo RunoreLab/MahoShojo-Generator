@@ -102,7 +102,7 @@ export async function getUserDataCardCapacity(userId: number, defaultCapacity: n
       'SELECT slot_count FROM users WHERE id = ?',
       [userId]
     ) as any;
-    
+
     if (result.success && result.result && result.result[0]?.results?.length > 0) {
       const user = result.result[0].results[0];
       const slotCount = user.slot_count;
@@ -113,5 +113,34 @@ export async function getUserDataCardCapacity(userId: number, defaultCapacity: n
   } catch (error) {
     console.error("获取用户数据卡容量失败:", error);
     return defaultCapacity;
+  }
+}
+
+// 增加用户的槽位数量
+export async function increaseUserSlotCount(userId: number, increaseBy: number): Promise<boolean> {
+  try {
+    // 先获取当前的 slot_count
+    const result = await queryFromD1(
+      'SELECT slot_count FROM users WHERE id = ?',
+      [userId]
+    ) as any;
+
+    if (!result.success || !result.result || result.result[0]?.results?.length === 0) {
+      return false;
+    }
+
+    const currentSlotCount = result.result[0].results[0].slot_count || 0;
+    const newSlotCount = currentSlotCount + increaseBy;
+
+    // 更新 slot_count
+    const updateResult = await queryFromD1(
+      'UPDATE users SET slot_count = ? WHERE id = ?',
+      [newSlotCount, userId]
+    ) as any;
+
+    return updateResult.success;
+  } catch (error) {
+    console.error("增加用户槽位数量失败:", error);
+    return false;
   }
 }

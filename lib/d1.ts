@@ -19,7 +19,8 @@ export {
   getUserByEmail,
   getUserByAuthKey,
   verifyUserLogin,
-  getUserDataCardCapacity
+  getUserDataCardCapacity,
+  increaseUserSlotCount
 } from './database/users';
 
 // 重新导出数据卡相关功能

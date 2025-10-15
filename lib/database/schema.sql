@@ -67,3 +67,10 @@ CREATE INDEX idx_data_cards_type ON data_cards(type);
 CREATE INDEX idx_data_cards_is_public ON data_cards(is_public);
 CREATE INDEX idx_data_cards_usage_count ON data_cards(usage_count);
 CREATE INDEX idx_data_cards_like_count ON data_cards(like_count);
+
+-- 兑换码表（用完即删除，无需记录历史）
+CREATE TABLE IF NOT EXISTS redemption_codes (
+  code TEXT PRIMARY KEY NOT NULL,           -- 兑换码
+  slot_count INTEGER NOT NULL,              -- 加的槽位数量
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

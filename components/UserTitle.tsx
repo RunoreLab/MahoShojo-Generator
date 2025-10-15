@@ -55,7 +55,7 @@ export default function UserTitle({ prefix, className = '' }: UserTitleProps) {
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-md border ${className}`}
+      className={`inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-md border ${className}`}
       style={{
         color: parsedPrefix.textColor,
         backgroundColor: parsedPrefix.backgroundColor,
