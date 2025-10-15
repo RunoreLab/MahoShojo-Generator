@@ -5,7 +5,7 @@
  * bun run scripts/generate-redemption-codes.ts <数量> <槽位数>
  *
  * 例如：
- * bun run scripts/generate-redemption-codes.ts 10 5
+ * bun run scripts/generate-redemption-codes.ts 10 64
  * 生成 10 个兑换码，每个增加 5 个槽位
  */
 
@@ -63,13 +63,12 @@ async function main() {
   // 插入数据库
   console.log('💾 正在写入数据库...\n');
   const success = await insertRedemptionCodes(codes);
-
   if (success) {
     console.log('✅ 兑换码生成成功！\n');
     console.log('生成的兑换码：');
     console.log('━'.repeat(50));
     codes.forEach((item, index) => {
-      console.log(`${(index + 1).toString().padStart(3, ' ')}. ${item.code} (${item.slotCount} 槽位)`);
+      console.log(`谢谢金主大人支持！！以下是 ${item.slotCount} 个槽位的兑换码：【${item.code}】请在 魔事院档案馆 中登录账号后，点击兑换来使用~ 如果出现问题，可以在 QQ 群里联系 @Colanns 或者在这里直接私信哦~ 另外就是，赞助不少于 24 元的老板们可以留下自己的收货地址，之后说不定会有神秘小礼物包邮到家（？！`);
     });
     console.log('━'.repeat(50));
     console.log(`\n📊 总计: ${count} 个兑换码`);
