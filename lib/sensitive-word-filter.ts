@@ -1,7 +1,5 @@
 // lib/sensitive-word-filter.ts
 
-import { pinyin } from 'pinyin-pro';
-
 // 防止屏蔽，所以用base64编码并直接扔文件里
 const sensitiveWordsConfig = {
     mask: "*",
@@ -207,7 +205,6 @@ const base64Decode = (str: string): string => {
  */
 export class SensitiveWordFilter {
     private sensitiveWords: string[] = [];
-    private sensitiveWordsPinyin: string[] = []; // 敏感词的拼音形式
     private config: SensitiveWordsConfig | null = null;
     private isInitialized: boolean = false;
 
@@ -234,20 +231,6 @@ export class SensitiveWordFilter {
                 this.sensitiveWords = [...this.config.words];
             }
 
-            // 将所有敏感词转换为拼音（无音调、小写）
-            this.sensitiveWordsPinyin = this.sensitiveWords.map(word => {
-                try {
-                    // 只转换包含中文的词
-                    if (/[\u4e00-\u9fa5]/.test(word)) {
-                        return pinyin(word, { toneType: 'none', type: 'array' }).join('').toLowerCase();
-                    }
-                    return word.toLowerCase();
-                } catch (e) {
-                    console.warn(`拼音转换失败: ${word}`, e);
-                    return word.toLowerCase();
-                }
-            });
-
             this.isInitialized = true;
             console.log(`✅ 敏感词过滤器初始化成功，加载了 ${this.sensitiveWords.length} 个敏感词`);
             return true;
@@ -265,23 +248,6 @@ export class SensitiveWordFilter {
     }
 
     /**
-     * 将文本转换为拼音形式
-     */
-    private textToPinyin(text: string): string {
-        try {
-            // 提取所有中文字符
-            const chineseChars = text.match(/[\u4e00-\u9fa5]/g);
-            if (!chineseChars) return text.toLowerCase();
-
-            // 转换为拼音（无音调）
-            return pinyin(text, { toneType: 'none', type: 'array' }).join('').toLowerCase();
-        } catch (e) {
-            console.warn('文本拼音转换失败', e);
-            return text.toLowerCase();
-        }
-    }
-
-    /**
      * 检查文本中是否包含敏感词（增强版）
      */
     checkText(text: string): FilterResult {
@@ -292,8 +258,9 @@ export class SensitiveWordFilter {
         const detectedWords: string[] = [];
         let filteredText = text;
 
-        // 1. 原有的检测逻辑（处理正则表达式和普通匹配）
+        // 1. 直接匹配检测（处理正则表达式和普通匹配）
         for (const word of this.sensitiveWords) {
+            // 处理正则表达式格式的敏感词
             const isRegex = word.includes('[') || word.includes('(') || word.includes('|');
 
             if (isRegex) {
@@ -306,16 +273,19 @@ export class SensitiveWordFilter {
                                 detectedWords.push(match);
                             }
                         });
+                        // 替换敏感词
                         filteredText = filteredText.replace(regex, this.getMaskString());
                     }
                 } catch (regexError) {
                     console.error('正则表达式格式错误:', regexError);
+                    // 如果正则表达式格式错误，按普通字符串处理
                     if (text.toLowerCase().includes(word.toLowerCase())) {
                         detectedWords.push(word);
                         filteredText = this.replaceSensitiveWord(filteredText, word);
                     }
                 }
             } else {
+                // 普通字符串匹配（忽略大小写）
                 if (text.toLowerCase().includes(word.toLowerCase())) {
                     detectedWords.push(word);
                     filteredText = this.replaceSensitiveWord(filteredText, word);
@@ -328,13 +298,13 @@ export class SensitiveWordFilter {
         for (let i = 0; i < this.sensitiveWords.length; i++) {
             const word = this.sensitiveWords[i];
             const normalizedWord = this.normalizeText(word);
-            const normalizedWordPinyin = this.sensitiveWordsPinyin[i];
+            // const normalizedWordPinyin = this.sensitiveWordsPinyin[i];
             // 跳过正则表达式格式的词
             if (word.includes('[') || word.includes('(') || word.includes('|')) {
                 continue;
             }
 
-            if (normalizedText.includes(normalizedWord) || normalizedText.includes(normalizedWordPinyin)) {
+            if (normalizedText.includes(normalizedWord)) {
                 // 找到了用特殊符号分隔的敏感词
                 if (!detectedWords.includes(word)) {
                     detectedWords.push(`${word}(变体)`);
@@ -344,7 +314,6 @@ export class SensitiveWordFilter {
 
         // 3. 全文拼音检测，由于误报情况可能性略大，所以暂时不使用
         // const textPinyin = this.textToPinyin(this.normalizeText(text));
-
 
         const hasSensitiveWords = detectedWords.length > 0;
 
