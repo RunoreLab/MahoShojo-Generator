@@ -1,4 +1,5 @@
 // lib/sensitive-word-filter.ts
+import { cut } from 'jieba-wasm';
 
 // 防止屏蔽，所以用base64编码并直接扔文件里
 const sensitiveWordsConfig = {
@@ -248,7 +249,19 @@ export class SensitiveWordFilter {
     }
 
     /**
-     * 检查文本中是否包含敏感词（增强版）
+     * 使用 jieba 进行分词
+     */
+    private segmentText(text: string): string[] {
+        try {
+            return cut(text, true);
+        } catch (error) {
+            console.error('分词失败:', error);
+            return [];
+        }
+    }
+
+    /**
+     * 检查文本中是否包含敏感词
      */
     checkText(text: string): FilterResult {
         if (!this.isInitialized) {
@@ -287,33 +300,34 @@ export class SensitiveWordFilter {
             } else {
                 // 普通字符串匹配（忽略大小写）
                 if (text.toLowerCase().includes(word.toLowerCase())) {
-                    detectedWords.push(word);
-                    filteredText = this.replaceSensitiveWord(filteredText, word);
+                        detectedWords.push(word);
+                        filteredText = this.replaceSensitiveWord(filteredText, word);
                 }
             }
         }
 
         // 2. 增强检测：规范化文本后检测（去除特殊符号）
         const normalizedText = this.normalizeText(text);
-        for (let i = 0; i < this.sensitiveWords.length; i++) {
-            const word = this.sensitiveWords[i];
+        const normalizedSegments = this.segmentText(normalizedText);
+
+        for (const word of this.sensitiveWords) {
             const normalizedWord = this.normalizeText(word);
-            // const normalizedWordPinyin = this.sensitiveWordsPinyin[i];
+
             // 跳过正则表达式格式的词
             if (word.includes('[') || word.includes('(') || word.includes('|')) {
                 continue;
             }
 
-            if (normalizedText.includes(normalizedWord)) {
-                // 找到了用特殊符号分隔的敏感词
-                if (!detectedWords.includes(word)) {
-                    detectedWords.push(`${word}(变体)`);
+            // 检查规范化后的分词结果
+            for (const segment of normalizedSegments) {
+                if (segment.includes(normalizedWord)) {
+                    if (!detectedWords.includes(word) && !detectedWords.includes(`${word}(变体)`)) {
+                        detectedWords.push(`${word}(变体)`);
+                    }
+                    break;
                 }
             }
         }
-
-        // 3. 全文拼音检测，由于误报情况可能性略大，所以暂时不使用
-        // const textPinyin = this.textToPinyin(this.normalizeText(text));
 
         const hasSensitiveWords = detectedWords.length > 0;
 
