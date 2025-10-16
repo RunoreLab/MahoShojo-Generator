@@ -5,7 +5,18 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true
   },
-  
+
+  // 重定向配置 - 将无效的路径重定向到正确的页面
+  async redirects() {
+    return [
+      {
+        source: '/details:path+',
+        destination: '/details',
+        permanent: false, // 使用 307 临时重定向
+      },
+    ];
+  },
+
   // 其他配置
   typescript: {
     ignoreBuildErrors: false,
