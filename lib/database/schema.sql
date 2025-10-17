@@ -74,3 +74,37 @@ CREATE TABLE IF NOT EXISTS redemption_codes (
   slot_count INTEGER NOT NULL,              -- 加的槽位数量
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 徽章定义表
+CREATE TABLE IF NOT EXISTS badges (
+  id TEXT PRIMARY KEY NOT NULL,              -- 徽章唯一ID（如：founder, beta_tester）
+  name TEXT NOT NULL,                        -- 徽章名称
+  description TEXT,                          -- 徽章描述
+  icon TEXT NOT NULL,                        -- 图标配置（JSON格式）
+  text_color TEXT NOT NULL,                  -- 文字颜色配置（JSON格式）
+  background_color TEXT NOT NULL,            -- 背景颜色配置（JSON格式）
+  border_color TEXT,                         -- 边框颜色配置（JSON格式，可选）
+  rarity INTEGER DEFAULT 0,                  -- 稀有度（数字越大越稀有）
+  sort_order INTEGER DEFAULT 0,              -- 显示排序
+  is_active BOOLEAN DEFAULT 1,               -- 是否可用
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_badges_rarity ON badges(rarity);
+CREATE INDEX IF NOT EXISTS idx_badges_is_active ON badges(is_active);
+
+-- 用户徽章关联表
+CREATE TABLE IF NOT EXISTS user_badges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,                  -- 用户ID
+  badge_id TEXT NOT NULL,                    -- 徽章ID（关联 badges.id）
+  is_equipped BOOLEAN DEFAULT 0,             -- 是否佩戴（0=未佩戴，1=已佩戴）
+  display_order INTEGER DEFAULT 0,           -- 佩戴后的显示顺序（1-5）
+  obtained_at DATETIME DEFAULT CURRENT_TIMESTAMP,  -- 获得时间
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (badge_id) REFERENCES badges(id) ON DELETE CASCADE,
+  UNIQUE(user_id, badge_id)                  -- 确保用户不能重复拥有同一徽章
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_badges_user_id ON user_badges(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_badges_is_equipped ON user_badges(is_equipped);
