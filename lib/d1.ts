@@ -47,6 +47,17 @@ export {
   getRecentBattles
 } from './database/arena';
 
+// 重新导出徽章相关功能
+export {
+  getUserBadges,
+  getUserEquippedBadges,
+  updateEquippedBadges,
+  grantBadgeToUser,
+  revokeBadgeFromUser,
+  userHasBadge,
+  getAllBadges
+} from './database/badges';
+
 /*
 数据库 Schema 说明：
 请查看 lib/database/schema.sql 文件了解完整的数据库结构。

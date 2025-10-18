@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import Footer from '../components/Footer';
+import { useAuth } from '@/lib/useAuth';
+import { UserWithTitle } from '@/components/UserTitle';
 
 interface LogoConfig {
   id: string;
@@ -85,6 +87,7 @@ const logoConfigs: LogoConfig[] = [
 
 export default function Home() {
   const [, setImagesLoaded] = useState(false);
+  const { user, userBadges, isAuthenticated, loading } = useAuth();
 
   useEffect(() => {
     const preloadImages = async () => {
@@ -133,6 +136,33 @@ export default function Home() {
               <img src="/logo.svg" width={280} height={180} alt="魔法少女生成器" />
             </div>
 
+            <div className="flex justify-center mb-4">
+              {loading ? (
+                <span className="text-sm text-gray-600">加载中...</span>
+              ) : isAuthenticated ? (
+                <Link
+                  href="/character-manager"
+                  className="inline-flex items-center px-4 py-2 text-sm bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 transition-colors"
+                >
+                  <span>欢迎回来，</span>
+                  <UserWithTitle
+                    username={user?.username || ''}
+                    usernameClassName="text-pink-700 font-semibold"
+                    titleClassName="text-xs"
+                    badges={userBadges}
+                    showBadges={true}
+                  />
+                  <span className="ml-2">点击进入档案馆</span>
+                </Link>
+              ) : (
+                <Link
+                  href="/character-manager"
+                  className="inline-flex items-center px-4 py-2 text-sm bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors"
+                >
+                  注册或登录
+                </Link>
+              )}
+            </div>
             <p className="subtitle text-center mb-4">
               欢迎来到魔法国度！选择一个项目开始玩耍吧！
             </p>
