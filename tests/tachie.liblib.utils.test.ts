@@ -2,12 +2,12 @@ import { describe, it, expect } from 'bun:test';
 import { urlSignature, getSignedUrl } from '@/lib/tachie/liblib/utils';
 
 describe('lib/tachie/liblib/utils', () => {
-    it('urlSignature: 当 url 为空时返回 undefined', () => {
-        expect(urlSignature('' as unknown as string, '1234567890')).toBeUndefined();
+    it('urlSignature: 当 url 为空时返回 undefined', async () => {
+        expect(await urlSignature('' as unknown as string, '1234567890')).toBeUndefined();
     });
 
-    it('urlSignature: 返回对象包含 signature/timestamp/signatureNonce，且 signature 为 URL-safe base64', () => {
-        const result = urlSignature('/api/generate/webui/status', '1234567890');
+    it('urlSignature: 返回对象包含 signature/timestamp/signatureNonce，且 signature 为 URL-safe base64', async () => {
+        const result = await urlSignature('/api/generate/webui/status', '1234567890');
         expect(result).toBeDefined();
         expect(typeof result!.timestamp).toBe('number');
         expect(typeof result!.signatureNonce).toBe('string');
@@ -17,11 +17,11 @@ describe('lib/tachie/liblib/utils', () => {
         expect(result!.signature).not.toMatch(/[+=/]/);
     });
 
-    it('getSignedUrl: 生成包含签名参数的 URL 查询串，并且 Timestamp 合理', () => {
+    it('getSignedUrl: 生成包含签名参数的 URL 查询串，并且 Timestamp 合理', async () => {
         const now = Date.now();
-        const url = getSignedUrl('lMG-xx', '1234567890', '/api/generate/webui/status');
+        const url = await getSignedUrl('lMG-xx', '1234567890', '/api/generate/webui/status');
         console.log(url);
-        expect(url.startsWith('/api/generate/webui/status?')).toBe(true);
+        expect(url.startsWith('https://openapi.liblibai.cloud/api/generate/webui/status?')).toBe(true);
 
         const qs = url.split('?')[1] ?? '';
         const params = new URLSearchParams(qs);
