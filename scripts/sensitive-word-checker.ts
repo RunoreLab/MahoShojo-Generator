@@ -12,11 +12,11 @@ import fs from 'fs';
 // console.log('sensitiveWord test result:', result.detectedWords);
 
 // Read the test fixture as text and pass it to checkText (it expects a string)
-fs.readFile('./tests/test.json', 'utf8', (err, data) => {
+fs.readFile('./tests/test.json', 'utf8', async (err, data) => {
     if (err) throw err;
 
     const filter = new SensitiveWordFilter();
-    const result = filter.checkText(data);
+    const result = await filter.checkText(data);
 
     // Basic assertion: result should be an object with isUnsafe boolean
     console.log('sensitiveWord test result:', result.detectedWords);

@@ -416,8 +416,13 @@ export class SensitiveWordFilter {
 /**
  * 创建默认的敏感词过滤器实例
  */
+let sharedFilter: SensitiveWordFilter | null = null;
+
 export const createSensitiveWordFilter = (): SensitiveWordFilter => {
-  return new SensitiveWordFilter();
+  if (!sharedFilter) {
+    sharedFilter = new SensitiveWordFilter();
+  }
+  return sharedFilter;
 };
 
 /**
@@ -425,7 +430,18 @@ export const createSensitiveWordFilter = (): SensitiveWordFilter => {
  */
 export const quickCheck = async (text: string): Promise<FilterResult> => {
   const filter = createSensitiveWordFilter();
-  return filter.checkText(text);
+  try {
+    return await filter.checkText(text);
+  } catch (error) {
+    console.error('敏感词检测失败，启用安全回退逻辑。', error);
+    return {
+      hasSensitiveWords: false,
+      detectedWords: [],
+      filteredText: text,
+      originalText: text,
+      shouldRedirectToArrested: false
+    };
+  }
 };
 
 export default SensitiveWordFilter;
