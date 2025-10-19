@@ -9,6 +9,10 @@ type SignatureSanitizationOptions = {
     ignoreKeyPrefixes?: string[];
 };
 
+type GenerateSignatureOptions = {
+    sanitizeIgnoredKeys?: boolean;
+};
+
 type StripResult<T> = {
     value: T;
     changed: boolean;
@@ -168,9 +172,13 @@ const bufferToHex = (buffer: ArrayBuffer): string => {
 /**
  * 为一个对象生成HMAC-SHA256签名。
  * @param data - 需要签名的对象。
+ * @param options - 生成签名时的配置。
  * @returns 返回十六进制格式的签名字符串，如果密钥未设置则返回null。
  */
-export const generateSignature = async (data: object): Promise<string | null> => {
+export const generateSignature = async (
+    data: object,
+    options: GenerateSignatureOptions = {}
+): Promise<string | null> => {
     const key = await getSecretKey();
     if (!key) return null;
 
@@ -181,8 +189,14 @@ export const generateSignature = async (data: object): Promise<string | null> =>
         delete (dataToSign as any).signature;
     }
 
+    const sanitizeIgnoredKeys = options.sanitizeIgnoredKeys ?? true;
+
+    const canonicalTarget = sanitizeIgnoredKeys
+        ? stripIgnoredKeysDeep(dataToSign, DEFAULT_SANITIZATION_OPTIONS).value
+        : dataToSign;
+
     // 1. 对对象的键进行递归排序，确保JSON字符串的稳定性
-    const sortedData = sortObjectKeys(dataToSign);
+    const sortedData = sortObjectKeys(canonicalTarget);
     
     // 2. 将排序后的对象序列化为JSON字符串
     const jsonString = JSON.stringify(sortedData);
@@ -220,19 +234,25 @@ export const verifySignature = async (dataWithSignature: any): Promise<boolean> 
     if (removedPrivateFields) {
         candidates.push(sanitizedWithoutPrivateFields);
     }
+    const modes: GenerateSignatureOptions[] = [
+        { sanitizeIgnoredKeys: true },
+        { sanitizeIgnoredKeys: false }
+    ];
 
     for (const candidate of candidates) {
-        const expectedSignature = await generateSignature(candidate);
-        if (!expectedSignature) {
-            continue;
-        }
+        for (const mode of modes) {
+            const expectedSignature = await generateSignature(candidate, mode);
+            if (!expectedSignature) {
+                continue;
+            }
 
-        if (signature.length !== expectedSignature.length) {
-            continue;
-        }
+            if (signature.length !== expectedSignature.length) {
+                continue;
+            }
 
-        if (signature === expectedSignature) {
-            return true;
+            if (signature === expectedSignature) {
+                return true;
+            }
         }
     }
 
