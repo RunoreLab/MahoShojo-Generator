@@ -327,5 +327,78 @@ export const dataCardApi = {
       console.error('Delete card error:', error);
       return { success: false, error: '删除失败' };
     }
+  },
+
+  // 获取回收站列表
+  async getRecycleBin(): Promise<any[]> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return [];
+
+    try {
+      const response = await fetch('/api/data-card-recycle', {
+        headers: { 'Authorization': authHeader }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return data.cards || [];
+      }
+      return [];
+    } catch (error) {
+      console.error('Get recycle bin error:', error);
+      return [];
+    }
+  },
+
+  // 恢复回收站中的数据卡
+  async restoreCard(id: string): Promise<{ success: boolean; error?: string }> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) {
+      return { success: false, error: '未登录' };
+    }
+
+    try {
+      const response = await fetch('/api/data-card-recycle', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader
+        },
+        body: JSON.stringify({ id })
+      });
+
+      const result = await response.json();
+      if (response.ok) {
+        return result;
+      }
+      return { success: false, error: result.error || '恢复失败' };
+    } catch (error) {
+      console.error('Restore card error:', error);
+      return { success: false, error: '恢复失败' };
+    }
+  },
+
+  // 永久删除回收站中的数据卡
+  async deleteRecycleCard(id: string): Promise<{ success: boolean; error?: string }> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) {
+      return { success: false, error: '未登录' };
+    }
+
+    try {
+      const response = await fetch(`/api/data-card-recycle?id=${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': authHeader }
+      });
+
+      const result = await response.json();
+      if (response.ok) {
+        return result;
+      }
+      return { success: false, error: result.error || '删除失败' };
+    } catch (error) {
+      console.error('Delete recycle card error:', error);
+      return { success: false, error: '删除失败' };
+    }
   }
 };

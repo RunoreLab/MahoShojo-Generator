@@ -19,6 +19,9 @@ interface DataCardsModalProps {
   onCancelEdit: () => void;
   onShareCard?: (card: any) => void;
   userCapacity?: number;
+  onOpenRecycleBin?: () => void;
+  recycleCount?: number;
+  recycleLimit?: number;
 }
 
 export default function DataCardsModal({
@@ -35,7 +38,10 @@ export default function DataCardsModal({
   onLoadCard,
   onCancelEdit,
   onShareCard,
-  userCapacity = config.DEFAULT_DATA_CARD_CAPACITY
+  userCapacity = config.DEFAULT_DATA_CARD_CAPACITY,
+  onOpenRecycleBin,
+  recycleCount = 0,
+  recycleLimit = config.RECYCLE_BIN_LIMIT
 }: DataCardsModalProps) {
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -64,11 +70,21 @@ export default function DataCardsModal({
         >
           ×
         </button>
-        <div className="flex justify-between items-center mb-4 pr-8">
-          <h2 className="text-xl font-bold">我的数据卡</h2>
-          <div className="text-sm text-gray-600">
-            {dataCards.length}/{userCapacity}
+        <div className="flex justify-between items-center mb-4 pr-8 gap-4 flex-wrap">
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold">我的数据卡</h2>
+            <div className="text-sm text-gray-600">
+              {dataCards.length}/{userCapacity}
+            </div>
           </div>
+          {onOpenRecycleBin && (
+            <button
+              onClick={onOpenRecycleBin}
+              className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-200 transition-colors"
+            >
+              回收站 {recycleCount}/{recycleLimit}
+            </button>
+          )}
         </div>
 
         {dataCards.length === 0 ? (

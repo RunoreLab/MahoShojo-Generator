@@ -227,6 +227,7 @@ export const config = {
 
   // 数据卡管理配置
   DEFAULT_DATA_CARD_CAPACITY: 20,
+  RECYCLE_BIN_LIMIT: 5,
 
   // 魔法少女生成配置
   MAGICAL_GIRL_GENERATION: {

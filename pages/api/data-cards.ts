@@ -4,7 +4,8 @@ import {
   getUserDataCards, 
   updateDataCard, 
   deleteDataCard,
-  getUserDataCardCapacity
+  getUserDataCardCapacity,
+  pruneUserRecycleBin
 } from '@/lib/d1';
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -234,7 +235,9 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
-        return new Response(JSON.stringify({ success: true, message: '数据卡删除成功' }), {
+        await pruneUserRecycleBin(userId, config.RECYCLE_BIN_LIMIT);
+
+        return new Response(JSON.stringify({ success: true, message: '数据卡已移入回收站' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
         });
