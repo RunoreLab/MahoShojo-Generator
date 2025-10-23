@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import TurnstileWidget, { TurnstileRef } from '../Turnstile';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import Link from 'next/link';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -291,7 +292,7 @@ export default function AuthModal({
           </button>
         </form>
 
-        <div className="mt-4 text-center text-sm text-gray-600">
+        <div className="mt-2 text-center text-sm text-gray-600">
           {authMode === 'login' ? '还没有账号？' : '已有账号？'}
           <button
             onClick={switchMode}
@@ -299,6 +300,9 @@ export default function AuthModal({
           >
             {authMode === 'login' ? '去注册' : '去登录'}
           </button>
+        </div>
+        <div className="mt-2 text-center text-sm text-gray-600">
+          <Link href="/password-recovery" className="text-purple-600 hover:text-purple-700 font-medium">找回密钥</Link>
         </div>
         </>
         )}

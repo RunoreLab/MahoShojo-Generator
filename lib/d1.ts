@@ -19,7 +19,8 @@ export {
   getUserByEmail,
   getUserByAuthKey,
   verifyUserLogin,
-  getUserDataCardCapacity
+  getUserDataCardCapacity,
+  increaseUserSlotCount
 } from './database/users';
 
 // 重新导出数据卡相关功能
@@ -45,6 +46,17 @@ export {
   getCharacterLeaderboard,
   getRecentBattles
 } from './database/arena';
+
+// 重新导出徽章相关功能
+export {
+  getUserBadges,
+  getUserEquippedBadges,
+  updateEquippedBadges,
+  grantBadgeToUser,
+  revokeBadgeFromUser,
+  userHasBadge,
+  getAllBadges
+} from './database/badges';
 
 /*
 数据库 Schema 说明：

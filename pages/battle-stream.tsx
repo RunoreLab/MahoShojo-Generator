@@ -1,11 +1,11 @@
-// pages/battle.tsx
+// pages/battle-stream.tsx
 
 import React, { useState, useRef, ChangeEvent, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useCooldown } from '../lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
-import BattleReportCard, { NewsReport } from '../components/BattleReportCard';
+import BattleReportCard, { NewsReport } from '../components/stream/BattleReportCard';
 import Link from 'next/link';
 import { Preset } from './api/get-presets';
 import { StatsData } from './api/get-stats';
@@ -87,6 +87,46 @@ type Combatant = (CombatantData | RandomCombatantPlaceholder) & { teamId?: numbe
 // 定义故事/战斗模式类型
 type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 
+interface SSEEventPayload {
+    event: string;
+    data: string;
+}
+
+const parseSSEEvent = (rawEvent: string): SSEEventPayload | null => {
+    if (!rawEvent.trim()) {
+        return null;
+    }
+
+    const lines = rawEvent.split('\n');
+    let eventType = 'message';
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+        if (line.startsWith('event:')) {
+            eventType = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+            dataLines.push(line.slice(5).trim());
+        }
+    }
+
+    if (dataLines.length === 0) {
+        return null;
+    }
+
+    return {
+        event: eventType,
+        data: dataLines.join('\n'),
+    };
+};
+
+const safeJsonParse = <T,>(input: string): T | null => {
+    try {
+        return JSON.parse(input) as T;
+    } catch {
+        return null;
+    }
+};
+
 // 辅助函数：用于检测是否为旧版的随机判定器格式
 // 通过检查数组中的对象是否包含旧的 'event' 和 'probability' 键，
 // 并且不包含新格式特有的 'type' 键，来做出判断。
@@ -115,6 +155,8 @@ const BattlePage: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     // 更新状态以匹配新的数据结构
     const [newsReport, setNewsReport] = useState<NewsReport | null>(null);
+    const [liveArticleBody, setLiveArticleBody] = useState<string | null>(null);
+    const [isStreaming, setIsStreaming] = useState(false);
     // 保存的图片URL
     const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
     // 是否显示图片模态框
@@ -850,7 +892,7 @@ const BattlePage: React.FC = () => {
                 }
             });
 
-            const response = await fetch('/api/generate-battle-story', {
+            const response = await fetch('/api/stream/generate-battle-story', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -902,35 +944,138 @@ const BattlePage: React.FC = () => {
                 throw new Error(errorMessage);
             }
 
-            // 处理新的API响应结构
-            const result: BattleApiResponse = await response.json();
-
-            // 加入后置生成敏感词检测
-            if (await checkSensitiveWords(JSON.stringify(result.report))) return;
-
-            // 将战报和随机判定结果合并后再设置 state
-            const reportWithAdjudication = {
-                ...result.report,
-                adjudicationResults: result.adjudicationResults,
-            };
-
-            setNewsReport(reportWithAdjudication);
-            setUpdatedCombatants(result.updatedCombatants);
-            // v0.4.0 新增: 更新判定结果状态
-            if (result.adjudicationResults) {
-                setAdjudicationResults(result.adjudicationResults);
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('text/event-stream')) {
+                const unexpectedBody = await response.text();
+                console.error('意外的响应内容:', unexpectedBody);
+                throw new Error('服务器未返回流式数据，暂时无法生成战报。');
             }
 
+            const reader = response.body?.getReader();
+            if (!reader) {
+                throw new Error('当前浏览器不支持流式输出，请使用最新版本的现代浏览器。');
+            }
 
-            // 用返回的最新角色数据更新当前页面的参战者状态
-            setCombatants(prev =>
-                (prev.filter(c => 'data' in c) as CombatantData[]).map(oldCombatant => {
-                    const updatedData = result.updatedCombatants.find(
-                        uc => (uc.codename || uc.name) === (oldCombatant.data.codename || oldCombatant.data.name)
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let finalPayload: BattleApiResponse | null = null;
+            let shouldAbort = false;
+
+            setLiveArticleBody('');
+            setIsStreaming(true);
+            setNewsReport({
+                headline: '故事生成中...',
+                reporterInfo: {
+                    name: '直播记者·星尘',
+                    publication: '魔法少女通讯社',
+                },
+                article: {
+                    body: '',
+                    analysis: '记者正在实时整理点评，请稍候。',
+                },
+                officialReport: {
+                    winner: '待定',
+                    conclusion: '故事仍在进行，最终结论稍后揭晓。',
+                },
+                userGuidance: userGuidance || undefined,
+                mode: battleMode,
+            });
+
+            const processEvent = async (evt: SSEEventPayload) => {
+                if (evt.event === 'status' || evt.event === 'yaml') {
+                    return;
+                }
+
+                if (evt.event === 'article_body') {
+                    const payload = safeJsonParse<{ text: string }>(evt.data);
+                    if (payload && typeof payload.text === 'string') {
+                        setLiveArticleBody(payload.text);
+                    }
+                    return;
+                }
+
+                if (evt.event === 'error') {
+                    const payload = safeJsonParse<{ message?: string }>(evt.data);
+                    throw new Error(payload?.message || '生成失败');
+                }
+
+                if (evt.event === 'final') {
+                    const payload = safeJsonParse<BattleApiResponse>(evt.data);
+                    if (!payload) {
+                        throw new Error('无法解析最终战报数据');
+                    }
+
+                    if (await checkSensitiveWords(JSON.stringify(payload.report))) {
+                        shouldAbort = true;
+                        return;
+                    }
+
+                    finalPayload = payload;
+
+                    const reportWithAdjudication = {
+                        ...payload.report,
+                        adjudicationResults: payload.adjudicationResults,
+                    };
+
+                    setNewsReport(reportWithAdjudication);
+                    setUpdatedCombatants(payload.updatedCombatants);
+                    if (payload.adjudicationResults) {
+                        setAdjudicationResults(payload.adjudicationResults);
+                    }
+
+                    setCombatants(prev =>
+                        (prev.filter(c => 'data' in c) as CombatantData[]).map(oldCombatant => {
+                            const updatedData = payload.updatedCombatants.find(
+                                uc => (uc.codename || uc.name) === (oldCombatant.data.codename || oldCombatant.data.name)
+                            );
+                            return updatedData ? { ...oldCombatant, data: updatedData } : oldCombatant;
+                        })
                     );
-                    return updatedData ? { ...oldCombatant, data: updatedData } : oldCombatant;
-                })
-            );
+
+                    setLiveArticleBody(null);
+                }
+            };
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) {
+                    break;
+                }
+                if (!value) {
+                    continue;
+                }
+
+                buffer += decoder.decode(value, { stream: true });
+
+                let boundary = buffer.indexOf('\n\n');
+                while (boundary !== -1) {
+                    const rawEvent = buffer.slice(0, boundary);
+                    buffer = buffer.slice(boundary + 2);
+                    const parsedEvent = parseSSEEvent(rawEvent);
+                    if (parsedEvent) {
+                        await processEvent(parsedEvent);
+                        if (shouldAbort) {
+                            await reader.cancel().catch(() => undefined);
+                            break;
+                        }
+                    }
+                    boundary = buffer.indexOf('\n\n');
+                }
+
+                if (shouldAbort) {
+                    break;
+                }
+            }
+
+            if (shouldAbort) {
+                setNewsReport(null);
+                setLiveArticleBody(null);
+                return;
+            }
+
+            if (!finalPayload) {
+                throw new Error('未收到完整的战报数据。');
+            }
 
             startCooldown();
         } catch (err) {
@@ -940,8 +1085,11 @@ const BattlePage: React.FC = () => {
             } else {
                 setError('✨ 魔法失效了！生成故事时发生未知错误，请重试。');
             }
+            setNewsReport(null);
+            setLiveArticleBody(null);
         } finally {
             setIsGenerating(false);
+            setIsStreaming(false);
         }
     };
 
@@ -1501,11 +1649,19 @@ const BattlePage: React.FC = () => {
 
 
                     {newsReport && (
-                        <BattleReportCard
-                            report={newsReport}
-                            onSaveImage={handleSaveImage}
-                            mode={battleMode} // 传递模式
-                        />
+                        <div className="space-y-3 mt-6">
+                            {isStreaming && (
+                                <div className="px-4 py-2 bg-purple-50 border border-purple-200 text-purple-700 text-sm rounded">
+                                    正在流式生成故事，正文会实时刷新，请稍候片刻……
+                                </div>
+                            )}
+                            <BattleReportCard
+                                report={newsReport}
+                                onSaveImage={handleSaveImage}
+                                mode={battleMode}
+                                liveBody={liveArticleBody ?? undefined}
+                            />
+                        </div>
                     )}
 
                     {/* --- 更新后的角色信息展示区域 --- */}

@@ -4,6 +4,95 @@ const subtle = crypto.subtle;
 // 使用一个Promise来缓存密钥的导入过程，避免重复导入
 let secretKeyPromise: Promise<CryptoKey | null> | null = null;
 
+type SignatureSanitizationOptions = {
+    ignoreKeys?: string[];
+    ignoreKeyPrefixes?: string[];
+};
+
+type GenerateSignatureOptions = {
+    sanitizeIgnoredKeys?: boolean;
+};
+
+type StripResult<T> = {
+    value: T;
+    changed: boolean;
+};
+
+const DEFAULT_SANITIZATION_OPTIONS: Required<SignatureSanitizationOptions> = {
+    ignoreKeys: [],
+    ignoreKeyPrefixes: ['_']
+};
+
+/**
+ * 判断某个键在签名过程中是否应该被忽略。
+ * @param key - 当前字段名。
+ * @param options - 配置项。
+ * @returns 如果应忽略则返回 true。
+ */
+const shouldIgnoreKey = (key: string, options: Required<SignatureSanitizationOptions>): boolean => {
+    if (options.ignoreKeys.includes(key)) {
+        return true;
+    }
+    return options.ignoreKeyPrefixes.some(prefix => key.startsWith(prefix));
+};
+
+/**
+ * 递归移除对象中需要忽略的字段，同时尽可能重用未修改的引用以减少额外分配。
+ * @param input - 待处理的数据。
+ * @param options - 忽略规则。
+ * @returns 包含处理后数据及是否发生变更的结果。
+ */
+const stripIgnoredKeysDeep = <T>(input: T, options: Required<SignatureSanitizationOptions>): StripResult<T> => {
+    if (Array.isArray(input)) {
+        let mutated = false;
+        const result = input.map(item => {
+            const { value: sanitizedItem, changed } = stripIgnoredKeysDeep(item, options);
+            if (changed) {
+                mutated = true;
+            }
+            if (!mutated && sanitizedItem !== item) {
+                mutated = true;
+            }
+            return sanitizedItem;
+        });
+
+        if (!mutated) {
+            return { value: input, changed: false };
+        }
+        return { value: result as unknown as T, changed: true };
+    }
+
+    if (input !== null && typeof input === 'object') {
+        const original = input as Record<string, any>;
+        let mutated = false;
+        const result: Record<string, any> = {};
+
+        for (const [key, value] of Object.entries(original)) {
+            if (shouldIgnoreKey(key, options)) {
+                mutated = true;
+                continue;
+            }
+
+            const { value: sanitizedChild, changed: childChanged } = stripIgnoredKeysDeep(value, options);
+            if (childChanged) {
+                mutated = true;
+            }
+            if (!mutated && sanitizedChild !== value) {
+                mutated = true;
+            }
+            result[key] = sanitizedChild;
+        }
+
+        if (!mutated && Object.keys(result).length === Object.keys(original).length) {
+            return { value: input, changed: false };
+        }
+
+        return { value: result as unknown as T, changed: true };
+    }
+
+    return { value: input, changed: false };
+};
+
 /**
  * [修改] 异步获取用于HMAC签名的密钥。
  * 密钥从环境变量 SIGNATURE_SECRET_KEY 中读取。
@@ -83,9 +172,13 @@ const bufferToHex = (buffer: ArrayBuffer): string => {
 /**
  * 为一个对象生成HMAC-SHA256签名。
  * @param data - 需要签名的对象。
+ * @param options - 生成签名时的配置。
  * @returns 返回十六进制格式的签名字符串，如果密钥未设置则返回null。
  */
-export const generateSignature = async (data: object): Promise<string | null> => {
+export const generateSignature = async (
+    data: object,
+    options: GenerateSignatureOptions = {}
+): Promise<string | null> => {
     const key = await getSecretKey();
     if (!key) return null;
 
@@ -96,8 +189,14 @@ export const generateSignature = async (data: object): Promise<string | null> =>
         delete (dataToSign as any).signature;
     }
 
+    const sanitizeIgnoredKeys = options.sanitizeIgnoredKeys ?? true;
+
+    const canonicalTarget = sanitizeIgnoredKeys
+        ? stripIgnoredKeysDeep(dataToSign, DEFAULT_SANITIZATION_OPTIONS).value
+        : dataToSign;
+
     // 1. 对对象的键进行递归排序，确保JSON字符串的稳定性
-    const sortedData = sortObjectKeys(dataToSign);
+    const sortedData = sortObjectKeys(canonicalTarget);
     
     // 2. 将排序后的对象序列化为JSON字符串
     const jsonString = JSON.stringify(sortedData);
@@ -124,15 +223,38 @@ export const verifySignature = async (dataWithSignature: any): Promise<boolean> 
     }
 
     const { signature, ...dataToVerify } = dataWithSignature;
-    
-    // 重新生成一个预期签名
-    const expectedSignature = await generateSignature(dataToVerify);
-    
-    // 比较两个签名是否一致
-    // 这是一个恒定时间比较，以防止时序攻击，虽然在这里的场景下可能性不大，但是一个好的安全实践
-    if (signature.length !== expectedSignature?.length) {
-        return false;
+
+    const candidates: object[] = [dataToVerify];
+
+    const { value: sanitizedWithoutPrivateFields, changed: removedPrivateFields } = stripIgnoredKeysDeep(
+        dataToVerify,
+        DEFAULT_SANITIZATION_OPTIONS
+    );
+
+    if (removedPrivateFields) {
+        candidates.push(sanitizedWithoutPrivateFields);
+    }
+    const modes: GenerateSignatureOptions[] = [
+        { sanitizeIgnoredKeys: true },
+        { sanitizeIgnoredKeys: false }
+    ];
+
+    for (const candidate of candidates) {
+        for (const mode of modes) {
+            const expectedSignature = await generateSignature(candidate, mode);
+            if (!expectedSignature) {
+                continue;
+            }
+
+            if (signature.length !== expectedSignature.length) {
+                continue;
+            }
+
+            if (signature === expectedSignature) {
+                return true;
+            }
+        }
     }
 
-    return signature === expectedSignature;
+    return false;
 };

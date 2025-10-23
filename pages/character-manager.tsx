@@ -14,9 +14,9 @@ import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
-import { MainColor } from '../lib/main-color';
+import { MainColor } from '@/lib/main-color';
 import { useAuth } from '@/lib/useAuth';
-import { dataCardApi } from '@/lib/auth';
+import { dataCardApi, authStorage } from '@/lib/auth';
 
 // 引入 AdjudicatorEditor 和新类型
 import AdjudicatorEditor from '../components/AdjudicatorEditor';
@@ -26,7 +26,8 @@ import AuthModal from '../components/CharManager/AuthModal';
 import SaveCardModal from '../components/CharManager/SaveCardModal';
 import DataCardsModal from '../components/CharManager/DataCardsModal';
 import ScenarioEditor from '../components/ScenarioEditor';
-import { UserWithTitle } from '../components/UserTitle';
+import { UserWithTitle } from '@/components/UserTitle';
+import type { UserBadge } from '@/types/badge';
 
 // 兼容 Edge 和 Node.js 环境的 crypto API
 const randomUUID = typeof crypto !== 'undefined' ? crypto.randomUUID.bind(crypto) : webcrypto.randomUUID.bind(webcrypto);
@@ -125,6 +126,9 @@ const CharacterManagerPage: React.FC = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const cardsPerPage = 12;
 
+    // 徽章管理相关状态
+    const [userBadges, setUserBadges] = useState<UserBadge[]>([]);
+
     // 状态管理
     const [isNative, setIsNative] = useState(false);
     const [hasLostNativeness, setHasLostNativeness] = useState(false);
@@ -164,6 +168,42 @@ const CharacterManagerPage: React.FC = () => {
         }
     }, [isAuthenticated, loadUserDataCards]);
 
+    const loadUserBadges = useCallback(async () => {
+        if (!isAuthenticated) return;
+        try {
+            const authHeader = await authStorage.getAuthHeader();
+            if (!authHeader) {
+                setUserBadges([]);
+                return;
+            }
+
+            const response = await fetch('/api/badges/user', {
+                headers: {
+                    Authorization: authHeader
+                }
+            });
+
+            if (!response.ok) {
+                setUserBadges([]);
+                return;
+            }
+
+            const data = await response.json();
+            setUserBadges(Array.isArray(data.badges) ? data.badges : []);
+        } catch (error) {
+            console.error('加载徽章失败:', error);
+            setUserBadges([]);
+        }
+    }, [isAuthenticated]);
+
+    useEffect(() => {
+        if (isAuthenticated) {
+            loadUserBadges();
+        } else {
+            setUserBadges([]);
+        }
+    }, [isAuthenticated, loadUserBadges]);
+
     // 处理注册
     const handleRegister = async (username: string, email: string, turnstileToken: string) => {
         setAuthMessage(null);
@@ -184,10 +224,15 @@ const CharacterManagerPage: React.FC = () => {
             setShowAuthModal(false);
             setMessage({ type: 'success', text: '登录成功！' });
             loadUserDataCards();
+            loadUserBadges();
         } else {
             setAuthMessage({ type: 'error', text: result.error || '登录失败' });
         }
     };
+
+    const handleLogout = useCallback(() => {
+        logout();
+    }, [logout]);
 
     // 保存当前角色为数据卡
     const handleSaveAsDataCard = async () => {
@@ -277,7 +322,8 @@ const CharacterManagerPage: React.FC = () => {
                 setShowSaveCardModal(false);
                 setNewCardForm({ name: '', description: '', isPublic: 0 });
                 setSaveCardError(null);
-                loadUserDataCards(); // 重新加载列表
+                loadUserDataCards();
+                loadUserBadges();
             } else {
                 if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
                     router.push('/arrested');
@@ -313,6 +359,7 @@ const CharacterManagerPage: React.FC = () => {
         if (result.success) {
             setMessage({ type: 'success', text: '数据卡已删除' });
             loadUserDataCards();
+            loadUserBadges();
         } else {
             setMessage({ type: 'error', text: result.error || '删除失败' });
         }
@@ -334,6 +381,7 @@ const CharacterManagerPage: React.FC = () => {
         if (result.success) {
             setEditingCard(null);
             loadUserDataCards();
+            loadUserBadges();
             setMessage({ type: 'success', text: '数据卡信息已更新' });
         } else {
             // 检查是否是敏感词错误，如果是则跳转到 /arrested
@@ -695,11 +743,11 @@ const CharacterManagerPage: React.FC = () => {
                         {typeof value === 'string' && value.length > 80 ?
                             <textarea id={currentPath} value={value as string} onChange={(e) => handleFieldChange(currentPath, e.target.value)} rows={3} className="input-field" />
                             :
-                            <input 
-                                type="text" 
-                                id={currentPath} 
-                                value={value as any} 
-                                onChange={(e) => handleFieldChange(currentPath, e.target.value)} 
+                            <input
+                                type="text"
+                                id={currentPath}
+                                value={value as any}
+                                onChange={(e) => handleFieldChange(currentPath, e.target.value)}
                                 className="input-field"
                                 // 当字段为 codename 或 name 时，限制最大长度为20
                                 maxLength={(key === 'codename' || key === 'name') ? 20 : undefined}
@@ -877,28 +925,62 @@ const CharacterManagerPage: React.FC = () => {
                                 {authLoading ? (
                                     <p className="text-sm text-gray-600">加载中...</p>
                                 ) : isAuthenticated ? (
-                                    <div className="flex justify-between items-center">
-                                        <div className="text-left">
-                                            <p className="text-sm text-gray-600">当前用户</p>
-                                            <UserWithTitle
-                                                username={user?.username || ''}
-                                                prefix={user?.prefix}
-                                                usernameClassName="font-semibold text-pink-700"
-                                                titleClassName="ml-1"
-                                            />
+                                    <div className="space-y-4">
+                                        {/* 操作按钮行 */}
+                                        <div className="flex items-center justify-between">
+                                            <div className="font-semibold text-pink-800 leading-[28px]">
+                                                用户中心
+                                            </div>
+                                            <div>
+                                                <Link
+                                                    href="/badge-manager"
+                                                    className="mr-2 px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
+                                                >
+                                                    徽章管理
+                                                </Link>
+                                                <Link
+                                                    href="/redeem"
+                                                    className="mr-2 px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
+                                                >
+                                                    兑换
+                                                </Link>
+                                                <button
+                                                    onClick={handleLogout}
+                                                    className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                                                >
+                                                    退出登录
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div className="space-x-2">
+                                        {/* 用户信息行 */}
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm text-gray-600">欢迎回来，</span>
+                                                <div className="flex flex-col">
+                                                    <UserWithTitle
+                                                        username={user?.username || ''}
+                                                        prefix={user?.prefix}
+                                                        usernameClassName="text-sm text-pink-700"
+                                                        titleClassName="text-xs"
+                                                        badges={userBadges}
+                                                        showBadges={true}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* 操作按钮行 */}
+                                        <div className="flex items-end justify-between">
                                             <button
                                                 onClick={() => setShowDataCardsModal(true)}
-                                                className="px-3 py-1 text-sm bg-pink-600 text-white rounded hover:bg-pink-700"
+                                                className="flex items-center cursor-pointer justify-center w-full gap-2 px-8 py-2.5 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors font-medium"
                                             >
-                                                我的数据卡 ({userDataCards.length}/{userCapacity})
-                                            </button>
-                                            <button
-                                                onClick={logout}
-                                                className="px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600"
-                                            >
-                                                退出登录
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                                </svg>
+                                                <span className="text-sm">
+                                                    我的数据卡 <span className="font-bold">({userDataCards.length}/{userCapacity})</span>
+                                                </span>
                                             </button>
                                         </div>
                                     </div>
@@ -911,6 +993,12 @@ const CharacterManagerPage: React.FC = () => {
                                         >
                                             登录 / 注册
                                         </button>
+                                        <Link
+                                            href="/password-recovery"
+                                            className="ml-3 text-sm text-purple-600 hover:text-purple-700 underline"
+                                        >
+                                            找回密码
+                                        </Link>
                                     </div>
                                 )}
                             </div>

@@ -102,7 +102,7 @@ export async function getUserDataCardCapacity(userId: number, defaultCapacity: n
       'SELECT slot_count FROM users WHERE id = ?',
       [userId]
     ) as any;
-    
+
     if (result.success && result.result && result.result[0]?.results?.length > 0) {
       const user = result.result[0].results[0];
       const slotCount = user.slot_count;
@@ -116,110 +116,31 @@ export async function getUserDataCardCapacity(userId: number, defaultCapacity: n
   }
 }
 
-// 获取所有用户（管理员功能）
-export async function getAllUsers(limit = 20, offset = 0, searchTerm = ''): Promise<{ users: any[], total: number }> {
+// 增加用户的槽位数量
+export async function increaseUserSlotCount(userId: number, increaseBy: number): Promise<boolean> {
   try {
-    let query = 'SELECT * FROM users';
-    const params: any[] = [];
-
-    if (searchTerm) {
-      query += ' WHERE username LIKE ? OR email LIKE ?';
-      params.push(`%${searchTerm}%`, `%${searchTerm}%`);
-    }
-
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    params.push(limit, offset);
-
-    const result = await queryFromD1(query, params) as any;
-
-    let users = [];
-    if (result.success && result.result && result.result[0]?.results) {
-      users = result.result[0].results;
-    }
-
-    // 获取总数
-    let countQuery = 'SELECT COUNT(*) as total FROM users';
-    const countParams: any[] = [];
-    
-    if (searchTerm) {
-      countQuery += ' WHERE username LIKE ? OR email LIKE ?';
-      countParams.push(`%${searchTerm}%`, `%${searchTerm}%`);
-    }
-
-    const countResult = await queryFromD1(countQuery, countParams) as any;
-    let total = 0;
-    
-    if (countResult.success && countResult.result && countResult.result[0]?.results?.length > 0) {
-      total = countResult.result[0].results[0].total;
-    }
-
-    return { users, total };
-  } catch (error) {
-    console.error("获取用户列表失败:", error);
-    return { users: [], total: 0 };
-  }
-}
-
-// 根据ID更新用户信息（管理员功能）
-export async function updateUserById(userId: number, updates: { is_banned?: string | null, slot_count?: number | null, prefix?: string | null }): Promise<any> {
-  try {
-    const updateFields: string[] = [];
-    const params: any[] = [];
-
-    if (updates.is_banned !== undefined) {
-      updateFields.push('is_banned = ?');
-      params.push(updates.is_banned);
-    }
-
-    if (updates.slot_count !== undefined) {
-      updateFields.push('slot_count = ?');
-      params.push(updates.slot_count);
-    }
-
-    if (updates.prefix !== undefined) {
-      updateFields.push('prefix = ?');
-      params.push(updates.prefix);
-    }
-
-    if (updateFields.length === 0) {
-      throw new Error('没有要更新的字段');
-    }
-
-    params.push(userId);
-    
-    const query = `UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`;
-    const result = await queryFromD1(query, params) as any;
-
-    if (result.success) {
-      // 返回更新后的用户信息
-      const getUserResult = await queryFromD1('SELECT * FROM users WHERE id = ?', [userId]) as any;
-      
-      if (getUserResult.success && getUserResult.result && getUserResult.result[0]?.results?.length > 0) {
-        return getUserResult.result[0].results[0];
-      }
-    }
-    
-    return null;
-  } catch (error) {
-    console.error("更新用户信息失败:", error);
-    return null;
-  }
-}
-
-// 根据ID获取用户信息
-export async function getUserById(userId: number): Promise<any> {
-  try {
+    // 先获取当前的 slot_count
     const result = await queryFromD1(
-      'SELECT * FROM users WHERE id = ?',
+      'SELECT slot_count FROM users WHERE id = ?',
       [userId]
     ) as any;
-    
-    if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0];
+
+    if (!result.success || !result.result || result.result[0]?.results?.length === 0) {
+      return false;
     }
-    return null;
+
+    const currentSlotCount = result.result[0].results[0].slot_count || 0;
+    const newSlotCount = currentSlotCount + increaseBy;
+
+    // 更新 slot_count
+    const updateResult = await queryFromD1(
+      'UPDATE users SET slot_count = ? WHERE id = ?',
+      [newSlotCount, userId]
+    ) as any;
+
+    return updateResult.success;
   } catch (error) {
-    console.error("根据ID查找用户失败:", error);
-    return null;
+    console.error("增加用户槽位数量失败:", error);
+    return false;
   }
 }
