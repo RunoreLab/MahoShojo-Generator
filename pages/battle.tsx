@@ -20,6 +20,7 @@ import Footer from '../components/Footer';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 // v0.4.0 引入新的编辑器组件
 import AdjudicatorEditor from '../components/AdjudicatorEditor';
+import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 
 interface UpdatedCombatantData {
     codename?: string;
@@ -142,6 +143,8 @@ const BattlePage: React.FC = () => {
     const [useArenaHistory, setUseArenaHistory] = useState(true);
     // 新增：用于控制是否使用轻量模型的状态（默认不启用）
     const [isDowngrade, setIsDowngrade] = useState(false);
+    // 新增：用于管理自定义 AI 供应商配置
+    const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
 
     // 冷却状态钩子，设置为2分钟
@@ -816,6 +819,11 @@ const BattlePage: React.FC = () => {
             return;
         }
 
+        if (userProviderConfig && !userProviderConfig.apiKey) {
+            setError('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
+            return;
+        }
+
         setIsGenerating(true);
         setError(null);
         setNewsReport(null);
@@ -870,28 +878,37 @@ const BattlePage: React.FC = () => {
                 }
             });
 
+            const requestBody: Record<string, unknown> = {
+                combatants: (finalCombatants.filter(c => 'data' in c) as CombatantData[]).map(c => ({
+                    type: c.type,
+                    data: c.data,
+                    isNative: c.isValid,
+                    isPreset: c.isPreset
+                })),
+                selectedLevel,
+                mode: battleMode,
+                userGuidance: userGuidance,
+                scenario: scenarioContent,
+                teams: Object.keys(teams).length > 0 ? teams : undefined,
+                language: selectedLanguage,
+                useArenaHistory: useArenaHistory,
+                isDowngrade: isDowngrade,
+                adjudicationEvents: adjudicationEvents,
+                storyLength: storyLength,
+            };
+
+            if (userProviderConfig && userProviderConfig.apiKey) {
+                requestBody.customProvider = {
+                    providerId: userProviderConfig.providerId,
+                    modelId: userProviderConfig.modelId,
+                    apiKey: userProviderConfig.apiKey,
+                };
+            }
+
             const response = await fetch('/api/generate-battle-story', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    // 使用 finalCombatants
-                    combatants: (finalCombatants.filter(c => 'data' in c) as CombatantData[]).map(c => ({
-                        type: c.type,
-                        data: c.data,
-                        isNative: c.isValid,
-                        isPreset: c.isPreset
-                    })),
-                    selectedLevel,
-                    mode: battleMode,
-                    userGuidance: userGuidance,
-                    scenario: scenarioContent, // 发送情景内容
-                    teams: Object.keys(teams).length > 0 ? teams : undefined, // 发送分队信息
-                    language: selectedLanguage,
-                    useArenaHistory: useArenaHistory, // 传递是否使用历战记录的选项
-                    isDowngrade: isDowngrade, // 传递是否使用轻量模型的选项
-                    adjudicationEvents: adjudicationEvents, // v0.4.0 新增
-                    storyLength: storyLength,
-                }),
+                body: JSON.stringify(requestBody),
             });
 
             // --- 核心修改：增强错误处理 ---
@@ -1363,6 +1380,10 @@ const BattlePage: React.FC = () => {
                             </div>
                         )}
                         {/* 历战记录使用选项 */}
+                        {
+                            // TODO: 调试中，暂时关闭该功能
+                            false && <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                        }
                         <div className="input-group">
                             <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">
                                 <input
