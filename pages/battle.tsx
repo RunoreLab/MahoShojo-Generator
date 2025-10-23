@@ -1,6 +1,6 @@
 // pages/battle.tsx
 
-import React, { useState, useRef, ChangeEvent, useEffect } from 'react';
+import React, { useState, useRef, ChangeEvent, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useCooldown } from '../lib/cooldown';
@@ -175,7 +175,7 @@ const BattlePage: React.FC = () => {
     const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
 
     // 用于存储情景模式下上传的情景文件内容
-    const [scenarioContent, setScenarioContent] = useState<object | null>(null);
+    const [scenarioContent, setScenarioContent] = useState<Record<string, unknown> | null>(null);
     const [scenarioFileName, setScenarioFileName] = useState<string | null>(null);
 
     // 用于追踪情景文件的原生性
@@ -196,6 +196,26 @@ const BattlePage: React.FC = () => {
      * - 'scenario': 正在随机匹配情景
      */
     const [isMatching, setIsMatching] = useState<string | null>(null);
+
+    const scenarioDisplayName = useMemo<string | null>(() => {
+        if (battleMode !== 'scenario') {
+            return null;
+        }
+        const content = scenarioContent as Record<string, unknown> | null;
+        if (content) {
+            const maybeTitle = content['title'];
+            if (typeof maybeTitle === 'string') {
+                const trimmed = maybeTitle.trim();
+                if (trimmed) {
+                    return trimmed;
+                }
+            }
+        }
+        if (typeof scenarioFileName === 'string' && scenarioFileName.trim()) {
+            return scenarioFileName.replace(/\.json$/i, '').trim();
+        }
+        return null;
+    }, [battleMode, scenarioContent, scenarioFileName]);
 
     // 加载语言列表
     useEffect(() => {
@@ -909,10 +929,14 @@ const BattlePage: React.FC = () => {
             if (await checkSensitiveWords(JSON.stringify(result.report))) return;
 
             // 将战报和随机判定结果合并后再设置 state
-            const reportWithAdjudication = {
+            const reportWithAdjudication: NewsReport = {
                 ...result.report,
                 adjudicationResults: result.adjudicationResults,
             };
+
+            if (scenarioDisplayName) {
+                reportWithAdjudication.scenario = scenarioDisplayName;
+            }
 
             setNewsReport(reportWithAdjudication);
             setUpdatedCombatants(result.updatedCombatants);
