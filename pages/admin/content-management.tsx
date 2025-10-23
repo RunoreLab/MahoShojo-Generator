@@ -498,7 +498,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                                 if (!isMeaningfulDescription) {
                                     titleToShow = JSON.stringify(JSON.parse(card.data), null, 2);
                                 }
-                            } catch(e) { /* 忽略解析错误 */ }
+                            } catch(e) { console.error('❌ 发生解析错误:', e); }
 
                             return (
                                 <p className="truncate" title={titleToShow}>
