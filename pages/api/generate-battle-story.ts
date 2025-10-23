@@ -796,7 +796,7 @@ async function handler(req: NextRequest): Promise<Response> {
         schema: BattleReportCoreSchema,
         taskName: `生成${mode}模式故事`,
         maxTokens: 8192,
-        modelOverride: isDowngrade ? "gemini-2.5-flash-lite" : undefined, // 使用轻量模型
+        modelOverride: isDowngrade ? "gemini-2.5-flash" : undefined, // 使用轻量模型
     };
 
     const aiResult = await generateWithAI({ combatants }, generationConfig);

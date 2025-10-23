@@ -181,7 +181,7 @@ ${userAnswersReviewSection}
     schema: finalSchema,
     taskName: "角色成长升华",
     maxTokens: 8192,
-    modelOverride: isDowngrade ? "gemini-2.5-flash-lite" : undefined, // 使用降级模型
+    modelOverride: isDowngrade ? "gemini-2.5-flash" : undefined, // 使用降级模型
   };
 };
 

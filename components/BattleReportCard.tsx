@@ -164,7 +164,7 @@ ${adjudicationMarkdown}
     <div
       ref={cardRef}
       className="result-card"
-      style={{ background: 'linear-gradient(135deg, #434343 0%, #000000 100%)' }}
+      style={{ background: 'linear-gradient(135deg, #3040a1 0%, #000000 50%, #8B0000 100%)' }}
     >
       <div className="result-content">
         <img src="/arena-white.svg" style={{ marginBottom: '1rem', marginTop: '1rem' }} width={320} height={90} alt="魔法少女竞技场" className="feature-title-svg" />

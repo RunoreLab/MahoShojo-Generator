@@ -920,7 +920,7 @@ async function handler(req: NextRequest): Promise<Response> {
         promptBuilder: createPromptBuilder(questionnaire.questions, finalUserGuidance, needsWorldviewWarning, language, selectedLevel, mode, scenario, teams, useArenaHistory, adjudicationResults, storyLength),
         taskName: `生成${mode}模式故事`,
         maxTokens: 8192,
-        modelOverride: isDowngrade ? "gemini-2.5-flash-lite" : undefined, // 使用轻量模型
+        modelOverride: isDowngrade ? "gemini-2.5-flash" : undefined, // 使用轻量模型
     };
 
     const { result: aiStreamResult, provider, selectedModel } = await streamWithAI({ combatants }, generationConfig);
