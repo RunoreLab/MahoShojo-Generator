@@ -48,11 +48,11 @@ export default function Badge({ badge, size = 'md', className = '' }: BadgeProps
 
   return (
     <span
-      className={`inline-flex items-center gap-1 font-medium rounded-md ${sizeClasses[size]} ${badge.borderColor ? 'border' : ''} ${className}`}
+      className={`inline-flex items-center font-medium rounded-md ${sizeClasses[size]} ${badge.borderColor ? 'border' : ''} ${className}`}
       style={styles}
       title={badge.description || badge.name}
     >
-      <BadgeIcon icon={badge.icon} size={iconSizes[size]} />
+      { badge.icon.type !== 'null' && <BadgeIcon className="mr-1" icon={badge.icon} size={iconSizes[size]} />}
       <span className="whitespace-nowrap">{badge.name}</span>
     </span>
   );

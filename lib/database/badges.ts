@@ -64,7 +64,7 @@ export async function getUserBadges(userId: number): Promise<UserBadge[]> {
         id: row.badge_id,
         name: row.badge_name,
         description: row.badge_description,
-        icon: parseJsonField<IconConfig>(row.badge_icon) || { type: 'emoji', value: '🏅' },
+        icon: parseJsonField<IconConfig>(row.badge_icon) || { type: 'null', value: null },
         textColor: parseJsonField<ColorConfig>(row.text_color) || { type: 'solid', value: '#000000' },
         backgroundColor: parseJsonField<ColorConfig>(row.background_color) || { type: 'solid', value: '#FFFFFF' },
         borderColor: parseJsonField<ColorConfig>(row.border_color),
