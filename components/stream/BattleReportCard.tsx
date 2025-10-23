@@ -7,6 +7,7 @@ import { AdjudicationResult } from '@/types/arena';
 
 export interface NewsReport {
   headline: string;
+  scenario?: string;
   reporterInfo: {
     name:string;
     publication: string;
