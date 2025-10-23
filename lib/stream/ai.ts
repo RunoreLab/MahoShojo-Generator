@@ -97,16 +97,28 @@ export interface StreamGenerationResult {
   selectedModel: string;
 }
 
+export interface StreamWithAIOptions {
+  loadBalanceStrategy?: LoadBalanceStrategy;
+  providerOverride?: AIProvider;
+}
+
 export async function streamWithAI<I = string>(
   input: I,
   generationConfig: StreamGenerationConfig<I>,
-  loadBalanceStrategy?: LoadBalanceStrategy
+  options?: StreamWithAIOptions
 ): Promise<StreamGenerationResult> {
-  const baseProviders = config.PROVIDERS;
+  const baseProviders: AIProvider[] = [
+    ...(options?.providerOverride ? [options.providerOverride] : []),
+    ...config.PROVIDERS,
+  ];
 
   if (baseProviders.length === 0) {
     log.error("没有配置 API Key");
     throw new Error("没有配置 API Key");
+  }
+
+  if (options?.providerOverride) {
+    log.info(`优先使用用户自定义提供商: ${options.providerOverride.name}`);
   }
 
   const expandedProviders = expandProviders(baseProviders);
@@ -117,7 +129,7 @@ export async function streamWithAI<I = string>(
   }
 
   const strategy =
-    loadBalanceStrategy ||
+    options?.loadBalanceStrategy ||
     (config.LOAD_BALANCE_STRATEGY as LoadBalanceStrategy) ||
     LoadBalanceStrategy.RANDOM;
 
