@@ -265,6 +265,7 @@ export async function getCardsForReview(cardIds: string[]): Promise<{ id: string
 
 /**
  * [Admin] 获取用户列表，支持复杂的多维度筛选和分页
+ * [修改] 增加了 card count 相关的筛选参数
  * @param filters - 包含所有筛选条件的对
  * @returns 返回查询到的用户数组及总数
  */
@@ -279,6 +280,10 @@ export async function getAdminUsers(filters: {
   loginDateStart?: string;
   loginDateEnd?: string;
   status?: 'normal' | 'banned' | 'exempt';
+  minPublicCards?: number; // 新增：最少公开卡片数
+  maxPublicCards?: number; // 新增：最多公开卡片数
+  minBannedCards?: number; // 新增：最少封禁卡片数
+  maxBannedCards?: number; // 新增：最多封禁卡片数
 }) {
   const {
     page = 1,
@@ -291,13 +296,18 @@ export async function getAdminUsers(filters: {
     loginDateStart,
     loginDateEnd,
     status,
+    minPublicCards,
+    maxPublicCards,
+    minBannedCards,
+    maxBannedCards,
   } = filters;
 
   const offset = (page - 1) * limit;
   const whereClauses: string[] = [];
-  const params: (string | number)[] = [];
+  const havingClauses: string[] = []; // 新增：用于 HAVING 子句
+  const params: (string | number)[] = []; // WHERE 和 HAVING 共用参数列表
 
-  // --- 动态构建 WHERE 子句 ---
+  // --- 动态构建 WHERE 子句 (过滤用户属性) ---
   if (search) {
     // 搜索范围包括用户名和邮箱，方便管理员通过邮件或用户名定位用户
     whereClauses.push('(u.username LIKE ? OR u.email LIKE ?)');
@@ -321,16 +331,26 @@ export async function getAdminUsers(filters: {
     params.push(loginDateEnd);
   }
   if (status) {
-    if (status === 'banned') {
-      whereClauses.push("u.is_banned IS NOT NULL AND u.is_banned != ''");
-    } else if (status === 'exempt') {
-      whereClauses.push('u.is_review_exempt = 1');
-    } else if (status === 'normal') {
-      whereClauses.push("(u.is_banned IS NULL OR u.is_banned = '') AND u.is_review_exempt = 0");
-    }
+    if (status === 'banned') whereClauses.push("u.is_banned IS NOT NULL AND u.is_banned != ''");
+    else if (status === 'exempt') whereClauses.push('u.is_review_exempt = 1');
+    else if (status === 'normal') whereClauses.push("(u.is_banned IS NULL OR u.is_banned = '') AND u.is_review_exempt = 0");
+  }
+
+  // --- 动态构建 HAVING 子句 (过滤聚合结果) ---
+  if (minPublicCards !== undefined) { havingClauses.push('public_cards >= ?'); params.push(minPublicCards); }
+  if (maxPublicCards !== undefined) { havingClauses.push('public_cards <= ?'); params.push(maxPublicCards); }
+  if (minBannedCards !== undefined) { havingClauses.push('banned_cards >= ?'); params.push(minBannedCards); }
+  if (maxBannedCards !== undefined) { havingClauses.push('banned_cards <= ?'); params.push(maxBannedCards); }
+  // 处理特殊情况： "no banned cards"
+  if (maxBannedCards === 0 && minBannedCards === undefined) {
+      if (!havingClauses.some(c => c.includes('banned_cards <= ?'))) {
+          havingClauses.push('banned_cards <= ?');
+          params.push(0);
+      }
   }
 
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const havingSql = havingClauses.length > 0 ? `HAVING ${havingClauses.join(' AND ')}` : '';
 
   // D1 不支持在 FROM 子句中使用复杂的子查询，所以我们将使用 LEFT JOIN 和 COUNT
   const dataSql = `
@@ -343,19 +363,37 @@ export async function getAdminUsers(filters: {
     FROM users u
     LEFT JOIN data_cards dc ON u.id = dc.user_id
     ${whereSql}
-    GROUP BY u.id
+    GROUP BY u.id -- 按用户分组
+    ${havingSql} -- 在分组后应用聚合筛选
     ORDER BY u.${sortBy} ${sortOrder.toUpperCase()}
     LIMIT ? OFFSET ?;
   `;
 
-  const countSql = `SELECT COUNT(id) as total FROM users u ${whereSql};`;
+  // --- 构建总数查询 SQL (使用子查询来应用 HAVING) ---
+  const countSql = `
+    SELECT COUNT(*) as total
+    FROM (
+      SELECT
+        u.id,
+        SUM(CASE WHEN dc.is_public = 1 THEN 1 ELSE 0 END) as public_cards,
+        SUM(CASE WHEN dc.is_public = -1 THEN 1 ELSE 0 END) as banned_cards
+      FROM users u
+      LEFT JOIN data_cards dc ON u.id = dc.user_id
+      ${whereSql}
+      GROUP BY u.id
+      ${havingSql}
+    ) AS subquery;
+  `;
 
   try {
     const dataParams = [...params, limit, offset];
     const countParams = [...params];
 
-    const dataResult = (await queryFromD1(dataSql, dataParams)) as any;
-    const countResult = (await queryFromD1(countSql, countParams)) as any;
+    // 并行执行数据查询和总数查询
+    const [dataResult, countResult] = await Promise.all([
+      queryFromD1(dataSql, dataParams),
+      queryFromD1(countSql, countParams)
+    ]) as [any, any];
 
     const users = dataResult.success ? dataResult.result[0]?.results || [] : [];
     const total = countResult.success ? countResult.result[0]?.results[0]?.total || 0 : 0;

@@ -35,6 +35,10 @@ const UserManagementPage: React.FC = () => {
     regDateEnd: '',
     loginDateStart: '',
     loginDateEnd: '',
+    minPublicCards: '',
+    maxPublicCards: '',
+    minBannedCards: '',
+    maxBannedCards: '',
   });
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
@@ -50,6 +54,10 @@ const UserManagementPage: React.FC = () => {
         regDateEnd: router.query.regDateEnd as string || '',
         loginDateStart: router.query.loginDateStart as string || '',
         loginDateEnd: router.query.loginDateEnd as string || '',
+        minPublicCards: router.query.minPublicCards as string || '',
+        maxPublicCards: router.query.maxPublicCards as string || '',
+        minBannedCards: router.query.minBannedCards as string || '',
+        maxBannedCards: router.query.maxBannedCards as string || '',
       }));
     }
   }, [router.isReady, router.query]);
@@ -181,6 +189,64 @@ const UserManagementPage: React.FC = () => {
               </select>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-medium">公开卡片数范围</label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    name="minPublicCards"
+                    value={filters.minPublicCards}
+                    onChange={handleFilterChange}
+                    placeholder="最少"
+                    className="input-field w-1/2"
+                    min="0"
+                  />
+                  <input
+                    type="number"
+                    name="maxPublicCards"
+                    value={filters.maxPublicCards}
+                    onChange={handleFilterChange}
+                    placeholder="最多"
+                    className="input-field w-1/2"
+                    min="0"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium">封禁卡片数范围</label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    name="minBannedCards"
+                    value={filters.minBannedCards}
+                    onChange={handleFilterChange}
+                    placeholder="最少"
+                    className="input-field w-1/2"
+                    min="0"
+                  />
+                  <input
+                    type="number"
+                    name="maxBannedCards"
+                    value={filters.maxBannedCards}
+                    onChange={handleFilterChange}
+                    placeholder="最多"
+                    className="input-field w-1/2"
+                    min="0"
+                  />
+                </div>
+                {/* Helper for the "no banned cards" use case */}
+                <button
+                    type="button"
+                    onClick={() => {
+                        const newFilters = { ...filters, minBannedCards: '', maxBannedCards: '0', page: 1 };
+                        setFilters(newFilters);
+                        updateUrl(newFilters); // Update immediately for this button
+                    }}
+                    className="text-xs text-purple-600 hover:underline mt-1"
+                >
+                    快速筛选: 无封禁卡
+                </button>
+              </div>
                 <div>
                     <label className="text-xs font-medium">注册时间范围</label>
                     <div className="flex gap-2">

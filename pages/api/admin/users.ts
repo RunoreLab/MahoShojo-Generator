@@ -38,9 +38,19 @@ export default async function handler(req: NextRequest) {
       loginDateStart: searchParams.get('loginDateStart') || undefined,
       loginDateEnd: searchParams.get('loginDateEnd') || undefined,
       status: searchParams.get('status') as any || undefined,
+      minPublicCards: searchParams.has('minPublicCards') ? parseInt(searchParams.get('minPublicCards')!, 10) : undefined,
+      maxPublicCards: searchParams.has('maxPublicCards') ? parseInt(searchParams.get('maxPublicCards')!, 10) : undefined,
+      minBannedCards: searchParams.has('minBannedCards') ? parseInt(searchParams.get('minBannedCards')!, 10) : undefined,
+      maxBannedCards: searchParams.has('maxBannedCards') ? parseInt(searchParams.get('maxBannedCards')!, 10) : undefined,
     };
     
-    // 清理掉值为 undefined 的筛选条件
+    const numericFilters: (keyof typeof filters)[] = ['minPublicCards', 'maxPublicCards', 'minBannedCards', 'maxBannedCards'];
+    numericFilters.forEach(key => {
+      if (filters[key] !== undefined && isNaN(filters[key]!)) {
+        console.warn(`Invalid numeric value for filter ${key}:`, searchParams.get(key));
+        delete filters[key];
+      }
+    });
     Object.keys(filters).forEach(key => (filters as any)[key] === undefined && delete (filters as any)[key]);
 
     const { users, total } = await getAdminUsers(filters);
