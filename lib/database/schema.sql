@@ -57,8 +57,10 @@ CREATE TABLE IF NOT EXISTS data_cards (
   is_public BOOLEAN NOT NULL DEFAULT 0,  -- 0 = 私有, 1 = 公开
   usage_count INTEGER DEFAULT 0,
   like_count INTEGER DEFAULT 0,
+  review_status TEXT DEFAULT 'pending',  -- 审核状态：pending / approved / rejected
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_at DATETIME,                   -- 软删除标记，存在值则表示位于回收站
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -67,6 +69,7 @@ CREATE INDEX idx_data_cards_type ON data_cards(type);
 CREATE INDEX idx_data_cards_is_public ON data_cards(is_public);
 CREATE INDEX idx_data_cards_usage_count ON data_cards(usage_count);
 CREATE INDEX idx_data_cards_like_count ON data_cards(like_count);
+CREATE INDEX idx_data_cards_deleted_at ON data_cards(deleted_at);
 
 -- 兑换码表（用完即删除，无需记录历史）
 CREATE TABLE IF NOT EXISTS redemption_codes (

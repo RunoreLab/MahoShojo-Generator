@@ -7,7 +7,7 @@ export async function checkPublicCardNameExists(
 ): Promise<boolean> {
   try {
     const result = await queryFromD1(
-      'SELECT COUNT(*) as count FROM data_cards WHERE name = ? AND type = ? AND is_public = 1',
+      'SELECT COUNT(*) as count FROM data_cards WHERE name = ? AND type = ? AND is_public = 1 AND deleted_at IS NULL',
       [name, type]
     ) as any;
     
@@ -102,7 +102,7 @@ export async function getUserDataCards(
   sortBy?: 'likes' | 'usage' | 'created_at'
 ): Promise<any[]> {
   try {
-    let sql = 'SELECT * FROM data_cards WHERE user_id = ?';
+    let sql = 'SELECT * FROM data_cards WHERE user_id = ? AND deleted_at IS NULL';
     const params: any[] = [userId];
     
     if (search) {
@@ -158,7 +158,7 @@ export async function updateDataCard(
         params.push(reviewStatus);
     }
 
-    sql += ' WHERE id = ? AND user_id = ?';
+    sql += ' WHERE id = ? AND user_id = ? AND deleted_at IS NULL';
     params.push(id, userId);
     
     const result = await queryFromD1(sql, params) as any;
@@ -177,10 +177,10 @@ export async function updateDataCard(
 export async function deleteDataCard(id: string, userId: number): Promise<boolean> {
   try {
     const result = await queryFromD1(
-      'DELETE FROM data_cards WHERE id = ? AND user_id = ?',
+      'UPDATE data_cards SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
       [id, userId]
     ) as any;
-    
+
     if (result.success && result.result && result.result[0]?.meta?.changes > 0) {
       return true;
     }
@@ -188,6 +188,91 @@ export async function deleteDataCard(id: string, userId: number): Promise<boolea
   } catch (error) {
     console.error("删除数据卡失败:", error);
     return false;
+  }
+}
+
+// 永久删除（物理删除）指定的数据卡
+export async function permanentlyDeleteDataCards(ids: string[], userId: number): Promise<number> {
+  if (!ids.length) {
+    return 0;
+  }
+
+  try {
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await queryFromD1(
+      `DELETE FROM data_cards WHERE user_id = ? AND id IN (${placeholders})`,
+      [userId, ...ids]
+    ) as any;
+
+    if (result.success && result.result) {
+      return result.result[0]?.meta?.changes ?? 0;
+    }
+    return 0;
+  } catch (error) {
+    console.error("永久删除数据卡失败:", error);
+    return 0;
+  }
+}
+
+// 获取用户回收站中的数据卡
+export async function getUserRecycleBinCards(userId: number): Promise<any[]> {
+  try {
+    const result = await queryFromD1(
+      'SELECT * FROM data_cards WHERE user_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
+      [userId]
+    ) as any;
+
+    if (result.success && result.result && result.result[0]?.results) {
+      return result.result[0].results;
+    }
+    return [];
+  } catch (error) {
+    console.error("获取回收站数据卡失败:", error);
+    return [];
+  }
+}
+
+// 从回收站恢复数据卡
+export async function restoreDataCard(cardId: string, userId: number): Promise<boolean> {
+  try {
+    const result = await queryFromD1(
+      'UPDATE data_cards SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL',
+      [cardId, userId]
+    ) as any;
+
+    if (result.success && result.result && result.result[0]?.meta?.changes > 0) {
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error("恢复数据卡失败:", error);
+    return false;
+  }
+}
+
+// 裁剪回收站，只保留最新的 keep 条目
+export async function pruneUserRecycleBin(userId: number, keep: number): Promise<string[]> {
+  try {
+    const result = await queryFromD1(
+      'SELECT id FROM data_cards WHERE user_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
+      [userId]
+    ) as any;
+
+    if (!(result.success && result.result && result.result[0]?.results)) {
+      return [];
+    }
+
+    const rows = result.result[0].results as Array<{ id: string }>;
+    if (rows.length <= keep) {
+      return [];
+    }
+
+    const idsToDelete = rows.slice(keep).map((row) => row.id);
+    await permanentlyDeleteDataCards(idsToDelete, userId);
+    return idsToDelete;
+  } catch (error) {
+    console.error("裁剪回收站失败:", error);
+    return [];
   }
 }
 
@@ -212,7 +297,7 @@ export async function verifyCardOwnership(cardId: string, userId: number): Promi
 // 通过ID获取单个数据卡（公开或私有）
 export async function getDataCardById(cardId: string, isPublic: boolean = false): Promise<any | null> {
   try {
-    let sql = 'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.id = ?';
+    let sql = 'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.id = ? AND dc.deleted_at IS NULL';
     const params: any[] = [cardId];
 
     // [v0.4.2 修改] 如果是查询公开卡，则必须是通过审查的
@@ -236,7 +321,7 @@ export async function getDataCardById(cardId: string, isPublic: boolean = false)
 export async function incrementDataCardLike(cardId: string): Promise<boolean> {
   try {
     const result = await queryFromD1(
-      "UPDATE data_cards SET like_count = like_count + 1 WHERE id = ? AND is_public = 1 AND review_status = 'approved'",
+      "UPDATE data_cards SET like_count = like_count + 1 WHERE id = ? AND is_public = 1 AND review_status = 'approved' AND deleted_at IS NULL",
       [cardId]
     ) as any;
     
@@ -251,7 +336,7 @@ export async function incrementDataCardLike(cardId: string): Promise<boolean> {
 export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
   try {
     const result = await queryFromD1(
-      "UPDATE data_cards SET usage_count = usage_count + 1 WHERE id = ? AND is_public = 1 AND review_status = 'approved'",
+      "UPDATE data_cards SET usage_count = usage_count + 1 WHERE id = ? AND is_public = 1 AND review_status = 'approved' AND deleted_at IS NULL",
       [cardId]
     ) as any;
     
@@ -284,7 +369,7 @@ export async function getPublicDataCards(
 ): Promise<any[]> {
   try {
     // 基础查询语句
-    let sql = "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.review_status = 'approved'";
+    let sql = "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.review_status = 'approved' AND dc.deleted_at IS NULL";
     const params: any[] = [];
     
     // -- 动态构建 WHERE 子句 --
@@ -352,7 +437,7 @@ export async function getRandomPublicCard(
   try {
     // D1 数据库支持 RANDOM() 函数，这使得随机选择非常高效。
     const result = await queryFromD1(
-      "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' ORDER BY RANDOM() LIMIT 1",
+      "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' AND dc.deleted_at IS NULL ORDER BY RANDOM() LIMIT 1",
       [type]
     ) as any;
     
