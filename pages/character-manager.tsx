@@ -1215,7 +1215,7 @@ const CharacterManagerPage: React.FC = () => {
                         )}
                     </div>
 
-                    {/* 【新增】角色卡片预览与生成区域 */}
+                    {/* 角色卡片预览与生成区域 */}
                     {characterData && !isLoading && (
                         <div className="card mt-6">
                             <h3 className="text-xl font-bold text-gray-800 text-center mb-4">
