@@ -153,9 +153,29 @@ const sensitiveWordsConfig = {
 };
 
 /**
+ * 匹配到的敏感词详细信息
+ */
+export interface SensitiveMatchDetail {
+  /** 敏感词词条（词表原文） */
+  word: string;
+  /** 实际匹配到的文本片段 */
+  matchedText: string;
+  /** 匹配类型：直接命中、正则命中或规范化后的变体 */
+  matchType: 'exact' | 'regex' | 'variant';
+  /** 在原始文本中的起始下标（闭区间左端） */
+  startIndex: number;
+  /** 在原始文本中的结束下标（开区间右端） */
+  endIndex: number;
+  /** 匹配前的上下文（最多12字符） */
+  contextBefore: string;
+  /** 匹配后的上下文（最多12字符） */
+  contextAfter: string;
+}
+
+/**
  * 敏感词过滤结果接口
  */
-interface FilterResult {
+export interface FilterResult {
   /** 是否包含敏感词 */
   hasSensitiveWords: boolean;
   /** 检测到的敏感词列表 */
@@ -166,6 +186,8 @@ interface FilterResult {
   originalText: string;
   /** 是否需要跳转到被捕页面 */
   shouldRedirectToArrested: boolean;
+  /** 详细匹配列表 */
+  matchDetails: SensitiveMatchDetail[];
 }
 
 /**
@@ -246,10 +268,39 @@ export class SensitiveWordFilter {
   }
 
   /**
+   * 构建规范化文本以及对应的原始索引映射。
+   */
+  private normalizeTextWithMapping(text: string): { normalized: string; indexMap: number[] } {
+    const normalizedChars: string[] = [];
+    const indexMap: number[] = [];
+
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      if (/[^\u4e00-\u9fa5a-zA-Z0-9]/.test(char)) {
+        continue;
+      }
+      normalizedChars.push(char.toLowerCase());
+      indexMap.push(i);
+    }
+
+    return {
+      normalized: normalizedChars.join(''),
+      indexMap
+    };
+  }
+
+  /**
    * 规范化文本：删除特殊符号，只保留汉字、数字和英文字符
    */
   private normalizeText(text: string): string {
-    return text.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase();
+    return this.normalizeTextWithMapping(text).normalized;
+  }
+
+  /**
+   * 转义正则表达式特殊字符
+   */
+  private escapeRegExp(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   /**
@@ -276,7 +327,35 @@ export class SensitiveWordFilter {
     }
 
     const detectedWords: string[] = [];
+    const matchDetails: SensitiveMatchDetail[] = [];
+    const seenMatchKeys = new Set<string>();
     let filteredText = text;
+
+    const addDetail = (
+      word: string,
+      matchedText: string,
+      startIndex: number,
+      endIndex: number,
+      matchType: SensitiveMatchDetail['matchType']
+    ) => {
+      if (startIndex < 0 || endIndex <= startIndex) {
+        return;
+      }
+      const key = `${startIndex}-${endIndex}-${matchType}-${word}`;
+      if (seenMatchKeys.has(key)) {
+        return;
+      }
+      seenMatchKeys.add(key);
+      matchDetails.push({
+        word,
+        matchedText,
+        matchType,
+        startIndex,
+        endIndex,
+        contextBefore: text.slice(Math.max(0, startIndex - 12), startIndex),
+        contextAfter: text.slice(endIndex, Math.min(text.length, endIndex + 12))
+      });
+    };
 
     // 1. 直接匹配检测（处理正则表达式和普通匹配）
     for (const word of this.sensitiveWords) {
@@ -286,55 +365,125 @@ export class SensitiveWordFilter {
       if (isRegex) {
         try {
           const regex = new RegExp(word, 'gi');
-          const matches = text.match(regex);
-          if (matches) {
-            matches.forEach(match => {
-              if (!detectedWords.includes(match)) {
-                detectedWords.push(match);
-              }
-            });
-            // 替换敏感词
+          let execResult: RegExpExecArray | null;
+          let matched = false;
+          while ((execResult = regex.exec(text)) !== null) {
+            matched = true;
+            const matchedText = execResult[0];
+            const startIndex = execResult.index;
+            const endIndex = startIndex + matchedText.length;
+            addDetail(word, matchedText, startIndex, endIndex, 'regex');
+            if (!detectedWords.includes(matchedText)) {
+              detectedWords.push(matchedText);
+            }
+          }
+          if (matched) {
+            regex.lastIndex = 0;
             filteredText = filteredText.replace(regex, this.getMaskString());
           }
         } catch (regexError) {
           console.error('正则表达式格式错误:', regexError);
-          // 如果正则表达式格式错误，按普通字符串处理
-          if (text.toLowerCase().includes(word.toLowerCase())) {
-            detectedWords.push(word);
-            filteredText = this.replaceSensitiveWord(filteredText, word);
+          const plainRegex = new RegExp(this.escapeRegExp(word), 'gi');
+          let execResult: RegExpExecArray | null;
+          let matched = false;
+          while ((execResult = plainRegex.exec(text)) !== null) {
+            matched = true;
+            const matchedText = execResult[0];
+            const startIndex = execResult.index;
+            const endIndex = startIndex + matchedText.length;
+            addDetail(word, matchedText, startIndex, endIndex, 'exact');
+            if (!detectedWords.includes(matchedText)) {
+              detectedWords.push(matchedText);
+            }
+          }
+          if (matched) {
+            plainRegex.lastIndex = 0;
+            filteredText = filteredText.replace(plainRegex, this.getMaskString());
           }
         }
       } else {
-        // 普通字符串匹配（忽略大小写）
-        if (text.toLowerCase().includes(word.toLowerCase())) {
-          detectedWords.push(word);
-          filteredText = this.replaceSensitiveWord(filteredText, word);
+        const regex = new RegExp(this.escapeRegExp(word), 'gi');
+        let execResult: RegExpExecArray | null;
+        let matched = false;
+        while ((execResult = regex.exec(text)) !== null) {
+          matched = true;
+          const matchedText = execResult[0];
+          const startIndex = execResult.index;
+          const endIndex = startIndex + matchedText.length;
+          addDetail(word, matchedText, startIndex, endIndex, 'exact');
+          if (!detectedWords.includes(matchedText)) {
+            detectedWords.push(matchedText);
+          }
+        }
+        if (matched) {
+          regex.lastIndex = 0;
+          filteredText = filteredText.replace(regex, this.getMaskString());
         }
       }
     }
 
     // 2. 增强检测：规范化文本后检测（去除特殊符号）
-    const normalizedText = this.normalizeText(text);
-    const normalizedSegments = this.segmentText(normalizedText);
+    const { normalized, indexMap } = this.normalizeTextWithMapping(text);
+    const normalizedSegments = this.segmentText(normalized);
+    const segmentOffsets: number[] = [];
+    let cumulativeOffset = 0;
+    for (const segment of normalizedSegments) {
+      segmentOffsets.push(cumulativeOffset);
+      cumulativeOffset += segment.length;
+    }
 
     for (const word of this.sensitiveWords) {
-      const normalizedWord = this.normalizeText(word);
-
       // 跳过正则表达式格式的词
       if (word.includes('[') || word.includes('(') || word.includes('|')) {
         continue;
       }
 
-      // 检查规范化后的分词结果
-      for (const segment of normalizedSegments) {
-        if (segment.includes(normalizedWord)) {
-          if (
-            !detectedWords.includes(word) &&
-            !detectedWords.includes(`${word}(变体)`)
-          ) {
-            detectedWords.push(`${word}(变体)`);
+      const normalizedWord = this.normalizeText(word);
+      if (!normalizedWord || normalizedWord.length === 0) {
+        continue;
+      }
+
+      for (let i = 0; i < normalizedSegments.length; i++) {
+        const segment = normalizedSegments[i];
+        const baseOffset = segmentOffsets[i] ?? 0;
+        let searchIndex = 0;
+
+        while (true) {
+          const relativeIndex = segment.indexOf(normalizedWord, searchIndex);
+          if (relativeIndex === -1) {
+            break;
           }
-          break;
+
+          const startNormalized = baseOffset + relativeIndex;
+          const endNormalized = startNormalized + normalizedWord.length - 1;
+
+          if (startNormalized >= indexMap.length || endNormalized >= indexMap.length) {
+            searchIndex = relativeIndex + 1;
+            continue;
+          }
+
+          const startIndex = indexMap[startNormalized];
+          const endIndex = indexMap[endNormalized];
+
+          if (typeof startIndex === 'number' && typeof endIndex === 'number') {
+            const slicingEnd = endIndex + 1;
+            const matchedText = text.slice(startIndex, slicingEnd);
+            addDetail(word, matchedText, startIndex, slicingEnd, 'variant');
+
+            if (
+              !detectedWords.includes(word) &&
+              !detectedWords.includes(`${word}(变体)`)
+            ) {
+              detectedWords.push(`${word}(变体)`);
+            }
+
+            const maskLength = Math.max(1, slicingEnd - startIndex);
+            const maskChar = this.config?.mask || '*';
+            const maskString = maskChar.repeat(maskLength);
+            filteredText = `${filteredText.slice(0, startIndex)}${maskString}${filteredText.slice(slicingEnd)}`;
+          }
+
+          searchIndex = relativeIndex + 1;
         }
       }
     }
@@ -346,25 +495,9 @@ export class SensitiveWordFilter {
       detectedWords,
       filteredText,
       originalText: text,
-      shouldRedirectToArrested: hasSensitiveWords
+      shouldRedirectToArrested: hasSensitiveWords,
+      matchDetails
     };
-  }
-
-  /**
-   * 替换敏感词
-   */
-  private replaceSensitiveWord(text: string, word: string): string {
-    if (!this.config) return text;
-
-    const regex = new RegExp(word, 'gi');
-
-    if (this.config.mask_word && this.config.mask_word.trim() !== '') {
-      // 如果设置了完整替换词，用它替换整个敏感词
-      return text.replace(regex, this.config.mask_word);
-    } else {
-      // 否则用mask字符替换敏感词的每个字符
-      return text.replace(regex, (match) => (this.config!.mask || '*').repeat(match.length));
-    }
   }
 
   /**
@@ -439,7 +572,8 @@ export const quickCheck = async (text: string): Promise<FilterResult> => {
       detectedWords: [],
       filteredText: text,
       originalText: text,
-      shouldRedirectToArrested: false
+      shouldRedirectToArrested: false,
+      matchDetails: []
     };
   }
 };
