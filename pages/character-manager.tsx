@@ -1,10 +1,10 @@
 // pages/character-manager.tsx
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { quickCheck } from '@/lib/sensitive-word-filter';
+import { quickCheck, type FilterResult, type SensitiveMatchDetail } from '@/lib/sensitive-word-filter';
 import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
 import { webcrypto } from 'crypto';
 import { config } from '@/lib/config';
@@ -91,6 +91,146 @@ const replaceAllNamesInData = (data: any, oldBaseName: string, newBaseName: stri
     return data;
 };
 
+type SensitiveIssue = {
+    path: string;
+    parentPath: string;
+    value: string;
+    matches: SensitiveMatchDetail[];
+};
+
+const parsePathSegments = (path: string): (string | number)[] => {
+    if (!path) return [];
+    const segments: (string | number)[] = [];
+    const parts = path.split('.');
+    for (const part of parts) {
+        const tokenRegex = /([^\[\]]+)|(\[\d+\])/g;
+        let match: RegExpExecArray | null;
+        while ((match = tokenRegex.exec(part)) !== null) {
+            const token = match[0];
+            if (!token) continue;
+            if (token.startsWith('[')) {
+                const index = Number(token.slice(1, -1));
+                segments.push(index);
+            } else {
+                segments.push(token);
+            }
+        }
+    }
+    return segments;
+};
+
+const getValueAtPath = (data: any, path: string): any => {
+    const segments = parsePathSegments(path);
+    if (segments.length === 0) return undefined;
+    let current = data;
+    for (const segment of segments) {
+        if (current === null || current === undefined) return undefined;
+        current = current[segment as any];
+    }
+    return current;
+};
+
+const setValueAtPath = (data: any, path: string, newValue: string): boolean => {
+    const segments = parsePathSegments(path);
+    if (segments.length === 0) return false;
+    let current = data;
+    for (let i = 0; i < segments.length - 1; i++) {
+        const segment = segments[i];
+        if (current === null || current === undefined) return false;
+        current = current[segment as any];
+    }
+    const lastSegment = segments[segments.length - 1];
+    if (current === null || current === undefined) return false;
+    if (typeof current[lastSegment as any] !== 'string') return false;
+    current[lastSegment as any] = newValue;
+    return true;
+};
+
+const maskValueByMatches = (value: string, matches: SensitiveMatchDetail[], mode: 'first' | 'last'): { text: string; changed: boolean } => {
+    if (!value || matches.length === 0) {
+        return { text: value, changed: false };
+    }
+    const chars = value.split('');
+    const changedIndices = new Set<number>();
+
+    matches.forEach(match => {
+        const targetIndex = mode === 'first'
+            ? match.startIndex
+            : Math.max(match.startIndex, match.endIndex - 1);
+
+        if (targetIndex < 0 || targetIndex >= chars.length) {
+            return;
+        }
+
+        if (chars[targetIndex] !== '*') {
+            chars[targetIndex] = '*';
+        }
+        changedIndices.add(targetIndex);
+    });
+
+    if (changedIndices.size === 0) {
+        return { text: value, changed: false };
+    }
+
+    return {
+        text: chars.join(''),
+        changed: true
+    };
+};
+
+const sortMatchesByPosition = (matches: SensitiveMatchDetail[]): SensitiveMatchDetail[] => {
+    return [...matches].sort((a, b) => {
+        if (a.startIndex === b.startIndex) {
+            return a.endIndex - b.endIndex;
+        }
+        return a.startIndex - b.startIndex;
+    });
+};
+
+const collectSensitiveIssues = async (value: any, path = '', parentPath = ''): Promise<SensitiveIssue[]> => {
+    const issues: SensitiveIssue[] = [];
+
+    if (typeof value === 'string') {
+        if (!value.trim()) {
+            return issues;
+        }
+        const result = await quickCheck(value);
+        if (result.matchDetails && result.matchDetails.length > 0) {
+            const normalizedMatches = sortMatchesByPosition(result.matchDetails);
+            const resolvedParent = parentPath || path;
+            issues.push({
+                path,
+                parentPath: resolvedParent,
+                value,
+                matches: normalizedMatches
+            });
+        }
+        return issues;
+    }
+
+    if (Array.isArray(value)) {
+        const effectiveParent = parentPath || path;
+        for (let index = 0; index < value.length; index++) {
+            const childPath = `${path}[${index}]`;
+            const childIssues = await collectSensitiveIssues(value[index], childPath, effectiveParent || path);
+            issues.push(...childIssues);
+        }
+        return issues;
+    }
+
+    if (isObject(value)) {
+        for (const key of Object.keys(value)) {
+            if (key === 'signature') continue;
+            const childPath = path ? `${path}.${key}` : key;
+            const childIssues = await collectSensitiveIssues(value[key], childPath, childPath);
+            issues.push(...childIssues);
+        }
+        return issues;
+    }
+
+    return issues;
+};
+
 // 【新增】定义渐变色，用于魔法少女卡片背景
 const gradientColors: Record<string, { first: string; second: string }> = {
     [MainColor.Red]: { first: '#ff6b6b', second: '#ee5a6f' },
@@ -151,6 +291,18 @@ const CharacterManagerPage: React.FC = () => {
 
     // 用于控制粘贴区域折叠/展开的状态，默认为折叠
     const [isPasteAreaVisible, setIsPasteAreaVisible] = useState(false);
+
+    // 敏感词检测相关状态
+    const [sensitiveIssues, setSensitiveIssues] = useState<SensitiveIssue[]>([]);
+    const [isSensitiveScanning, setIsSensitiveScanning] = useState(false);
+    const [lastScanTime, setLastScanTime] = useState<number | null>(null);
+    const [debouncedCharacterData, setDebouncedCharacterData] = useState<any | null>(null);
+    const [scanTrigger, setScanTrigger] = useState(0);
+
+    // 即时检测文本框
+    const [manualCheckText, setManualCheckText] = useState('');
+    const [manualCheckResult, setManualCheckResult] = useState<FilterResult | null>(null);
+    const [manualCheckLoading, setManualCheckLoading] = useState(false);
 
     // 加载用户数据卡和容量
     const loadUserDataCards = useCallback(async () => {
@@ -450,6 +602,52 @@ const CharacterManagerPage: React.FC = () => {
         }
     }, []); // 空依赖数组 `[]` 确保此效果仅在组件首次挂载时运行一次
 
+    useEffect(() => {
+        if (!characterData) {
+            setDebouncedCharacterData(null);
+            return;
+        }
+        const handler = setTimeout(() => {
+            setDebouncedCharacterData(characterData);
+        }, 400);
+        return () => clearTimeout(handler);
+    }, [characterData]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        if (!debouncedCharacterData) {
+            setSensitiveIssues([]);
+            setLastScanTime(null);
+            setIsSensitiveScanning(false);
+            return;
+        }
+
+        setIsSensitiveScanning(true);
+        collectSensitiveIssues(debouncedCharacterData)
+            .then(issues => {
+                if (!cancelled) {
+                    setSensitiveIssues(issues);
+                    setLastScanTime(Date.now());
+                }
+            })
+            .catch(error => {
+                if (!cancelled) {
+                    console.error('敏感词扫描失败:', error);
+                    setSensitiveIssues([]);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setIsSensitiveScanning(false);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [debouncedCharacterData, scanTrigger]);
+
     // [SRS 3.3] 立绘生成器相关状态
     const [isTachieVisible, setIsTachieVisible] = useState(false);
     const [tachiePrompt, setTachiePrompt] = useState('');
@@ -700,6 +898,41 @@ const CharacterManagerPage: React.FC = () => {
 
     }, [characterData, originalData]);
 
+    const totalMatches = useMemo(() => {
+        return sensitiveIssues.reduce((sum, issue) => sum + issue.matches.length, 0);
+    }, [sensitiveIssues]);
+
+    const flattenedMatches = useMemo(() => {
+        const items: { key: string; issue: SensitiveIssue; match: SensitiveMatchDetail }[] = [];
+        sensitiveIssues.forEach((issue, issueIndex) => {
+            issue.matches.forEach((match, matchIndex) => {
+                const key = `${issue.path || 'root'}-${match.startIndex}-${match.endIndex}-${match.matchType}-${issueIndex}-${matchIndex}`;
+                items.push({ key, issue, match });
+            });
+        });
+        return items;
+    }, [sensitiveIssues]);
+
+    const fieldIssueMap = useMemo(() => {
+        const map = new Map<string, SensitiveIssue[]>();
+        const assign = (key: string | undefined, issue: SensitiveIssue) => {
+            if (!key) return;
+            const list = map.get(key);
+            if (list) {
+                list.push(issue);
+            } else {
+                map.set(key, [issue]);
+            }
+        };
+        sensitiveIssues.forEach(issue => {
+            assign(issue.path, issue);
+            if (issue.parentPath && issue.parentPath !== issue.path) {
+                assign(issue.parentPath, issue);
+            }
+        });
+        return map;
+    }, [sensitiveIssues]);
+
     // 递归渲染表单
     // 【修正】渲染表单的递归函数，移除了未被使用的变量以修复ESLint报错
     const renderFormFields = (data: any, path: string = ''): React.ReactNode => {
@@ -726,6 +959,15 @@ const CharacterManagerPage: React.FC = () => {
             if (key === 'signature' || key === 'isPreset' || key === 'arena_history' || key === 'adjudicationEvents') return null;
 
             const value = data[key];
+            const fieldIssues = fieldIssueMap.get(currentPath) || [];
+            const hasIssue = fieldIssues.length > 0;
+            const issueCount = fieldIssues.reduce((total, issue) => total + issue.matches.length, 0);
+            const inputClassName = hasIssue
+                ? 'input-field border-red-400 focus:border-red-500 focus:ring-red-300 bg-red-50'
+                : 'input-field';
+            const issueHint = hasIssue ? (
+                <p className="text-xs text-red-500 mt-1">检测到 {issueCount} 处敏感词，建议参考下方“敏感词检测”面板进行修正。</p>
+            ) : null;
 
             // 专门处理数组类型的逻辑
             if (Array.isArray(value)) {
@@ -740,10 +982,11 @@ const CharacterManagerPage: React.FC = () => {
                                 value={value.join('\n')}
                                 onChange={(e) => handleFieldChange(currentPath, e.target.value.split('\n'))}
                                 rows={Math.max(3, value.length)} // 动态调整高度
-                                className="input-field"
+                                className={inputClassName}
                                 placeholder="每行输入一个项目"
                             />
                             <p className="text-xs text-gray-500 mt-1">此字段为列表，请每行输入一个项目。</p>
+                            {issueHint}
                         </div>
                     );
                 }
@@ -777,14 +1020,14 @@ const CharacterManagerPage: React.FC = () => {
                     <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
                     <div className="mt-1 flex items-center">
                         {typeof value === 'string' && value.length > 80 ?
-                            <textarea id={currentPath} value={value as string} onChange={(e) => handleFieldChange(currentPath, e.target.value)} rows={3} className="input-field" />
+                            <textarea id={currentPath} value={value as string} onChange={(e) => handleFieldChange(currentPath, e.target.value)} rows={3} className={inputClassName} />
                             :
                             <input
                                 type="text"
                                 id={currentPath}
                                 value={value as any}
                                 onChange={(e) => handleFieldChange(currentPath, e.target.value)}
-                                className="input-field"
+                                className={inputClassName}
                                 // 当字段为 codename 或 name 时，限制最大长度为20
                                 maxLength={(key === 'codename' || key === 'name') ? 20 : undefined}
                             />
@@ -802,6 +1045,7 @@ const CharacterManagerPage: React.FC = () => {
                             点击将所有“{originalData.codename || originalData.name}”替换为“{characterData.codename || characterData.name}”
                         </button>
                     )}
+                    {issueHint}
                 </div>
             );
         });
@@ -811,6 +1055,83 @@ const CharacterManagerPage: React.FC = () => {
         const newCodename = randomChooseOneHanaName();
         handleFieldChange('codename', newCodename);
     };
+
+    const handleManualRescan = useCallback(() => {
+        if (!characterData) return;
+        setScanTrigger(prev => prev + 1);
+    }, [characterData]);
+
+    const handleHarmonize = useCallback((mode: 'first' | 'last') => {
+        if (!characterData) {
+            setMessage({ type: 'info', text: '请先加载角色或情景数据，再执行和谐操作。' });
+            return;
+        }
+
+        if (sensitiveIssues.length === 0) {
+            setMessage({ type: 'info', text: '未检测到敏感词，无需执行和谐。' });
+            return;
+        }
+
+        let hasChange = false;
+
+        setCharacterData((prev: any) => {
+            if (!prev) return prev;
+            const cloned = JSON.parse(JSON.stringify(prev));
+            let localChange = false;
+
+            sensitiveIssues.forEach(issue => {
+                if (!issue.matches.length) return;
+                const originalValue = getValueAtPath(cloned, issue.path);
+                if (typeof originalValue !== 'string') return;
+                const { text, changed } = maskValueByMatches(originalValue, issue.matches, mode);
+                if (changed && text !== originalValue) {
+                    setValueAtPath(cloned, issue.path, text);
+                    localChange = true;
+                }
+            });
+
+            if (localChange) {
+                hasChange = true;
+                return cloned;
+            }
+
+            return prev;
+        });
+
+        if (hasChange) {
+            setMessage({ type: 'success', text: `已执行${mode === 'first' ? '首字符' : '尾字符'}打码，建议重新扫描确认。` });
+            setScanTrigger(prev => prev + 1);
+        } else {
+            setMessage({ type: 'info', text: '未找到可替换的敏感词片段，请确认检测结果。' });
+        }
+    }, [characterData, sensitiveIssues]);
+
+    const handleManualCheck = useCallback(async () => {
+        if (!manualCheckText.trim()) {
+            setManualCheckResult(null);
+            return;
+        }
+
+        setManualCheckLoading(true);
+        try {
+            const result = await quickCheck(manualCheckText);
+            setManualCheckResult({
+                ...result,
+                matchDetails: sortMatchesByPosition(result.matchDetails || [])
+            });
+        } catch (error) {
+            console.error('即时文本敏感词检测失败:', error);
+            setMessage({ type: 'error', text: '即时文本检测失败，请稍后重试。' });
+            setManualCheckResult(null);
+        } finally {
+            setManualCheckLoading(false);
+        }
+    }, [manualCheckText]);
+
+    const handleManualReset = useCallback(() => {
+        setManualCheckText('');
+        setManualCheckResult(null);
+    }, []);
 
     // ===================================
     // 历战记录管理函数 (SRS 3.7.2)
@@ -1213,6 +1534,127 @@ const CharacterManagerPage: React.FC = () => {
                                 {message.text}
                             </div>
                         )}
+                    </div>
+
+                    <div className="card mt-6">
+                        <h3 className="text-xl font-bold text-gray-800 text-center mb-2">敏感词检测控制台</h3>
+                        <p className="text-sm text-gray-600 text-center">实时标记角色与情景内容中的敏感词，并提供快捷的文本检测与和谐工具。</p>
+
+                        <div className="mt-4">
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm font-semibold text-gray-700">当前档案扫描</span>
+                                <span className="text-xs text-gray-500">{lastScanTime ? `最近扫描：${new Date(lastScanTime).toLocaleString()}` : '尚未扫描'}</span>
+                            </div>
+
+                            {!characterData ? (
+                                <p className="mt-2 text-xs text-gray-500">请先加载角色或情景数据，以查看敏感词标记与和谐建议。</p>
+                            ) : isSensitiveScanning ? (
+                                <p className="mt-2 text-xs text-gray-500">正在扫描敏感词，请稍候...</p>
+                            ) : totalMatches > 0 ? (
+                                <>
+                                    <p className="mt-2 text-xs text-gray-600">共标记 <span className="font-semibold text-pink-600">{totalMatches}</span> 处敏感词，请按照下方定位信息进行修正。</p>
+                                    <ul className="mt-3 space-y-3 max-h-64 overflow-y-auto pr-1">
+                                        {flattenedMatches.map(({ key, issue, match }) => (
+                                            <li key={key} className="rounded border border-pink-100 bg-pink-50/70 p-2 text-xs text-gray-700">
+                                                <div className="flex items-center justify-between text-[11px] text-pink-900 font-mono">
+                                                    <span>{issue.path || '(根路径)'}</span>
+                                                    <span>{match.matchType === 'variant' ? '变体' : match.matchType === 'regex' ? '正则命中' : '直接命中'}</span>
+                                                </div>
+                                                <div className="mt-1 leading-relaxed">
+                                                    <span>{match.contextBefore}</span>
+                                                    <mark className="bg-yellow-200 text-red-700 px-0.5">{match.matchedText}</mark>
+                                                    <span>{match.contextAfter}</span>
+                                                </div>
+                                                <div className="mt-1 text-[10px] text-gray-500">词条：{match.word} ｜ 位置：{match.startIndex} - {match.endIndex - 1}</div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </>
+                            ) : (
+                                <p className="mt-2 text-xs text-emerald-600">未检测到敏感词，继续保持！</p>
+                            )}
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                                <button
+                                    onClick={() => handleHarmonize('first')}
+                                    disabled={!characterData || totalMatches === 0}
+                                    className="px-4 py-1.5 text-xs font-semibold text-white bg-pink-500 rounded-md hover:bg-pink-600 disabled:opacity-50 disabled:pointer-events-none"
+                                >
+                                    一键和谐（首字符）
+                                </button>
+                                <button
+                                    onClick={() => handleHarmonize('last')}
+                                    disabled={!characterData || totalMatches === 0}
+                                    className="px-4 py-1.5 text-xs font-semibold text-white bg-purple-500 rounded-md hover:bg-purple-600 disabled:opacity-50 disabled:pointer-events-none"
+                                >
+                                    一键和谐（尾字符）
+                                </button>
+                                <button
+                                    onClick={handleManualRescan}
+                                    disabled={!characterData || isSensitiveScanning}
+                                    className="px-4 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:pointer-events-none"
+                                >
+                                    重新扫描
+                                </button>
+                            </div>
+                            <p className="mt-1 text-[11px] text-gray-500">和谐操作仅替换敏感词首尾字符为“*”，不会破坏整体文案结构，也不会影响原生性判定之外的其他字段。</p>
+                        </div>
+
+                        <div className="mt-6 border-t pt-4">
+                            <h4 className="text-sm font-semibold text-gray-700">即时文本检测</h4>
+                            <p className="text-xs text-gray-500 mt-1">将任意提示词、剧情或描述粘贴到下方文本框，实时验证敏感词风险。</p>
+                            <textarea
+                                value={manualCheckText}
+                                onChange={(e) => setManualCheckText(e.target.value)}
+                                rows={5}
+                                className="input-field resize-y h-32 mt-3"
+                                placeholder="在此粘贴待检测文本，支持多段内容。"
+                            />
+                            <div className="mt-2 flex flex-wrap gap-2">
+                                <button
+                                    onClick={handleManualCheck}
+                                    disabled={manualCheckLoading || !manualCheckText.trim()}
+                                    className="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-500 rounded-md hover:bg-indigo-600 disabled:opacity-50 disabled:pointer-events-none"
+                                >
+                                    {manualCheckLoading ? '检测中...' : '立即检测'}
+                                </button>
+                                <button
+                                    onClick={handleManualReset}
+                                    disabled={!manualCheckText && !manualCheckResult}
+                                    className="px-4 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:pointer-events-none"
+                                >
+                                    清空文本
+                                </button>
+                            </div>
+
+                            {manualCheckResult && (
+                                <div className={`mt-3 rounded-md border p-3 text-xs ${manualCheckResult.hasSensitiveWords ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                                    <div className="font-semibold">
+                                        {manualCheckResult.hasSensitiveWords
+                                            ? `检测到 ${manualCheckResult.matchDetails.length} 处敏感词`
+                                            : '未检测到敏感词'}
+                                    </div>
+                                    {manualCheckResult.hasSensitiveWords && (
+                                        <ul className="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1 text-gray-700">
+                                            {manualCheckResult.matchDetails.map((match, index) => (
+                                                <li key={`manual-${index}-${match.startIndex}-${match.endIndex}`} className="rounded bg-white/90 p-2 shadow-sm">
+                                                    <div className="flex items-center justify-between text-[11px] text-gray-500">
+                                                        <span>{match.matchType === 'variant' ? '变体' : match.matchType === 'regex' ? '正则命中' : '直接命中'}</span>
+                                                        <span>位置 {match.startIndex} - {match.endIndex - 1}</span>
+                                                    </div>
+                                                    <div className="mt-1 leading-relaxed">
+                                                        <span>{match.contextBefore}</span>
+                                                        <mark className="bg-yellow-200 text-red-700 px-0.5">{match.matchedText}</mark>
+                                                        <span>{match.contextAfter}</span>
+                                                    </div>
+                                                    <div className="mt-1 text-[10px] text-gray-500">词条：{match.word}</div>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     {/* 角色卡片预览与生成区域 */}

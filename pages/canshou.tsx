@@ -9,6 +9,7 @@ import { CANSHOU_LORE } from '../lib/canshou-lore';
 import { generateRandomCanshou } from '../lib/random-character-generator';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
+import QuestionNavigator from '../components/QuestionNavigator';
 
 // 定义问卷和问题的类型
 interface Question {
@@ -123,6 +124,7 @@ const CanshouPage: React.FC = () => {
   const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
   const [showLanguageSection, setShowLanguageSection] = useState(false); // 控制生成语言区域的折叠状态
   const [showBulkFillSection, setShowBulkFillSection] = useState(false); // 控制一键填充区域的折叠状态
+  const [showAnswerReview, setShowAnswerReview] = useState(false);
 
   useEffect(() => {
     fetch('/languages.json')
@@ -181,6 +183,13 @@ const CanshouPage: React.FC = () => {
     }
   }, [answers]);
 
+  useEffect(() => {
+    if (!questionnaire) return;
+    const question = questionnaire.questions[currentQuestionIndex];
+    if (!question) return;
+    setCurrentAnswer(answers[question.id] || '');
+  }, [currentQuestionIndex, questionnaire, answers]);
+
 
   const proceedToNext = (answer: string) => {
     const currentQuestion = questionnaire!.questions[currentQuestionIndex];
@@ -205,13 +214,46 @@ const CanshouPage: React.FC = () => {
       setError('⚠️ 请输入或选择一个答案');
       return;
     }
+    if (allowCustomInput && currentMaxLength && currentAnswer.trim().length > currentMaxLength) {
+      setError(`⚠️ 答案不能超过${currentMaxLength}字`);
+      return;
+    }
     setError(null);
     proceedToNext(currentAnswer.trim());
+  };
+
+  const handlePreviousQuestion = () => {
+    if (!questionnaire || currentQuestionIndex === 0) return;
+
+    const currentQuestion = questionnaire.questions[currentQuestionIndex];
+    const trimmed = currentAnswer.trim();
+    const updatedAnswers = { ...answers, [currentQuestion.id]: trimmed };
+    setAnswers(updatedAnswers);
+
+    const previousIndex = currentQuestionIndex - 1;
+    const previousQuestion = questionnaire.questions[previousIndex];
+    setCurrentQuestionIndex(previousIndex);
+    setCurrentAnswer(updatedAnswers[previousQuestion.id] || '');
+    setError(null);
   };
 
   const handleOptionClick = (option: string) => {
     setCurrentAnswer(option);
     setTimeout(() => proceedToNext(option), 100);
+  };
+
+  const handleNavigateToQuestion = (index: number) => {
+    if (!questionnaire) return;
+    if (index === currentQuestionIndex || index < 0 || index >= questionnaire.questions.length) return;
+
+    const currentQuestion = questionnaire.questions[currentQuestionIndex];
+    const updatedAnswers = { ...answers, [currentQuestion.id]: currentAnswer.trim() };
+    setAnswers(updatedAnswers);
+
+    const targetQuestion = questionnaire.questions[index];
+    setCurrentQuestionIndex(index);
+    setCurrentAnswer(updatedAnswers[targetQuestion.id] || '');
+    setError(null);
   };
 
   const handleSubmit = async (finalAnswers: Record<string, string>) => {
@@ -277,7 +319,9 @@ const CanshouPage: React.FC = () => {
     lines.forEach((line, index) => {
       if (index < questionnaire!.questions.length) {
         const questionId = questionnaire!.questions[index].id;
-        newAnswers[questionId] = line.slice(0, 100); // 限制单行长度
+        const questionDef = questionnaire!.questions[index];
+        const limit = (questionDef.type === 'text' || questionDef.allowCustom) ? 140 : 80;
+        newAnswers[questionId] = line.slice(0, limit);
       }
     });
     setAnswers(newAnswers);
@@ -297,6 +341,14 @@ const CanshouPage: React.FC = () => {
 
   const currentQuestion = questionnaire.questions[currentQuestionIndex];
   const isLastQuestion = currentQuestionIndex === questionnaire.questions.length - 1;
+  const progressPercent = Math.round(((currentQuestionIndex + 1) / questionnaire.questions.length) * 100);
+  const navigatorItems = questionnaire.questions.map((question, index) => ({
+    id: question.id || `CS-${index + 1}`,
+    label: question.question
+  }));
+  const allowCustomInput = currentQuestion.type === 'text' || currentQuestion.allowCustom;
+  const currentMaxLength = allowCustomInput ? 140 : 0;
+  const fallbackQuickOptions = allowCustomInput ? ['记录未知', '稍后补充'] : [];
 
   return (
     <>
@@ -349,64 +401,113 @@ const CanshouPage: React.FC = () => {
               </div>
             ) : !canshouDetails ? (
               <>
-                <div className="mb-6">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm text-gray-600">问题 {currentQuestionIndex + 1} / {questionnaire.questions.length}</span>
+                <QuestionNavigator
+                  items={navigatorItems}
+                  currentIndex={currentQuestionIndex}
+                  onNavigate={handleNavigateToQuestion}
+                  isAnswered={(index) => {
+                    const q = questionnaire.questions[index];
+                    return q ? (answers[q.id]?.trim()?.length ?? 0) > 0 : false;
+                  }}
+                  theme="dark"
+                />
+
+                <div className="mt-4 space-y-4">
+                  <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-slate-200">
+                      <span>问题 {currentQuestionIndex + 1} / {questionnaire.questions.length}</span>
+                      <span>进度 {progressPercent}%</span>
+                    </div>
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                      <div
+                        className="h-full rounded-full bg-emerald-400 transition-all duration-300 ease-out"
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    </div>
+                    <div className={`mt-4 min-h-[60px] flex items-center justify-center transition-opacity duration-200 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
+                      <h3 className="text-xl font-semibold text-center text-slate-100">
+                        {currentQuestion.question}
+                      </h3>
+                    </div>
+                    <p className="text-xs text-center text-slate-400 mt-2">
+                      请基于您构想的虚拟档案回答，并确保内容符合公序良俗，请勿使用任何真实信息。
+                    </p>
+                    {allowCustomInput && fallbackQuickOptions.length > 0 && (
+                      <div className="mt-3 flex flex-wrap justify-center gap-3 text-xs">
+                        {fallbackQuickOptions.map(option => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => handleOptionClick(option)}
+                            disabled={submitting || isCooldown}
+                            className="rounded-full border border-slate-600 bg-slate-900 px-4 py-1.5 font-medium text-emerald-300 transition-colors hover:border-emerald-400 hover:text-emerald-200"
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div className="h-2 rounded-full bg-pink-500 transition-all duration-300" style={{ width: `${((currentQuestionIndex + 1) / questionnaire.questions.length) * 100}%` }} />
-                  </div>
+
+                  {currentQuestion.options && (
+                    <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4 shadow-sm">
+                      <p className="text-xs text-slate-400 mb-3">推荐选项（点击后将自动进入下一题，可在下方补充）</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {currentQuestion.options.map((option, index) => {
+                          const value = typeof option === 'string' ? option : option.value;
+                          const label = typeof option === 'string' ? option : option.label;
+                          const disabled = typeof option !== 'string' && option.disabled;
+                          return (
+                            <button
+                              key={`${value}-${index}`}
+                              onClick={() => !disabled && handleOptionClick(value)}
+                              disabled={disabled}
+                              className={`rounded-lg border text-sm px-3 py-2 transition-colors text-left ${disabled
+                                ? 'border-slate-700 bg-slate-800 text-slate-500 cursor-not-allowed'
+                                : 'border-slate-600 bg-slate-800 text-slate-100 hover:border-emerald-400 hover:text-emerald-200'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className={`mb-4 min-h-[60px] flex items-center justify-center transition-opacity duration-200 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
-                  <h3 className="text-xl font-medium text-center text-gray-800">
-                    {currentQuestion.question}
-                  </h3>
-                </div>
-
-                {currentQuestion.options && (
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    {currentQuestion.options.map((option, index) => {
-                      const value = typeof option === 'string' ? option : option.value;
-                      const label = typeof option === 'string' ? option : option.label;
-                      const disabled = typeof option !== 'string' && option.disabled;
-                      return (
-                        <button
-                          key={index}
-                          onClick={() => !disabled && handleOptionClick(value)}
-                          disabled={disabled}
-                          className={`p-3 border rounded-lg text-sm text-center transition-colors 
-                            ${disabled
-                              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                              : 'bg-white text-gray-800 hover:text-pink-500 hover:bg-pink-50 hover:border-pink-300 cursor-pointer'
-                            }`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <p className="text-xs text-center text-gray-500 mb-4 -mt-2 px-4">
-                  请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。
-                </p>
-
-                {(currentQuestion.type === 'text' || currentQuestion.allowCustom) && (
-                  <div className="input-group">
+                {allowCustomInput && (
+                  <div className="input-group mt-4">
                     <textarea
                       value={currentAnswer}
                       onChange={(e) => setCurrentAnswer(e.target.value)}
-                      placeholder={currentQuestion.placeholder || "请在此输入你的想法..."}
-                      className="input-field resize-y h-24"
-                      maxLength={100}
+                      placeholder={currentQuestion.placeholder || '请在此输入你的想法...'}
+                      className="input-field resize-y min-h-[6rem]"
+                      maxLength={currentMaxLength || undefined}
                     />
+                    {currentMaxLength ? (
+                      <div className="mt-1 text-right text-xs text-gray-500">
+                        {currentAnswer.length}/{currentMaxLength}
+                      </div>
+                    ) : null}
                   </div>
                 )}
-
-                <button onClick={handleNext} disabled={submitting || isCooldown || !currentAnswer.trim()} className="generate-button">
-                  {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '生成中...' : isLastQuestion ? '生成档案' : '下一题'}
-                </button>
+                <div className="mt-4 flex flex-col sm:flex-row gap-2">
+                  <button
+                    onClick={handlePreviousQuestion}
+                    disabled={currentQuestionIndex === 0 || submitting || isCooldown}
+                    className="generate-button sm:w-1/4"
+                  >
+                    返回上题
+                  </button>
+                  <button
+                    onClick={handleNext}
+                    disabled={submitting || isCooldown || !currentAnswer.trim()}
+                    className="generate-button flex-1"
+                  >
+                    {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '生成中...' : isLastQuestion ? '生成档案' : '下一题'}
+                  </button>
+                </div>
                 {/* 多语言支持 */}
                 <div className="my-4 bg-gray-100 rounded-lg p-3">
                   <button
@@ -458,6 +559,38 @@ const CanshouPage: React.FC = () => {
                         <button onClick={handleBulkFill} className="text-sm text-blue-600 hover:underline">填充</button>
                         <button onClick={handleClearDraft} className="text-sm text-red-600 hover:underline">清空存档</button>
                       </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="my-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+                  <button
+                    onClick={() => setShowAnswerReview(!showAnswerReview)}
+                    className="flex w-full items-center justify-between text-left text-sm font-semibold text-emerald-300"
+                  >
+                    <span>答案概览</span>
+                    <span>{showAnswerReview ? '▲' : '▼'}</span>
+                  </button>
+                  {showAnswerReview && (
+                    <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1 text-sm">
+                      {questionnaire.questions.map((question, index) => (
+                        <div key={`canshou-review-${question.id}`} className="rounded-lg border border-slate-700 bg-slate-900/80 p-3">
+                          <div className="text-xs font-semibold text-emerald-300">Q{index + 1}</div>
+                          <div className="mt-1 text-xs text-slate-300">{question.question}</div>
+                          <div className="mt-2 text-slate-100 whitespace-pre-wrap">
+                            {answers[question.id] && answers[question.id].trim().length > 0 ? answers[question.id] : <span className="text-slate-500">尚未填写</span>}
+                          </div>
+                          <div className="mt-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleNavigateToQuestion(index)}
+                              className="text-xs text-emerald-300 hover:underline"
+                            >
+                              编辑此题
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
