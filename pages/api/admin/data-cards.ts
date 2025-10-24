@@ -48,6 +48,7 @@ export default async function handler(req: NextRequest) {
       sortOrder: (searchParams.get('sortOrder') as 'asc' | 'desc') || 'desc',
       reviewStatus: searchParams.get('reviewStatus') as 'pending' | 'approved' | 'rejected' | undefined,
       isPublic: isPublicValue, // <-- 使用处理后的 isPublicValue
+      isRecommended: searchParams.get('isRecommended') as '0' | '1' | undefined,
       type: searchParams.get('type') as 'character' | 'scenario' | undefined,
       search: searchParams.get('search') || undefined,
     };

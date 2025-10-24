@@ -13,8 +13,10 @@ interface DataCard {
   is_public: number;
   usage_count: number;
   like_count: number;
+  favorite_count: number;
   created_at: string;
   updated_at: string;
+  is_recommended: number;
   username?: string;
 }
 
@@ -259,7 +261,12 @@ export default function CharacterManagement() {
                           }`}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="font-medium text-sm">{card.name}</span>
+                          <span className="font-medium text-sm flex items-center gap-2">
+                            {card.name}
+                            {card.is_recommended === 1 && (
+                              <span className="px-2 py-0.5 text-[11px] rounded-full bg-amber-100 text-amber-700">推荐</span>
+                            )}
+                          </span>
                           <div className="flex items-center gap-1">
                             <span className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${cardStatus.status === 'banned'
                               ? 'bg-red-100 text-red-700'
@@ -277,7 +284,7 @@ export default function CharacterManagement() {
                           {card.type === 'character' ? '角色卡' : '情景卡'} | 作者: {card.username}
                         </div>
                         <div className="text-xs text-gray-400">
-                          ❤️ {card.like_count} | 📥 {card.usage_count}
+                          ❤️ {card.like_count} | ⭐ {card.favorite_count} | 📥 {card.usage_count}
                         </div>
                       </div>
                     );
@@ -448,6 +455,15 @@ export default function CharacterManagement() {
                         <input
                           type="text"
                           value={selectedCard.like_count || 0}
+                          disabled
+                          className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">收藏数</label>
+                        <input
+                          type="text"
+                          value={selectedCard.favorite_count || 0}
                           disabled
                           className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50"
                         />

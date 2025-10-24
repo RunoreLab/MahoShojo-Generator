@@ -19,6 +19,8 @@ interface DataCard {
   username: string;
   like_count: number;
   usage_count: number;
+  favorite_count: number;
+  is_recommended: number;
   created_at: string;
   updated_at: string;
 }
@@ -46,6 +48,7 @@ const CharacterManagementPage: React.FC = () => {
     reviewStatus: '',
     isPublic: '',
     type: '',
+    isRecommended: '',
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
@@ -71,6 +74,7 @@ const CharacterManagementPage: React.FC = () => {
         reviewStatus: currentFilters.reviewStatus,
         isPublic: currentFilters.isPublic,
         type: currentFilters.type,
+        isRecommended: currentFilters.isRecommended,
       });
       const response = await fetch(`/api/admin/data-cards?${params.toString()}`);
       if (!response.ok) throw new Error('获取数据失败');
@@ -93,6 +97,7 @@ const CharacterManagementPage: React.FC = () => {
         reviewStatus: router.query.reviewStatus as string || '',
         isPublic: router.query.isPublic as string || '',
         type: router.query.type as string || '',
+        isRecommended: router.query.isRecommended as string || '',
       };
       setFilters(newFilters);
       fetchData(newFilters);
@@ -123,6 +128,7 @@ const CharacterManagementPage: React.FC = () => {
       if (newFilters.reviewStatus) query.reviewStatus = newFilters.reviewStatus;
       if (newFilters.isPublic) query.isPublic = newFilters.isPublic;
       if (newFilters.type) query.type = newFilters.type;
+      if (newFilters.isRecommended) query.isRecommended = newFilters.isRecommended;
       
       router.push({ pathname: router.pathname, query }, undefined, { shallow: true });
   }, [router]);
@@ -400,7 +406,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
 
           {/* 筛选器区域 */}
           <div className="bg-white p-4 rounded-lg shadow-sm mb-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <input
                 type="text"
                 name="search"
@@ -426,6 +432,11 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                 <option value="character">角色</option>
                 <option value="scenario">情景</option>
               </select>
+              <select name="isRecommended" value={filters.isRecommended} onChange={handleFilterChange} className="input-field">
+                <option value="">推荐状态</option>
+                <option value="1">仅推荐</option>
+                <option value="0">未推荐</option>
+              </select>
             </div>
           </div>
 
@@ -438,6 +449,8 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                 <button onClick={() => handleBatchAction('set_public_status', 1)} className="admin-button-sm bg-blue-500 hover:bg-blue-600">设为公开</button>
                 <button onClick={() => handleBatchAction('set_public_status', 0)} className="admin-button-sm bg-gray-500 hover:bg-gray-600">设为私有</button>
                 <button onClick={() => handleBatchAction('set_public_status', -1)} className="admin-button-sm bg-zinc-500 hover:bg-zinc-600">设为封禁</button>
+                <button onClick={() => handleBatchAction('set_recommended', 1)} className="admin-button-sm bg-amber-500 hover:bg-amber-600 text-white">设为推荐</button>
+                <button onClick={() => handleBatchAction('set_recommended', 0)} className="admin-button-sm bg-amber-200 hover:bg-amber-300 text-amber-800">取消推荐</button>
                 <button onClick={handleExport} className="admin-button-sm bg-teal-500 hover:bg-teal-600 disabled:opacity-50" disabled={isExporting || selectedIds.size === 0}>
                   {isExporting ? '导出中...' : '导出选中项'}
                 </button>
@@ -455,7 +468,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                   <th scope="col" className="px-6 py-3">类型</th>
                   <th scope="col" className="px-6 py-3">公开状态</th>
                   <th scope="col" className="px-6 py-3">审查状态</th>
-                  <th scope="col" className="px-6 py-3">点赞/使用</th>
+                  <th scope="col" className="px-6 py-3 whitespace-nowrap">点赞 / 收藏 / 使用</th>
                   <th scope="col" className="px-6 py-3">内容预览</th>
                   <th scope="col" className="px-6 py-3">更新时间</th>
                 </tr>
@@ -475,13 +488,20 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                           className="font-medium text-purple-600 hover:underline text-left"
                         >
                           {card.name}
+                          {card.is_recommended === 1 && (
+                            <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full bg-amber-100 text-amber-700">
+                              <span>推荐</span>
+                            </span>
+                          )}
                         </button>
                         <div className="text-xs text-gray-500">by {card.username}</div>
                       </td>
                       <td className="px-6 py-4">{card.type === 'character' ? '角色' : '情景'}</td>
                       <td className="px-6 py-4">{getPublicStatusBadge(card.is_public)}</td>
                       <td className="px-6 py-4">{getReviewStatusBadge(card.review_status)}</td>
-                      <td className="px-6 py-4">{card.like_count} / {card.usage_count}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        ❤️ {card.like_count} / ⭐ {card.favorite_count} / 📥 {card.usage_count}
+                      </td>
                       {/* 内容预览列 */}
                       <td className="px-6 py-4 text-xs text-gray-500 max-w-xs">
                         {(() => {
@@ -623,6 +643,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
             isPublic: selectedCardDetails.is_public === 1,
             usageCount: selectedCardDetails.usage_count,
             likeCount: selectedCardDetails.like_count,
+            favoriteCount: selectedCardDetails.favorite_count,
             author: selectedCardDetails.username,
             createdAt: selectedCardDetails.created_at,
             updatedAt: selectedCardDetails.updated_at

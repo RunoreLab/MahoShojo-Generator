@@ -19,7 +19,7 @@ export default async function handler(req: NextRequest) {
       return new Response(JSON.stringify({ success: false, error: '缺少必要参数: cardIds 和 action' }), { status: 400 });
     }
 
-    const updates: { review_status?: 'approved' | 'rejected'; is_public?: 0 | 1 | -1 } = {};
+    const updates: { review_status?: 'approved' | 'rejected'; is_public?: 0 | 1 | -1; is_recommended?: 0 | 1 } = {};
 
     // 根据 action 构建 updates 对象
     switch (action) {
@@ -34,6 +34,13 @@ export default async function handler(req: NextRequest) {
           updates.is_public = value;
         } else {
           return new Response(JSON.stringify({ success: false, error: '无效的公开状态值' }), { status: 400 });
+        }
+        break;
+      case 'set_recommended':
+        if ([0, 1].includes(value)) {
+          updates.is_recommended = value;
+        } else {
+          return new Response(JSON.stringify({ success: false, error: '无效的推荐状态值' }), { status: 400 });
         }
         break;
       default:
