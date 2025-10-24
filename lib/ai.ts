@@ -119,17 +119,29 @@ export enum LoadBalanceStrategy {
 // 全局轮询计数器（用于轮询策略）
 let roundRobinCounter = 0;
 
+export interface GenerateWithAIOptions {
+  loadBalanceStrategy?: LoadBalanceStrategy;
+  providerOverride?: AIProvider;
+}
+
 // 通用 AI 生成函数
 export async function generateWithAI<T, I = string>(
   input: I,
   generationConfig: GenerationConfig<T, I>,
-  loadBalanceStrategy?: LoadBalanceStrategy
+  options?: GenerateWithAIOptions
 ): Promise<T> {
-  const baseProviders = config.PROVIDERS;
+  const baseProviders: AIProvider[] = [
+    ...(options?.providerOverride ? [options.providerOverride] : []),
+    ...config.PROVIDERS,
+  ];
 
   if (baseProviders.length === 0) {
     log.error("没有配置 API Key");
     throw new Error("没有配置 API Key");
+  }
+
+  if (options?.providerOverride) {
+    log.info(`优先使用用户自定义提供商: ${options.providerOverride.name}`);
   }
 
   // 展开多模型配置
@@ -142,7 +154,7 @@ export async function generateWithAI<T, I = string>(
   }
 
   // 如果没有指定策略，从配置中读取
-  const strategy = loadBalanceStrategy || (config.LOAD_BALANCE_STRATEGY as LoadBalanceStrategy) || LoadBalanceStrategy.RANDOM;
+  const strategy = options?.loadBalanceStrategy || (config.LOAD_BALANCE_STRATEGY as LoadBalanceStrategy) || LoadBalanceStrategy.RANDOM;
 
   let lastError: unknown = null;
   let providersToTry: AIProvider[] = [];

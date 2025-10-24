@@ -25,6 +25,7 @@ import AdjudicatorEditor from '../components/AdjudicatorEditor';
 import AuthModal from '../components/CharManager/AuthModal';
 import SaveCardModal from '../components/CharManager/SaveCardModal';
 import DataCardsModal from '../components/CharManager/DataCardsModal';
+import RecycleBinModal from '../components/CharManager/RecycleBinModal';
 import ScenarioEditor from '../components/ScenarioEditor';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { UserBadge } from '@/types/badge';
@@ -118,6 +119,8 @@ const CharacterManagerPage: React.FC = () => {
     const [userDataCards, setUserDataCards] = useState<any[]>([]);
     const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
     const [showDataCardsModal, setShowDataCardsModal] = useState(false);
+    const [recycleBinCards, setRecycleBinCards] = useState<any[]>([]);
+    const [showRecycleBinModal, setShowRecycleBinModal] = useState(false);
     const [editingCard, setEditingCard] = useState<any | null>(null);
     const [showSaveCardModal, setShowSaveCardModal] = useState(false);
     const [newCardForm, setNewCardForm] = useState({ name: '', description: '', isPublic: 0 });
@@ -152,11 +155,13 @@ const CharacterManagerPage: React.FC = () => {
     // 加载用户数据卡和容量
     const loadUserDataCards = useCallback(async () => {
         if (!isAuthenticated) return;
-        const [cards, capacity] = await Promise.all([
+        const [cards, capacity, recycleCards] = await Promise.all([
             dataCardApi.getCards(),
-            dataCardApi.getUserCapacity()
+            dataCardApi.getUserCapacity(),
+            dataCardApi.getRecycleBin()
         ]);
         setUserDataCards(cards);
+        setRecycleBinCards(recycleCards);
         if (capacity !== null) {
             setUserCapacity(capacity);
         }
@@ -165,6 +170,11 @@ const CharacterManagerPage: React.FC = () => {
     useEffect(() => {
         if (isAuthenticated) {
             loadUserDataCards();
+        } else {
+            setUserDataCards([]);
+            setRecycleBinCards([]);
+            setShowDataCardsModal(false);
+            setShowRecycleBinModal(false);
         }
     }, [isAuthenticated, loadUserDataCards]);
 
@@ -357,7 +367,33 @@ const CharacterManagerPage: React.FC = () => {
 
         const result = await dataCardApi.deleteCard(id);
         if (result.success) {
-            setMessage({ type: 'success', text: '数据卡已删除' });
+            setMessage({ type: 'success', text: '数据卡已移入回收站' });
+            loadUserDataCards();
+            loadUserBadges();
+        } else {
+            setMessage({ type: 'error', text: result.error || '删除失败' });
+        }
+    };
+
+    // 恢复回收站中的数据卡
+    const handleRestoreRecycleCard = async (id: string) => {
+        const result = await dataCardApi.restoreCard(id);
+        if (result.success) {
+            setMessage({ type: 'success', text: '数据卡已恢复' });
+            loadUserDataCards();
+            loadUserBadges();
+        } else {
+            setMessage({ type: 'error', text: result.error || '恢复失败' });
+        }
+    };
+
+    // 永久删除回收站中的数据卡
+    const handleDeleteRecycleCard = async (id: string) => {
+        if (!window.confirm('确定要彻底删除这个数据卡吗？此操作无法撤销。')) return;
+
+        const result = await dataCardApi.deleteRecycleCard(id);
+        if (result.success) {
+            setMessage({ type: 'success', text: '数据卡已彻底删除' });
             loadUserDataCards();
             loadUserBadges();
         } else {
@@ -1179,7 +1215,7 @@ const CharacterManagerPage: React.FC = () => {
                         )}
                     </div>
 
-                    {/* 【新增】角色卡片预览与生成区域 */}
+                    {/* 角色卡片预览与生成区域 */}
                     {characterData && !isLoading && (
                         <div className="card mt-6">
                             <h3 className="text-xl font-bold text-gray-800 text-center mb-4">
@@ -1273,6 +1309,22 @@ const CharacterManagerPage: React.FC = () => {
                 onCancelEdit={() => setEditingCard(null)}
                 onShareCard={handleShareDataCard}
                 userCapacity={userCapacity}
+                onOpenRecycleBin={() => {
+                    setShowDataCardsModal(false);
+                    setShowRecycleBinModal(true);
+                }}
+                recycleCount={recycleBinCards.length}
+                recycleLimit={config.RECYCLE_BIN_LIMIT}
+            />
+
+            {/* 回收站模态框 */}
+            < RecycleBinModal
+                isOpen={showRecycleBinModal}
+                onClose={() => setShowRecycleBinModal(false)}
+                recycleCards={recycleBinCards}
+                onRestore={handleRestoreRecycleCard}
+                onDelete={handleDeleteRecycleCard}
+                limit={config.RECYCLE_BIN_LIMIT}
             />
 
             {/* 保存数据卡弹窗 */}

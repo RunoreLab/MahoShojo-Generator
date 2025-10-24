@@ -1,6 +1,6 @@
 // pages/battle-stream.tsx
 
-import React, { useState, useRef, ChangeEvent, useEffect } from 'react';
+import React, { useState, useRef, ChangeEvent, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useCooldown } from '../lib/cooldown';
@@ -20,6 +20,7 @@ import Footer from '../components/Footer';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 // v0.4.0 引入新的编辑器组件
 import AdjudicatorEditor from '../components/AdjudicatorEditor';
+import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 
 interface UpdatedCombatantData {
     codename?: string;
@@ -184,7 +185,8 @@ const BattlePage: React.FC = () => {
     const [useArenaHistory, setUseArenaHistory] = useState(true);
     // 新增：用于控制是否使用轻量模型的状态（默认不启用）
     const [isDowngrade, setIsDowngrade] = useState(false);
-
+    // 新增：用于管理自定义 AI 供应商配置
+    const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
     // 冷却状态钩子，设置为2分钟
     const { isCooldown, startCooldown, remainingTime } = useCooldown('generateBattleCooldown', 120000);
@@ -217,7 +219,7 @@ const BattlePage: React.FC = () => {
     const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
 
     // 用于存储情景模式下上传的情景文件内容
-    const [scenarioContent, setScenarioContent] = useState<object | null>(null);
+    const [scenarioContent, setScenarioContent] = useState<Record<string, unknown> | null>(null);
     const [scenarioFileName, setScenarioFileName] = useState<string | null>(null);
 
     // 用于追踪情景文件的原生性
@@ -238,6 +240,26 @@ const BattlePage: React.FC = () => {
      * - 'scenario': 正在随机匹配情景
      */
     const [isMatching, setIsMatching] = useState<string | null>(null);
+
+    const scenarioDisplayName = useMemo<string | null>(() => {
+        if (battleMode !== 'scenario') {
+            return null;
+        }
+        const content = scenarioContent as Record<string, unknown> | null;
+        if (content) {
+            const maybeTitle = content['title'];
+            if (typeof maybeTitle === 'string') {
+                const trimmed = maybeTitle.trim();
+                if (trimmed) {
+                    return trimmed;
+                }
+            }
+        }
+        if (typeof scenarioFileName === 'string' && scenarioFileName.trim()) {
+            return scenarioFileName.replace(/\.json$/i, '').trim();
+        }
+        return null;
+    }, [battleMode, scenarioContent, scenarioFileName]);
 
     // 加载语言列表
     useEffect(() => {
@@ -838,6 +860,11 @@ const BattlePage: React.FC = () => {
             return;
         }
 
+        if (userProviderConfig && !userProviderConfig.apiKey) {
+            setError('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
+            return;
+        }
+
         setIsGenerating(true);
         setError(null);
         setNewsReport(null);
@@ -892,28 +919,37 @@ const BattlePage: React.FC = () => {
                 }
             });
 
+            const requestBody: Record<string, unknown> = {
+                combatants: (finalCombatants.filter(c => 'data' in c) as CombatantData[]).map(c => ({
+                    type: c.type,
+                    data: c.data,
+                    isNative: c.isValid,
+                    isPreset: c.isPreset
+                })),
+                selectedLevel,
+                mode: battleMode,
+                userGuidance: userGuidance,
+                scenario: scenarioContent,
+                teams: Object.keys(teams).length > 0 ? teams : undefined,
+                language: selectedLanguage,
+                useArenaHistory: useArenaHistory,
+                isDowngrade: isDowngrade,
+                adjudicationEvents: adjudicationEvents,
+                storyLength: storyLength,
+            };
+
+            if (userProviderConfig && userProviderConfig.apiKey) {
+                requestBody.customProvider = {
+                    providerId: userProviderConfig.providerId,
+                    modelId: userProviderConfig.modelId,
+                    apiKey: userProviderConfig.apiKey,
+                };
+            }
+
             const response = await fetch('/api/stream/generate-battle-story', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    // 使用 finalCombatants
-                    combatants: (finalCombatants.filter(c => 'data' in c) as CombatantData[]).map(c => ({
-                        type: c.type,
-                        data: c.data,
-                        isNative: c.isValid,
-                        isPreset: c.isPreset
-                    })),
-                    selectedLevel,
-                    mode: battleMode,
-                    userGuidance: userGuidance,
-                    scenario: scenarioContent, // 发送情景内容
-                    teams: Object.keys(teams).length > 0 ? teams : undefined, // 发送分队信息
-                    language: selectedLanguage,
-                    useArenaHistory: useArenaHistory, // 传递是否使用历战记录的选项
-                    isDowngrade: isDowngrade, // 传递是否使用轻量模型的选项
-                    adjudicationEvents: adjudicationEvents, // v0.4.0 新增
-                    storyLength: storyLength,
-                }),
+                body: JSON.stringify(requestBody),
             });
 
             // --- 核心修改：增强错误处理 ---
@@ -1012,10 +1048,14 @@ const BattlePage: React.FC = () => {
 
                     finalPayload = payload;
 
-                    const reportWithAdjudication = {
+                    const reportWithAdjudication: NewsReport = {
                         ...payload.report,
                         adjudicationResults: payload.adjudicationResults,
                     };
+
+                    if (scenarioDisplayName) {
+                        reportWithAdjudication.scenario = scenarioDisplayName;
+                    }
 
                     setNewsReport(reportWithAdjudication);
                     setUpdatedCombatants(payload.updatedCombatants);
@@ -1486,6 +1526,10 @@ const BattlePage: React.FC = () => {
                                 </div>
                             </div>
                         )}
+                        {
+                            // TODO: 调试中，暂时关闭该功能
+                            false && <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                        }
                         {/* 历战记录使用选项 */}
                         <div className="input-group">
                             <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">

@@ -15,7 +15,8 @@ export type ColorConfig =
 export type IconConfig =
   | { type: 'lucide'; name: string }      // lucide-react 图标
   | { type: 'svg'; url: string }          // 自定义 SVG URL
-  | { type: 'emoji'; value: string };     // emoji 表情
+  | { type: 'emoji'; value: string }      // Emoji 字符
+  | { type: 'null'; value: null };        // 不展示
 
 /**
  * 徽章定义
