@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Info } from 'lucide-react';
+import { X, Info, Star, Heart, Download } from 'lucide-react';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
 
 interface DataCardDetailsModalProps {
@@ -14,6 +14,7 @@ interface DataCardDetailsModalProps {
     isPublic: boolean;
     usageCount?: number;
     likeCount?: number;
+    favoriteCount?: number;
     author?: string;
     createdAt?: string;
     updatedAt?: string;
@@ -105,6 +106,11 @@ export default function DataCardDetailsModal({
               <p className="text-xs text-gray-500 mt-2">
                 作者：{card.author}
               </p>
+              <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+                <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{card.likeCount ?? 0}</span>
+                <span className="flex items-center gap-1"><Star className="w-3 h-3" />{card.favoriteCount ?? 0}</span>
+                <span className="flex items-center gap-1"><Download className="w-3 h-3" />{card.usageCount ?? 0}</span>
+              </div>
             </div>
           </div>
           <button

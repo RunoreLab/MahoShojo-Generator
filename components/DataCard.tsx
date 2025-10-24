@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Heart, Share, Info, Ban, AlertTriangle, Clock, XCircle } from 'lucide-react'; // 新增 Clock, XCircle 图标
+import { Download, Heart, Share, Info, Ban, AlertTriangle, Clock, XCircle, Star, BadgeCheck } from 'lucide-react';
 import { isCardLiked, addLikedCard } from '@/lib/localStorage';
 import { getDataCardStatus } from '@/lib/database/data-cards';
 
@@ -12,6 +12,7 @@ interface DataCardProps {
   reviewStatus?: 'pending' | 'approved' | 'rejected'; // 新增：审查状态属性
   usageCount?: number;
   likeCount?: number;
+  favoriteCount?: number;
   author?: string;
   isOwner?: boolean;
   isSelected?: boolean;
@@ -24,6 +25,10 @@ interface DataCardProps {
   onLikeSuccess?: () => void;
   onViewDetails?: () => void; // 新增查看详情回调
   onAuthorClick?: (authorName: string) => void;
+  isFavorited?: boolean;
+  canFavorite?: boolean;
+  onToggleFavorite?: (nextState: boolean) => Promise<boolean> | boolean;
+  isRecommended?: boolean;
 }
 
 const typeMap = {
@@ -40,6 +45,7 @@ export default function DataCard({
   reviewStatus,
   usageCount = 0,
   likeCount = 0,
+  favoriteCount = 0,
   author,
   isOwner = false,
   onDownload,
@@ -51,11 +57,17 @@ export default function DataCard({
   onLikeSuccess,
   onViewDetails,
   onAuthorClick,
+  isFavorited = false,
+  canFavorite = false,
+  onToggleFavorite,
+  isRecommended = false,
 }: DataCardProps) {
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied'>('idle');
   const [liked, setLiked] = useState(false);
   const [liking, setLiking] = useState(false);
   const [currentLikeCount, setCurrentLikeCount] = useState(likeCount);
+  const [favoriting, setFavoriting] = useState(false);
+  const cardStatus = getDataCardStatus({ is_public: isPublic });
 
   // 检查本地存储中的点赞状态
   useEffect(() => {
@@ -137,6 +149,30 @@ export default function DataCard({
     }
   };
 
+  const handleFavoriteToggle = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    if (!onToggleFavorite || favoriting || !canFavorite) {
+      return;
+    }
+
+    if (cardStatus.status !== 'public') {
+      return;
+    }
+
+    setFavoriting(true);
+    try {
+      const result = await onToggleFavorite(!isFavorited);
+      if (!result) {
+        console.warn('收藏操作未成功');
+      }
+    } catch (error) {
+      console.error('收藏操作失败:', error);
+    } finally {
+      setFavoriting(false);
+    }
+  };
+
   // 分享功能 - 复制卡片名称和UUID到剪贴板
   const handleShare = async () => {
     const cardStatus = getDataCardStatus({ is_public: isPublic });
@@ -164,7 +200,6 @@ export default function DataCard({
       }
     }
   };
-  const cardStatus = getDataCardStatus({ is_public: isPublic });
   const bgColor = type === 'scenario'
     ? 'bg-white border-gray-200 hover:border-green-400'
     : 'bg-white border-gray-200 hover:border-pink-400';
@@ -214,6 +249,11 @@ export default function DataCard({
                 角色
               </span>
             )}
+            {isRecommended && (
+              <span className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded flex items-center gap-1">
+                <BadgeCheck className="w-3 h-3" /> 推荐
+              </span>
+            )}
           </div>
         </div>
 
@@ -256,7 +296,31 @@ export default function DataCard({
         )}
         
         {/* 点赞按钮和计数 */}
-        <div className="flex gap-3 text-sm justify-end flex-shrink-0">
+        <div className="flex gap-3 text-sm justify-end flex-shrink-0 items-center">
+          <button
+            onClick={handleFavoriteToggle}
+            className={`flex items-center gap-1 transition-colors ${
+              canFavorite
+                ? isFavorited
+                  ? 'text-amber-500'
+                  : favoriting
+                    ? 'text-amber-300'
+                    : 'text-gray-500 hover:text-amber-500'
+                : 'text-gray-400 cursor-not-allowed'
+            }`}
+            disabled={!canFavorite || favoriting}
+            title={
+              !canFavorite
+                ? '登录后才能收藏'
+                : isFavorited
+                  ? '取消收藏'
+                  : '收藏'
+            }
+          >
+            <Star className={`w-4 h-4 ${isFavorited ? 'fill-current' : ''}`} />
+            <span>{favoriteCount}</span>
+          </button>
+
           <button
             onClick={handleLike}
             className={`flex items-center gap-1 transition-colors ${

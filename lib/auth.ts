@@ -196,7 +196,7 @@ export const authApi = {
 // 数据卡 API
 export const dataCardApi = {
   // 获取所有数据卡
-  async getCards(search?: string, sortBy?: 'likes' | 'usage' | 'created_at'): Promise<any[]> {
+  async getCards(search?: string, sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at'): Promise<any[]> {
     const authHeader = await authStorage.getAuthHeader();
     if (!authHeader) return [];
 
@@ -400,5 +400,66 @@ export const dataCardApi = {
       console.error('Delete recycle card error:', error);
       return { success: false, error: '删除失败' };
     }
+  }
+};
+
+export const favoritesApi = {
+  async getFavorites(options?: { type?: 'character' | 'scenario'; idsOnly?: boolean }) {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return { success: false, favorites: [] };
+
+    const params = new URLSearchParams();
+    if (options?.type) {
+      params.append('type', options.type);
+    }
+    if (options?.idsOnly) {
+      params.append('idsOnly', '1');
+    }
+
+    const response = await fetch(`/api/favorites${params.size ? `?${params.toString()}` : ''}`, {
+      headers: { 'Authorization': authHeader }
+    });
+
+    if (!response.ok) {
+      return { success: false, favorites: [] };
+    }
+
+    return response.json();
+  },
+
+  async add(cardId: string) {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) {
+      return { success: false, error: '未登录' };
+    }
+
+    const response = await fetch('/api/favorites', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
+      body: JSON.stringify({ cardId })
+    });
+
+    return response.json();
+  },
+
+  async remove(cardId: string) {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) {
+      return { success: false, error: '未登录' };
+    }
+
+    const response = await fetch('/api/favorites', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
+      body: JSON.stringify({ cardId })
+    });
+
+    return response.json();
   }
 };
