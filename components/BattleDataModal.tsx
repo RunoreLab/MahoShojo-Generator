@@ -1,11 +1,11 @@
 // components/BattleDataModal.tsx
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import DataCard from './DataCard';
 import SortSelector from './SortSelector';
 import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
-import { dataCardApi } from '@/lib/auth';
+import { dataCardApi, favoritesApi } from '@/lib/auth';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { ChevronDown, Filter } from 'lucide-react';
 
@@ -23,6 +23,9 @@ interface Filters {
   maxLikes: string;
   minUsage: string;
   maxUsage: string;
+  minFavorites: string;
+  maxFavorites: string;
+  recommendedOnly: boolean;
 }
 
 export default function BattleDataModal({
@@ -34,24 +37,35 @@ export default function BattleDataModal({
   const { isAuthenticated } = useAuth();
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
   const [publicDataCards, setPublicDataCards] = useState<any[]>([]);
+  const [favoriteCards, setFavoriteCards] = useState<any[]>([]);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'my' | 'public'>('public');
+  const [activeTab, setActiveTab] = useState<'my' | 'public' | 'favorites'>('public');
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'likes' | 'usage' | 'created_at'>('created_at');
+  const [sortBy, setSortBy] = useState<'likes' | 'usage' | 'favorites' | 'created_at'>('created_at');
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const cardsPerPage = 12;
 
   // 【新增】高级筛选的状态
-  const initialFilters: Filters = { author: '', minLikes: '', maxLikes: '', minUsage: '', maxUsage: '' };
+  const initialFilters = useMemo<Filters>(() => ({
+    author: '',
+    minLikes: '',
+    maxLikes: '',
+    minUsage: '',
+    maxUsage: '',
+    minFavorites: '',
+    maxFavorites: '',
+    recommendedOnly: false
+  }), []);
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
 
   // 获取用户的数据卡
-  const loadUserDataCards = useCallback(async (searchTerm?: string, sortBy?: 'likes' | 'usage' | 'created_at') => {
+  const loadUserDataCards = useCallback(async (searchTerm?: string, sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     if (!isAuthenticated) return;
 
     try {
@@ -89,7 +103,7 @@ export default function BattleDataModal({
   // 【修改】获取公开数据卡，现在会接收所有筛选条件
   const loadPublicDataCards = useCallback(async (
     page: number = 1,
-    currentSortBy: 'likes' | 'usage' | 'created_at',
+    currentSortBy: 'likes' | 'usage' | 'favorites' | 'created_at',
     currentSearchTerm?: string,
     currentFilters?: Filters
   ) => {
@@ -107,10 +121,13 @@ export default function BattleDataModal({
       // 【新增】将高级筛选条件添加到请求参数中
       if (currentFilters) {
         if (currentFilters.author) params.append('author', currentFilters.author);
-        if (currentFilters.minLikes) params.append('minLikes', currentFilters.minLikes);
-        if (currentFilters.maxLikes) params.append('maxLikes', currentFilters.maxLikes);
-        if (currentFilters.minUsage) params.append('minUsage', currentFilters.minUsage);
-        if (currentFilters.maxUsage) params.append('maxUsage', currentFilters.maxUsage);
+      if (currentFilters.minLikes) params.append('minLikes', currentFilters.minLikes);
+      if (currentFilters.maxLikes) params.append('maxLikes', currentFilters.maxLikes);
+      if (currentFilters.minUsage) params.append('minUsage', currentFilters.minUsage);
+      if (currentFilters.maxUsage) params.append('maxUsage', currentFilters.maxUsage);
+      if (currentFilters.minFavorites) params.append('minFavorites', currentFilters.minFavorites);
+      if (currentFilters.maxFavorites) params.append('maxFavorites', currentFilters.maxFavorites);
+      if (currentFilters.recommendedOnly) params.append('recommendedOnly', '1');
       }
 
       const response = await fetch(`/api/public-data-cards?${params}`);
@@ -124,6 +141,63 @@ export default function BattleDataModal({
       setIsLoading(false);
     }
   }, [selectedType, cardsPerPage]);
+
+  const sortFavorites = useCallback((items: any[], criteria: 'likes' | 'usage' | 'favorites' | 'created_at') => {
+    const sorted = [...items];
+    switch (criteria) {
+      case 'likes':
+        sorted.sort((a, b) => (b.like_count ?? 0) - (a.like_count ?? 0));
+        break;
+      case 'usage':
+        sorted.sort((a, b) => (b.usage_count ?? 0) - (a.usage_count ?? 0));
+        break;
+      case 'favorites':
+        sorted.sort((a, b) => (b.favorite_count ?? 0) - (a.favorite_count ?? 0));
+        break;
+      case 'created_at':
+      default:
+        sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+    return sorted;
+  }, []);
+
+  const adjustFavoriteCount = useCallback((cards: any[], cardId: string, delta: number) => {
+    return cards.map((card) => {
+      if (card.id !== cardId) return card;
+      const nextCount = Math.max(0, (card.favorite_count ?? 0) + delta);
+      return { ...card, favorite_count: nextCount };
+    });
+  }, []);
+
+  const loadFavorites = useCallback(async (
+    typeParam?: 'character' | 'scenario',
+    showLoading: boolean = false
+  ) => {
+    if (!isAuthenticated) return;
+
+    try {
+      if (showLoading) {
+        setIsLoading(true);
+      }
+      const result = await favoritesApi.getFavorites({ type: typeParam ?? selectedType });
+      if (result.success) {
+        const cards = Array.isArray(result.favorites) ? result.favorites : [];
+        setFavoriteCards(sortFavorites(cards, sortBy));
+        setFavoriteIds(new Set(cards.map((card: any) => card.id)));
+      } else {
+        setFavoriteCards([]);
+        setFavoriteIds(new Set());
+      }
+    } catch (error) {
+      console.error('获取收藏数据卡失败:', error);
+      setFavoriteCards([]);
+      setFavoriteIds(new Set());
+    } finally {
+      if (showLoading) {
+        setIsLoading(false);
+      }
+    }
+  }, [isAuthenticated, selectedType, sortFavorites, sortBy]);
 
   // 防抖功能 - 延迟500ms执行搜索
   useEffect(() => {
@@ -162,13 +236,16 @@ export default function BattleDataModal({
       if (isAuthenticated) {
         setActiveTab('my');
         loadUserDataCards(undefined, sortBy);
+        loadFavorites(selectedType);
       } else {
         setActiveTab('public');
+        setFavoriteCards([]);
+        setFavoriteIds(new Set());
       }
       loadPublicDataCards(1, sortBy);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, selectedType, isAuthenticated]);
+  }, [isOpen, selectedType, isAuthenticated, loadFavorites, loadUserDataCards, loadPublicDataCards, sortBy, initialFilters]);
 
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {
@@ -216,9 +293,15 @@ export default function BattleDataModal({
   };
 
   // 【新增】处理高级筛选输入变化
-  const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFilters(prev => ({ ...prev, [name]: value }));
+  const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name } = e.target;
+    let nextValue: string | boolean = (e.target as HTMLInputElement).value;
+
+    if (e.target instanceof HTMLInputElement && e.target.type === 'checkbox') {
+      nextValue = e.target.checked;
+    }
+
+    setFilters(prev => ({ ...prev, [name]: nextValue } as Filters));
   };
 
   // 【新增】应用高级筛选
@@ -244,6 +327,67 @@ export default function BattleDataModal({
     loadPublicDataCards(1, sortBy, '', newFilters);
   };
 
+  const handleFavoriteToggleForCard = useCallback(async (card: any, nextState: boolean) => {
+    if (!isAuthenticated) {
+      return false;
+    }
+
+    if (nextState) {
+      const result = await favoritesApi.add(card.id);
+      if (!result.success && !result.alreadyExists) {
+        return false;
+      }
+
+      const delta = result.alreadyExists ? 0 : 1;
+
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        next.add(card.id);
+        return next;
+      });
+
+      if (delta !== 0) {
+        setPublicDataCards((prev) => adjustFavoriteCount(prev, card.id, delta));
+        setUserDataCards((prev) => adjustFavoriteCount(prev, card.id, delta));
+      }
+
+      setFavoriteCards((prev) => {
+        const exists = prev.some((item) => item.id === card.id);
+        let nextList = prev;
+        if (exists) {
+          nextList = delta !== 0 ? adjustFavoriteCount(prev, card.id, delta) : [...prev];
+        } else {
+          const newCard = {
+            ...card,
+            favorite_count: (card.favorite_count ?? 0) + delta,
+            favorited_at: new Date().toISOString()
+          };
+          nextList = [...prev, newCard];
+        }
+        return sortFavorites(nextList, sortBy);
+      });
+
+      return true;
+    }
+
+    const result = await favoritesApi.remove(card.id);
+    if (!result.success) {
+      return false;
+    }
+
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      next.delete(card.id);
+      return next;
+    });
+
+    setPublicDataCards((prev) => adjustFavoriteCount(prev, card.id, -1));
+    setUserDataCards((prev) => adjustFavoriteCount(prev, card.id, -1));
+    setFavoriteCards((prev) => prev.filter((item) => item.id !== card.id));
+
+    return true;
+  }, [isAuthenticated, adjustFavoriteCount, sortFavorites, sortBy]);
+
   // 处理页码变化
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
@@ -253,23 +397,55 @@ export default function BattleDataModal({
   };
 
   // 处理排序变化
-  const handleSortChange = (newSortBy: 'likes' | 'usage' | 'created_at') => {
+  const handleSortChange = (newSortBy: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     setSortBy(newSortBy);
     setCurrentPage(1);
     if (activeTab === 'my') {
       loadUserDataCards(debouncedSearchQuery.trim() || undefined, newSortBy);
     } else if (activeTab === 'public') {
       loadPublicDataCards(1, newSortBy, debouncedSearchQuery.trim() || undefined, filters);
+    } else if (activeTab === 'favorites') {
+      setFavoriteCards((prev) => sortFavorites(prev, newSortBy));
     }
   };
 
   if (!isOpen) return null;
 
-  const userTotalPages = activeTab === 'my' ? Math.ceil(userDataCards.length / cardsPerPage) : 1;
-  const paginatedUserCards = activeTab === 'my' ? userDataCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage) : [];
-  const displayCards = activeTab === 'my' ? paginatedUserCards : publicDataCards;
+  const userTotalPages = Math.max(1, Math.ceil(userDataCards.length / cardsPerPage));
+  const favoritesTotalPages = Math.max(1, Math.ceil(favoriteCards.length / cardsPerPage));
+  const paginatedUserCards = useMemo(
+    () => userDataCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
+    [userDataCards, currentPage, cardsPerPage]
+  );
+  const paginatedFavoriteCards = useMemo(
+    () => favoriteCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
+    [favoriteCards, currentPage, cardsPerPage]
+  );
+
+  const displayCards = activeTab === 'my'
+    ? paginatedUserCards
+    : activeTab === 'favorites'
+      ? paginatedFavoriteCards
+      : publicDataCards;
+
+  const currentTabTotalPages = activeTab === 'my'
+    ? userTotalPages
+    : activeTab === 'favorites'
+      ? favoritesTotalPages
+      : null;
   const typeLabel = selectedType === 'character' ? '角色' : '情景';
-  const isFilterActive = Object.values(filters).some(v => v !== '');
+  const isFilterActive = useMemo(() => {
+    return Boolean(
+      filters.author ||
+      filters.minLikes ||
+      filters.maxLikes ||
+      filters.minUsage ||
+      filters.maxUsage ||
+      filters.minFavorites ||
+      filters.maxFavorites ||
+      filters.recommendedOnly
+    );
+  }, [filters]);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -292,7 +468,7 @@ export default function BattleDataModal({
           {/* 【新增】高级筛选面板 */}
           {showAdvancedFilters && activeTab === 'public' && (
             <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-gray-600">作者</label>
                   <input type="text" name="author" value={filters.author} onChange={handleFilterChange} placeholder="输入作者名" className="input-field" />
@@ -311,7 +487,24 @@ export default function BattleDataModal({
                     <input type="number" name="maxUsage" value={filters.maxUsage} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
                   </div>
                 </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">收藏数</label>
+                  <div className="flex gap-2">
+                    <input type="number" name="minFavorites" value={filters.minFavorites} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                    <input type="number" name="maxFavorites" value={filters.maxFavorites} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                  </div>
+                </div>
               </div>
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+                <input
+                  type="checkbox"
+                  name="recommendedOnly"
+                  checked={filters.recommendedOnly}
+                  onChange={handleFilterChange}
+                  className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                />
+                仅查看管理员推荐
+              </label>
               <div className="flex justify-end gap-2 pt-2">
                 <button onClick={resetFilters} className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">重置</button>
                 <button onClick={applyFilters} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700">应用筛选</button>
@@ -322,8 +515,40 @@ export default function BattleDataModal({
 
         {/* 标签页切换 */}
         <div className="flex gap-2 mb-4">
-          {isAuthenticated && <button onClick={() => { setActiveTab('my'); setCurrentPage(1); loadUserDataCards(undefined, sortBy); }} className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'my' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}>我的{typeLabel} ({userDataCards.length})</button>}
-          <button onClick={() => { setActiveTab('public'); setCurrentPage(1); loadPublicDataCards(1, sortBy, '', filters); }} className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}>公开{typeLabel}</button>
+          {isAuthenticated && (
+            <button
+              onClick={() => {
+                setActiveTab('my');
+                setCurrentPage(1);
+                loadUserDataCards(undefined, sortBy);
+              }}
+              className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'my' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+            >
+              我的{typeLabel} ({userDataCards.length})
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setActiveTab('public');
+              setCurrentPage(1);
+              loadPublicDataCards(1, sortBy, '', filters);
+            }}
+            className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+          >
+            公开{typeLabel}
+          </button>
+          {isAuthenticated && (
+            <button
+              onClick={() => {
+                setActiveTab('favorites');
+                setCurrentPage(1);
+                loadFavorites(selectedType, true);
+              }}
+              className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'favorites' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+            >
+              我的收藏 ({favoriteCards.length})
+            </button>
+          )}
         </div>
 
         {/* 内容区域 */}
@@ -331,26 +556,61 @@ export default function BattleDataModal({
           {isLoading ? <div className="flex justify-center items-center h-full"><div className="text-gray-500">加载中...</div></div>
             : displayCards.length === 0 ? <div className="text-center text-gray-500 py-8">暂无数据卡</div>
               : <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {displayCards.map((card: any) => (
-                  <div key={card.id} className="cursor-pointer h-full" onClick={() => handleSelectCard(card)}>
-                    <DataCard
-                      id={card.id} name={card.name} description={card.description} type={card.type} isPublic={card.is_public}
-                      reviewStatus={card.review_status}
-                      usageCount={card.usage_count} likeCount={card.like_count} author={activeTab === 'public' ? (card.username || '未知') : '我'}
-                      onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
-                      onAuthorClick={handleAuthorClick}
-                    />
-                  </div>
-                ))}
+                {displayCards.map((card: any) => {
+                  const isFavorited = favoriteIds.has(card.id);
+                  const enableFavorite = isAuthenticated && activeTab !== 'my';
+
+                  return (
+                    <div key={card.id} className="cursor-pointer h-full" onClick={() => handleSelectCard(card)}>
+                      <DataCard
+                        id={card.id}
+                        name={card.name}
+                        description={card.description}
+                        type={card.type}
+                        isPublic={card.is_public}
+                        reviewStatus={card.review_status}
+                        usageCount={card.usage_count}
+                        likeCount={card.like_count}
+                        favoriteCount={card.favorite_count}
+                        isFavorited={isFavorited}
+                        canFavorite={enableFavorite}
+                        isRecommended={card.is_recommended === 1}
+                        author={activeTab === 'public' ? (card.username || '未知') : '我'}
+                        onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
+                        onAuthorClick={handleAuthorClick}
+                        onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
+                      />
+                    </div>
+                  );
+                })}
               </div>}
         </div>
         
         {/* 分页与底部 */}
-        {((activeTab === 'my' && userDataCards.length > cardsPerPage) || (activeTab === 'public' && (displayCards.length >= cardsPerPage || currentPage > 1))) &&
+        {(
+          (activeTab === 'my' && userDataCards.length > cardsPerPage) ||
+          (activeTab === 'favorites' && favoriteCards.length > cardsPerPage) ||
+          (activeTab === 'public' && (displayCards.length >= cardsPerPage || currentPage > 1))
+        ) &&
           <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
             <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="page-button">上一页</button>
-            <span className="text-sm text-gray-600">第 {currentPage} 页{activeTab === 'my' ? ` / ${userTotalPages}` : ''}</span>
-            <button onClick={() => handlePageChange(currentPage + 1)} disabled={activeTab === 'my' ? currentPage >= userTotalPages : displayCards.length < cardsPerPage} className="page-button">下一页</button>
+            <span className="text-sm text-gray-600">
+              第 {currentPage} 页
+              {currentTabTotalPages ? ` / ${currentTabTotalPages}` : ''}
+            </span>
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={
+                activeTab === 'my'
+                  ? currentPage >= userTotalPages
+                  : activeTab === 'favorites'
+                    ? currentPage >= favoritesTotalPages
+                    : displayCards.length < cardsPerPage
+              }
+              className="page-button"
+            >
+              下一页
+            </button>
           </div>
         }
       </div>
@@ -372,6 +632,7 @@ export default function BattleDataModal({
             isPublic: selectedCard.is_public,
             usageCount: selectedCard.usage_count,
             likeCount: selectedCard.like_count,
+            favoriteCount: selectedCard.favorite_count,
             author: activeTab === 'public' ? (selectedCard.username || '未知') : '我',
             createdAt: selectedCard.created_at,
             updatedAt: selectedCard.updated_at

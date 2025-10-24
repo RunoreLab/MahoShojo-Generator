@@ -99,7 +99,7 @@ export async function createDataCard(
 export async function getUserDataCards(
   userId: number, 
   search?: string,
-  sortBy?: 'likes' | 'usage' | 'created_at'
+  sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at'
 ): Promise<any[]> {
   try {
     let sql = 'SELECT * FROM data_cards WHERE user_id = ? AND deleted_at IS NULL';
@@ -116,6 +116,8 @@ export async function getUserDataCards(
       orderBy = 'like_count DESC, updated_at DESC';
     } else if (sortBy === 'usage') {
       orderBy = 'usage_count DESC, updated_at DESC';
+    } else if (sortBy === 'favorites') {
+      orderBy = 'favorite_count DESC, updated_at DESC';
     } else if (sortBy === 'created_at') {
       orderBy = 'created_at DESC';
     }
@@ -360,12 +362,15 @@ export async function getPublicDataCards(
   offset: number = 0,
   type?: 'character' | 'scenario',
   search?: string,
-  sortBy?: 'likes' | 'usage' | 'created_at',
+  sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
   author?: string,
   minLikes?: number,
   maxLikes?: number,
   minUsage?: number,
-  maxUsage?: number
+  maxUsage?: number,
+  minFavorites?: number,
+  maxFavorites?: number,
+  recommendedOnly?: boolean
 ): Promise<any[]> {
   try {
     // 基础查询语句
@@ -402,6 +407,17 @@ export async function getPublicDataCards(
       sql += ' AND dc.usage_count <= ?';
       params.push(maxUsage);
     }
+    if (minFavorites !== undefined && minFavorites !== null) {
+      sql += ' AND dc.favorite_count >= ?';
+      params.push(minFavorites);
+    }
+    if (maxFavorites !== undefined && maxFavorites !== null) {
+      sql += ' AND dc.favorite_count <= ?';
+      params.push(maxFavorites);
+    }
+    if (recommendedOnly) {
+      sql += ' AND dc.is_recommended = 1';
+    }
     
     // -- 排序逻辑 --
     let orderBy = 'dc.created_at DESC'; // 默认按创建时间排序
@@ -409,8 +425,18 @@ export async function getPublicDataCards(
       orderBy = 'dc.like_count DESC, dc.created_at DESC';
     } else if (sortBy === 'usage') {
       orderBy = 'dc.usage_count DESC, dc.created_at DESC';
+    } else if (sortBy === 'favorites') {
+      orderBy = 'dc.favorite_count DESC, dc.created_at DESC';
     }
-    
+
+    if (recommendedOnly && sortBy !== 'favorites') {
+      // 推荐列表默认按推荐时间倒序，其次按创建时间
+      orderBy = 'dc.updated_at DESC, dc.created_at DESC';
+    } else if (!recommendedOnly) {
+      // 推荐项在普通列表中仍需优先展示
+      orderBy = `dc.is_recommended DESC, ${orderBy}`;
+    }
+
     sql += ` ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
     params.push(limit, offset);
     
