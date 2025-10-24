@@ -8,25 +8,39 @@ export interface MagicalQuestionMeta {
   maxLength?: number;
 }
 
-// 预设选项与提示，参考残兽问卷的交互体验
+// 预设选项与提示，参考预设角色回答
 const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   {
     id: 'MG-1',
     placeholder: '请填写角色的名字',
     suggestions: ['白思与', '二阶堂祥子', '雪莉', '咕咕嘎嘎！', '真名只不过是表面之物罢了，不足挂齿'],
-    maxLength: 24
+    maxLength: 180
   },
   {
     id: 'MG-2',
-    suggestions: ['违背嘱托冲上去救她', '呼叫支援掩护撤退', '想办法调虎离山', '冲过去救她，命令可以事后解释', '用尽一切手段去救她，即使因此受罚', '我会尊重她的意志，直到最后一刻'],
+    suggestions: [
+      '违背嘱托冲上去救她',
+      '呼叫支援掩护撤退',
+      '想办法调虎离山',
+      '冲过去救她，命令可以事后解释',
+      '用尽一切手段去救她，即使因此受罚', 
+      '我会尊重她的意志，直到最后一刻'
+    ],
     helperText: '描述你在危急时刻的本能反应',
-    maxLength: 140
+    maxLength: 260
   },
   {
     id: 'MG-3',
-    suggestions: ['握住她的手告诉她已经足够好了', '主动请缨承担失误的后果', '提议暂停任务总结经验', '告诉她这是团队的战斗，错误由我们一起承担', '先治愈她，再约定下一次一起赢回来', '比起沉湎于复杂的懊悔，用简单的行动来弥补，才是正道'],
+    suggestions: [
+      '握住她的手告诉她已经足够好了',
+      '主动请缨承担失误的后果',
+      '提议暂停任务总结经验',
+      '告诉她这是团队的战斗，错误由我们一起承担',
+      '先治愈她，再约定下一次一起赢回来', 
+      '比起沉湎于复杂的懊悔，用简单的行动来弥补，才是正道'
+    ],
     helperText: '聚焦你与搭档的关系',
-    maxLength: 140
+    maxLength: 260
   },
   {
     id: 'MG-4',
@@ -37,7 +51,8 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
       { value: '先护住她们撤离', label: '先护住她们撤离，再想办法逆转局势' }
     ],
     allowCustom: true,
-    helperText: '你愿意牺牲到什么程度？'
+    helperText: '你愿意牺牲到什么程度？',
+    maxLength: 220
   },
   {
     id: 'MG-5',
@@ -48,7 +63,8 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
       { value: '带回失落的光芒', label: '把光带回被黑暗笼罩的城市' }
     ],
     allowCustom: true,
-    placeholder: '第一次想完成的事情…'
+    placeholder: '第一次想完成的事情…',
+    maxLength: 220
   },
   {
     id: 'MG-6',
@@ -59,11 +75,13 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
     ],
     allowCustom: true,
     placeholder: '描述你期望的能力',
-    suggestions: ['治愈一切伤痕的力量', '让时间倒流，挽回失去的人']
+    suggestions: ['治愈一切伤痕的力量', '让时间倒流，挽回失去的人'],
+    maxLength: 220
   },
   {
     id: 'MG-7',
-    suggestions: ['灯火', '羽翼', '晨星', '流星', '余烬', '潮汐']
+    suggestions: ['灯火', '羽翼', '晨星', '流星', '余烬', '潮汐'],
+    maxLength: 200
   },
   {
     id: 'MG-8',
@@ -73,7 +91,8 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
       { value: '依据情况权衡', label: '依据情况权衡' },
       { value: '先护队友再反击', label: '先保护队友，再寻找反击机会' }
     ],
-    allowCustom: true
+    allowCustom: true,
+    maxLength: 200
   },
   {
     id: 'MG-9',
@@ -83,7 +102,8 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
       { value: '顺应命运寻求意义', label: '顺应命运寻求意义' },
       { value: '命运注定但意义可改写', label: '命运或许注定，但结果的意义由自己决定' }
     ],
-    allowCustom: true
+    allowCustom: true,
+    maxLength: 200
   },
   {
     id: 'MG-10',
@@ -93,7 +113,8 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
       { value: '尝试寻找第三条路', label: '尝试寻找第三条路' },
       { value: '成为那个“少数”', label: '如果必须牺牲，就由我成为那个“少数”' }
     ],
-    allowCustom: true
+    allowCustom: true,
+    maxLength: 200
   },
   {
     id: 'MG-11',
@@ -103,7 +124,8 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
       { value: '只有在明确边界时才允许', label: '只有在明确边界时才允许' }
     ],
     allowCustom: true,
-    helperText: '谈谈你对“代价”与“底线”的理解'
+    helperText: '谈谈你对“代价”与“底线”的理解',
+    maxLength: 220
   },
   {
     id: 'MG-12',
@@ -113,7 +135,8 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
       { value: '尊重但寻求其他队友协助', label: '尊重但寻求其他队友协助' },
       { value: '独自承担风险', label: '选择独自承担，避免牵连他人' }
     ],
-    allowCustom: true
+    allowCustom: true,
+    maxLength: 200
   },
   {
     id: 'MG-13',
@@ -123,7 +146,8 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
       { value: '根据任务灵活切换', label: '根据任务灵活切换' },
       { value: '取决于队友是谁', label: '取决于队友是谁' }
     ],
-    allowCustom: true
+    allowCustom: true,
+    maxLength: 200
   },
   {
     id: 'MG-14',
@@ -133,18 +157,19 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
       { value: '先计划再顺势调整', label: '先计划再顺势调整' },
       { value: '计划与直觉并重', label: '先制定蓝图，再视战况灵活调整' }
     ],
-    allowCustom: true
+    allowCustom: true,
+    maxLength: 200
   },
   {
     id: 'MG-15',
-    suggestions: ['夏夜烟花下的约定', '第一次见到魔法少女的瞬间', '与家人重逢的拥抱', '在湿地下被前辈救起的瞬间', '雨中的葬礼与粉色樱花的凋零', '我……没有经历过……', '咕咕嘎嘎！'],
-    maxLength: 160
+    suggestions: ['夏夜烟花下的约定', '第一次见到魔法少女的瞬间', '与家人重逢的拥抱', '被前辈救起的瞬间', '雨中的葬礼与粉色樱花的凋零', '我……没有经历过……', '咕咕嘎嘎！'],
+    maxLength: 280
   },
   {
     id: 'MG-16',
     suggestions: ['曾经撤退导致同伴受伤', '因为犹豫而错失机会', '没有勇敢说出的告白', '没能阻止亲人遭遇不幸', '如果当时我更强就好了', '我曾经因为顾虑一份复杂的人情，而没有及时出手，导致同伴受到了本可以避免的伤害。现在我不会再犹豫。', '咕咕嘎嘎！'],
     helperText: '描述你想弥补的遗憾',
-    maxLength: 160
+    maxLength: 280
   }
 ];
 
@@ -159,7 +184,7 @@ export const buildMagicalQuestionMeta = (length: number): MagicalQuestionMeta[] 
       options: catalogMeta?.options,
       allowCustom: catalogMeta?.allowCustom !== undefined ? catalogMeta.allowCustom : true,
       helperText: catalogMeta?.helperText,
-      maxLength: catalogMeta?.maxLength ?? 120
+      maxLength: catalogMeta?.maxLength ?? 200
     };
   });
 };

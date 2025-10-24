@@ -245,7 +245,7 @@ const DetailsPage: React.FC = () => {
       return;
     }
 
-    const maxLength = meta?.maxLength ?? 120;
+    const maxLength = Math.max(meta?.maxLength ?? 200, 150);
     if (normalizedAnswer.length > maxLength) {
       setError(`⚠️ 答案不能超过${maxLength}字`);
       return;
@@ -347,7 +347,7 @@ const DetailsPage: React.FC = () => {
     const newAnswers = [...answers];
     lines.forEach((line, index) => {
       if (index < questions.length) {
-        const maxLength = questionMeta[index]?.maxLength ?? 120;
+        const maxLength = Math.max(questionMeta[index]?.maxLength ?? 200, 150);
         newAnswers[index] = line.slice(0, maxLength);
       }
     });
@@ -482,7 +482,7 @@ const DetailsPage: React.FC = () => {
   const isLastQuestion = currentQuestionIndex === questions.length - 1;
   const currentQuestion = questions[currentQuestionIndex];
   const currentMeta = questionMeta[currentQuestionIndex];
-  const currentMaxLength = currentMeta?.maxLength ?? 120;
+  const currentMaxLength = Math.max(currentMeta?.maxLength ?? 200, 150);
   const quickSuggestions = currentMeta?.suggestions ?? [];
   const hasOptions = (currentMeta?.options?.length ?? 0) > 0;
   const navigatorItems = questions.map((question, index) => ({

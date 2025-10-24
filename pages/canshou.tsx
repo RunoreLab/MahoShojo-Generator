@@ -320,7 +320,7 @@ const CanshouPage: React.FC = () => {
       if (index < questionnaire!.questions.length) {
         const questionId = questionnaire!.questions[index].id;
         const questionDef = questionnaire!.questions[index];
-        const limit = (questionDef.type === 'text' || questionDef.allowCustom) ? 140 : 80;
+        const limit = (questionDef.type === 'text' || questionDef.allowCustom) ? 240 : 180;
         newAnswers[questionId] = line.slice(0, limit);
       }
     });
@@ -347,7 +347,7 @@ const CanshouPage: React.FC = () => {
     label: question.question
   }));
   const allowCustomInput = currentQuestion.type === 'text' || currentQuestion.allowCustom;
-  const currentMaxLength = allowCustomInput ? 140 : 0;
+  const currentMaxLength = allowCustomInput ? 240 : undefined;
   const fallbackQuickOptions = allowCustomInput ? ['记录未知', '稍后补充'] : [];
 
   return (
