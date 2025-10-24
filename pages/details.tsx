@@ -606,6 +606,19 @@ const DetailsPage: React.FC = () => {
                     {currentMeta?.helperText && (
                       <p className="mt-2 text-sm text-gray-600 text-center">{currentMeta.helperText}</p>
                     )}
+                    <div className="mt-3 flex flex-wrap justify-center gap-3 text-xs">
+                      {fallbackQuickOptions.map(option => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => handleQuickOption(option)}
+                          disabled={submitting || isTransitioning || isCooldown}
+                          className="rounded-full border border-pink-200 bg-white px-4 py-1.5 font-medium text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50"
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {hasOptions && (
@@ -658,23 +671,8 @@ const DetailsPage: React.FC = () => {
                     {currentAnswer.length}/{currentMaxLength}
                   </div>
                 </div>
-
-                {/* 通用快捷选项 */}
-                <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-                  {fallbackQuickOptions.map(option => (
-                    <button
-                      key={option}
-                      onClick={() => handleQuickOption(option)}
-                      disabled={submitting || isTransitioning || isCooldown}
-                      className="rounded-full border border-pink-200 bg-white px-4 py-1.5 text-xs font-medium text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50"
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-
                 {/* 下一题按钮 */}
-                <div className="flex justify-between gap-2">
+                <div className="mt-4 flex flex-col sm:flex-row gap-2">
                   <button className="generate-button w-1/4" onClick={handlePreviousQuestion} disabled={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}>
                     返回上题
                   </button>

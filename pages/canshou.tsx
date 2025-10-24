@@ -432,6 +432,21 @@ const CanshouPage: React.FC = () => {
                     <p className="text-xs text-center text-slate-400 mt-2">
                       请基于您构想的虚拟档案回答，并确保内容符合公序良俗，请勿使用任何真实信息。
                     </p>
+                    {allowCustomInput && fallbackQuickOptions.length > 0 && (
+                      <div className="mt-3 flex flex-wrap justify-center gap-3 text-xs">
+                        {fallbackQuickOptions.map(option => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => handleOptionClick(option)}
+                            disabled={submitting || isCooldown}
+                            className="rounded-full border border-slate-600 bg-slate-900 px-4 py-1.5 font-medium text-emerald-300 transition-colors hover:border-emerald-400 hover:text-emerald-200"
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {currentQuestion.options && (
@@ -477,22 +492,6 @@ const CanshouPage: React.FC = () => {
                     ) : null}
                   </div>
                 )}
-
-                {fallbackQuickOptions.length > 0 && (
-                  <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-                    {fallbackQuickOptions.map(option => (
-                      <button
-                        key={option}
-                        onClick={() => handleOptionClick(option)}
-                        disabled={submitting || isCooldown}
-                        className="rounded-full border border-slate-600 bg-slate-900 px-4 py-1.5 text-xs font-medium text-emerald-300 transition-colors hover:border-emerald-400 hover:text-emerald-200"
-                      >
-                        {option}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
                 <div className="mt-4 flex flex-col sm:flex-row gap-2">
                   <button
                     onClick={handlePreviousQuestion}
