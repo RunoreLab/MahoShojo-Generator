@@ -42,6 +42,14 @@ export {
   incrementDataCardUsage
 } from './database/data-cards';
 
+// 重新导出收藏相关功能
+export {
+  addFavorite,
+  removeFavorite,
+  getUserFavorites,
+  getUserFavoriteIds
+} from './database/favorites';
+
 // 重新导出竞技场相关功能
 export {
   getOrCreateCharacter,

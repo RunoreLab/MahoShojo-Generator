@@ -124,6 +124,8 @@ export default function DataCardsModal({
                       reviewStatus={card.review_status}
                       usageCount={card.usage_count}
                       likeCount={card.like_count}
+                      favoriteCount={card.favorite_count}
+                      isRecommended={card.is_recommended === 1}
                       author={author}
                       isOwner={true}
                       onViewDetails={() => handleViewDetails(card)}
@@ -193,6 +195,7 @@ export default function DataCardsModal({
             isPublic: selectedCard.is_public,
             usageCount: selectedCard.usage_count,
             likeCount: selectedCard.like_count,
+            favoriteCount: selectedCard.favorite_count,
             author: '我',
             createdAt: selectedCard.created_at,
             updatedAt: selectedCard.updated_at

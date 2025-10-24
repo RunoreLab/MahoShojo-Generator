@@ -14,7 +14,7 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
     id: 'MG-1',
     placeholder: '请填写角色的名字',
     suggestions: ['白思与', '二阶堂祥子', '雪莉', '咕咕嘎嘎！', '真名只不过是表面之物罢了，不足挂齿'],
-    maxLength: 24
+    maxLength: 100
   },
   {
     id: 'MG-2',

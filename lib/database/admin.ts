@@ -90,6 +90,7 @@ export async function getAdminDataCards(filters: {
   sortOrder?: 'asc' | 'desc';
   reviewStatus?: 'pending' | 'approved' | 'rejected';
   isPublic?: '0' | '1' | '-1'; // 0=私有, 1=公开, -1=封禁
+  isRecommended?: '0' | '1';
   type?: 'character' | 'scenario';
   search?: string; // 搜索名称、描述或作者名
 }): Promise<{ cards: any[], total: number }> {
@@ -100,6 +101,7 @@ export async function getAdminDataCards(filters: {
     sortOrder = 'desc',
     reviewStatus,
     isPublic,
+    isRecommended,
     type,
     search,
   } = filters;
@@ -116,6 +118,10 @@ export async function getAdminDataCards(filters: {
   if (isPublic) {
     whereClauses.push('dc.is_public = ?');
     params.push(parseInt(isPublic, 10));
+  }
+  if (isRecommended) {
+    whereClauses.push('dc.is_recommended = ?');
+    params.push(parseInt(isRecommended, 10));
   }
   if (type) {
     whereClauses.push('dc.type = ?');
@@ -172,7 +178,7 @@ export async function getAdminDataCards(filters: {
  */
 export async function batchUpdateDataCards(
   cardIds: string[],
-  updates: { review_status?: 'approved' | 'rejected'; is_public?: 0 | 1 | -1 }
+  updates: { review_status?: 'approved' | 'rejected'; is_public?: 0 | 1 | -1; is_recommended?: 0 | 1 }
 ): Promise<boolean> {
   if (cardIds.length === 0) return true;
 
@@ -186,6 +192,10 @@ export async function batchUpdateDataCards(
   if (updates.is_public !== undefined) {
     setClauses.push('is_public = ?');
     params.push(updates.is_public);
+  }
+  if (updates.is_recommended !== undefined) {
+    setClauses.push('is_recommended = ?');
+    params.push(updates.is_recommended);
   }
 
   if (setClauses.length === 0) {

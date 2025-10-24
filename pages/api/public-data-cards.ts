@@ -17,7 +17,7 @@ export default async function handler(req: Request): Promise<Response> {
     const id = url.searchParams.get('id'); // 单个数据卡ID
     const type = url.searchParams.get('type'); // 'character' or 'scenario'
     const search = url.searchParams.get('search'); // 搜索关键词
-    const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'created_at' | null; // 排序方式
+    const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'favorites' | 'created_at' | null; // 排序方式
     const limit = parseInt(url.searchParams.get('limit') || '12');
     const offset = parseInt(url.searchParams.get('offset') || '0');
 
@@ -27,6 +27,9 @@ export default async function handler(req: Request): Promise<Response> {
     const maxLikes = url.searchParams.get('maxLikes');
     const minUsage = url.searchParams.get('minUsage');
     const maxUsage = url.searchParams.get('maxUsage');
+    const minFavorites = url.searchParams.get('minFavorites');
+    const maxFavorites = url.searchParams.get('maxFavorites');
+    const recommendedOnly = url.searchParams.get('recommendedOnly') === '1';
 
 
     // 如果提供了ID，则获取单个数据卡
@@ -63,7 +66,10 @@ export default async function handler(req: Request): Promise<Response> {
         minLikes ? parseInt(minLikes) : undefined,
         maxLikes ? parseInt(maxLikes) : undefined,
         minUsage ? parseInt(minUsage) : undefined,
-        maxUsage ? parseInt(maxUsage) : undefined
+        maxUsage ? parseInt(maxUsage) : undefined,
+        minFavorites ? parseInt(minFavorites) : undefined,
+        maxFavorites ? parseInt(maxFavorites) : undefined,
+        recommendedOnly
     );
 
     return new Response(JSON.stringify({
