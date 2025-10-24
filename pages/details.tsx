@@ -11,6 +11,8 @@ import TachieGenerator from '../components/TachieGenerator';
 import { generateRandomMagicalGirl } from '../lib/random-character-generator';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
+import QuestionNavigator from '../components/QuestionNavigator';
+import { buildMagicalQuestionMeta, type MagicalQuestionMeta } from '@/lib/questionnaires';
 
 interface Questionnaire {
   questions: string[];
@@ -134,6 +136,7 @@ const LOCAL_STORAGE_KEY = 'magicalGirlAnswersDraft'; // 定义本地存储的键
 const DetailsPage: React.FC = () => {
   const router = useRouter();
   const [questions, setQuestions] = useState<string[]>([]);
+  const [questionMeta, setQuestionMeta] = useState<MagicalQuestionMeta[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
   const [currentAnswer, setCurrentAnswer] = useState('');
@@ -151,6 +154,8 @@ const DetailsPage: React.FC = () => {
   const [showLanguageSection, setShowLanguageSection] = useState(false); // 控制生成语言区域的折叠状态
   const [showBulkFillSection, setShowBulkFillSection] = useState(false); // 控制一键填充区域的折叠状态
   const [isGenerating, setIsGenerating] = useState(false);
+  const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
+  const [showAnswerReview, setShowAnswerReview] = useState(false);
 
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -174,6 +179,8 @@ const DetailsPage: React.FC = () => {
       })
       .then((data: Questionnaire) => {
         setQuestions(data.questions);
+        const metadata = buildMagicalQuestionMeta(data.questions.length);
+        setQuestionMeta(metadata);
         const emptyAnswers = new Array(data.questions.length).fill('');
 
         // 尝试从 localStorage 读取存档
@@ -184,7 +191,15 @@ const DetailsPage: React.FC = () => {
             if (Array.isArray(parsedAnswers) && parsedAnswers.length === data.questions.length) {
               setAnswers(parsedAnswers);
               setCurrentAnswer(parsedAnswers[0] || ''); // 直接设置第一个问题的答案
+              setAutoSaveTimestamp(Date.now());
               return; // 读取成功，提前返回
+            } else if (parsedAnswers && typeof parsedAnswers === 'object') {
+              // 兼容新版结构
+              const restored = data.questions.map((_, index) => parsedAnswers[`MG-${index + 1}`] || parsedAnswers[index] || '');
+              setAnswers(restored);
+              setCurrentAnswer(restored[0] || '');
+              setAutoSaveTimestamp(Date.now());
+              return;
             }
           }
         } catch (e) {
@@ -193,6 +208,7 @@ const DetailsPage: React.FC = () => {
 
         // 如果没有有效存档，则设置空答案
         setAnswers(emptyAnswers);
+        setCurrentAnswer('');
       })
       .catch(error => {
         console.error('加载问卷失败:', error);
@@ -206,41 +222,74 @@ const DetailsPage: React.FC = () => {
   // 答案变化时，自动保存到 localStorage (这个 useEffect 保持不变)
   useEffect(() => {
     try {
-      // 只有当至少有一个答案非空时才保存，避免保存初始的空数组
       if (answers.some(answer => answer.trim() !== '')) {
         const dataToSave = JSON.stringify(answers);
         localStorage.setItem(LOCAL_STORAGE_KEY, dataToSave);
+        setAutoSaveTimestamp(Date.now());
       }
     } catch (e) {
       console.error("Failed to save answers to localStorage", e);
     }
   }, [answers]);
 
+  useEffect(() => {
+    setCurrentAnswer(answers[currentQuestionIndex] || '');
+  }, [currentQuestionIndex, answers]);
+
   const handleNext = () => {
-    if (currentAnswer.trim().length === 0) {
+    const meta = questionMeta[currentQuestionIndex];
+    const normalizedAnswer = currentAnswer.trim();
+
+    if (normalizedAnswer.length === 0) {
       setError('⚠️ 请输入答案后再继续');
       return;
     }
 
-    if (currentAnswer.length > 120) {
-      setError('⚠️ 答案不能超过120字');
+    const maxLength = meta?.maxLength ?? 120;
+    if (normalizedAnswer.length > maxLength) {
+      setError(`⚠️ 答案不能超过${maxLength}字`);
       return;
     }
 
     setError(null); // 清除错误信息
 
-    proceedToNextQuestion(currentAnswer.trim());
+    proceedToNextQuestion(normalizedAnswer);
   };
 
   // “返回上题”功能的函数
   const handlePreviousQuestion = () => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(currentQuestionIndex - 1);
-    }
+    if (currentQuestionIndex === 0) return;
+
+    const updatedAnswers = [...answers];
+    updatedAnswers[currentQuestionIndex] = currentAnswer.trim();
+    setAnswers(updatedAnswers);
+
+    const prevIndex = currentQuestionIndex - 1;
+    setCurrentQuestionIndex(prevIndex);
+    setCurrentAnswer(updatedAnswers[prevIndex] || '');
+    setError(null);
   };
 
   const handleQuickOption = (option: string) => {
+    setCurrentAnswer(option);
+    setError(null);
     proceedToNextQuestion(option);
+  };
+
+  const handleNavigateToQuestion = (index: number) => {
+    if (index === currentQuestionIndex || index < 0 || index >= questions.length) return;
+
+    const updatedAnswers = [...answers];
+    updatedAnswers[currentQuestionIndex] = currentAnswer.trim();
+    setAnswers(updatedAnswers);
+    setCurrentQuestionIndex(index);
+    setCurrentAnswer(updatedAnswers[index] || '');
+    setError(null);
+  };
+
+  const handleSuggestionFill = (value: string) => {
+    setCurrentAnswer(value);
+    setError(null);
   };
 
   const proceedToNextQuestion = (answer: string) => {
@@ -284,6 +333,7 @@ const DetailsPage: React.FC = () => {
       const emptyAnswers = new Array(questions.length).fill('');
       setAnswers(emptyAnswers);
       setCurrentAnswer('');
+      setAutoSaveTimestamp(null);
       alert('存档已清空！');
     }
   };
@@ -297,7 +347,8 @@ const DetailsPage: React.FC = () => {
     const newAnswers = [...answers];
     lines.forEach((line, index) => {
       if (index < questions.length) {
-        newAnswers[index] = line.slice(0, 120); // 限制单行长度
+        const maxLength = questionMeta[index]?.maxLength ?? 120;
+        newAnswers[index] = line.slice(0, maxLength);
       }
     });
     setAnswers(newAnswers);
@@ -381,10 +432,9 @@ const DetailsPage: React.FC = () => {
 
   // “一键复制”功能的函数
   const handleCopyContent = () => {
-    // 将已填写的答案格式化为字符串
-    const contentToCopy = Object.entries(answers)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join('\n');
+    const contentToCopy = questions
+      .map((question, index) => `Q${index + 1}: ${question}\nA: ${answers[index] || ''}`)
+      .join('\n\n');
 
     // 使用剪贴板API进行复制
     navigator.clipboard.writeText(contentToCopy).then(() => {
@@ -430,6 +480,18 @@ const DetailsPage: React.FC = () => {
   }
 
   const isLastQuestion = currentQuestionIndex === questions.length - 1;
+  const currentQuestion = questions[currentQuestionIndex];
+  const currentMeta = questionMeta[currentQuestionIndex];
+  const currentMaxLength = currentMeta?.maxLength ?? 120;
+  const quickSuggestions = currentMeta?.suggestions ?? [];
+  const hasOptions = (currentMeta?.options?.length ?? 0) > 0;
+  const navigatorItems = questions.map((question, index) => ({
+    id: questionMeta[index]?.id ?? `MG-${index + 1}`,
+    label: question
+  }));
+  const progressPercent = Math.round(((currentQuestionIndex + 1) / questions.length) * 100);
+  const fallbackQuickOptions = ['还没想好', '不想回答'];
+  const suggestionPool = quickSuggestions.filter(Boolean);
 
   return (
     <>
@@ -506,78 +568,109 @@ const DetailsPage: React.FC = () => {
             ) : (
               // 问卷部分
               <>
-                {/* 进度指示器 */}
-                <div style={{ marginBottom: '1.5rem' }}>
-                  <div className="flex justify-between items-center" style={{ marginBottom: '0.5rem' }}>
-                    <span className="text-sm text-gray-600">
-                      问题 {currentQuestionIndex + 1} / {questions.length}
-                    </span>
-                    <span className="text-sm text-gray-600">
-                      {Math.round(((currentQuestionIndex + 1) / questions.length) * 100)}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="h-2 rounded-full transition-all duration-300"
+                <QuestionNavigator
+                  items={navigatorItems}
+                  currentIndex={currentQuestionIndex}
+                  onNavigate={handleNavigateToQuestion}
+                  isAnswered={(index) => (answers[index] || '').trim().length > 0}
+                  theme="pink"
+                />
+
+                <div className="mt-4 space-y-4">
+                  <div className="rounded-2xl border border-pink-100 bg-white/90 p-4 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600">
+                      <span>问题 {currentQuestionIndex + 1} / {questions.length}</span>
+                      <span>进度 {progressPercent}%</span>
+                      {autoSaveTimestamp && (
+                        <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
+                      )}
+                    </div>
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-pink-100">
+                      <div
+                        className="h-full rounded-full bg-pink-400 transition-all duration-300 ease-out"
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    </div>
+                    <h2
+                      className="mt-4 text-xl font-semibold leading-relaxed text-center text-pink-700 transition-all duration-300 ease-out"
                       style={{
-                        width: `${((currentQuestionIndex + 1) / questions.length) * 100}%`,
-                        background: 'linear-gradient(to right, #3b82f6, #1d4ed8)'
+                        opacity: isTransitioning ? 0 : 1,
+                        transform: isTransitioning ? 'translateX(-16px)' : 'translateX(0)'
                       }}
-                    />
+                    >
+                      {currentQuestion}
+                    </h2>
+                    <p className="text-xs text-center text-gray-500 mt-2">
+                      请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。
+                    </p>
+                    {currentMeta?.helperText && (
+                      <p className="mt-2 text-sm text-gray-600 text-center">{currentMeta.helperText}</p>
+                    )}
                   </div>
-                </div>
 
-                {/* 问题 */}
-                <div style={{ marginBottom: '1rem', minHeight: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <h2
-                    className="text-xl font-medium leading-relaxed text-center text-blue-900"
-                    style={{
-                      opacity: isTransitioning ? 0 : 1,
-                      transition: 'opacity 0.3s ease-in-out, transform 0.3s ease-in-out',
-                      transform: isTransitioning ? 'translateX(-100px)' : 'translateX(0)',
-                      animation: !isTransitioning && currentQuestionIndex > 0 ? 'slideInFromRight 0.3s ease-out' : 'none'
-                    }}
-                  >
-                    {questions[currentQuestionIndex]}
-                  </h2>
-                </div>
+                  {hasOptions && (
+                    <div className="rounded-2xl border border-pink-100 bg-white p-4 shadow-sm">
+                      <p className="text-xs text-gray-500 mb-2">推荐选项（点击后自动跳转下一题，也可继续补充文本）</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {currentMeta?.options?.map(option => (
+                          <button
+                            type="button"
+                            key={option.value}
+                            onClick={() => handleQuickOption(option.value)}
+                            className="rounded-lg border border-pink-200 bg-white px-3 py-2 text-sm text-gray-700 transition-colors hover:border-pink-400 hover:bg-pink-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-300"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-                <p className="text-xs text-center text-gray-500 mb-4 -mt-2 px-4">
-                  请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。
-                </p>
+                  {suggestionPool.length > 0 && (
+                    <div className="rounded-2xl border border-pink-100 bg-white/80 p-3 shadow-sm">
+                      <p className="text-xs text-gray-500 mb-2">灵感提示（点击将内容填入文本框，可再编辑）</p>
+                      <div className="flex flex-wrap gap-2">
+                        {suggestionPool.map(suggestion => (
+                          <button
+                            type="button"
+                            key={suggestion}
+                            onClick={() => handleSuggestionFill(suggestion)}
+                            className="rounded-full border border-pink-200 bg-white px-3 py-1.5 text-xs text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50"
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* 输入框 */}
-                <div className="input-group">
+                <div className="input-group mt-4">
                   <textarea
                     value={currentAnswer}
                     onChange={(e) => setCurrentAnswer(e.target.value)}
-                    placeholder="请输入您的答案（不超过120字）"
-                    className="input-field resize-none h-24"
-                    maxLength={120}
+                    placeholder={currentMeta?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
+                    className="input-field min-h-[6rem] resize-y"
+                    maxLength={currentMaxLength}
                   />
-                  <div className="text-right text-sm text-gray-500" style={{ marginTop: '-2rem', marginRight: '0.5rem' }}>
-                    {currentAnswer.length}/120
+                  <div className="mt-1 text-right text-xs text-gray-500">
+                    {currentAnswer.length}/{currentMaxLength}
                   </div>
                 </div>
 
-                {/* 快捷选项 */}
-                <div className="flex gap-2 justify-center" style={{ marginBottom: '1rem', marginTop: '2rem' }}>
-                  <button
-                    onClick={() => handleQuickOption('还没想好')}
-                    disabled={submitting || isTransitioning || isCooldown}
-                    className="generate-button h-10"
-                    style={{ marginBottom: 0, padding: 0 }}
-                  >
-                    还没想好
-                  </button>
-                  <button
-                    onClick={() => handleQuickOption('不想回答')}
-                    disabled={submitting || isTransitioning || isCooldown}
-                    className="generate-button h-10"
-                    style={{ marginBottom: 0, padding: 0 }}
-                  >
-                    不想回答
-                  </button>
+                {/* 通用快捷选项 */}
+                <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                  {fallbackQuickOptions.map(option => (
+                    <button
+                      key={option}
+                      onClick={() => handleQuickOption(option)}
+                      disabled={submitting || isTransitioning || isCooldown}
+                      className="rounded-full border border-pink-200 bg-white px-4 py-1.5 text-xs font-medium text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50"
+                    >
+                      {option}
+                    </button>
+                  ))}
                 </div>
 
                 {/* 下一题按钮 */}
@@ -660,6 +753,39 @@ const DetailsPage: React.FC = () => {
                     </div>
                   )}
                 </div>
+
+                <div className="my-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <button
+                    onClick={() => setShowAnswerReview(!showAnswerReview)}
+                    className="flex w-full items-center justify-between text-left text-sm font-semibold text-blue-700"
+                  >
+                    <span>答案概览</span>
+                    <span>{showAnswerReview ? '▲' : '▼'}</span>
+                  </button>
+                  {showAnswerReview && (
+                    <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1 text-sm">
+                      {questions.map((question, index) => (
+                        <div key={`answer-review-${index}`} className="rounded-lg bg-white/90 p-3 shadow-sm">
+                          <div className="text-xs font-semibold text-pink-600">Q{index + 1}</div>
+                          <div className="mt-1 text-xs text-gray-500">{question}</div>
+                          <div className="mt-2 text-gray-800 whitespace-pre-wrap">
+                            {answers[index] && answers[index].trim().length > 0 ? answers[index] : <span className="text-gray-400">尚未填写</span>}
+                          </div>
+                          <div className="mt-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleNavigateToQuestion(index)}
+                              className="text-xs text-pink-500 hover:underline"
+                            >
+                              编辑此题
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* 错误信息显示 */}
                 {error && (
                   <div className="error-message">
