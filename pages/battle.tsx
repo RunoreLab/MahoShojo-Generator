@@ -18,6 +18,7 @@ import BattleDataModal from '../components/BattleDataModal';
 import { useAuth } from '@/lib/useAuth';
 import Footer from '../components/Footer';
 import SaveToCloudButton from '../components/SaveToCloudButton';
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 // v0.4.0 引入新的编辑器组件
 import AdjudicatorEditor from '../components/AdjudicatorEditor';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -191,6 +192,25 @@ const BattlePage: React.FC = () => {
     const [adjudicationEvents, setAdjudicationEvents] = useState<AdjudicatorEvent[]>([]);
     const [adjudicationResults, setAdjudicationResults] = useState<AdjudicationResult[] | null>(null);
     const [storyLength, setStoryLength] = useState('default');
+    const [selectedCombatantForDetails, setSelectedCombatantForDetails] = useState<CombatantData | null>(null);
+
+    const combatantDetailsCard = useMemo(() => {
+        if (!selectedCombatantForDetails) return null;
+        const baseData = selectedCombatantForDetails.data || {};
+        const displayName = baseData.codename || baseData.name || selectedCombatantForDetails.filename;
+        const typeLabel = selectedCombatantForDetails.type === 'magical-girl' ? '魔法少女' : '残兽';
+        return {
+            id: selectedCombatantForDetails.filename,
+            name: displayName,
+            description: `${typeLabel}详细设定`,
+            type: 'character' as const,
+            data: JSON.stringify(baseData, null, 2),
+            isPublic: Boolean(selectedCombatantForDetails.isPreset),
+            author: baseData.author ?? baseData.creator ?? '未知作者',
+            createdAt: baseData.createdAt,
+            updatedAt: baseData.updatedAt,
+        };
+    }, [selectedCombatantForDetails]);
 
     /**
      * @description 用于跟踪随机匹配功能的加载状态。
@@ -1193,6 +1213,7 @@ const BattlePage: React.FC = () => {
                                             ? (c.type === 'random-magical-girl' ? '(随机魔法少女)' : '(随机残兽)')
                                             : (c.type === 'magical-girl' ? '(魔法少女)' : '(残兽)');
                                         const isCorrected = !isPlaceholder && correctedFiles[name];
+                                        const combatantData = isPlaceholder ? null : (c as CombatantData);
 
                                                 return (
                                                     <li key={key} className="flex justify-between items-start group gap-2">
@@ -1222,6 +1243,15 @@ const BattlePage: React.FC = () => {
                                                             )}
                                                         </div>
                                                         <div className="flex items-center flex-shrink-0">
+                                                            {!isPlaceholder && combatantData && (
+                                                                <button
+                                                                    onClick={() => setSelectedCombatantForDetails(combatantData)}
+                                                                    className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300 mr-2"
+                                                                    disabled={isGenerating}
+                                                                >
+                                                                    详情
+                                                                </button>
+                                                            )}
                                                             {isCorrected && (
                                                                 <div className="flex gap-2 mr-2">
                                                                     <button onClick={() => handleDownloadCorrectedJson(name)} disabled={isGenerating} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">下载</button>
@@ -1671,6 +1701,15 @@ const BattlePage: React.FC = () => {
                 onSelectCard={handleSelectDataCard}
                 selectedType={dataModalType}
             />
+
+            {/* 角色详情模态框 */}
+            {combatantDetailsCard && (
+                <DataCardDetailsModal
+                    isOpen={!!selectedCombatantForDetails}
+                    onClose={() => setSelectedCombatantForDetails(null)}
+                    card={combatantDetailsCard}
+                />
+            )}
         </>
     );
 };
