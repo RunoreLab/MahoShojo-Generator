@@ -37,12 +37,12 @@ interface StatCardProps {
 const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, color, note }) => (
   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between">
     <div>
+      <p className="text-gray-500 text-sm font-medium mb-2">{title}</p>
       <div className="flex items-center gap-4">
         <div className={`w-12 h-12 rounded-full flex items-center justify-center ${color}`}>
           <Icon className="w-6 h-6 text-white" />
         </div>
         <div>
-          <p className="text-gray-500 text-sm font-medium">{title}</p>
           <p className="text-3xl font-bold text-gray-800">{value}</p>
         </div>
       </div>
@@ -86,7 +86,7 @@ const AdminHomePage: React.FC = () => {
         <title>管理后台 - MahoShojo Generator</title>
       </Head>
       <div className="min-h-screen bg-gray-100 p-4 sm:p-6 md:p-8">
-        <div className="container mx-auto max-w-6xl">
+        <div className="mx-auto max-w-6xl">
           <div className="text-center mb-10">
             <h1 className="text-4xl font-bold text-gray-800 tracking-tight">MahoShojo Generator</h1>
             <p className="text-lg text-gray-500 mt-2">管理仪表盘</p>
@@ -98,7 +98,7 @@ const AdminHomePage: React.FC = () => {
             {loading ? (
               <div className="text-center p-8 bg-white rounded-lg shadow-sm">加载中...</div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
                 <StatCard title="待审查内容" value={stats?.pendingReviewCount ?? 0} icon={Clock} color="bg-yellow-500" note="需要管理员尽快处理" />
                 <StatCard title="今日新增用户" value={stats?.newUsersToday ?? 0} icon={UserPlus} color="bg-green-500" />
                 <StatCard title="今日新增档案" value={stats?.newDataCardsToday ?? 0} icon={FilePlus} color="bg-blue-500" />
