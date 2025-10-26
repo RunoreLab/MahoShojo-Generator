@@ -1,4 +1,4 @@
-import { getUserByAuthKey, increaseUserSlotCount } from '@/lib/d1';
+import { getUserByAuthKey, increaseUserSlotCount, grantBadgeToUser, userHasBadge } from '@/lib/d1';
 import { validateAndConsumeRedemptionCode } from '@/lib/database/redemption-codes';
 
 export const runtime = 'edge';
@@ -63,6 +63,16 @@ export default async function handler(req: Request): Promise<Response> {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
+    }
+
+    if (!(await userHasBadge(user.id, 'sponsor'))) {
+      const badgeGranted = await grantBadgeToUser(user.id, 'sponsor');
+      if (!badgeGranted) {
+        return new Response(JSON.stringify({ error: '兑换成功但徽章发放失败，请联系管理员处理' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
     }
 
     return new Response(JSON.stringify({
