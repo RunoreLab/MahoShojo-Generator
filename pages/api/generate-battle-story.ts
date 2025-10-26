@@ -1,12 +1,13 @@
 // pages/api/generate-battle-story.ts
 
 import { z } from 'zod';
-import { generateWithAI, GenerationConfig } from '../../lib/ai';
+import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
 import { queryFromD1 } from '../../lib/d1';
 import { getLogger } from '../../lib/logger';
 import questionnaire from '../../public/questionnaire.json';
 import { getRandomJournalist } from '../../lib/random-choose-journalist';
-import { config as appConfig, SafetyCheckPolicy } from '../../lib/config';
+import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '../../lib/config';
+import { AI_PROVIDER_CATALOG } from '@/lib/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 // v0.4.0 引入新的判定器类型
@@ -54,6 +55,12 @@ const BattleReportCoreSchema = z.object({
     impact: z.string().describe("一句话概括该角色在此次事件中的成长、感悟或变化。")
   })).describe("对每位参与该事件的核心角色的影响总结列表。")
 }).describe("生成一份关于魔法少女的新闻报道。如果用户提供了引导，请在创作时参考，但必须确保最终内容符合魔法少女世界观和公序良俗。");
+
+const CustomProviderSchema = z.object({
+  providerId: z.string().min(1),
+  modelId: z.string().min(1),
+  apiKey: z.string(),
+});
 
 
 // 从组件中导入的类型，用于最终返回给前端的完整数据结构
@@ -654,6 +661,7 @@ async function handler(req: NextRequest): Promise<Response> {
   }
 
   try {
+    const body = await req.json();
     const { 
         combatants, 
         selectedLevel, 
@@ -663,10 +671,67 @@ async function handler(req: NextRequest): Promise<Response> {
         teams, 
         language = 'zh-CN', 
         useArenaHistory = true,
-        isDowngrade = false, // 新增：是否使用轻量模型
-        adjudicationEvents, // v0.4.0 新增
-        storyLength
-    } = await req.json();
+        isDowngrade = false,
+        adjudicationEvents,
+        storyLength,
+        customProvider: customProviderPayload
+    } = body;
+
+    let customProviderOverride: AIProvider | null = null;
+    let customProviderId: string | null = null;
+    let customModelOverride: string | undefined;
+    if (customProviderPayload) {
+        const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
+        if (!parsedResult.success) {
+            log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
+            return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
+        }
+
+        const parsed = parsedResult.data;
+        customProviderId = parsed.providerId;
+        const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
+        if (!providerConfig) {
+            return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
+        }
+
+        const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
+        if (!modelConfig) {
+            return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
+        }
+
+        const sanitizedApiKey = parsed.apiKey.trim();
+        if (!sanitizedApiKey && providerConfig.id !== 'system') {
+            return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
+        }
+
+        const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
+        if (!sanitizedBaseUrl) {
+            customModelOverride = modelConfig.value;
+            log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
+                providerId: providerConfig.id,
+                model: modelConfig.value,
+            });
+        } else {
+            customProviderOverride = {
+                name: providerConfig.name,
+                apiKey: sanitizedApiKey,
+                baseUrl: sanitizedBaseUrl,
+                model: modelConfig.value,
+                type: providerConfig.type,
+                retryCount: 1,
+                skipProbability: 0,
+            };
+        }
+    }
+
+    const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
+    const providerOptions = (customProviderOverride || shouldDisablePolling)
+        ? {
+            ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
+            ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+        }
+        : undefined;
+    const resolvedModelOverride = customModelOverride ?? (isDowngrade ? "gemini-2.5-flash-lite" : undefined);
 
     const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
     if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > 4) {
@@ -751,7 +816,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 schema: SafetyCheckSchema,
                 taskName: "安全检查",
                 maxTokens: 500,
-            });
+                modelOverride: resolvedModelOverride,
+            }, providerOptions);
 
             if (safetyResult.isUnsafe) {
                 log.warn('AI检测到不安全内容，请求被拒绝', { text: combinedText, reason: safetyResult.reason });
@@ -767,7 +833,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 temperature: 0,
                 promptBuilder: (input: string) => `魔法少女的世界是一个存在超凡力量的现代都市世界...用户输入的内容是：“${input}”。请判断该内容是否与这个世界观存在明显冲突。`,
                 schema: WorldviewCheckSchema, taskName: "世界观检查", maxTokens: 500,
-            });
+                modelOverride: resolvedModelOverride,
+            }, providerOptions);
             if (worldviewResult.isInconsistent) {
                 needsWorldviewWarning = true;
                 log.info('用户引导内容可能不符合世界观', { text: combinedText });
@@ -796,10 +863,10 @@ async function handler(req: NextRequest): Promise<Response> {
         schema: BattleReportCoreSchema,
         taskName: `生成${mode}模式故事`,
         maxTokens: 8192,
-        modelOverride: isDowngrade ? "gemini-2.5-flash" : undefined, // 使用轻量模型
+        modelOverride: resolvedModelOverride, // 使用轻量模型或自定义覆盖模型
     };
 
-    const aiResult = await generateWithAI({ combatants }, generationConfig);
+    const aiResult = await generateWithAI({ combatants }, generationConfig, providerOptions);
     
     // 组合成完整的前端报告对象
     const report: NewsReport = {

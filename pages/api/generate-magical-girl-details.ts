@@ -5,6 +5,7 @@ import { getRandomFlowers } from '../../lib/random-choose-hana-name';
 // import { saveToD1 } from '../../lib/d1';
 import { getLogger } from '../../lib/logger';
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
+import { buildMagicalQuestionMeta } from '../../lib/questionnaires';
 
 const log = getLogger('api-gen-details');
 
@@ -110,34 +111,52 @@ async function handler(req: Request): Promise<Response> {
     });
   }
 
-  const { answers, language = 'zh-CN' } = await req.json();
+  const body = await req.json();
+  const rawAnswers = body?.answers;
+  const language = body?.language ?? 'zh-CN';
 
-  if (!answers || !Array.isArray(answers) || answers.length === 0) {
+  if (!rawAnswers || !Array.isArray(rawAnswers) || rawAnswers.length === 0) {
     return new Response(JSON.stringify({ error: 'Answers array is required' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' }
     });
   }
 
-  // 验证每个答案不超过120字
-  for (const answer of answers) {
-    if (typeof answer !== 'string' || answer.trim().length === 0) {
+  const questionMeta = buildMagicalQuestionMeta(rawAnswers.length);
+  const normalizedAnswers: string[] = [];
+
+  // 基于题目元数据验证每个答案的字数上限
+  for (const [index, answer] of rawAnswers.entries()) {
+    if (typeof answer !== 'string') {
       return new Response(JSON.stringify({ error: 'All answers must be non-empty strings' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       });
     }
-    if (answer.length > 120) {
-      return new Response(JSON.stringify({ error: 'Each answer must not exceed 120 characters' }), {
+
+    const trimmedAnswer = answer.trim();
+    if (trimmedAnswer.length === 0) {
+      return new Response(JSON.stringify({ error: 'All answers must be non-empty strings' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       });
     }
+
+    const meta = questionMeta[index];
+    const maxAllowedLength = Math.max(meta?.maxLength ?? 200, 150);
+    if (trimmedAnswer.length > maxAllowedLength) {
+      return new Response(JSON.stringify({ error: `第 ${index + 1} 题的答案字数超过限制（最多 ${maxAllowedLength} 字）` }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    normalizedAnswers.push(trimmedAnswer);
   }
 
   try {
     // 直接调用AI生成，不再入队
-    const magicalGirlDetails = await generateWithAI({ answers, language }, magicalGirlDetailsConfig);
+    const magicalGirlDetails = await generateWithAI({ answers: normalizedAnswers, language }, magicalGirlDetailsConfig);
 
     // 异步保存到D1数据库，不阻塞对用户的响应
     // const saveData = {
@@ -158,7 +177,7 @@ async function handler(req: Request): Promise<Response> {
     const dataToSign = {
         ...magicalGirlDetails,
         templateId: "魔法少女/心之花/魔法少女（问卷生成）", // 添加模板ID
-        userAnswers: answers
+        userAnswers: normalizedAnswers
     };
 
     // 为合并后的数据生成签名
@@ -175,7 +194,7 @@ async function handler(req: Request): Promise<Response> {
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (error) {
-    log.error('生成魔法少女详细信息失败', { error, answersLength: answers?.length });
+    log.error('生成魔法少女详细信息失败', { error, answersLength: normalizedAnswers.length });
     const errorMessage = error instanceof Error ? error.message : '服务器内部错误';
     return new Response(JSON.stringify({ error: '生成失败，当前服务器可能正忙，请稍后重试', message: errorMessage }), {
       status: 500,

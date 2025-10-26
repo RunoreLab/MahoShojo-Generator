@@ -8,6 +8,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { useCooldown } from '../lib/cooldown';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
+import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 
 // 定义引导性问题
 const scenarioQuestions = [
@@ -37,6 +38,7 @@ const ScenarioPage: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultData, setResultData] = useState<any | null>(null);
+  const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
   // 实例化 useCooldown hook，设置60秒冷却时间
   const { isCooldown, startCooldown, remainingTime } = useCooldown('scenarioCooldown', 60000);
@@ -75,6 +77,10 @@ const ScenarioPage: React.FC = () => {
       setError(`操作过于频繁，请等待 ${remainingTime} 秒后再试。`);
       return;
     }
+    if (userProviderConfig && userProviderConfig.providerId !== 'system' && !userProviderConfig.apiKey) {
+      setError('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
+      return;
+    }
     setIsGenerating(true);
     setError(null);
     setResultData(null);
@@ -88,11 +94,29 @@ const ScenarioPage: React.FC = () => {
         return;
       }
 
+      const requestBody: Record<string, unknown> = {
+        answers,
+        language: selectedLanguage,
+        fieldsToKeepEmpty,
+      };
+
+      if (
+        userProviderConfig &&
+        (userProviderConfig.apiKey || userProviderConfig.providerId === 'system') &&
+        userProviderConfig.modelId !== 'default'
+      ) {
+        requestBody.customProvider = {
+          providerId: userProviderConfig.providerId,
+          modelId: userProviderConfig.modelId,
+          apiKey: userProviderConfig.apiKey.trim(),
+        };
+      }
+
       const response = await fetch('/api/generate-scenario', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // [修改] 在请求体中加入 fieldsToKeepEmpty
-        body: JSON.stringify({ answers, language: selectedLanguage, fieldsToKeepEmpty }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -198,6 +222,14 @@ const ScenarioPage: React.FC = () => {
                   </div>
                 </div>
               )}
+            </div>
+
+            <div className="input-group mt-6">
+              <label className="input-label">自定义 AI 供应商 (可选)</label>
+              <AiProviderSelector onConfigChange={setUserProviderConfig} />
+              <p className="text-xs text-gray-500 mt-1">
+                若需使用自备模型，请先选择供应商与模型并填写对应 API Key。
+              </p>
             </div>
 
             {/* 多语言支持 */}

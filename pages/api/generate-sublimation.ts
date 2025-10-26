@@ -1,13 +1,14 @@
 // pages/api/generate-sublimation.ts
 
 import { z } from 'zod';
-import { generateWithAI, GenerationConfig } from '../../lib/ai';
+import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
 import { getLogger } from '../../lib/logger';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import magicalGirlQuestionnaire from '../../public/questionnaire.json';
-import { config as appConfig } from '../../lib/config';
+import { config as appConfig, type AIProvider } from '../../lib/config';
+import { AI_PROVIDER_CATALOG } from '@/lib/constants';
 
 const log = getLogger('api-gen-sublimation');
 
@@ -116,7 +117,20 @@ const createDynamicSchema = (baseSchema: z.ZodObject<any>, fieldsToPreserve: str
 // 2. AI Prompt 配置
 // =================================================================
 
-const createGenerationConfig = (characterData: any, language: string, userGuidance: string | null, fieldsToPreserve: string[], isDowngrade: boolean = false): GenerationConfig<any, any> => {
+const CustomProviderSchema = z.object({
+  providerId: z.string().min(1),
+  modelId: z.string().min(1),
+  apiKey: z.string(),
+});
+
+const createGenerationConfig = (
+  characterData: any,
+  language: string,
+  userGuidance: string | null,
+  fieldsToPreserve: string[],
+  isDowngrade: boolean = false,
+  modelOverride?: string
+): GenerationConfig<any, any> => {
   const isMagicalGirl = !!characterData.codename;
   const characterType = isMagicalGirl ? '魔法少女' : '残兽';
   const nameField = isMagicalGirl ? 'codename' : 'name';
@@ -181,7 +195,7 @@ ${userAnswersReviewSection}
     schema: finalSchema,
     taskName: "角色成长升华",
     maxTokens: 8192,
-    modelOverride: isDowngrade ? "gemini-2.5-flash" : undefined, // 使用降级模型
+    modelOverride: modelOverride ?? (isDowngrade ? "gemini-2.5-flash-lite" : undefined), // 使用降级模型或自定义模型覆盖
   };
 };
 
@@ -225,7 +239,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
   try {
     const body = await req.json();
-    const { language = 'zh-CN', userGuidance = '', fieldsToPreserve = [], isDowngrade = false, ...originalCharacterData } = body; 
+    const { language = 'zh-CN', userGuidance = '', fieldsToPreserve = [], isDowngrade = false, customProvider: customProviderPayload, ...originalCharacterData } = body; 
     const finalUserGuidance = userGuidance.trim() || null;
 
     // 安全检查
@@ -238,10 +252,73 @@ async function handler(req: NextRequest): Promise<Response> {
       return new Response(JSON.stringify({ error: '角色数据缺少历战记录 (arena_history)，无法进行升华' }), { status: 400 });
     }
 
+    let customProviderOverride: AIProvider | null = null;
+    let customProviderId: string | null = null;
+    let customModelOverride: string | undefined;
+    if (customProviderPayload) {
+        const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
+        if (!parsedResult.success) {
+            log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
+            return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
+        }
+
+        const parsed = parsedResult.data;
+        customProviderId = parsed.providerId;
+        const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
+        if (!providerConfig) {
+            return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
+        }
+
+        const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
+        if (!modelConfig) {
+            return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
+        }
+
+        const sanitizedApiKey = parsed.apiKey.trim();
+        if (!sanitizedApiKey && providerConfig.id !== 'system') {
+            return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
+        }
+
+        const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
+        if (!sanitizedBaseUrl) {
+            customModelOverride = modelConfig.value;
+            log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
+                providerId: providerConfig.id,
+                model: modelConfig.value,
+            });
+        } else {
+            customProviderOverride = {
+                name: providerConfig.name,
+                apiKey: sanitizedApiKey,
+                baseUrl: sanitizedBaseUrl,
+                model: modelConfig.value,
+                type: providerConfig.type,
+                retryCount: 1,
+                skipProbability: 0,
+            };
+        }
+    }
+
+    const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
+
     const isNative = await verifySignature(originalCharacterData);
-    const generationConfig = createGenerationConfig(originalCharacterData, language, finalUserGuidance, fieldsToPreserve, isDowngrade);
+    const generationConfig = createGenerationConfig(
+        originalCharacterData,
+        language,
+        finalUserGuidance,
+        fieldsToPreserve,
+        isDowngrade,
+        customModelOverride
+    );
     
-    const aiResult = await generateWithAI(null, generationConfig);
+    const providerOptions = (customProviderOverride || shouldDisablePolling)
+        ? {
+            ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
+            ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+        }
+        : undefined;
+
+    const aiResult = await generateWithAI(null, generationConfig, providerOptions);
     const updatedDataFromAI = aiResult.updatedCharacterData;
 
     // --- 数据整合与签名 ---

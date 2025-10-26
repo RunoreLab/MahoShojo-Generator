@@ -4,6 +4,8 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import { config, AIProvider } from "./config";
 import { getLogger } from "./logger";
+import { jsonrepair } from 'jsonrepair'
+import { repairNormalizeValidate } from "@/lib/repair-pipeline";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -113,28 +115,40 @@ function expandProviders(providers: AIProvider[]): AIProvider[] {
 export enum LoadBalanceStrategy {
   SEQUENTIAL = 'sequential',  // 顺序执行（原有逻辑）
   RANDOM = 'random',         // 随机选择
-  ROUND_ROBIN = 'round_robin' // 轮询（暂时不实现）
+  ROUND_ROBIN = 'round_robin', // 轮询（暂时不实现）
+  CUSTOM = 'custom'        // 自定义（使用用户自定义模型，不进行轮询）
 }
 
 // 全局轮询计数器（用于轮询策略）
 let roundRobinCounter = 0;
 
+export interface GenerateWithAIOptions {
+  loadBalanceStrategy?: LoadBalanceStrategy;
+  providerOverride?: AIProvider;
+}
+
 // 通用 AI 生成函数
 export async function generateWithAI<T, I = string>(
   input: I,
   generationConfig: GenerationConfig<T, I>,
-  loadBalanceStrategy?: LoadBalanceStrategy
+  options?: GenerateWithAIOptions
 ): Promise<T> {
-  const baseProviders = config.PROVIDERS;
+  const baseProviders: AIProvider[] = [
+    ...(options?.providerOverride ? [options.providerOverride] : []),
+    ...config.PROVIDERS,
+  ];
 
   if (baseProviders.length === 0) {
     log.error("没有配置 API Key");
     throw new Error("没有配置 API Key");
   }
 
+  if (options?.providerOverride) {
+    log.info(`优先使用用户自定义提供商: ${options.providerOverride.name}`);
+  }
+
   // 展开多模型配置
   const expandedProviders = expandProviders(baseProviders);
-  log.debug(`展开后的提供商数量: ${expandedProviders.length}`);
 
   // 如果有模型覆盖，记录日志
   if (generationConfig.modelOverride) {
@@ -142,7 +156,7 @@ export async function generateWithAI<T, I = string>(
   }
 
   // 如果没有指定策略，从配置中读取
-  const strategy = loadBalanceStrategy || (config.LOAD_BALANCE_STRATEGY as LoadBalanceStrategy) || LoadBalanceStrategy.RANDOM;
+  const strategy = options?.loadBalanceStrategy || (config.LOAD_BALANCE_STRATEGY as LoadBalanceStrategy) || LoadBalanceStrategy.RANDOM;
 
   let lastError: unknown = null;
   let providersToTry: AIProvider[] = [];
@@ -170,7 +184,13 @@ export async function generateWithAI<T, I = string>(
         order: providersToTry.map(p => `${p.name}(${typeof p.model === 'string' ? p.model : 'multi'})`)
       });
       break;
-
+    case LoadBalanceStrategy.CUSTOM:
+      // 自定义策略：优先使用用户自定义模型，不进行轮询
+      providersToTry = [expandedProviders[0]];
+      log.debug('使用自定义策略', {
+        order: providersToTry.map(p => `${p.name}(${typeof p.model === 'string' ? p.model : 'multi'})`)
+      });
+      break;
     case LoadBalanceStrategy.SEQUENTIAL:
     default:
       // 顺序执行（原有逻辑）
@@ -219,10 +239,18 @@ export async function generateWithAI<T, I = string>(
           maxTokens: generationConfig.maxTokens,
           retryCount: 1,
           mode: provider.mode || 'auto',
-          experimental_repairText: provider.mode === 'json' ? async (options: any) => {
+          // 疑似无用，待升级 AI SDK 版本和修复
+          experimental_repairText: async (options: any) => {
             options.text = options.text.replace('```json\n', '').replace('\n```', '');
+            options.text = jsonrepair(options.text);
+            options.text = await repairNormalizeValidate({
+              input: options.text,
+              schema: generationConfig.schema,
+              autoPromoteBySchemaKeys: true,
+              autoPromoteMaxDepth: 8,
+            });
             return options.text;
-          } : undefined,
+          },
         };
 
         const { object } = await generateObject(generateOptions);

@@ -1,12 +1,13 @@
 // pages/api/generate-scenario.ts
 
 import { z } from 'zod';
-import { generateWithAI, GenerationConfig } from '../../lib/ai';
+import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
 import { getLogger } from '../../lib/logger';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 import { generateSignature } from '@/lib/signature';
-import { config as appConfig } from '../../lib/config'; // 引入应用配置
+import { config as appConfig, type AIProvider } from '../../lib/config'; // 引入应用配置
+import { AI_PROVIDER_CATALOG } from '@/lib/constants';
 
 const log = getLogger('api-gen-scenario');
 
@@ -44,6 +45,13 @@ const ScenarioSchema = z.object({
     development: z.array(z.string()).describe("故事可能的多个发展方向。"),
   }),
 }).describe("一个结构化的情景设定，用于魔法少女竞技场。");
+
+
+const CustomProviderSchema = z.object({
+  providerId: z.string().min(1),
+  modelId: z.string().min(1),
+  apiKey: z.string(),
+});
 
 
 // =================================================================
@@ -114,7 +122,7 @@ async function handler(req: NextRequest): Promise<Response> {
   }
 
   try {
-    const { answers, language = 'zh-CN', fieldsToKeepEmpty = [] } = await req.json();
+    const { answers, language = 'zh-CN', fieldsToKeepEmpty = [], customProvider: customProviderPayload } = await req.json();
 
     if (!answers || typeof answers !== 'object' || Object.keys(answers).length === 0) {
       return new Response(JSON.stringify({ error: 'Answers object is required' }), { status: 400 });
@@ -154,9 +162,70 @@ async function handler(req: NextRequest): Promise<Response> {
         }
     }
 
+    // --- 自定义模型配置解析 ---
+    let customProviderOverride: AIProvider | null = null;
+    let customProviderId: string | null = null;
+    let customModelOverride: string | undefined;
+
+    if (customProviderPayload) {
+        const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
+        if (!parsedResult.success) {
+            log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
+            return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
+        }
+
+        const parsed = parsedResult.data;
+        customProviderId = parsed.providerId;
+        const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
+        if (!providerConfig) {
+            return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
+        }
+
+        const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
+        if (!modelConfig) {
+            return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
+        }
+
+        const sanitizedApiKey = parsed.apiKey.trim();
+        if (!sanitizedApiKey && providerConfig.id !== 'system') {
+            return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
+        }
+
+        const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
+        if (!sanitizedBaseUrl) {
+            customModelOverride = modelConfig.value;
+            log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
+                providerId: providerConfig.id,
+                model: modelConfig.value,
+            });
+        } else {
+            customProviderOverride = {
+                name: providerConfig.name,
+                apiKey: sanitizedApiKey,
+                baseUrl: sanitizedBaseUrl,
+                model: modelConfig.value,
+                type: providerConfig.type,
+                retryCount: 1,
+                skipProbability: 0,
+            };
+        }
+    }
+
     // --- 生成逻辑 ---
     const generationConfig = createGenerationConfig(answers, language, fieldsToKeepEmpty);
-    const scenarioData = await generateWithAI(null, generationConfig);
+    if (customModelOverride) {
+        generationConfig.modelOverride = customModelOverride;
+    }
+
+    const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
+    const providerOptions = (customProviderOverride || shouldDisablePolling)
+        ? {
+            ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
+            ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+        }
+        : undefined;
+
+    const scenarioData = await generateWithAI(null, generationConfig, providerOptions);
 
     // [修改] 修正签名逻辑 (SRS 3.3.3 & 4.1)
     // 1. 先构建不含签名的完整数据载荷
