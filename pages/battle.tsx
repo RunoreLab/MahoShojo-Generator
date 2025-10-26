@@ -142,7 +142,7 @@ const BattlePage: React.FC = () => {
     // 新增：用于控制是否使用历战记录的状态
     const [useArenaHistory, setUseArenaHistory] = useState(true);
     // 新增：用于控制是否使用轻量模型的状态（默认不启用）
-    const [isDowngrade, setIsDowngrade] = useState(false);
+    const [isDowngrade] = useState(false);
     // 新增：用于管理自定义 AI 供应商配置
     const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
@@ -819,7 +819,7 @@ const BattlePage: React.FC = () => {
             return;
         }
 
-        if (userProviderConfig && !userProviderConfig.apiKey) {
+        if (userProviderConfig && userProviderConfig.providerId !== 'system' && !userProviderConfig.apiKey) {
             setError('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
             return;
         }
@@ -897,7 +897,12 @@ const BattlePage: React.FC = () => {
                 storyLength: storyLength,
             };
 
-            if (userProviderConfig && userProviderConfig.apiKey) {
+            if (
+                userProviderConfig 
+                && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
+                // 默认的时候，不添加自定义请求体
+                && userProviderConfig.modelId !== 'default'
+            ) {
                 requestBody.customProvider = {
                     providerId: userProviderConfig.providerId,
                     modelId: userProviderConfig.modelId,
@@ -1380,10 +1385,7 @@ const BattlePage: React.FC = () => {
                             </div>
                         )}
                         {/* 历战记录使用选项 */}
-                        {
-                            // TODO: 调试中，暂时关闭该功能
-                            false && <AiProviderSelector onConfigChange={setUserProviderConfig} />
-                        }
+                        
                         <div className="input-group">
                             <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">
                                 <input
@@ -1474,21 +1476,7 @@ const BattlePage: React.FC = () => {
                         </div>
 
                         {/* 轻量模型选项 */}
-                        <div className="input-group">
-                            <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={isDowngrade}
-                                    onChange={(e) => setIsDowngrade(e.target.checked)}
-                                    className="h-4 w-4 rounded border-gray-300 text-pink-600 focus:ring-pink-500 mr-2 disabled:opacity-50"
-                                    disabled={isGenerating}
-                                />
-                                使用轻量模型
-                            </label>
-                            <p className="text-xs text-gray-500 mt-1">
-                                启用后可显著提高成功率和速度，但可能降低输出质量。
-                            </p>
-                        </div>
+                        <AiProviderSelector onConfigChange={setUserProviderConfig} />
 
                         <button onClick={handleGenerate}
                             // --- 根据模式动态判断禁用条件 ---

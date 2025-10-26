@@ -4,6 +4,8 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import { config, AIProvider } from "./config";
 import { getLogger } from "./logger";
+import { jsonrepair } from 'jsonrepair'
+import { repairNormalizeValidate } from "@/lib/repair-pipeline";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -113,7 +115,8 @@ function expandProviders(providers: AIProvider[]): AIProvider[] {
 export enum LoadBalanceStrategy {
   SEQUENTIAL = 'sequential',  // 顺序执行（原有逻辑）
   RANDOM = 'random',         // 随机选择
-  ROUND_ROBIN = 'round_robin' // 轮询（暂时不实现）
+  ROUND_ROBIN = 'round_robin', // 轮询（暂时不实现）
+  CUSTOM = 'custom'        // 自定义（使用用户自定义模型，不进行轮询）
 }
 
 // 全局轮询计数器（用于轮询策略）
@@ -146,7 +149,6 @@ export async function generateWithAI<T, I = string>(
 
   // 展开多模型配置
   const expandedProviders = expandProviders(baseProviders);
-  log.debug(`展开后的提供商数量: ${expandedProviders.length}`);
 
   // 如果有模型覆盖，记录日志
   if (generationConfig.modelOverride) {
@@ -182,7 +184,13 @@ export async function generateWithAI<T, I = string>(
         order: providersToTry.map(p => `${p.name}(${typeof p.model === 'string' ? p.model : 'multi'})`)
       });
       break;
-
+    case LoadBalanceStrategy.CUSTOM:
+      // 自定义策略：优先使用用户自定义模型，不进行轮询
+      providersToTry = [expandedProviders[0]];
+      log.debug('使用自定义策略', {
+        order: providersToTry.map(p => `${p.name}(${typeof p.model === 'string' ? p.model : 'multi'})`)
+      });
+      break;
     case LoadBalanceStrategy.SEQUENTIAL:
     default:
       // 顺序执行（原有逻辑）
@@ -231,10 +239,18 @@ export async function generateWithAI<T, I = string>(
           maxTokens: generationConfig.maxTokens,
           retryCount: 1,
           mode: provider.mode || 'auto',
-          experimental_repairText: provider.mode === 'json' ? async (options: any) => {
+          // 疑似无用，待升级 AI SDK 版本和修复
+          experimental_repairText: async (options: any) => {
             options.text = options.text.replace('```json\n', '').replace('\n```', '');
+            options.text = jsonrepair(options.text);
+            options.text = await repairNormalizeValidate({
+              input: options.text,
+              schema: generationConfig.schema,
+              autoPromoteBySchemaKeys: true,
+              autoPromoteMaxDepth: 8,
+            });
             return options.text;
-          } : undefined,
+          },
         };
 
         const { object } = await generateObject(generateOptions);

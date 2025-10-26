@@ -13,6 +13,7 @@ import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import BattleDataModal from '../components/BattleDataModal';
 import { useAuth } from '@/lib/useAuth';
+import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 
 // 颜色处理方案
 const MainColor = {
@@ -108,7 +109,8 @@ const SublimationPage: React.FC = () => {
     // [新增] 用于管理高级选项的状态
     const [fieldsToPreserve, setFieldsToPreserve] = useState<string[]>([]);
     const [isAdvancedVisible, setIsAdvancedVisible] = useState(false);
-    const [isDowngrade, setIsDowngrade] = useState(true); // 是否使用轻量模型（默认勾选）
+    const [isDowngrade] = useState(false); // 是否使用轻量模型
+    const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
     const { isCooldown, startCooldown, remainingTime } = useCooldown('sublimationCooldown', 60000);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -238,6 +240,10 @@ const SublimationPage: React.FC = () => {
             setError('⚠️ 请先上传一个角色设定文件。');
             return;
         }
+        if (userProviderConfig && userProviderConfig.providerId !== 'system' && !userProviderConfig.apiKey) {
+            setError('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
+            return;
+        }
         setIsGenerating(true);
         setError(null);
         setResultData(null);
@@ -261,6 +267,15 @@ const SublimationPage: React.FC = () => {
                     userGuidance: userGuidance.trim(),
                     fieldsToPreserve: fieldsToPreserve, // [新增] 发送需要保留的字段列表
                     isDowngrade: isDowngrade,
+                    customProvider: (
+                        userProviderConfig
+                        && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
+                        && userProviderConfig.modelId !== 'default'
+                    ) ? {
+                        providerId: userProviderConfig.providerId,
+                        modelId: userProviderConfig.modelId,
+                        apiKey: userProviderConfig.apiKey,
+                    } : undefined,
                 }),
             });
 
@@ -485,22 +500,8 @@ const SublimationPage: React.FC = () => {
                             </select>
                         </div>
 
-                        {/* 轻量模型选项 */}
-                        <div className="input-group">
-                            <div className="flex items-center gap-3">
-                                <label className="flex items-center cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={isDowngrade}
-                                        onChange={(e) => setIsDowngrade(e.target.checked)}
-                                        className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                        disabled={isGenerating}
-                                    />
-                                    <span className="ml-2 text-sm font-medium text-gray-700">使用轻量模型</span>
-                                </label>
-                                <span className="text-xs text-gray-500">显著提高成功率和速度，但是可能降低输出质量</span>
-                            </div>
-                        </div>
+                        {/* 自定义 AI 模型选择 */}
+                        <AiProviderSelector onConfigChange={setUserProviderConfig} />
 
                         {/* 成功提示信息 */}
                         {!isGenerating && resultData && (

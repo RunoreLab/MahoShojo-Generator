@@ -1,7 +1,7 @@
 // pages/api/generate-battle-story.ts
 
 import { z } from 'zod';
-import { generateWithAI, GenerationConfig } from '../../lib/ai';
+import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
 import { queryFromD1 } from '../../lib/d1';
 import { getLogger } from '../../lib/logger';
 import questionnaire from '../../public/questionnaire.json';
@@ -59,7 +59,7 @@ const BattleReportCoreSchema = z.object({
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),
-  apiKey: z.string().min(1),
+  apiKey: z.string(),
 });
 
 
@@ -678,6 +678,8 @@ async function handler(req: NextRequest): Promise<Response> {
     } = body;
 
     let customProviderOverride: AIProvider | null = null;
+    let customProviderId: string | null = null;
+    let customModelOverride: string | undefined;
     if (customProviderPayload) {
         const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
         if (!parsedResult.success) {
@@ -686,6 +688,7 @@ async function handler(req: NextRequest): Promise<Response> {
         }
 
         const parsed = parsedResult.data;
+        customProviderId = parsed.providerId;
         const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
         if (!providerConfig) {
             return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
@@ -697,22 +700,38 @@ async function handler(req: NextRequest): Promise<Response> {
         }
 
         const sanitizedApiKey = parsed.apiKey.trim();
-        if (!sanitizedApiKey) {
+        if (!sanitizedApiKey && providerConfig.id !== 'system') {
             return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
         }
 
-        customProviderOverride = {
-            name: providerConfig.name,
-            apiKey: sanitizedApiKey,
-            baseUrl: providerConfig.baseUrl,
-            model: modelConfig.value,
-            type: providerConfig.type,
-            retryCount: 1,
-            skipProbability: 0,
-        };
+        const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
+        if (!sanitizedBaseUrl) {
+            customModelOverride = modelConfig.value;
+            log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
+                providerId: providerConfig.id,
+                model: modelConfig.value,
+            });
+        } else {
+            customProviderOverride = {
+                name: providerConfig.name,
+                apiKey: sanitizedApiKey,
+                baseUrl: sanitizedBaseUrl,
+                model: modelConfig.value,
+                type: providerConfig.type,
+                retryCount: 1,
+                skipProbability: 0,
+            };
+        }
     }
 
-    const providerOptions = customProviderOverride ? { providerOverride: customProviderOverride } : undefined;
+    const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
+    const providerOptions = (customProviderOverride || shouldDisablePolling)
+        ? {
+            ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
+            ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+        }
+        : undefined;
+    const resolvedModelOverride = customModelOverride ?? (isDowngrade ? "gemini-2.5-flash-lite" : undefined);
 
     const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
     if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > 4) {
@@ -797,6 +816,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 schema: SafetyCheckSchema,
                 taskName: "安全检查",
                 maxTokens: 500,
+                modelOverride: resolvedModelOverride,
             }, providerOptions);
 
             if (safetyResult.isUnsafe) {
@@ -813,6 +833,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 temperature: 0,
                 promptBuilder: (input: string) => `魔法少女的世界是一个存在超凡力量的现代都市世界...用户输入的内容是：“${input}”。请判断该内容是否与这个世界观存在明显冲突。`,
                 schema: WorldviewCheckSchema, taskName: "世界观检查", maxTokens: 500,
+                modelOverride: resolvedModelOverride,
             }, providerOptions);
             if (worldviewResult.isInconsistent) {
                 needsWorldviewWarning = true;
@@ -842,7 +863,7 @@ async function handler(req: NextRequest): Promise<Response> {
         schema: BattleReportCoreSchema,
         taskName: `生成${mode}模式故事`,
         maxTokens: 8192,
-        modelOverride: isDowngrade ? "gemini-2.5-flash-lite" : undefined, // 使用轻量模型
+        modelOverride: resolvedModelOverride, // 使用轻量模型或自定义覆盖模型
     };
 
     const aiResult = await generateWithAI({ combatants }, generationConfig, providerOptions);
