@@ -66,7 +66,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         id: 'kourichat',
         name: 'KouriChat',
         description: 'KouriChat 为用户提供了国内外广泛的模型库。',
-        docsUrl: 'https://api.kourichat.com/login',
+        docsUrl: 'https://api.kourichat.com/register?aff=mahoshojo',
         baseUrl: 'https://api.kourichat.com/v1',
         type: 'openai',
         models: [
