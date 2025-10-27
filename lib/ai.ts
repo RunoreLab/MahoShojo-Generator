@@ -6,6 +6,7 @@ import { config, AIProvider } from "./config";
 import { getLogger } from "./logger";
 import { jsonrepair } from 'jsonrepair'
 import { repairNormalizeValidate } from "@/lib/repair-pipeline";
+import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -33,6 +34,7 @@ const createAIClient = (provider: AIProvider) => {
       apiKey: provider.apiKey,
       baseURL: provider.baseUrl,
       compatibility: "compatible",
+      fetch: getProviderFetch(provider),
     });
   }
 };
