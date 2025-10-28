@@ -7,7 +7,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 import { generateSignature } from '@/lib/signature';
 import { config as appConfig, type AIProvider } from '../../lib/config'; // 引入应用配置
-import { AI_PROVIDER_CATALOG } from '@/lib/constants';
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 
 const log = getLogger('api-gen-scenario');
 

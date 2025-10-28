@@ -7,7 +7,7 @@ import { getLogger } from '../../lib/logger';
 import questionnaire from '../../public/questionnaire.json';
 import { getRandomJournalist } from '../../lib/random-choose-journalist';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '../../lib/config';
-import { AI_PROVIDER_CATALOG } from '@/lib/constants';
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 // v0.4.0 引入新的判定器类型

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AI_PROVIDER_CATALOG, type AIProviderOption } from '@/lib/constants';
+import { AI_PROVIDER_CATALOG, type AIProviderOption } from '@/lib/ai/constants';
 import Link from 'next/link';
 
 export interface UserAIProviderConfig {
