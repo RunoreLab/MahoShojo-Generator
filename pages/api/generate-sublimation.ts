@@ -8,7 +8,7 @@ import { NextRequest } from 'next/server';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import magicalGirlQuestionnaire from '../../public/questionnaire.json';
 import { config as appConfig, type AIProvider } from '../../lib/config';
-import { AI_PROVIDER_CATALOG } from '@/lib/constants';
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 
 const log = getLogger('api-gen-sublimation');
 

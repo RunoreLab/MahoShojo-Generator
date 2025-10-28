@@ -1,7 +1,7 @@
 import { AIProvider } from "@/lib/config";
 
 const getProviderFetch = (provider: AIProvider): typeof fetch => {
-  if (provider.name !== "kourichat") {
+  if (provider.name.toLowerCase() !== "kourichat") {
     return (input, init) => fetch(input, init);
   }
 
