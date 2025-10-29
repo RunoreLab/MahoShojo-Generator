@@ -61,6 +61,7 @@ export default function BattleDataModal({
     recommendedOnly: false
   }), []);
   const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [activeFilters, setActiveFilters] = useState<Filters>(initialFilters);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
 
@@ -121,13 +122,13 @@ export default function BattleDataModal({
       // 【新增】将高级筛选条件添加到请求参数中
       if (currentFilters) {
         if (currentFilters.author) params.append('author', currentFilters.author);
-      if (currentFilters.minLikes) params.append('minLikes', currentFilters.minLikes);
-      if (currentFilters.maxLikes) params.append('maxLikes', currentFilters.maxLikes);
-      if (currentFilters.minUsage) params.append('minUsage', currentFilters.minUsage);
-      if (currentFilters.maxUsage) params.append('maxUsage', currentFilters.maxUsage);
-      if (currentFilters.minFavorites) params.append('minFavorites', currentFilters.minFavorites);
-      if (currentFilters.maxFavorites) params.append('maxFavorites', currentFilters.maxFavorites);
-      if (currentFilters.recommendedOnly) params.append('recommendedOnly', '1');
+        if (currentFilters.minLikes) params.append('minLikes', currentFilters.minLikes);
+        if (currentFilters.maxLikes) params.append('maxLikes', currentFilters.maxLikes);
+        if (currentFilters.minUsage) params.append('minUsage', currentFilters.minUsage);
+        if (currentFilters.maxUsage) params.append('maxUsage', currentFilters.maxUsage);
+        if (currentFilters.minFavorites) params.append('minFavorites', currentFilters.minFavorites);
+        if (currentFilters.maxFavorites) params.append('maxFavorites', currentFilters.maxFavorites);
+        if (currentFilters.recommendedOnly) params.append('recommendedOnly', '1');
       }
 
       const response = await fetch(`/api/public-data-cards?${params}`);
@@ -219,11 +220,10 @@ export default function BattleDataModal({
     if (match) {
       loadCardByIdForDisplay(match[0]);
     } else {
-      loadPublicDataCards(1, sortBy, debouncedSearchQuery.trim() || undefined, filters);
+      loadPublicDataCards(1, sortBy, debouncedSearchQuery.trim() || undefined, activeFilters);
     }
     setCurrentPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearchQuery, isOpen, loadCardByIdForDisplay]);
+  }, [debouncedSearchQuery, isOpen, loadCardByIdForDisplay, loadPublicDataCards, sortBy, activeFilters]);
 
 
   // 当模态框打开时加载数据
@@ -232,6 +232,7 @@ export default function BattleDataModal({
       setCurrentPage(1);
       setSearchQuery('');
       setFilters(initialFilters); // 清空高级筛选
+      setActiveFilters(initialFilters);
 
       if (isAuthenticated) {
         setActiveTab('my');
@@ -244,7 +245,6 @@ export default function BattleDataModal({
       }
       loadPublicDataCards(1, sortBy);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, selectedType, isAuthenticated, loadFavorites, loadUserDataCards, loadPublicDataCards, sortBy, initialFilters]);
 
   // 处理卡片选择
@@ -307,14 +307,14 @@ export default function BattleDataModal({
   // 【新增】应用高级筛选
   const applyFilters = () => {
     setCurrentPage(1);
-    loadPublicDataCards(1, sortBy, debouncedSearchQuery.trim() || undefined, filters);
+    setActiveFilters(filters);
   };
 
   // 【新增】重置高级筛选
   const resetFilters = () => {
     setFilters(initialFilters);
+    setActiveFilters(initialFilters);
     setCurrentPage(1);
-    loadPublicDataCards(1, sortBy, debouncedSearchQuery.trim() || undefined, initialFilters);
   };
 
   // 【新增】处理作者点击事件
@@ -322,9 +322,9 @@ export default function BattleDataModal({
     if (activeTab !== 'public') return;
     const newFilters = { ...initialFilters, author: authorName };
     setFilters(newFilters);
+    setActiveFilters(newFilters);
     setCurrentPage(1);
     setShowAdvancedFilters(true); // 展开筛选器让用户看到
-    loadPublicDataCards(1, sortBy, '', newFilters);
   };
 
   const handleFavoriteToggleForCard = useCallback(async (card: any, nextState: boolean) => {
@@ -392,7 +392,7 @@ export default function BattleDataModal({
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
     if (activeTab === 'public') {
-      loadPublicDataCards(newPage, sortBy, debouncedSearchQuery.trim() || undefined, filters);
+      loadPublicDataCards(newPage, sortBy, debouncedSearchQuery.trim() || undefined, activeFilters);
     }
   };
 
@@ -403,13 +403,11 @@ export default function BattleDataModal({
     if (activeTab === 'my') {
       loadUserDataCards(debouncedSearchQuery.trim() || undefined, newSortBy);
     } else if (activeTab === 'public') {
-      loadPublicDataCards(1, newSortBy, debouncedSearchQuery.trim() || undefined, filters);
+      loadPublicDataCards(1, newSortBy, debouncedSearchQuery.trim() || undefined, activeFilters);
     } else if (activeTab === 'favorites') {
       setFavoriteCards((prev) => sortFavorites(prev, newSortBy));
     }
   };
-
-  if (!isOpen) return null;
 
   const userTotalPages = Math.max(1, Math.ceil(userDataCards.length / cardsPerPage));
   const favoritesTotalPages = Math.max(1, Math.ceil(favoriteCards.length / cardsPerPage));
@@ -436,16 +434,20 @@ export default function BattleDataModal({
   const typeLabel = selectedType === 'character' ? '角色' : '情景';
   const isFilterActive = useMemo(() => {
     return Boolean(
-      filters.author ||
-      filters.minLikes ||
-      filters.maxLikes ||
-      filters.minUsage ||
-      filters.maxUsage ||
-      filters.minFavorites ||
-      filters.maxFavorites ||
-      filters.recommendedOnly
+      activeFilters.author ||
+      activeFilters.minLikes ||
+      activeFilters.maxLikes ||
+      activeFilters.minUsage ||
+      activeFilters.maxUsage ||
+      activeFilters.minFavorites ||
+      activeFilters.maxFavorites ||
+      activeFilters.recommendedOnly
     );
-  }, [filters]);
+  }, [activeFilters]);
+
+  if (!isOpen) {
+    return null;
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

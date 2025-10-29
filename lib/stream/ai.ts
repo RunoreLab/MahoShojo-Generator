@@ -5,6 +5,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { config, AIProvider } from "../config";
 import { getLogger } from "../logger";
 import { LoadBalanceStrategy } from "../ai";
+import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 
 const log = getLogger("ai-stream");
 
@@ -23,6 +24,7 @@ const createAIClient = (provider: AIProvider) => {
     apiKey: provider.apiKey,
     baseURL: provider.baseUrl,
     compatibility: "compatible",
+    fetch: getProviderFetch(provider),
   });
 };
 

@@ -80,6 +80,8 @@ const sensitiveWordsConfig = {
     "5LiL5L2T6auY5r2u",
     "54ix5ray",
     "56eB5aSE",
+    "54OI5aOr",
+    "5ram5LmL",
     // 慈爱眷者相关违禁词
     "5LiL5L2T",
     "5amK",

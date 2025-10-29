@@ -18,6 +18,7 @@ import BattleDataModal from '../components/BattleDataModal';
 import { useAuth } from '@/lib/useAuth';
 import Footer from '../components/Footer';
 import SaveToCloudButton from '../components/SaveToCloudButton';
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 // v0.4.0 引入新的编辑器组件
 import AdjudicatorEditor from '../components/AdjudicatorEditor';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -142,7 +143,7 @@ const BattlePage: React.FC = () => {
     // 新增：用于控制是否使用历战记录的状态
     const [useArenaHistory, setUseArenaHistory] = useState(true);
     // 新增：用于控制是否使用轻量模型的状态（默认不启用）
-    const [isDowngrade, setIsDowngrade] = useState(false);
+    const [isDowngrade] = useState(false);
     // 新增：用于管理自定义 AI 供应商配置
     const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
@@ -191,6 +192,25 @@ const BattlePage: React.FC = () => {
     const [adjudicationEvents, setAdjudicationEvents] = useState<AdjudicatorEvent[]>([]);
     const [adjudicationResults, setAdjudicationResults] = useState<AdjudicationResult[] | null>(null);
     const [storyLength, setStoryLength] = useState('default');
+    const [selectedCombatantForDetails, setSelectedCombatantForDetails] = useState<CombatantData | null>(null);
+
+    const combatantDetailsCard = useMemo(() => {
+        if (!selectedCombatantForDetails) return null;
+        const baseData = selectedCombatantForDetails.data || {};
+        const displayName = baseData.codename || baseData.name || selectedCombatantForDetails.filename;
+        const typeLabel = selectedCombatantForDetails.type === 'magical-girl' ? '魔法少女' : '残兽';
+        return {
+            id: selectedCombatantForDetails.filename,
+            name: displayName,
+            description: `${typeLabel}详细设定`,
+            type: 'character' as const,
+            data: JSON.stringify(baseData, null, 2),
+            isPublic: Boolean(selectedCombatantForDetails.isPreset),
+            author: baseData.author ?? baseData.creator ?? '未知作者',
+            createdAt: baseData.createdAt,
+            updatedAt: baseData.updatedAt,
+        };
+    }, [selectedCombatantForDetails]);
 
     /**
      * @description 用于跟踪随机匹配功能的加载状态。
@@ -819,7 +839,7 @@ const BattlePage: React.FC = () => {
             return;
         }
 
-        if (userProviderConfig && !userProviderConfig.apiKey) {
+        if (userProviderConfig && userProviderConfig.providerId !== 'system' && !userProviderConfig.apiKey) {
             setError('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
             return;
         }
@@ -897,7 +917,12 @@ const BattlePage: React.FC = () => {
                 storyLength: storyLength,
             };
 
-            if (userProviderConfig && userProviderConfig.apiKey) {
+            if (
+                userProviderConfig 
+                && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
+                // 默认的时候，不添加自定义请求体
+                && userProviderConfig.modelId !== 'default'
+            ) {
                 requestBody.customProvider = {
                     providerId: userProviderConfig.providerId,
                     modelId: userProviderConfig.modelId,
@@ -1188,6 +1213,7 @@ const BattlePage: React.FC = () => {
                                             ? (c.type === 'random-magical-girl' ? '(随机魔法少女)' : '(随机残兽)')
                                             : (c.type === 'magical-girl' ? '(魔法少女)' : '(残兽)');
                                         const isCorrected = !isPlaceholder && correctedFiles[name];
+                                        const combatantData = isPlaceholder ? null : (c as CombatantData);
 
                                                 return (
                                                     <li key={key} className="flex justify-between items-start group gap-2">
@@ -1217,6 +1243,15 @@ const BattlePage: React.FC = () => {
                                                             )}
                                                         </div>
                                                         <div className="flex items-center flex-shrink-0">
+                                                            {!isPlaceholder && combatantData && (
+                                                                <button
+                                                                    onClick={() => setSelectedCombatantForDetails(combatantData)}
+                                                                    className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300 mr-2"
+                                                                    disabled={isGenerating}
+                                                                >
+                                                                    详情
+                                                                </button>
+                                                            )}
                                                             {isCorrected && (
                                                                 <div className="flex gap-2 mr-2">
                                                                     <button onClick={() => handleDownloadCorrectedJson(name)} disabled={isGenerating} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">下载</button>
@@ -1380,10 +1415,7 @@ const BattlePage: React.FC = () => {
                             </div>
                         )}
                         {/* 历战记录使用选项 */}
-                        {
-                            // TODO: 调试中，暂时关闭该功能
-                            false && <AiProviderSelector onConfigChange={setUserProviderConfig} />
-                        }
+                        
                         <div className="input-group">
                             <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">
                                 <input
@@ -1474,21 +1506,7 @@ const BattlePage: React.FC = () => {
                         </div>
 
                         {/* 轻量模型选项 */}
-                        <div className="input-group">
-                            <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={isDowngrade}
-                                    onChange={(e) => setIsDowngrade(e.target.checked)}
-                                    className="h-4 w-4 rounded border-gray-300 text-pink-600 focus:ring-pink-500 mr-2 disabled:opacity-50"
-                                    disabled={isGenerating}
-                                />
-                                使用轻量模型
-                            </label>
-                            <p className="text-xs text-gray-500 mt-1">
-                                启用后可显著提高成功率和速度，但可能降低输出质量。
-                            </p>
-                        </div>
+                        <AiProviderSelector onConfigChange={setUserProviderConfig} />
 
                         <button onClick={handleGenerate}
                             // --- 根据模式动态判断禁用条件 ---
@@ -1683,6 +1701,15 @@ const BattlePage: React.FC = () => {
                 onSelectCard={handleSelectDataCard}
                 selectedType={dataModalType}
             />
+
+            {/* 角色详情模态框 */}
+            {combatantDetailsCard && (
+                <DataCardDetailsModal
+                    isOpen={!!selectedCombatantForDetails}
+                    onClose={() => setSelectedCombatantForDetails(null)}
+                    card={combatantDetailsCard}
+                />
+            )}
         </>
     );
 };

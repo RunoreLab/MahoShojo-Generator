@@ -1,6 +1,6 @@
 // pages/details.tsx
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import MagicalGirlCard from '../components/MagicalGirlCard';
@@ -17,6 +17,10 @@ import { buildMagicalQuestionMeta, type MagicalQuestionMeta } from '@/lib/questi
 interface Questionnaire {
   questions: string[];
 }
+
+type JsonSaveMode = 'download' | 'text';
+type ImageSaveMode = 'download' | 'modal';
+type DeviceType = 'mobile' | 'desktop' | 'unknown';
 
 interface MagicalGirlDetails {
   codename: string;
@@ -56,78 +60,94 @@ interface MagicalGirlDetails {
     };
   };
 }
+interface SaveJsonButtonProps {
+  magicalGirlDetails: MagicalGirlDetails;
+  answers: string[];
+  mode: JsonSaveMode;
+  recommendedMode: JsonSaveMode;
+}
 
-const SaveJsonButton: React.FC<{ magicalGirlDetails: MagicalGirlDetails; answers: string[] }> = ({ magicalGirlDetails, answers }) => {
-  const [isMobile, setIsMobile] = useState(false);
-  const [showJsonText, setShowJsonText] = useState(false);
-
-  useEffect(() => {
-    const userAgent = navigator.userAgent.toLowerCase();
-    const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(userAgent);
-    setIsMobile(isMobileDevice);
-  }, []);
+const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ magicalGirlDetails, answers, mode, recommendedMode }) => {
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const jsonPayload = useMemo(() => JSON.stringify({ ...magicalGirlDetails, userAnswers: answers }, null, 2), [magicalGirlDetails, answers]);
 
   const downloadJson = () => {
-    // 将用户答案添加到保存的数据中
-    const dataToSave = {
-      ...magicalGirlDetails,
-      userAnswers: answers
-    };
-    const jsonData = JSON.stringify(dataToSave, null, 2);
-    const blob = new Blob([jsonData], { type: 'application/json' });
+    const blob = new Blob([jsonPayload], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `魔法少女_${magicalGirlDetails.codename || 'data'}.json`;
+    const sanitizedCodename = magicalGirlDetails.codename?.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'data';
+    link.download = `魔法少女_${sanitizedCodename}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    setCopyStatus('idle');
   };
 
-  const handleSave = () => {
-    if (isMobile) {
-      setShowJsonText(true);
-    } else {
-      downloadJson();
+  const handleCopy = async () => {
+    try {
+      if (!navigator.clipboard) {
+        throw new Error('clipboard-not-available');
+      }
+      await navigator.clipboard.writeText(jsonPayload);
+      setCopyStatus('success');
+      setTimeout(() => setCopyStatus('idle'), 2000);
+    } catch (err) {
+      console.error('复制 JSON 失败：', err);
+      setCopyStatus('error');
+      setTimeout(() => setCopyStatus('idle'), 2500);
     }
   };
 
-  if (showJsonText) {
+  const statusMessage = copyStatus === 'success'
+    ? '✅ JSON 已复制到剪贴板'
+    : copyStatus === 'error'
+      ? '⚠️ 复制失败，请手动长按选择'
+      : recommendedMode === 'text'
+        ? '建议复制后在本地粘贴到新文件中'
+        : '若无法下载，可改用复制模式';
+
+  if (mode === 'download') {
     return (
-      <div className="text-left">
-        <div className="mb-4 text-center">
-          <div className="p-3 mb-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-xs rounded-r-lg">
-            <p className="font-bold">手机用户操作提示：</p>
-            <p className="mt-1">建议使用电脑进行文件操作。手机用户请复制下方全部内容，并将其手动保存为一个以 <code className="bg-yellow-200 px-1 rounded">.json</code> 结尾的文件。</p>
-            <p className="mt-1">您也可以直接将复制的内容粘贴到【魔法少女竞技场】的文本输入框中，但此方式可能较为不便。</p>
-          </div>
-          <p className="text-sm text-gray-600 mb-2">请复制以下数据并保存</p>
-          <button
-            onClick={() => setShowJsonText(false)}
-            className="text-blue-600 text-sm"
-          >
-            返回
-          </button>
-        </div>
-        <textarea
-          value={JSON.stringify({ ...magicalGirlDetails, userAnswers: answers }, null, 2)}
-          readOnly
-          className="w-full h-64 p-3 border rounded-lg text-xs font-mono bg-gray-50 text-gray-900"
-          onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-        />
-        <p className="text-xs text-gray-500 mt-2 text-center">点击文本框可全选内容</p>
+      <div className="flex-1 min-w-[260px] text-left">
+        <p className="text-xs text-gray-500 mb-2 text-center">
+          {recommendedMode === 'download'
+            ? '推荐：直接下载 JSON 文件，适合桌面端或支持下载的浏览器'
+            : '实验功能：部分移动端浏览器也支持直接下载，如失败请切换到复制模式'}
+        </p>
+        <button onClick={downloadJson} className="generate-button w-full">
+          {recommendedMode === 'download' ? '💾 下载设定文件' : '🧪 尝试直接下载 JSON'}
+        </button>
       </div>
     );
   }
 
   return (
-    <button
-      onClick={handleSave}
-      className="generate-button"
-    >
-      {isMobile ? '查看原始数据' : '下载设定文件'}
-    </button>
+    <div className="flex-1 min-w-[260px] text-left">
+      <div className="mb-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800">
+        <p className="font-semibold mb-1">复制模式</p>
+        <p>复制下方全部内容，并将其粘贴到文本文件中保存为 <code className="bg-yellow-100 px-1 rounded">.json</code>。</p>
+        <p className="mt-1">也可粘贴到竞技场的文本输入框继续使用。</p>
+      </div>
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <span className="text-xs text-gray-500">{statusMessage}</span>
+        <button
+          onClick={handleCopy}
+          className="rounded-md border border-indigo-200 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:border-indigo-400 hover:text-indigo-700"
+          type="button"
+        >
+          复制 JSON
+        </button>
+      </div>
+      <textarea
+        value={jsonPayload}
+        readOnly
+        className="w-full h-64 p-3 border rounded-lg text-xs font-mono bg-gray-50 text-gray-900"
+        onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+      />
+      <p className="text-xs text-gray-400 mt-2 text-center">点击文本框可全选内容</p>
+    </div>
   );
 };
 
@@ -156,16 +176,32 @@ const DetailsPage: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const [showAnswerReview, setShowAnswerReview] = useState(false);
+  const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
+  const [imageSaveMode, setImageSaveMode] = useState<ImageSaveMode>('download');
+  const [jsonSaveMode, setJsonSaveMode] = useState<JsonSaveMode>('download');
 
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
+  const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
+  const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
+  const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600'}`;
 
   useEffect(() => {
     fetch('/languages.json')
       .then(res => res.json())
       .then(data => setLanguages(data))
       .catch(err => console.error("Failed to load languages:", err));
+  }, []);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+    const userAgent = navigator.userAgent.toLowerCase();
+    const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(userAgent);
+    const detectedType: DeviceType = isMobileDevice ? 'mobile' : 'desktop';
+    setDeviceType(detectedType);
+    setImageSaveMode(isMobileDevice ? 'modal' : 'download');
+    setJsonSaveMode(isMobileDevice ? 'text' : 'download');
   }, []);
 
   useEffect(() => {
@@ -245,7 +281,7 @@ const DetailsPage: React.FC = () => {
       return;
     }
 
-    const maxLength = meta?.maxLength ?? 120;
+    const maxLength = Math.max(meta?.maxLength ?? 200, 150);
     if (normalizedAnswer.length > maxLength) {
       setError(`⚠️ 答案不能超过${maxLength}字`);
       return;
@@ -347,7 +383,7 @@ const DetailsPage: React.FC = () => {
     const newAnswers = [...answers];
     lines.forEach((line, index) => {
       if (index < questions.length) {
-        const maxLength = questionMeta[index]?.maxLength ?? 120;
+        const maxLength = Math.max(questionMeta[index]?.maxLength ?? 200, 150);
         newAnswers[index] = line.slice(0, maxLength);
       }
     });
@@ -450,6 +486,10 @@ const DetailsPage: React.FC = () => {
     setShowImageModal(true);
   };
 
+  const imageSaveButtonLabel = imageSaveMode === 'download'
+    ? '💾 一键保存长图'
+    : '📱 打开长按保存弹窗';
+
   const handleStartQuestionnaire = () => {
     setShowIntroduction(false);
   };
@@ -482,7 +522,7 @@ const DetailsPage: React.FC = () => {
   const isLastQuestion = currentQuestionIndex === questions.length - 1;
   const currentQuestion = questions[currentQuestionIndex];
   const currentMeta = questionMeta[currentQuestionIndex];
-  const currentMaxLength = currentMeta?.maxLength ?? 120;
+  const currentMaxLength = Math.max(currentMeta?.maxLength ?? 200, 150);
   const quickSuggestions = currentMeta?.suggestions ?? [];
   const hasOptions = (currentMeta?.options?.length ?? 0) > 0;
   const navigatorItems = questions.map((question, index) => ({
@@ -821,7 +861,74 @@ const DetailsPage: React.FC = () => {
                 magicalGirl={magicalGirlDetails}
                 gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)"
                 onSaveImage={handleSaveImage}
+                imageSaveMode={imageSaveMode}
+                saveButtonLabel={imageSaveButtonLabel}
               />
+              <div className="card" style={{ marginTop: '1rem' }}>
+                <div className="space-y-5 text-left">
+                  <div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-blue-900">设定长图保存方式</span>
+                      <span className="text-xs text-gray-500">推荐：{recommendedImageMode === 'download' ? '一键下载' : '长按保存弹窗'}</span>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2 mt-2">
+                      <button
+                        type="button"
+                        className={preferenceButtonClass(imageSaveMode === 'download')}
+                        onClick={() => setImageSaveMode('download')}
+                      >
+                        一键下载长图
+                        {recommendedImageMode === 'download' && (
+                          <span className="ml-2 inline-flex items-center rounded-full bg-indigo-100 px-2 text-[10px] font-semibold text-indigo-600">推荐</span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className={preferenceButtonClass(imageSaveMode === 'modal')}
+                        onClick={() => setImageSaveMode('modal')}
+                      >
+                        长按保存弹窗
+                        {recommendedImageMode === 'modal' && (
+                          <span className="ml-2 inline-flex items-center rounded-full bg-indigo-100 px-2 text-[10px] font-semibold text-indigo-600">推荐</span>
+                        )}
+                      </button>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">若当前浏览器不支持下载，可切换为长按模式，系统会弹出预览供保存。</p>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-blue-900">设定文件保存方式</span>
+                      <span className="text-xs text-gray-500">推荐：{recommendedJsonMode === 'download' ? '直接下载 JSON' : '复制原始数据'}</span>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2 mt-2">
+                      <button
+                        type="button"
+                        className={preferenceButtonClass(jsonSaveMode === 'download')}
+                        onClick={() => setJsonSaveMode('download')}
+                      >
+                        直接下载 JSON
+                        {recommendedJsonMode === 'download' && (
+                          <span className="ml-2 inline-flex items-center rounded-full bg-indigo-100 px-2 text-[10px] font-semibold text-indigo-600">推荐</span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className={preferenceButtonClass(jsonSaveMode === 'text')}
+                        onClick={() => setJsonSaveMode('text')}
+                      >
+                        复制原始数据
+                        {recommendedJsonMode === 'text' && (
+                          <span className="ml-2 inline-flex items-center rounded-full bg-indigo-100 px-2 text-[10px] font-semibold text-indigo-600">推荐</span>
+                        )}
+                      </button>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">两种方式可随时切换，移动端也可尝试直接下载，桌面端亦能复制备用。</p>
+                  </div>
+
+                  <p className="text-xs text-gray-400 text-center">提示：偏好设置仅影响本次会话，切换不会丢失生成结果。</p>
+                </div>
+              </div>
               {/* 关键解释抽屉 点击展开 点击关闭 */}
               <div className="card" style={{ marginTop: '1rem' }}>
                 <div className="text-center">
@@ -862,7 +969,12 @@ const DetailsPage: React.FC = () => {
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>保存人物设定</h3>
                   <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                    <SaveJsonButton magicalGirlDetails={magicalGirlDetails} answers={answers} />
+                    <SaveJsonButton
+                      magicalGirlDetails={magicalGirlDetails}
+                      answers={answers}
+                      mode={jsonSaveMode}
+                      recommendedMode={recommendedJsonMode}
+                    />
                     <SaveToCloudButton
                       data={{ ...magicalGirlDetails, userAnswers: answers }}
                       buttonText="保存到云端"

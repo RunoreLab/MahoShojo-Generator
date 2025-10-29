@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AI_PROVIDER_CATALOG, type AIProviderOption } from '@/lib/constants';
+import { AI_PROVIDER_CATALOG, type AIProviderOption } from '@/lib/ai/constants';
+import Link from 'next/link';
 
 export interface UserAIProviderConfig {
     providerId: string;
@@ -126,26 +127,36 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
     const [apiKey, setApiKey] = useState<string>('');
     const [isHydrated, setIsHydrated] = useState<boolean>(false);
 
-    const activeProvider = selectedProviderId === 'system'
-        ? null
-        : providerOptions.find(provider => provider.id === selectedProviderId) ?? null;
+    const activeProvider = providerOptions.find(provider => provider.id === selectedProviderId) ?? null;
 
     useEffect(() => {
         if (typeof window === 'undefined') {
             return;
         }
 
-        const savedProviderId = window.localStorage.getItem(STORAGE_SELECTED_PROVIDER) || 'system';
-        const validProvider = providerOptions.find(item => item.id === savedProviderId);
-        const initialProviderId = validProvider ? savedProviderId : 'system';
-        setSelectedProviderId(initialProviderId);
+        const savedProviderId = window.localStorage.getItem(STORAGE_SELECTED_PROVIDER);
+        const validProvider = savedProviderId
+            ? providerOptions.find(item => item.id === savedProviderId)
+            : null;
+
+        if (!savedProviderId) {
+            window.localStorage.setItem(STORAGE_SELECTED_PROVIDER, 'system');
+        }
 
         if (validProvider) {
-            const storedApiKey = window.localStorage.getItem(getApiKeyStorageKey(initialProviderId)) || '';
-            const storedModel = window.localStorage.getItem(getModelStorageKey(initialProviderId)) || '';
+            const storedApiKey = window.localStorage.getItem(getApiKeyStorageKey(validProvider.id)) || '';
+            const storedModel = window.localStorage.getItem(getModelStorageKey(validProvider.id)) || validProvider.models[0]?.value || '';
 
+            setSelectedProviderId(validProvider.id);
             setApiKey(storedApiKey);
-            setSelectedModel(storedModel || validProvider.models[0]?.value || '');
+            setSelectedModel(storedModel);
+        } else {
+            if (savedProviderId) {
+                window.localStorage.setItem(STORAGE_SELECTED_PROVIDER, 'system');
+            }
+            setSelectedProviderId('system');
+            setApiKey('');
+            setSelectedModel('');
         }
 
         setIsHydrated(true);
@@ -203,17 +214,11 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
     }, [activeProvider, isHydrated, selectedModel]);
 
     const providerSelectOptions = useMemo<CustomSelectOption[]>(() => {
-        const systemOption: CustomSelectOption = {
-            value: 'system',
-            label: '使用系统默认配置',
-            description: '依照服务器轮询策略自动选择供应商与模型。',
-        };
-        const mapped = providerOptions.map((provider): CustomSelectOption => ({
+        return providerOptions.map((provider): CustomSelectOption => ({
             value: provider.id,
             label: provider.name,
             description: provider.description,
         }));
-        return [systemOption, ...mapped];
     }, [providerOptions]);
 
     const modelSelectOptions: CustomSelectOption[] = useMemo(() => {
@@ -234,54 +239,51 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
                 onChange={setSelectedProviderId}
                 placeholder="选择供应商"
             />
-            {selectedProviderId === 'system' ? (
-                <p className="mt-1 text-xs text-gray-500">
-                    将继续使用传统的系统默认 AI 模型策略。
-                </p>
-            ) : (
-                activeProvider && (
-                    <div className="mt-2 space-y-1">
-                        <p className="text-sm font-semibold text-pink-700 leading-tight">{activeProvider.name}</p>
-                        <p className="text-xs text-gray-500 leading-relaxed">{activeProvider.description}</p>
-                        <a
+            <label className="text-xs text-gray-500">更多提供商正在添加中...</label>
+            {
+                activeProvider && (activeProvider.id !== 'system') && (
+                    <div className="mt-4">
+                        <Link
                             href={activeProvider.docsUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex text-xs text-pink-700 underline hover:text-pink-900"
+                            className="inline-flex w-full items-center justify-center rounded-lg bg-pink-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-transform hover:-translate-y-0.5 hover:bg-pink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-500"
                         >
-                            查看官方文档
-                        </a>
+                            前往获取 API Key
+                        </Link>
                     </div>
                 )
-            )}
+            }
 
-            {activeProvider && selectedProviderId !== 'system' && (
-                <div className="mt-3 space-y-3 rounded-lg border border-pink-200 bg-pink-50 p-3 text-sm text-gray-700">
-                    <div>
-                        <label className="block text-xs font-semibold text-gray-600 mb-1">选择模型</label>
-                        <CustomSelect
-                            options={modelSelectOptions}
-                            value={selectedModel}
-                            onChange={setSelectedModel}
-                            placeholder="选择模型"
-                            disabled={modelSelectOptions.length === 0}
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-semibold text-gray-600 mb-1">API Key</label>
-                        <input
-                            className="input-field"
-                            placeholder="请输入该供应商的 API Key"
-                            value={apiKey}
-                            onChange={(event) => setApiKey(event.target.value)}
-                        />
-                        <p className="mt-1 text-xs text-gray-500">
-                            API Key 仅存储于本地浏览器 localStorage，不会上传到服务器。
-                        </p>
-                    </div>
+            <div className="mt-3 space-y-3 rounded-lg border border-pink-200 bg-pink-50 p-3 text-sm text-gray-700">
+                <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">选择模型</label>
+                    <CustomSelect
+                        options={modelSelectOptions}
+                        value={selectedModel}
+                        onChange={setSelectedModel}
+                        placeholder="选择模型"
+                        disabled={modelSelectOptions.length === 0}
+                    />
                 </div>
-            )}
+
+                {
+                    activeProvider && activeProvider.id !== 'system' && (
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">API Key</label>
+                            <input
+                                className="input-field"
+                                placeholder="请输入该供应商的 API Key"
+                                value={apiKey}
+                                onChange={(event) => setApiKey(event.target.value)}
+                            />
+                            <p className="mt-1 text-xs text-gray-500">
+                                API Key 仅存储于本地浏览器 localStorage，不会上传到服务器。
+                            </p>
+                        </div>
+                    )
+                }
+            </div>
         </div>
     );
 };
