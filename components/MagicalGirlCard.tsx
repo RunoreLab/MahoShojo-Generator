@@ -45,6 +45,8 @@ interface MagicalGirlCardProps {
   };
   gradientStyle: string;
   onSaveImage?: (imageUrl: string) => void;
+  imageSaveMode?: 'auto' | 'modal' | 'download';
+  saveButtonLabel?: string;
 }
 
 /**
@@ -74,20 +76,18 @@ const renderComplexValue = (value: any) => {
 const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
   magicalGirl,
   gradientStyle,
-  onSaveImage
+  onSaveImage,
+  imageSaveMode = 'auto',
+  saveButtonLabel
 }) => {
   const resultRef = useRef<HTMLDivElement>(null);
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
 
   /**
-   * 【核心修改】
-   * 替换原有的 handleSaveImage 函数。
-   * 新的函数包含了与 BattleReportCard 相同的逻辑：
-   * 1. 在截图时隐藏按钮，显示 Logo。
-   * 2. 区分移动端和桌面端设备。
-   * - 移动端：调用 onSaveImage 回调，由父组件弹出图片模态框供用户长按保存。
-   * - 桌面端：直接触发 PNG 文件的下载。
-   * 3. 提供了更完善的错误处理，确保在失败时也能恢复UI。
+   * 对卡片内容进行截图，并根据 imageSaveMode 选择保存策略。
+   * - auto：自动检测终端类型，移动端触发回调弹窗，桌面端直接下载。
+   * - modal：始终调用 onSaveImage，由父组件控制后续交互。
+   * - download：始终触发本地下载。
    */
   const handleSaveImage = async () => {
     if (!resultRef.current) return;
@@ -111,19 +111,22 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
       const imgElement = await result.toPng();
       const imageUrl = imgElement.src;
 
-      // 检测设备类型以提供最佳保存体验
-      const isMobileDevice = /Mobi/i.test(window.navigator.userAgent);
+      const resolvedMode: 'modal' | 'download' = imageSaveMode === 'modal' || imageSaveMode === 'download'
+        ? imageSaveMode
+        : (/Mobi/i.test(window.navigator.userAgent) ? 'modal' : 'download');
 
-      if (isMobileDevice) {
-        // 在移动端，调用回调函数以显示弹窗供用户长按保存
+      if (resolvedMode === 'modal') {
         if (onSaveImage) {
           onSaveImage(imageUrl);
+        } else {
+          const previewWindow = window.open(imageUrl, '_blank');
+          if (!previewWindow) {
+            alert('图片已生成，请长按或右键保存。');
+          }
         }
       } else {
-        // 在桌面端，直接触发文件下载
         const downloadLink = document.createElement('a');
         downloadLink.href = imageUrl;
-        // 使用代号并清理特殊字符作为文件名
         const sanitizedTitle = magicalGirl.codename.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
         downloadLink.download = `魔法少女_${sanitizedTitle}.png`;
         document.body.appendChild(downloadLink);
@@ -283,7 +286,7 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         )}
 
         <button onClick={handleSaveImage} className="save-button">
-          📱 保存为图片
+          {saveButtonLabel ?? '📱 保存为图片'}
         </button>
 
         <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
