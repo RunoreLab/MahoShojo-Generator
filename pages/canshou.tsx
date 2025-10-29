@@ -1,5 +1,5 @@
 // pages/canshou.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useCooldown } from '../lib/cooldown';
@@ -27,77 +27,98 @@ interface CanshouQuestionnaire {
   questions: Question[];
 }
 
-// 用于保存JSON的按钮组件
-const SaveJsonButton: React.FC<{ canshouDetails: CanshouDetails; answers: Record<string, string> }> = ({ canshouDetails, answers }) => {
-  const [isMobile, setIsMobile] = useState(false);
-  const [showJsonText, setShowJsonText] = useState(false);
+type JsonSaveMode = 'download' | 'text';
+type ImageSaveMode = 'download' | 'modal';
+type DeviceType = 'mobile' | 'desktop' | 'unknown';
 
-  useEffect(() => {
-    const userAgent = navigator.userAgent.toLowerCase();
-    const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(userAgent);
-    setIsMobile(isMobileDevice);
-  }, []);
+interface SaveJsonButtonProps {
+  canshouDetails: CanshouDetails;
+  answers: Record<string, string>;
+  mode: JsonSaveMode;
+  recommendedMode: JsonSaveMode;
+}
+
+// 用于保存JSON的按钮组件
+const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ canshouDetails, answers, mode, recommendedMode }) => {
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const jsonPayload = useMemo(() => JSON.stringify({ ...canshouDetails, userAnswers: answers }, null, 2), [canshouDetails, answers]);
 
   const downloadJson = () => {
-    // 将用户答案添加到保存的数据中
-    const dataToSave = {
-      ...canshouDetails,
-      userAnswers: answers
-    };
-    const jsonData = JSON.stringify(dataToSave, null, 2);
-    const blob = new Blob([jsonData], { type: 'application/json' });
+    const blob = new Blob([jsonPayload], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
+    const sanitizedName = (canshouDetails.name || 'data').replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
     link.href = url;
-    link.download = `残兽档案_${canshouDetails.name || 'data'}.json`;
+    link.download = `残兽档案_${sanitizedName}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    setCopyStatus('idle');
   };
 
-  const handleSave = () => {
-    if (isMobile) {
-      setShowJsonText(true);
-    } else {
-      downloadJson();
+  const handleCopy = async () => {
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard) {
+        throw new Error('clipboard-not-available');
+      }
+      await navigator.clipboard.writeText(jsonPayload);
+      setCopyStatus('success');
+      setTimeout(() => setCopyStatus('idle'), 2000);
+    } catch (err) {
+      console.error('复制 JSON 失败：', err);
+      setCopyStatus('error');
+      setTimeout(() => setCopyStatus('idle'), 2500);
     }
   };
 
-  if (showJsonText) {
+  const statusMessage = copyStatus === 'success'
+    ? '✅ JSON 已复制，记得粘贴到文件中保存'
+    : copyStatus === 'error'
+      ? '⚠️ 复制遇到问题，请手动长按选择'
+      : recommendedMode === 'text'
+        ? '推荐复制后在本地编辑器中保存为 .json 文件'
+        : '若下载失败，可切换到复制模式';
+
+  if (mode === 'download') {
     return (
-      <div className="text-left">
-        <div className="mb-4 text-center">
-          <div className="p-3 mb-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-xs rounded-r-lg">
-            <p className="font-bold">手机用户操作提示：</p>
-            <p className="mt-1">建议使用电脑进行文件操作。手机用户请复制下方全部内容，并将其手动保存为一个以 <code className="bg-yellow-200 px-1 rounded">.json</code> 结尾的文件。</p>
-          </div>
-          <p className="text-sm text-gray-600 mb-2">请复制以下数据并保存</p>
-          <button
-            onClick={() => setShowJsonText(false)}
-            className="text-pink-700 text-sm"
-          >
-            返回
-          </button>
-        </div>
-        <textarea
-          value={JSON.stringify({ ...canshouDetails, userAnswers: answers }, null, 2)}
-          readOnly
-          className="w-full h-64 p-3 border rounded-lg text-xs font-mono bg-gray-50 text-gray-900"
-          onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-        />
-        <p className="text-xs text-gray-500 mt-2 text-center">点击文本框可全选内容</p>
+      <div className="flex-1 min-w-[260px] text-left">
+        <p className="text-xs text-gray-500 mb-2 text-center">
+          {recommendedMode === 'download'
+            ? '推荐：直接下载 JSON 文件，方便在桌面端继续编辑'
+            : '实验功能：部分移动端浏览器支持直接下载，若失败请使用复制模式'}
+        </p>
+        <button onClick={downloadJson} className="generate-button w-full">
+          {recommendedMode === 'download' ? '💾 下载残兽档案' : '🧪 尝试直接下载 JSON'}
+        </button>
       </div>
     );
   }
 
   return (
-    <button
-      onClick={handleSave}
-      className="generate-button"
-    >
-      {isMobile ? '查看原始数据' : '下载设定文件'}
-    </button>
+    <div className="flex-1 min-w-[260px] text-left">
+      <div className="mb-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800">
+        <p className="font-semibold mb-1">复制模式</p>
+        <p>复制完整内容后，粘贴到文本编辑器中，以 <code className="bg-yellow-100 px-1 rounded">.json</code> 结尾保存。</p>
+      </div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs text-gray-500">{statusMessage}</span>
+        <button
+          onClick={handleCopy}
+          className="rounded-md border border-indigo-200 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:border-indigo-400 hover:text-indigo-700"
+          type="button"
+        >
+          复制 JSON
+        </button>
+      </div>
+      <textarea
+        value={jsonPayload}
+        readOnly
+        className="w-full h-64 p-3 border rounded-lg text-xs font-mono bg-gray-50 text-gray-900"
+        onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+      />
+      <p className="text-xs text-gray-400 mt-2 text-center">点击文本框可全选内容</p>
+    </div>
   );
 };
 
@@ -125,12 +146,28 @@ const CanshouPage: React.FC = () => {
   const [showLanguageSection, setShowLanguageSection] = useState(false); // 控制生成语言区域的折叠状态
   const [showBulkFillSection, setShowBulkFillSection] = useState(false); // 控制一键填充区域的折叠状态
   const [showAnswerReview, setShowAnswerReview] = useState(false);
+  const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
+  const [imageSaveMode, setImageSaveMode] = useState<ImageSaveMode>('download');
+  const [jsonSaveMode, setJsonSaveMode] = useState<JsonSaveMode>('download');
+  const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
+  const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
+  const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`;
 
   useEffect(() => {
     fetch('/languages.json')
       .then(res => res.json())
       .then(data => setLanguages(data))
       .catch(err => console.error("Failed to load languages:", err));
+  }, []);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+    const userAgent = navigator.userAgent.toLowerCase();
+    const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(userAgent);
+    const detectedType: DeviceType = isMobileDevice ? 'mobile' : 'desktop';
+    setDeviceType(detectedType);
+    setImageSaveMode(isMobileDevice ? 'modal' : 'download');
+    setJsonSaveMode(isMobileDevice ? 'text' : 'download');
   }, []);
 
   // 加载问卷文件
@@ -298,6 +335,10 @@ const CanshouPage: React.FC = () => {
     setSavedImageUrl(imageUrl);
     setShowImageModal(true);
   };
+
+  const imageSaveButtonLabel = imageSaveMode === 'download'
+    ? '💾 一键保存长图'
+    : '📱 打开长按保存弹窗';
 
   const handleClearDraft = () => {
     if (window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) {
@@ -603,12 +644,87 @@ const CanshouPage: React.FC = () => {
               </>
             ) : (
               <>
-                <CanshouCard canshou={canshouDetails} onSaveImage={handleSaveImage} />
+                <CanshouCard
+                  canshou={canshouDetails}
+                  onSaveImage={handleSaveImage}
+                  imageSaveMode={imageSaveMode}
+                  saveButtonLabel={imageSaveButtonLabel}
+                />
+                <div className="card" style={{ marginTop: '1rem' }}>
+                  <div className="space-y-5 text-left">
+                    <div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium text-gray-800">设定长图保存方式</span>
+                        <span className="text-xs text-gray-500">推荐：{recommendedImageMode === 'download' ? '一键下载' : '长按保存弹窗'}</span>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2 mt-2">
+                        <button
+                          type="button"
+                          className={preferenceButtonClass(imageSaveMode === 'download')}
+                          onClick={() => setImageSaveMode('download')}
+                        >
+                          一键下载长图
+                          {recommendedImageMode === 'download' && (
+                            <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className={preferenceButtonClass(imageSaveMode === 'modal')}
+                          onClick={() => setImageSaveMode('modal')}
+                        >
+                          长按保存弹窗
+                          {recommendedImageMode === 'modal' && (
+                            <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
+                          )}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs text-gray-500">如果当前浏览器阻止下载，可切换为弹窗模式再手动保存。</p>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium text-gray-800">JSON 保存方式</span>
+                        <span className="text-xs text-gray-500">推荐：{recommendedJsonMode === 'download' ? '直接下载' : '复制 JSON'}</span>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2 mt-2">
+                        <button
+                          type="button"
+                          className={preferenceButtonClass(jsonSaveMode === 'download')}
+                          onClick={() => setJsonSaveMode('download')}
+                        >
+                          直接下载 JSON
+                          {recommendedJsonMode === 'download' && (
+                            <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className={preferenceButtonClass(jsonSaveMode === 'text')}
+                          onClick={() => setJsonSaveMode('text')}
+                        >
+                          复制原始数据
+                          {recommendedJsonMode === 'text' && (
+                            <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
+                          )}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs text-gray-500">两种方式都可跨终端使用，可随时切换体验。</p>
+                    </div>
+
+                    <p className="text-xs text-gray-400 text-center">提示：偏好设置仅在当前页面有效，切换不会触发重新生成。</p>
+                  </div>
+                </div>
                 <div className="card" style={{ marginTop: '1rem' }}>
                   <div className="text-center">
                     <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
                     <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                      <SaveJsonButton canshouDetails={canshouDetails} answers={answers} />
+                      <SaveJsonButton
+                        canshouDetails={canshouDetails}
+                        answers={answers}
+                        mode={jsonSaveMode}
+                        recommendedMode={recommendedJsonMode}
+                      />
                       <SaveToCloudButton
                         data={{ ...canshouDetails, userAnswers: answers }}
                         buttonText="保存到云端"
