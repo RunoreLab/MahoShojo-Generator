@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { debounce } from 'lodash';
+import { debounce } from '@/lib/debounce';
 
 // 定义用户数据类型接口
 interface User {
@@ -96,17 +96,23 @@ const UserManagementPage: React.FC = () => {
   }, [router.isReady, router.query, fetchData, filters]);
 
   // 更新 URL
-  const updateUrl = (newFilters: typeof filters) => {
+  const updateUrl = useCallback((newFilters: typeof filters) => {
     const query: { [key: string]: any } = {};
     Object.entries(newFilters).forEach(([key, value]) => {
-        if (value && key !== 'limit' && !(key === 'page' && value === 1)) {
-            query[key] = value;
-        }
+      if (value && key !== 'limit' && !(key === 'page' && value === 1)) {
+        query[key] = value;
+      }
     });
     router.push({ pathname: router.pathname, query }, undefined, { shallow: true });
-  };
+  }, [router]);
   
   const debouncedUpdateUrl = useMemo(() => debounce(updateUrl, 500), [updateUrl]);
+
+  useEffect(() => {
+    return () => {
+      debouncedUpdateUrl.cancel();
+    };
+  }, [debouncedUpdateUrl]);
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { debounce } from 'lodash';
+import { debounce } from '@/lib/debounce';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 
 // 定义数据卡类型接口
@@ -134,6 +134,12 @@ const CharacterManagementPage: React.FC = () => {
   }, [router]);
 
   const debouncedUpdateUrl = useMemo(() => debounce(updateUrl, 300), [updateUrl]);
+
+  useEffect(() => {
+    return () => {
+      debouncedUpdateUrl.cancel();
+    };
+  }, [debouncedUpdateUrl]);
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
