@@ -14,6 +14,8 @@ import {
   isScenarioCard
 } from './schemas';
 
+const NON_SUBSTANTIVE_KEYS = new Set(['signature', 'templateId', 'arena_history']);
+
 export type DataCardTemplate = 'magical-girl' | 'canshou' | 'general' | 'scenario';
 export type InferableTemplate = DataCardTemplate | 'unknown';
 
@@ -165,17 +167,43 @@ const SCENARIO_META: Record<string, FieldMeta> = {
 
 const DEFAULT_MAGICAL_GIRL: MagicalGirlData = {
   codename: '未命名魔法少女',
-  appearance: {},
-  magicConstruct: {},
-  wonderlandRule: {},
-  blooming: {},
+  appearance: {
+    outfit: '',
+    accessories: '',
+    colorScheme: '',
+    overallLook: ''
+  },
+  magicConstruct: {
+    name: '',
+    form: '',
+    basicAbilities: [],
+    description: ''
+  },
+  wonderlandRule: {
+    name: '',
+    description: '',
+    tendency: '',
+    activation: ''
+  },
+  blooming: {
+    name: '',
+    evolvedAbilities: [],
+    evolvedForm: '',
+    evolvedOutfit: '',
+    powerLevel: ''
+  },
   analysis: {
     personalityAnalysis: '',
     abilityReasoning: '',
     coreTraits: [],
     predictionBasis: '',
-    background: {}
+    background: {
+      belief: '',
+      bonds: ''
+    }
   },
+  userAnswers: [],
+  adjudicationEvents: [],
   templateId: '魔法少女/心之花/魔法少女（问卷生成）'
 };
 
@@ -416,6 +444,9 @@ function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): Ass
   if (sourceTemplate === 'general') {
     delete source.content;
   }
+  delete source.signature;
+  delete source.templateId;
+  delete source.arena_history;
 
   const unmatched = assignWithMeta(source, base as Record<string, any>, MAGICAL_GIRL_META);
   const appendix = formatUnmatchedFields(unmatched);
@@ -439,6 +470,12 @@ function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignR
   if (sourceTemplate === 'general') {
     delete source.content;
   }
+  if (sourceTemplate === 'general') {
+    delete source.content;
+  }
+  delete source.signature;
+  delete source.templateId;
+  delete source.arena_history;
 
   const unmatched = assignWithMeta(source, base as Record<string, any>, CANSHOU_META);
   const appendix = formatUnmatchedFields(unmatched);
@@ -458,6 +495,9 @@ function convertToScenario(data: any, sourceTemplate: InferableTemplate): Assign
   delete source.codename;
   delete source.name;
   delete source.title;
+  delete source.signature;
+  delete source.templateId;
+  delete source.arena_history;
 
   const unmatched = assignWithMeta(source, base as Record<string, any>, SCENARIO_META);
 
@@ -493,15 +533,17 @@ export function convertDataCard(data: any, target: DataCardTemplate, sourceTempl
     throw new Error('无法转换：数据格式无效。');
   }
 
+  const sanitized = sanitizeForConversion(data);
+
   switch (target) {
     case 'general':
-      return convertToGeneral(data);
+      return convertToGeneral(sanitized);
     case 'magical-girl':
-      return convertToMagicalGirl(data, sourceTemplate);
+      return convertToMagicalGirl(sanitized, sourceTemplate);
     case 'canshou':
-      return convertToCanshou(data, sourceTemplate);
+      return convertToCanshou(sanitized, sourceTemplate);
     case 'scenario':
-      return convertToScenario(data, sourceTemplate);
+      return convertToScenario(sanitized, sourceTemplate);
     default:
       throw new Error('未支持的目标模板。');
   }
@@ -509,4 +551,25 @@ export function convertDataCard(data: any, target: DataCardTemplate, sourceTempl
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sanitizeForConversion(data: any): any {
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeForConversion(item));
+  }
+  if (!isPlainObject(data)) return data;
+  const clone: Record<string, any> = {};
+  Object.entries(data).forEach(([key, value]) => {
+    if (NON_SUBSTANTIVE_KEYS.has(key)) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      clone[key] = value.map(item => sanitizeForConversion(item));
+    } else if (isPlainObject(value)) {
+      clone[key] = sanitizeForConversion(value);
+    } else {
+      clone[key] = value;
+    }
+  });
+  return clone;
 }
