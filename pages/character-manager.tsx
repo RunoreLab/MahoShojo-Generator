@@ -631,6 +631,8 @@ const CharacterManagerPage: React.FC = () => {
         }
     }, [characterData]);
 
+    const currentTemplate = useMemo<InferableTemplate>(() => characterData ? inferTemplate(characterData) : 'unknown', [characterData]);
+
     useEffect(() => {
         let cancelled = false;
 
@@ -894,6 +896,8 @@ const CharacterManagerPage: React.FC = () => {
                 setOriginalData(JSON.parse(JSON.stringify(converted)));
                 setSelectedTemplate(targetTemplate);
                 setValidationResult(validateDataCard(converted));
+                setIsNative(false);
+                setHasLostNativeness(true);
                 if (warnings.length) {
                     setMessage({ type: 'info', text: `已转换为${TEMPLATE_LABELS[targetTemplate]}模板。${warnings.join(' ')}` });
                 } else {
@@ -1745,12 +1749,12 @@ const CharacterManagerPage: React.FC = () => {
                     </div>
 
                     {/* 角色卡片预览与生成区域 */}
-                    {characterData && !isLoading && (
+                    {characterData && !isLoading && (currentTemplate === 'magical-girl' || currentTemplate === 'canshou') && (
                         <div className="card mt-6">
                             <h3 className="text-xl font-bold text-gray-800 text-center mb-4">
                                 角色卡片预览与生成
                             </h3>
-                            {characterData.codename ? (
+                            {currentTemplate === 'magical-girl' ? (
                                 <MagicalGirlCard
                                     magicalGirl={characterData}
                                     gradientStyle={(() => {

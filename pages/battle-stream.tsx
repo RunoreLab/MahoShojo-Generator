@@ -1142,7 +1142,7 @@ const BattlePage: React.FC = () => {
                     setCombatants(prev =>
                         (prev.filter(c => 'data' in c) as CombatantData[]).map(oldCombatant => {
                             const updatedData = payload.updatedCombatants.find(
-                                uc => (uc.codename || uc.name) === (oldCombatant.data.codename || oldCombatant.data.name)
+                                uc => getCombatantDisplayName(uc) === getCombatantDisplayName(oldCombatant.data)
                             );
                             return updatedData ? { ...oldCombatant, data: updatedData } : oldCombatant;
                         })
@@ -1419,7 +1419,7 @@ const BattlePage: React.FC = () => {
                                                         <div className="flex items-center flex-grow min-w-0">
                                                         <span className="break-words mr-2" title={displayName}>
                                                             {displayName}
-                                                                <span className="text-xs text-gray-500 ml-1">{typeDisplay}</span>
+                                                            <span className="text-xs text-gray-500 ml-1">{typeDisplay}</span>
                                                                 {!isPlaceholder && c.isPreset && <span className="text-xs text-purple-600 ml-1">(预设)</span>}
                                                                 {!isPlaceholder && c.isValid && <span className="text-xs text-green-600 ml-1">(原生)</span>}
                                                                 {isCorrected && <span className="text-xs text-yellow-600 ml-2">(格式已修正)</span>}
@@ -1471,7 +1471,7 @@ const BattlePage: React.FC = () => {
                                             {combatants
                                                 .filter((c): c is CombatantData => 'data' in c && !!c.data.arena_history?.entries)
                                                 .filter(c => c.data.arena_history.entries.length > 20)
-                                                .map(c => `“${c.data.codename || c.data.name}”(${c.data.arena_history.entries.length}条) `)
+                                                .map(c => `“${getCombatantDisplayName(c.data)}”(${c.data.arena_history.entries.length}条) `)
                                                 .join('、')
                                             }
                                             的历战记录已超过20条上限，生成故事时将仅选取最重要的部分。
