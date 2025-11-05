@@ -14,7 +14,7 @@ import {
   isScenarioCard
 } from './schemas';
 
-const NON_SUBSTANTIVE_KEYS = new Set(['signature', 'templateId', 'arena_history']);
+const NON_SUBSTANTIVE_KEYS = new Set(['signature', 'templateId']);
 
 export type DataCardTemplate = 'magical-girl' | 'canshou' | 'general' | 'scenario';
 export type InferableTemplate = DataCardTemplate | 'unknown';
@@ -203,6 +203,16 @@ const DEFAULT_MAGICAL_GIRL: MagicalGirlData = {
     }
   },
   userAnswers: [],
+  arena_history: {
+    attributes: {
+      world_line_id: '',
+      created_at: '',
+      updated_at: '',
+      sublimation_count: 0,
+      last_sublimation_at: null
+    },
+    entries: []
+  },
   adjudicationEvents: [],
   templateId: '魔法少女/心之花/魔法少女（问卷生成）'
 };
@@ -398,9 +408,14 @@ function toMarkdownContent(rest: Record<string, unknown>): string {
   return markdown.trim() || '暂无附加设定。';
 }
 
-function formatUnmatchedFields(unmatched: UnmatchedField[]): string {
+function formatUnmatchedFields(unmatched: UnmatchedField[], ignoreTopLevel: string[] = []): string {
   if (unmatched.length === 0) return '';
+  const ignoreSet = new Set(ignoreTopLevel);
   return unmatched
+    .filter(({ path }) => {
+      const [top] = path.split('.');
+      return !ignoreSet.has(top);
+    })
     .map(({ path, value }) => {
       let serialized: string;
       if (typeof value === 'string') serialized = value;
@@ -430,6 +445,12 @@ function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
     name,
     content
   };
+  if (data?.arena_history) {
+    (result as any).arena_history = JSON.parse(JSON.stringify(data.arena_history));
+  }
+  if (data?.adjudicationEvents) {
+    (result as any).adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
+  }
   return { data: GeneralCharacterSchema.parse(result), warnings: [] };
 }
 
@@ -444,15 +465,19 @@ function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): Ass
   if (sourceTemplate === 'general') {
     delete source.content;
   }
-  delete source.signature;
-  delete source.templateId;
-  delete source.arena_history;
 
   const unmatched = assignWithMeta(source, base as Record<string, any>, MAGICAL_GIRL_META);
-  const appendix = formatUnmatchedFields(unmatched);
+  const appendix = formatUnmatchedFields(unmatched, ['arena_history', 'adjudicationEvents']);
   if (appendix) {
     if (!base.analysis) base.analysis = { predictionBasis: '' };
     base.analysis.predictionBasis = `${base.analysis?.predictionBasis?.trim() || ''}\n${appendix}`.trim();
+  }
+
+  if (data?.arena_history) {
+    base.arena_history = JSON.parse(JSON.stringify(data.arena_history));
+  }
+  if (data?.adjudicationEvents) {
+    base.adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
   }
 
   base.templateId = '魔法少女/心之花/魔法少女（问卷生成）';
@@ -470,17 +495,18 @@ function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignR
   if (sourceTemplate === 'general') {
     delete source.content;
   }
-  if (sourceTemplate === 'general') {
-    delete source.content;
-  }
-  delete source.signature;
-  delete source.templateId;
-  delete source.arena_history;
 
   const unmatched = assignWithMeta(source, base as Record<string, any>, CANSHOU_META);
-  const appendix = formatUnmatchedFields(unmatched);
+  const appendix = formatUnmatchedFields(unmatched, ['arena_history', 'adjudicationEvents']);
   if (appendix) {
     base.researcherNotes = `${base.researcherNotes?.trim() || ''}\n${appendix}`.trim();
+  }
+
+  if (data?.arena_history) {
+    base.arena_history = JSON.parse(JSON.stringify(data.arena_history));
+  }
+  if (data?.adjudicationEvents) {
+    base.adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
   }
 
   base.templateId = '魔法少女/心之花/残兽（问卷生成）';
