@@ -896,8 +896,6 @@ const CharacterManagerPage: React.FC = () => {
                 setOriginalData(JSON.parse(JSON.stringify(converted)));
                 setSelectedTemplate(targetTemplate);
                 setValidationResult(validateDataCard(converted));
-                setIsNative(false);
-                setHasLostNativeness(true);
                 if (warnings.length) {
                     setMessage({ type: 'info', text: `已转换为${TEMPLATE_LABELS[targetTemplate]}模板。${warnings.join(' ')}` });
                 } else {
