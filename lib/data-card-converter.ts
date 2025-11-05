@@ -247,6 +247,7 @@ function assignWithMeta<T extends Record<string, any>>(
   prefix = ''
 ): UnmatchedField[] {
   const unmatched: UnmatchedField[] = [];
+  const targetRecord = target as Record<string, any>;
 
   Object.entries(source).forEach(([key, value]) => {
     if (value === undefined || value === null) return;
@@ -265,50 +266,50 @@ function assignWithMeta<T extends Record<string, any>>(
     switch (definition.type) {
       case 'string':
         if (typeof value === 'string') {
-          target[key] = value;
+          targetRecord[key] = value;
         } else {
           unmatched.push({ path, value });
         }
         break;
       case 'number':
         if (typeof value === 'number') {
-          target[key] = value;
+          targetRecord[key] = value;
         } else {
           unmatched.push({ path, value });
         }
         break;
       case 'boolean':
         if (typeof value === 'boolean') {
-          target[key] = value;
+          targetRecord[key] = value;
         } else {
           unmatched.push({ path, value });
         }
         break;
       case 'array':
         if (Array.isArray(value)) {
-          target[key] = value;
+          targetRecord[key] = value;
         } else {
           unmatched.push({ path, value });
         }
         break;
       case 'arrayOfString':
         if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
-          target[key] = value;
+          targetRecord[key] = value;
         } else {
           unmatched.push({ path, value });
         }
         break;
       case 'recordString':
         if (isPlainObject(value) && Object.values(value).every(item => typeof item === 'string')) {
-          target[key] = value;
+          targetRecord[key] = value;
         } else {
           unmatched.push({ path, value });
         }
         break;
       case 'object':
         if (isPlainObject(value)) {
-          const existing = isPlainObject(target[key]) ? target[key] : {};
-          target[key] = existing;
+          const existing = (isPlainObject(targetRecord[key]) ? targetRecord[key] : {}) as Record<string, any>;
+          targetRecord[key] = existing;
           const nestedUnmatched = assignWithMeta(value, existing, definition.children ?? {}, path);
           unmatched.push(...nestedUnmatched);
         } else {
@@ -317,7 +318,7 @@ function assignWithMeta<T extends Record<string, any>>(
         break;
       case 'unknown':
       default:
-        target[key] = value;
+        targetRecord[key] = value;
     }
   });
 
