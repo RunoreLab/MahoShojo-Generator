@@ -610,6 +610,18 @@ const magicalGirlVsCanshouSystemPrompt = `你是一名战地记者，负责报�
   4. 重点描述：重点描写双方能力和战术的碰撞，以及战斗对周围环境造成的影响。
 `;
 
+const universalFallbackSystemPrompt = `
+你是一位熟悉魔法少女世界观、擅长跨题材叙事的资深撰稿人。当前事件集合了来源各异的角色（可能是魔法少女、残兽、通用角色，甚至未明确定义的类型），请遵循以下准则：
+
+1. **尊重设定**：精读每位角色的资料。不论是结构化字段还是 Markdown 文本，都必须准确还原角色的能力、个性、弱点与动机。
+2. **解释同场理由**：若角色的类型或世界观存在差异，请在叙事中说明他们为何会同处此地，诸如维度交错、临时结盟或共同任务等。
+3. **灵活的冲突形式**：故事不必局限于武力对决。可以是谈判、心理博弈、团队合作、调查或战斗与交流交织的场景。重点是呈现角色间的张力与抉择。
+4. **维护世界观底线**：整体调性需符合魔法少女世界观。对于设定中可能冲突的元素，请合理化处理，严禁出现现实政治、色情、恐怖等违禁内容。
+5. **完整的报道结构**：最终仍需输出 headline / article / officialReport / impacts 结构。其中 article.body 描述事件经过，officialReport 给出结论与影响，impacts 为每位核心角色总结改变。
+
+请在此框架下，创作一篇兼具戏剧张力与逻辑可信度的新闻式故事。
+`;
+
 // 场景三：【经典模式】残兽 vs 残兽 的系统提示词
 const canshouVsCanshouSystemPrompt = `你是魔法国度研究院所属的魔法少女，你被研究院首席祖母绿大人要求观察并记录一场残兽之间的内斗。你的报告需要客观、冷静，并带有生物学和神秘学角度的分析。
   --- 残兽核心设定 ---
@@ -667,7 +679,7 @@ const createPromptBuilder = (
         const isStructured = isStructuredCharacter(data);
         const characterName = data.codename || data.name;
         const otherNames = allNames.filter(name => name !== characterName);
-        const typeDisplay = type === 'magical-girl' ? '魔法少女' : '残兽';
+        const typeDisplay = type === 'magical-girl' ? '魔法少女' : type === 'canshou' ? '残兽' : '通用角色';
         let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
         // [核心修改] 根据 useArenaHistory 的值来决定是否格式化并添加历战记录
         if (useArenaHistory) {
@@ -686,8 +698,12 @@ const createPromptBuilder = (
                 profileString += userAnswers.map((answer, i) => `Q: ${questions[i] || `问题 ${i + 1}`}\nA: ${answer}`).join('\n');
             }
         } else {
-            // 对于非结构化数据，告知AI并将其作为纯文本块提供
-            profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`;
+            // 对于非结构化数据，提供文本化设定
+            if (type === 'general-character' && typeof data.content === 'string') {
+                profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
+            } else {
+                profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`;
+            }
         }
         return profileString;
     }).join('\n\n');
@@ -973,11 +989,20 @@ async function handler(req: NextRequest): Promise<Response> {
     else if (mode === 'kizuna') systemPrompt = kizunaModeSystemPrompt;
     else if (mode === 'scenario') systemPrompt = scenarioModeSystemPrompt;
     else {
-        const hasMagicalGirl = combatants.some((c: any) => c.type === 'magical-girl');
-        const hasCanshou = combatants.some((c: any) => c.type === 'canshou');
-        if (hasMagicalGirl && !hasCanshou) systemPrompt = classicModeSystemPrompt;
-        else if (!hasMagicalGirl && hasCanshou) systemPrompt = canshouVsCanshouSystemPrompt;
-        else systemPrompt = magicalGirlVsCanshouSystemPrompt;
+        const participantTypes = new Set(combatants.map((c: any) => c.type));
+        const hasOnlyMagicalGirls = participantTypes.size === 1 && participantTypes.has('magical-girl');
+        const hasOnlyCanshou = participantTypes.size === 1 && participantTypes.has('canshou');
+        const hasMagicalAndCanshouOnly = participantTypes.has('magical-girl') && participantTypes.has('canshou') && participantTypes.size === 2;
+
+        if (hasOnlyMagicalGirls) {
+            systemPrompt = classicModeSystemPrompt;
+        } else if (hasOnlyCanshou) {
+            systemPrompt = canshouVsCanshouSystemPrompt;
+        } else if (hasMagicalAndCanshouOnly) {
+            systemPrompt = magicalGirlVsCanshouSystemPrompt;
+        } else {
+            systemPrompt = universalFallbackSystemPrompt;
+        }
     }
 
     // 创建生成配置

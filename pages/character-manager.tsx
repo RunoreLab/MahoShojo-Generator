@@ -29,6 +29,14 @@ import RecycleBinModal from '../components/CharManager/RecycleBinModal';
 import ScenarioEditor from '../components/ScenarioEditor';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { UserBadge } from '@/types/badge';
+import {
+    inferTemplate,
+    createBlankDataCard,
+    convertDataCard,
+    TEMPLATE_LABELS,
+    type DataCardTemplate,
+    type InferableTemplate
+} from '@/lib/data-card-converter';
 
 // 兼容 Edge 和 Node.js 环境的 crypto API
 const randomUUID = typeof crypto !== 'undefined' ? crypto.randomUUID.bind(crypto) : webcrypto.randomUUID.bind(webcrypto);
@@ -243,6 +251,9 @@ const gradientColors: Record<string, { first: string; second: string }> = {
     [MainColor.Green]: { first: '#51cf66', second: '#8ce99a' }
 };
 
+const TEMPLATE_PLACEHOLDER_VALUE = '__unknown__';
+const TEMPLATE_ORDER: DataCardTemplate[] = ['magical-girl', 'canshou', 'general', 'scenario'];
+
 const CharacterManagerPage: React.FC = () => {
     const router = useRouter();
     const { user, loading: authLoading, isAuthenticated, register, login, logout } = useAuth();
@@ -279,6 +290,7 @@ const CharacterManagerPage: React.FC = () => {
     const [message, setMessage] = useState<{ type: 'info' | 'error' | 'success', text: string } | null>(null);
     const [copiedStatus, setCopiedStatus] = useState(false);
     const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+    const [selectedTemplate, setSelectedTemplate] = useState<InferableTemplate>('unknown');
     // 【新增】图片保存模态框的状态
     const [showImageModal, setShowImageModal] = useState(false);
     const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
@@ -582,9 +594,7 @@ const CharacterManagerPage: React.FC = () => {
     };
 
     // 检测是否为情景文件
-    const isScenarioData = (data: any): boolean => {
-        return Boolean(data && data.title && data.elements && (data.scenario_type || data.elements.events));
-    };
+    const isScenarioData = (data: any): boolean => inferTemplate(data) === 'scenario';
 
     // 分享数据卡
     const handleShareDataCard = async (card: any) => {
@@ -611,6 +621,14 @@ const CharacterManagerPage: React.FC = () => {
             setDebouncedCharacterData(characterData);
         }, 400);
         return () => clearTimeout(handler);
+    }, [characterData]);
+
+    useEffect(() => {
+        if (!characterData) {
+            setSelectedTemplate('unknown');
+        } else {
+            setSelectedTemplate(inferTemplate(characterData));
+        }
     }, [characterData]);
 
     useEffect(() => {
@@ -794,8 +812,9 @@ const CharacterManagerPage: React.FC = () => {
             //     throw new Error(validationResult.error || '无效的文件格式。请确保是有效的角色或情景文件。');
             // }
 
-            const isCharacterFile = validationResult.type === 'character' || validationResult.type === 'canshou';
+            const isCharacterFile = validationResult.type === 'character' || validationResult.type === 'canshou' || validationResult.type === 'general';
             const isScenarioFile = validationResult.type === 'scenario';
+            const inferredTemplate = inferTemplate(data);
 
             // 调用API验证原生性
             const verificationResponse = await fetch('/api/verify-origin', {
@@ -808,9 +827,14 @@ const CharacterManagerPage: React.FC = () => {
             setCharacterData(data);
             setOriginalData(JSON.parse(JSON.stringify(data))); // 深拷贝作为原始备份
             setIsNative(isValid);
+            setSelectedTemplate(inferredTemplate);
 
             if (isCharacterFile) {
-                setMessage({ type: 'success', text: `成功加载角色: ${data.codename || data.name}` });
+                if (inferredTemplate === 'general') {
+                    setMessage({ type: 'success', text: `成功加载通用角色: ${data.name || data.codename || '未命名角色'}` });
+                } else {
+                    setMessage({ type: 'success', text: `成功加载角色: ${data.codename || data.name}` });
+                }
             } else if (isScenarioFile) {
                 setMessage({ type: 'success', text: `成功加载情景: ${data.title}` });
             }
@@ -820,6 +844,7 @@ const CharacterManagerPage: React.FC = () => {
             setCharacterData(null);
             setOriginalData(null);
             setIsNative(false);
+            setSelectedTemplate('unknown');
         } finally {
             setIsLoading(false);
         }
@@ -847,9 +872,47 @@ const CharacterManagerPage: React.FC = () => {
         processJsonData(pastedJson);
     };
 
+    const handleTemplateOptionChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+        const value = event.target.value;
+        if (value === TEMPLATE_PLACEHOLDER_VALUE) return;
+        const targetTemplate = value as DataCardTemplate;
+
+        try {
+            if (!characterData) {
+                const blank = createBlankDataCard(targetTemplate);
+                setCharacterData(blank);
+                setOriginalData(JSON.parse(JSON.stringify(blank)));
+                setIsNative(false);
+                setHasLostNativeness(false);
+                setSelectedTemplate(targetTemplate);
+                setValidationResult(validateDataCard(blank));
+                setMessage({ type: 'info', text: `已创建${TEMPLATE_LABELS[targetTemplate]}模板的空白内容。` });
+            } else {
+                const sourceTemplate = inferTemplate(characterData);
+                const { data: converted, warnings } = convertDataCard(characterData, targetTemplate, sourceTemplate);
+                setCharacterData(converted);
+                setOriginalData(JSON.parse(JSON.stringify(converted)));
+                setSelectedTemplate(targetTemplate);
+                setValidationResult(validateDataCard(converted));
+                if (warnings.length) {
+                    setMessage({ type: 'info', text: `已转换为${TEMPLATE_LABELS[targetTemplate]}模板。${warnings.join(' ')}` });
+                } else {
+                    setMessage({ type: 'success', text: `已转换为${TEMPLATE_LABELS[targetTemplate]}模板。` });
+                }
+            }
+        } catch (error) {
+            console.error('模板转换失败:', error);
+            setMessage({ type: 'error', text: '模板转换失败，请检查数据格式。' });
+        }
+    }, [characterData, setCharacterData, setOriginalData, setIsNative, setHasLostNativeness, setSelectedTemplate, setValidationResult, setMessage]);
+
     // 统一的字段更新处理器
     const handleFieldChange = useCallback((path: string, value: any) => {
         setCharacterData((prev: any) => {
+            if (!prev) return prev;
+            if (path === 'templateId') {
+                return prev;
+            }
             const newData = JSON.parse(JSON.stringify(prev)); // 深拷贝以安全地修改
             let current = newData;
             const keys = path.split('.');
@@ -940,8 +1003,8 @@ const CharacterManagerPage: React.FC = () => {
         if (!isObject(data)) return null;
 
         const keyOrder = [
-            'codename', 'name', 'appearance', 'magicConstruct', 'wonderlandRule',
-            'blooming', 'analysis', 'userAnswers', 'arena_history', 'adjudicationEvents'
+            'templateId', 'codename', 'name', 'title', 'appearance', 'magicConstruct', 'wonderlandRule',
+            'blooming', 'analysis', 'content', 'userAnswers', 'elements', 'arena_history', 'adjudicationEvents'
         ];
 
         const sortedKeys = Object.keys(data).sort((a, b) => {
@@ -957,6 +1020,7 @@ const CharacterManagerPage: React.FC = () => {
             const currentPath = path ? `${path}.${key}` : key;
             // 过滤掉不应在表单中编辑的字段
             if (key === 'signature' || key === 'isPreset' || key === 'arena_history' || key === 'adjudicationEvents') return null;
+            if (key === 'templateId') return null;
 
             const value = data[key];
             const fieldIssues = fieldIssueMap.get(currentPath) || [];
@@ -1406,6 +1470,29 @@ const CharacterManagerPage: React.FC = () => {
                                     </div>
                                 </div>
                             )}
+                        </div>
+
+                        <div className="mb-6">
+                            <label className="block text-sm font-semibold text-gray-700 mb-1">内容模板</label>
+                            <select
+                                value={selectedTemplate === 'unknown' ? TEMPLATE_PLACEHOLDER_VALUE : selectedTemplate}
+                                onChange={handleTemplateOptionChange}
+                                className="input-field"
+                            >
+                                <option value={TEMPLATE_PLACEHOLDER_VALUE} disabled>
+                                    {characterData ? '未知类型（请选择转换目标）' : '选择模板以创建空白内容'}
+                                </option>
+                                {TEMPLATE_ORDER.map((template) => (
+                                    <option key={template} value={template}>
+                                        {TEMPLATE_LABELS[template]}
+                                    </option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">
+                                {characterData
+                                    ? '切换模板会尝试根据规则转换当前内容，原生性状态不会因此改变。'
+                                    : '未加载内容时，选择模板将创建对应的空白数据卡，初始即为非原生。'}
+                            </p>
                         </div>
 
                         {!characterData ? (

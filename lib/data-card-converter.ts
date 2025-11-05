@@ -1,0 +1,511 @@
+import {
+  CanshouSchema,
+  GeneralCharacterSchema,
+  MagicalGirlSchema,
+  ScenarioSchema,
+  type CanshouData,
+  type GeneralCharacterData,
+  type MagicalGirlData,
+  type ScenarioData,
+  GENERAL_CHARACTER_TEMPLATE_ID,
+  isCanshou,
+  isGeneralCharacter,
+  isMagicalGirl,
+  isScenarioCard
+} from './schemas';
+
+export type DataCardTemplate = 'magical-girl' | 'canshou' | 'general' | 'scenario';
+export type InferableTemplate = DataCardTemplate | 'unknown';
+
+export const TEMPLATE_LABELS: Record<DataCardTemplate, string> = {
+  'magical-girl': '魔法少女',
+  canshou: '残兽',
+  general: '通用角色',
+  scenario: '情景'
+};
+
+type FieldType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'array'
+  | 'arrayOfString'
+  | 'recordString'
+  | 'object'
+  | 'unknown';
+
+interface FieldMeta {
+  type: FieldType;
+  children?: Record<string, FieldMeta>;
+}
+
+interface AssignResult<T> {
+  data: T;
+  warnings: string[];
+}
+
+interface UnmatchedField {
+  path: string;
+  value: unknown;
+}
+
+const MAGICAL_GIRL_META: Record<string, FieldMeta> = {
+  codename: { type: 'string' },
+  appearance: {
+    type: 'object',
+    children: {
+      outfit: { type: 'string' },
+      accessories: { type: 'string' },
+      colorScheme: { type: 'string' },
+      overallLook: { type: 'string' }
+    }
+  },
+  magicConstruct: {
+    type: 'object',
+    children: {
+      name: { type: 'string' },
+      form: { type: 'string' },
+      basicAbilities: { type: 'arrayOfString' },
+      description: { type: 'string' }
+    }
+  },
+  wonderlandRule: {
+    type: 'object',
+    children: {
+      name: { type: 'string' },
+      description: { type: 'string' },
+      tendency: { type: 'string' },
+      activation: { type: 'string' }
+    }
+  },
+  blooming: {
+    type: 'object',
+    children: {
+      name: { type: 'string' },
+      evolvedAbilities: { type: 'arrayOfString' },
+      evolvedForm: { type: 'string' },
+      evolvedOutfit: { type: 'string' },
+      powerLevel: { type: 'string' }
+    }
+  },
+  analysis: {
+    type: 'object',
+    children: {
+      personalityAnalysis: { type: 'string' },
+      abilityReasoning: { type: 'string' },
+      coreTraits: { type: 'arrayOfString' },
+      predictionBasis: { type: 'string' },
+      background: {
+        type: 'object',
+        children: {
+          belief: { type: 'string' },
+          bonds: { type: 'string' }
+        }
+      }
+    }
+  },
+  userAnswers: { type: 'unknown' },
+  signature: { type: 'string' },
+  templateId: { type: 'string' },
+  isPreset: { type: 'boolean' },
+  arena_history: { type: 'unknown' },
+  adjudicationEvents: { type: 'unknown' }
+};
+
+const CANSHOU_META: Record<string, FieldMeta> = {
+  name: { type: 'string' },
+  appearance: { type: 'string' },
+  materialAndSkin: { type: 'string' },
+  featuresAndAppendages: { type: 'string' },
+  coreConcept: { type: 'string' },
+  coreEmotion: { type: 'string' },
+  evolutionStage: { type: 'string' },
+  attackMethod: { type: 'string' },
+  specialAbility: { type: 'string' },
+  origin: { type: 'string' },
+  birthEnvironment: { type: 'string' },
+  researcherNotes: { type: 'string' },
+  templateId: { type: 'string' },
+  userAnswers: { type: 'unknown' },
+  isPreset: { type: 'boolean' },
+  signature: { type: 'string' },
+  adjudicationEvents: { type: 'unknown' },
+  arena_history: { type: 'unknown' }
+};
+
+const SCENARIO_META: Record<string, FieldMeta> = {
+  title: { type: 'string' },
+  scenario_type: { type: 'string' },
+  description: { type: 'string' },
+  elements: {
+    type: 'object',
+    children: {
+      scene: {
+        type: 'object',
+        children: {
+          time: { type: 'string' },
+          place: { type: 'string' },
+          features: { type: 'string' }
+        }
+      },
+      roles: { type: 'array' },
+      events: { type: 'string' },
+      atmosphere: { type: 'string' },
+      development: { type: 'array' }
+    }
+  },
+  metadata: {
+    type: 'object',
+    children: {
+      created_at: { type: 'string' },
+      signature: { type: 'string' }
+    }
+  }
+};
+
+const DEFAULT_MAGICAL_GIRL: MagicalGirlData = {
+  codename: '未命名魔法少女',
+  appearance: {},
+  magicConstruct: {},
+  wonderlandRule: {},
+  blooming: {},
+  analysis: {
+    personalityAnalysis: '',
+    abilityReasoning: '',
+    coreTraits: [],
+    predictionBasis: '',
+    background: {}
+  },
+  templateId: '魔法少女/心之花/魔法少女（问卷生成）'
+};
+
+const DEFAULT_CANSHOU: CanshouData = {
+  name: '未命名残兽',
+  appearance: '',
+  materialAndSkin: '',
+  featuresAndAppendages: '',
+  coreConcept: '',
+  coreEmotion: '',
+  evolutionStage: '',
+  attackMethod: '',
+  specialAbility: '',
+  origin: '',
+  birthEnvironment: '',
+  researcherNotes: '',
+  templateId: '魔法少女/心之花/残兽（问卷生成）'
+};
+
+const DEFAULT_SCENARIO: ScenarioData = {
+  title: '未命名情景',
+  description: '',
+  elements: {
+    scene: {
+      time: '',
+      place: '',
+      features: ''
+    },
+    roles: [],
+    events: '',
+    atmosphere: '',
+    development: []
+  },
+  metadata: {}
+};
+
+const DEFAULT_GENERAL: GeneralCharacterData = {
+  templateId: GENERAL_CHARACTER_TEMPLATE_ID,
+  name: '未命名角色',
+  content: '请在此处补充角色设定，建议使用 Markdown 书写。'
+};
+
+export function inferTemplate(data: unknown): InferableTemplate {
+  if (isGeneralCharacter(data)) return 'general';
+  if (isScenarioCard(data)) return 'scenario';
+  if (isMagicalGirl(data)) return 'magical-girl';
+  if (isCanshou(data)) return 'canshou';
+  return 'unknown';
+}
+
+export function createBlankDataCard(template: DataCardTemplate): MagicalGirlData | CanshouData | GeneralCharacterData | ScenarioData {
+  switch (template) {
+    case 'magical-girl':
+      return JSON.parse(JSON.stringify(DEFAULT_MAGICAL_GIRL));
+    case 'canshou':
+      return JSON.parse(JSON.stringify(DEFAULT_CANSHOU));
+    case 'scenario':
+      return JSON.parse(JSON.stringify(DEFAULT_SCENARIO));
+    case 'general':
+    default:
+      return JSON.parse(JSON.stringify(DEFAULT_GENERAL));
+  }
+}
+
+function assignWithMeta<T extends Record<string, any>>(
+  source: Record<string, any>,
+  target: T,
+  meta: Record<string, FieldMeta>,
+  prefix = ''
+): UnmatchedField[] {
+  const unmatched: UnmatchedField[] = [];
+
+  Object.entries(source).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    const path = prefix ? `${prefix}.${key}` : key;
+
+    if (key === 'templateId') {
+      return;
+    }
+
+    const definition = meta[key];
+    if (!definition) {
+      unmatched.push({ path, value });
+      return;
+    }
+
+    switch (definition.type) {
+      case 'string':
+        if (typeof value === 'string') {
+          target[key] = value;
+        } else {
+          unmatched.push({ path, value });
+        }
+        break;
+      case 'number':
+        if (typeof value === 'number') {
+          target[key] = value;
+        } else {
+          unmatched.push({ path, value });
+        }
+        break;
+      case 'boolean':
+        if (typeof value === 'boolean') {
+          target[key] = value;
+        } else {
+          unmatched.push({ path, value });
+        }
+        break;
+      case 'array':
+        if (Array.isArray(value)) {
+          target[key] = value;
+        } else {
+          unmatched.push({ path, value });
+        }
+        break;
+      case 'arrayOfString':
+        if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
+          target[key] = value;
+        } else {
+          unmatched.push({ path, value });
+        }
+        break;
+      case 'recordString':
+        if (isPlainObject(value) && Object.values(value).every(item => typeof item === 'string')) {
+          target[key] = value;
+        } else {
+          unmatched.push({ path, value });
+        }
+        break;
+      case 'object':
+        if (isPlainObject(value)) {
+          const existing = isPlainObject(target[key]) ? target[key] : {};
+          target[key] = existing;
+          const nestedUnmatched = assignWithMeta(value, existing, definition.children ?? {}, path);
+          unmatched.push(...nestedUnmatched);
+        } else {
+          unmatched.push({ path, value });
+        }
+        break;
+      case 'unknown':
+      default:
+        target[key] = value;
+    }
+  });
+
+  return unmatched;
+}
+
+function valueToMarkdown(value: unknown, level = 1): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    const lines = value
+      .map(item => {
+        if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+          return `- ${item}`;
+        }
+        const nested = valueToMarkdown(item, level + 1);
+        return nested ? `- ${nested.replace(/\n/g, `\n${' '.repeat(2)}`)}` : '';
+      })
+      .filter(Boolean);
+    return lines.join('\n');
+  }
+
+  if (isPlainObject(value)) {
+    const entries = Object.entries(value)
+      .map(([key, val]) => {
+        const heading = `${'#'.repeat(level)} ${key}`;
+        const body = valueToMarkdown(val, level + 1);
+        return body ? `${heading}\n${body}` : heading;
+      })
+      .filter(Boolean);
+    return entries.join('\n\n');
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function toMarkdownContent(rest: Record<string, unknown>): string {
+  const markdown = valueToMarkdown(rest);
+  return markdown.trim() || '暂无附加设定。';
+}
+
+function formatUnmatchedFields(unmatched: UnmatchedField[]): string {
+  if (unmatched.length === 0) return '';
+  return unmatched
+    .map(({ path, value }) => {
+      let serialized: string;
+      if (typeof value === 'string') serialized = value;
+      else {
+        try {
+          serialized = JSON.stringify(value, null, 2);
+        } catch {
+          serialized = String(value);
+        }
+      }
+      return `- ${path}: ${serialized}`;
+    })
+    .join('\n');
+}
+
+function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
+  const name = data?.codename || data?.name || data?.title || '未命名角色';
+  const rest = { ...data };
+  delete rest.codename;
+  delete rest.name;
+  delete rest.title;
+  delete rest.templateId;
+
+  const content = toMarkdownContent(rest);
+  const result: GeneralCharacterData = {
+    templateId: GENERAL_CHARACTER_TEMPLATE_ID,
+    name,
+    content
+  };
+  return { data: GeneralCharacterSchema.parse(result), warnings: [] };
+}
+
+function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): AssignResult<MagicalGirlData> {
+  const base: MagicalGirlData = JSON.parse(JSON.stringify(DEFAULT_MAGICAL_GIRL));
+  base.codename = data?.codename || data?.name || data?.title || base.codename;
+
+  const source = { ...data };
+  delete source.codename;
+  delete source.name;
+  delete source.title;
+  if (sourceTemplate === 'general') {
+    delete source.content;
+  }
+
+  const unmatched = assignWithMeta(source, base as Record<string, any>, MAGICAL_GIRL_META);
+  const appendix = formatUnmatchedFields(unmatched);
+  if (appendix) {
+    if (!base.analysis) base.analysis = { predictionBasis: '' };
+    base.analysis.predictionBasis = `${base.analysis?.predictionBasis?.trim() || ''}\n${appendix}`.trim();
+  }
+
+  base.templateId = '魔法少女/心之花/魔法少女（问卷生成）';
+  return { data: MagicalGirlSchema.parse(base), warnings: unmatched.length ? ['部分字段已追加至预测依据。'] : [] };
+}
+
+function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignResult<CanshouData> {
+  const base: CanshouData = JSON.parse(JSON.stringify(DEFAULT_CANSHOU));
+  base.name = data?.name || data?.codename || data?.title || base.name;
+
+  const source = { ...data };
+  delete source.codename;
+  delete source.name;
+  delete source.title;
+  if (sourceTemplate === 'general') {
+    delete source.content;
+  }
+
+  const unmatched = assignWithMeta(source, base as Record<string, any>, CANSHOU_META);
+  const appendix = formatUnmatchedFields(unmatched);
+  if (appendix) {
+    base.researcherNotes = `${base.researcherNotes?.trim() || ''}\n${appendix}`.trim();
+  }
+
+  base.templateId = '魔法少女/心之花/残兽（问卷生成）';
+  return { data: CanshouSchema.parse(base), warnings: unmatched.length ? ['部分字段已附加到研究员注记。'] : [] };
+}
+
+function convertToScenario(data: any, sourceTemplate: InferableTemplate): AssignResult<ScenarioData> {
+  const base: ScenarioData = JSON.parse(JSON.stringify(DEFAULT_SCENARIO));
+  base.title = data?.title || data?.codename || data?.name || base.title;
+
+  const source = { ...data };
+  delete source.codename;
+  delete source.name;
+  delete source.title;
+
+  const unmatched = assignWithMeta(source, base as Record<string, any>, SCENARIO_META);
+
+  if (sourceTemplate === 'magical-girl' || sourceTemplate === 'canshou' || sourceTemplate === 'general') {
+    const roleName = data?.codename || data?.name || base.title;
+    let description = '';
+    if (sourceTemplate === 'general') {
+      description = typeof data?.content === 'string' ? data.content : toMarkdownContent({ ...data, templateId: undefined, name: undefined, codename: undefined, title: undefined });
+    } else {
+      const rest = { ...data };
+      delete rest.codename;
+      delete rest.name;
+      delete rest.templateId;
+      description = toMarkdownContent(rest);
+    }
+    base.elements.roles = base.elements.roles || [];
+    base.elements.roles.push({
+      name: roleName,
+      description
+    });
+  }
+
+  const appendix = formatUnmatchedFields(unmatched);
+  if (appendix) {
+    base.description = `${base.description?.trim() || ''}\n${appendix}`.trim();
+  }
+
+  return { data: ScenarioSchema.parse(base), warnings: unmatched.length ? ['部分字段已合并至情景描述。'] : [] };
+}
+
+export function convertDataCard(data: any, target: DataCardTemplate, sourceTemplate: InferableTemplate = inferTemplate(data)): AssignResult<any> {
+  if (!data || typeof data !== 'object') {
+    throw new Error('无法转换：数据格式无效。');
+  }
+
+  switch (target) {
+    case 'general':
+      return convertToGeneral(data);
+    case 'magical-girl':
+      return convertToMagicalGirl(data, sourceTemplate);
+    case 'canshou':
+      return convertToCanshou(data, sourceTemplate);
+    case 'scenario':
+      return convertToScenario(data, sourceTemplate);
+    default:
+      throw new Error('未支持的目标模板。');
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}

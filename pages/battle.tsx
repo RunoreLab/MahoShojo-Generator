@@ -22,6 +22,8 @@ import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 // v0.4.0 引入新的编辑器组件
 import AdjudicatorEditor from '../components/AdjudicatorEditor';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import { inferTemplate } from '@/lib/data-card-converter';
+import { GeneralCharacterSchema } from '@/lib/schemas';
 
 interface UpdatedCombatantData {
     codename?: string;
@@ -75,7 +77,7 @@ interface RandomCombatantPlaceholder {
 
 // 定义参战者的数据结构
 interface CombatantData {
-    type: 'magical-girl' | 'canshou';
+    type: 'magical-girl' | 'canshou' | 'general-character';
     data: any;
     filename: string; // 用于UI显示和去重
     isValid: boolean; // 用于标记是否为原生设定
@@ -194,11 +196,38 @@ const BattlePage: React.FC = () => {
     const [storyLength, setStoryLength] = useState('default');
     const [selectedCombatantForDetails, setSelectedCombatantForDetails] = useState<CombatantData | null>(null);
 
+    const TYPE_LABELS: Record<CombatantData['type'], string> = {
+        'magical-girl': '魔法少女',
+        canshou: '残兽',
+        'general-character': '通用角色'
+    };
+
+    const getCombatantDisplayName = (data: any): string => {
+        if (!data) return '未命名';
+        return data.codename || data.name || data.title || '未命名';
+    };
+
+    const inferCombatantType = (data: any): CombatantData['type'] => {
+        const template = inferTemplate(data);
+        switch (template) {
+            case 'magical-girl':
+                return 'magical-girl';
+            case 'canshou':
+                return 'canshou';
+            case 'general':
+                return 'general-character';
+            default:
+                if (data?.codename) return 'magical-girl';
+                if (data?.name) return 'canshou';
+                return 'general-character';
+        }
+    };
+
     const combatantDetailsCard = useMemo(() => {
         if (!selectedCombatantForDetails) return null;
         const baseData = selectedCombatantForDetails.data || {};
-        const displayName = baseData.codename || baseData.name || selectedCombatantForDetails.filename;
-        const typeLabel = selectedCombatantForDetails.type === 'magical-girl' ? '魔法少女' : '残兽';
+        const displayName = getCombatantDisplayName(baseData);
+        const typeLabel = TYPE_LABELS[selectedCombatantForDetails.type];
         return {
             id: selectedCombatantForDetails.filename,
             name: displayName,
@@ -365,6 +394,17 @@ const BattlePage: React.FC = () => {
         return { success: true };
     };
 
+    const validateGeneralCharacterData = (data: any, filename: string): { success: boolean } => {
+        const parsed = GeneralCharacterSchema.safeParse(data);
+        if (!parsed.success) {
+            const firstIssue = parsed.error.issues[0];
+            const message = firstIssue?.message ? `：${firstIssue.message}` : '';
+            setError(`❌ 通用角色文件 "${filename}" 格式不规范${message}。`);
+            return { success: false };
+        }
+        return { success: true };
+    };
+
     // 统一处理添加参战者
     const addCombatant = (combatant: CombatantData) => { // 注意：这里只接收 CombatantData
         if (combatants.length >= 4) {
@@ -395,14 +435,14 @@ const BattlePage: React.FC = () => {
             if (!response.ok) throw new Error(`无法加载 ${preset.name} 的设定文件。`);
             const presetData = await response.json();
 
-            let validationResult;
+            let validationSuccess = false;
             if (preset.type === 'magical-girl') {
-                validationResult = validateMagicalGirlData(presetData, preset.name);
+                validationSuccess = validateMagicalGirlData(presetData, preset.name).success;
             } else {
-                validationResult = { success: validateCanshouData(presetData, preset.name).success, wasCorrected: false };
+                validationSuccess = validateCanshouData(presetData, preset.name).success;
             }
 
-            if (!validationResult.success) return;
+            if (!validationSuccess) return;
 
             presetData.isPreset = true;
             // 预设文件默认视为原生
@@ -443,41 +483,56 @@ const BattlePage: React.FC = () => {
         let legacyWarningTriggered = false; // 用于避免重复显示警告
 
         for (const item of dataArray) {
-            const itemName = item.codename || item.name || sourceName;
+            const template = inferTemplate(item);
+            const itemName = getCombatantDisplayName(item) || sourceName;
             try {
-                const type: 'magical-girl' | 'canshou' = item.codename ? 'magical-girl' : 'canshou';
-                if (!item.codename && !item.name) throw new Error('缺少 "codename" 或 "name" 字段。');
+                if (template === 'scenario') {
+                    throw new Error('检测到情景文件，请在情景模式中使用。');
+                }
 
-                const validationResult = type === 'magical-girl' ? validateMagicalGirlData(item, itemName) : validateCanshouData(item, itemName);
-                if (!validationResult.success) throw new Error("标准验证失败");
+                const type: CombatantData['type'] = template === 'magical-girl'
+                    ? 'magical-girl'
+                    : template === 'canshou'
+                        ? 'canshou'
+                        : template === 'general'
+                            ? 'general-character'
+                            : inferCombatantType(item);
+
+                let validationOk = false;
+                if (type === 'magical-girl') {
+                    validationOk = validateMagicalGirlData(item, itemName).success;
+                } else if (type === 'canshou') {
+                    validationOk = validateCanshouData(item, itemName).success;
+                } else {
+                    validationOk = validateGeneralCharacterData(item, itemName).success;
+                }
+
+                if (!validationOk) {
+                    throw new Error('标准验证失败');
+                }
 
                 const verificationResponse = await fetch('/api/verify-origin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
                 const { isValid } = await verificationResponse.json();
 
-                // 检查并处理内嵌的随机判定事件
                 if (Array.isArray(item.adjudicationEvents) && item.adjudicationEvents.length > 0) {
-                    // 调用新增的辅助函数进行检测
                     if (isLegacyAdjudicatorFormat(item.adjudicationEvents)) {
-                        // 如果是旧格式，则忽略数据并设置警告
                         if (!legacyWarningTriggered) {
                             setError(`⚠️ 文件 "${itemName}" 包含旧版随机事件，已被忽略。请前往【角色管理中心】加载并保存该文件以自动升级格式。`);
                             legacyWarningTriggered = true;
                         }
-                        // 从角色数据中删除旧字段，防止其污染后续逻辑
                         delete item.adjudicationEvents;
                     } else {
-                        // 如果是新格式，则正常加载
                         newAdjudicationEvents.push(...(item.adjudicationEvents as AdjudicatorEvent[]));
                     }
                 }
 
                 loadedCombatants.push({ type, data: item, filename: itemName, isValid, isPreset: false, isNonStandard: false });
 
-            } catch (e) { // 捕获所有类型的错误
-                if (item && (item.codename || item.name)) {
+            } catch (e) {
+                if (item && (item.codename || item.name || item.content)) {
                     setError(`✔️ 文件 "${itemName}" 格式不完全规范，已通过兼容模式加载。`);
-                    const type = item.codename ? 'magical-girl' : 'canshou';
-                    loadedCombatants.push({ type, data: item, filename: itemName, isValid: false, isPreset: false, isNonStandard: true });
+                    const fallbackType = template === 'scenario' ? 'general-character' : inferCombatantType(item);
+                    loadedCombatants.push({ type: fallbackType, data: item, filename: itemName, isValid: false, isPreset: false, isNonStandard: true });
                 } else {
                     const errorMessage = e instanceof Error ? e.message : '未知错误';
                     throw new Error(`文件 "${itemName}" 格式不规范或处理失败: ${errorMessage}`);
@@ -556,10 +611,13 @@ const BattlePage: React.FC = () => {
             const cleanedCardData = removePrivateKeys(cardData);
 
             // 构造文件名显示
-            const filename = `${originalCardName || (cleanedCardData.codename || cleanedCardData.name || cleanedCardData.title || '未命名')}.json`;
+            const resolvedName = getCombatantDisplayName(cleanedCardData);
+            const filename = `${originalCardName || resolvedName}.json`;
+
+            const inferredTemplate = inferTemplate(cleanedCardData);
 
             // 根据数据类型判断是角色还是情景
-            if (cleanedCardData.title && cleanedCardData.elements) {
+            if (inferredTemplate === 'scenario') {
                 // 这是情景数据卡，在情景模式下处理
                 if (battleMode !== 'scenario') {
                     setError('❌ 情景数据卡只能在情景模式下使用。');
@@ -592,8 +650,21 @@ const BattlePage: React.FC = () => {
                 return;
             }
 
-            // 这是角色数据卡
-            const type = cleanedCardData.codename ? 'magical-girl' : 'canshou';
+            const type = inferredTemplate === 'magical-girl'
+                ? 'magical-girl'
+                : inferredTemplate === 'canshou'
+                    ? 'canshou'
+                    : 'general-character';
+
+            if (type === 'magical-girl') {
+                const result = validateMagicalGirlData(cleanedCardData, filename);
+                if (!result.success) return;
+            } else if (type === 'canshou') {
+                if (!validateCanshouData(cleanedCardData, filename).success) return;
+            } else {
+                if (!validateGeneralCharacterData(cleanedCardData, filename).success) return;
+            }
+
             const verificationResponse = await fetch('/api/verify-origin', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -718,29 +789,30 @@ const BattlePage: React.FC = () => {
         }
     };
 
-    const handleDownloadCorrectedJson = (codename: string) => {
-        const combatant = combatants.find(c => !('id' in c) && (c.data.codename || c.data.name) === codename) as CombatantData | undefined;
+    const handleDownloadCorrectedJson = (identifier: string) => {
+        const combatant = combatants.find(c => !('id' in c) && (c as CombatantData).filename === identifier) as CombatantData | undefined;
         if (!combatant) return;
         const jsonData = JSON.stringify(combatant.data, null, 2);
         const blob = new Blob([jsonData], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `魔法少女_${codename}_修正版.json`;
+        const baseName = getCombatantDisplayName(combatant.data);
+        link.download = `${baseName}_修正版.json`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
     };
 
-    const handleCopyCorrectedJson = (codename: string) => {
-        const combatant = combatants.find(c => !('id' in c) && (c.data.codename || c.data.name) === codename) as CombatantData | undefined;
+    const handleCopyCorrectedJson = (identifier: string) => {
+        const combatant = combatants.find(c => !('id' in c) && (c as CombatantData).filename === identifier) as CombatantData | undefined;
         if (!combatant) return;
         const jsonData = JSON.stringify(combatant.data, null, 2);
         navigator.clipboard.writeText(jsonData).then(() => {
-            setCopiedStatus(prev => ({ ...prev, [codename]: true }));
+            setCopiedStatus(prev => ({ ...prev, [identifier]: true }));
             setTimeout(() => {
-                setCopiedStatus(prev => ({ ...prev, [codename]: false }));
+                setCopiedStatus(prev => ({ ...prev, [identifier]: false }));
             }, 2000); // 2秒后恢复按钮状态
         });
     };
@@ -1087,7 +1159,7 @@ const BattlePage: React.FC = () => {
         <>
             <Head>
                 <title>魔法少女竞技场 - MahoShojo Generator</title>
-                <meta name="description" content="上传魔法少女或残兽设定，生成她们之间的战斗或日常故事！" />
+                <meta name="description" content="上传魔法少女、残兽或通用角色的设定，生成她们之间的战斗或日常故事！" />
             </Head>
             <div className="magic-background-white">
                 <div className="container">
@@ -1152,7 +1224,7 @@ const BattlePage: React.FC = () => {
                             </button>
                             {isPasteAreaVisible && (
                                 <div className="input-group mt-2">
-                                    <textarea value={pastedJson} onChange={(e) => setPastedJson(e.target.value)} placeholder="在此处粘贴一个或多个魔法少女/残兽的设定文件(.json)内容..." className="input-field resize-y h-32" disabled={isGenerating} />
+                                    <textarea value={pastedJson} onChange={(e) => setPastedJson(e.target.value)} placeholder="在此处粘贴一个或多个魔法少女/残兽/通用角色的设定文件(.json)内容..." className="input-field resize-y h-32" disabled={isGenerating} />
                                     <button onClick={handleAddFromPaste} disabled={!pastedJson.trim() || isGenerating || combatants.length >= 4} className="generate-button mt-2 mb-0">从文本添加角色</button>
                                 </div>
                             )}
@@ -1205,21 +1277,21 @@ const BattlePage: React.FC = () => {
                                 </div>
                                 <ul className="list-disc list-inside text-sm text-gray-600 mt-2 space-y-2">
                                     {combatants.map(c => {
-                                        // 类型守卫，判断是真实角色数据还是占位符
                                         const isPlaceholder = 'id' in c;
                                         const key = isPlaceholder ? c.id : c.filename;
-                                        const name = isPlaceholder ? c.filename : (c.data.codename || c.data.name);
+                                        const combatantData = isPlaceholder ? null : (c as CombatantData);
+                                        const displayName = isPlaceholder ? c.filename : getCombatantDisplayName(combatantData?.data);
                                         const typeDisplay = isPlaceholder
                                             ? (c.type === 'random-magical-girl' ? '(随机魔法少女)' : '(随机残兽)')
-                                            : (c.type === 'magical-girl' ? '(魔法少女)' : '(残兽)');
-                                        const isCorrected = !isPlaceholder && correctedFiles[name];
-                                        const combatantData = isPlaceholder ? null : (c as CombatantData);
+                                            : `(${TYPE_LABELS[combatantData!.type]})`;
+                                        const fileKey = isPlaceholder ? c.filename : combatantData!.filename;
+                                        const isCorrected = !isPlaceholder && correctedFiles[fileKey];
 
                                                 return (
                                                     <li key={key} className="flex justify-between items-start group gap-2">
                                                         <div className="flex items-center flex-grow min-w-0">
-                                                            <span className="break-words mr-2" title={name}>
-                                                                {name}
+                                                            <span className="break-words mr-2" title={displayName}>
+                                                                {displayName}
                                                                 <span className="text-xs text-gray-500 ml-1">{typeDisplay}</span>
                                                                 {!isPlaceholder && c.isPreset && <span className="text-xs text-purple-600 ml-1">(预设)</span>}
                                                                 {!isPlaceholder && c.isValid && <span className="text-xs text-green-600 ml-1">(原生)</span>}
@@ -1254,8 +1326,8 @@ const BattlePage: React.FC = () => {
                                                             )}
                                                             {isCorrected && (
                                                                 <div className="flex gap-2 mr-2">
-                                                                    <button onClick={() => handleDownloadCorrectedJson(name)} disabled={isGenerating} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">下载</button>
-                                                                    <button onClick={() => handleCopyCorrectedJson(name)} disabled={isGenerating} className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 w-16">{copiedStatus[name] ? '已复制!' : '复制'}</button>
+                                                                    <button onClick={() => handleDownloadCorrectedJson(fileKey)} disabled={isGenerating} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">下载</button>
+                                                                    <button onClick={() => handleCopyCorrectedJson(fileKey)} disabled={isGenerating} className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 w-16">{copiedStatus[fileKey] ? '已复制!' : '复制'}</button>
                                                                 </div>
                                                             )}
                                                             {/* 单个删除按钮 */}
@@ -1578,10 +1650,13 @@ const BattlePage: React.FC = () => {
                             <div className="space-y-4">
                                 {updatedCombatants.map((charData) => {
                                     const latestEntry = charData.arena_history?.entries?.[charData.arena_history.entries.length - 1];
-                                    const name = charData.codename || charData.name;
-
-                                    // 直接根据当前角色数据（charData）的字段来判断类型,魔法少女有 codename 字段，而残兽没有。
-                                    const typeDisplay = charData.codename ? '魔法少女' : '残兽';
+                                    const name = getCombatantDisplayName(charData);
+                                    const template = inferTemplate(charData);
+                                    const typeDisplay = template === 'magical-girl'
+                                        ? '魔法少女'
+                                        : template === 'canshou'
+                                            ? '残兽'
+                                            : '通用角色';
 
                                     if (!latestEntry) return null;
 
