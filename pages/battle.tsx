@@ -76,8 +76,16 @@ interface RandomCombatantPlaceholder {
 }
 
 // 定义参战者的数据结构
+type CombatantType = 'magical-girl' | 'canshou' | 'general-character';
+
+const COMBATANT_TYPE_LABELS: Record<CombatantType, string> = {
+    'magical-girl': '魔法少女',
+    canshou: '残兽',
+    'general-character': '通用角色'
+};
+
 interface CombatantData {
-    type: 'magical-girl' | 'canshou' | 'general-character';
+    type: CombatantType;
     data: any;
     filename: string; // 用于UI显示和去重
     isValid: boolean; // 用于标记是否为原生设定
@@ -196,12 +204,6 @@ const BattlePage: React.FC = () => {
     const [storyLength, setStoryLength] = useState('default');
     const [selectedCombatantForDetails, setSelectedCombatantForDetails] = useState<CombatantData | null>(null);
 
-    const TYPE_LABELS: Record<CombatantData['type'], string> = {
-        'magical-girl': '魔法少女',
-        canshou: '残兽',
-        'general-character': '通用角色'
-    };
-
     const getCombatantDisplayName = (data: any): string => {
         if (!data) return '未命名';
         return data.codename || data.name || data.title || '未命名';
@@ -227,7 +229,7 @@ const BattlePage: React.FC = () => {
         if (!selectedCombatantForDetails) return null;
         const baseData = selectedCombatantForDetails.data || {};
         const displayName = getCombatantDisplayName(baseData);
-        const typeLabel = TYPE_LABELS[selectedCombatantForDetails.type];
+        const typeLabel = COMBATANT_TYPE_LABELS[selectedCombatantForDetails.type];
         return {
             id: selectedCombatantForDetails.filename,
             name: displayName,
@@ -1281,9 +1283,9 @@ const BattlePage: React.FC = () => {
                                         const key = isPlaceholder ? c.id : c.filename;
                                         const combatantData = isPlaceholder ? null : (c as CombatantData);
                                         const displayName = isPlaceholder ? c.filename : getCombatantDisplayName(combatantData?.data);
-                                        const typeDisplay = isPlaceholder
-                                            ? (c.type === 'random-magical-girl' ? '(随机魔法少女)' : '(随机残兽)')
-                                            : `(${TYPE_LABELS[combatantData!.type]})`;
+        const typeDisplay = isPlaceholder
+            ? (c.type === 'random-magical-girl' ? '(随机魔法少女)' : '(随机残兽)')
+            : `(${COMBATANT_TYPE_LABELS[combatantData!.type]})`;
                                         const fileKey = isPlaceholder ? c.filename : combatantData!.filename;
                                         const isCorrected = !isPlaceholder && correctedFiles[fileKey];
 
