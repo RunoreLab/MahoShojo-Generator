@@ -1,6 +1,8 @@
 import React from 'react';
-import { isDataCardBanned } from '../../lib/database/data-cards';
 import { AlertTriangle } from 'lucide-react';
+import { isDataCardBanned } from '../../lib/database/data-cards';
+import { inferTemplate, TEMPLATE_LABELS } from '@/lib/data-card-converter';
+import type { InferableTemplate } from '@/lib/data-card-converter';
 
 interface EditCardFormProps {
   card: any;
@@ -14,6 +16,17 @@ export default function EditCardForm({ card, onSave, onCancel }: EditCardFormPro
     description: card.description || '',
     isPublic: card.is_public === 1 // 只有值为1时才显示为选中
   });
+
+  const templateType = React.useMemo<InferableTemplate>(() => {
+    try {
+      const parsed = JSON.parse(card.data);
+      return inferTemplate(parsed);
+    } catch {
+      return 'unknown';
+    }
+  }, [card.data]);
+
+  const templateLabel = templateType === 'unknown' ? '未知类型' : TEMPLATE_LABELS[templateType];
 
   const isBanned = isDataCardBanned(card);
 
@@ -36,6 +49,21 @@ export default function EditCardForm({ card, onSave, onCancel }: EditCardFormPro
           placeholder="描述"
           maxLength={120}
         />
+        <div>
+          <label className="block text-sm font-medium text-gray-700">内容模板</label>
+          <select
+            value={templateType === 'unknown' ? '__unknown__' : templateType}
+            disabled
+            className="input-field bg-gray-100 cursor-not-allowed"
+          >
+            <option value={templateType === 'unknown' ? '__unknown__' : templateType}>
+              {templateLabel}
+            </option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            如需转换模板，请在档案馆编辑器中载入该数据卡并使用“内容模板”选择器。
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <input
             type="checkbox"
