@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry } from '@/types/arena';
@@ -19,6 +19,68 @@ interface GeneralCharacterCardProps {
   saveButtonLabel?: string;
 }
 
+type MainColorKey = 'Red' | 'Orange' | 'Cyan' | 'Blue' | 'Purple' | 'Pink' | 'Yellow' | 'Green';
+
+const MAIN_COLORS: Record<MainColorKey, string> = {
+  Red: '红色',
+  Orange: '橙色',
+  Cyan: '青色',
+  Blue: '蓝色',
+  Purple: '紫色',
+  Pink: '粉色',
+  Yellow: '黄色',
+  Green: '绿色',
+};
+
+const COLOR_GRADIENTS: Record<MainColorKey, { first: string; second: string }> = {
+  Red: { first: '#ff6b6b', second: '#ee5a6f' },
+  Orange: { first: '#ff922b', second: '#ffa94d' },
+  Cyan: { first: '#22b8cf', second: '#66d9e8' },
+  Blue: { first: '#5c7cfa', second: '#748ffc' },
+  Purple: { first: '#9775fa', second: '#b197fc' },
+  Pink: { first: '#ff9a9e', second: '#fecfef' },
+  Yellow: { first: '#f59f00', second: '#fcc419' },
+  Green: { first: '#51cf66', second: '#8ce99a' },
+};
+
+const ENGLISH_COLOR_KEYWORDS: Record<string, MainColorKey> = {
+  red: 'Red',
+  crimson: 'Red',
+  scarlet: 'Red',
+  orange: 'Orange',
+  amber: 'Orange',
+  cyan: 'Cyan',
+  teal: 'Cyan',
+  blue: 'Blue',
+  navy: 'Blue',
+  violet: 'Purple',
+  purple: 'Purple',
+  pink: 'Pink',
+  rose: 'Pink',
+  yellow: 'Yellow',
+  gold: 'Yellow',
+  green: 'Green',
+  emerald: 'Green',
+};
+
+const detectColorFromContent = (content?: string): MainColorKey => {
+  if (!content) return 'Pink';
+  for (const [key, label] of Object.entries(MAIN_COLORS) as [MainColorKey, string][]) {
+    if (content.includes(label)) {
+      return key;
+    }
+  }
+
+  const lower = content.toLowerCase();
+  for (const [keyword, color] of Object.entries(ENGLISH_COLOR_KEYWORDS)) {
+    if (lower.includes(keyword)) {
+      return color;
+    }
+  }
+
+  return 'Pink';
+};
+
 const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
   general,
   onSaveImage,
@@ -27,6 +89,11 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
+
+  const gradientStyle = useMemo(() => {
+    const colors = COLOR_GRADIENTS[detectColorFromContent(general?.content)];
+    return `linear-gradient(135deg, ${colors.first} 0%, ${colors.second} 100%)`;
+  }, [general]);
 
   const handleSaveImage = async () => {
     if (!cardRef.current) return;
@@ -114,7 +181,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
     <div
       ref={cardRef}
       className="result-card"
-      style={{ background: 'linear-gradient(135deg, #1f2937 0%, #312e81 100%)' }}
+      style={{ background: gradientStyle }}
     >
       <div className="result-content">
         <div className="flex justify-center">
