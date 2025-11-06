@@ -598,7 +598,7 @@ export default function BattleDataModal({
                         isFavorited={isFavorited}
                         canFavorite={enableFavorite}
                         isRecommended={card.is_recommended === 1}
-                        author={activeTab === 'public' ? (card.username || '未知') : '我'}
+                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
                         onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
                         onAuthorClick={handleAuthorClick}
                         onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
@@ -657,7 +657,7 @@ export default function BattleDataModal({
             usageCount: selectedCard.usage_count,
             likeCount: selectedCard.like_count,
             favoriteCount: selectedCard.favorite_count,
-            author: activeTab === 'public' ? (selectedCard.username || '未知') : '我',
+            author: activeTab === 'my' ? '我' : (selectedCard.username || '未知'),
             createdAt: selectedCard.created_at,
             updatedAt: selectedCard.updated_at
           }}
