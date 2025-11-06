@@ -15,7 +15,7 @@ interface MagicalGirlCardProps {
     magicConstruct: {
       name: string;
       form: string | object; // 允许 form 是字符串或对象
-      basicAbilities: string[] | string;
+      basicAbilities: Array<string | Record<string, unknown>> | string;
       description: string;
     };
     wonderlandRule: {
@@ -71,6 +71,89 @@ const renderComplexValue = (value: any) => {
     }
     // 对于其他类型（如数字等），转换为字符串
     return String(value);
+};
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const renderInlineValue = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => renderInlineValue(item)).filter(Boolean).join('，');
+  }
+  if (isPlainObject(value)) {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '[复杂数据]';
+    }
+  }
+  return String(value);
+};
+
+const renderAbilityItem = (ability: string | Record<string, unknown>, index: number) => {
+  if (typeof ability === 'string') {
+    return <li key={`basicAbility-${index}`}>• {ability}</li>;
+  }
+
+  if (isPlainObject(ability)) {
+    const { name, description, subFields, ...rest } = ability;
+    const hasName = typeof name === 'string' && name.trim().length > 0;
+    const hasDescription = typeof description === 'string' && description.trim().length > 0;
+    const subFieldEntries = isPlainObject(subFields) ? Object.entries(subFields) : [];
+    const extraEntries = Object.entries(rest).filter(([, value]) => value !== undefined && value !== null);
+    const hasStructuredInfo = subFieldEntries.length > 0 || extraEntries.length > 0;
+
+    return (
+      <li key={`basicAbility-${index}`} style={{ marginBottom: '0.75rem' }}>
+        <div>
+          <span>• </span>
+          {hasName && <strong>{String(name)}</strong>}
+          {hasDescription && (
+            <span>{hasName ? '：' : ''}{String(description)}</span>
+          )}
+          {!hasName && !hasDescription && !hasStructuredInfo && (
+            <span>{renderInlineValue(ability)}</span>
+          )}
+        </div>
+        {subFieldEntries.length > 0 && (
+          <ul style={{ marginLeft: '1.5rem', marginTop: '0.25rem', listStyleType: 'circle' }}>
+            {subFieldEntries.map(([subKey, subValue]) => (
+              <li
+                key={`basicAbility-${index}-sub-${subKey}`}
+                style={{ marginLeft: '1rem', listStyleType: 'circle' }}
+              >
+                <strong>{subKey}：</strong>{renderInlineValue(subValue)}
+              </li>
+            ))}
+          </ul>
+        )}
+        {extraEntries.length > 0 && (
+          <ul style={{ marginLeft: '1.5rem', marginTop: '0.25rem', listStyleType: 'circle' }}>
+            {extraEntries.map(([extraKey, extraValue]) => (
+              <li
+                key={`basicAbility-${index}-extra-${extraKey}`}
+                style={{ marginLeft: '1rem', listStyleType: 'circle' }}
+              >
+                <strong>{extraKey}：</strong>{renderInlineValue(extraValue)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  }
+
+  return <li key={`basicAbility-${index}`}>• {renderInlineValue(ability)}</li>;
 };
 
 const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
@@ -180,13 +263,15 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
             <div><strong>名称：</strong>{magicalGirl.magicConstruct.name}</div>
             <div><strong>形态：</strong>{renderComplexValue(magicalGirl.magicConstruct.form)}</div>
             <div><strong>基本能力：</strong></div>
-            <ul style={{ marginLeft: '1rem', marginTop: '0.5rem' }}>
-              {/* 在使用 .map() 之前，使用 Array.isArray() 检查确保它是一个数组。如果不是，则不渲染任何列表项，避免崩溃。
-              */}
-              {Array.isArray(magicalGirl.magicConstruct.basicAbilities) && magicalGirl.magicConstruct.basicAbilities.map((ability: string, index: number) => (
-                <li key={index}>• {ability}</li>
-              ))}
-            </ul>
+            {Array.isArray(magicalGirl.magicConstruct.basicAbilities) ? (
+              <ul style={{ marginLeft: '1rem', marginTop: '0.5rem' }}>
+                {magicalGirl.magicConstruct.basicAbilities.map((ability, index) => renderAbilityItem(ability, index))}
+              </ul>
+            ) : (
+              <p className="text-sm" style={{ marginLeft: '0.5rem', marginTop: '0.5rem' }}>
+                {renderInlineValue(magicalGirl.magicConstruct.basicAbilities)}
+              </p>
+            )}
             <div style={{ marginTop: '0.5rem' }}><strong>详细描述：</strong>{magicalGirl.magicConstruct.description}</div>
           </div>
         </div>
