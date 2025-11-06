@@ -14,6 +14,7 @@ import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
+import GeneralCharacterCard from '../components/GeneralCharacterCard';
 import { MainColor } from '@/lib/main-color';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, authStorage } from '@/lib/auth';
@@ -1747,7 +1748,7 @@ const CharacterManagerPage: React.FC = () => {
                     </div>
 
                     {/* 角色卡片预览与生成区域 */}
-                    {characterData && !isLoading && (currentTemplate === 'magical-girl' || currentTemplate === 'canshou') && (
+                    {characterData && !isLoading && (currentTemplate === 'magical-girl' || currentTemplate === 'canshou' || currentTemplate === 'general') && (
                         <div className="card mt-6">
                             <h3 className="text-xl font-bold text-gray-800 text-center mb-4">
                                 角色卡片预览与生成
@@ -1763,9 +1764,14 @@ const CharacterManagerPage: React.FC = () => {
                                     })()}
                                     onSaveImage={handleSaveImageCallback}
                                 />
-                            ) : (
+                            ) : currentTemplate === 'canshou' ? (
                                 <CanshouCard
                                     canshou={characterData}
+                                    onSaveImage={handleSaveImageCallback}
+                                />
+                            ) : (
+                                <GeneralCharacterCard
+                                    general={characterData}
                                     onSaveImage={handleSaveImageCallback}
                                 />
                             )}
