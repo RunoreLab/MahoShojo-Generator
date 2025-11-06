@@ -1,13 +1,83 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry } from '@/types/arena';
 import { GeneralCharacterData } from '@/lib/schemas/general-character';
 
-interface GeneralCharacterCardProps {
-  general: (GeneralCharacterData & { arena_history?: ArenaHistory | null }) | { name: string; content: string; arena_history?: ArenaHistory | null };
+export interface GeneralCharacterDetails extends GeneralCharacterData {
+  arena_history?: ArenaHistory | null;
 }
 
-const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({ general }) => {
+interface GeneralCharacterCardProps {
+  general: GeneralCharacterDetails | {
+    name: string;
+    content: string;
+    arena_history?: ArenaHistory | null;
+  };
+  onSaveImage?: (imageUrl: string) => void;
+  imageSaveMode?: 'auto' | 'modal' | 'download';
+  saveButtonLabel?: string;
+}
+
+const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
+  general,
+  onSaveImage,
+  imageSaveMode = 'auto',
+  saveButtonLabel,
+}) => {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [isHistoryVisible, setIsHistoryVisible] = useState(false);
+
+  const handleSaveImage = async () => {
+    if (!cardRef.current) return;
+
+    try {
+      const saveButton = cardRef.current.querySelector('.save-button') as HTMLElement;
+      const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
+
+      if (saveButton) saveButton.style.display = 'none';
+      if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
+
+      const result = await snapdom(cardRef.current, { scale: 1 });
+
+      if (saveButton) saveButton.style.display = 'block';
+      if (logoPlaceholder) logoPlaceholder.style.display = 'none';
+
+      const imgElement = await result.toPng();
+      const imageUrl = imgElement.src;
+
+      const resolvedMode: 'modal' | 'download' = imageSaveMode === 'modal' || imageSaveMode === 'download'
+        ? imageSaveMode
+        : (/Mobi/i.test(window.navigator.userAgent) ? 'modal' : 'download');
+
+      if (resolvedMode === 'modal') {
+        if (onSaveImage) {
+          onSaveImage(imageUrl);
+        } else {
+          const previewWindow = window.open(imageUrl, '_blank');
+          if (!previewWindow) {
+            alert('图片已生成，请长按或右键保存。');
+          }
+        }
+      } else {
+        const downloadLink = document.createElement('a');
+        downloadLink.href = imageUrl;
+        const sanitizedTitle = (general?.name || '未命名角色').replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
+        downloadLink.download = `通用角色_${sanitizedTitle}.png`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+      }
+    } catch (err) {
+      alert('生成图片失败，请重试');
+      console.error('Image generation failed:', err);
+      const saveButton = cardRef.current?.querySelector('.save-button') as HTMLElement;
+      const logoPlaceholder = cardRef.current?.querySelector('.logo-placeholder') as HTMLElement;
+      if (saveButton) saveButton.style.display = 'block';
+      if (logoPlaceholder) logoPlaceholder.style.display = 'none';
+    }
+  };
+
   const renderHistory = () => {
     const history = general?.arena_history;
     if (!history || !Array.isArray(history.entries) || history.entries.length === 0) {
@@ -15,43 +85,52 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({ general }) 
     }
 
     const entries = [...history.entries].reverse();
-
     return (
       <div className="result-item">
-        <div className="result-label">🧭 历战记录</div>
-        <div className="result-value space-y-3">
-          {entries.map((entry: ArenaHistoryEntry) => (
-            <div key={entry.id} className="rounded-lg border border-purple-200 bg-white/70 p-3 shadow-sm">
-              <div className="flex justify-between text-xs text-purple-600 mb-1">
-                <span>{entry.type === 'sublimation' ? '升华事件' : entry.type}</span>
-                <span>胜者：{entry.winner || '未知'}</span>
+        <button
+          onClick={() => setIsHistoryVisible(!isHistoryVisible)}
+          className="result-label w-full text-left bg-transparent border-none cursor-pointer"
+        >
+          {isHistoryVisible ? '▼' : '▶'} 📜 历战记录
+        </button>
+        {isHistoryVisible && (
+          <div className="result-value mt-2 space-y-2 text-xs">
+            {entries.map((entry: ArenaHistoryEntry) => (
+              <div key={entry.id} className="p-2 bg-black bg-opacity-10 rounded">
+                <p className="font-semibold text-sm">{entry.title || '未命名事件'}</p>
+                <p className="text-gray-200">
+                  <strong>类型:</strong> {entry.type} | <strong>胜者:</strong> {entry.winner || '未知'}
+                </p>
+                <p className="text-gray-100 leading-relaxed" style={{ whiteSpace: 'pre-wrap' }}>{entry.impact || '暂无影响描述'}</p>
               </div>
-              <div className="text-sm font-semibold text-gray-800 mb-1">{entry.title || '未命名事件'}</div>
-              <div className="text-sm text-gray-600 leading-relaxed" style={{ whiteSpace: 'pre-wrap' }}>{entry.impact || '暂无影响描述'}</div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
 
   return (
-    <div className="result-card" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #312e81 100%)' }}>
+    <div
+      ref={cardRef}
+      className="result-card"
+      style={{ background: 'linear-gradient(135deg, #1f2937 0%, #312e81 100%)' }}
+    >
       <div className="result-content">
-        <div className="flex justify-center items-center mb-6">
-          <img src="/sublimation.svg" width={260} height={80} alt="通用角色" />
+        <div className="flex justify-center">
+          <img src="/questionnaire-title.svg" alt="通用角色档案" className="w-72 mb-4" />
         </div>
 
         <div className="result-item">
-          <div className="result-label">🌌 角色名称</div>
-          <div className="result-value text-2xl font-bold text-white drop-shadow" style={{ letterSpacing: '0.06em' }}>
+          <div className="result-label">角色名称</div>
+          <div className="result-value text-2xl font-bold text-white drop-shadow" style={{ letterSpacing: '0.08em' }}>
             {general?.name || '未命名角色'}
           </div>
         </div>
 
         <div className="result-item">
-          <div className="result-label">📜 角色设定（content）</div>
-          <div className="result-value bg-white/90 rounded-xl p-4 shadow-inner text-sm leading-relaxed text-gray-800">
+          <div className="result-label">角色设定（content）</div>
+          <div className="result-value bg-white/95 rounded-xl p-4 shadow-inner text-sm leading-relaxed text-gray-800">
             <ReactMarkdown
               components={{
                 h1: ({ children }) => <h1 className="text-2xl font-bold my-3 text-indigo-700">{children}</h1>,
@@ -65,7 +144,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({ general }) 
                 blockquote: ({ children }) => (
                   <blockquote className="border-l-4 border-indigo-300 pl-4 italic text-gray-600 my-3">{children}</blockquote>
                 ),
-                code: ({ children }) => <code className="bg-gray-100 rounded px-1 py-0.5 text-xs text-gray-700">{children}</code>
+                code: ({ children }) => <code className="bg-gray-100 rounded px-1 py-0.5 text-xs text-gray-700">{children}</code>,
               }}
             >
               {general?.content?.trim() || '（content 字段为空，建议补充完整的角色设定，包括外观、能力、背景与关键剧情。）'}
@@ -74,6 +153,25 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({ general }) 
         </div>
 
         {renderHistory()}
+
+        <button onClick={handleSaveImage} className="save-button mt-4">
+          {saveButtonLabel ?? '📱 保存为图片'}
+        </button>
+
+        <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
+          <img
+            src="/logo-white-qrcode.svg"
+            width={240}
+            height={240}
+            alt="MahoShojo Generator"
+            style={{
+              display: 'block',
+              borderRadius: '12px',
+              background: 'rgba(17, 24, 39, 0.85)',
+              padding: '1rem',
+            }}
+          />
+        </div>
       </div>
     </div>
   );
