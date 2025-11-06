@@ -6,6 +6,7 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
+import GeneralCharacterCard from '../components/GeneralCharacterCard';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { useCooldown } from '../lib/cooldown';
 import { config as appConfig } from '../lib/config';
@@ -14,6 +15,13 @@ import Footer from '../components/Footer';
 import BattleDataModal from '../components/BattleDataModal';
 import { useAuth } from '@/lib/useAuth';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import {
+    inferTemplate,
+    TEMPLATE_LABELS,
+    type DataCardTemplate,
+    type InferableTemplate
+} from '@/lib/data-card-converter';
+import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
 
 // 颜色处理方案
 const MainColor = {
@@ -36,6 +44,16 @@ const gradientColors: Record<string, { first: string; second: string }> = {
     [MainColor.Pink]: { first: '#ff9a9e', second: '#fecfef' },
     [MainColor.Yellow]: { first: '#f59f00', second: '#fcc419' },
     [MainColor.Green]: { first: '#51cf66', second: '#8ce99a' }
+};
+
+type SupportedTargetTemplate = 'magical-girl' | 'canshou' | 'general';
+
+const TARGET_TEMPLATE_OPTIONS: SupportedTargetTemplate[] = ['magical-girl', 'canshou', 'general'];
+
+const TARGET_TEMPLATE_LABELS: Record<SupportedTargetTemplate, string> = {
+    'magical-girl': TEMPLATE_LABELS['magical-girl'],
+    'canshou': TEMPLATE_LABELS['canshou'],
+    'general': TEMPLATE_LABELS['general'],
 };
 
 // 递归提取对象中所有字符串值的函数
@@ -61,10 +79,11 @@ const extractTextForCheck = (data: any): string => {
 interface SublimationResponse {
     sublimatedData: any;
     unchangedFields: string[];
+    targetTemplate?: SupportedTargetTemplate;
 }
 
 // [新增] 定义可配置的字段及其显示名称
-const PRESERVABLE_FIELDS_CONFIG = {
+const PRESERVABLE_FIELDS_CONFIG: Record<SupportedTargetTemplate, { id: string; label: string }[]> = {
     'magical-girl': [
         { id: 'appearance', label: '外观' },
         { id: 'magicConstruct', label: '魔装' },
@@ -85,7 +104,35 @@ const PRESERVABLE_FIELDS_CONFIG = {
         { id: 'birthEnvironment', label: '诞生环境' },
         { id: 'researcherNotes', label: '研究员笔记' },
         { id: 'userAnswers', label: '问卷答案' },
+    ],
+    'general': [
+        { id: 'name', label: '角色名称' },
+        { id: 'content', label: '完整设定（content）' }
     ]
+};
+
+const FIELD_PRESET_CONFIG: Record<SupportedTargetTemplate, { default: string[]; personality: string[] }> = {
+    'magical-girl': {
+        default: ['wonderlandRule', 'blooming'],
+        personality: ['appearance', 'magicConstruct', 'wonderlandRule', 'blooming']
+    },
+    'canshou': {
+        default: [],
+        personality: ['appearance', 'materialAndSkin', 'featuresAndAppendages', 'attackMethod', 'specialAbility']
+    },
+    'general': {
+        default: [],
+        personality: ['name']
+    }
+};
+
+const getDefaultPreserveFields = (target: SupportedTargetTemplate) => [...FIELD_PRESET_CONFIG[target].default];
+const getPersonalityPreset = (target: SupportedTargetTemplate) => [...FIELD_PRESET_CONFIG[target].personality];
+const getDefaultTargetTemplate = (source: InferableTemplate): SupportedTargetTemplate => {
+    if (source === 'magical-girl') return 'magical-girl';
+    if (source === 'canshou') return 'canshou';
+    if (source === 'general') return 'general';
+    return 'general';
 };
 
 
@@ -105,12 +152,15 @@ const SublimationPage: React.FC = () => {
 
     // 数据库选择相关状态
     const [showBattleDataModal, setShowBattleDataModal] = useState(false);
+    const [modalType, setModalType] = useState<'character' | 'scenario'>('character');
 
     // [新增] 用于管理高级选项的状态
     const [fieldsToPreserve, setFieldsToPreserve] = useState<string[]>([]);
     const [isAdvancedVisible, setIsAdvancedVisible] = useState(false);
     const [isDowngrade] = useState(false); // 是否使用轻量模型
     const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
+    const [targetTemplate, setTargetTemplate] = useState<SupportedTargetTemplate>('magical-girl');
+    const [sourceTemplate, setSourceTemplate] = useState<InferableTemplate>('unknown');
 
     const { isCooldown, startCooldown, remainingTime } = useCooldown('sublimationCooldown', 60000);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -122,24 +172,27 @@ const SublimationPage: React.FC = () => {
         if (isMobileDevice) setIsPasteAreaVisible(true);
     }, []);
 
+    useEffect(() => {
+        setFieldsToPreserve(prev => {
+            const allowed = new Set(PRESERVABLE_FIELDS_CONFIG[targetTemplate].map(item => item.id));
+            return prev.filter(field => allowed.has(field));
+        });
+    }, [targetTemplate]);
+
     const processJsonData = (jsonText: string) => {
         try {
             const json = JSON.parse(jsonText);
-            if (!json.arena_history) {
-                throw new Error('角色文件缺少必需的“arena_history”（历战记录）属性，需使用在竞技场下载的经历战斗后的角色文件！');
-            }
             setCharacterData(json);
             setFileName('粘贴的内容');
             setError(null);
             setResultData(null);
 
-            // [新增] 加载角色后，根据类型设置默认的保留字段
-            const isMagicalGirl = !!json.codename;
-            if (isMagicalGirl) {
-                setFieldsToPreserve(['wonderlandRule', 'blooming']);
-            } else {
-                setFieldsToPreserve([]); // 残兽默认全部重置
-            }
+            const inferred = inferTemplate(json);
+            setSourceTemplate(inferred);
+
+            const defaultTarget = getDefaultTargetTemplate(inferred);
+            setTargetTemplate(defaultTarget);
+            setFieldsToPreserve(getDefaultPreserveFields(defaultTarget));
 
             return true;
         } catch (err) {
@@ -180,6 +233,13 @@ const SublimationPage: React.FC = () => {
         setShowBattleDataModal(true);
     };
 
+    const handleTargetTemplateChange = (event: ChangeEvent<HTMLSelectElement>) => {
+        const value = event.target.value as SupportedTargetTemplate;
+        if (!TARGET_TEMPLATE_OPTIONS.includes(value)) return;
+        setTargetTemplate(value);
+        setFieldsToPreserve(getDefaultPreserveFields(value));
+    };
+
     // 递归删除以 _ 开头的键
     const removePrivateKeys = (obj: any): any => {
         if (obj === null || typeof obj !== 'object') {
@@ -215,16 +275,16 @@ const SublimationPage: React.FC = () => {
             // 删除内部使用的私有键（以_开头）
             const cleanedCardData = removePrivateKeys(cardData);
 
-            // 验证数据是否包含历战记录
-            if (!cleanedCardData.arena_history) {
-                setError('❌ 选择的角色缺少必需的"历战记录"（arena_history）属性，无法进行升华。');
-                return;
-            }
-
             setCharacterData(cleanedCardData);
             setFileName(`${card._cardName || '未命名'}(来自数据库)`); // 使用内部传递的_cardName
             setShowBattleDataModal(false);
             setError(null);
+
+            const inferred = inferTemplate(cleanedCardData);
+            setSourceTemplate(inferred);
+            const defaultTarget = getDefaultTargetTemplate(inferred);
+            setTargetTemplate(defaultTarget);
+            setFieldsToPreserve(getDefaultPreserveFields(defaultTarget));
 
         } catch (err) {
             setError(`❌ 数据卡加载失败: ${err instanceof Error ? err.message : '未知错误'}`);
@@ -258,25 +318,35 @@ const SublimationPage: React.FC = () => {
                 return;
             }
 
+            const allowedFieldSet = new Set(currentFieldsConfig.map(item => item.id));
+            const filteredFieldsToPreserve = fieldsToPreserve.filter(field => allowedFieldSet.has(field));
+
+            const payload: Record<string, any> = {
+                ...characterData,
+                language: selectedLanguage,
+                userGuidance: userGuidance.trim(),
+                fieldsToPreserve: filteredFieldsToPreserve,
+                isDowngrade: isDowngrade,
+                targetTemplate: targetTemplate,
+                customProvider: (
+                    userProviderConfig
+                    && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
+                    && userProviderConfig.modelId !== 'default'
+                ) ? {
+                    providerId: userProviderConfig.providerId,
+                    modelId: userProviderConfig.modelId,
+                    apiKey: userProviderConfig.apiKey,
+                } : undefined,
+            };
+
+            if (sourceTemplate !== 'unknown') {
+                payload.sourceTemplate = sourceTemplate;
+            }
+
             const response = await fetch('/api/generate-sublimation', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ...characterData,
-                    language: selectedLanguage,
-                    userGuidance: userGuidance.trim(),
-                    fieldsToPreserve: fieldsToPreserve, // [新增] 发送需要保留的字段列表
-                    isDowngrade: isDowngrade,
-                    customProvider: (
-                        userProviderConfig
-                        && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
-                        && userProviderConfig.modelId !== 'default'
-                    ) ? {
-                        providerId: userProviderConfig.providerId,
-                        modelId: userProviderConfig.modelId,
-                        apiKey: userProviderConfig.apiKey,
-                    } : undefined,
-                }),
+                body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
@@ -292,6 +362,9 @@ const SublimationPage: React.FC = () => {
             }
 
             const result: SublimationResponse = await response.json();
+            if (result.targetTemplate && TARGET_TEMPLATE_OPTIONS.includes(result.targetTemplate)) {
+                setTargetTemplate(result.targetTemplate);
+            }
             setResultData(result);
             startCooldown();
 
@@ -331,21 +404,15 @@ const SublimationPage: React.FC = () => {
     };
 
     const applyPreset = (presetName: 'default' | 'full' | 'personality') => {
-        if (!characterData) return;
-        const isMagicalGirl = !!characterData.codename;
         switch (presetName) {
             case 'default':
-                setFieldsToPreserve(isMagicalGirl ? ['wonderlandRule', 'blooming'] : []);
+                setFieldsToPreserve(getDefaultPreserveFields(targetTemplate));
                 break;
             case 'full':
                 setFieldsToPreserve([]);
                 break;
             case 'personality':
-                setFieldsToPreserve(
-                    isMagicalGirl
-                        ? ['appearance', 'magicConstruct', 'wonderlandRule', 'blooming']
-                        : ['appearance', 'materialAndSkin', 'featuresAndAppendages', 'attackMethod', 'specialAbility']
-                );
+                setFieldsToPreserve(getPersonalityPreset(targetTemplate));
                 break;
         }
     };
@@ -354,20 +421,28 @@ const SublimationPage: React.FC = () => {
         if (!resultData?.sublimatedData) return null;
         const data = resultData.sublimatedData;
 
-        if (data.codename) {
+        if (targetTemplate === 'magical-girl' && data.codename) {
             const colorScheme = data.appearance.colorScheme || "红色、粉色";
             const mainColorName = Object.values(MainColor).find(color => colorScheme.includes(color)) || MainColor.Pink;
             const colors = gradientColors[mainColorName] || gradientColors[MainColor.Pink];
             const gradientStyle = `linear-gradient(135deg, ${colors.first} 0%, ${colors.second} 100%)`;
             return <MagicalGirlCard magicalGirl={data} gradientStyle={gradientStyle} onSaveImage={handleSaveImage} />;
-        } else if (data.name) {
+        } else if (targetTemplate === 'canshou' && data.name && data.templateId !== GENERAL_CHARACTER_TEMPLATE_ID) {
             return <CanshouCard canshou={data} onSaveImage={handleSaveImage} />;
+        } else if (targetTemplate === 'general') {
+            return <GeneralCharacterCard general={data} />;
         }
-        return <div className="error-message">无法识别的角色类型</div>;
+        return (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+                升华结果已生成，可通过“下载新设定”查看完整 JSON。当前模板不支持在页面内预览。
+            </div>
+        );
     };
 
-    const currentCharacterType = characterData?.codename ? 'magical-girl' : 'canshou';
-    const currentFieldsConfig = PRESERVABLE_FIELDS_CONFIG[currentCharacterType] || [];
+    const sourceTemplateLabel = sourceTemplate === 'unknown'
+        ? '未识别模板'
+        : TEMPLATE_LABELS[sourceTemplate as DataCardTemplate];
+    const currentFieldsConfig = PRESERVABLE_FIELDS_CONFIG[targetTemplate];
 
     return (
         <>
@@ -387,15 +462,15 @@ const SublimationPage: React.FC = () => {
                         <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-800">
                             <h3 className="font-bold mb-2">✨ 功能说明</h3>
                             <ol className="list-decimal list-inside space-y-1">
-                                <li>上传一个包含【历战记录】(arena_history) 的角色设定文件 (.json)。</li>
-                                <li>AI 将会阅读角色的全部设定和所有经历。</li>
-                                <li>为你生成一个“成长之后”的全新角色设定！你可以在高级选项中选择保留哪些设定不被AI修改。</li>
+                                <li>上传任意.json格式的设定文件（部分兼容非规范文件），历战记录 <span className="font-semibold">可选</span>，如存在会增强升华叙事。</li>
+                                <li>选择目标模板（默认沿用原模板，无匹配时自动切换为通用角色），并可指定需要保留的字段。如果希望借此切换角色模板，建议选择【完全重塑】。</li>
+                                <li>AI 将结合设定、历战记录与可选的成长引导，生成“升华后”的新形态设定。</li>
                             </ol>
                         </div>
 
                         {/* 文件上传与粘贴区域 */}
                         <div className="input-group">
-                            <label htmlFor="character-upload" className="input-label">上传角色设定文件</label>
+                            <label htmlFor="character-upload" className="input-label">上传设定文件</label>
                             <input id="character-upload" type="file" accept=".json" onChange={handleFileChange} className="input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100" />
                             {fileName && (<p className="text-xs text-gray-500 mt-2">已加载角色: {fileName}</p>)}
                         </div>
@@ -405,8 +480,8 @@ const SublimationPage: React.FC = () => {
                             </button>
                             {isPasteAreaVisible && (
                                 <div className="input-group mt-2">
-                                    <textarea value={pastedJson} onChange={(e) => setPastedJson(e.target.value)} placeholder="在此处粘贴一个角色的设定文件(.json)内容..." className="input-field resize-y h-32" />
-                                    <button onClick={handlePasteAndLoad} disabled={isGenerating} className="generate-button mt-2 mb-0" style={{ backgroundColor: '#8b5cf6', backgroundImage: 'linear-gradient(to right, #8b5cf6, #a78bfa)' }}>从文本加载角色</button>
+                                    <textarea value={pastedJson} onChange={(e) => setPastedJson(e.target.value)} placeholder="在此处粘贴一个设定文件(.json)内容" className="input-field resize-y h-32" />
+                                    <button onClick={handlePasteAndLoad} disabled={isGenerating} className="generate-button mt-2 mb-0" style={{ backgroundColor: '#8b5cf6', backgroundImage: 'linear-gradient(to right, #8b5cf6, #a78bfa)' }}>从文本加载设定</button>
                                 </div>
                             )}
                         </div>
@@ -422,20 +497,55 @@ const SublimationPage: React.FC = () => {
                                 >
                                     从在线角色数据库中选择
                                 </button>
-                                {!isAuthenticated && (
-                                    <div className="flex-1 text-xs text-gray-500 flex items-center px-2">
-                                        <Link
-                                            href="/character-manager"
-                                            className="text-purple-600 hover:text-purple-800 underline"
-                                        >
-                                            登录后可访问私有数据卡
-                                        </Link>
-                                    </div>
-                                )}
+                                <select
+                                    value={modalType}
+                                    onChange={(e) => setModalType(e.target.value as 'character' | 'scenario')}
+                                    className="flex-1 input-field"
+                                    disabled={isGenerating}
+                                >
+                                    <option value="character">角色/残兽/通用</option>
+                                    <option value="scenario">情景 (Scenario)</option>
+                                </select>
                             </div>
+                            {!isAuthenticated && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                    <Link
+                                        href="/character-manager"
+                                        className="text-purple-600 hover:text-purple-800 underline"
+                                    >
+                                        登录
+                                    </Link>
+                                    后可访问私有数据卡与收藏夹。
+                                </p>
+                            )}
                             {isAuthenticated && (
                                 <p className="text-xs text-gray-500 mt-1">
-                                    选择您保存的角色数据卡，只有包含历战记录的角色才能进行升华
+                                    支持任意设定素材；若档案含历战记录，AI 会自动引用相关经历。
+                                </p>
+                            )}
+                        </div>
+
+                        {/* 目标模板选择 */}
+                        <div className="input-group">
+                            <label className="input-label">升华目标模板</label>
+                            <select
+                                value={targetTemplate}
+                                onChange={handleTargetTemplateChange}
+                                className="input-field"
+                                disabled={isGenerating || !characterData}
+                            >
+                                {TARGET_TEMPLATE_OPTIONS.map(option => (
+                                    <option key={option} value={option}>
+                                        {TARGET_TEMPLATE_LABELS[option]}
+                                    </option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">
+                                当前素材识别为：<span className="font-semibold">{sourceTemplateLabel}</span>；默认根据该模板选择目标，可手动尝试跨模板升华。
+                            </p>
+                            {targetTemplate === 'general' && (
+                                <p className="text-xs text-blue-600 mt-1">
+                                    通用角色的 <code>content</code> 字段将承载全部设定，AI 会输出结构化 Markdown 方便继续创作。
                                 </p>
                             )}
                         </div>
@@ -459,6 +569,11 @@ const SublimationPage: React.FC = () => {
                             {isAdvancedVisible && characterData && (
                                 <div className="mt-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
                                     <p className="text-xs text-gray-600 mb-3">勾选你希望<span className="font-bold">保留不变</span>的字段，未勾选的字段将由AI重塑。</p>
+                                    {targetTemplate === 'general' && (
+                                        <p className="text-xs text-blue-700 mb-3">
+                                            提醒：<code>content</code> 字段包含角色的全部设定（外观、能力、背景、经历等）。如需完整改写，请取消勾选。
+                                        </p>
+                                    )}
                                     <div className="mb-4 flex flex-wrap gap-2">
                                         <button onClick={() => applyPreset('default')} className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-1 px-3 rounded-full">默认</button>
                                         <button onClick={() => applyPreset('full')} className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-1 px-3 rounded-full">完全重塑</button>
@@ -572,7 +687,7 @@ const SublimationPage: React.FC = () => {
                     isOpen={showBattleDataModal}
                     onClose={() => setShowBattleDataModal(false)}
                     onSelectCard={handleSelectDataCard}
-                    selectedType="character"
+                    selectedType={modalType}
                 />
             </div>
         </>
