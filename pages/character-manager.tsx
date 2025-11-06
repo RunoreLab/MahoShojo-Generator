@@ -1082,6 +1082,26 @@ const CharacterManagerPage: React.FC = () => {
                 );
             }
 
+            if (typeof value === 'string' && currentPath === 'content') {
+                const lineCount = Math.max(1, value.split(/\r?\n/).length);
+                const rows = Math.min(30, Math.max(10, lineCount + 2));
+                return (
+                    <div key={currentPath}>
+                        <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
+                        <textarea
+                            id={currentPath}
+                            value={value}
+                            onChange={(e) => handleFieldChange(currentPath, e.target.value)}
+                            rows={rows}
+                            className={inputClassName}
+                            style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word' }}
+                            wrap="soft"
+                        />
+                        {issueHint}
+                    </div>
+                );
+            }
+
             return (
                 <div key={currentPath}>
                     <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>

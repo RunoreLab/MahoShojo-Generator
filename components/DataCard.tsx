@@ -68,6 +68,7 @@ export default function DataCard({
   const [currentLikeCount, setCurrentLikeCount] = useState(likeCount);
   const [favoriting, setFavoriting] = useState(false);
   const cardStatus = getDataCardStatus({ is_public: isPublic });
+  const canDownload = Boolean(onDownload);
 
   // 检查本地存储中的点赞状态
   useEffect(() => {
@@ -274,8 +275,8 @@ export default function DataCard({
       </div>
 
       {/* 底部区域 */}
-      <div className="flex items-center justify-between mt-auto">
-        {/* 作者信息现在是一个可点击的按钮 (如果 onAuthorClick 存在) */}
+      <div className="mt-auto flex flex-col gap-2">
+        {/* 作者信息现在是单独一行，避免与按钮竞争空间 */}
         {author && (
           onAuthorClick ? (
             <button
@@ -283,20 +284,20 @@ export default function DataCard({
                 e.stopPropagation(); // 阻止事件冒泡，防止触发整个卡片的点击事件
                 onAuthorClick(author);
               }}
-              className={`text-xs ${subTextColor} hover:text-purple-600 hover:underline transition-colors`}
+              className={`text-xs ${subTextColor} hover:text-purple-600 hover:underline transition-colors text-left truncate`}
               title={`筛选作者: ${author}`}
             >
               作者: {author}
             </button>
           ) : (
-            <p className={`text-xs leading-[20px] ${subTextColor}`}>
+            <p className={`text-xs leading-[18px] ${subTextColor} truncate`} title={`作者: ${author}`}>
               作者: {author}
             </p>
           )
         )}
-        
-        {/* 点赞按钮和计数 */}
-        <div className="flex gap-3 text-sm justify-end flex-shrink-0 items-center">
+
+        {/* 操作按钮行 */}
+        <div className="flex flex-wrap gap-3 text-sm items-center">
           <button
             onClick={handleFavoriteToggle}
             className={`flex items-center gap-1 transition-colors ${
@@ -343,11 +344,28 @@ export default function DataCard({
             <span>{currentLikeCount}</span>
           </button>
 
-          {/* 使用次数 */}
-          <div className="flex items-center gap-1 text-gray-500">
+          {/* 下载/使用次数 */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (canDownload) {
+                onDownload?.();
+              }
+            }}
+            className={`flex items-center gap-1 transition-colors ${
+              canDownload ? 'text-gray-500 hover:text-blue-500' : 'text-gray-400 cursor-not-allowed'
+            }`}
+            disabled={!canDownload}
+            title={
+              canDownload
+                ? `下载数据卡（已下载/使用：${usageCount ?? 0}）`
+                : '暂不支持保存'
+            }
+            aria-label="下载数据卡到本地"
+          >
             <Download className="w-4 h-4" />
             <span>{usageCount}</span>
-          </div>
+          </button>
 
           {/* 分享按钮 */}
           <button

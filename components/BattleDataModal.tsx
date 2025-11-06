@@ -292,6 +292,27 @@ export default function BattleDataModal({
     }
   };
 
+  const handleDownloadCard = useCallback((card: any) => {
+    try {
+      let cardPayload = card.data;
+      if (typeof cardPayload === 'string') {
+        cardPayload = JSON.parse(cardPayload);
+      }
+      const blob = new Blob([JSON.stringify(cardPayload, null, 2)], { type: 'application/json' });
+      const sanitizedName = (card.name || '数据卡').replace(/[\\/:*?"<>|]/g, '_');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sanitizedName}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('保存数据卡失败:', error);
+    }
+  }, []);
+
   // 【新增】处理高级筛选输入变化
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name } = e.target;
@@ -577,10 +598,11 @@ export default function BattleDataModal({
                         isFavorited={isFavorited}
                         canFavorite={enableFavorite}
                         isRecommended={card.is_recommended === 1}
-                        author={activeTab === 'public' ? (card.username || '未知') : '我'}
+                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
                         onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
                         onAuthorClick={handleAuthorClick}
                         onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
+                        onDownload={() => handleDownloadCard(card)}
                       />
                     </div>
                   );
@@ -635,7 +657,7 @@ export default function BattleDataModal({
             usageCount: selectedCard.usage_count,
             likeCount: selectedCard.like_count,
             favoriteCount: selectedCard.favorite_count,
-            author: activeTab === 'public' ? (selectedCard.username || '未知') : '我',
+            author: activeTab === 'my' ? '我' : (selectedCard.username || '未知'),
             createdAt: selectedCard.created_at,
             updatedAt: selectedCard.updated_at
           }}
