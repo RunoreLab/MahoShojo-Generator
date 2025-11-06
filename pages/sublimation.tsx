@@ -237,6 +237,13 @@ const SublimationPage: React.FC = () => {
         const value = event.target.value as SupportedTargetTemplate;
         if (!TARGET_TEMPLATE_OPTIONS.includes(value)) return;
         setTargetTemplate(value);
+
+        const isCrossTemplateSelection = Boolean(characterData && sourceTemplate !== value);
+        if (isCrossTemplateSelection) {
+            setFieldsToPreserve([]);
+            return;
+        }
+
         setFieldsToPreserve(getDefaultPreserveFields(value));
     };
 
@@ -442,6 +449,8 @@ const SublimationPage: React.FC = () => {
     const sourceTemplateLabel = sourceTemplate === 'unknown'
         ? '未识别模板'
         : TEMPLATE_LABELS[sourceTemplate as DataCardTemplate];
+    const targetTemplateLabel = TARGET_TEMPLATE_LABELS[targetTemplate];
+    const hasCrossTemplateSelection = Boolean(characterData && sourceTemplate !== targetTemplate);
     const currentFieldsConfig = PRESERVABLE_FIELDS_CONFIG[targetTemplate];
 
     return (
@@ -543,6 +552,11 @@ const SublimationPage: React.FC = () => {
                             <p className="text-xs text-gray-500 mt-1">
                                 当前素材识别为：<span className="font-semibold">{sourceTemplateLabel}</span>；默认根据该模板选择目标，可手动尝试跨模板升华。
                             </p>
+                            {hasCrossTemplateSelection && (
+                                <p className="text-xs text-purple-600 mt-1">
+                                    检测到从 {sourceTemplateLabel} 升华为 {targetTemplateLabel}，系统已自动取消所有“保留字段”，AI 将完全重塑设定。
+                                </p>
+                            )}
                             {targetTemplate === 'general' && (
                                 <p className="text-xs text-blue-600 mt-1">
                                     通用角色的 <code>content</code> 字段将承载全部设定，AI 会输出结构化 Markdown 方便继续创作。
