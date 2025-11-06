@@ -9,11 +9,43 @@ import { generateSignature, verifySignature } from '@/lib/signature';
 import magicalGirlQuestionnaire from '../../public/questionnaire.json';
 import { config as appConfig, type AIProvider } from '../../lib/config';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import {
+  convertDataCard,
+  createBlankDataCard,
+  inferTemplate,
+  TEMPLATE_LABELS,
+  type DataCardTemplate,
+  type InferableTemplate
+} from '@/lib/data-card-converter';
+import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
 
 const log = getLogger('api-gen-sublimation');
 
 export const config = {
   runtime: 'edge',
+};
+
+type SupportedTargetTemplate = 'magical-girl' | 'canshou' | 'general';
+
+const SUPPORTED_TARGET_TEMPLATES: SupportedTargetTemplate[] = ['magical-girl', 'canshou', 'general'];
+const SUPPORTED_SOURCE_TEMPLATES: DataCardTemplate[] = ['magical-girl', 'canshou', 'general', 'scenario'];
+
+const isSupportedTargetTemplate = (value: unknown): value is SupportedTargetTemplate =>
+  typeof value === 'string' && SUPPORTED_TARGET_TEMPLATES.includes(value as SupportedTargetTemplate);
+
+const isSupportedSourceTemplate = (value: unknown): value is DataCardTemplate =>
+  typeof value === 'string' && SUPPORTED_SOURCE_TEMPLATES.includes(value as DataCardTemplate);
+
+const getFullPayloadSchema = (target: SupportedTargetTemplate) => {
+  switch (target) {
+    case 'magical-girl':
+      return FullMagicalGirlSublimationPayloadSchema;
+    case 'canshou':
+      return FullCanshouSublimationPayloadSchema;
+    case 'general':
+    default:
+      return FullGeneralSublimationPayloadSchema;
+  }
 };
 
 // =================================================================
@@ -83,6 +115,11 @@ const FullCanshouSublimationPayloadSchema = z.object({
   userAnswers: z.array(z.string()).optional().describe("根据残兽的成长，对问卷问题的全新回答。"),
 });
 
+const FullGeneralSublimationPayloadSchema = z.object({
+  name: z.string().describe('角色的新名称，建议在原始名称基础上追加一个以「」包裹的称号来凸显成长。'),
+  content: z.string().describe('角色的完整设定文本；需要涵盖外观、能力、背景、性格、重要经历等全部要点，建议使用结构化 Markdown。')
+});
+
 
 // 升华事件的通用Schema
 const SublimationEventSchema = z.object({
@@ -124,34 +161,56 @@ const CustomProviderSchema = z.object({
 });
 
 const createGenerationConfig = (
-  characterData: any,
+  originalData: any,
+  baseOutputData: any,
   language: string,
   userGuidance: string | null,
+  sourceTemplate: InferableTemplate,
+  targetTemplate: SupportedTargetTemplate,
   fieldsToPreserve: string[],
   isDowngrade: boolean = false,
   modelOverride?: string
 ): GenerationConfig<any, any> => {
-  const isMagicalGirl = !!characterData.codename;
-  const characterType = isMagicalGirl ? '魔法少女' : '残兽';
-  const nameField = isMagicalGirl ? 'codename' : 'name';
-  const baseSchema = isMagicalGirl ? FullMagicalGirlSublimationPayloadSchema : FullCanshouSublimationPayloadSchema;
-  
-  // 找出需要AI重新生成的字段
-  const fieldsToGenerate = Object.keys(baseSchema.shape).filter(key => !fieldsToPreserve.includes(key));
+  const baseSchema = getFullPayloadSchema(targetTemplate);
+  const schemaKeys = Object.keys(baseSchema.shape);
+  const sanitizedFieldsToPreserve = fieldsToPreserve.filter(field => schemaKeys.includes(field));
+  const fieldsToGenerate = schemaKeys.filter(key => !sanitizedFieldsToPreserve.includes(key));
+
+  const nameField = targetTemplate === 'magical-girl' ? 'codename' : 'name';
+  const targetLabel = TEMPLATE_LABELS[targetTemplate];
+  const sourceLabel = sourceTemplate === 'unknown' ? '未知模板' : TEMPLATE_LABELS[sourceTemplate];
 
   const promptBuilder = () => {
-    const dataForPrompt = { ...characterData };
+    const dataForPrompt = JSON.parse(JSON.stringify(originalData || {}));
     delete dataForPrompt.signature;
 
-    const historyText = (dataForPrompt.arena_history?.entries || [])
-      .map((entry: any) => `- 事件“${entry.title}”：胜利者是${entry.winner}，对我的影响是“${entry.impact}”`)
-      .join('\n') || "无";
-    
-    let userAnswersReviewSection = "";
-    if (isMagicalGirl && dataForPrompt.userAnswers) {
-        const questions = magicalGirlQuestionnaire.questions;
-        const userAnswersText = dataForPrompt.userAnswers.map((answer: string, i: number) => `Q: ${questions[i] || `问题 ${i+1}`}\nA: ${answer}`).join('\n');
-        userAnswersReviewSection = `## 问卷回答回顾 (用于理解角色深层性格)\n${userAnswersText}`;
+    const outputSkeletonForPrompt = JSON.parse(JSON.stringify(baseOutputData || {}));
+    delete outputSkeletonForPrompt.signature;
+
+    const historyEntries = Array.isArray(dataForPrompt?.arena_history?.entries)
+      ? dataForPrompt.arena_history.entries
+      : [];
+    const historyText = historyEntries.length > 0
+      ? historyEntries
+          .map((entry: any) => {
+            const title = entry?.title ? `“${entry.title}”` : '（未命名事件）';
+            const winner = entry?.winner ?? '未知胜者';
+            const impact = entry?.impact ?? '影响未记录';
+            return `- 事件${title}：胜利者 ${winner}，对角色的影响是“${impact}”`;
+          })
+          .join('\n')
+      : '无（原始素材未包含历战记录，可直接基于设定内容完成升华）';
+
+    let userAnswersReviewSection = '';
+    if (Array.isArray(dataForPrompt?.userAnswers) && dataForPrompt.userAnswers.length > 0) {
+      const questions = magicalGirlQuestionnaire.questions;
+      const userAnswersText = dataForPrompt.userAnswers
+        .map((answer: string, index: number) => {
+          const question = questions[index] || `问题 ${index + 1}`;
+          return `Q: ${question}\nA: ${answer}`;
+        })
+        .join('\n');
+      userAnswersReviewSection = `\n## 问卷回答回顾 (用于理解角色深层性格)\n${userAnswersText}`;
     }
 
     let guidanceInstruction = '';
@@ -159,10 +218,40 @@ const createGenerationConfig = (
       guidanceInstruction = `\n## 成长方向引导\n角色可以朝这个方向成长升华：“${userGuidance}”。请在重塑角色时将此作为最重要的参考。`;
     }
 
+    const rules: string[] = [];
+    const fieldsToGenerateText = fieldsToGenerate.length > 0
+      ? `\`${fieldsToGenerate.join('`, `')}\``
+      : '（列表为空时，仅需返回 updatedCharacterData 的空对象，同时确保升华事件完整）';
+
+    rules.push(`**任务范围**: 你的任务是 **只生成** 以下字段的全新内容：${fieldsToGenerateText}。`);
+
+    if (sanitizedFieldsToPreserve.length > 0) {
+      rules.push(`**保留字段**: 你 **绝对不能** 在 JSON 输出中包含以下字段：\`${sanitizedFieldsToPreserve.join('`, `')}\`。这些字段由用户选择保留，你无需关心。`);
+    } else {
+      rules.push('**保留字段**: 用户未指定保留字段，你可以根据需要重塑所有字段。');
+    }
+
+    if (fieldsToGenerate.includes(nameField)) {
+      rules.push(`**称号规则**: 角色名称字段(\`${nameField}\`)必须更新。该字段的结构为 \`{代号/名称}\` 或 \`{代号/名称}「{称号}」\`。你 **不可** 修改 \`{代号/名称}\` 部分，但 **必须** 为其生成或更新一个4个字左右（1~8个字）的 \`{称号}\`，并以「」包裹，以体现其新状态。`);
+    }
+
+    if (targetTemplate === 'general' && fieldsToGenerate.includes('content')) {
+      rules.push('**通用角色设定**: `content` 字段需要完整描述角色的外观、能力、背景、性格、重要经历等关键信息，建议使用结构化 Markdown 段落与小标题。');
+    }
+
+    rules.push('**生成升华事件**:  你还需要创作一个“升华事件”，简要描述角色是如何从这些经历中收获成长，升华到新状态的。');
+
+    const rulesText = rules.map((rule, index) => `${index + 1}.  ${rule}`).join('\n');
+
     return `
 # 角色成长升华任务
-你是一位资深的角色设定师。你的任务是为一个${characterType}角色进行“成长升华”。
-该角色经历了诸多事件，现在需要你基于其完整的设定和所有“历战记录”，对其进行一次全面的重塑和升级，以体现其成长与蜕变。
+你是一位资深的角色设定师。你的任务是为一个${targetLabel}角色进行“成长升华”。
+你需要基于其完整的设定和所有“历战记录”（如有），对其进行一次全面的重塑和升级，以体现其成长与蜕变。
+
+## 模板信息
+- 原始素材类型：${sourceLabel}
+- 目标输出模板：${targetLabel}
+- 输出语言：${language}
 
 ${guidanceInstruction}
 
@@ -171,31 +260,31 @@ ${guidanceInstruction}
 ${JSON.stringify(dataForPrompt, null, 2)}
 \`\`\`
 
+## 目标模板初始结构（供参考，可在其基础上重塑）
+\`\`\`json
+${JSON.stringify(outputSkeletonForPrompt, null, 2)}
+\`\`\`
+
 ## 历战记录回顾
 ${historyText}
-
 ${userAnswersReviewSection}
 
 ## 升华规则 (必须严格遵守)
-你必须严格遵守以下规则来更新角色设定：
-1.  **任务范围**: 你的任务是 **只生成** 以下字段的全新内容：\`${fieldsToGenerate.join('`, `')}\`。
-2.  **绝对禁止**: 你 **绝对不能** 在你的JSON输出中包含以下字段：\`${fieldsToPreserve.join('`, `')}\`。这些字段由用户选择保留，你无需关心。
-3.  **称号规则**: 角色名称字段(\`${nameField}\`)必须更新。该字段的结构为 \`{代号/名称}\` 或 \`{代号/名称}「{称号}」\`。你 **不可** 修改 \`{代号/名称}\` 部分，但 **必须** 为其生成或更新一个4个字左右（1~8个字）的 \`{称号}\`，并以「」包裹，以体现其新状态。
-4.  **生成升华事件**: 你还需要创作一个“升华事件”，简要描述角色是如何从这些经历中收获成长，升华到新状态的。
+${rulesText}
 
-请严格按照提供的JSON Schema格式返回结果，使用【${language}】进行内容创作。`;
+请严格按照提供的 JSON Schema 返回结果，使用【${language}】进行内容创作。`;
   };
 
-  const finalSchema = createDynamicSchema(baseSchema, fieldsToPreserve);
+  const finalSchema = createDynamicSchema(baseSchema, sanitizedFieldsToPreserve);
 
   return {
-    systemPrompt: "你是一位资深的角色设定师，擅长根据角色的经历描绘其成长与蜕变。",
+    systemPrompt: '你是一位资深的角色设定师，擅长根据角色的经历描绘其成长与蜕变。',
     temperature: 0.7,
     promptBuilder,
     schema: finalSchema,
-    taskName: "角色成长升华",
+    taskName: '角色成长升华',
     maxTokens: 8192,
-    modelOverride: modelOverride ?? (isDowngrade ? "gemini-2.5-flash-lite" : undefined), // 使用降级模型或自定义模型覆盖
+    modelOverride: modelOverride ?? (isDowngrade ? 'gemini-2.5-flash-lite' : undefined),
   };
 };
 
@@ -239,7 +328,16 @@ async function handler(req: NextRequest): Promise<Response> {
 
   try {
     const body = await req.json();
-    const { language = 'zh-CN', userGuidance = '', fieldsToPreserve = [], isDowngrade = false, customProvider: customProviderPayload, ...originalCharacterData } = body; 
+    const {
+      language = 'zh-CN',
+      userGuidance = '',
+      fieldsToPreserve = [],
+      isDowngrade = false,
+      customProvider: customProviderPayload,
+      targetTemplate: requestedTargetTemplate,
+      sourceTemplate: requestedSourceTemplate,
+      ...originalCharacterData
+    } = body;
     const finalUserGuidance = userGuidance.trim() || null;
 
     // 安全检查
@@ -248,9 +346,38 @@ async function handler(req: NextRequest): Promise<Response> {
         return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '上传的角色档案或引导内容包含危险符文' }), { status: 400 });
     }
 
-    if (!originalCharacterData.arena_history) {
-      return new Response(JSON.stringify({ error: '角色数据缺少历战记录 (arena_history)，无法进行升华' }), { status: 400 });
+    const inferredSourceTemplate = inferTemplate(originalCharacterData) as InferableTemplate;
+    const bodySourceTemplate = isSupportedSourceTemplate(requestedSourceTemplate) ? requestedSourceTemplate : null;
+    const sourceTemplate: InferableTemplate = bodySourceTemplate ?? inferredSourceTemplate;
+
+    let targetTemplate: SupportedTargetTemplate;
+    if (isSupportedTargetTemplate(requestedTargetTemplate)) {
+      targetTemplate = requestedTargetTemplate;
+    } else if (isSupportedTargetTemplate(sourceTemplate)) {
+      targetTemplate = sourceTemplate as SupportedTargetTemplate;
+    } else {
+      targetTemplate = 'general';
     }
+
+    let baseOutputData: any;
+    let conversionWarnings: string[] = [];
+    try {
+      const conversionResult = convertDataCard(originalCharacterData, targetTemplate, sourceTemplate);
+      baseOutputData = conversionResult.data;
+      conversionWarnings = conversionResult.warnings || [];
+      if (conversionWarnings.length > 0) {
+        log.info('转换到目标模板时产生警告', { warnings: conversionWarnings, targetTemplate });
+      }
+    } catch (conversionError) {
+      log.warn('角色数据转换目标模板失败，使用空白模板兜底', { error: conversionError instanceof Error ? conversionError.message : conversionError, targetTemplate });
+      baseOutputData = createBlankDataCard(targetTemplate);
+    }
+
+    const targetSchema = getFullPayloadSchema(targetTemplate);
+    const schemaKeys = Object.keys(targetSchema.shape);
+    const sanitizedFieldsToPreserve = Array.isArray(fieldsToPreserve)
+      ? (fieldsToPreserve as string[]).filter(field => schemaKeys.includes(field))
+      : [];
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;
@@ -304,9 +431,12 @@ async function handler(req: NextRequest): Promise<Response> {
     const isNative = await verifySignature(originalCharacterData);
     const generationConfig = createGenerationConfig(
         originalCharacterData,
+        baseOutputData,
         language,
         finalUserGuidance,
-        fieldsToPreserve,
+        sourceTemplate,
+        targetTemplate,
+        sanitizedFieldsToPreserve,
         isDowngrade,
         customModelOverride
     );
@@ -322,51 +452,88 @@ async function handler(req: NextRequest): Promise<Response> {
     const updatedDataFromAI = aiResult.updatedCharacterData;
 
     // --- 数据整合与签名 ---
-    // 1. 创建原始数据的深拷贝作为基础
-    const sublimatedData: any = JSON.parse(JSON.stringify(originalCharacterData));
+    // 1. 创建目标模板的数据副本作为基础
+    const sublimatedData: any = JSON.parse(JSON.stringify(baseOutputData));
 
-    // 1.1 确保 templateId 存在
+    // 1.1 确保 templateId 存在且符合目标模板
     if (!sublimatedData.templateId) {
-        sublimatedData.templateId = sublimatedData.codename 
-            ? "魔法少女/心之花/魔法少女（问卷生成）" 
-            : "魔法少女/心之花/残兽（问卷生成）";
-        log.info('为旧版角色数据补充了 templateId');
+        sublimatedData.templateId = targetTemplate === 'magical-girl'
+            ? '魔法少女/心之花/魔法少女（问卷生成）'
+            : targetTemplate === 'canshou'
+                ? '魔法少女/心之花/残兽（问卷生成）'
+                : GENERAL_CHARACTER_TEMPLATE_ID;
+        log.info('为升华结果补充了目标模板的 templateId', { targetTemplate });
     }
 
-    // 2. 将AI生成的新数据安全地合并到这个副本上
-    // safeDeepMerge会递归地合并对象，确保不会丢失嵌套结构
+    // 2. 合并 AI 生成的新数据
     Object.assign(sublimatedData, safeDeepMerge(sublimatedData, updatedDataFromAI));
 
-    // 3. 重新应用不可变字段，确保它们绝对不会被AI意外修改
-    const isMagicalGirl = 'codename' in originalCharacterData;
-    if (isMagicalGirl) {
-      sublimatedData.magicConstruct.name = originalCharacterData.magicConstruct.name;
-      sublimatedData.blooming.name = originalCharacterData.blooming.name;
+    // 3. 重新应用不可变字段，确保模板关键字段不会被修改
+    if (targetTemplate === 'magical-girl') {
+      const baseMagicName = baseOutputData?.magicConstruct?.name;
+      const baseBloomingName = baseOutputData?.blooming?.name;
+      if (baseMagicName && sublimatedData.magicConstruct) {
+        sublimatedData.magicConstruct.name = baseMagicName;
+      }
+      if (baseBloomingName && sublimatedData.blooming) {
+        sublimatedData.blooming.name = baseBloomingName;
+      }
     }
 
     // 4. 更新历战记录
-    const oldEntries = originalCharacterData.arena_history.entries || [];
-    const sublimationEntries = oldEntries.filter((entry: any) => entry.type === 'sublimation');
-    const lastEntryId = oldEntries.length > 0 ? Math.max(...oldEntries.map((e: any) => e.id)) : 0;
-    
-    sublimationEntries.push({
+    const existingHistoryEntries = Array.isArray(originalCharacterData?.arena_history?.entries)
+      ? [...originalCharacterData.arena_history.entries]
+      : (Array.isArray(sublimatedData?.arena_history?.entries) ? [...sublimatedData.arena_history.entries] : []);
+    const participantsName = targetTemplate === 'magical-girl'
+      ? sublimatedData.codename
+      : sublimatedData.name;
+
+    const lastEntryId = existingHistoryEntries.reduce((maxId: number, entry: any) => {
+      const numericId = typeof entry?.id === 'number'
+        ? entry.id
+        : Number(entry?.id);
+      return Number.isFinite(numericId) ? Math.max(maxId, numericId as number) : maxId;
+    }, 0);
+
+    existingHistoryEntries.push({
       id: lastEntryId + 1,
       type: 'sublimation',
       title: aiResult.sublimationEvent.title,
-      participants: [isMagicalGirl ? sublimatedData.codename : sublimatedData.name],
-      winner: isMagicalGirl ? sublimatedData.codename : sublimatedData.name,
+      participants: participantsName ? [participantsName] : [],
+      winner: participantsName ?? '未知角色',
       impact: aiResult.sublimationEvent.impact,
       metadata: { user_guidance: finalUserGuidance, scenario_title: null, non_native_data_involved: !isNative || !!finalUserGuidance }
     });
-    sublimatedData.arena_history.entries = sublimationEntries;
 
-    // 5. 更新历战记录属性
     const nowISO = new Date().toISOString();
-    sublimatedData.arena_history.attributes.sublimation_count = (originalCharacterData.arena_history.attributes.sublimation_count || 0) + 1;
-    sublimatedData.arena_history.attributes.updated_at = nowISO;
-    sublimatedData.arena_history.attributes.last_sublimation_at = nowISO;
+    const existingAttributes = originalCharacterData?.arena_history?.attributes
+      || sublimatedData?.arena_history?.attributes
+      || {};
+    const ensureWorldLineId = () => {
+      if (existingAttributes.world_line_id) return existingAttributes.world_line_id;
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+      return `world-${Math.random().toString(16).slice(2, 10)}`;
+    };
 
-    // 6. 签名逻辑
+    const previousCountRaw = (existingAttributes as any).sublimation_count;
+    const previousCount = typeof previousCountRaw === 'number'
+      ? previousCountRaw
+      : Number(previousCountRaw ?? 0) || 0;
+
+    sublimatedData.arena_history = {
+      attributes: {
+        world_line_id: ensureWorldLineId(),
+        created_at: existingAttributes.created_at ?? nowISO,
+        updated_at: nowISO,
+        sublimation_count: previousCount + 1,
+        last_sublimation_at: nowISO
+      },
+      entries: existingHistoryEntries
+    };
+
+    // 5. 签名逻辑
     // 默认情况下，有引导的升华会失去原生性
     let shouldSign = isNative && !finalUserGuidance;
     // 但是，如果管理员在配置中开启了特例，则即使有引导也进行签名
@@ -382,7 +549,8 @@ async function handler(req: NextRequest): Promise<Response> {
 
     const finalResponse = {
         sublimatedData,
-        unchangedFields: fieldsToPreserve
+        unchangedFields: sanitizedFieldsToPreserve,
+        targetTemplate
     };
 
     return new Response(JSON.stringify(finalResponse), { status: 200, headers: { 'Content-Type': 'application/json' } });

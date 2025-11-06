@@ -581,7 +581,7 @@ const classicModeSystemPrompt = `
         * 叶级: 可使用各种【术式】（法术）。
         * 蕾级: 可使用【奇境】。
         * 花级: 可使用【繁开】。
-        * 花牌: 魔力大幅增强（基础花级的2倍以上）。
+        * 花牌: 魔力大幅增强（花级的2倍以上）。
     * 能力锁定：角色不能使用未达到对应等级解锁的能力。例如，叶级魔法少女无法使用奇境和繁开，但可以使用魔装与术式。
 
 2.  常规战斗模式：绝大多数战斗都围绕着魔法少女的【基本能力】、【魔装】和【术式】展开，极少情况下才可能使用【奇境】及【繁开】。
@@ -601,6 +601,24 @@ const classicModeSystemPrompt = `
 
 // 场景二：【经典模式】魔法少女 vs 残兽 的系统提示词
 const magicalGirlVsCanshouSystemPrompt = `你是一名战地记者，负责报道魔法少女与残兽之间的战斗。
+  --- 等级与能力设定 ---
+    * 魔法少女的等级体系：
+        * 种级: 新成为魔法少女。
+        * 芽级: 可使用【魔装】。
+        * 叶级: 可使用各种【术式】（法术）。
+        * 蕾级: 可使用【奇境】。
+        * 花级: 可使用【繁开】。
+        * 花牌: 魔力大幅增强（花级的2倍以上）
+    * 残兽的等级体系与魔法少女对比：
+		* **卵**: 与种级相当，但略弱一点。
+		* **蠖**: 与芽级相当，略强一丝。
+		* **蛹**: 1只蛹与3位芽级魔法少女相当，1位叶级与2只蛹相当。
+		* **半蜕**: 1只半蜕略强于10位叶级魔法少女，1位蕾级与3只半蜕相当。
+        * **蜕**: 与蕾级魔法少女相当，但略弱一点。
+        * **王蜕**: 与花级魔法少女相当，但略弱一点。
+		* **羽**: 强度远超花级魔法少女，基本上无人能敌，至少需要5位花牌或需要宝石权杖才能抗衡。
+    * 其他等级体系：非魔法少女与残兽的角色由其具体设定说明。
+    * 能力锁定：角色不能使用未达到对应等级解锁的能力。例如，叶级角色无法使用奇境和繁开，但可以使用魔装与术式。
   --- 残兽核心设定 ---
   ${canshouLore}
   --- 报道规则 ---
@@ -619,6 +637,43 @@ const canshouVsCanshouSystemPrompt = `你是魔法国度研究院所属的魔法
   2. 战斗动机：推测它们战斗的动机，可能是为了吞噬对方以进化、争夺领地，或是纯粹的混沌本能。
   3. 报告口吻：使用研究报告的口吻，可以加入一些学术性的猜测和对残兽生态的分析。
   4. 胜利者判断：根据它们的设定和战斗逻辑，合理判断出胜利者。也可能两败俱伤或被第三方（例如魔法少女或环境因素）终结。
+`;
+
+// 兜底场景：【经典模式】其他战斗 的系统提示词
+const universalFallbackSystemPrompt = `
+  现在角色们在 A.R.E.N.A.竞技场中展开战斗，请根据以下规则生成战斗简报：
+  战斗推演核心规则：
+1.  等级与能力限制：角色的能力与等级严格挂钩。在推演开始前，请根据角色设定的强度，为每位角色分配合理的等级以确保战斗的平衡性和观赏性。
+    * 平衡原则：通常，参加战斗的角色等级应当是一致的。但作为最后的平衡手段，能力设定严重过强的角色可以比其他人低1级，而设定严重过弱的角色则可以比其他人高1级。
+    * 魔法少女的等级体系：
+        * 种级: 新成为魔法少女。
+        * 芽级: 可使用【魔装】。
+        * 叶级: 可使用各种【术式】（法术）。
+        * 蕾级: 可使用【奇境】。
+        * 花级: 可使用【繁开】。
+        * 花牌: 魔力大幅增强（花级的2倍以上）
+    * 残兽的等级体系：
+		* **卵**: 最初级的阶段，也是最弱小的形态。通常表现为巨大的肉块状，行动迟缓，凭本能进行破坏。与种级魔法少女相当，但略弱一点。
+		* **蠖**: 比“卵”更高级的阶段，实力和速度都有显著提升。与芽级魔法少女相当，略强一丝。
+		* **蛹**: 此阶段的残兽会筑巢，扭曲场地空间，拥有近似野兽的智慧，并会吸引低级残兽。1只蛹与3位芽级魔法少女相当，1位叶级与2只蛹相当。
+		* **蜕**: “蛹”之后的更高阶进化形态，实力远超之前的阶段。可以形成自己的“规则”，在特定区域内改写物理法则。包括“半蜕”、“蜕”和“王蜕”等细分等级。1只半蜕略强于10位叶级魔法少女，1位蕾级与3只半蜕相当；蜕与蕾级魔法少女相当，但略弱一点；王蜕与花级魔法少女相当，但略弱一点。
+		* **羽**: “蜕”之上的最终进化形态，强度远超花级魔法少女，基本上无人能敌，至少需要5位花牌或需要宝石权杖才能抗衡。
+    * 其他等级体系：非魔法少女与残兽的角色由其具体设定说明。
+    * 能力锁定：角色不能使用未达到对应等级解锁的能力。例如，叶级角色无法使用奇境和繁开，但可以使用魔装与术式。
+
+2.  常规战斗模式：绝大多数战斗都围绕着角色的基本能力（例如魔法少女的【魔装】和【术式】）展开，极少情况下才可能使用高阶能力（例如【奇境】及【繁开】）。
+
+3.  领域（例如【奇境】、【巢】）的战术运用：
+    * 高昂代价：开启领域会付出巨大代价，因此通常只在面临你死我活的阵营冲突的情况下角色才会考虑使用。
+    * 战术博弈：可以描绘角色【权衡和考虑】是否要开启领域，以此来制造战术紧张感，但她们不一定会真的发动。
+    * 反制手段：领域并非无敌，它可以被对方的领域【抵消】，或被强大的魔力直接【破坏】。
+
+4.  必杀技（例如【繁开】）的最终手段：
+    * 使用时机：只有顶级角色，在这么写更有益于战斗的展开的情况下，才【极小概率】允许使用【繁开】。
+    * 强度限制：所使用的必杀技必须是【有代价、可被理解和应对的】，绝不能是无法破解的必胜技能。严禁使用干涉命运、时间、世界等过于强大的必杀技能力。
+
+请严格遵守以上战斗规则进行推演，构建一场等级合理、有来有回、充满战术博弈的精彩战斗，而不是一场单纯的能力碾压。
+注意，正义并不是必然战胜邪恶。反派有时候也能胜过正派。而且，正义与邪恶之间互有胜负才能创造出更精彩的故事。
 `;
 
 // 【情景模式】的核心系统提示词
@@ -667,7 +722,7 @@ const createPromptBuilder = (
         const isStructured = isStructuredCharacter(data);
         const characterName = data.codename || data.name;
         const otherNames = allNames.filter(name => name !== characterName);
-        const typeDisplay = type === 'magical-girl' ? '魔法少女' : '残兽';
+        const typeDisplay = type === 'magical-girl' ? '魔法少女' : type === 'canshou' ? '残兽' : '通用角色';
         let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
         // [核心修改] 根据 useArenaHistory 的值来决定是否格式化并添加历战记录
         if (useArenaHistory) {
@@ -686,8 +741,12 @@ const createPromptBuilder = (
                 profileString += userAnswers.map((answer, i) => `Q: ${questions[i] || `问题 ${i + 1}`}\nA: ${answer}`).join('\n');
             }
         } else {
-            // 对于非结构化数据，告知AI并将其作为纯文本块提供
-            profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`;
+            // 对于非结构化数据，提供文本化设定
+            if (type === 'general-character' && typeof data.content === 'string') {
+                profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
+            } else {
+                profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`;
+            }
         }
         return profileString;
     }).join('\n\n');
@@ -973,11 +1032,20 @@ async function handler(req: NextRequest): Promise<Response> {
     else if (mode === 'kizuna') systemPrompt = kizunaModeSystemPrompt;
     else if (mode === 'scenario') systemPrompt = scenarioModeSystemPrompt;
     else {
-        const hasMagicalGirl = combatants.some((c: any) => c.type === 'magical-girl');
-        const hasCanshou = combatants.some((c: any) => c.type === 'canshou');
-        if (hasMagicalGirl && !hasCanshou) systemPrompt = classicModeSystemPrompt;
-        else if (!hasMagicalGirl && hasCanshou) systemPrompt = canshouVsCanshouSystemPrompt;
-        else systemPrompt = magicalGirlVsCanshouSystemPrompt;
+        const participantTypes = new Set(combatants.map((c: any) => c.type));
+        const hasOnlyMagicalGirls = participantTypes.size === 1 && participantTypes.has('magical-girl');
+        const hasOnlyCanshou = participantTypes.size === 1 && participantTypes.has('canshou');
+        const hasMagicalAndCanshouOnly = participantTypes.has('magical-girl') && participantTypes.has('canshou') && participantTypes.size === 2;
+
+        if (hasOnlyMagicalGirls) {
+            systemPrompt = classicModeSystemPrompt;
+        } else if (hasOnlyCanshou) {
+            systemPrompt = canshouVsCanshouSystemPrompt;
+        } else if (hasMagicalAndCanshouOnly) {
+            systemPrompt = magicalGirlVsCanshouSystemPrompt;
+        } else {
+            systemPrompt = universalFallbackSystemPrompt;
+        }
     }
 
     // 创建生成配置
