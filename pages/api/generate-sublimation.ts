@@ -481,21 +481,24 @@ async function handler(req: NextRequest): Promise<Response> {
     }
 
     // 4. 更新历战记录
-    const existingHistoryEntries = Array.isArray(originalCharacterData?.arena_history?.entries)
+    const historyEntriesFromSource = Array.isArray(originalCharacterData?.arena_history?.entries)
       ? [...originalCharacterData.arena_history.entries]
       : (Array.isArray(sublimatedData?.arena_history?.entries) ? [...sublimatedData.arena_history.entries] : []);
+
+    // 升华后的角色只保留升华类历战条目，清理遗失逻辑导致的旧记录
+    const sublimationHistoryEntries = historyEntriesFromSource.filter((entry: any) => entry?.type === 'sublimation');
     const participantsName = targetTemplate === 'magical-girl'
       ? sublimatedData.codename
       : sublimatedData.name;
 
-    const lastEntryId = existingHistoryEntries.reduce((maxId: number, entry: any) => {
+    const lastEntryId = sublimationHistoryEntries.reduce((maxId: number, entry: any) => {
       const numericId = typeof entry?.id === 'number'
         ? entry.id
         : Number(entry?.id);
       return Number.isFinite(numericId) ? Math.max(maxId, numericId as number) : maxId;
     }, 0);
 
-    existingHistoryEntries.push({
+    sublimationHistoryEntries.push({
       id: lastEntryId + 1,
       type: 'sublimation',
       title: aiResult.sublimationEvent.title,
@@ -530,7 +533,7 @@ async function handler(req: NextRequest): Promise<Response> {
         sublimation_count: previousCount + 1,
         last_sublimation_at: nowISO
       },
-      entries: existingHistoryEntries
+      entries: sublimationHistoryEntries
     };
 
     // 5. 签名逻辑
