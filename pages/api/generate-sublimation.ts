@@ -18,7 +18,6 @@ import {
   type InferableTemplate
 } from '@/lib/data-card-converter';
 import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
-import { CurrentStateSchema } from '@/lib/schemas/current-state';
 
 const log = getLogger('api-gen-sublimation');
 
@@ -57,6 +56,10 @@ const getFullPayloadSchema = (target: SupportedTargetTemplate) => {
  * @description 这是一个“完全体”的魔法少女Schema，包含了所有可能被用户选择进行升华的字段。
  * 我们将基于这个Schema，根据用户的选择动态地移除那些需要“保留”的字段。
  */
+const CurrentStateUpdateSchema = z.object({
+  summary: z.string().describe('角色当前状态的摘要，1-2句话描述角色身体状况、心境或想法等。')
+}).partial().optional();
+
 const FullMagicalGirlSublimationPayloadSchema = z.object({
   codename: z.string().describe("角色的新代号，必须包含原始代号并在后面加上一个「称号」。例如，如果原始代号是'代号'，新代号可以是'代号「称号」'。"),
   appearance: z.object({
@@ -95,7 +98,7 @@ const FullMagicalGirlSublimationPayloadSchema = z.object({
     }).describe("角色背景故事的演进。")
   }).describe("对角色分析的全面更新。"),
   userAnswers: z.array(z.string()).optional().describe("根据角色的成长，对问卷问题的全新回答。"),
-  current_state: CurrentStateSchema.optional(),
+  current_state: CurrentStateUpdateSchema,
 });
 
 /**
@@ -115,13 +118,13 @@ const FullCanshouSublimationPayloadSchema = z.object({
   birthEnvironment: z.string(),
   researcherNotes: z.string().describe("研究员对这次升华的补充笔记。"),
   userAnswers: z.array(z.string()).optional().describe("根据残兽的成长，对问卷问题的全新回答。"),
-  current_state: CurrentStateSchema.optional(),
+  current_state: CurrentStateUpdateSchema,
 });
 
 const FullGeneralSublimationPayloadSchema = z.object({
   name: z.string().describe('角色的新名称，建议在原始名称基础上追加一个以「」包裹的称号来凸显成长。'),
   content: z.string().describe('角色的完整设定文本；需要涵盖外观、能力、背景、性格、重要经历等全部要点，建议使用结构化 Markdown。'),
-  current_state: CurrentStateSchema.optional(),
+  current_state: CurrentStateUpdateSchema,
 });
 
 
