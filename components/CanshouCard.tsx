@@ -17,6 +17,7 @@ export interface CanshouDetails {
   birthEnvironment: string;
   researcherNotes: string;
   arena_history?: ArenaHistory;
+  current_state?: CharacterCurrentState | null;
 }
 
 const formatCurrentStateValue = (field: CurrentStateField) => {

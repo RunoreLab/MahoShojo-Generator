@@ -236,7 +236,6 @@ export const FIELD_TRANSLATIONS: Record<string, string> = {
   'summary': '状态摘要',
   'fields': '状态字段',
   'label': '标签',
-  'value': '数值',
   'entries': '历战记录',
   'sublimation_count': '升华次数',
   'last_sublimation_at': '上次升华时间',

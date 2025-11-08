@@ -53,6 +53,7 @@ interface GeneralCharacterCardProps {
     name: string;
     content: string;
     arena_history?: ArenaHistory | null;
+    current_state?: CharacterCurrentState | null;
   };
   onSaveImage?: (imageUrl: string) => void;
   imageSaveMode?: 'auto' | 'modal' | 'download';
