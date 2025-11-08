@@ -30,6 +30,7 @@ import RecycleBinModal from '../components/CharManager/RecycleBinModal';
 import ScenarioEditor from '../components/ScenarioEditor';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { UserBadge } from '@/types/badge';
+import type { CharacterCurrentState, CurrentStateField } from '@/types/arena';
 import {
     inferTemplate,
     createBlankDataCard,
@@ -1007,7 +1008,7 @@ const CharacterManagerPage: React.FC = () => {
 
         const keyOrder = [
             'templateId', 'codename', 'name', 'title', 'appearance', 'magicConstruct', 'wonderlandRule',
-            'blooming', 'analysis', 'content', 'userAnswers', 'elements', 'arena_history', 'adjudicationEvents'
+            'blooming', 'analysis', 'content', 'userAnswers', 'elements', 'arena_history', 'current_state', 'adjudicationEvents'
         ];
 
         const sortedKeys = Object.keys(data).sort((a, b) => {
@@ -1022,7 +1023,7 @@ const CharacterManagerPage: React.FC = () => {
         return sortedKeys.map(key => {
             const currentPath = path ? `${path}.${key}` : key;
             // 过滤掉不应在表单中编辑的字段
-            if (key === 'signature' || key === 'isPreset' || key === 'arena_history' || key === 'adjudicationEvents') return null;
+            if (key === 'signature' || key === 'isPreset' || key === 'arena_history' || key === 'current_state' || key === 'adjudicationEvents') return null;
             if (key === 'templateId') return null;
 
             const value = data[key];
@@ -1249,6 +1250,92 @@ const CharacterManagerPage: React.FC = () => {
             });
         }
     };
+
+    const getCurrentStateSnapshot = useCallback((): CharacterCurrentState => {
+        const base = characterData?.current_state;
+        return {
+            summary: base?.summary ?? '',
+            fields: Array.isArray(base?.fields) ? [...base.fields] : [],
+            updated_at: base?.updated_at ?? null,
+        };
+    }, [characterData]);
+
+    const commitCurrentState = useCallback((next: CharacterCurrentState) => {
+        handleFieldChange('current_state', {
+            ...next,
+            fields: Array.isArray(next.fields) ? next.fields : [],
+            updated_at: new Date().toISOString(),
+        });
+    }, [handleFieldChange]);
+
+    const handleCurrentStateSummaryChange = useCallback((value: string) => {
+        const snapshot = getCurrentStateSnapshot();
+        commitCurrentState({ ...snapshot, summary: value });
+    }, [commitCurrentState, getCurrentStateSnapshot]);
+
+    const handleAddCurrentStateField = useCallback(() => {
+        const snapshot = getCurrentStateSnapshot();
+        const newField: CurrentStateField = {
+            id: randomUUID(),
+            label: `字段 ${snapshot.fields.length + 1}`,
+            type: 'string',
+            value: '',
+        };
+        commitCurrentState({ ...snapshot, fields: [...snapshot.fields, newField] });
+    }, [commitCurrentState, getCurrentStateSnapshot]);
+
+    const handleRemoveCurrentStateField = useCallback((fieldId: string) => {
+        const snapshot = getCurrentStateSnapshot();
+        commitCurrentState({ ...snapshot, fields: snapshot.fields.filter(field => field.id !== fieldId) });
+    }, [commitCurrentState, getCurrentStateSnapshot]);
+
+    const handleCurrentStateFieldLabelChange = useCallback((fieldId: string, label: string) => {
+        const snapshot = getCurrentStateSnapshot();
+        commitCurrentState({
+            ...snapshot,
+            fields: snapshot.fields.map(field => field.id === fieldId ? { ...field, label } : field),
+        });
+    }, [commitCurrentState, getCurrentStateSnapshot]);
+
+    const handleCurrentStateFieldTypeChange = useCallback((fieldId: string, type: CurrentStateField['type']) => {
+        const snapshot = getCurrentStateSnapshot();
+        commitCurrentState({
+            ...snapshot,
+            fields: snapshot.fields.map(field => {
+                if (field.id !== fieldId) return field;
+                let nextValue: string | number | boolean;
+                if (type === 'boolean') {
+                    nextValue = Boolean(field.value);
+                } else if (type === 'number') {
+                    const numeric = Number(field.value);
+                    nextValue = Number.isFinite(numeric) ? numeric : 0;
+                } else {
+                    nextValue = field.value?.toString() ?? '';
+                }
+                return { ...field, type, value: nextValue };
+            }),
+        });
+    }, [commitCurrentState, getCurrentStateSnapshot]);
+
+    const handleCurrentStateFieldValueChange = useCallback((fieldId: string, rawValue: string) => {
+        const snapshot = getCurrentStateSnapshot();
+        commitCurrentState({
+            ...snapshot,
+            fields: snapshot.fields.map(field => {
+                if (field.id !== fieldId) return field;
+                let nextValue: string | number | boolean = rawValue;
+                if (field.type === 'boolean') {
+                    nextValue = rawValue === 'true' || rawValue === true;
+                } else if (field.type === 'number') {
+                    const numeric = Number(rawValue);
+                    nextValue = Number.isFinite(numeric) ? numeric : 0;
+                } else {
+                    nextValue = rawValue;
+                }
+                return { ...field, value: nextValue };
+            }),
+        });
+    }, [commitCurrentState, getCurrentStateSnapshot]);
 
     // ===================================
     // 保存与输出 (SRS 3.7.4 & 3.7.5)
@@ -1591,6 +1678,91 @@ const CharacterManagerPage: React.FC = () => {
                                             <div className="flex flex-wrap gap-2 pt-2 border-t">
                                                 <button onClick={handleResetHistoryAttributes} className="text-xs bg-yellow-100 text-yellow-800 px-3 py-1 rounded hover:bg-yellow-200">重置属性</button>
                                                 <button onClick={handleClearHistory} className="text-xs bg-red-100 text-red-800 px-3 py-1 rounded hover:bg-red-200">清除所有记录</button>
+                                            </div>
+                                        </div>
+                                    </fieldset>
+                                )}
+
+                                {!isScenarioData(characterData) && (
+                                    <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
+                                        <legend className="text-sm font-semibold px-2 text-gray-600">当前状态</legend>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-xs font-semibold text-gray-600 mb-1">状态摘要</label>
+                                                <textarea
+                                                    value={characterData.current_state?.summary ?? ''}
+                                                    onChange={(e) => handleCurrentStateSummaryChange(e.target.value)}
+                                                    className="input-field"
+                                                    rows={3}
+                                                    placeholder="记录 HP/MP、情绪、物品等即时状态..."
+                                                />
+                                                <p className="text-[11px] text-gray-500 mt-1">修改当前状态将使原生签名失效，这是正常行为。</p>
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-xs font-semibold text-gray-600">自定义字段</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleAddCurrentStateField}
+                                                        className="text-xs text-purple-700 font-semibold hover:underline"
+                                                    >
+                                                        + 新增字段
+                                                    </button>
+                                                </div>
+                                                {Array.isArray(characterData.current_state?.fields) && characterData.current_state.fields.length > 0 ? (
+                                                    <div className="space-y-3">
+                                                        {characterData.current_state.fields.map((field: CurrentStateField) => (
+                                                            <div key={field.id} className="border border-gray-200 rounded-md p-3 space-y-2">
+                                                                <div className="flex flex-col gap-2 md:flex-row">
+                                                                    <input
+                                                                        type="text"
+                                                                        className="input-field flex-1"
+                                                                        value={field.label}
+                                                                        onChange={(e) => handleCurrentStateFieldLabelChange(field.id, e.target.value)}
+                                                                        placeholder="字段名称"
+                                                                    />
+                                                                    <select
+                                                                        className="input-field md:w-32"
+                                                                        value={field.type}
+                                                                        onChange={(e) => handleCurrentStateFieldTypeChange(field.id, e.target.value as CurrentStateField['type'])}
+                                                                    >
+                                                                        <option value="string">字符串</option>
+                                                                        <option value="number">数值</option>
+                                                                        <option value="boolean">布尔</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    {field.type === 'boolean' ? (
+                                                                        <select
+                                                                            className="input-field"
+                                                                            value={String(field.value)}
+                                                                            onChange={(e) => handleCurrentStateFieldValueChange(field.id, e.target.value)}
+                                                                        >
+                                                                            <option value="true">是</option>
+                                                                            <option value="false">否</option>
+                                                                        </select>
+                                                                    ) : (
+                                                                        <input
+                                                                            type={field.type === 'number' ? 'number' : 'text'}
+                                                                            className="input-field"
+                                                                            value={field.value?.toString() ?? ''}
+                                                                            onChange={(e) => handleCurrentStateFieldValueChange(field.id, e.target.value)}
+                                                                        />
+                                                                    )}
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleRemoveCurrentStateField(field.id)}
+                                                                        className="text-xs text-red-500 font-semibold hover:underline"
+                                                                    >
+                                                                        删除
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-xs text-gray-500">暂无自定义字段，点击“新增字段”以记录独特的资源或计数。</p>
+                                                )}
                                             </div>
                                         </div>
                                     </fieldset>

@@ -8,6 +8,19 @@
  * 历战记录中的单个事件条目。
  * 对应 SRS 3.1.2 节。
  */
+export interface CurrentStateField {
+  id: string;
+  label: string;
+  type: 'string' | 'number' | 'boolean';
+  value: string | number | boolean;
+}
+
+export interface CharacterCurrentState {
+  summary: string;
+  fields?: CurrentStateField[];
+  updated_at?: string | null;
+}
+
 export interface ArenaHistoryEntry {
   id: number; // 从 1 开始自增
   type: 'daily' | 'kizuna' | 'classic' | 'scenario' | 'sublimation';

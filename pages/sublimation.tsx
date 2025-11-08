@@ -135,6 +135,8 @@ const getDefaultTargetTemplate = (source: InferableTemplate): SupportedTargetTem
     return 'general';
 };
 
+const SUBLIMATION_STATE_PREF_KEY = 'sublimation-history-state-preferences-v1';
+
 
 const SublimationPage: React.FC = () => {
     const router = useRouter();
@@ -161,6 +163,10 @@ const SublimationPage: React.FC = () => {
     const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
     const [targetTemplate, setTargetTemplate] = useState<SupportedTargetTemplate>('magical-girl');
     const [sourceTemplate, setSourceTemplate] = useState<InferableTemplate>('unknown');
+    const [readArenaHistory, setReadArenaHistory] = useState(true);
+    const [writeArenaHistory, setWriteArenaHistory] = useState(true);
+    const [readCurrentState, setReadCurrentState] = useState(true);
+    const [writeCurrentState, setWriteCurrentState] = useState(true);
 
     const { isCooldown, startCooldown, remainingTime } = useCooldown('sublimationCooldown', 60000);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -171,6 +177,32 @@ const SublimationPage: React.FC = () => {
         const isMobileDevice = /mobile/i.test(navigator.userAgent);
         if (isMobileDevice) setIsPasteAreaVisible(true);
     }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const saved = window.localStorage.getItem(SUBLIMATION_STATE_PREF_KEY);
+            if (!saved) return;
+            const parsed = JSON.parse(saved);
+            if (typeof parsed.readArenaHistory === 'boolean') setReadArenaHistory(parsed.readArenaHistory);
+            if (typeof parsed.writeArenaHistory === 'boolean') setWriteArenaHistory(parsed.writeArenaHistory);
+            if (typeof parsed.readCurrentState === 'boolean') setReadCurrentState(parsed.readCurrentState);
+            if (typeof parsed.writeCurrentState === 'boolean') setWriteCurrentState(parsed.writeCurrentState);
+        } catch (error) {
+            console.warn('Failed to load sublimation preferences', error);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const payload = {
+            readArenaHistory,
+            writeArenaHistory,
+            readCurrentState,
+            writeCurrentState,
+        };
+        window.localStorage.setItem(SUBLIMATION_STATE_PREF_KEY, JSON.stringify(payload));
+    }, [readArenaHistory, writeArenaHistory, readCurrentState, writeCurrentState]);
 
     useEffect(() => {
         setFieldsToPreserve(prev => {
@@ -335,6 +367,10 @@ const SublimationPage: React.FC = () => {
                 fieldsToPreserve: filteredFieldsToPreserve,
                 isDowngrade: isDowngrade,
                 targetTemplate: targetTemplate,
+                readArenaHistory,
+                writeArenaHistory,
+                readCurrentState,
+                writeCurrentState,
                 customProvider: (
                     userProviderConfig
                     && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
@@ -529,7 +565,7 @@ const SublimationPage: React.FC = () => {
                             )}
                             {isAuthenticated && (
                                 <p className="text-xs text-gray-500 mt-1">
-                                    支持任意设定素材；若档案含历战记录，AI 会自动引用相关经历。
+                                    支持任意设定素材；默认会引用档案中的历战记录，可在下方“资料读写策略”中关闭读取或写入。
                                 </p>
                             )}
                         </div>
@@ -573,6 +609,61 @@ const SublimationPage: React.FC = () => {
                             ) : (
                                 <p className="text-xs text-yellow-700 mt-1">⚠️ 注意: 提供引导将使生成的角色变为“衍生数据”，并移除其原生签名。</p>
                             )}
+                        </div>
+
+                        {/* 历战记录 / 当前状态策略 */}
+                        <div className="input-group">
+                            <label className="input-label">资料读写策略</label>
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <fieldset className="border border-gray-200 rounded-lg p-3">
+                                    <legend className="text-xs font-semibold text-gray-600 px-1">历战记录</legend>
+                                    <label className="flex items-center text-sm text-gray-700 mt-2">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 mr-2 text-purple-600 border-gray-300 rounded"
+                                            checked={readArenaHistory}
+                                            onChange={(e) => setReadArenaHistory(e.target.checked)}
+                                            disabled={isGenerating}
+                                        />
+                                        升华时读取
+                                    </label>
+                                    <label className="flex items-center text-sm text-gray-700 mt-2">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 mr-2 text-purple-600 border-gray-300 rounded"
+                                            checked={writeArenaHistory}
+                                            onChange={(e) => setWriteArenaHistory(e.target.checked)}
+                                            disabled={isGenerating}
+                                        />
+                                        升华后写入
+                                    </label>
+                                    <p className="text-[11px] text-gray-500 mt-1">关闭读取后，仅根据设定与引导完成升华；关闭写入后，本次升华不会新增历史条目。</p>
+                                </fieldset>
+                                <fieldset className="border border-gray-200 rounded-lg p-3">
+                                    <legend className="text-xs font-semibold text-gray-600 px-1">当前状态</legend>
+                                    <label className="flex items-center text-sm text-gray-700 mt-2">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 mr-2 text-purple-600 border-gray-300 rounded"
+                                            checked={readCurrentState}
+                                            onChange={(e) => setReadCurrentState(e.target.checked)}
+                                            disabled={isGenerating}
+                                        />
+                                        升华时读取
+                                    </label>
+                                    <label className="flex items-center text-sm text-gray-700 mt-2">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 mr-2 text-purple-600 border-gray-300 rounded"
+                                            checked={writeCurrentState}
+                                            onChange={(e) => setWriteCurrentState(e.target.checked)}
+                                            disabled={isGenerating}
+                                        />
+                                        升华后写入
+                                    </label>
+                                    <p className="text-[11px] text-gray-500 mt-1">当前状态用于追踪角色即时状况。开启写入后，AI 只会更新摘要，保留你自定义的字段。</p>
+                                </fieldset>
+                            </div>
                         </div>
 
                         {/* [新增] 高级选项UI */}
