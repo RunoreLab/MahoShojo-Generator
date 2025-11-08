@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { loadArrestedBackup, clearArrestedBackup, type ArrestedBackupPackage, type ArrestedBackupItem } from '@/lib/arrested-backup';
 
 export default function ArrestedPage() {
     const router = useRouter();
@@ -15,6 +16,9 @@ export default function ArrestedPage() {
     const [newsTickerItems, setNewsTickerItems] = useState<string[]>([]);
     // 当前显示的新闻条目的索引
     const [currentNewsIndex, setCurrentNewsIndex] = useState(0);
+    const [backupData, setBackupData] = useState<ArrestedBackupPackage | null>(null);
+    const [selectedItems, setSelectedItems] = useState<Record<string, boolean>>({});
+    const [previewItemId, setPreviewItemId] = useState<string | null>(null);
 
     useEffect(() => {
         // 从 URL query 获取理由
@@ -81,6 +85,91 @@ export default function ArrestedPage() {
         // 组件卸载时清除定时器，防止内存泄漏
         return () => clearInterval(intervalId);
     }, [newsTickerItems]); // 当新闻列表变化时，重新设置定时器
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const stored = loadArrestedBackup();
+        if (stored && stored.triggerSource === 'output' && stored.items.length > 0) {
+            setBackupData(stored);
+            const initialSelection = stored.items.reduce<Record<string, boolean>>((acc, item) => {
+                acc[item.id] = true;
+                return acc;
+            }, {});
+            setSelectedItems(initialSelection);
+        }
+    }, []);
+
+    const shouldShowBackupSection = Boolean(backupData && backupData.triggerSource === 'output' && backupData.items.length > 0);
+    const selectedCount = shouldShowBackupSection && backupData
+        ? backupData.items.filter(item => selectedItems[item.id]).length
+        : 0;
+    const hasSelectedItems = selectedCount > 0;
+
+    const formatSize = (size: number): string => {
+        if (size < 1024) return `${size} B`;
+        if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+        return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+    };
+
+    const formatBackupTime = (iso?: string): string => {
+        if (!iso) return '未知时间';
+        const parsed = new Date(iso);
+        if (Number.isNaN(parsed.getTime())) return iso;
+        return parsed.toLocaleString('zh-CN', { hour12: false });
+    };
+
+    const describeOrigin = (origin?: string): string => {
+        switch (origin) {
+            case 'battle':
+                return '战报故事生成';
+            case 'battle-stream':
+                return '战报流式生成';
+            case 'details':
+                return '角色问卷生成';
+            default:
+                return '生成器';
+        }
+    };
+
+    const downloadItem = (item: ArrestedBackupItem) => {
+        if (typeof window === 'undefined') return;
+        const blob = new Blob([item.content], { type: item.mimeType });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = item.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    };
+
+    const handleDownloadSelected = () => {
+        if (!backupData || !hasSelectedItems) return;
+        backupData.items.forEach(item => {
+            if (selectedItems[item.id]) {
+                downloadItem(item);
+            }
+        });
+    };
+
+    const toggleSelection = (itemId: string) => {
+        setSelectedItems(prev => ({
+            ...prev,
+            [itemId]: !prev[itemId],
+        }));
+    };
+
+    const handlePreviewToggle = (itemId: string) => {
+        setPreviewItemId(prev => (prev === itemId ? null : itemId));
+    };
+
+    const handleClearBackup = () => {
+        clearArrestedBackup();
+        setBackupData(null);
+        setSelectedItems({});
+        setPreviewItemId(null);
+    };
 
     return (
         <>
@@ -167,6 +256,87 @@ export default function ArrestedPage() {
                             </div>
                         </div>
                     </div>
+
+                    {shouldShowBackupSection && backupData && (
+                        <div className="bg-purple-950/70 border border-pink-400/80 rounded-lg p-6 mb-8 shadow-2xl">
+                            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                <div>
+                                    <div className="flex items-center gap-2 text-pink-200 text-lg font-semibold">
+                                        <span>📁 输出触发敏感词，但输入已临时保存</span>
+                                    </div>
+                                    <p className="text-sm text-purple-100/80 mt-2">
+                                        存档时间：{formatBackupTime(backupData.triggeredAt)} · 来源：{describeOrigin(backupData.origin)} · 触发原因：{backupData.reason || '使用危险符文'}
+                                    </p>
+                                    <p className="text-xs text-purple-100/70 mt-1">为避免再次丢失，请尽快下载所需资料并在本地妥善存储。</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleClearBackup}
+                                    className="self-start rounded-md border border-pink-300/70 px-3 py-1 text-sm text-pink-100 hover:bg-pink-400/10"
+                                >
+                                    清空缓存
+                                </button>
+                            </div>
+
+                            <div className="mt-5 space-y-4">
+                                {backupData.items.map(item => (
+                                    <div key={item.id} className="rounded-lg border border-purple-700/60 bg-purple-900/60 p-4">
+                                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                            <label className="flex flex-1 items-start gap-3 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    className="mt-1 h-4 w-4 accent-pink-400"
+                                                    checked={Boolean(selectedItems[item.id])}
+                                                    onChange={() => toggleSelection(item.id)}
+                                                />
+                                                <div>
+                                                    <p className="font-semibold text-white">{item.label}</p>
+                                                    <p className="text-xs text-purple-100/80 break-words">
+                                                        {item.filename} · {formatSize(item.size)}{item.description ? ` · ${item.description}` : ''}
+                                                    </p>
+                                                </div>
+                                            </label>
+                                            <div className="flex flex-wrap gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="rounded-md border border-pink-200/70 px-3 py-1 text-sm text-pink-100 hover:bg-pink-400/10"
+                                                    onClick={() => downloadItem(item)}
+                                                >
+                                                    单独下载
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="rounded-md border border-purple-300/60 px-3 py-1 text-sm text-purple-100 hover:bg-purple-400/10"
+                                                    onClick={() => handlePreviewToggle(item.id)}
+                                                >
+                                                    {previewItemId === item.id ? '收起预览' : '查看内容'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {previewItemId === item.id && (
+                                            <pre className="mt-3 max-h-56 overflow-auto rounded-lg bg-black/30 p-3 text-xs text-left font-mono text-purple-50 whitespace-pre-wrap">
+                                                {item.content}
+                                            </pre>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-start">
+                                <button
+                                    type="button"
+                                    onClick={handleDownloadSelected}
+                                    disabled={!hasSelectedItems}
+                                    className={`rounded-md px-4 py-2 text-sm font-semibold shadow ${hasSelectedItems ? 'bg-pink-500 text-white hover:bg-pink-400' : 'bg-pink-200/30 text-pink-100 cursor-not-allowed'}`}
+                                >
+                                    下载选中项目（{selectedCount}）
+                                </button>
+                                <span className="text-xs text-purple-100/70">
+                                    如果浏览器阻止下载，请逐个点击“单独下载”按钮。
+                                </span>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Magical footer warning */}
                     <div className="mt-8 text-center">
