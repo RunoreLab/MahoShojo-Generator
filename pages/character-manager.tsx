@@ -1699,9 +1699,9 @@ const CharacterManagerPage: React.FC = () => {
                                                     onChange={(e) => handleCurrentStateSummaryChange(e.target.value)}
                                                     className="input-field"
                                                     rows={3}
-                                                    placeholder="记录 HP/MP、情绪、物品等即时状态..."
+                                                    placeholder="记录角色身体状况、情绪、物品等即时状态..."
                                                 />
-                                                <p className="text-[11px] text-gray-500 mt-1">修改当前状态将使原生签名失效，这是正常行为。</p>
+                                                <p className="text-[11px] text-gray-500 mt-1">修改当前状态将使原生签名失效。请尽量统一使用状态摘要，避免随意增加自定义字段。</p>
                                             </div>
                                             <div>
                                                 <div className="flex items-center justify-between mb-2">

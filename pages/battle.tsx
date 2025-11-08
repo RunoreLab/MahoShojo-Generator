@@ -1548,7 +1548,7 @@ const BattlePage: React.FC = () => {
                                         />
                                         战报后写入
                                     </label>
-                                    <p className="text-[11px] text-gray-500 mt-1">关闭读取后，AI 会将角色视为首次登场；关闭写入后，本次战绩不会被记录。</p>
+                                    <p className="text-[11px] text-gray-500 mt-1">关闭读取后，将不会参考角色历战；关闭写入后，本次战绩不会被记录。</p>
                                 </fieldset>
                                 <fieldset className="border border-gray-200 rounded-lg p-3">
                                     <legend className="text-xs font-semibold text-gray-600 px-1">当前状态</legend>
@@ -1572,7 +1572,7 @@ const BattlePage: React.FC = () => {
                                         />
                                         战报后写入
                                     </label>
-                                    <p className="text-[11px] text-gray-500 mt-1">当前状态可记录 HP/MP、物品、人际等实时信息。写入时仅更新摘要，用户自定义字段将被保留。</p>
+                                    <p className="text-[11px] text-gray-500 mt-1">当前状态可记录角色身体状况、物品、人际等实时信息。</p>
                                 </fieldset>
                             </div>
                             <p className="text-xs text-gray-500 mt-2">偏好会自动保存到浏览器，下次进入竞技场会沿用当前设置。</p>
