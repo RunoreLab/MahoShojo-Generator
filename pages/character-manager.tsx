@@ -1275,33 +1275,37 @@ const CharacterManagerPage: React.FC = () => {
 
     const handleAddCurrentStateField = useCallback(() => {
         const snapshot = getCurrentStateSnapshot();
+        const fields = snapshot.fields ?? [];
         const newField: CurrentStateField = {
             id: randomUUID(),
-            label: `字段 ${snapshot.fields.length + 1}`,
+            label: `字段 ${fields.length + 1}`,
             type: 'string',
             value: '',
         };
-        commitCurrentState({ ...snapshot, fields: [...snapshot.fields, newField] });
+        commitCurrentState({ ...snapshot, fields: [...fields, newField] });
     }, [commitCurrentState, getCurrentStateSnapshot]);
 
     const handleRemoveCurrentStateField = useCallback((fieldId: string) => {
         const snapshot = getCurrentStateSnapshot();
-        commitCurrentState({ ...snapshot, fields: snapshot.fields.filter(field => field.id !== fieldId) });
+        const fields = snapshot.fields ?? [];
+        commitCurrentState({ ...snapshot, fields: fields.filter(field => field.id !== fieldId) });
     }, [commitCurrentState, getCurrentStateSnapshot]);
 
     const handleCurrentStateFieldLabelChange = useCallback((fieldId: string, label: string) => {
         const snapshot = getCurrentStateSnapshot();
+        const fields = snapshot.fields ?? [];
         commitCurrentState({
             ...snapshot,
-            fields: snapshot.fields.map(field => field.id === fieldId ? { ...field, label } : field),
+            fields: fields.map(field => field.id === fieldId ? { ...field, label } : field),
         });
     }, [commitCurrentState, getCurrentStateSnapshot]);
 
     const handleCurrentStateFieldTypeChange = useCallback((fieldId: string, type: CurrentStateField['type']) => {
         const snapshot = getCurrentStateSnapshot();
+        const fields = snapshot.fields ?? [];
         commitCurrentState({
             ...snapshot,
-            fields: snapshot.fields.map(field => {
+            fields: fields.map(field => {
                 if (field.id !== fieldId) return field;
                 let nextValue: string | number | boolean;
                 if (type === 'boolean') {
@@ -1319,13 +1323,14 @@ const CharacterManagerPage: React.FC = () => {
 
     const handleCurrentStateFieldValueChange = useCallback((fieldId: string, rawValue: string) => {
         const snapshot = getCurrentStateSnapshot();
+        const fields = snapshot.fields ?? [];
         commitCurrentState({
             ...snapshot,
-            fields: snapshot.fields.map(field => {
+            fields: fields.map(field => {
                 if (field.id !== fieldId) return field;
                 let nextValue: string | number | boolean = rawValue;
                 if (field.type === 'boolean') {
-                    nextValue = rawValue === 'true' || rawValue === true;
+                    nextValue = rawValue === 'true';
                 } else if (field.type === 'number') {
                     const numeric = Number(rawValue);
                     nextValue = Number.isFinite(numeric) ? numeric : 0;

@@ -12,7 +12,7 @@ import { StatsData } from './api/get-stats';
 import Leaderboard from '../components/Leaderboard';
 import { config as appConfig } from '../lib/config';
 // v0.4.0 引入新的判定器类型
-import { AdjudicatorEvent, AdjudicationResult } from '../types/arena';
+import { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '../types/arena';
 import { generateRandomMagicalGirl, generateRandomCanshou } from '../lib/random-character-generator';
 import BattleDataModal from '../components/BattleDataModal';
 import { useAuth } from '@/lib/useAuth';
@@ -32,6 +32,7 @@ interface UpdatedCombatantData {
     name?: string;
     arena_history: any; // ArenaHistory;
     signature?: string;
+    current_state?: CharacterCurrentState | null;
     // 允许包含角色文件的其他所有字段
     [key: string]: any;
 }

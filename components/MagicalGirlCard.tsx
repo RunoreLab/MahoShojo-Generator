@@ -82,6 +82,7 @@ interface MagicalGirlCardProps {
       };
     };
   arena_history?: ArenaHistory;
+  current_state?: CharacterCurrentState | null;
   };
   gradientStyle: string;
   onSaveImage?: (imageUrl: string) => void;
