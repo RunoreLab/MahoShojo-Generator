@@ -491,9 +491,9 @@ const applyPostBattleUpdates = async (
             } else {
                 delete characterData.signature;
             }
-        }
 
-        updatedCombatants.push(characterData);
+            updatedCombatants.push(characterData);
+        }
     }
 
     return updatedCombatants;
