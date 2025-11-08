@@ -47,7 +47,7 @@ export default function EditCardForm({ card, onSave, onCancel }: EditCardFormPro
           className="input-field text-sm"
           rows={2}
           placeholder="描述"
-          maxLength={120}
+          maxLength={300}
         />
         <div>
           <label className="block text-sm font-medium text-gray-700">内容模板</label>
