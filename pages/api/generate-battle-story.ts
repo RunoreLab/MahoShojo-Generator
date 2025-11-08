@@ -40,22 +40,37 @@ const WorldviewCheckSchema = z.object({
 });
 
 // 为AI定义的核心Schema
-const BattleReportCoreSchema = z.object({
-  headline: z.string().describe("本场战斗或故事的新闻标题，可以使用震惊体等技巧来吸引读者。"),
-  article: z.object({
-    body: z.string().describe("战斗简报或故事的正文。【注意】内容应当符合公序良俗，排除涉及或影射政治、现实、脏话、性、色情、暴力、仇恨言论、歧视、犯罪、争议性的内容，以及不契合魔法少女故事的要素。"),
-    analysis: z.string().describe("记者的分析与猜测。这部分内容可以带有记者的主观色彩，看热闹不嫌事大，进行一些有逻辑但可能不完全真实的猜测和引申，制造“爆点”，字数约100-150字。")
-  }),
-  officialReport: z.object({
-    winner: z.string().describe("胜利者的代号或名称。如果是平局，则返回'平局'。如果是无胜负要素的故事，请列出所有核心角色的名字；如果带有竞争性并分出了胜负（如战斗、辩论、比赛），则只写胜利者的名字。"),
-    conclusion: z.string().describe("对本次事件的总结点评，描述事件带来的最终结果，包括对参与者和相关者的后续影响。"),
-  }),
-  impacts: z.array(z.object({
-    characterName: z.string().describe("参与者的代号或名称。"),
-    impact: z.string().describe("一句话概括该角色在此次事件中的成长、感悟或变化。"),
-    currentStateSummary: z.string().describe("该角色在战斗/事件结束后的实时状态概述。").optional()
-  })).describe("对每位参与该事件的核心角色的影响总结列表，反映角色当前状态。")
-}).describe("生成一份关于魔法少女的新闻报道。如果用户提供了引导，请在创作时参考，但必须确保最终内容符合魔法少女世界观和公序良俗。");
+const buildBattleReportSchema = (options: { enableImpacts: boolean; enableImpactText: boolean; enableCurrentState: boolean }) => {
+  const baseShape: Record<string, z.ZodTypeAny> = {
+    headline: z.string().describe("本场战斗或故事的新闻标题，可以使用震惊体等技巧来吸引读者。"),
+    article: z.object({
+      body: z.string().describe("战斗简报或故事的正文。【注意】内容应当符合公序良俗，排除涉及或影射政治、现实、脏话、性、色情、暴力、仇恨言论、歧视、犯罪、争议性的内容。"),
+      analysis: z.string().describe("记者的分析与猜测。这部分内容可以带有记者的主观色彩，看热闹不嫌事大，进行一些有逻辑但可能不完全真实的猜测和引申，制造“爆点”，字数约100-150字。")
+    }),
+    officialReport: z.object({
+      winner: z.string().describe("胜利者的代号或名称。如果是平局，则返回'平局'。如果是无胜负要素的故事，请列出所有核心参与角色的名字；如果带有竞争性并分出了胜负（如战斗、辩论、比赛），则只写胜利者的名字。"),
+      conclusion: z.string().describe("对本次事件的总结点评，描述事件带来的最终结果，包括对参与者和相关者的后续影响。"),
+    })
+  };
+
+  if (options.enableImpacts) {
+    const impactShape: Record<string, z.ZodTypeAny> = {
+      characterName: z.string().describe("参与者的代号或名称。"),
+    };
+
+    if (options.enableImpactText) {
+      impactShape.impact = z.string().describe("概括该角色在此次事件中的成长、感悟或变化。");
+    }
+
+    if (options.enableCurrentState) {
+      impactShape.currentStateSummary = z.string().describe("该角色在战斗/事件结束后的实时状态概述。").optional();
+    }
+
+    baseShape.impacts = z.array(z.object(impactShape)).describe("对每位参与该事件的核心角色的影响总结列表，反映角色当前状态。");
+  }
+
+  return z.object(baseShape).describe("生成一份关于魔法少女的新闻报道。如果用户提供了引导，请在创作时参考，但必须确保最终内容符合魔法少女世界观和公序良俗。");
+};
 
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
@@ -166,7 +181,7 @@ const filterAndFormatHistory = (
   history: ArenaHistory | undefined,
   otherParticipantNames: string[],
   isPureBattle: boolean,
-  limit?: number
+  limit?: number | null
 ): string => {
   // 如果没有历战记录，直接返回空字符串
   if (!history || !history.entries || history.entries.length === 0) {
@@ -241,7 +256,7 @@ const formatCurrentStateForPrompt = (state: CharacterCurrentState | undefined): 
 const applyPostBattleUpdates = async (
     combatants: any[],
     report: NewsReport,
-    impacts: { characterName: string; impact: string; currentStateSummary?: string }[],
+    impacts: { characterName: string; impact?: string; currentStateSummary?: string }[],
     userGuidance: string | null,
     scenario: any | null,
     options: { writeArenaHistory: boolean; writeCurrentState: boolean }
@@ -736,6 +751,12 @@ async function handler(req: NextRequest): Promise<Response> {
             return 3;
         })()
         : 0;
+    const shouldRequestImpacts = resolvedWriteArenaHistory || resolvedWriteCurrentState;
+    const battleReportSchema = buildBattleReportSchema({
+        enableImpacts: shouldRequestImpacts,
+        enableImpactText: resolvedWriteArenaHistory,
+        enableCurrentState: resolvedWriteCurrentState
+    });
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;
@@ -916,7 +937,9 @@ async function handler(req: NextRequest): Promise<Response> {
     }
 
     // 创建生成配置
-    const generationConfig: GenerationConfig<z.infer<typeof BattleReportCoreSchema>, any> = {
+    type BattleReportResult = z.infer<typeof battleReportSchema>;
+
+    const generationConfig: GenerationConfig<BattleReportResult, any> = {
         systemPrompt,
         temperature: 0.9,
         promptBuilder: createPromptBuilder(
@@ -935,21 +958,25 @@ async function handler(req: NextRequest): Promise<Response> {
             adjudicationResults,
             storyLength
         ),
-        schema: BattleReportCoreSchema,
+        schema: battleReportSchema,
         taskName: `生成${mode}模式故事`,
         maxTokens: 8192,
         modelOverride: resolvedModelOverride, // 使用轻量模型或自定义覆盖模型
     };
 
-    const aiResult = await generateWithAI({ combatants }, generationConfig, providerOptions);
+    const aiResult = await generateWithAI<BattleReportResult, { combatants: any[] }>({ combatants }, generationConfig, providerOptions);
     
     // 组合成完整的前端报告对象
+    const impactsFromAI = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
+        ? (aiResult as any).impacts
+        : [];
+
     const report: NewsReport = {
-      ...aiResult,
+      ...(aiResult as Record<string, unknown>),
       reporterInfo: getRandomJournalist(),
       userGuidance: finalUserGuidance || undefined,
       mode: mode,
-    };
+    } as NewsReport;
     
     // 异步更新数据库统计，不阻塞响应
     // 仅在写入历战记录时更新统计，避免污染数据
@@ -967,7 +994,7 @@ async function handler(req: NextRequest): Promise<Response> {
     const updatedCombatants = await applyPostBattleUpdates(
         combatants,
         report,
-        aiResult.impacts,
+        impactsFromAI,
         finalUserGuidance,
         scenario,
         { writeArenaHistory: resolvedWriteArenaHistory, writeCurrentState: resolvedWriteCurrentState }
