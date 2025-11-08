@@ -165,7 +165,8 @@ const filterAndFormatHistory = (
   characterName: string,
   history: ArenaHistory | undefined,
   otherParticipantNames: string[],
-  isPureBattle: boolean
+  isPureBattle: boolean,
+  limit?: number
 ): string => {
   // 如果没有历战记录，直接返回空字符串
   if (!history || !history.entries || history.entries.length === 0) {
@@ -195,7 +196,10 @@ const filterAndFormatHistory = (
   });
 
   // 【SRS 3.1.3 - 数量限制】
-  const selectedEntries = relevantEntries.slice(0, 20);
+  const sliceLimit = typeof limit === 'number' && limit > 0 ? limit : 20;
+  const selectedEntries = sliceLimit === Infinity
+    ? relevantEntries
+    : relevantEntries.slice(0, sliceLimit);
 
   if (selectedEntries.length === 0) {
     return '';
@@ -578,6 +582,7 @@ const createPromptBuilder = (
     scenario: any | null,
     teams: { [key: string]: string[] } | undefined,
     readArenaHistory: boolean,
+    historyReadLimit: number | null,
     readCurrentState: boolean,
     writeCurrentState: boolean,
     adjudicationResults: AdjudicationResult[] | null,
@@ -597,7 +602,7 @@ const createPromptBuilder = (
         const typeDisplay = type === 'magical-girl' ? '魔法少女' : '残兽';
         let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
         if (readArenaHistory) {
-            profileString += filterAndFormatHistory(characterName, data.arena_history, otherNames, isPureBattle);
+            profileString += filterAndFormatHistory(characterName, data.arena_history, otherNames, isPureBattle, historyReadLimit ?? undefined);
         }
         if (readCurrentState) {
             profileString += formatCurrentStateForPrompt(data.current_state);
@@ -703,6 +708,7 @@ async function handler(req: NextRequest): Promise<Response> {
         teams, 
         language = 'zh-CN', 
         useArenaHistory,
+        arenaHistoryReadLimit,
         readArenaHistory,
         writeArenaHistory,
         readCurrentState,
@@ -721,6 +727,15 @@ async function handler(req: NextRequest): Promise<Response> {
         : (typeof useArenaHistory === 'boolean' ? useArenaHistory : true);
     const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
     const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
+    const resolvedHistoryReadLimit = resolvedReadArenaHistory
+        ? (() => {
+            if (arenaHistoryReadLimit === null) return Infinity;
+            if (typeof arenaHistoryReadLimit === 'number' && Number.isFinite(arenaHistoryReadLimit)) {
+                return Math.max(1, Math.floor(arenaHistoryReadLimit));
+            }
+            return 3;
+        })()
+        : 0;
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;
@@ -914,6 +929,7 @@ async function handler(req: NextRequest): Promise<Response> {
             scenario,
             teams,
             resolvedReadArenaHistory,
+            resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit,
             resolvedReadCurrentState,
             resolvedWriteCurrentState,
             adjudicationResults,
