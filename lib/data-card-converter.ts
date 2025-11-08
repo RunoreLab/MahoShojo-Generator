@@ -13,6 +13,7 @@ import {
   isMagicalGirl,
   isScenarioCard
 } from './schemas';
+import type { CurrentStateData } from './schemas/current-state';
 
 const NON_SUBSTANTIVE_KEYS = new Set(['signature', 'templateId']);
 
@@ -50,6 +51,11 @@ interface UnmatchedField {
   path: string;
   value: unknown;
 }
+
+const createDefaultCurrentState = (): CurrentStateData => ({
+  summary: '当前状态尚未记录，可在战报或编辑器中更新。',
+  fields: [],
+});
 
 const MAGICAL_GIRL_META: Record<string, FieldMeta> = {
   codename: { type: 'string' },
@@ -111,7 +117,8 @@ const MAGICAL_GIRL_META: Record<string, FieldMeta> = {
   templateId: { type: 'string' },
   isPreset: { type: 'boolean' },
   arena_history: { type: 'unknown' },
-  adjudicationEvents: { type: 'unknown' }
+  adjudicationEvents: { type: 'unknown' },
+  current_state: { type: 'unknown' }
 };
 
 const CANSHOU_META: Record<string, FieldMeta> = {
@@ -132,7 +139,8 @@ const CANSHOU_META: Record<string, FieldMeta> = {
   isPreset: { type: 'boolean' },
   signature: { type: 'string' },
   adjudicationEvents: { type: 'unknown' },
-  arena_history: { type: 'unknown' }
+  arena_history: { type: 'unknown' },
+  current_state: { type: 'unknown' }
 };
 
 const SCENARIO_META: Record<string, FieldMeta> = {
@@ -203,6 +211,7 @@ const DEFAULT_MAGICAL_GIRL: MagicalGirlData = {
     }
   },
   userAnswers: [],
+  current_state: createDefaultCurrentState(),
   arena_history: {
     attributes: {
       world_line_id: '',
@@ -230,7 +239,8 @@ const DEFAULT_CANSHOU: CanshouData = {
   origin: '',
   birthEnvironment: '',
   researcherNotes: '',
-  templateId: '魔法少女/心之花/残兽（问卷生成）'
+  templateId: '魔法少女/心之花/残兽（问卷生成）',
+  current_state: createDefaultCurrentState()
 };
 
 const DEFAULT_SCENARIO: ScenarioData = {
@@ -253,7 +263,8 @@ const DEFAULT_SCENARIO: ScenarioData = {
 const DEFAULT_GENERAL: GeneralCharacterData = {
   templateId: GENERAL_CHARACTER_TEMPLATE_ID,
   name: '未命名角色',
-  content: '请在此处补充角色设定，建议使用 Markdown 书写。'
+  content: '请在此处补充角色设定，建议使用 Markdown 书写。',
+  current_state: createDefaultCurrentState()
 };
 
 export function inferTemplate(data: unknown): InferableTemplate {
@@ -451,6 +462,9 @@ function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
   if (data?.adjudicationEvents) {
     (result as any).adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
   }
+  if (data?.current_state) {
+    (result as any).current_state = JSON.parse(JSON.stringify(data.current_state));
+  }
   return { data: GeneralCharacterSchema.parse(result), warnings: [] };
 }
 
@@ -467,7 +481,7 @@ function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): Ass
   }
 
   const unmatched = assignWithMeta(source, base as Record<string, any>, MAGICAL_GIRL_META);
-  const appendix = formatUnmatchedFields(unmatched, ['arena_history', 'adjudicationEvents']);
+  const appendix = formatUnmatchedFields(unmatched, ['arena_history', 'adjudicationEvents', 'current_state']);
   if (appendix) {
     if (!base.analysis) base.analysis = { predictionBasis: '' };
     base.analysis.predictionBasis = `${base.analysis?.predictionBasis?.trim() || ''}\n${appendix}`.trim();
@@ -478,6 +492,9 @@ function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): Ass
   }
   if (data?.adjudicationEvents) {
     base.adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
+  }
+  if (data?.current_state) {
+    (base as any).current_state = JSON.parse(JSON.stringify(data.current_state));
   }
 
   base.templateId = '魔法少女/心之花/魔法少女（问卷生成）';
@@ -497,7 +514,7 @@ function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignR
   }
 
   const unmatched = assignWithMeta(source, base as Record<string, any>, CANSHOU_META);
-  const appendix = formatUnmatchedFields(unmatched, ['arena_history', 'adjudicationEvents']);
+  const appendix = formatUnmatchedFields(unmatched, ['arena_history', 'adjudicationEvents', 'current_state']);
   if (appendix) {
     base.researcherNotes = `${base.researcherNotes?.trim() || ''}\n${appendix}`.trim();
   }
@@ -507,6 +524,9 @@ function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignR
   }
   if (data?.adjudicationEvents) {
     base.adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
+  }
+  if (data?.current_state) {
+    (base as any).current_state = JSON.parse(JSON.stringify(data.current_state));
   }
 
   base.templateId = '魔法少女/心之花/残兽（问卷生成）';
@@ -524,6 +544,7 @@ function convertToScenario(data: any, sourceTemplate: InferableTemplate): Assign
   delete source.signature;
   delete source.templateId;
   delete source.arena_history;
+  delete source.current_state;
 
   const unmatched = assignWithMeta(source, base as Record<string, any>, SCENARIO_META);
 

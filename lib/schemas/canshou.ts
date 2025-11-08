@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CurrentStateSchema } from './current-state';
 
 const keyList = [
   'name',
@@ -17,6 +18,7 @@ const keyList = [
   'userAnswers',
   'signature',
   'arena_history',
+  'current_state',
   'isPreset',
   'adjudicationEvents'
 ];
@@ -45,6 +47,7 @@ export const CanshouSchema = z.object({
     probability: z.number().optional(),
     outcomes: z.array(z.string().optional()).optional(),
   })).optional(),
+  current_state: CurrentStateSchema.optional(),
   arena_history: z.object({
     attributes: z.object({
       world_line_id: z.string().optional(),
