@@ -197,6 +197,8 @@ const BattlePage: React.FC = () => {
     const [loadingPreset, setLoadingPreset] = useState<string | null>(null);
     // 新增：用于控制是否使用历战记录的状态
     const [readArenaHistory, setReadArenaHistory] = useState(true);
+    const [readArenaHistoryLimit, setReadArenaHistoryLimit] = useState('3');
+    const [isArenaHistoryUnlimited, setIsArenaHistoryUnlimited] = useState(false);
     const [writeArenaHistory, setWriteArenaHistory] = useState(true);
     const [readCurrentState, setReadCurrentState] = useState(true);
     const [writeCurrentState, setWriteCurrentState] = useState(true);
@@ -216,6 +218,8 @@ const BattlePage: React.FC = () => {
             if (!saved) return;
             const parsed = JSON.parse(saved);
             if (typeof parsed.readArenaHistory === 'boolean') setReadArenaHistory(parsed.readArenaHistory);
+            if (typeof parsed.readArenaHistoryLimit === 'string') setReadArenaHistoryLimit(parsed.readArenaHistoryLimit);
+            if (typeof parsed.isArenaHistoryUnlimited === 'boolean') setIsArenaHistoryUnlimited(parsed.isArenaHistoryUnlimited);
             if (typeof parsed.writeArenaHistory === 'boolean') setWriteArenaHistory(parsed.writeArenaHistory);
             if (typeof parsed.readCurrentState === 'boolean') setReadCurrentState(parsed.readCurrentState);
             if (typeof parsed.writeCurrentState === 'boolean') setWriteCurrentState(parsed.writeCurrentState);
@@ -228,12 +232,14 @@ const BattlePage: React.FC = () => {
         if (typeof window === 'undefined') return;
         const payload = {
             readArenaHistory,
+            readArenaHistoryLimit,
+            isArenaHistoryUnlimited,
             writeArenaHistory,
             readCurrentState,
             writeCurrentState,
         };
         window.localStorage.setItem(ARENA_STATE_PREF_KEY, JSON.stringify(payload));
-    }, [readArenaHistory, writeArenaHistory, readCurrentState, writeCurrentState]);
+    }, [readArenaHistory, readArenaHistoryLimit, isArenaHistoryUnlimited, writeArenaHistory, readCurrentState, writeCurrentState]);
 
     // 分别存储两种类型的预设
     const [magicalGirlPresets, setMagicalGirlPresets] = useState<Preset[]>([]);
@@ -392,6 +398,18 @@ const BattlePage: React.FC = () => {
                 return 'general-character';
         }
     };
+
+    const readableCombatantCount = useMemo(() => (
+        combatants.filter((c): c is CombatantData => 'data' in c).length
+    ), [combatants]);
+
+    const numericHistoryLimit = isArenaHistoryUnlimited
+        ? Infinity
+        : Math.max(1, Number(readArenaHistoryLimit) || 0);
+    const estimatedHistoryTotal = readArenaHistory
+        ? (numericHistoryLimit === Infinity ? Infinity : numericHistoryLimit * readableCombatantCount)
+        : 0;
+    const shouldWarnHistoryLimit = readArenaHistory && readableCombatantCount > 0 && (numericHistoryLimit === Infinity || estimatedHistoryTotal > 20);
 
     const validateGeneralCharacterData = (data: any, filename: string): { success: boolean } => {
         const parsed = GeneralCharacterSchema.safeParse(data);
@@ -1095,6 +1113,10 @@ const BattlePage: React.FC = () => {
                 }
             });
 
+            const arenaHistoryReadLimit = readArenaHistory
+                ? (isArenaHistoryUnlimited ? null : Math.max(1, Number(readArenaHistoryLimit) || 0))
+                : undefined;
+
             const requestBody: Record<string, unknown> = {
                 combatants: (finalCombatants.filter(c => 'data' in c) as CombatantData[]).map(c => ({
                     type: c.type,
@@ -1109,6 +1131,7 @@ const BattlePage: React.FC = () => {
                 teams: Object.keys(teams).length > 0 ? teams : undefined,
                 language: selectedLanguage,
                 readArenaHistory,
+                arenaHistoryReadLimit,
                 writeArenaHistory,
                 readCurrentState,
                 writeCurrentState,
@@ -1742,7 +1765,33 @@ const BattlePage: React.FC = () => {
                                         />
                                         战报后写入
                                     </label>
-                                    <p className="text-[11px] text-gray-500 mt-1">关闭读取后 AI 会忽略旧战绩；关闭写入后，本场表现不会加入角色档案。</p>
+                                    {readArenaHistory && (
+                                        <div className="mt-3 space-y-2">
+                                            <label className="block text-xs font-semibold text-gray-600">单个角色读取条数</label>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    min={1}
+                                                    step={1}
+                                                    className="input-field w-24"
+                                                    value={readArenaHistoryLimit}
+                                                    onChange={(e) => setReadArenaHistoryLimit(e.target.value.replace(/[^0-9]/g, '') || '1')}
+                                                    disabled={isGenerating || isArenaHistoryUnlimited}
+                                                />
+                                                <label className="flex items-center text-xs text-gray-600">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="h-4 w-4 mr-2 text-pink-600 border-gray-300 rounded"
+                                                        checked={isArenaHistoryUnlimited}
+                                                        onChange={(e) => setIsArenaHistoryUnlimited(e.target.checked)}
+                                                        disabled={isGenerating}
+                                                    />
+                                                    无上限
+                                                </label>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <p className="text-[11px] text-gray-500 mt-1">关闭读取后，将不会参考角色历战；关闭写入后，本次战绩不会被记录。</p>
                                 </fieldset>
                                 <fieldset className="border border-gray-200 rounded-lg p-3">
                                     <legend className="text-xs font-semibold text-gray-600 px-1">当前状态</legend>
@@ -1769,6 +1818,11 @@ const BattlePage: React.FC = () => {
                                     <p className="text-[11px] text-gray-500 mt-1">当前状态用于追踪角色身体状况、物品、人际等即时信息。写入时仅更新摘要，既有自定义字段不会被覆盖。</p>
                                 </fieldset>
                             </div>
+                            {shouldWarnHistoryLimit && (
+                                <p className="text-xs text-orange-600 mt-2">
+                                    ⚠️ 当前设置预计将读取{numericHistoryLimit === Infinity ? '无限制数量的' : `约 ${Math.ceil(estimatedHistoryTotal)} 条`}历战记录，超过 20 条可能显著提高生成失败或超时概率。
+                                </p>
+                            )}
                             <p className="text-xs text-gray-500 mt-2">偏好保存在浏览器端，流式与普通模式共享同一配置。</p>
                         </div>
 
