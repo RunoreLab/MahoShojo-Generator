@@ -237,7 +237,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
         </div>
 
         <div className="result-item">
-          <div className="result-label">角色设定（content）</div>
+          <div className="result-label">角色设定</div>
           <div className="result-value bg-white/95 rounded-xl p-4 shadow-inner text-sm leading-relaxed text-gray-800">
             <ReactMarkdown
               components={{
@@ -255,7 +255,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
                 code: ({ children }) => <code className="bg-gray-100 rounded px-1 py-0.5 text-xs text-gray-700">{children}</code>,
               }}
             >
-              {general?.content?.trim() || '（content 字段为空，建议补充完整的角色设定，包括外观、能力、背景与关键剧情。）'}
+              {general?.content?.trim() || '（content 字段为空，建议补充完整的角色设定，包括外观、能力、背景。）'}
             </ReactMarkdown>
           </div>
         </div>
