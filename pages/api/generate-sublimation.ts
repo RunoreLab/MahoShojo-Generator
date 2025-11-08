@@ -135,21 +135,37 @@ const SublimationEventSchema = z.object({
 }).describe("描述角色如何升华的事件。");
 
 /**
+ * @description 从对象顶层移除指定字段，主要用于控制传递给 AI 的上下文。
+ */
+const pruneTopLevelFields = (target: Record<string, any>, fields: Iterable<string>) => {
+  if (!target || typeof target !== 'object') {
+    return;
+  }
+  for (const field of fields) {
+    if (field in target) {
+      delete target[field];
+    }
+  }
+};
+
+/**
  * 核心函数：根据用户选择，动态构建AI所需的Zod Schema。
  * @param baseSchema - “完全体”的基础Schema。
- * @param fieldsToPreserve - 用户选择要保持不变的字段键名数组。
+ * @param fieldsToPreserve - 用户选择要保持不变的字段键名数组（已清洗）。
  * @returns 一个新的Zod Schema，仅包含AI需要生成的部分。
  */
 const createDynamicSchema = (baseSchema: z.ZodObject<any>, fieldsToPreserve: string[]) => {
-    let dynamicSchema = baseSchema;
-    // 遍历用户要求保留的字段
-    for (const field of fieldsToPreserve) {
-        // 检查该字段是否存在于基础Schema中
+    const omitShape = fieldsToPreserve.reduce<Record<string, true>>((acc, field) => {
         if (field in baseSchema.shape) {
-            // 如果存在，就从Schema中“omit”（省略）掉这个字段
-            dynamicSchema = dynamicSchema.omit({ [field]: true });
+            acc[field] = true;
         }
-    }
+        return acc;
+    }, {});
+
+    const dynamicSchema = Object.keys(omitShape).length > 0
+        ? baseSchema.omit(omitShape)
+        : baseSchema;
+
     // 最终返回一个包含动态生成部分和固定“升华事件”部分的Schema
     return z.object({
         updatedCharacterData: dynamicSchema.describe("一个JSON对象，仅包含所有被AI更新后的字段。"),
@@ -212,7 +228,14 @@ const createGenerationConfig = (
   const baseSchema = getFullPayloadSchema(targetTemplate);
   const schemaKeys = Object.keys(baseSchema.shape);
   const sanitizedFieldsToPreserve = fieldsToPreserve.filter(field => schemaKeys.includes(field));
-  const fieldsToGenerate = schemaKeys.filter(key => !sanitizedFieldsToPreserve.includes(key));
+  const autoSchemaOmissions: string[] = [];
+
+  if (stateOptions?.writeCurrentState === false && schemaKeys.includes('current_state')) {
+    autoSchemaOmissions.push('current_state');
+  }
+
+  const effectiveSchemaOmissions = Array.from(new Set([...sanitizedFieldsToPreserve, ...autoSchemaOmissions]));
+  const fieldsToGenerate = schemaKeys.filter(key => !effectiveSchemaOmissions.includes(key));
 
   const nameField = targetTemplate === 'magical-girl' ? 'codename' : 'name';
   const targetLabel = TEMPLATE_LABELS[targetTemplate];
@@ -227,6 +250,14 @@ const createGenerationConfig = (
 
     const includeHistory = stateOptions?.readArenaHistory !== false;
     const includeCurrentState = stateOptions?.readCurrentState !== false;
+
+    const promptOmissionSet = new Set(effectiveSchemaOmissions);
+    if (!includeHistory) {
+      promptOmissionSet.add('arena_history');
+    }
+    if (!includeCurrentState) {
+      promptOmissionSet.add('current_state');
+    }
 
     const historyEntries = includeHistory && Array.isArray(dataForPrompt?.arena_history?.entries)
       ? dataForPrompt.arena_history.entries
@@ -249,7 +280,8 @@ const createGenerationConfig = (
       : '用户选择不提供当前状态，本次升华请根据设定自行推断角色的即时状态。';
 
     let userAnswersReviewSection = '';
-    if (Array.isArray(dataForPrompt?.userAnswers) && dataForPrompt.userAnswers.length > 0) {
+    const allowUserAnswersInPrompt = !promptOmissionSet.has('userAnswers');
+    if (allowUserAnswersInPrompt && Array.isArray(dataForPrompt?.userAnswers) && dataForPrompt.userAnswers.length > 0) {
       const questions = magicalGirlQuestionnaire.questions;
       const userAnswersText = dataForPrompt.userAnswers
         .map((answer: string, index: number) => {
@@ -296,6 +328,10 @@ const createGenerationConfig = (
 
     const rulesText = rules.map((rule, index) => `${index + 1}.  ${rule}`).join('\n');
 
+    const promptOmittedFields = Array.from(promptOmissionSet);
+    pruneTopLevelFields(dataForPrompt, promptOmittedFields);
+    pruneTopLevelFields(outputSkeletonForPrompt, promptOmittedFields);
+
     return `
 # 角色成长升华任务
 你是一位资深的角色设定师。你的任务是为一个${targetLabel}角色进行“成长升华”。
@@ -331,7 +367,7 @@ ${rulesText}
 请严格按照提供的 JSON Schema 返回结果，使用【${language}】进行内容创作。`;
   };
 
-  const finalSchema = createDynamicSchema(baseSchema, sanitizedFieldsToPreserve);
+  const finalSchema = createDynamicSchema(baseSchema, effectiveSchemaOmissions);
 
   return {
     systemPrompt: '你是一位资深的角色设定师，擅长根据角色的经历描绘其成长与蜕变。',
