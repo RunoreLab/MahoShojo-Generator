@@ -232,6 +232,10 @@ export const FIELD_TRANSLATIONS: Record<string, string> = {
 
   // 升华相关
   'arena_history': '历战记录',
+  'current_state': '当前状态',
+  'summary': '状态摘要',
+  'fields': '状态字段',
+  'label': '标签',
   'entries': '历战记录',
   'sublimation_count': '升华次数',
   'last_sublimation_at': '上次升华时间',

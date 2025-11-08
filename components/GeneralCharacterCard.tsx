@@ -1,8 +1,48 @@
 import React, { useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { snapdom } from '@zumer/snapdom';
-import { ArenaHistory, ArenaHistoryEntry } from '@/types/arena';
+import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState, CurrentStateField } from '@/types/arena';
 import { GeneralCharacterData } from '@/lib/schemas/general-character';
+
+const formatCurrentStateValue = (field: CurrentStateField) => {
+  if (field.type === 'boolean') {
+    return field.value ? '是' : '否';
+  }
+  if (field.type === 'number') {
+    return typeof field.value === 'number' ? field.value : Number(field.value) || 0;
+  }
+  return String(field.value ?? '');
+};
+
+const renderCurrentStatePanel = (state?: CharacterCurrentState | null) => {
+  if (!state) return null;
+  const hasSummary = Boolean(state.summary && state.summary.trim());
+  const fields = Array.isArray(state.fields) ? state.fields : [];
+  const hasFields = fields.length > 0;
+  if (!hasSummary && !hasFields) return null;
+
+  return (
+    <div className="result-item">
+      <div className="result-label">🧭 当前状态</div>
+      <div className="result-value text-sm space-y-2">
+        {hasSummary && <p className="leading-relaxed">{state.summary}</p>}
+        {hasFields && (
+          <ul className="text-xs space-y-1">
+            {fields.map(field => (
+              <li key={field.id} className="flex justify-between gap-2">
+                <span className="font-semibold text-gray-700">{field.label}</span>
+                <span className="text-gray-900">{formatCurrentStateValue(field)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {state.updated_at && (
+          <p className="text-[10px] text-gray-400">最近更新：{new Date(state.updated_at).toLocaleString()}</p>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export interface GeneralCharacterDetails extends GeneralCharacterData {
   arena_history?: ArenaHistory | null;
@@ -13,6 +53,7 @@ interface GeneralCharacterCardProps {
     name: string;
     content: string;
     arena_history?: ArenaHistory | null;
+    current_state?: CharacterCurrentState | null;
   };
   onSaveImage?: (imageUrl: string) => void;
   imageSaveMode?: 'auto' | 'modal' | 'download';
@@ -218,6 +259,8 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
             </ReactMarkdown>
           </div>
         </div>
+
+        {renderCurrentStatePanel(general?.current_state)}
 
         {renderHistory()}
 

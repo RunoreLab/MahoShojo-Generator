@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CurrentStateSchema } from './current-state';
 
 const keyList = [
   'codename',
@@ -11,6 +12,7 @@ const keyList = [
   'userAnswers',
   'signature',
   'arena_history',
+  'current_state',
   'isPreset',
   'adjudicationEvents'
 ];
@@ -57,6 +59,7 @@ export const MagicalGirlSchema = z.object({
   userAnswers: z.array(z.string()).optional(),
   signature: z.string().optional(),
   isPreset: z.boolean().optional(),
+  current_state: CurrentStateSchema.optional(),
   arena_history: z.object({
     attributes: z.object({
       world_line_id: z.string().optional(),

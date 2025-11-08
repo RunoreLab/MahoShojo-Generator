@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CurrentStateSchema } from './current-state';
 
 export const GENERAL_CHARACTER_TEMPLATE_ID = '通用角色' as const;
 
@@ -12,7 +13,8 @@ export const GENERAL_CHARACTER_TEMPLATE_ID = '通用角色' as const;
 export const GeneralCharacterSchema = z.object({
   templateId: z.literal(GENERAL_CHARACTER_TEMPLATE_ID).default(GENERAL_CHARACTER_TEMPLATE_ID),
   name: z.string(),
-  content: z.string()
+  content: z.string(),
+  current_state: CurrentStateSchema.optional(),
 }).catchall(z.unknown());
 
 export type GeneralCharacterData = z.infer<typeof GeneralCharacterSchema>;

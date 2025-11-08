@@ -56,6 +56,10 @@ const getFullPayloadSchema = (target: SupportedTargetTemplate) => {
  * @description 这是一个“完全体”的魔法少女Schema，包含了所有可能被用户选择进行升华的字段。
  * 我们将基于这个Schema，根据用户的选择动态地移除那些需要“保留”的字段。
  */
+const CurrentStateUpdateSchema = z.object({
+  summary: z.string().describe('角色当前状态的摘要，1-2句话描述角色身体状况、心境或想法等。')
+}).partial().optional();
+
 const FullMagicalGirlSublimationPayloadSchema = z.object({
   codename: z.string().describe("角色的新代号，必须包含原始代号并在后面加上一个「称号」。例如，如果原始代号是'代号'，新代号可以是'代号「称号」'。"),
   appearance: z.object({
@@ -94,6 +98,7 @@ const FullMagicalGirlSublimationPayloadSchema = z.object({
     }).describe("角色背景故事的演进。")
   }).describe("对角色分析的全面更新。"),
   userAnswers: z.array(z.string()).optional().describe("根据角色的成长，对问卷问题的全新回答。"),
+  current_state: CurrentStateUpdateSchema,
 });
 
 /**
@@ -113,11 +118,13 @@ const FullCanshouSublimationPayloadSchema = z.object({
   birthEnvironment: z.string(),
   researcherNotes: z.string().describe("研究员对这次升华的补充笔记。"),
   userAnswers: z.array(z.string()).optional().describe("根据残兽的成长，对问卷问题的全新回答。"),
+  current_state: CurrentStateUpdateSchema,
 });
 
 const FullGeneralSublimationPayloadSchema = z.object({
   name: z.string().describe('角色的新名称，建议在原始名称基础上追加一个以「」包裹的称号来凸显成长。'),
-  content: z.string().describe('角色的完整设定文本；需要涵盖外观、能力、背景、性格、重要经历等全部要点，建议使用结构化 Markdown。')
+  content: z.string().describe('角色的完整设定文本；需要涵盖外观、能力、背景、性格、重要经历等全部要点，建议使用结构化 Markdown。'),
+  current_state: CurrentStateUpdateSchema,
 });
 
 
@@ -160,6 +167,31 @@ const CustomProviderSchema = z.object({
   apiKey: z.string(),
 });
 
+const formatCurrentStateForPrompt = (state: any): string => {
+  if (!state) {
+    return '无（未记录当前状态，可根据其他设定自行判断）。';
+  }
+  const lines: string[] = [];
+  if (typeof state.summary === 'string' && state.summary.trim()) {
+    lines.push(`- 状态摘要: ${state.summary.trim()}`);
+  }
+  if (Array.isArray(state.fields) && state.fields.length > 0) {
+    lines.push('- 结构化状态点:');
+    state.fields.forEach((field: any) => {
+      const type = field?.type ?? typeof field?.value;
+      let value = field?.value;
+      if (type === 'boolean') {
+        value = value ? '是' : '否';
+      }
+      lines.push(`  • ${field?.label ?? '未命名字段'} (${type}): ${value}`);
+    });
+  }
+  if (lines.length === 0) {
+    return '无（当前状态字段为空，AI可结合叙事自行推断）。';
+  }
+  return lines.join('\n');
+};
+
 const createGenerationConfig = (
   originalData: any,
   baseOutputData: any,
@@ -169,7 +201,13 @@ const createGenerationConfig = (
   targetTemplate: SupportedTargetTemplate,
   fieldsToPreserve: string[],
   isDowngrade: boolean = false,
-  modelOverride?: string
+  modelOverride?: string,
+  stateOptions?: {
+    readArenaHistory: boolean;
+    writeArenaHistory: boolean;
+    readCurrentState: boolean;
+    writeCurrentState: boolean;
+  }
 ): GenerationConfig<any, any> => {
   const baseSchema = getFullPayloadSchema(targetTemplate);
   const schemaKeys = Object.keys(baseSchema.shape);
@@ -187,19 +225,28 @@ const createGenerationConfig = (
     const outputSkeletonForPrompt = JSON.parse(JSON.stringify(baseOutputData || {}));
     delete outputSkeletonForPrompt.signature;
 
-    const historyEntries = Array.isArray(dataForPrompt?.arena_history?.entries)
+    const includeHistory = stateOptions?.readArenaHistory !== false;
+    const includeCurrentState = stateOptions?.readCurrentState !== false;
+
+    const historyEntries = includeHistory && Array.isArray(dataForPrompt?.arena_history?.entries)
       ? dataForPrompt.arena_history.entries
       : [];
-    const historyText = historyEntries.length > 0
-      ? historyEntries
-          .map((entry: any) => {
-            const title = entry?.title ? `“${entry.title}”` : '（未命名事件）';
-            const winner = entry?.winner ?? '未知胜者';
-            const impact = entry?.impact ?? '影响未记录';
-            return `- 事件${title}：胜利者 ${winner}，对角色的影响是“${impact}”`;
-          })
-          .join('\n')
-      : '无（原始素材未包含历战记录，可直接基于设定内容完成升华）';
+    const historyText = includeHistory
+      ? (historyEntries.length > 0
+          ? historyEntries
+              .map((entry: any) => {
+                const title = entry?.title ? `“${entry.title}”` : '（未命名事件）';
+                const winner = entry?.winner ?? '未知胜者';
+                const impact = entry?.impact ?? '影响未记录';
+                return `- 事件${title}：胜利者 ${winner}，对角色的影响是“${impact}”`;
+              })
+              .join('\n')
+          : '无（原始素材未包含历战记录，可直接基于设定内容完成升华）')
+      : '用户选择不提供历战记录，本次升华请只参考当前设定。';
+
+    const currentStateText = includeCurrentState
+      ? formatCurrentStateForPrompt(dataForPrompt?.current_state)
+      : '用户选择不提供当前状态，本次升华请根据设定自行推断角色的即时状态。';
 
     let userAnswersReviewSection = '';
     if (Array.isArray(dataForPrompt?.userAnswers) && dataForPrompt.userAnswers.length > 0) {
@@ -241,6 +288,12 @@ const createGenerationConfig = (
 
     rules.push('**生成升华事件**:  你还需要创作一个“升华事件”，简要描述角色是如何从这些经历中收获成长，升华到新状态的。');
 
+    if (stateOptions?.writeCurrentState === false) {
+      rules.push('**当前状态**: 用户禁用了当前状态写入，你不得在输出中新增或修改 `current_state` 字段。');
+    } else {
+      rules.push('**当前状态同步**: 如果输出的 `updatedCharacterData` 中包含 `current_state`，请专注更新 `summary`，不要更改已有 `fields` 的结构与取值。');
+    }
+
     const rulesText = rules.map((rule, index) => `${index + 1}.  ${rule}`).join('\n');
 
     return `
@@ -267,6 +320,9 @@ ${JSON.stringify(outputSkeletonForPrompt, null, 2)}
 
 ## 历战记录回顾
 ${historyText}
+
+## 当前状态
+${currentStateText}
 ${userAnswersReviewSection}
 
 ## 升华规则 (必须严格遵守)
@@ -336,8 +392,16 @@ async function handler(req: NextRequest): Promise<Response> {
       customProvider: customProviderPayload,
       targetTemplate: requestedTargetTemplate,
       sourceTemplate: requestedSourceTemplate,
+      readArenaHistory,
+      writeArenaHistory,
+      readCurrentState,
+      writeCurrentState,
       ...originalCharacterData
     } = body;
+    const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean' ? readArenaHistory : true;
+    const resolvedWriteArenaHistory = typeof writeArenaHistory === 'boolean' ? writeArenaHistory : true;
+    const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
+    const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
     const finalUserGuidance = userGuidance.trim() || null;
 
     // 安全检查
@@ -438,7 +502,13 @@ async function handler(req: NextRequest): Promise<Response> {
         targetTemplate,
         sanitizedFieldsToPreserve,
         isDowngrade,
-        customModelOverride
+        customModelOverride,
+        {
+          readArenaHistory: resolvedReadArenaHistory,
+          writeArenaHistory: resolvedWriteArenaHistory,
+          readCurrentState: resolvedReadCurrentState,
+          writeCurrentState: resolvedWriteCurrentState,
+        }
     );
     
     const providerOptions = (customProviderOverride || shouldDisablePolling)
@@ -480,58 +550,79 @@ async function handler(req: NextRequest): Promise<Response> {
       }
     }
 
-    // 4. 更新历战记录
-    const existingHistoryEntries = Array.isArray(originalCharacterData?.arena_history?.entries)
-      ? [...originalCharacterData.arena_history.entries]
-      : (Array.isArray(sublimatedData?.arena_history?.entries) ? [...sublimatedData.arena_history.entries] : []);
-    const participantsName = targetTemplate === 'magical-girl'
-      ? sublimatedData.codename
-      : sublimatedData.name;
+    if (resolvedWriteArenaHistory) {
+      const historyEntriesFromSource = Array.isArray(originalCharacterData?.arena_history?.entries)
+        ? [...originalCharacterData.arena_history.entries]
+        : (Array.isArray(sublimatedData?.arena_history?.entries) ? [...sublimatedData.arena_history.entries] : []);
 
-    const lastEntryId = existingHistoryEntries.reduce((maxId: number, entry: any) => {
-      const numericId = typeof entry?.id === 'number'
-        ? entry.id
-        : Number(entry?.id);
-      return Number.isFinite(numericId) ? Math.max(maxId, numericId as number) : maxId;
-    }, 0);
+      const sublimationHistoryEntries = historyEntriesFromSource.filter((entry: any) => entry?.type === 'sublimation');
+      const participantsName = targetTemplate === 'magical-girl'
+        ? sublimatedData.codename
+        : sublimatedData.name;
 
-    existingHistoryEntries.push({
-      id: lastEntryId + 1,
-      type: 'sublimation',
-      title: aiResult.sublimationEvent.title,
-      participants: participantsName ? [participantsName] : [],
-      winner: participantsName ?? '未知角色',
-      impact: aiResult.sublimationEvent.impact,
-      metadata: { user_guidance: finalUserGuidance, scenario_title: null, non_native_data_involved: !isNative || !!finalUserGuidance }
-    });
+      const lastEntryId = sublimationHistoryEntries.reduce((maxId: number, entry: any) => {
+        const numericId = typeof entry?.id === 'number'
+          ? entry.id
+          : Number(entry?.id);
+        return Number.isFinite(numericId) ? Math.max(maxId, numericId as number) : maxId;
+      }, 0);
 
-    const nowISO = new Date().toISOString();
-    const existingAttributes = originalCharacterData?.arena_history?.attributes
-      || sublimatedData?.arena_history?.attributes
-      || {};
-    const ensureWorldLineId = () => {
-      if (existingAttributes.world_line_id) return existingAttributes.world_line_id;
-      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-        return crypto.randomUUID();
+      sublimationHistoryEntries.push({
+        id: lastEntryId + 1,
+        type: 'sublimation',
+        title: aiResult.sublimationEvent.title,
+        participants: participantsName ? [participantsName] : [],
+        winner: participantsName ?? '未知角色',
+        impact: aiResult.sublimationEvent.impact,
+        metadata: { user_guidance: finalUserGuidance, scenario_title: null, non_native_data_involved: !isNative || !!finalUserGuidance }
+      });
+
+      const nowISO = new Date().toISOString();
+      const existingAttributes = originalCharacterData?.arena_history?.attributes
+        || sublimatedData?.arena_history?.attributes
+        || {};
+      const ensureWorldLineId = () => {
+        if (existingAttributes.world_line_id) return existingAttributes.world_line_id;
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          return crypto.randomUUID();
+        }
+        return `world-${Math.random().toString(16).slice(2, 10)}`;
+      };
+
+      const previousCountRaw = (existingAttributes as any).sublimation_count;
+      const previousCount = typeof previousCountRaw === 'number'
+        ? previousCountRaw
+        : Number(previousCountRaw ?? 0) || 0;
+
+      sublimatedData.arena_history = {
+        attributes: {
+          world_line_id: ensureWorldLineId(),
+          created_at: existingAttributes.created_at ?? nowISO,
+          updated_at: nowISO,
+          sublimation_count: previousCount + 1,
+          last_sublimation_at: nowISO
+        },
+        entries: sublimationHistoryEntries
+      };
+    } else if (originalCharacterData?.arena_history) {
+      sublimatedData.arena_history = JSON.parse(JSON.stringify(originalCharacterData.arena_history));
+    }
+
+    if (resolvedWriteCurrentState) {
+      if (sublimatedData.current_state) {
+        const preservedFields = Array.isArray(originalCharacterData?.current_state?.fields)
+          ? JSON.parse(JSON.stringify(originalCharacterData.current_state.fields))
+          : Array.isArray(sublimatedData.current_state.fields)
+            ? JSON.parse(JSON.stringify(sublimatedData.current_state.fields))
+            : [];
+        sublimatedData.current_state.fields = preservedFields;
+        sublimatedData.current_state.updated_at = new Date().toISOString();
       }
-      return `world-${Math.random().toString(16).slice(2, 10)}`;
-    };
-
-    const previousCountRaw = (existingAttributes as any).sublimation_count;
-    const previousCount = typeof previousCountRaw === 'number'
-      ? previousCountRaw
-      : Number(previousCountRaw ?? 0) || 0;
-
-    sublimatedData.arena_history = {
-      attributes: {
-        world_line_id: ensureWorldLineId(),
-        created_at: existingAttributes.created_at ?? nowISO,
-        updated_at: nowISO,
-        sublimation_count: previousCount + 1,
-        last_sublimation_at: nowISO
-      },
-      entries: existingHistoryEntries
-    };
+    } else if (originalCharacterData?.current_state) {
+      sublimatedData.current_state = JSON.parse(JSON.stringify(originalCharacterData.current_state));
+    } else {
+      delete sublimatedData.current_state;
+    }
 
     // 5. 签名逻辑
     // 默认情况下，有引导的升华会失去原生性

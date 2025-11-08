@@ -12,7 +12,7 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 // v0.4.0 引入新的判定器类型
-import { ArenaHistory, ArenaHistoryEntry, AdjudicatorEvent, AdjudicationResult } from '@/types/arena';
+import { ArenaHistory, ArenaHistoryEntry, AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import { webcrypto } from 'crypto';
 
@@ -53,7 +53,8 @@ const BattleReportCoreSchema = z.object({
   }),
   impacts: z.array(z.object({
     characterName: z.string().describe("参与者的代号或名称。"),
-    impact: z.string().describe("一句话概括该角色在此次事件中的成长、感悟或变化。")
+    impact: z.string().describe("一句话概括该角色在此次事件中的成长、感悟或变化。"),
+    currentStateSummary: z.string().describe("该角色在本次故事后的即时状态概述。").optional()
   })).describe("对每位参与该事件的核心角色的影响总结列表。")
 }).describe("生成一份关于魔法少女的新闻报道。如果用户提供了引导，请在创作时参考，但必须确保最终内容符合魔法少女世界观和公序良俗。");
 
@@ -309,28 +310,43 @@ const filterAndFormatHistory = (
   return `\n// ${characterName}的过往重要经历回顾:\n${formattedHistory}\n`;
 };
 
+const formatCurrentStateForPrompt = (state: CharacterCurrentState | undefined): string => {
+  if (!state) return '';
+  const lines: string[] = [];
+  if (state.summary?.trim()) {
+    lines.push(`- 状态摘要: ${state.summary.trim()}`);
+  }
+  if (Array.isArray(state.fields) && state.fields.length > 0) {
+    lines.push('- 结构化状态点:');
+    state.fields.forEach(field => {
+      const value = field.type === 'boolean'
+        ? (field.value ? '是' : '否')
+        : field.type === 'number'
+          ? field.value
+          : field.value;
+      lines.push(`  • ${field.label} (${field.type}): ${value}`);
+    });
+  }
+  if (lines.length === 0) return '';
+  return `\n// 当前状态快照\n${lines.join('\n')}\n`;
+};
+
 
 /**
- * 根据战斗结果更新所有参战者的历战记录
- * @param combatants 原始参战者数据列表
- * @param report 生成的战斗报告
- * @param impacts AI为每个角色生成的impact
- * @param userGuidance 用户提供的故事指引
- * @param scenario 情景模式下的情景文件
- * @param useArenaHistory 是否需要记录本次战斗并更新历战记录
- * @returns 更新后的参战者数据列表
+ * 根据战斗结果更新参战者的历战记录与当前状态
  */
-const updateCombatantsWithHistory = async (
+const applyPostBattleUpdates = async (
     combatants: any[],
     report: NewsReport,
-    impacts: { characterName: string; impact: string }[],
+    impacts: { characterName: string; impact: string; currentStateSummary?: string }[],
     userGuidance: string | null,
     scenario: any | null,
-    useArenaHistory: boolean
+    options: { writeArenaHistory: boolean; writeCurrentState: boolean }
 ): Promise<any[]> => {
     const updatedCombatants = [];
     const participantNames = combatants.map(c => c.data.codename || c.data.name);
     const nowISO = new Date().toISOString();
+    const { writeArenaHistory, writeCurrentState } = options;
 
     // =================================================================
     // 【紧急安全修复：V20240927-Hotfix】处理重名角色的原生性伪造漏洞
@@ -389,8 +405,13 @@ const updateCombatantsWithHistory = async (
             log.info(`为旧版角色 "${characterName}" 补充了 templateId: ${characterData.templateId}`);
         }
         
-        // 只有当 useArenaHistory 为 true 时，才进行历战记录的追加和更新
-        if (useArenaHistory) {
+        let shouldSign = combatant.isNative;
+        if (conflictingNames.has(characterName)) {
+            shouldSign = false;
+        }
+        let didMutate = false;
+
+        if (writeArenaHistory) {
             let history = characterData.arena_history;
 
             // 如果角色原本没有历战记录，则为其创建一个新的
@@ -429,24 +450,29 @@ const updateCombatantsWithHistory = async (
 
             history.entries.push(newEntry);
             characterData.arena_history = history;
+            didMutate = true;
+        }
 
-            // 步骤 3: 【应用修复策略】在决定是否签名之前，检查当前角色名称是否存在于冲突列表中。
-            let shouldSign = combatant.isNative; // 默认继承原始状态
-            if (conflictingNames.has(characterName)) {
-                // 如果存在冲突，则强制将此角色视为非原生，无论其原始 isNative 标志是什么。
-                shouldSign = false;
+        if (writeCurrentState) {
+            const summary = impacts.find(i => i.characterName === characterName)?.currentStateSummary?.trim();
+            if (summary) {
+                const nextState = characterData.current_state ?? { summary: '', fields: [] };
+                characterData.current_state = {
+                    ...nextState,
+                    summary,
+                    updated_at: nowISO,
+                };
+                didMutate = true;
             }
+        }
 
-            // 根据最终的 shouldSign 决定是生成新签名还是删除旧签名
+        if (didMutate) {
             if (shouldSign) {
                 characterData.signature = await generateSignature(characterData);
             } else {
                 delete characterData.signature;
             }
-
         }
-        // 如果 useArenaHistory 为 false，我们什么都不做，直接将原始的 characterData 推入
-        // 这将保持其历战记录和签名不变
 
         updatedCombatants.push(characterData);
     }
@@ -644,33 +670,19 @@ const universalFallbackSystemPrompt = `
   现在角色们在 A.R.E.N.A.竞技场中展开战斗，请根据以下规则生成战斗简报：
   战斗推演核心规则：
 1.  等级与能力限制：角色的能力与等级严格挂钩。在推演开始前，请根据角色设定的强度，为每位角色分配合理的等级以确保战斗的平衡性和观赏性。
-    * 平衡原则：通常，参加战斗的角色等级应当是一致的。但作为最后的平衡手段，能力设定严重过强的角色可以比其他人低1级，而设定严重过弱的角色则可以比其他人高1级。
-    * 魔法少女的等级体系：
-        * 种级: 新成为魔法少女。
-        * 芽级: 可使用【魔装】。
-        * 叶级: 可使用各种【术式】（法术）。
-        * 蕾级: 可使用【奇境】。
-        * 花级: 可使用【繁开】。
-        * 花牌: 魔力大幅增强（花级的2倍以上）
-    * 残兽的等级体系：
-		* **卵**: 最初级的阶段，也是最弱小的形态。通常表现为巨大的肉块状，行动迟缓，凭本能进行破坏。与种级魔法少女相当，但略弱一点。
-		* **蠖**: 比“卵”更高级的阶段，实力和速度都有显著提升。与芽级魔法少女相当，略强一丝。
-		* **蛹**: 此阶段的残兽会筑巢，扭曲场地空间，拥有近似野兽的智慧，并会吸引低级残兽。1只蛹与3位芽级魔法少女相当，1位叶级与2只蛹相当。
-		* **蜕**: “蛹”之后的更高阶进化形态，实力远超之前的阶段。可以形成自己的“规则”，在特定区域内改写物理法则。包括“半蜕”、“蜕”和“王蜕”等细分等级。1只半蜕略强于10位叶级魔法少女，1位蕾级与3只半蜕相当；蜕与蕾级魔法少女相当，但略弱一点；王蜕与花级魔法少女相当，但略弱一点。
-		* **羽**: “蜕”之上的最终进化形态，强度远超花级魔法少女，基本上无人能敌，至少需要5位花牌或需要宝石权杖才能抗衡。
-    * 其他等级体系：非魔法少女与残兽的角色由其具体设定说明。
-    * 能力锁定：角色不能使用未达到对应等级解锁的能力。例如，叶级角色无法使用奇境和繁开，但可以使用魔装与术式。
+    * 平衡原则：通常，参加战斗的角色等级应当是一致的。但作为平衡手段，能力设定严重过强的角色等级可以比其他人低，而设定严重过弱的角色等级则可以比其他人高。
+    * 能力锁定：角色不能使用未达到对应等级解锁的能力。
 
 2.  常规战斗模式：绝大多数战斗都围绕着角色的基本能力（例如魔法少女的【魔装】和【术式】）展开，极少情况下才可能使用高阶能力（例如【奇境】及【繁开】）。
 
 3.  领域（例如【奇境】、【巢】）的战术运用：
     * 高昂代价：开启领域会付出巨大代价，因此通常只在面临你死我活的阵营冲突的情况下角色才会考虑使用。
-    * 战术博弈：可以描绘角色【权衡和考虑】是否要开启领域，以此来制造战术紧张感，但她们不一定会真的发动。
-    * 反制手段：领域并非无敌，它可以被对方的领域【抵消】，或被强大的魔力直接【破坏】。
+    * 战术博弈：可以描绘角色【权衡和考虑】是否要开启领域，以此来制造战术紧张感，但不一定会真的发动。
+    * 反制手段：领域并非无敌，可以被【抵消】或被【破坏】。
 
 4.  必杀技（例如【繁开】）的最终手段：
-    * 使用时机：只有顶级角色，在这么写更有益于战斗的展开的情况下，才【极小概率】允许使用【繁开】。
-    * 强度限制：所使用的必杀技必须是【有代价、可被理解和应对的】，绝不能是无法破解的必胜技能。严禁使用干涉命运、时间、世界等过于强大的必杀技能力。
+    * 使用时机：只有顶级角色，在这么写更有益于战斗的展开的情况下，才【极小概率】允许使用必杀技。
+    * 强度限制：所使用的必杀技必须是【有代价、可被理解和应对的】，绝不能是无法破解的必胜技能。严禁使用干涉命运、时间、世界等过于强大的必杀技。
 
 请严格遵守以上战斗规则进行推演，构建一场等级合理、有来有回、充满战术博弈的精彩战斗，而不是一场单纯的能力碾压。
 注意，正义并不是必然战胜邪恶。反派有时候也能胜过正派。而且，正义与邪恶之间互有胜负才能创造出更精彩的故事。
@@ -707,7 +719,9 @@ const createPromptBuilder = (
     mode: string | undefined,
     scenario: any | null,
     teams: { [key: string]: string[] } | undefined,
-    useArenaHistory: boolean,
+    readArenaHistory: boolean,
+    readCurrentState: boolean,
+    writeCurrentState: boolean,
     adjudicationResults: AdjudicationResult[] | null,
     storyLength: string | undefined
 ) => (input: { combatants: any[] }): string => {
@@ -724,11 +738,13 @@ const createPromptBuilder = (
         const otherNames = allNames.filter(name => name !== characterName);
         const typeDisplay = type === 'magical-girl' ? '魔法少女' : type === 'canshou' ? '残兽' : '通用角色';
         let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
-        // [核心修改] 根据 useArenaHistory 的值来决定是否格式化并添加历战记录
-        if (useArenaHistory) {
+        // 根据 readArenaHistory 的值来决定是否格式化并添加历战记录
+        if (readArenaHistory) {
             profileString += filterAndFormatHistory(characterName, data.arena_history, otherNames, isPureBattle);
-        } else {
-            profileString += `// 注意：该角色本次不参考过往经历，视为初次登场。\n`
+        }
+
+        if (readCurrentState) {
+            profileString += formatCurrentStateForPrompt(data.current_state);
         }
         
         // [SRS 3.2.2] 根据数据结构采用不同prompt格式
@@ -807,6 +823,10 @@ const createPromptBuilder = (
     // [SRS 3.4.4] 添加语言指令
     finalPrompt += `\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
 
+    if (writeCurrentState) {
+        finalPrompt += `\n\n【当前状态同步】请在 JSON 输出的 impacts 数组里，为每位角色填写 currentStateSummary 字段，用 1-2 句话描述事件结束后的即时状态（角色身体状况、物品、心情或想法等）。`;
+    }
+
     finalPrompt += `
 
 【输出格式（YAML）】
@@ -854,12 +874,25 @@ async function handler(req: NextRequest): Promise<Response> {
         scenario, 
         teams, 
         language = 'zh-CN', 
-        useArenaHistory = true,
+        useArenaHistory,
+        readArenaHistory,
+        writeArenaHistory,
+        readCurrentState,
+        writeCurrentState,
         isDowngrade = false,
         adjudicationEvents,
         storyLength,
         customProvider: customProviderPayload
     } = body;
+
+    const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
+        ? readArenaHistory
+        : (typeof useArenaHistory === 'boolean' ? useArenaHistory : true);
+    const resolvedWriteArenaHistory = typeof writeArenaHistory === 'boolean'
+        ? writeArenaHistory
+        : (typeof useArenaHistory === 'boolean' ? useArenaHistory : true);
+    const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
+    const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;
@@ -1052,7 +1085,21 @@ async function handler(req: NextRequest): Promise<Response> {
     const generationConfig: StreamGenerationConfig<{ combatants: any[] }> = {
         systemPrompt,
         temperature: 0.9,
-        promptBuilder: createPromptBuilder(questionnaire.questions, finalUserGuidance, needsWorldviewWarning, language, selectedLevel, mode, scenario, teams, useArenaHistory, adjudicationResults, storyLength),
+        promptBuilder: createPromptBuilder(
+            questionnaire.questions,
+            finalUserGuidance,
+            needsWorldviewWarning,
+            language,
+            selectedLevel,
+            mode,
+            scenario,
+            teams,
+            resolvedReadArenaHistory,
+            resolvedReadCurrentState,
+            resolvedWriteCurrentState,
+            adjudicationResults,
+            storyLength
+        ),
         taskName: `生成${mode}模式故事`,
         maxTokens: 8192,
         modelOverride: resolvedModelOverride, // 使用轻量模型或自定义覆盖模型
@@ -1099,7 +1146,7 @@ async function handler(req: NextRequest): Promise<Response> {
             mode: mode,
           };
 
-          if (useArenaHistory) {
+          if (resolvedWriteArenaHistory) {
             const updateStatsPromise = updateBattleStats(report.officialReport.winner, combatants);
             const executionContext = (req as any).context;
             if (executionContext?.waitUntil) {
@@ -1109,7 +1156,14 @@ async function handler(req: NextRequest): Promise<Response> {
             }
           }
 
-          const updatedCombatants = await updateCombatantsWithHistory(combatants, report, aiResult.impacts, finalUserGuidance, scenario, useArenaHistory);
+          const updatedCombatants = await applyPostBattleUpdates(
+            combatants,
+            report,
+            aiResult.impacts,
+            finalUserGuidance,
+            scenario,
+            { writeArenaHistory: resolvedWriteArenaHistory, writeCurrentState: resolvedWriteCurrentState }
+          );
 
           const apiResponse: BattleApiResponse = {
             report,

@@ -12,7 +12,7 @@ import { StatsData } from './api/get-stats';
 import Leaderboard from '../components/Leaderboard';
 import { config as appConfig } from '../lib/config';
 // v0.4.0 引入新的判定器类型
-import { AdjudicatorEvent, AdjudicationResult } from '../types/arena';
+import { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '../types/arena';
 import { generateRandomMagicalGirl, generateRandomCanshou } from '../lib/random-character-generator';
 import BattleDataModal from '../components/BattleDataModal';
 import { useAuth } from '@/lib/useAuth';
@@ -24,11 +24,14 @@ import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProvide
 import { inferTemplate } from '@/lib/data-card-converter';
 import { GeneralCharacterSchema } from '@/lib/schemas';
 
+const ARENA_STATE_PREF_KEY = 'arena-history-state-preferences-v1';
+
 interface UpdatedCombatantData {
     codename?: string;
     name?: string;
     arena_history: any; // ArenaHistory;
     signature?: string;
+    current_state?: CharacterCurrentState | null;
     // 允许包含角色文件的其他所有字段
     [key: string]: any;
 }
@@ -192,7 +195,10 @@ const BattlePage: React.FC = () => {
     // 用于锁定正在加载的预设按钮的状态
     const [loadingPreset, setLoadingPreset] = useState<string | null>(null);
     // 新增：用于控制是否使用历战记录的状态
-    const [useArenaHistory, setUseArenaHistory] = useState(true);
+    const [readArenaHistory, setReadArenaHistory] = useState(true);
+    const [writeArenaHistory, setWriteArenaHistory] = useState(true);
+    const [readCurrentState, setReadCurrentState] = useState(true);
+    const [writeCurrentState, setWriteCurrentState] = useState(true);
     // 新增：用于控制是否使用轻量模型的状态（默认不启用）
     const [isDowngrade, setIsDowngrade] = useState(false);
     // 新增：用于管理自定义 AI 供应商配置
@@ -201,6 +207,32 @@ const BattlePage: React.FC = () => {
     // 冷却状态钩子，设置为2分钟
     const { isCooldown, startCooldown, remainingTime } = useCooldown('generateBattleCooldown', 120000);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const saved = window.localStorage.getItem(ARENA_STATE_PREF_KEY);
+            if (!saved) return;
+            const parsed = JSON.parse(saved);
+            if (typeof parsed.readArenaHistory === 'boolean') setReadArenaHistory(parsed.readArenaHistory);
+            if (typeof parsed.writeArenaHistory === 'boolean') setWriteArenaHistory(parsed.writeArenaHistory);
+            if (typeof parsed.readCurrentState === 'boolean') setReadCurrentState(parsed.readCurrentState);
+            if (typeof parsed.writeCurrentState === 'boolean') setWriteCurrentState(parsed.writeCurrentState);
+        } catch (error) {
+            console.warn('Failed to load arena preferences', error);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const payload = {
+            readArenaHistory,
+            writeArenaHistory,
+            readCurrentState,
+            writeCurrentState,
+        };
+        window.localStorage.setItem(ARENA_STATE_PREF_KEY, JSON.stringify(payload));
+    }, [readArenaHistory, writeArenaHistory, readCurrentState, writeCurrentState]);
 
     // 分别存储两种类型的预设
     const [magicalGirlPresets, setMagicalGirlPresets] = useState<Preset[]>([]);
@@ -1008,7 +1040,10 @@ const BattlePage: React.FC = () => {
                 scenario: scenarioContent,
                 teams: Object.keys(teams).length > 0 ? teams : undefined,
                 language: selectedLanguage,
-                useArenaHistory: useArenaHistory,
+                readArenaHistory,
+                writeArenaHistory,
+                readCurrentState,
+                writeCurrentState,
                 isDowngrade: isDowngrade,
                 adjudicationEvents: adjudicationEvents,
                 storyLength: storyLength,
@@ -1608,21 +1643,60 @@ const BattlePage: React.FC = () => {
                             // TODO: 调试中，暂时关闭该功能
                             false && <AiProviderSelector onConfigChange={setUserProviderConfig} />
                         }
-                        {/* 历战记录使用选项 */}
+                        {/* 历战记录 / 当前状态策略 */}
                         <div className="input-group">
-                            <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={useArenaHistory}
-                                    onChange={(e) => setUseArenaHistory(e.target.checked)}
-                                    className="h-4 w-4 rounded border-gray-300 text-pink-600 focus:ring-pink-500 mr-2 disabled:opacity-50"
-                                    disabled={isGenerating}
-                                />
-                                使用角色的&ldquo;历战记录&rdquo;
-                            </label>
-                            <p className="text-xs text-gray-500 mt-1">
-                                默认启用。AI会参考角色的过往经历来创作故事。取消勾选后，AI将视其为初次登场，且旧的历战记录不会被保留。
-                            </p>
+                            <label className="input-label">资料读写策略</label>
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <fieldset className="border border-gray-200 rounded-lg p-3">
+                                    <legend className="text-xs font-semibold text-gray-600 px-1">历战记录</legend>
+                                    <label className="flex items-center text-sm text-gray-700 mt-2">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 mr-2 text-pink-600 border-gray-300 rounded"
+                                            checked={readArenaHistory}
+                                            onChange={(e) => setReadArenaHistory(e.target.checked)}
+                                            disabled={isGenerating}
+                                        />
+                                        生成时读取
+                                    </label>
+                                    <label className="flex items-center text-sm text-gray-700 mt-2">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 mr-2 text-pink-600 border-gray-300 rounded"
+                                            checked={writeArenaHistory}
+                                            onChange={(e) => setWriteArenaHistory(e.target.checked)}
+                                            disabled={isGenerating}
+                                        />
+                                        战报后写入
+                                    </label>
+                                    <p className="text-[11px] text-gray-500 mt-1">关闭读取后 AI 会忽略旧战绩；关闭写入后，本场表现不会加入角色档案。</p>
+                                </fieldset>
+                                <fieldset className="border border-gray-200 rounded-lg p-3">
+                                    <legend className="text-xs font-semibold text-gray-600 px-1">当前状态</legend>
+                                    <label className="flex items-center text-sm text-gray-700 mt-2">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 mr-2 text-pink-600 border-gray-300 rounded"
+                                            checked={readCurrentState}
+                                            onChange={(e) => setReadCurrentState(e.target.checked)}
+                                            disabled={isGenerating}
+                                        />
+                                        生成时读取
+                                    </label>
+                                    <label className="flex items-center text-sm text-gray-700 mt-2">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 mr-2 text-pink-600 border-gray-300 rounded"
+                                            checked={writeCurrentState}
+                                            onChange={(e) => setWriteCurrentState(e.target.checked)}
+                                            disabled={isGenerating}
+                                        />
+                                        战报后写入
+                                    </label>
+                                    <p className="text-[11px] text-gray-500 mt-1">当前状态用于追踪角色身体状况、物品、人际等即时信息。写入时仅更新摘要，既有自定义字段不会被覆盖。</p>
+                                </fieldset>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">偏好保存在浏览器端，流式与普通模式共享同一配置。</p>
                         </div>
 
 
@@ -1793,6 +1867,7 @@ const BattlePage: React.FC = () => {
                             <div className="space-y-4">
                                 {updatedCombatants.map((charData) => {
                                     const latestEntry = charData.arena_history?.entries?.[charData.arena_history.entries.length - 1];
+                                    const stateSummary = charData.current_state?.summary;
                                     const name = getCombatantDisplayName(charData);
                                     const template = inferTemplate(charData);
                                     const typeDisplay = template === 'magical-girl'
@@ -1812,6 +1887,12 @@ const BattlePage: React.FC = () => {
                                                         <span className="font-medium">本次事件影响：</span>
                                                         {latestEntry.impact}
                                                     </p>
+                                                    {stateSummary && (
+                                                        <p className="text-sm text-gray-600 mt-1">
+                                                            <span className="font-medium">当前状态：</span>
+                                                            {stateSummary}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </div>
                                             <div className="flex gap-2 mt-2 justify-end">
