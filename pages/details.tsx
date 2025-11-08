@@ -13,6 +13,7 @@ import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
 import { buildMagicalQuestionMeta, type MagicalQuestionMeta } from '@/lib/questionnaires';
+import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 
 interface Questionnaire {
   questions: string[];
@@ -354,10 +355,58 @@ const DetailsPage: React.FC = () => {
     }
   };
 
-  const checkSensitiveWords = async (content: string) => {
+  const redirectToArrested = (reason?: string, withBackup?: boolean) => {
+    const query: Record<string, string> = {};
+    if (reason) query.reason = reason;
+    if (withBackup) query.backup = '1';
+    if (Object.keys(query).length > 0) {
+      router.push({ pathname: '/arrested', query });
+    } else {
+      router.push('/arrested');
+    }
+  };
+
+  const buildAnswerBackupItems = (): ArrestedBackupDraftItem[] => {
+    if (!answers.length) return [];
+    return [
+      {
+        id: 'questionnaire-answers',
+        label: '魔法少女问卷答案',
+        filename: 'magical-girl-answers.json',
+        content: {
+          answers,
+          language: selectedLanguage,
+          questionCount: questions.length,
+        },
+        description: '提交前填写的所有答案',
+      }
+    ];
+  };
+
+  type SensitiveCheckOptions = {
+    source?: ArrestedBackupTriggerSource;
+    reason?: string;
+    origin?: string;
+    backupItems?: ArrestedBackupDraftItem[];
+  };
+
+  const checkSensitiveWords = async (content: string, options?: SensitiveCheckOptions) => {
     const checkResult = await quickCheck(content);
     if (checkResult.hasSensitiveWords) {
-      router.push('/arrested');
+      if (options?.source === 'output') {
+        const backupItems = options.backupItems ?? [];
+        if (backupItems.length > 0) {
+          persistArrestedBackup({
+            triggerSource: 'output',
+            origin: options.origin || 'details',
+            reason: options.reason,
+            items: backupItems,
+          });
+        }
+        redirectToArrested(options?.reason, backupItems.length > 0);
+      } else {
+        redirectToArrested(options?.reason);
+      }
       return true;
     }
     return false;
@@ -438,7 +487,12 @@ const DetailsPage: React.FC = () => {
       const result: MagicalGirlDetails = await response.json();
       console.log('生成结果:', result);
       // 加入后置生成敏感词检测
-      if (await checkSensitiveWords(JSON.stringify(result))) return;
+      if (await checkSensitiveWords(JSON.stringify(result), {
+        source: 'output',
+        origin: 'details',
+        reason: '使用危险符文',
+        backupItems: buildAnswerBackupItems(),
+      })) return;
 
       setMagicalGirlDetails(result);
       setError(null); // 成功时清除错误

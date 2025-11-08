@@ -23,6 +23,7 @@ import AdjudicatorEditor from '../components/AdjudicatorEditor';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { GeneralCharacterSchema } from '@/lib/schemas';
+import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 
 const ARENA_STATE_PREF_KEY = 'arena-history-state-preferences-v1';
 
@@ -936,11 +937,78 @@ const BattlePage: React.FC = () => {
         URL.revokeObjectURL(url);
     };
 
+    const redirectToArrested = (reason?: string, withBackup?: boolean) => {
+        const query: Record<string, string> = {};
+        if (reason) query.reason = reason;
+        if (withBackup) query.backup = '1';
+        if (Object.keys(query).length > 0) {
+            router.push({ pathname: '/arrested', query });
+        } else {
+            router.push('/arrested');
+        }
+    };
 
-    const checkSensitiveWords = async (content: string) => {
+    const buildStreamingBackupItems = (): ArrestedBackupDraftItem[] => {
+        const items: ArrestedBackupDraftItem[] = [];
+        const playableCombatants = combatants.filter((c): c is CombatantData => 'data' in c);
+
+        playableCombatants.forEach((combatant, index) => {
+            items.push({
+                id: `combatant-${index}`,
+                label: `参战者：${getCombatantDisplayName(combatant.data)}`,
+                filename: combatant.filename || getCombatantDisplayName(combatant.data) || `combatant-${index + 1}.json`,
+                content: combatant.data,
+                description: combatant.isPreset ? '预设角色' : '用户上传角色',
+            });
+        });
+
+        if (scenarioContent) {
+            items.push({
+                id: 'scenario',
+                label: scenarioDisplayName ? `情景：${scenarioDisplayName}` : '情景设定',
+                filename: scenarioFileName || (scenarioDisplayName ? `${scenarioDisplayName}.json` : 'scenario.json'),
+                content: scenarioContent,
+                description: isScenarioNative ? '原生情景文件' : '用户自定义情景',
+            });
+        }
+
+        if (userGuidance.trim()) {
+            items.push({
+                id: 'user-guidance',
+                label: '故事引导文本',
+                filename: 'user-guidance.txt',
+                mimeType: 'text/plain',
+                content: userGuidance.trim(),
+            });
+        }
+
+        return items;
+    };
+
+    type SensitiveCheckOptions = {
+        source?: ArrestedBackupTriggerSource;
+        reason?: string;
+        origin?: string;
+        backupItems?: ArrestedBackupDraftItem[];
+    };
+
+    const checkSensitiveWords = async (content: string, options?: SensitiveCheckOptions) => {
         const checkResult = await quickCheck(content);
         if (checkResult.hasSensitiveWords) {
-            router.push('/arrested');
+            if (options?.source === 'output') {
+                const backupItems = options.backupItems ?? [];
+                if (backupItems.length > 0) {
+                    persistArrestedBackup({
+                        triggerSource: 'output',
+                        origin: options.origin || 'battle-stream',
+                        reason: options.reason,
+                        items: backupItems,
+                    });
+                }
+                redirectToArrested(options?.reason, backupItems.length > 0);
+            } else {
+                redirectToArrested(options?.reason);
+            }
             return true;
         }
         return false;
@@ -1152,7 +1220,12 @@ const BattlePage: React.FC = () => {
                         throw new Error('无法解析最终战报数据');
                     }
 
-                    if (await checkSensitiveWords(JSON.stringify(payload.report))) {
+                    if (await checkSensitiveWords(JSON.stringify(payload.report), {
+                        source: 'output',
+                        origin: 'battle-stream',
+                        reason: '使用危险符文',
+                        backupItems: buildStreamingBackupItems(),
+                    })) {
                         shouldAbort = true;
                         return;
                     }
