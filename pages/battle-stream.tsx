@@ -1693,7 +1693,7 @@ const BattlePage: React.FC = () => {
                                         />
                                         战报后写入
                                     </label>
-                                    <p className="text-[11px] text-gray-500 mt-1">当前状态用于追踪 HP/MP、物品、人际等即时信息。写入时仅更新摘要，既有自定义字段不会被覆盖。</p>
+                                    <p className="text-[11px] text-gray-500 mt-1">当前状态用于追踪角色身体状况、物品、人际等即时信息。写入时仅更新摘要，既有自定义字段不会被覆盖。</p>
                                 </fieldset>
                             </div>
                             <p className="text-xs text-gray-500 mt-2">偏好保存在浏览器端，流式与普通模式共享同一配置。</p>

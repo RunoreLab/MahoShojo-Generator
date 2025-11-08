@@ -824,7 +824,7 @@ const createPromptBuilder = (
     finalPrompt += `\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
 
     if (writeCurrentState) {
-        finalPrompt += `\n\n【当前状态同步】请在 JSON 输出的 impacts 数组里，为每位角色填写 currentStateSummary 字段，用 1-2 句话描述事件结束后的即时状态（HP/MP、物品、心情或下一步行动等）。`;
+        finalPrompt += `\n\n【当前状态同步】请在 JSON 输出的 impacts 数组里，为每位角色填写 currentStateSummary 字段，用 1-2 句话描述事件结束后的即时状态（角色身体状况、物品、心情或想法等）。`;
     }
 
     finalPrompt += `
