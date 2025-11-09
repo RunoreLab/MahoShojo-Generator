@@ -151,6 +151,44 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             //     description: 'Moonshot 旗下的大模型，可以看出我懒得写描述了。'
             // },
         ]
-    }
+    },
+    {
+        id: 'google-cloudflare',
+        name: 'Google',
+        description: '咕咕噜噜原生渠道直连，使用 Cloudflare 代理。',
+        docsUrl: 'https://aistudio.google.com/',
+        baseUrl: 'https://gateway.ai.cloudflare.com/v1/5e2c3572782d87ae449e050ac15d6c5d/mhsj-custom/google-ai-studio/v1beta',
+        type: 'google',
+        models: [
+            {
+                value: 'gemini-2.5-pro',
+                label: 'Gemini 2.5 Pro',
+                description: 'Google 旗下的最先进模型系列，性能很棒棒。'
+            },
+            {
+                value: 'gemini-2.5-flash',
+                label: 'Gemini 2.5 Flash',
+                description: 'Google 旗下的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
+            },
+            {
+                value: 'gemini-2.5-flash-lite',
+                label: 'Gemini 2.5 Flash Lite',
+                description: 'Google 旗下的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+            },
+        ]
+    },
+    {
+        id: 'deepseek',
+        name: 'DeepSeek',
+        description: 'DeepSeek 官方 API 直连。',
+        docsUrl: 'https://platform.deepseek.com',
+        baseUrl: 'https://api.deepseek.com/v1',
+        type: 'openai',
+        mode: 'json',
+        models: [
+            { value: 'deepseek-chat', label: 'DeepSeek-V3.2-Exp', description: 'DeepSeek 最新版本。' },
+            { value: 'deepseek-reasoner', label: 'DeepSeek-V3.2-Exp 思考模式', description: 'DeepSeek 最新版本思考模式。' },
+        ]
+    },
 ];
 
