@@ -130,8 +130,8 @@ const FullGeneralSublimationPayloadSchema = z.object({
 
 // 升华事件的通用Schema
 const SublimationEventSchema = z.object({
-    title: z.string().describe("描述本次升华事件的标题。"),
-    impact: z.string().describe("对本次升华事件的描述，解释角色是如何被过往经历影响，最终蜕变到新状态的。")
+  title: z.string().describe("描述本次升华事件的标题。"),
+  impact: z.string().describe("对本次升华事件的描述，解释角色是如何被过往经历影响，最终蜕变到新状态的。")
 }).describe("描述角色如何升华的事件。");
 
 /**
@@ -155,22 +155,22 @@ const pruneTopLevelFields = (target: Record<string, any>, fields: Iterable<strin
  * @returns 一个新的Zod Schema，仅包含AI需要生成的部分。
  */
 const createDynamicSchema = (baseSchema: z.ZodObject<any>, fieldsToPreserve: string[]) => {
-    const omitShape = fieldsToPreserve.reduce<Record<string, true>>((acc, field) => {
-        if (field in baseSchema.shape) {
-            acc[field] = true;
-        }
-        return acc;
-    }, {});
+  const omitShape = fieldsToPreserve.reduce<Record<string, true>>((acc, field) => {
+    if (field in baseSchema.shape) {
+      acc[field] = true;
+    }
+    return acc;
+  }, {});
 
-    const dynamicSchema = Object.keys(omitShape).length > 0
-        ? baseSchema.omit(omitShape)
-        : baseSchema;
+  const dynamicSchema = Object.keys(omitShape).length > 0
+    ? baseSchema.omit(omitShape)
+    : baseSchema;
 
-    // 最终返回一个包含动态生成部分和固定“升华事件”部分的Schema
-    return z.object({
-        updatedCharacterData: dynamicSchema.describe("一个JSON对象，仅包含所有被AI更新后的字段。"),
-        sublimationEvent: SublimationEventSchema
-    });
+  // 最终返回一个包含动态生成部分和固定“升华事件”部分的Schema
+  return z.object({
+    updatedCharacterData: dynamicSchema.describe("一个JSON对象，仅包含所有被AI更新后的字段。"),
+    sublimationEvent: SublimationEventSchema
+  });
 };
 
 // =================================================================
@@ -264,15 +264,15 @@ const createGenerationConfig = (
       : [];
     const historyText = includeHistory
       ? (historyEntries.length > 0
-          ? historyEntries
-              .map((entry: any) => {
-                const title = entry?.title ? `“${entry.title}”` : '（未命名事件）';
-                const winner = entry?.winner ?? '未知胜者';
-                const impact = entry?.impact ?? '影响未记录';
-                return `- 事件${title}：胜利者 ${winner}，对角色的影响是“${impact}”`;
-              })
-              .join('\n')
-          : '无（原始素材未包含历战记录，可直接基于设定内容完成升华）')
+        ? historyEntries
+          .map((entry: any) => {
+            const title = entry?.title ? `“${entry.title}”` : '（未命名事件）';
+            const winner = entry?.winner ?? '未知胜者';
+            const impact = entry?.impact ?? '影响未记录';
+            return `- 事件${title}：胜利者 ${winner}，对角色的影响是“${impact}”`;
+          })
+          .join('\n')
+        : '无（原始素材未包含历战记录，可直接基于设定内容完成升华）')
       : '用户选择不提供历战记录，本次升华请只参考当前设定。';
 
     const currentStateText = includeCurrentState
@@ -386,7 +386,7 @@ ${rulesText}
 // =================================================================
 
 function isObject(item: any): boolean {
-    return (item && typeof item === 'object' && !Array.isArray(item));
+  return (item && typeof item === 'object' && !Array.isArray(item));
 }
 
 /**
@@ -396,17 +396,17 @@ function isObject(item: any): boolean {
  * @returns {any} 返回一个合并后的新对象。
  */
 function safeDeepMerge(target: any, source: any): any {
-    const output = { ...target };
-    if (isObject(target) && isObject(source)) {
-        Object.keys(source).forEach(key => {
-            if (isObject(source[key]) && key in target && isObject(target[key])) {
-                output[key] = safeDeepMerge(target[key], source[key]);
-            } else {
-                output[key] = source[key];
-            }
-        });
-    }
-    return output;
+  const output = { ...target };
+  if (isObject(target) && isObject(source)) {
+    Object.keys(source).forEach(key => {
+      if (isObject(source[key]) && key in target && isObject(target[key])) {
+        output[key] = safeDeepMerge(target[key], source[key]);
+      } else {
+        output[key] = source[key];
+      }
+    });
+  }
+  return output;
 }
 
 // =================================================================
@@ -443,7 +443,7 @@ async function handler(req: NextRequest): Promise<Response> {
     // 安全检查
     const textToCheck = extractTextForCheck(originalCharacterData) + " " + (finalUserGuidance || '');
     if ((await quickCheck(textToCheck)).hasSensitiveWords) {
-        return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '上传的角色档案或引导内容包含危险符文' }), { status: 400 });
+      return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '上传的角色档案或引导内容包含危险符文' }), { status: 400 });
     }
 
     const inferredSourceTemplate = inferTemplate(originalCharacterData) as InferableTemplate;
@@ -483,76 +483,77 @@ async function handler(req: NextRequest): Promise<Response> {
     let customProviderId: string | null = null;
     let customModelOverride: string | undefined;
     if (customProviderPayload) {
-        const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
-        if (!parsedResult.success) {
-            log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
-            return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
-        }
+      const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
+      if (!parsedResult.success) {
+        log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
+        return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
+      }
 
-        const parsed = parsedResult.data;
-        customProviderId = parsed.providerId;
-        const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
-        if (!providerConfig) {
-            return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
-        }
+      const parsed = parsedResult.data;
+      customProviderId = parsed.providerId;
+      const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
+      if (!providerConfig) {
+        return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
+      }
 
-        const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
-        if (!modelConfig) {
-            return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
-        }
+      const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
+      if (!modelConfig) {
+        return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
+      }
 
-        const sanitizedApiKey = parsed.apiKey.trim();
-        if (!sanitizedApiKey && providerConfig.id !== 'system') {
-            return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
-        }
+      const sanitizedApiKey = parsed.apiKey.trim();
+      if (!sanitizedApiKey && providerConfig.id !== 'system') {
+        return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
+      }
 
-        const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
-        if (!sanitizedBaseUrl) {
-            customModelOverride = modelConfig.value;
-            log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
-                providerId: providerConfig.id,
-                model: modelConfig.value,
-            });
-        } else {
-            customProviderOverride = {
-                name: providerConfig.name,
-                apiKey: sanitizedApiKey,
-                baseUrl: sanitizedBaseUrl,
-                model: modelConfig.value,
-                type: providerConfig.type,
-                retryCount: 1,
-                skipProbability: 0,
-            };
-        }
+      const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
+      if (!sanitizedBaseUrl) {
+        customModelOverride = modelConfig.value;
+        log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
+          providerId: providerConfig.id,
+          model: modelConfig.value,
+        });
+      } else {
+        customProviderOverride = {
+          name: providerConfig.name,
+          apiKey: sanitizedApiKey,
+          baseUrl: sanitizedBaseUrl,
+          model: modelConfig.value,
+          type: providerConfig.type,
+          mode: providerConfig.mode || 'auto',
+          retryCount: 1,
+          skipProbability: 0,
+        };
+      }
     }
 
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
 
     const isNative = await verifySignature(originalCharacterData);
     const generationConfig = createGenerationConfig(
-        originalCharacterData,
-        baseOutputData,
-        language,
-        finalUserGuidance,
-        sourceTemplate,
-        targetTemplate,
-        sanitizedFieldsToPreserve,
-        isDowngrade,
-        customModelOverride,
-        {
-          readArenaHistory: resolvedReadArenaHistory,
-          writeArenaHistory: resolvedWriteArenaHistory,
-          readCurrentState: resolvedReadCurrentState,
-          writeCurrentState: resolvedWriteCurrentState,
-        }
+      originalCharacterData,
+      baseOutputData,
+      language,
+      finalUserGuidance,
+      sourceTemplate,
+      targetTemplate,
+      sanitizedFieldsToPreserve,
+      isDowngrade,
+      customModelOverride,
+      {
+        readArenaHistory: resolvedReadArenaHistory,
+        writeArenaHistory: resolvedWriteArenaHistory,
+        readCurrentState: resolvedReadCurrentState,
+        writeCurrentState: resolvedWriteCurrentState,
+      }
     );
-    
+
     const providerOptions = (customProviderOverride || shouldDisablePolling)
-        ? {
-            ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
-            ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
-        }
-        : undefined;
+      ? {
+        ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
+        ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+      }
+      : undefined;
 
     const aiResult = await generateWithAI(null, generationConfig, providerOptions);
     const updatedDataFromAI = aiResult.updatedCharacterData;
@@ -563,12 +564,12 @@ async function handler(req: NextRequest): Promise<Response> {
 
     // 1.1 确保 templateId 存在且符合目标模板
     if (!sublimatedData.templateId) {
-        sublimatedData.templateId = targetTemplate === 'magical-girl'
-            ? '魔法少女/心之花/魔法少女（问卷生成）'
-            : targetTemplate === 'canshou'
-                ? '魔法少女/心之花/残兽（问卷生成）'
-                : GENERAL_CHARACTER_TEMPLATE_ID;
-        log.info('为升华结果补充了目标模板的 templateId', { targetTemplate });
+      sublimatedData.templateId = targetTemplate === 'magical-girl'
+        ? '魔法少女/心之花/魔法少女（问卷生成）'
+        : targetTemplate === 'canshou'
+          ? '魔法少女/心之花/残兽（问卷生成）'
+          : GENERAL_CHARACTER_TEMPLATE_ID;
+      log.info('为升华结果补充了目标模板的 templateId', { targetTemplate });
     }
 
     // 2. 合并 AI 生成的新数据
@@ -669,15 +670,15 @@ async function handler(req: NextRequest): Promise<Response> {
     }
 
     if (shouldSign) {
-        sublimatedData.signature = await generateSignature(sublimatedData);
+      sublimatedData.signature = await generateSignature(sublimatedData);
     } else {
-        delete sublimatedData.signature;
+      delete sublimatedData.signature;
     }
 
     const finalResponse = {
-        sublimatedData,
-        unchangedFields: sanitizedFieldsToPreserve,
-        targetTemplate
+      sublimatedData,
+      unchangedFields: sanitizedFieldsToPreserve,
+      targetTemplate
     };
 
     return new Response(JSON.stringify(finalResponse), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -695,19 +696,19 @@ async function handler(req: NextRequest): Promise<Response> {
  * @returns 连接所有字符串值的单个字符串。
  */
 const extractTextForCheck = (data: any): string => {
-    let textContent = '';
-    if (typeof data === 'string') {
-        textContent += data + ' ';
-    } else if (Array.isArray(data)) {
-        data.forEach(item => { textContent += extractTextForCheck(item); });
-    } else if (typeof data === 'object' && data !== null) {
-        for (const key in data) {
-            if (key !== 'signature' && key !== 'userAnswers') {
-                textContent += extractTextForCheck(data[key]);
-            }
-        }
+  let textContent = '';
+  if (typeof data === 'string') {
+    textContent += data + ' ';
+  } else if (Array.isArray(data)) {
+    data.forEach(item => { textContent += extractTextForCheck(item); });
+  } else if (typeof data === 'object' && data !== null) {
+    for (const key in data) {
+      if (key !== 'signature' && key !== 'userAnswers') {
+        textContent += extractTextForCheck(data[key]);
+      }
     }
-    return textContent;
+  }
+  return textContent;
 };
 
 export default handler;
