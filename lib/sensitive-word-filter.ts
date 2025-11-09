@@ -111,6 +111,7 @@ const sensitiveWordsConfig = {
     "5Liw6IW0",
     "6IuX5bqK",
     "5qao5Y+W",
+    "6Zi06YGT",
     //"5Y+R5oOF", 暂时取消该词，以免因为突发情况等误封
     "5oCn5b+r5oSf",
     // 奥菲利亚相关违禁词
