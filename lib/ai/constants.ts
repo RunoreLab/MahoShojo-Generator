@@ -129,20 +129,21 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         docsUrl: 'https://www.modelscope.cn/my/myaccesstoken',
         baseUrl: 'https://api-inference.modelscope.cn/v1',
         type: 'openai',
+        mode: 'json',
         models: [
-            // {
-            //     value: 'Qwen/Qwen3-235B-A22B',
-            //     label: '通义千问 3 235B',
-            //     description: '阿里旗下的通义千问大模型。'
-            // },
+            {
+                value: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
+                label: '通义千问 3 235B',
+                description: '阿里旗下的通义千问大模型。'
+            },
             {
                 value: 'ZhipuAI/GLM-4.6',
                 label: 'GLM-4.6',
                 description: '智谱旗下的大模型，更多模型正在添加中。'
-            },
+            }
             // {
-            //     value: 'deepseek-ai/DeepSeek-V3.1',
-            //     label: 'DeepSeek V3.2 Exp',
+            //     value: 'MiniMax/MiniMax-M2',
+            //     label: 'MiniMax-M2',
             //     description: 'DeepSeek 最新版本。'
             // },
             // {
@@ -151,8 +152,8 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             //     description: 'DeepSeek 思考版本。'
             // },
             // {
-            //     value: 'moonshotai/Kimi-K2-Instruct',
-            //     label: 'Kimi K2 Instruct',
+            //     value: 'moonshotai/Kimi-K2-Thinking',
+            //     label: 'Kimi K2 Thinking',
             //     description: 'Moonshot 旗下的大模型，可以看出我懒得写描述了。'
             // },
         ]
