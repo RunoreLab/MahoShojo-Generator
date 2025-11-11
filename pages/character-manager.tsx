@@ -1161,6 +1161,7 @@ const CharacterManagerPage: React.FC = () => {
         }
 
         let hasChange = false;
+        const harmonizedUpdates: { path: string; value: string }[] = [];
 
         setCharacterData((prev: any) => {
             if (!prev) return prev;
@@ -1173,8 +1174,11 @@ const CharacterManagerPage: React.FC = () => {
                 if (typeof originalValue !== 'string') return;
                 const { text, changed } = maskValueByMatches(originalValue, issue.matches, mode);
                 if (changed && text !== originalValue) {
-                    setValueAtPath(cloned, issue.path, text);
-                    localChange = true;
+                    const updated = setValueAtPath(cloned, issue.path, text);
+                    if (updated) {
+                        harmonizedUpdates.push({ path: issue.path, value: text });
+                        localChange = true;
+                    }
                 }
             });
 
@@ -1187,6 +1191,18 @@ const CharacterManagerPage: React.FC = () => {
         });
 
         if (hasChange) {
+            if (harmonizedUpdates.length > 0) {
+                setOriginalData((prev: any) => {
+                    if (!prev) return prev;
+                    const clonedOriginal = JSON.parse(JSON.stringify(prev));
+                    harmonizedUpdates.forEach(({ path, value }) => {
+                        if (path) {
+                            setValueAtPath(clonedOriginal, path, value);
+                        }
+                    });
+                    return clonedOriginal;
+                });
+            }
             setMessage({ type: 'success', text: `已执行${mode === 'first' ? '首字符' : '尾字符'}打码，建议重新扫描确认。` });
             setScanTrigger(prev => prev + 1);
         } else {
