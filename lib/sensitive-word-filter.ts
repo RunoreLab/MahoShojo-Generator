@@ -150,6 +150,7 @@ const sensitiveWordsConfig = {
     "6LSx56eN",
     // 1016新增
     "6LSe5pON6ZSB",
+    "6Lez6JuL",
   ],
   encoding: "base64",
   original_count: 71
