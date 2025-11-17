@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CurrentStateSchema } from './current-state';
+import { AdjudicatorEventSchema } from './adjudicator';
 
 const keyList = [
   'name',
@@ -40,13 +41,7 @@ export const CanshouSchema = z.object({
   userAnswers: z.union([z.record(z.string()), z.array(z.string())]).optional(),
   isPreset: z.boolean().optional(),
   signature: z.string().optional(),
-  adjudicationEvents: z.array(z.object({
-    id: z.string().optional(),
-    description: z.string().optional(),
-    type: z.string().optional(),
-    probability: z.number().optional(),
-    outcomes: z.array(z.string().optional()).optional(),
-  })).optional(),
+  adjudicationEvents: z.array(AdjudicatorEventSchema).optional(),
   current_state: CurrentStateSchema.optional(),
   arena_history: z.object({
     attributes: z.object({

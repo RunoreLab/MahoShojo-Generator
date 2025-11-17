@@ -750,19 +750,31 @@ const CharacterManagerPage: React.FC = () => {
         // 递归检查函数，会忽略被豁免的路径
         const checkForBreakingChanges = (originalNode: any, currentNode: any, path: string) => {
             if (hasBreakingChange) return;
-            for (const key in originalNode) {
+            const originalKeys = originalNode && typeof originalNode === 'object' ? Object.keys(originalNode) : [];
+            const currentKeys = currentNode && typeof currentNode === 'object' ? Object.keys(currentNode) : [];
+            const mergedKeys = new Set([...originalKeys, ...currentKeys]);
+
+            for (const key of mergedKeys) {
                 const currentPath = path ? `${path}.${key}` : key;
+
+                if (currentPath === 'adjudicationEvents') {
+                    // 内嵌随机事件完全豁免，增删改均不会破坏原生性
+                    continue;
+                }
 
                 // 如果当前路径或其父路径在豁免列表中（如 'codename'），或字段本身就是签名/历战记录，则跳过检查
                 if (key === 'signature' || key === 'arena_history' || NATIVE_PRESERVING_PATHS.has(currentPath)) {
                     continue;
                 }
 
-                if (!deepEqual(originalNode[key], currentNode[key])) {
+                const originalValue = originalNode?.[key];
+                const currentValue = currentNode?.[key];
+
+                if (!deepEqual(originalValue, currentValue)) {
                     // 历战记录有特殊规则：只允许删除条目，不允许新增或修改
                     if (currentPath === 'arena_history.entries') {
-                        const originalEntries = originalNode[key] || [];
-                        const currentEntries = currentNode[key] || [];
+                        const originalEntries = originalValue || [];
+                        const currentEntries = currentValue || [];
                         if (currentEntries.length > originalEntries.length) {
                             hasBreakingChange = true;
                         } else {
@@ -1161,6 +1173,7 @@ const CharacterManagerPage: React.FC = () => {
         }
 
         let hasChange = false;
+        const harmonizedUpdates: { path: string; value: string }[] = [];
 
         setCharacterData((prev: any) => {
             if (!prev) return prev;
@@ -1173,8 +1186,11 @@ const CharacterManagerPage: React.FC = () => {
                 if (typeof originalValue !== 'string') return;
                 const { text, changed } = maskValueByMatches(originalValue, issue.matches, mode);
                 if (changed && text !== originalValue) {
-                    setValueAtPath(cloned, issue.path, text);
-                    localChange = true;
+                    const updated = setValueAtPath(cloned, issue.path, text);
+                    if (updated) {
+                        harmonizedUpdates.push({ path: issue.path, value: text });
+                        localChange = true;
+                    }
                 }
             });
 
@@ -1187,6 +1203,18 @@ const CharacterManagerPage: React.FC = () => {
         });
 
         if (hasChange) {
+            if (harmonizedUpdates.length > 0) {
+                setOriginalData((prev: any) => {
+                    if (!prev) return prev;
+                    const clonedOriginal = JSON.parse(JSON.stringify(prev));
+                    harmonizedUpdates.forEach(({ path, value }) => {
+                        if (path) {
+                            setValueAtPath(clonedOriginal, path, value);
+                        }
+                    });
+                    return clonedOriginal;
+                });
+            }
             setMessage({ type: 'success', text: `已执行${mode === 'first' ? '首字符' : '尾字符'}打码，建议重新扫描确认。` });
             setScanTrigger(prev => prev + 1);
         } else {

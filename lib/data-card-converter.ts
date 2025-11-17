@@ -147,6 +147,7 @@ const SCENARIO_META: Record<string, FieldMeta> = {
   title: { type: 'string' },
   scenario_type: { type: 'string' },
   description: { type: 'string' },
+  adjudicationEvents: { type: 'array' },
   elements: {
     type: 'object',
     children: {
@@ -257,7 +258,8 @@ const DEFAULT_SCENARIO: ScenarioData = {
     atmosphere: '',
     development: []
   },
-  metadata: {}
+  metadata: {},
+  adjudicationEvents: []
 };
 
 const DEFAULT_GENERAL: GeneralCharacterData = {
@@ -570,6 +572,10 @@ function convertToScenario(data: any, sourceTemplate: InferableTemplate): Assign
   const appendix = formatUnmatchedFields(unmatched);
   if (appendix) {
     base.description = `${base.description?.trim() || ''}\n${appendix}`.trim();
+  }
+
+  if (data?.adjudicationEvents) {
+    base.adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
   }
 
   return { data: ScenarioSchema.parse(base), warnings: unmatched.length ? ['部分字段已合并至情景描述。'] : [] };

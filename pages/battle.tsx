@@ -1,6 +1,6 @@
 // pages/battle.tsx
 
-import React, { useState, useRef, ChangeEvent, useEffect, useMemo } from 'react';
+import React, { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useCooldown } from '../lib/cooldown';
@@ -211,6 +211,35 @@ const BattlePage: React.FC = () => {
     const [adjudicationResults, setAdjudicationResults] = useState<AdjudicationResult[] | null>(null);
     const [storyLength, setStoryLength] = useState('default');
     const [selectedCombatantForDetails, setSelectedCombatantForDetails] = useState<CombatantData | null>(null);
+
+    const upsertAdjudicationEvents = useCallback((incoming: AdjudicatorEvent[] | undefined) => {
+        if (!Array.isArray(incoming) || incoming.length === 0) return;
+        const buildKey = (evt: AdjudicatorEvent, idx: number) => (typeof evt?.id === 'string' && evt.id) || `${evt?.description || 'event'}-${idx}`;
+        setAdjudicationEvents(prev => {
+            const incomingWithKey = incoming.map((evt, idx) => ({ evt, key: buildKey(evt, idx) }));
+            const incomingKeys = new Set(incomingWithKey.map(item => item.key));
+            const filteredPrev = prev.filter((evt, idx) => !incomingKeys.has(buildKey(evt, idx)));
+            return [...filteredPrev, ...incomingWithKey.map(item => item.evt)];
+        });
+    }, []);
+
+    const appendAdjudicationEventsFromSource = useCallback((events: unknown, sourceLabel: string, options?: { warningState?: { warned: boolean }; onLegacyDiscard?: () => void }) => {
+        if (!Array.isArray(events) || events.length === 0) return;
+        const warningState = options?.warningState;
+        if (isLegacyAdjudicatorFormat(events as any[])) {
+            if (warningState) {
+                if (!warningState.warned) {
+                    setError(`⚠️ 文件 "${sourceLabel}" 包含旧版随机事件，已被忽略。请前往【角色管理中心】加载并保存该文件以自动升级格式。`);
+                    warningState.warned = true;
+                }
+            } else {
+                setError(`⚠️ 文件 "${sourceLabel}" 包含旧版随机事件，已被忽略。请前往【角色管理中心】加载并保存该文件以自动升级格式。`);
+            }
+            options?.onLegacyDiscard?.();
+            return;
+        }
+        upsertAdjudicationEvents(events as AdjudicatorEvent[]);
+    }, [setError, upsertAdjudicationEvents]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -531,8 +560,7 @@ const BattlePage: React.FC = () => {
         }
 
         const loadedCombatants: CombatantData[] = [];
-        const newAdjudicationEvents: AdjudicatorEvent[] = [];
-        let legacyWarningTriggered = false; // 用于避免重复显示警告
+        const warningState = { warned: false };
 
         for (const item of dataArray) {
             const template = inferTemplate(item);
@@ -566,17 +594,12 @@ const BattlePage: React.FC = () => {
                 const verificationResponse = await fetch('/api/verify-origin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
                 const { isValid } = await verificationResponse.json();
 
-                if (Array.isArray(item.adjudicationEvents) && item.adjudicationEvents.length > 0) {
-                    if (isLegacyAdjudicatorFormat(item.adjudicationEvents)) {
-                        if (!legacyWarningTriggered) {
-                            setError(`⚠️ 文件 "${itemName}" 包含旧版随机事件，已被忽略。请前往【角色管理中心】加载并保存该文件以自动升级格式。`);
-                            legacyWarningTriggered = true;
-                        }
-                        delete item.adjudicationEvents;
-                    } else {
-                        newAdjudicationEvents.push(...(item.adjudicationEvents as AdjudicatorEvent[]));
+                appendAdjudicationEventsFromSource(item.adjudicationEvents, itemName, {
+                    warningState,
+                    onLegacyDiscard: () => {
+                        delete (item as Record<string, unknown>).adjudicationEvents;
                     }
-                }
+                });
 
                 loadedCombatants.push({ type, data: item, filename: itemName, isValid, isPreset: false, isNonStandard: false });
 
@@ -592,9 +615,6 @@ const BattlePage: React.FC = () => {
             }
         }
         setCombatants(prev => [...prev, ...loadedCombatants]);
-        if (newAdjudicationEvents.length > 0) {
-            setAdjudicationEvents(prev => [...prev, ...newAdjudicationEvents]);
-        }
     };
 
 
@@ -683,12 +703,17 @@ const BattlePage: React.FC = () => {
                 });
                 const { isValid } = await verificationResponse.json();
                 // 设置为情景内容
-                setScenarioContent(cleanedCardData);
-                setScenarioFileName(filename);
-                setIsScenarioNative(isValid || false);
-                setError(null);
-                return;
-            }
+            setScenarioContent(cleanedCardData);
+            setScenarioFileName(filename);
+            setIsScenarioNative(isValid || false);
+            appendAdjudicationEventsFromSource(cleanedCardData.adjudicationEvents, filename, {
+                onLegacyDiscard: () => {
+                    delete (cleanedCardData as Record<string, unknown>).adjudicationEvents;
+                }
+            });
+            setError(null);
+            return;
+        }
 
             // 这是角色数据卡，检查角色数量限制
             if (combatants.length >= 4) {
@@ -819,6 +844,11 @@ const BattlePage: React.FC = () => {
 
             setScenarioContent(json);
             setScenarioFileName(json.title || '粘贴的情景');
+            appendAdjudicationEventsFromSource(json.adjudicationEvents, json.title || '粘贴的情景', {
+                onLegacyDiscard: () => {
+                    delete (json as Record<string, unknown>).adjudicationEvents;
+                }
+            });
             setError(null);
             setPastedScenarioJson('');
         } catch (err) {
@@ -908,6 +938,11 @@ const BattlePage: React.FC = () => {
 
             setScenarioContent(json);
             setScenarioFileName(file.name);
+            appendAdjudicationEventsFromSource(json.adjudicationEvents, file.name, {
+                onLegacyDiscard: () => {
+                    delete (json as Record<string, unknown>).adjudicationEvents;
+                }
+            });
             setError(null);
         } catch (err) {
             const message = err instanceof Error ? err.message : '无法解析文件。';
@@ -1847,11 +1882,12 @@ const BattlePage: React.FC = () => {
                     {/* --- 更新后的角色信息展示区域 --- */}
                     {updatedCombatants.length > 0 && (
                         <div className="card mt-6">
-                            <h3 className="text-lg font-bold text-gray-800 mb-3">历战记录更新</h3>
+                            <h3 className="text-lg font-bold text-gray-800 mb-3">角色更新</h3>
                             <div className="space-y-4">
                                 {updatedCombatants.map((charData) => {
-                                    const latestEntry = charData.arena_history?.entries?.[charData.arena_history.entries.length - 1];
-                                    const stateSummary = charData.current_state?.summary;
+                                    const entries = charData.arena_history?.entries;
+                                    const latestEntry = Array.isArray(entries) && entries.length > 0 ? entries[entries.length - 1] : null;
+                                    const stateSummary = charData.current_state?.summary?.trim();
                                     const name = getCombatantDisplayName(charData);
                                     const template = inferTemplate(charData);
                                     const typeDisplay = template === 'magical-girl'
@@ -1860,7 +1896,10 @@ const BattlePage: React.FC = () => {
                                             ? '残兽'
                                             : '通用角色';
 
-                                    if (!latestEntry) return null;
+                                    const hasHistoryUpdate = !!latestEntry;
+                                    const hasStateUpdate = !!stateSummary;
+
+                                    if (!hasHistoryUpdate && !hasStateUpdate) return null;
 
                                     return (
                                         <div key={name} className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
@@ -1868,10 +1907,10 @@ const BattlePage: React.FC = () => {
                                                 <div>
                                                     <p className="font-semibold text-gray-700">{name} <span className="text-xs text-gray-500">({typeDisplay})</span></p>
                                                     <p className="text-sm text-gray-600 mt-1">
-                                                        <span className="font-medium">本次事件影响：</span>
-                                                        {latestEntry.impact}
+                                                        <span className="font-medium">历战记录：</span>
+                                                        {hasHistoryUpdate ? latestEntry.impact : '已跳过写入，改为仅更新其它字段。'}
                                                     </p>
-                                                    {stateSummary && (
+                                                    {hasStateUpdate && (
                                                         <p className="text-sm text-gray-600 mt-1">
                                                             <span className="font-medium">当前状态：</span>
                                                             {stateSummary}
