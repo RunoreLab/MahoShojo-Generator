@@ -2025,11 +2025,12 @@ const BattlePage: React.FC = () => {
                     {/* --- 更新后的角色信息展示区域 --- */}
                     {updatedCombatants.length > 0 && (
                         <div className="card mt-6">
-                            <h3 className="text-lg font-bold text-gray-800 mb-3">历战记录更新</h3>
+                            <h3 className="text-lg font-bold text-gray-800 mb-3">角色更新</h3>
                             <div className="space-y-4">
                                 {updatedCombatants.map((charData) => {
-                                    const latestEntry = charData.arena_history?.entries?.[charData.arena_history.entries.length - 1];
-                                    const stateSummary = charData.current_state?.summary;
+                                    const entries = charData.arena_history?.entries;
+                                    const latestEntry = Array.isArray(entries) && entries.length > 0 ? entries[entries.length - 1] : null;
+                                    const stateSummary = charData.current_state?.summary?.trim();
                                     const name = getCombatantDisplayName(charData);
                                     const template = inferTemplate(charData);
                                     const typeDisplay = template === 'magical-girl'
@@ -2038,7 +2039,10 @@ const BattlePage: React.FC = () => {
                                             ? '残兽'
                                             : '通用角色';
 
-                                    if (!latestEntry) return null;
+                                    const hasHistoryUpdate = !!latestEntry;
+                                    const hasStateUpdate = !!stateSummary;
+
+                                    if (!hasHistoryUpdate && !hasStateUpdate) return null;
 
                                     return (
                                         <div key={name} className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
@@ -2046,10 +2050,10 @@ const BattlePage: React.FC = () => {
                                                 <div>
                                                     <p className="font-semibold text-gray-700">{name} <span className="text-xs text-gray-500">({typeDisplay})</span></p>
                                                     <p className="text-sm text-gray-600 mt-1">
-                                                        <span className="font-medium">本次事件影响：</span>
-                                                        {latestEntry.impact}
+                                                        <span className="font-medium">历战记录：</span>
+                                                        {hasHistoryUpdate ? latestEntry.impact : '已跳过写入，改为仅更新其它字段。'}
                                                     </p>
-                                                    {stateSummary && (
+                                                    {hasStateUpdate && (
                                                         <p className="text-sm text-gray-600 mt-1">
                                                             <span className="font-medium">当前状态：</span>
                                                             {stateSummary}
