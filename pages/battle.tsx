@@ -27,6 +27,7 @@ import { GeneralCharacterSchema } from '@/lib/schemas';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 
 const ARENA_STATE_PREF_KEY = 'arena-history-state-preferences-v1';
+const MAX_COMBATANTS = 10;
 
 interface UpdatedCombatantData {
     codename?: string;
@@ -488,8 +489,8 @@ const BattlePage: React.FC = () => {
 
     // 统一处理添加参战者
     const addCombatant = (combatant: CombatantData) => { // 注意：这里只接收 CombatantData
-        if (combatants.length >= 4) {
-            setError('最多只能选择 4 位参战者。');
+        if (combatants.length >= MAX_COMBATANTS) {
+            setError(`最多只能选择 ${MAX_COMBATANTS} 位参战者。`);
             return;
         }
         setCombatants(prev => [...prev, combatant]);
@@ -555,8 +556,8 @@ const BattlePage: React.FC = () => {
 
         const dataArray = Array.isArray(parsedData) ? parsedData : [parsedData];
 
-        if (dataArray.length > (4 - combatants.length)) {
-            throw new Error(`队伍将超出4人上限！`);
+        if (dataArray.length > (MAX_COMBATANTS - combatants.length)) {
+            throw new Error(`队伍将超出${MAX_COMBATANTS}人上限！`);
         }
 
         const loadedCombatants: CombatantData[] = [];
@@ -716,8 +717,8 @@ const BattlePage: React.FC = () => {
         }
 
             // 这是角色数据卡，检查角色数量限制
-            if (combatants.length >= 4) {
-                setError('❌ 最多只能添加4位角色。');
+            if (combatants.length >= MAX_COMBATANTS) {
+                setError(`❌ 最多只能添加${MAX_COMBATANTS}位角色。`);
                 return;
             }
 
@@ -772,8 +773,8 @@ const BattlePage: React.FC = () => {
      */
     const handleRandomMatch = async (type: 'character' | 'scenario') => {
         // 检查角色数量上限
-        if (type === 'character' && combatants.length >= 4) {
-            setError('最多只能选择 4 位参战者。');
+        if (type === 'character' && combatants.length >= MAX_COMBATANTS) {
+            setError(`最多只能选择 ${MAX_COMBATANTS} 位参战者。`);
             return;
         }
 
@@ -1288,7 +1289,7 @@ const BattlePage: React.FC = () => {
                             const isSelected = combatants.some(c => c.filename === preset.filename);
                             // 修改：增加 loadingPreset 和 isGenerating 的判断
                             const isLoadingThis = loadingPreset === preset.filename;
-                            const isDisabled = isGenerating || isLoadingThis || (!isSelected && combatants.length >= 4);
+                            const isDisabled = isGenerating || isLoadingThis || (!isSelected && combatants.length >= MAX_COMBATANTS);
 
                             const bgColor = preset.type === 'canshou'
                                 ? (isSelected ? 'bg-red-200 border-red-400 hover:bg-red-300' : 'bg-white border-gray-300 hover:border-red-400 hover:bg-red-50')
@@ -1340,7 +1341,7 @@ const BattlePage: React.FC = () => {
                             <h3 className="font-bold mb-2">📰 使用须知</h3>
                             <ol className="list-decimal list-inside space-y-1">
                                 <li>前往<Link href="/details" className="footer-link">【奇妙妖精大调查】</Link>或<Link href="/canshou" className="footer-link">【研究院残兽调查】</Link>页面，生成角色并下载其【设定文件】。</li>
-                                <li>收集 2-4 位角色的设定文件（.json 格式）。</li>
+                                <li>收集 2-10 位角色的设定文件（.json 格式）。</li>
                                 <li>在此处选择预设角色、上传设定文件，也可以加入随机生成角色或使用【随机匹配】功能从数据库中抽取其他用户分享的角色</li>
                                 <li>选择一个模式，然后敬请期待在「命运的舞台」之上发生的故事吧！</li>
                             </ol>
@@ -1355,14 +1356,14 @@ const BattlePage: React.FC = () => {
                             <div className="flex gap-2">
                                 <button
                                     onClick={handleOpenCharacterDataModal}
-                                    disabled={isGenerating || combatants.length >= 4}
+                                    disabled={isGenerating || combatants.length >= MAX_COMBATANTS}
                                     className="flex-1 px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                                 >
                                     浏览在线角色库
                                 </button>
                                 <button
                                     onClick={() => handleRandomMatch('character')}
-                                    disabled={isGenerating || isMatching !== null || combatants.length >= 4}
+                                    disabled={isGenerating || isMatching !== null || combatants.length >= MAX_COMBATANTS}
                                     className="flex-1 px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                                 >
                                     {isMatching === 'character' ? '匹配中...' : '随机匹配角色'}
@@ -1392,7 +1393,7 @@ const BattlePage: React.FC = () => {
                             {isPasteAreaVisible && (
                                 <div className="input-group mt-2">
                                     <textarea value={pastedJson} onChange={(e) => setPastedJson(e.target.value)} placeholder="在此处粘贴一个或多个魔法少女/残兽/通用角色的设定文件(.json)内容..." className="input-field resize-y h-32" disabled={isGenerating} />
-                                    <button onClick={handleAddFromPaste} disabled={!pastedJson.trim() || isGenerating || combatants.length >= 4} className="generate-button mt-2 mb-0">从文本添加角色</button>
+                                    <button onClick={handleAddFromPaste} disabled={!pastedJson.trim() || isGenerating || combatants.length >= MAX_COMBATANTS} className="generate-button mt-2 mb-0">从文本添加角色</button>
                                 </div>
                             )}
                         </div>
@@ -1401,14 +1402,14 @@ const BattlePage: React.FC = () => {
                         {combatants.length > 0 && (
                             <div className="mb-4 p-3 bg-gray-200 rounded-lg">
                                 <div className="flex justify-between items-center m-0 top-0 right-0">
-                                    <p className="font-semibold text-sm text-gray-700">已选角色 ({combatants.length}/4):</p>
+                                    <p className="font-semibold text-sm text-gray-700">已选角色 ({combatants.length}/{MAX_COMBATANTS}):</p>
                                     <button onClick={handleClearRoster} disabled={isGenerating} className="text-sm text-red-500 hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">清空列表</button>
                                 </div>
                                 <div className="flex gap-2 mt-3">
                                     <button
                                         onClick={() => {
-                                            if (combatants.length >= 4) {
-                                                setError('最多只能选择 4 位参战者。');
+                                            if (combatants.length >= MAX_COMBATANTS) {
+                                                setError(`最多只能选择 ${MAX_COMBATANTS} 位参战者。`);
                                                 return;
                                             }
                                             const newPlaceholder: RandomCombatantPlaceholder = {
@@ -1418,15 +1419,15 @@ const BattlePage: React.FC = () => {
                                             };
                                             setCombatants(prev => [...prev, newPlaceholder]);
                                         }}
-                                        disabled={isGenerating || combatants.length >= 4}
+                                        disabled={isGenerating || combatants.length >= MAX_COMBATANTS}
                                         className="text-xs flex-1 bg-pink-100 text-pink-700 px-3 py-1.5 rounded-lg hover:bg-pink-200 disabled:opacity-50"
                                     >
                                         + 添加随机魔法少女
                                     </button>
                                     <button
                                         onClick={() => {
-                                            if (combatants.length >= 4) {
-                                                setError('最多只能选择 4 位参战者。');
+                                            if (combatants.length >= MAX_COMBATANTS) {
+                                                setError(`最多只能选择 ${MAX_COMBATANTS} 位参战者。`);
                                                 return;
                                             }
                                             const newPlaceholder: RandomCombatantPlaceholder = {
@@ -1436,7 +1437,7 @@ const BattlePage: React.FC = () => {
                                             };
                                             setCombatants(prev => [...prev, newPlaceholder]);
                                         }}
-                                        disabled={isGenerating || combatants.length >= 4}
+                                        disabled={isGenerating || combatants.length >= MAX_COMBATANTS}
                                         className="text-xs flex-1 bg-red-100 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-200 disabled:opacity-50"
                                     >
                                         + 添加随机残兽
