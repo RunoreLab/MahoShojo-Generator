@@ -20,6 +20,7 @@ import { webcrypto } from 'crypto';
 const randomUUID = typeof crypto !== 'undefined' ? crypto.randomUUID.bind(crypto) : webcrypto.randomUUID.bind(webcrypto);
 
 const log = getLogger('api-gen-battle-story-stream');
+const MAX_COMBATANTS = 10;
 
 export const config = {
   runtime: 'edge',
@@ -988,8 +989,8 @@ async function handler(req: NextRequest): Promise<Response> {
     const resolvedModelOverride = customModelOverride ?? (isDowngrade ? "gemini-2.5-flash-lite" : undefined);
 
     const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
-    if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > 4) {
-      const errorMessage = `该模式需要 ${minParticipants} 到 4 位角色`;
+    if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > MAX_COMBATANTS) {
+      const errorMessage = `该模式需要 ${minParticipants} 到 ${MAX_COMBATANTS} 位角色`;
       return new Response(JSON.stringify({ error: errorMessage }), { status: 400 });
     }
 
