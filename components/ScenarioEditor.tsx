@@ -1,4 +1,5 @@
 import React from 'react';
+import AdjudicatorEditor from '@/components/AdjudicatorEditor';
 
 interface ScenarioEditorProps {
   data: any;
@@ -231,6 +232,16 @@ export default function ScenarioEditor({ data, onChange }: ScenarioEditorProps) 
             </button>
           </div>
         </div>
+      </fieldset>
+
+      {/* 内嵌随机事件 */}
+      <fieldset className="border border-gray-300 p-4 rounded-lg">
+        <legend className="text-sm font-semibold px-2 text-gray-600">🎲 内嵌随机事件</legend>
+        <p className="text-xs text-gray-500 mb-2">在情景中预置随机事件，竞技场加载该情景时会自动加入判定链。</p>
+        <AdjudicatorEditor
+          events={data.adjudicationEvents || []}
+          onEventsChange={(events) => handleFieldChange('adjudicationEvents', events)}
+        />
       </fieldset>
     </div>
   );

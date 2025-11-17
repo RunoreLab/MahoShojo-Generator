@@ -156,6 +156,30 @@ const setValueAtPath = (data: any, path: string, newValue: string): boolean => {
     return true;
 };
 
+const collectAdjudicatorEventIds = (events: any): Set<string> => {
+    const ids = new Set<string>();
+    const visitEvent = (event: any) => {
+        if (!event || typeof event !== 'object') return;
+        if (typeof event.id === 'string') {
+            ids.add(event.id);
+        }
+        const success = event.onSuccess?.event;
+        if (success) visitEvent(success);
+        const failure = event.onFailure?.event;
+        if (failure) visitEvent(failure);
+        if (Array.isArray(event.outcomes)) {
+            event.outcomes.forEach((outcome: any) => {
+                const chained = outcome?.chainedEvent?.event;
+                if (chained) visitEvent(chained);
+            });
+        }
+    };
+    if (Array.isArray(events)) {
+        events.forEach(visitEvent);
+    }
+    return ids;
+};
+
 const maskValueByMatches = (value: string, matches: SensitiveMatchDetail[], mode: 'first' | 'last'): { text: string; changed: boolean } => {
     if (!value || matches.length === 0) {
         return { text: value, changed: false };
@@ -750,19 +774,40 @@ const CharacterManagerPage: React.FC = () => {
         // 递归检查函数，会忽略被豁免的路径
         const checkForBreakingChanges = (originalNode: any, currentNode: any, path: string) => {
             if (hasBreakingChange) return;
-            for (const key in originalNode) {
+            const originalKeys = originalNode && typeof originalNode === 'object' ? Object.keys(originalNode) : [];
+            const currentKeys = currentNode && typeof currentNode === 'object' ? Object.keys(currentNode) : [];
+            const mergedKeys = new Set([...originalKeys, ...currentKeys]);
+
+            for (const key of mergedKeys) {
                 const currentPath = path ? `${path}.${key}` : key;
+
+                if (currentPath === 'adjudicationEvents') {
+                    const originalIds = collectAdjudicatorEventIds(originalNode?.[key]);
+                    const currentIds = collectAdjudicatorEventIds(currentNode?.[key]);
+                    for (const id of currentIds) {
+                        if (!originalIds.has(id)) {
+                            hasBreakingChange = true;
+                            console.log(`原生性丧失：新增随机事件 ${id || '(未命名事件)'}`);
+                            break;
+                        }
+                    }
+                    if (hasBreakingChange) break;
+                    continue;
+                }
 
                 // 如果当前路径或其父路径在豁免列表中（如 'codename'），或字段本身就是签名/历战记录，则跳过检查
                 if (key === 'signature' || key === 'arena_history' || NATIVE_PRESERVING_PATHS.has(currentPath)) {
                     continue;
                 }
 
-                if (!deepEqual(originalNode[key], currentNode[key])) {
+                const originalValue = originalNode?.[key];
+                const currentValue = currentNode?.[key];
+
+                if (!deepEqual(originalValue, currentValue)) {
                     // 历战记录有特殊规则：只允许删除条目，不允许新增或修改
                     if (currentPath === 'arena_history.entries') {
-                        const originalEntries = originalNode[key] || [];
-                        const currentEntries = currentNode[key] || [];
+                        const originalEntries = originalValue || [];
+                        const currentEntries = currentValue || [];
                         if (currentEntries.length > originalEntries.length) {
                             hasBreakingChange = true;
                         } else {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AdjudicatorEventSchema } from './adjudicator';
 
 // 情景数据卡的 Zod Schema
 export const ScenarioSchema = z.object({
@@ -23,10 +24,12 @@ export const ScenarioSchema = z.object({
     created_at: z.string().optional(),
     signature: z.string().optional(),
   }).optional(),
+  adjudicationEvents: z.array(AdjudicatorEventSchema).optional(),
 }).catchall(z.unknown())
   .superRefine((data, ctx) => {
+    const allowedKeys = ['title', 'scenario_type', 'description', 'elements', 'metadata', 'adjudicationEvents'];
     for (const key in data) {
-      if (!['title', 'scenario_type', 'description', 'elements', 'metadata'].includes(key) && !key.startsWith('_')) {
+      if (!allowedKeys.includes(key) && !key.startsWith('_')) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [key],
