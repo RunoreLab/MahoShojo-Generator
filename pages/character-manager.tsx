@@ -156,30 +156,6 @@ const setValueAtPath = (data: any, path: string, newValue: string): boolean => {
     return true;
 };
 
-const collectAdjudicatorEventIds = (events: any): Set<string> => {
-    const ids = new Set<string>();
-    const visitEvent = (event: any) => {
-        if (!event || typeof event !== 'object') return;
-        if (typeof event.id === 'string') {
-            ids.add(event.id);
-        }
-        const success = event.onSuccess?.event;
-        if (success) visitEvent(success);
-        const failure = event.onFailure?.event;
-        if (failure) visitEvent(failure);
-        if (Array.isArray(event.outcomes)) {
-            event.outcomes.forEach((outcome: any) => {
-                const chained = outcome?.chainedEvent?.event;
-                if (chained) visitEvent(chained);
-            });
-        }
-    };
-    if (Array.isArray(events)) {
-        events.forEach(visitEvent);
-    }
-    return ids;
-};
-
 const maskValueByMatches = (value: string, matches: SensitiveMatchDetail[], mode: 'first' | 'last'): { text: string; changed: boolean } => {
     if (!value || matches.length === 0) {
         return { text: value, changed: false };
@@ -782,16 +758,7 @@ const CharacterManagerPage: React.FC = () => {
                 const currentPath = path ? `${path}.${key}` : key;
 
                 if (currentPath === 'adjudicationEvents') {
-                    const originalIds = collectAdjudicatorEventIds(originalNode?.[key]);
-                    const currentIds = collectAdjudicatorEventIds(currentNode?.[key]);
-                    for (const id of currentIds) {
-                        if (!originalIds.has(id)) {
-                            hasBreakingChange = true;
-                            console.log(`原生性丧失：新增随机事件 ${id || '(未命名事件)'}`);
-                            break;
-                        }
-                    }
-                    if (hasBreakingChange) break;
+                    // 内嵌随机事件完全豁免，增删改均不会破坏原生性
                     continue;
                 }
 
