@@ -1055,8 +1055,8 @@ const BattlePage: React.FC = () => {
         }
 
         const minParticipants = (battleMode === 'daily' || battleMode === 'scenario') ? 1 : 2;
-        const maxParticipants = 4;
-        if (combatants.length < minParticipants || combatants.length > 4) {
+        const maxParticipants = MAX_COMBATANTS;
+        if (combatants.length < minParticipants || combatants.length > MAX_COMBATANTS) {
             setError(`⚠️ 该模式需要 ${minParticipants} 到 ${maxParticipants} 位角色。`);
             return;
         }
