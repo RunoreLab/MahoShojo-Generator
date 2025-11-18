@@ -208,8 +208,11 @@ const BattlePage: React.FC = () => {
     // 新增：用于管理自定义 AI 供应商配置
     const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
-    // 冷却状态钩子，设置为2分钟
-    const { isCooldown, startCooldown, remainingTime } = useCooldown('generateBattleCooldown', 120000);
+    // 冷却状态钩子：官方120s，自定义Key缩短至3s
+    const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+    const battleStreamCooldownMs = isUserCustomKey ? 3000 : 120000;
+    const battleStreamCooldownKey = isUserCustomKey ? 'generateBattleCooldown:custom' : 'generateBattleCooldown:system';
+    const { isCooldown, startCooldown, remainingTime } = useCooldown(battleStreamCooldownKey, battleStreamCooldownMs);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {

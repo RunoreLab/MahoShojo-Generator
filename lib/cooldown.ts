@@ -24,6 +24,16 @@ export const useCooldown = (key: string, duration: number) => {
     );
     const [remainingTime, setRemainingTime] = useState<number>(0);
 
+    // 当 key 变更时，重新同步本地存储的时间戳，避免沿用旧配置
+    useEffect(() => {
+        if (isDevelopment) return;
+        const storedEndTime = getLocalStorageItem(key);
+        setCooldownEndTime(storedEndTime);
+        if (!storedEndTime) {
+            setRemainingTime(0);
+        }
+    }, [key, isDevelopment]);
+
     useEffect(() => {
         if (isDevelopment || !cooldownEndTime) return;
 
@@ -46,11 +56,12 @@ export const useCooldown = (key: string, duration: number) => {
         return () => clearInterval(interval);
     }, [cooldownEndTime, key, isDevelopment]);
 
-    const startCooldown = useCallback(() => {
+    const startCooldown = useCallback((overrideDuration?: number) => {
         // 在开发环境中不启动 cooldown
         if (isDevelopment) return;
         
-        const endTime = Date.now() + duration;
+        const effectiveDuration = typeof overrideDuration === 'number' ? overrideDuration : duration;
+        const endTime = Date.now() + effectiveDuration;
         setLocalStorageItem(key, endTime);
         setCooldownEndTime(endTime);
     }, [duration, key, isDevelopment]);
