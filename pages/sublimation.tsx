@@ -168,7 +168,10 @@ const SublimationPage: React.FC = () => {
     const [readCurrentState, setReadCurrentState] = useState(true);
     const [writeCurrentState, setWriteCurrentState] = useState(true);
 
-    const { isCooldown, startCooldown, remainingTime } = useCooldown('sublimationCooldown', 60000);
+    const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+    const sublimationCooldownMs = isUserCustomKey ? 3000 : 60000;
+    const sublimationCooldownKey = isUserCustomKey ? 'sublimationCooldown:custom' : 'sublimationCooldown:system';
+    const { isCooldown, startCooldown, remainingTime } = useCooldown(sublimationCooldownKey, sublimationCooldownMs);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
     const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
 

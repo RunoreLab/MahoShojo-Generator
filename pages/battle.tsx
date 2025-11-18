@@ -167,8 +167,11 @@ const BattlePage: React.FC = () => {
     const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
 
-    // 冷却状态钩子，设置为2分钟
-    const { isCooldown, startCooldown, remainingTime } = useCooldown('generateBattleCooldown', 120000);
+    // 冷却状态钩子：官方 120s，自定义 Key 缩短为 3s
+    const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+    const battleCooldownMs = isUserCustomKey ? 3000 : 120000;
+    const battleCooldownStorageKey = isUserCustomKey ? 'generateBattleCooldown:custom' : 'generateBattleCooldown:system';
+    const { isCooldown, startCooldown, remainingTime } = useCooldown(battleCooldownStorageKey, battleCooldownMs);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // 分别存储两种类型的预设
