@@ -71,11 +71,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'openai',
         mode: 'json',
         models: [
-            // {
-            //     value: 'gemini-3-pro-preview',
-            //     label: 'Gemini 3.0 Pro （预览版）',
-            //     description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
-            // },
+            {
+                value: 'gemini-3-pro-preview',
+                label: 'Gemini 3.0 Pro （预览版）',
+                description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
+            },
             {
                 value: 'gemini-2.5-pro',
                 label: 'Gemini 2.5 Pro',
