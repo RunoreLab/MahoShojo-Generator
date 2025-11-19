@@ -48,17 +48,17 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'gemini-2.5-flash',
                 label: 'Gemini 2.5 Flash',
-                description: 'Google 旗下的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
+                description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
             },
             {
                 value: 'gemini-2.5-flash-lite',
                 label: 'Gemini 2.5 Flash Lite',
-                description: 'Google 旗下的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+                description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
             {
                 value: 'gemini-2.0-flash-exp',
                 label: 'Gemini 2.0 Flash Exp',
-                description: 'Google 旗下的上一代模型，但是真的好快！'
+                description: 'Google 旗下的上两代模型，但是真的好快！'
             }
         ]
     },
@@ -71,10 +71,15 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'openai',
         mode: 'json',
         models: [
+            // {
+            //     value: 'gemini-3-pro-preview',
+            //     label: 'Gemini 3.0 Pro （预览版）',
+            //     description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
+            // },
             {
                 value: 'gemini-2.5-pro',
                 label: 'Gemini 2.5 Pro',
-                description: 'Google 旗下的最先进模型系列，性能很棒棒。'
+                description: 'Google 旗下上一代的最先进模型系列，性能很棒棒。'
             },
             {
                 value: 'gemini-2.5-pro-payg',
@@ -84,12 +89,12 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'gemini-2.5-flash',
                 label: 'Gemini 2.5 Flash',
-                description: 'Google 旗下的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
+                description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
             },
             {
                 value: 'gemini-2.5-flash-lite',
                 label: 'Gemini 2.5 Flash Lite',
-                description: 'Google 旗下的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+                description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
             // {
             //     value: 'glm-4.6',
@@ -163,19 +168,24 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'google',
         models: [
             {
+                value: 'gemini-3-pro-preview',
+                label: 'Gemini 3.0 Pro （预览版）',
+                description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
+            },
+            {
                 value: 'gemini-2.5-pro',
                 label: 'Gemini 2.5 Pro',
-                description: 'Google 旗下的最先进模型系列，性能很棒棒。'
+                description: 'Google 旗下上一代的最先进模型系列，性能很棒棒。'
             },
             {
                 value: 'gemini-2.5-flash',
                 label: 'Gemini 2.5 Flash',
-                description: 'Google 旗下的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
+                description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
             },
             {
                 value: 'gemini-2.5-flash-lite',
                 label: 'Gemini 2.5 Flash Lite',
-                description: 'Google 旗下的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+                description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
         ]
     },
