@@ -172,7 +172,7 @@ npm run start
 
 ## 星标情况
 
-[![Star History Chart](https://api.star-history.com/svg?repos=colasama/MahoShojo-Generator&type=Date)](https://www.star-history.com/#colasama/MahoShojo-Generator&Date)
+[![Stargazers over time](https://starchart.cc/colasama/MahoShojo-Generator.svg?variant=adaptive)](https://starchart.cc/colasama/MahoShojo-Generator)
 
 ## 🧡 致谢
 <div align="center">
