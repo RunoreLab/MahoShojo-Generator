@@ -1,3 +1,5 @@
+// lib/cooldown.ts
+
 import { useState, useEffect, useCallback } from 'react';
 
 const getLocalStorageItem = (key: string): number | null => {
@@ -29,8 +31,22 @@ export const useCooldown = (key: string, duration: number) => {
         if (isDevelopment) return;
         const storedEndTime = getLocalStorageItem(key);
         setCooldownEndTime(storedEndTime);
+        
+        // [修复]：当切换 key 时，立即根据读取到的 storedEndTime 计算 remainingTime
+        // 避免在下一次 interval 触发前出现状态不同步（例如切换回一个正在冷却的 key 时显示未冷却）
         if (!storedEndTime) {
             setRemainingTime(0);
+        } else {
+            const now = Date.now();
+            const remaining = storedEndTime - now;
+            if (remaining <= 0) {
+                setRemainingTime(0);
+                // 如果读出来的已经是过期时间，顺便清理一下
+                localStorage.removeItem(key);
+                setCooldownEndTime(null);
+            } else {
+                setRemainingTime(Math.ceil(remaining / 1000));
+            }
         }
     }, [key, isDevelopment]);
 
@@ -49,7 +65,7 @@ export const useCooldown = (key: string, duration: number) => {
             }
         };
 
-        calculateRemainingTime();
+        // calculateRemainingTime(); 
 
         const interval = setInterval(calculateRemainingTime, 1000);
 
@@ -64,6 +80,8 @@ export const useCooldown = (key: string, duration: number) => {
         const endTime = Date.now() + effectiveDuration;
         setLocalStorageItem(key, endTime);
         setCooldownEndTime(endTime);
+        // start 时立即更新 UI，提升响应速度
+        setRemainingTime(Math.ceil(effectiveDuration / 1000));
     }, [duration, key, isDevelopment]);
 
     const isCooldown = !isDevelopment && remainingTime > 0;
