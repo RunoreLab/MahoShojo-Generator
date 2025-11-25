@@ -31,23 +31,28 @@ type JsonSaveMode = 'download' | 'text';
 type ImageSaveMode = 'download' | 'modal';
 type DeviceType = 'mobile' | 'desktop' | 'unknown';
 
+type CanshouResultPayload = CanshouDetails & {
+  templateId?: string;
+  signature?: string | null;
+  userAnswers?: Record<string, string>;
+};
+
 interface SaveJsonButtonProps {
-  canshouDetails: CanshouDetails;
-  answers: Record<string, string>;
+  data: CanshouResultPayload;
   mode: JsonSaveMode;
   recommendedMode: JsonSaveMode;
 }
 
 // 用于保存JSON的按钮组件
-const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ canshouDetails, answers, mode, recommendedMode }) => {
+const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommendedMode }) => {
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const jsonPayload = useMemo(() => JSON.stringify({ ...canshouDetails, userAnswers: answers }, null, 2), [canshouDetails, answers]);
+  const jsonPayload = useMemo(() => JSON.stringify(data, null, 2), [data]);
 
   const downloadJson = () => {
     const blob = new Blob([jsonPayload], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const sanitizedName = (canshouDetails.name || 'data').replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
+    const sanitizedName = (data.name || 'data').replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
     link.href = url;
     link.download = `残兽档案_${sanitizedName}.json`;
     document.body.appendChild(link);
@@ -133,7 +138,7 @@ const CanshouPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [canshouDetails, setCanshouDetails] = useState<CanshouDetails | null>(null);
+  const [canshouDetails, setCanshouDetails] = useState<CanshouResultPayload | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
   const [showIntroduction, setShowIntroduction] = useState(true);
@@ -152,6 +157,17 @@ const CanshouPage: React.FC = () => {
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
   const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`;
+
+  const resolvedResultPayload = useMemo(() => {
+    if (!canshouDetails) return null;
+    const serverAnswers = canshouDetails.userAnswers && Object.keys(canshouDetails.userAnswers).length > 0
+      ? canshouDetails.userAnswers
+      : null;
+    return {
+      ...canshouDetails,
+      userAnswers: serverAnswers ?? answers,
+    };
+  }, [canshouDetails, answers]);
 
   useEffect(() => {
     fetch('/languages.json')
@@ -317,7 +333,7 @@ const CanshouPage: React.FC = () => {
         throw new Error(errorData.message || '生成失败，服务器返回错误');
       }
 
-      const result: CanshouDetails = await response.json();
+      const result: CanshouResultPayload = await response.json();
       setCanshouDetails(result);
       startCooldown();
     } catch (err) {
@@ -719,17 +735,20 @@ const CanshouPage: React.FC = () => {
                   <div className="text-center">
                     <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
                     <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                      <SaveJsonButton
-                        canshouDetails={canshouDetails}
-                        answers={answers}
-                        mode={jsonSaveMode}
-                        recommendedMode={recommendedJsonMode}
-                      />
-                      <SaveToCloudButton
-                        data={{ ...canshouDetails, userAnswers: answers }}
-                        buttonText="保存到云端"
-                        style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
-                      />
+                      {resolvedResultPayload && (
+                        <>
+                          <SaveJsonButton
+                            data={resolvedResultPayload}
+                            mode={jsonSaveMode}
+                            recommendedMode={recommendedJsonMode}
+                          />
+                          <SaveToCloudButton
+                            data={resolvedResultPayload}
+                            buttonText="保存到云端"
+                            style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                          />
+                        </>
+                      )}
                     </div>
                     <button
                       onClick={handleRegenerate}
