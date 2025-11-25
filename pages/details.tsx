@@ -71,7 +71,6 @@ interface SaveJsonButtonProps {
 }
 
 const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommendedMode }) => {
-  if (!data) return null;
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const jsonPayload = useMemo(() => JSON.stringify(data, null, 2), [data]);
 
