@@ -60,24 +60,27 @@ interface MagicalGirlDetails {
       bonds: string;
     };
   };
+  templateId?: string;
+  signature?: string;
+  userAnswers?: string[];
 }
 interface SaveJsonButtonProps {
-  magicalGirlDetails: MagicalGirlDetails;
-  answers: string[];
+  data: MagicalGirlDetails;
   mode: JsonSaveMode;
   recommendedMode: JsonSaveMode;
 }
 
-const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ magicalGirlDetails, answers, mode, recommendedMode }) => {
+const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommendedMode }) => {
+  if (!data) return null;
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const jsonPayload = useMemo(() => JSON.stringify({ ...magicalGirlDetails, userAnswers: answers }, null, 2), [magicalGirlDetails, answers]);
+  const jsonPayload = useMemo(() => JSON.stringify(data, null, 2), [data]);
 
   const downloadJson = () => {
     const blob = new Blob([jsonPayload], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    const sanitizedCodename = magicalGirlDetails.codename?.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'data';
+    const sanitizedCodename = data.codename?.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'data';
     link.download = `魔法少女_${sanitizedCodename}.json`;
     document.body.appendChild(link);
     link.click();
@@ -187,6 +190,17 @@ const DetailsPage: React.FC = () => {
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
   const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600'}`;
+
+  const resolvedResultPayload = useMemo(() => {
+    if (!magicalGirlDetails) return null;
+    const serverAnswers = Array.isArray(magicalGirlDetails.userAnswers) && magicalGirlDetails.userAnswers.length > 0
+      ? magicalGirlDetails.userAnswers
+      : null;
+    return {
+      ...magicalGirlDetails,
+      userAnswers: serverAnswers ?? answers,
+    };
+  }, [magicalGirlDetails, answers]);
 
   useEffect(() => {
     fetch('/languages.json')
@@ -1023,17 +1037,20 @@ const DetailsPage: React.FC = () => {
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>保存人物设定</h3>
                   <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                    <SaveJsonButton
-                      magicalGirlDetails={magicalGirlDetails}
-                      answers={answers}
-                      mode={jsonSaveMode}
-                      recommendedMode={recommendedJsonMode}
-                    />
-                    <SaveToCloudButton
-                      data={{ ...magicalGirlDetails, userAnswers: answers }}
-                      buttonText="保存到云端"
-                      style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
-                    />
+                    {resolvedResultPayload && (
+                      <>
+                        <SaveJsonButton
+                          data={resolvedResultPayload}
+                          mode={jsonSaveMode}
+                          recommendedMode={recommendedJsonMode}
+                        />
+                        <SaveToCloudButton
+                          data={resolvedResultPayload}
+                          buttonText="保存到云端"
+                          style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                        />
+                      </>
+                    )}
                   </div>
                   {/* 新增：前往竞技场的入口 */}
                   <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
