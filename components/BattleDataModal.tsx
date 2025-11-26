@@ -472,7 +472,7 @@ export default function BattleDataModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg mx-4 p-6 max-w-7xl w-full max-h-[90vh] overflow-hidden flex flex-col relative">
+      <div className="bg-white rounded-lg mx-4 p-6 max-w-7xl w-full h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">×</button>
         <h2 className="text-xl font-bold mb-4 pr-8">选择{typeLabel}数据卡</h2>
 

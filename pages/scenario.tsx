@@ -40,8 +40,11 @@ const ScenarioPage: React.FC = () => {
   const [resultData, setResultData] = useState<any | null>(null);
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
-  // 实例化 useCooldown hook，设置60秒冷却时间
-  const { isCooldown, startCooldown, remainingTime } = useCooldown('scenarioCooldown', 60000);
+  // 根据是否使用自定义 Key 动态调整冷却时间：官方 60s，自定义 3s
+  const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+  const scenarioCooldownMs = isUserCustomKey ? 3000 : 60000;
+  const scenarioCooldownKey = isUserCustomKey ? 'scenarioCooldown:custom' : 'scenarioCooldown:system';
+  const { isCooldown, startCooldown, remainingTime } = useCooldown(scenarioCooldownKey, scenarioCooldownMs);
   // 用于存储希望留空的字段的状态
   const [fieldsToKeepEmpty, setFieldsToKeepEmpty] = useState<string[]>([]);
   // 用于控制高级选项的显示/隐藏
