@@ -164,7 +164,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         models: [
             {
                 value: 'gemini-3-pro-preview',
-                label: '【待修复】Gemini 3.0 Pro （预览版）',
+                label: 'Gemini 3.0 Pro （预览版）',
                 description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
             },
             {
@@ -181,6 +181,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-2.5-flash-lite',
                 label: 'Gemini 2.5 Flash Lite',
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+            },
+            {
+                value: 'gemini-2.0-flash',
+                label: 'Gemini 2.0 Flash',
+                description: 'Google 早前的旗舰快模型，成本低且兼具多模态能力，适合作为备用通道。'
+            },
+            {
+                value: 'gemini-2.0-flash-lite',
+                label: 'Gemini 2.0 Flash Lite',
+                description: 'Google 早前的轻量版快速模型，速度极快，适合预算敏感或高并发场景。'
             },
         ]
     },
