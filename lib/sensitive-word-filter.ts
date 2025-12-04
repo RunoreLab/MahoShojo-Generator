@@ -151,6 +151,16 @@ const sensitiveWordsConfig = {
     // 1016新增
     "6LSe5pON6ZSB",
     "6Lez6JuL",
+    // 落榜美术生相关
+    "5biM54m55YuS",
+    "5YWa5Y2r6Zif",
+    "5YWa5Y2r5Yab",
+    "54q55aSq",
+    "56eN5peP54Gt57ud",
+    "57qz57K5",
+    "TmF6aQ==",
+    "SGl0bGVy",
+    "SmV3",
   ],
   encoding: "base64",
   original_count: 71
