@@ -1,6 +1,6 @@
 // pages/api/generate-magical-girl-details.ts
 import { generateWithAI, GenerationConfig } from '../../lib/ai';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { getRandomFlowers } from '../../lib/random-choose-hana-name';
 // import { saveToD1 } from '../../lib/d1';
 import { getLogger } from '../../lib/logger';
@@ -96,7 +96,7 @@ const magicalGirlDetailsConfig: GenerationConfig<MagicalGirlDetails, { answers: 
   },
   schema: MagicalGirlDetailsSchema,
   taskName: "生成魔法少女详细信息",
-  maxTokens: 8192,
+  maxOutputTokens: 8192,
 }
 
 // 处理器重构：

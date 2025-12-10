@@ -1,6 +1,6 @@
 // pages/api/generate-sublimation.ts
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
 import { getLogger } from '../../lib/logger';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -375,7 +375,7 @@ ${rulesText}
     promptBuilder,
     schema: finalSchema,
     taskName: '角色成长升华',
-    maxTokens: 8192,
+    maxOutputTokens: 8192,
     modelOverride: modelOverride ?? (isDowngrade ? 'gemini-2.5-flash-lite' : undefined),
   };
 };

@@ -1,5 +1,5 @@
 // pages/api/generate-canshou.ts
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig } from '../../lib/ai';
 import { getLogger } from '../../lib/logger';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -86,7 +86,7 @@ const canshouGenerationConfig: GenerationConfig<CanshouDetails, { answers: Recor
   },
   schema: CanshouSchema,
   taskName: "生成残兽档案",
-  maxTokens: 8192,
+  maxOutputTokens: 8192,
 };
 
 // API Handler
