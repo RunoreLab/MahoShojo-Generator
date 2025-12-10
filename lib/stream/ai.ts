@@ -23,8 +23,7 @@ const createAIClient = (provider: AIProvider) => {
   return createOpenAI({
     apiKey: provider.apiKey,
     baseURL: provider.baseUrl,
-    compatibility: "compatible",
-    fetch: getProviderFetch(provider),
+    fetch: getProviderFetch(provider)
   });
 };
 
@@ -89,7 +88,7 @@ export interface StreamGenerationConfig<I = string> {
   temperature: number;
   promptBuilder: (input: I) => string;
   taskName: string;
-  maxTokens: number;
+  maxOutputTokens: number;
   modelOverride?: string;
 }
 
@@ -184,7 +183,7 @@ export async function streamWithAI<I = string>(
           system: systemPrompt,
           prompt,
           temperature: generationConfig.temperature,
-          maxTokens: generationConfig.maxTokens,
+          maxOutputTokens: generationConfig.maxOutputTokens,
           maxRetries: 0,
         });
 

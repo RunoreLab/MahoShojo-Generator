@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { CurrentStateSchema } from './current-state';
 import { AdjudicatorEventSchema } from './adjudicator';
 

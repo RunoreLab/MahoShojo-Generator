@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { AdjudicatorEventSchema } from './adjudicator';
 
 // 情景数据卡的 Zod Schema

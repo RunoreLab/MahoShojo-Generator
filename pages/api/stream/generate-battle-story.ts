@@ -1,6 +1,6 @@
 // pages/api/stream/generate-battle-story.ts
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { generateWithAI, LoadBalanceStrategy } from '@/lib/ai';
 import { streamWithAI, StreamGenerationConfig } from '@/lib/stream/ai';
 import { queryFromD1 } from '@/lib/d1';
@@ -1070,7 +1070,7 @@ async function handler(req: NextRequest): Promise<Response> {
           promptBuilder: (input: string) => `用户输入的内容是：“${input}”。请对该内容进行检查。`,
           schema: SafetyCheckSchema,
           taskName: "安全检查",
-          maxTokens: 500,
+          maxOutputTokens: 500,
           modelOverride: resolvedModelOverride,
         }, providerOptions);
 
@@ -1087,7 +1087,7 @@ async function handler(req: NextRequest): Promise<Response> {
           systemPrompt: "你是一个魔法少女世界观的专家。请判断用户输入的内容是否与该世界观兼容。",
           temperature: 0,
           promptBuilder: (input: string) => `魔法少女的世界是一个存在超凡力量的现代都市世界...用户输入的内容是：“${input}”。请判断该内容是否与这个世界观存在明显冲突。`,
-          schema: WorldviewCheckSchema, taskName: "世界观检查", maxTokens: 500,
+          schema: WorldviewCheckSchema, taskName: "世界观检查", maxOutputTokens: 500,
           modelOverride: resolvedModelOverride,
         }, providerOptions);
         if (worldviewResult.isInconsistent) {
@@ -1140,7 +1140,7 @@ async function handler(req: NextRequest): Promise<Response> {
         storyLength
       ),
       taskName: `生成${mode}模式故事`,
-      maxTokens: 8192,
+      maxOutputTokens: 8192,
       modelOverride: resolvedModelOverride, // 使用轻量模型或自定义覆盖模型
     };
 

@@ -1,5 +1,5 @@
 // pages/api/generate-magical-girl.ts
-import { z } from "zod";
+import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig } from "../../lib/ai";
 import { config as appConfig } from "../../lib/config";
 import { MainColor } from "../../lib/main-color";
@@ -53,7 +53,7 @@ const magicalGirlGenerationConfig: GenerationConfig<AIGeneratedMagicalGirl, { re
     `请为名叫"${realName}"的人设计一个魔法少女角色。真实姓名：${realName}\n\n【重要指令】请你必须使用【${language}】进行内容创作。`,
   schema: MagicalGirlGenerationSchema,
   taskName: "生成魔法少女",
-  maxTokens: 6000,
+  maxOutputTokens: 6000,
 };
 
 // 生成魔法少女的函数（使用通用函数）
