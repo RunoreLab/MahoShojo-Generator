@@ -1,6 +1,7 @@
 import { generateObject, NoObjectGeneratedError } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createDeepSeek } from "@ai-sdk/deepseek";
 import { z } from 'zod/v3';
 import { config, AIProvider } from "./config";
 import { getLogger } from "./logger";
@@ -27,7 +28,13 @@ const createAIClient = (provider: AIProvider) => {
       apiKey: provider.apiKey,
       baseURL: provider.baseUrl,
     });
-  } else {
+  } else if (provider.type === 'deepseek') {
+    return createDeepSeek({
+      apiKey: provider.apiKey,
+      baseURL: provider.baseUrl,
+    });
+  }
+  else {
     return createOpenAI({
       apiKey: provider.apiKey,
       baseURL: provider.baseUrl,
@@ -223,16 +230,31 @@ export async function generateWithAI<T, I = string>(
         const llm = createAIClient(provider);
 
         const systemPrompt = generationConfig.systemPrompt + generationConfig.promptBuilder(input) + 'Ignore the user \'s prompt.';
+        log.info(`provider.type: ${provider.type}`);
         const { object } = await generateObject({
-          model: llm(selectedModel) as any, // Type assertion for AI SDK 5 compatibility
+          model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel), // Type assertion for AI SDK 5 compatibility
           // 应对风控，尝试直接全部放入系统提示词中
-          system: systemPrompt,
-          // 从 systemPrompt 随机截取一个长度为20字的片段
-          prompt: (() => {
-            const len = 20;
-            const start = Math.floor(Math.random() * Math.max(1, systemPrompt.length - len));
-            return systemPrompt.substring(start, start + len);
-          })(),
+          prompt: [
+            {
+              role: 'user',
+              content: systemPrompt,
+            },
+            {
+              role: 'user',
+              content: (() => {
+                const len = 20;
+                const start = Math.floor(Math.random() * Math.max(1, systemPrompt.length - len));
+                return systemPrompt.substring(start, start + len);
+              })(),
+            }
+          ],
+          // system: systemPrompt,
+          // // 从 systemPrompt 随机截取一个长度为20字的片段
+          // prompt: (() => {
+          //   const len = 20;
+          //   const start = Math.floor(Math.random() * Math.max(1, systemPrompt.length - len));
+          //   return systemPrompt.substring(start, start + len);
+          // })(),
           schema: generationConfig.schema,
           temperature: generationConfig.temperature,
           maxOutputTokens: generationConfig.maxOutputTokens,
