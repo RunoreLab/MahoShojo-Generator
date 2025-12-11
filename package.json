@@ -46,6 +46,7 @@
         "@typescript-eslint/typescript-estree": "^8.43.0",
         "eslint": "^9",
         "eslint-config-next": "15.3.2",
+        "shadcn": "^3.5.2",
         "tailwindcss": "^4",
         "tw-animate-css": "^1.3.0",
         "typescript": "^5",
