@@ -1,10 +1,10 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "mahoshojo-generator",
       "dependencies": {
+<<<<<<< HEAD
 <<<<<<< HEAD
         "@ai-sdk/google": "^3.0.0-beta.68",
         "@ai-sdk/openai": "^3.0.0-beta.89",
@@ -15,6 +15,11 @@
 =======
         "@ai-sdk/google": "^1.2.22",
         "@ai-sdk/openai": "^1.3.22",
+=======
+        "@ai-sdk/deepseek": "^1.0.31",
+        "@ai-sdk/google": "^2.0.45",
+        "@ai-sdk/openai": "^2.0.80",
+>>>>>>> 33d15c9 (feat: 调整升级 ai sdk v4 -> v5)
         "@ai-sdk/react": "^2.0.109",
         "@next/third-parties": "15.3.6",
         "@zumer/snapdom": "^1.9.7",
@@ -54,6 +59,7 @@
   },
   "packages": {
 <<<<<<< HEAD
+<<<<<<< HEAD
     "@ai-sdk/gateway": ["@ai-sdk/gateway@2.0.0-beta.74", "https://mirrors.tencent.com/npm/@ai-sdk/gateway/-/gateway-2.0.0-beta.74.tgz", { "dependencies": { "@ai-sdk/provider": "3.0.0-beta.26", "@ai-sdk/provider-utils": "4.0.0-beta.45", "@vercel/oidc": "3.0.5" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-txkhwB1MijDiHuNJkS4RqWe8M8vSVMGMsHmssNLwlIKtmLCvW8rVUywsPt7oKd9WHHi2t8eh5dhk5bBR9Kt1Sg=="],
 
     "@ai-sdk/google": ["@ai-sdk/google@3.0.0-beta.68", "https://mirrors.tencent.com/npm/@ai-sdk/google/-/google-3.0.0-beta.68.tgz", { "dependencies": { "@ai-sdk/provider": "3.0.0-beta.26", "@ai-sdk/provider-utils": "4.0.0-beta.45" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-DnPCaa47dXeQCaqT1Cii32yzTQ+pbBVMpIWEx6xUOqK8b5nq+1mBdQrNkJK5krhYBoY4pusKi14UX08r5NSTPg=="],
@@ -66,15 +72,19 @@
 
     "@ai-sdk/react": ["@ai-sdk/react@3.0.0-beta.141", "https://mirrors.tencent.com/npm/@ai-sdk/react/-/react-3.0.0-beta.141.tgz", { "dependencies": { "@ai-sdk/provider-utils": "4.0.0-beta.45", "ai": "6.0.0-beta.139", "swr": "^2.2.5", "throttleit": "2.1.0" }, "peerDependencies": { "react": "^18 || ^19" } }, "sha512-Wrli+nSApHg0bsGsYfZnljs5dxsY1p6qOuB4m6kOyxizPAJRt1gCtaED4n7AToKPOu/qS9rIDlEZLNO29/rcLQ=="],
 =======
+=======
+    "@ai-sdk/deepseek": ["@ai-sdk/deepseek@1.0.31", "https://registry.npmmirror.com/@ai-sdk/deepseek/-/deepseek-1.0.31.tgz", { "dependencies": { "@ai-sdk/provider": "2.0.0", "@ai-sdk/provider-utils": "3.0.18" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-Il7WJp8bA3CmlreYSl1YzCucGTn2e5P81IANYIIEeLtWrbK0Y9CLoOCROj8xKYyUSMKlINyGZX2uP79cKewtSg=="],
+
+>>>>>>> 33d15c9 (feat: 调整升级 ai sdk v4 -> v5)
     "@ai-sdk/gateway": ["@ai-sdk/gateway@2.0.18", "https://mirrors.tencent.com/npm/@ai-sdk/gateway/-/gateway-2.0.18.tgz", { "dependencies": { "@ai-sdk/provider": "2.0.0", "@ai-sdk/provider-utils": "3.0.18", "@vercel/oidc": "3.0.5" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-sDQcW+6ck2m0pTIHW6BPHD7S125WD3qNkx/B8sEzJp/hurocmJ5Cni0ybExg6sQMGo+fr/GWOwpHF1cmCdg5rQ=="],
 
-    "@ai-sdk/google": ["@ai-sdk/google@1.2.22", "https://mirrors.tencent.com/npm/@ai-sdk/google/-/google-1.2.22.tgz", { "dependencies": { "@ai-sdk/provider": "1.1.3", "@ai-sdk/provider-utils": "2.2.8" }, "peerDependencies": { "zod": "^3.0.0" } }, "sha512-Ppxu3DIieF1G9pyQ5O1Z646GYR0gkC57YdBqXJ82qvCdhEhZHu0TWhmnOoeIWe2olSbuDeoOY+MfJrW8dzS3Hw=="],
+    "@ai-sdk/google": ["@ai-sdk/google@2.0.45", "https://registry.npmmirror.com/@ai-sdk/google/-/google-2.0.45.tgz", { "dependencies": { "@ai-sdk/provider": "2.0.0", "@ai-sdk/provider-utils": "3.0.18" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-2kQUjjWGnaWzx92muvS0XQUM0+zy3TOv+kTdtfkD7n/9B3ikRZrq6clTNisg0MxUxHcXvNbBrmqbqIWLzU9Q1w=="],
 
-    "@ai-sdk/openai": ["@ai-sdk/openai@1.3.24", "https://mirrors.tencent.com/npm/@ai-sdk/openai/-/openai-1.3.24.tgz", { "dependencies": { "@ai-sdk/provider": "1.1.3", "@ai-sdk/provider-utils": "2.2.8" }, "peerDependencies": { "zod": "^3.0.0" } }, "sha512-GYXnGJTHRTZc4gJMSmFRgEQudjqd4PUN0ZjQhPwOAYH1yOAvQoG/Ikqs+HyISRbLPCrhbZnPKCNHuRU4OfpW0Q=="],
+    "@ai-sdk/openai": ["@ai-sdk/openai@2.0.80", "https://registry.npmmirror.com/@ai-sdk/openai/-/openai-2.0.80.tgz", { "dependencies": { "@ai-sdk/provider": "2.0.0", "@ai-sdk/provider-utils": "3.0.18" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-tNHuraF11db+8xJEDBoU9E3vMcpnHFKRhnLQ3DQX2LnEzfPB9DksZ8rE+yVuDN1WRW9cm2OWAhgHFgVKs7ICuw=="],
 
-    "@ai-sdk/provider": ["@ai-sdk/provider@1.1.3", "https://mirrors.tencent.com/npm/@ai-sdk/provider/-/provider-1.1.3.tgz", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-qZMxYJ0qqX/RfnuIaab+zp8UAeJn/ygXXAffR5I4N0n1IrvA6qBsjc8hXLmBiMV2zoXlifkacF7sEFnYnjBcqg=="],
+    "@ai-sdk/provider": ["@ai-sdk/provider@2.0.0", "https://mirrors.tencent.com/npm/@ai-sdk/provider/-/provider-2.0.0.tgz", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-6o7Y2SeO9vFKB8lArHXehNuusnpddKPk7xqL7T2/b+OvXMRIXUO1rR4wcv1hAFUAT9avGZshty3Wlua/XA7TvA=="],
 
-    "@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@2.2.8", "https://mirrors.tencent.com/npm/@ai-sdk/provider-utils/-/provider-utils-2.2.8.tgz", { "dependencies": { "@ai-sdk/provider": "1.1.3", "nanoid": "^3.3.8", "secure-json-parse": "^2.7.0" }, "peerDependencies": { "zod": "^3.23.8" } }, "sha512-fqhG+4sCVv8x7nFzYnFo19ryhAa3w096Kmc3hWxMQfW/TubPOmt3A6tYZhl4mUfQWWQMsuSkLrtjlWuXBVSGQA=="],
+    "@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@3.0.18", "https://mirrors.tencent.com/npm/@ai-sdk/provider-utils/-/provider-utils-3.0.18.tgz", { "dependencies": { "@ai-sdk/provider": "2.0.0", "@standard-schema/spec": "^1.0.0", "eventsource-parser": "^3.0.6" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ypv1xXMsgGcNKUP+hglKqtdDuMg68nWHucPPAhIENrbFAI+xCHiqPVN8Zllxyv1TNZwGWUghPxJXU+Mqps0YRQ=="],
 
     "@ai-sdk/react": ["@ai-sdk/react@2.0.109", "https://mirrors.tencent.com/npm/@ai-sdk/react/-/react-2.0.109.tgz", { "dependencies": { "@ai-sdk/provider-utils": "3.0.18", "ai": "5.0.108", "swr": "^2.2.5", "throttleit": "2.1.0" }, "peerDependencies": { "react": "^18 || ^19 || ^19.0.0-rc", "zod": "^3.25.76 || ^4.1.8" }, "optionalPeers": ["zod"] }, "sha512-5qM8KuN7bv7E+g6BXkSAYLFjwIfMSTKOA1prjg1zEShJXJyLSc+Yqkd3EfGibm75b7nJAqJNShurDmR/IlQqFQ=="],
 >>>>>>> c58b95c (feat: 更新 AI SDK 版本到最新)
@@ -1366,10 +1376,13 @@
     "scheduler": ["scheduler@0.27.0", "https://mirrors.tencent.com/npm/scheduler/-/scheduler-0.27.0.tgz", {}, "sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q=="],
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     "secure-json-parse": ["secure-json-parse@2.7.0", "https://mirrors.tencent.com/npm/secure-json-parse/-/secure-json-parse-2.7.0.tgz", {}, "sha512-6aU+Rwsezw7VR8/nyvKTx8QpWH9FrcYiXXlqC4z5d5XQBDRqtbfsRjnwGyqbi3gddNtWHuEk9OANUotL26qKUw=="],
 
 >>>>>>> c58b95c (feat: 更新 AI SDK 版本到最新)
+=======
+>>>>>>> 33d15c9 (feat: 调整升级 ai sdk v4 -> v5)
     "semver": ["semver@7.7.2", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-RF0Fw+rO5AMf9MAyaRXI4AV0Ulj5lMHqVxxdSgiVbixSCXoEmmX/jk0CuJw4+3SqroYO9VoUh+HcuJivvtJemA=="],
 
     "set-function-length": ["set-function-length@1.2.2", "", { "dependencies": { "define-data-property": "^1.1.4", "es-errors": "^1.3.0", "function-bind": "^1.1.2", "get-intrinsic": "^1.2.4", "gopd": "^1.0.1", "has-property-descriptors": "^1.0.2" } }, "sha512-pgRc4hJ4/sNjWCSS9AmnS40x3bNMDTknHgL5UaMBTMyJnU90EgWh1Rz+MC9eFu4BuN/UwZjKQuY/1v3rM7HMfg=="],
@@ -1626,12 +1639,6 @@
 
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
 
-    "@ai-sdk/gateway/@ai-sdk/provider": ["@ai-sdk/provider@2.0.0", "https://mirrors.tencent.com/npm/@ai-sdk/provider/-/provider-2.0.0.tgz", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-6o7Y2SeO9vFKB8lArHXehNuusnpddKPk7xqL7T2/b+OvXMRIXUO1rR4wcv1hAFUAT9avGZshty3Wlua/XA7TvA=="],
-
-    "@ai-sdk/gateway/@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@3.0.18", "https://mirrors.tencent.com/npm/@ai-sdk/provider-utils/-/provider-utils-3.0.18.tgz", { "dependencies": { "@ai-sdk/provider": "2.0.0", "@standard-schema/spec": "^1.0.0", "eventsource-parser": "^3.0.6" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ypv1xXMsgGcNKUP+hglKqtdDuMg68nWHucPPAhIENrbFAI+xCHiqPVN8Zllxyv1TNZwGWUghPxJXU+Mqps0YRQ=="],
-
-    "@ai-sdk/react/@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@3.0.18", "https://mirrors.tencent.com/npm/@ai-sdk/provider-utils/-/provider-utils-3.0.18.tgz", { "dependencies": { "@ai-sdk/provider": "2.0.0", "@standard-schema/spec": "^1.0.0", "eventsource-parser": "^3.0.6" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ypv1xXMsgGcNKUP+hglKqtdDuMg68nWHucPPAhIENrbFAI+xCHiqPVN8Zllxyv1TNZwGWUghPxJXU+Mqps0YRQ=="],
-
     "@ampproject/remapping/@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.25", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-vNk6aEwybGtawWmy/PzwnGDOjCkLWSD2wqvjGGAgOAwCGWySYXfYoxt00IJkTF+8Lb57DwOb3Aa0o9CApepiYQ=="],
 
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
@@ -1726,10 +1733,6 @@
 
     "@vercel/static-config/ajv": ["ajv@8.6.3", "", { "dependencies": { "fast-deep-equal": "^3.1.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2", "uri-js": "^4.2.2" } }, "sha512-SMJOdDP6LqTkD0Uq8qLi+gMwSt0imXLSV080qFVwJCpH9U6Mb+SUGHAXM0KNbcBPguytWyvFxcHgMLe2D2XSpw=="],
 
-    "ai/@ai-sdk/provider": ["@ai-sdk/provider@2.0.0", "https://mirrors.tencent.com/npm/@ai-sdk/provider/-/provider-2.0.0.tgz", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-6o7Y2SeO9vFKB8lArHXehNuusnpddKPk7xqL7T2/b+OvXMRIXUO1rR4wcv1hAFUAT9avGZshty3Wlua/XA7TvA=="],
-
-    "ai/@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@3.0.18", "https://mirrors.tencent.com/npm/@ai-sdk/provider-utils/-/provider-utils-3.0.18.tgz", { "dependencies": { "@ai-sdk/provider": "2.0.0", "@standard-schema/spec": "^1.0.0", "eventsource-parser": "^3.0.6" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ypv1xXMsgGcNKUP+hglKqtdDuMg68nWHucPPAhIENrbFAI+xCHiqPVN8Zllxyv1TNZwGWUghPxJXU+Mqps0YRQ=="],
-
     "chokidar/glob-parent": ["glob-parent@5.1.2", "", { "dependencies": { "is-glob": "^4.0.1" } }, "sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow=="],
 
     "edge-runtime/async-listen": ["async-listen@3.0.1", "", {}, "sha512-cWMaNwUJnf37C/S5TfCkk/15MwbPRwVYALA2jtjkbHjCmAPiDXyNJy2q3p1KAZzDLHAWyarUWSujUoHR4pEgrA=="],
@@ -1807,8 +1810,6 @@
     "wrap-ansi-cjs/strip-ansi": ["strip-ansi@6.0.1", "", { "dependencies": { "ansi-regex": "^5.0.1" } }, "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A=="],
 
     "youch/cookie": ["cookie@0.7.2", "", {}, "sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w=="],
-
-    "@ai-sdk/react/@ai-sdk/provider-utils/@ai-sdk/provider": ["@ai-sdk/provider@2.0.0", "https://mirrors.tencent.com/npm/@ai-sdk/provider/-/provider-2.0.0.tgz", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-6o7Y2SeO9vFKB8lArHXehNuusnpddKPk7xqL7T2/b+OvXMRIXUO1rR4wcv1hAFUAT9avGZshty3Wlua/XA7TvA=="],
 
     "@next/eslint-plugin-next/fast-glob/glob-parent": ["glob-parent@5.1.2", "", { "dependencies": { "is-glob": "^4.0.1" } }, "sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow=="],
 
