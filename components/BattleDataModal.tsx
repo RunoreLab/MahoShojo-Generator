@@ -213,17 +213,30 @@ export default function BattleDataModal({
   useEffect(() => {
     if (!isOpen) return;
 
+    const trimmed = debouncedSearchQuery.trim();
+    setCurrentPage(1);
+
+    // 私有库搜索：直接从用户数据卡接口查询
+    if (activeTab === 'my') {
+      loadUserDataCards(trimmed || undefined, sortBy);
+      return;
+    }
+
+    // 收藏库本地过滤，避免重复请求
+    if (activeTab === 'favorites') {
+      return;
+    }
+
     // 检查是否包含 UUID 格式的 ID
     const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-    const match = debouncedSearchQuery.match(uuidRegex);
+    const match = trimmed.match(uuidRegex);
 
     if (match) {
       loadCardByIdForDisplay(match[0]);
     } else {
-      loadPublicDataCards(1, sortBy, debouncedSearchQuery.trim() || undefined, activeFilters);
+      loadPublicDataCards(1, sortBy, trimmed || undefined, activeFilters);
     }
-    setCurrentPage(1);
-  }, [debouncedSearchQuery, isOpen, loadCardByIdForDisplay, loadPublicDataCards, sortBy, activeFilters]);
+  }, [debouncedSearchQuery, isOpen, activeTab, loadUserDataCards, loadCardByIdForDisplay, loadPublicDataCards, sortBy, activeFilters]);
 
 
   // 当模态框打开时加载数据
@@ -431,14 +444,25 @@ export default function BattleDataModal({
   };
 
   const userTotalPages = Math.max(1, Math.ceil(userDataCards.length / cardsPerPage));
-  const favoritesTotalPages = Math.max(1, Math.ceil(favoriteCards.length / cardsPerPage));
+  const filteredFavoriteCards = useMemo(() => {
+    const keyword = debouncedSearchQuery.trim().toLowerCase();
+    if (!keyword) return favoriteCards;
+
+    return favoriteCards.filter((card) => {
+      const name = (card.name || '').toLowerCase();
+      const desc = (card.description || '').toLowerCase();
+      return name.includes(keyword) || desc.includes(keyword);
+    });
+  }, [favoriteCards, debouncedSearchQuery]);
+
+  const favoritesTotalPages = Math.max(1, Math.ceil(filteredFavoriteCards.length / cardsPerPage));
   const paginatedUserCards = useMemo(
     () => userDataCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
     [userDataCards, currentPage, cardsPerPage]
   );
   const paginatedFavoriteCards = useMemo(
-    () => favoriteCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
-    [favoriteCards, currentPage, cardsPerPage]
+    () => filteredFavoriteCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
+    [filteredFavoriteCards, currentPage, cardsPerPage]
   );
 
   const displayCards = activeTab === 'my'
