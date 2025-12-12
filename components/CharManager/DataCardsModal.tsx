@@ -4,6 +4,7 @@ import EditCardForm from './EditCardForm';
 import DataCardDetailsModal from '../DataCardDetailsModal';
 import { config } from '@/lib/config';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { isHotCard } from '@/lib/constants';
 
 interface DataCardsModalProps {
   isOpen: boolean;
@@ -108,6 +109,9 @@ export default function DataCardsModal({
             <div className="text-sm text-gray-600">
               {dataCards.length}/{userCapacity}
             </div>
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded">
+              🔥 热门卡片（收藏&gt;10 且使用&gt;30）不占槽位
+            </div>
           </div>
           {onOpenRecycleBin && (
             <button
@@ -137,6 +141,9 @@ export default function DataCardsModal({
                   }
                   const roleType = inferRoleType(card);
 
+                  const hot = isHotCard({ favorite_count: card.favorite_count, usage_count: card.usage_count });
+                  const hasPendingUpdate = Boolean(card.pending_data);
+
                   return editingCard?.id === card.id ? (
                     <EditCardForm
                       key={card.id}
@@ -160,6 +167,8 @@ export default function DataCardsModal({
                       likeCount={card.like_count}
                       favoriteCount={card.favorite_count}
                       isRecommended={card.is_recommended === 1}
+                      hot={hot}
+                      pending={hasPendingUpdate}
                       author={author}
                       isOwner={true}
                       onViewDetails={() => handleViewDetails(card)}
@@ -234,6 +243,7 @@ export default function DataCardsModal({
             createdAt: selectedCard.created_at,
             updatedAt: selectedCard.updated_at
           }}
+          pendingNotice={selectedCard.pending_data ? '线上版本仍为旧版，新版审核通过后生效' : undefined}
         />
       )}
     </div>

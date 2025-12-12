@@ -1,4 +1,4 @@
-import { getUserByAuthKey, getUserDataCardCapacity } from '@/lib/d1';
+import { getUserByAuthKey, getUserDataCardCapacity, getUserUsedSlots } from '@/lib/d1';
 import { config } from '@/lib/config';
 
 export const runtime = 'edge';
@@ -37,11 +37,15 @@ export default async function handler(req: Request): Promise<Response> {
 
   try {
     // 获取用户数据卡容量
-    const capacity = await getUserDataCardCapacity(user.id, config.DEFAULT_DATA_CARD_CAPACITY);
+    const [capacity, usedSlots] = await Promise.all([
+      getUserDataCardCapacity(user.id, config.DEFAULT_DATA_CARD_CAPACITY),
+      getUserUsedSlots(user.id)
+    ]);
     
     return new Response(JSON.stringify({ 
       success: true, 
-      capacity 
+      capacity,
+      usedSlots
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }

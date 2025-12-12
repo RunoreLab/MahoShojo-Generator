@@ -97,12 +97,16 @@ export async function createDataCard(
 
 // 获取用户的所有数据卡
 export async function getUserDataCards(
-  userId: number, 
+  userId: number,
   search?: string,
   sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at'
 ): Promise<any[]> {
   try {
-    let sql = 'SELECT * FROM data_cards WHERE user_id = ? AND deleted_at IS NULL';
+    let sql = `
+      SELECT dc.*, du.data AS pending_data, du.name AS pending_name, du.description AS pending_description, du.updated_at AS pending_updated_at
+      FROM data_cards dc
+      LEFT JOIN data_card_updates du ON du.data_card_id = dc.id
+      WHERE dc.user_id = ? AND dc.deleted_at IS NULL`;
     const params: any[] = [userId];
     
     if (search) {
@@ -171,6 +175,108 @@ export async function updateDataCard(
     return false;
   } catch (error) {
     console.error("更新数据卡失败:", error);
+    return false;
+  }
+}
+
+// 新增/更新暂存表中的卡片更新记录
+export async function upsertDataCardUpdate(
+  dataCardId: string,
+  userId: number,
+  payload: { name?: string; description?: string; data?: string }
+): Promise<boolean> {
+  try {
+    const existing = await queryFromD1(
+      'SELECT id FROM data_card_updates WHERE data_card_id = ?',
+      [dataCardId]
+    ) as any;
+
+    const hasExisting = existing.success && existing.result?.[0]?.results?.length > 0;
+    const id = hasExisting ? existing.result[0].results[0].id : generateUUID();
+
+    const fields = ['data_card_id', 'user_id'];
+    const values: any[] = [dataCardId, userId];
+
+    if (payload.name !== undefined) {
+      fields.push('name');
+      values.push(payload.name);
+    }
+    if (payload.description !== undefined) {
+      fields.push('description');
+      values.push(payload.description);
+    }
+    if (payload.data !== undefined) {
+      fields.push('data');
+      values.push(payload.data);
+    }
+
+    if (!hasExisting) {
+      const placeholders = fields.map(() => '?').join(', ');
+      const sql = `INSERT INTO data_card_updates (id, ${fields.join(', ')}) VALUES (?, ${placeholders})`;
+      const result = await queryFromD1(sql, [id, ...values]) as any;
+      return result.success;
+    } else {
+      const setClauses = fields.map((f) => `${f} = ?`).join(', ');
+      const sql = `UPDATE data_card_updates SET ${setClauses}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+      const result = await queryFromD1(sql, [...values, id]) as any;
+      return result.success && result.result?.[0]?.meta?.changes > 0;
+    }
+  } catch (error) {
+    console.error('写入 data_card_updates 失败:', error);
+    return false;
+  }
+}
+
+// 计算用户已占用的槽位数量（热门卡片不计入）
+export async function getUserUsedSlots(userId: number): Promise<number> {
+  try {
+    const result = await queryFromD1(
+      `SELECT COUNT(*) as count
+       FROM data_cards
+       WHERE user_id = ?
+         AND deleted_at IS NULL
+         AND NOT (favorite_count > 10 AND usage_count > 30)`,
+      [userId]
+    ) as any;
+
+    if (result.success && result.result && result.result[0]?.results?.length > 0) {
+      return result.result[0].results[0].count;
+    }
+    return 0;
+  } catch (error) {
+    console.error('获取已用槽位失败:', error);
+    return 0;
+  }
+}
+
+// 读取待审核更新
+export async function getDataCardUpdate(dataCardId: string): Promise<any | null> {
+  try {
+    const result = await queryFromD1(
+      'SELECT * FROM data_card_updates WHERE data_card_id = ?',
+      [dataCardId]
+    ) as any;
+
+    if (result.success && result.result?.[0]?.results?.length > 0) {
+      return result.result[0].results[0];
+    }
+    return null;
+  } catch (error) {
+    console.error('获取 data_card_updates 失败:', error);
+    return null;
+  }
+}
+
+// 删除待审核更新
+export async function deleteDataCardUpdate(dataCardId: string): Promise<boolean> {
+  try {
+    const result = await queryFromD1(
+      'DELETE FROM data_card_updates WHERE data_card_id = ?',
+      [dataCardId]
+    ) as any;
+    return result.success;
+  } catch (error) {
+    console.error('删除 data_card_updates 失败:', error);
     return false;
   }
 }
