@@ -3,6 +3,7 @@ import DataCard from '../DataCard';
 import EditCardForm from './EditCardForm';
 import DataCardDetailsModal from '../DataCardDetailsModal';
 import { config } from '@/lib/config';
+import { inferTemplate } from '@/lib/data-card-converter';
 
 interface DataCardsModalProps {
   isOpen: boolean;
@@ -45,6 +46,37 @@ export default function DataCardsModal({
 }: DataCardsModalProps) {
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+
+  const inferRoleType = (card: any): 'magical-girl' | 'canshou' | 'general' | undefined => {
+    if (!card || card.type !== 'character') return undefined;
+    let payload = card.data;
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        payload = {};
+      }
+    }
+
+    const tpl = inferTemplate(payload);
+    if (tpl === 'magical-girl' || tpl === 'canshou' || tpl === 'general') return tpl;
+
+    const templateId = payload?.templateId || payload?.template || payload?.template_id;
+    const templateText = typeof templateId === 'string' ? templateId.toLowerCase() : '';
+    if (templateText.includes('魔法少女') || templateText.includes('magical-girl') || templateText.includes('magical')) {
+      return 'magical-girl';
+    }
+    if (templateText.includes('残兽') || templateText.includes('canshou')) {
+      return 'canshou';
+    }
+    if (templateText.includes('通用') || templateText.includes('general')) {
+      return 'general';
+    }
+
+    if (payload?.codename) return 'magical-girl';
+    if (payload?.name) return 'canshou';
+    return 'general';
+  };
 
   if (!isOpen) return null;
 
@@ -103,6 +135,7 @@ export default function DataCardsModal({
                   } catch {
                     // 忽略解析错误
                   }
+                  const roleType = inferRoleType(card);
 
                   return editingCard?.id === card.id ? (
                     <EditCardForm
@@ -120,6 +153,7 @@ export default function DataCardsModal({
                       name={card.name}
                       description={card.description}
                       type={card.type}
+                      roleType={roleType}
                       isPublic={card.is_public}
                       reviewStatus={card.review_status}
                       usageCount={card.usage_count}

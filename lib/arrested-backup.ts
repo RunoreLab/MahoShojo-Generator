@@ -28,7 +28,8 @@ export interface ArrestedBackupDraftItem {
   filename?: string;
   mimeType?: string;
   description?: string;
-  content: string | Record<string, unknown>;
+  // 允许字符串、对象或数组，方便直接写入判定器事件/结果等结构化数据
+  content: string | Record<string, unknown> | unknown[];
 }
 
 export interface ArrestedBackupDraft {
