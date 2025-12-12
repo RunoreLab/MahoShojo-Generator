@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import SaveCardModal from './CharManager/SaveCardModal';
+import ReplaceCardModal from './ReplaceCardModal';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi } from '@/lib/auth';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -34,6 +35,8 @@ export default function SaveToCloudButton({
   const [isSaving, setIsSaving] = useState(false);
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
   const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
+  const [showReplaceModal, setShowReplaceModal] = useState(false);
+  const [isReplacing, setIsReplacing] = useState(false);
 
   // 加载用户数据卡信息
   useEffect(() => {
@@ -44,14 +47,14 @@ export default function SaveToCloudButton({
 
   const loadUserDataCards = async () => {
     try {
-        const [cards, capacity] = await Promise.all([
-            dataCardApi.getCards(),
-            dataCardApi.getUserCapacity()
-        ]);
-        setUserDataCards(cards);
-        if (capacity !== null) {
-            setUserCapacity(capacity);
-        }
+      const [cards, capacity] = await Promise.all([
+        dataCardApi.getCards(),
+        dataCardApi.getUserCapacity()
+      ]);
+      setUserDataCards(cards);
+      if (capacity !== null) {
+        setUserCapacity(capacity);
+      }
     } catch (error) {
         console.error("加载用户数据卡失败:", error);
     }
@@ -82,6 +85,41 @@ export default function SaveToCloudButton({
     setIsPublic(0);
     setSaveError(null);
     setShowSaveModal(true);
+  };
+
+  const handleReplaceConfirm = async (cardId: string, opts: { name?: string; description?: string; isPublic?: number }) => {
+    if (!data) return;
+    setIsReplacing(true);
+    setSaveError(null);
+    try {
+      const finalData = { ...data };
+      // 敏感词检查
+      const textToCheck = `${opts.name || ''} ${opts.description || ''} ${JSON.stringify(finalData)}`;
+      const sensitiveWordResult = await quickCheck(textToCheck);
+      if (sensitiveWordResult.hasSensitiveWords) {
+        router.push('/arrested');
+        return;
+      }
+
+      const result = await dataCardApi.replaceCard(cardId, {
+        name: opts.name,
+        description: opts.description,
+        isPublic: opts.isPublic,
+        data: finalData,
+      });
+
+      if (result.success) {
+        alert(result.pendingReview ? '更新已提交审核，审核通过后生效' : '已替换成功');
+        setShowReplaceModal(false);
+        loadUserDataCards();
+      } else {
+        setSaveError(result.error || '替换失败');
+      }
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : '替换失败，请稍后重试');
+    } finally {
+      setIsReplacing(false);
+    }
   };
 
   const handleSave = async () => {
@@ -149,6 +187,24 @@ export default function SaveToCloudButton({
       >
         {buttonText}
       </button>
+      <button
+        onClick={() => {
+          if (!isAuthenticated) {
+            alert('请先登录后再替换到云端');
+            return;
+          }
+          if (!data) {
+            alert('没有可替换的数据。');
+            return;
+          }
+          setShowReplaceModal(true);
+        }}
+        className={`${className} ml-2`}
+        style={{ ...style, backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #f97316)' }}
+        disabled={!data}
+      >
+        替换已有
+      </button>
 
       <SaveCardModal
         isOpen={showSaveModal}
@@ -164,6 +220,15 @@ export default function SaveToCloudButton({
         isSaving={isSaving}
         currentCardCount={userDataCards.length}
         userCapacity={userCapacity}
+      />
+
+      <ReplaceCardModal
+        isOpen={showReplaceModal}
+        onClose={() => setShowReplaceModal(false)}
+        cards={userDataCards}
+        targetType={isScenarioData(data) ? 'scenario' : 'character'}
+        onConfirm={handleReplaceConfirm}
+        isSaving={isReplacing}
       />
     </>
   );
