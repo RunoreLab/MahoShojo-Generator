@@ -7,6 +7,7 @@ import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, favoritesApi } from '@/lib/auth';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
+import { inferTemplate } from '@/lib/data-card-converter';
 import { ChevronDown, Filter } from 'lucide-react';
 
 interface BattleDataModalProps {
@@ -68,6 +69,7 @@ export default function BattleDataModal({
 
   const inferRoleType = useCallback((card: any): 'magical-girl' | 'canshou' | 'general' | null => {
     if (!card || card.type !== 'character') return null;
+
     let payload = card.data;
     if (typeof payload === 'string') {
       try {
@@ -76,6 +78,11 @@ export default function BattleDataModal({
         payload = {};
       }
     }
+
+    const tpl = inferTemplate(payload);
+    if (tpl === 'magical-girl' || tpl === 'canshou' || tpl === 'general') return tpl;
+
+    // 回退：按 templateId 字段文本判断
     const templateId: unknown = payload?.templateId || payload?.template || payload?.template_id;
     const templateText = typeof templateId === 'string' ? templateId.toLowerCase() : '';
     if (templateText.includes('魔法少女') || templateText.includes('magical-girl') || templateText.includes('magical')) {
@@ -87,9 +94,8 @@ export default function BattleDataModal({
     if (templateText.includes('通用') || templateText.includes('general')) {
       return 'general';
     }
-    if (typeof payload?.content === 'string') {
-      return 'general';
-    }
+
+    // 最终兜底：codename -> 魔法少女；name -> 残兽；否则通用
     if (payload?.codename) return 'magical-girl';
     if (payload?.name) return 'canshou';
     return 'general';

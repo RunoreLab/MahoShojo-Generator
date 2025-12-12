@@ -3,6 +3,7 @@ import DataCard from '../DataCard';
 import EditCardForm from './EditCardForm';
 import DataCardDetailsModal from '../DataCardDetailsModal';
 import { config } from '@/lib/config';
+import { inferTemplate } from '@/lib/data-card-converter';
 
 interface DataCardsModalProps {
   isOpen: boolean;
@@ -56,6 +57,10 @@ export default function DataCardsModal({
         payload = {};
       }
     }
+
+    const tpl = inferTemplate(payload);
+    if (tpl === 'magical-girl' || tpl === 'canshou' || tpl === 'general') return tpl;
+
     const templateId = payload?.templateId || payload?.template || payload?.template_id;
     const templateText = typeof templateId === 'string' ? templateId.toLowerCase() : '';
     if (templateText.includes('魔法少女') || templateText.includes('magical-girl') || templateText.includes('magical')) {
@@ -67,9 +72,7 @@ export default function DataCardsModal({
     if (templateText.includes('通用') || templateText.includes('general')) {
       return 'general';
     }
-    if (typeof payload?.content === 'string') {
-      return 'general';
-    }
+
     if (payload?.codename) return 'magical-girl';
     if (payload?.name) return 'canshou';
     return 'general';
