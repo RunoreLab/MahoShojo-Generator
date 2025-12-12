@@ -984,7 +984,7 @@ const BattlePage: React.FC = () => {
         }
     };
 
-    const buildBattleBackupItems = (): ArrestedBackupDraftItem[] => {
+    const buildBattleBackupItems = (options?: { adjudicationResults?: AdjudicationResult[] | null }): ArrestedBackupDraftItem[] => {
         const items: ArrestedBackupDraftItem[] = [];
         const playableCombatants = combatants.filter((c): c is CombatantData => 'data' in c);
 
@@ -1015,6 +1015,26 @@ const BattlePage: React.FC = () => {
                 filename: 'user-guidance.txt',
                 mimeType: 'text/plain',
                 content: userGuidance.trim(),
+            });
+        }
+
+        if (adjudicationEvents.length > 0) {
+            items.push({
+                id: 'adjudication-events',
+                label: '随机判定器配置',
+                filename: 'adjudication-events.json',
+                content: adjudicationEvents,
+                description: '用户设置的随机事件链',
+            });
+        }
+
+        if (options?.adjudicationResults?.length) {
+            items.push({
+                id: 'adjudication-results',
+                label: '随机判定结果',
+                filename: 'adjudication-results.json',
+                content: options.adjudicationResults,
+                description: '本次生成返回的判定结果',
             });
         }
 
@@ -1210,7 +1230,7 @@ const BattlePage: React.FC = () => {
                 source: 'output',
                 origin: 'battle',
                 reason: '使用危险符文',
-                backupItems: buildBattleBackupItems(),
+                backupItems: buildBattleBackupItems({ adjudicationResults: result.adjudicationResults }),
             })) return;
 
             // 将战报和随机判定结果合并后再设置 state
