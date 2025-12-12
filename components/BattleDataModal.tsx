@@ -26,6 +26,7 @@ interface Filters {
   minFavorites: string;
   maxFavorites: string;
   recommendedOnly: boolean;
+  roleType: '' | 'magical-girl' | 'canshou' | 'general';
 }
 
 export default function BattleDataModal({
@@ -58,11 +59,48 @@ export default function BattleDataModal({
     maxUsage: '',
     minFavorites: '',
     maxFavorites: '',
-    recommendedOnly: false
+    recommendedOnly: false,
+    roleType: ''
   }), []);
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [activeFilters, setActiveFilters] = useState<Filters>(initialFilters);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  const inferRoleType = useCallback((card: any): 'magical-girl' | 'canshou' | 'general' | null => {
+    if (!card || card.type !== 'character') return null;
+    let payload = card.data;
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        payload = {};
+      }
+    }
+    const templateId: unknown = payload?.templateId || payload?.template || payload?.template_id;
+    const templateText = typeof templateId === 'string' ? templateId.toLowerCase() : '';
+    if (templateText.includes('魔法少女') || templateText.includes('magical-girl') || templateText.includes('magical')) {
+      return 'magical-girl';
+    }
+    if (templateText.includes('残兽') || templateText.includes('canshou')) {
+      return 'canshou';
+    }
+    if (templateText.includes('通用') || templateText.includes('general')) {
+      return 'general';
+    }
+    if (typeof payload?.content === 'string') {
+      return 'general';
+    }
+    if (payload?.codename) return 'magical-girl';
+    if (payload?.name) return 'canshou';
+    return 'general';
+  }, []);
+
+  const mapWithRoleType = useCallback((cards: any[]): any[] => {
+    return cards.map((card) => ({
+      ...card,
+      roleType: inferRoleType(card) || undefined,
+    }));
+  }, [inferRoleType]);
 
 
   // 获取用户的数据卡
@@ -74,13 +112,13 @@ export default function BattleDataModal({
       const cards = await dataCardApi.getCards(searchTerm, sortBy);
       // 根据选择的类型过滤数据卡
       const filteredCards = cards.filter((card: any) => card.type === selectedType);
-      setUserDataCards(filteredCards);
+      setUserDataCards(mapWithRoleType(filteredCards));
     } catch (error) {
       console.error('获取用户数据卡失败:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, selectedType]);
+  }, [isAuthenticated, selectedType, mapWithRoleType]);
 
   // 通过 ID 获取数据卡并显示在列表中
   const loadCardByIdForDisplay = useCallback(async (cardId: string) => {
@@ -89,7 +127,7 @@ export default function BattleDataModal({
       const response = await fetch(`/api/public-data-cards?id=${cardId}`);
       if (response.ok) {
         const result = await response.json();
-        setPublicDataCards(result.success && result.card ? [result.card] : []);
+        setPublicDataCards(result.success && result.card ? mapWithRoleType([result.card]) : []);
       } else {
         setPublicDataCards([]);
       }
@@ -99,7 +137,7 @@ export default function BattleDataModal({
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [mapWithRoleType]);
 
   // 【修改】获取公开数据卡，现在会接收所有筛选条件
   const loadPublicDataCards = useCallback(async (
@@ -134,14 +172,19 @@ export default function BattleDataModal({
       const response = await fetch(`/api/public-data-cards?${params}`);
       if (response.ok) {
         const result = await response.json();
-        setPublicDataCards(result.success ? (result.cards || []) : []);
+        let cards = result.success ? (result.cards || []) : [];
+        cards = mapWithRoleType(cards);
+        if (currentFilters?.roleType && selectedType === 'character') {
+          cards = cards.filter((card: any) => card.roleType === currentFilters.roleType);
+        }
+        setPublicDataCards(cards);
       }
     } catch (error) {
       console.error('获取公开数据卡失败:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [selectedType, cardsPerPage]);
+  }, [selectedType, cardsPerPage, mapWithRoleType]);
 
   const sortFavorites = useCallback((items: any[], criteria: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     const sorted = [...items];
@@ -182,7 +225,7 @@ export default function BattleDataModal({
       }
       const result = await favoritesApi.getFavorites({ type: typeParam ?? selectedType });
       if (result.success) {
-        const cards = Array.isArray(result.favorites) ? result.favorites : [];
+        const cards = Array.isArray(result.favorites) ? mapWithRoleType(result.favorites) : [];
         setFavoriteCards(sortFavorites(cards, sortBy));
         setFavoriteIds(new Set(cards.map((card: any) => card.id)));
       } else {
@@ -198,7 +241,7 @@ export default function BattleDataModal({
         setIsLoading(false);
       }
     }
-  }, [isAuthenticated, selectedType, sortFavorites, sortBy]);
+  }, [isAuthenticated, selectedType, sortFavorites, sortBy, mapWithRoleType]);
 
   // 防抖功能 - 延迟500ms执行搜索
   useEffect(() => {
@@ -259,6 +302,14 @@ export default function BattleDataModal({
       loadPublicDataCards(1, sortBy);
     }
   }, [isOpen, selectedType, isAuthenticated, loadFavorites, loadUserDataCards, loadPublicDataCards, sortBy, initialFilters]);
+
+  // 切换到情景时清除角色类型筛选，避免误筛
+  useEffect(() => {
+    if (selectedType !== 'character') {
+      setFilters((prev) => ({ ...prev, roleType: '' }));
+      setActiveFilters((prev) => ({ ...prev, roleType: '' }));
+    }
+  }, [selectedType]);
 
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {
@@ -486,7 +537,8 @@ export default function BattleDataModal({
       activeFilters.maxUsage ||
       activeFilters.minFavorites ||
       activeFilters.maxFavorites ||
-      activeFilters.recommendedOnly
+      activeFilters.recommendedOnly ||
+      activeFilters.roleType
     );
   }, [activeFilters]);
 
@@ -515,7 +567,7 @@ export default function BattleDataModal({
           {/* 【新增】高级筛选面板 */}
           {showAdvancedFilters && activeTab === 'public' && (
             <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-gray-600">作者</label>
                   <input type="text" name="author" value={filters.author} onChange={handleFilterChange} placeholder="输入作者名" className="input-field" />
@@ -540,6 +592,21 @@ export default function BattleDataModal({
                     <input type="number" name="minFavorites" value={filters.minFavorites} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
                     <input type="number" name="maxFavorites" value={filters.maxFavorites} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
                   </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">角色类型</label>
+                  <select
+                    name="roleType"
+                    value={filters.roleType}
+                    onChange={handleFilterChange}
+                    className="input-field disabled:bg-gray-100 disabled:text-gray-400"
+                    disabled={selectedType !== 'character'}
+                  >
+                    <option value="">全部</option>
+                    <option value="magical-girl">魔法少女</option>
+                    <option value="canshou">残兽</option>
+                    <option value="general">通用</option>
+                  </select>
                 </div>
               </div>
               <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
@@ -614,6 +681,7 @@ export default function BattleDataModal({
                         name={card.name}
                         description={card.description}
                         type={card.type}
+                        roleType={card.roleType}
                         isPublic={card.is_public}
                         reviewStatus={card.review_status}
                         usageCount={card.usage_count}

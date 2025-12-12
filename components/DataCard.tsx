@@ -8,6 +8,7 @@ interface DataCardProps {
   name: string;
   description: string;
   type: 'character' | 'scenario';
+  roleType?: 'magical-girl' | 'canshou' | 'general';
   isPublic: boolean | number; // 支持 -1 表示封禁
   reviewStatus?: 'pending' | 'approved' | 'rejected'; // 新增：审查状态属性
   usageCount?: number;
@@ -36,11 +37,24 @@ const typeMap = {
   scenario: '情景',
 }
 
+const roleTypeLabelMap: Record<NonNullable<DataCardProps['roleType']>, string> = {
+  'magical-girl': '魔法少女',
+  canshou: '残兽',
+  general: '通用',
+};
+
+const roleTypeStyleMap: Record<NonNullable<DataCardProps['roleType']>, string> = {
+  'magical-girl': 'bg-pink-100 text-pink-700',
+  canshou: 'bg-indigo-100 text-indigo-700',
+  general: 'bg-sky-100 text-sky-700',
+};
+
 export default function DataCard({
   id,
   name,
   description,
   type,
+  roleType,
   isPublic,
   reviewStatus,
   usageCount = 0,
@@ -248,6 +262,11 @@ export default function DataCard({
             {type === 'character' && (
               <span className="text-xs px-2 py-1 bg-pink-100 text-pink-700 rounded">
                 角色
+              </span>
+            )}
+            {type === 'character' && roleType && (
+              <span className={`text-xs px-2 py-1 rounded ${roleTypeStyleMap[roleType]}`}>
+                {roleTypeLabelMap[roleType]}
               </span>
             )}
             {isRecommended && (
