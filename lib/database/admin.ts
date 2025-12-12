@@ -226,6 +226,71 @@ export async function batchUpdateDataCards(
   }
 }
 
+// 获取待审核的更新记录，携带原卡片信息
+export async function getPendingDataCardUpdates(): Promise<any[]> {
+  const sql = `
+    SELECT dcu.*, dc.name AS original_name, dc.description AS original_description, dc.data AS original_data,
+           dc.type, dc.user_id, dc.is_public, dc.review_status, dc.like_count, dc.usage_count, dc.favorite_count,
+           u.username
+    FROM data_card_updates dcu
+    JOIN data_cards dc ON dcu.data_card_id = dc.id
+    JOIN users u ON dc.user_id = u.id
+    ORDER BY dcu.created_at DESC;
+  `;
+
+  const result = await queryFromD1(sql) as any;
+  return result?.result?.[0]?.results || [];
+}
+
+// 审核更新记录：approve -> 覆盖主表并删除更新；reject -> 删除更新
+export async function reviewDataCardUpdate(
+  updateId: string,
+  action: 'approve' | 'reject'
+): Promise<boolean> {
+  if (!updateId) return false;
+
+  // 先取出更新记录
+  const updateResult = await queryFromD1(
+    'SELECT * FROM data_card_updates WHERE id = ?',
+    [updateId]
+  ) as any;
+
+  const updateRow = updateResult?.result?.[0]?.results?.[0];
+  if (!updateRow) return false;
+
+  if (action === 'reject') {
+    const del = await queryFromD1('DELETE FROM data_card_updates WHERE id = ?', [updateId]) as any;
+    return Boolean(del?.success);
+  }
+
+  // approve: 覆盖 data_cards
+  const fields: string[] = [];
+  const params: any[] = [];
+  if (updateRow.name !== null && updateRow.name !== undefined) {
+    fields.push('name = ?');
+    params.push(updateRow.name);
+  }
+  if (updateRow.description !== null && updateRow.description !== undefined) {
+    fields.push('description = ?');
+    params.push(updateRow.description);
+  }
+  if (updateRow.data !== null && updateRow.data !== undefined) {
+    fields.push('data = ?');
+    params.push(updateRow.data);
+  }
+  // 审核通过后保持 review_status 为 approved
+  fields.push("review_status = 'approved'");
+  fields.push('updated_at = CURRENT_TIMESTAMP');
+
+  const updateSql = `UPDATE data_cards SET ${fields.join(', ')} WHERE id = ?`;
+  params.push(updateRow.data_card_id);
+  const upd = await queryFromD1(updateSql, params) as any;
+  if (!(upd?.success)) return false;
+
+  const del = await queryFromD1('DELETE FROM data_card_updates WHERE id = ?', [updateId]) as any;
+  return Boolean(del?.success);
+}
+
 /**
  * [Admin] 根据ID列表获取用于导出的数据卡核心数据
  * @param cardIds - 要导出的数据卡ID数组

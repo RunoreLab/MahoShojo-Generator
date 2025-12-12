@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { queryFromD1 } from '../../../../lib/database/core';
+import { reviewDataCardUpdate } from '@/lib/database/admin';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { id } = req.query;
@@ -11,7 +12,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === 'PUT') {
     // 更新角色卡信息
     try {
-      const { name, description, is_public } = req.body;
+      const { name, description, is_public, update_action, update_id } = req.body;
+
+      // 如果是审核更新记录
+      if (update_action && update_id) {
+        const ok = await reviewDataCardUpdate(update_id, update_action === 'approve' ? 'approve' : 'reject');
+        if (!ok) {
+          return res.status(400).json({ error: '处理更新记录失败' });
+        }
+        return res.status(200).json({ success: true });
+      }
 
       // 验证输入数据
       const updates: string[] = [];

@@ -52,6 +52,8 @@ const CharacterManagementPage: React.FC = () => {
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
+  const [pendingUpdates, setPendingUpdates] = useState<any[]>([]);
+  const [loadingUpdates, setLoadingUpdates] = useState(false);
 
   // AI 审查相关状态
   const [showAiReviewModal, setShowAiReviewModal] = useState(false);
@@ -87,6 +89,20 @@ const CharacterManagementPage: React.FC = () => {
       setLoading(false);
     }
   }, []);
+
+  const fetchUpdates = useCallback(async () => {
+    try {
+      setLoadingUpdates(true);
+      const res = await fetch('/api/admin/data-card-updates');
+      if (!res.ok) throw new Error('获取更新记录失败');
+      const data = await res.json();
+      setPendingUpdates(data.updates || []);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoadingUpdates(false);
+    }
+  }, []);
   
   useEffect(() => {
     if (router.isReady) {
@@ -101,8 +117,9 @@ const CharacterManagementPage: React.FC = () => {
       };
       setFilters(newFilters);
       fetchData(newFilters);
+      fetchUpdates();
     }
-  }, [router.isReady, router.query, fetchData]);
+  }, [router.isReady, router.query, fetchData, fetchUpdates]);
 
   // useEffect 钩子，用于在 AI 审查结果加载后自动更新操作标记。
   useEffect(() => {
@@ -228,6 +245,22 @@ const CharacterManagementPage: React.FC = () => {
       console.error('导出失败:', error);
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleUpdateReview = async (updateId: string, action: 'approve' | 'reject') => {
+    try {
+      const res = await fetch(`/api/admin/data-cards/${updateId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ update_action: action, update_id: updateId })
+      });
+      if (!res.ok) throw new Error('操作失败');
+      await fetchUpdates();
+      await fetchData(filters);
+      alert('已处理更新记录');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '处理失败');
     }
   };
 
@@ -409,6 +442,58 @@ ${JSON.stringify(cardsToCopy, null, 2)}
             </Link>
           </div>
           <h1 className="text-2xl font-bold text-gray-800 mb-4">内容档案管理</h1>
+
+          {/* 待审核更新列表 */}
+          <div className="bg-white p-4 rounded-lg shadow-sm mb-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold">待审核更新</h2>
+              {loadingUpdates && <span className="text-sm text-gray-500">加载中...</span>}
+            </div>
+            {pendingUpdates.length === 0 ? (
+              <p className="text-sm text-gray-600">暂无待审核的更新记录。</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead>
+                    <tr className="bg-gray-50">
+                      <th className="px-3 py-2 text-left text-gray-700">卡片ID</th>
+                      <th className="px-3 py-2 text-left text-gray-700">原名称 / 新名称</th>
+                      <th className="px-3 py-2 text-left text-gray-700">用户</th>
+                      <th className="px-3 py-2 text-left text-gray-700">提交时间</th>
+                      <th className="px-3 py-2 text-left text-gray-700">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {pendingUpdates.map((item) => (
+                      <tr key={item.id}>
+                        <td className="px-3 py-2 font-mono text-xs">{item.data_card_id}</td>
+                        <td className="px-3 py-2">
+                          <div className="text-gray-800">{item.original_name}</div>
+                          <div className="text-gray-500 text-xs">→ {item.name || '(未改名)'}</div>
+                        </td>
+                        <td className="px-3 py-2 text-gray-700">{item.username}</td>
+                        <td className="px-3 py-2 text-gray-500 text-xs">{item.created_at}</td>
+                        <td className="px-3 py-2 space-x-2">
+                          <button
+                            onClick={() => handleUpdateReview(item.id, 'approve')}
+                            className="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                          >
+                            通过
+                          </button>
+                          <button
+                            onClick={() => handleUpdateReview(item.id, 'reject')}
+                            className="px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                          >
+                            拒绝
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
 
           {/* 筛选器区域 */}
           <div className="bg-white p-4 rounded-lg shadow-sm mb-4">

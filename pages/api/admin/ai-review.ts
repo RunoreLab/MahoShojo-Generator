@@ -1,7 +1,7 @@
 // pages/api/admin/ai-review.ts
 
 import { getCardsForReview } from '@/lib/database/admin';
-import { generateWithAI, GenerationConfig } from '@/lib/ai';
+import { generateWithAI } from '@/lib/ai';
 import { getLogger } from '@/lib/logger';
 import { z } from 'zod';
 import type { NextRequest } from 'next/server';
@@ -67,17 +67,18 @@ export default async function handler(req: NextRequest) {
     };
 
     // 6. 配置并调用 AI 生成函数
-    const generationConfig: GenerationConfig<z.infer<typeof AiReviewResponseSchema>, any> = {
+    const generationConfig: any = {
       systemPrompt: "你是一个经验丰富的内容审查员，负责确保用户生成内容的合规性。你的回答必须精确、简洁，并严格遵守JSON格式。",
       temperature: 0.1,
       promptBuilder: () => promptBuilder(cardsToReview),
-      schema: AiReviewResponseSchema,
+      // Zod 类型与 SDK 泛型定义存在版本不匹配，这里强制断言以保证类型安全由运行时校验负责
+      schema: AiReviewResponseSchema as any,
       taskName: "AI内容辅助审查",
-      maxTokens: 4096,
       modelOverride: model, // 允许前端传递模型名称
+      maxOutputTokens: 4096,
     };
 
-    const aiResult = await generateWithAI({}, generationConfig);
+    const aiResult: any = await generateWithAI({}, generationConfig);
 
 // 7. 将数据库信息与AI结果合并，返回给前端更完整的数据
     const fullReviews = aiResult.reviews.map((review: AiReviewSuggestion) => {
