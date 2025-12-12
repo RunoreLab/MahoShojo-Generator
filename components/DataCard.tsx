@@ -30,6 +30,8 @@ interface DataCardProps {
   canFavorite?: boolean;
   onToggleFavorite?: (nextState: boolean) => Promise<boolean> | boolean;
   isRecommended?: boolean;
+  hot?: boolean;
+  pending?: boolean;
 }
 
 const typeMap = {
@@ -75,6 +77,8 @@ export default function DataCard({
   canFavorite = false,
   onToggleFavorite,
   isRecommended = false,
+  hot = false,
+  pending = false,
 }: DataCardProps) {
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied'>('idle');
   const [liked, setLiked] = useState(false);
@@ -232,6 +236,21 @@ export default function DataCard({
         <div className="flex items-start justify-between gap-2 mb-2">
           <h4 className={`font-semibold text-lg ${textColor} flex-1`}>{name}</h4>
           <div className="flex items-center gap-2 flex-shrink-0">
+            {hot && (
+              <span className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-800 border border-orange-200">
+                🔥 热门卡片
+              </span>
+            )}
+            {hot && (
+              <span className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-800 border border-orange-200">
+                🔥 热门卡片
+              </span>
+            )}
+            {pending && (
+              <span className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-200">
+                <Clock className="w-3 h-3" /> 更新审核中
+              </span>
+            )}
             {reviewStatus === 'pending' && isPublic === 1 && (
               <span className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-yellow-100 text-yellow-800 border border-yellow-200">
                 <Clock className="w-3 h-3" />

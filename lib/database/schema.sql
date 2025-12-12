@@ -75,6 +75,23 @@ CREATE INDEX idx_data_cards_favorite_count ON data_cards(favorite_count);
 CREATE INDEX idx_data_cards_deleted_at ON data_cards(deleted_at);
 CREATE INDEX idx_data_cards_is_recommended ON data_cards(is_recommended);
 
+-- 数据卡更新暂存表：用于存放需要审核的新版本内容
+CREATE TABLE IF NOT EXISTS data_card_updates (
+  id TEXT PRIMARY KEY NOT NULL,              -- UUID，唯一标识一次更新
+  data_card_id TEXT NOT NULL,                -- 关联主表 data_cards.id
+  user_id INTEGER NOT NULL,                  -- 提交更新的用户
+  name TEXT,                                 -- 新名称（可选）
+  description TEXT,                          -- 新描述（可选）
+  data TEXT,                                 -- 新内容 JSON 字符串（可选）
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (data_card_id) REFERENCES data_cards(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(data_card_id)                       -- 同一张卡同一时间仅保留一条待审核更新
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_card_updates_user_id ON data_card_updates(user_id);
+
 -- 收藏表
 CREATE TABLE IF NOT EXISTS favorites (
   user_id INTEGER NOT NULL,
