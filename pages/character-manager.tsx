@@ -410,6 +410,39 @@ const CharacterManagerPage: React.FC = () => {
         logout();
     }, [logout]);
 
+    // 统一构建可上传的数据（处理原生性签名）
+    const prepareFinalDataForUpload = useCallback(async (): Promise<any | null> => {
+        if (!characterData) return null;
+        let finalData = { ...characterData };
+
+        if (isNative && !hasLostNativeness) {
+            setMessage({ type: 'info', text: '正在请求服务器进行原生性签名认证...' });
+            const response = await fetch('/api/resign-data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(finalData),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                if (errorData.shouldRedirect) {
+                    router.push({
+                        pathname: '/arrested',
+                        query: { reason: errorData.reason || '编辑内容不合规' }
+                    });
+                    return null;
+                }
+                throw new Error(errorData.message || '签名服务器认证失败');
+            }
+            finalData = await response.json();
+            setMessage({ type: 'success', text: '原生性签名认证成功！' });
+        } else {
+            delete finalData.signature;
+        }
+
+        return finalData;
+    }, [characterData, hasLostNativeness, isNative, router, setMessage]);
+
     // 保存当前角色为数据卡
     const handleSaveAsDataCard = async () => {
         if (!isAuthenticated || !characterData) return;
@@ -442,36 +475,10 @@ const CharacterManagerPage: React.FC = () => {
         setSaveCardError(null);
 
         try {
-            // 核心修复：在创建数据卡之前，对数据进行最终的原生性处理
-            let finalData = { ...characterData };
-
-            // 1. 判断是否需要重新签名或移除签名
-            if (isNative && !hasLostNativeness) {
-                // 情况一：数据为原生且未被破坏，需要获取一个新的有效签名
-                setMessage({ type: 'info', text: '正在请求服务器进行原生性签名认证...' });
-                const response = await fetch('/api/resign-data', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(finalData),
-                });
-
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    if (errorData.shouldRedirect) {
-                        router.push({
-                            pathname: '/arrested',
-                            query: { reason: errorData.reason || '编辑内容不合规' }
-                        });
-                        return; // 中断执行
-                    }
-                    throw new Error(errorData.message || '签名服务器认证失败');
-                }
-                finalData = await response.json(); // 使用服务器返回的、带有最新有效签名的数据
-                setMessage({ type: 'success', text: '原生性签名认证成功！' });
-
-            } else {
-                // 情况二：数据为衍生数据（非原生或已失去原生性），必须移除签名
-                delete finalData.signature;
+            const finalData = await prepareFinalDataForUpload();
+            if (!finalData) {
+                setIsSavingCard(false);
+                return;
             }
 
             // 2. 前端敏感词检查 (使用处理后的 finalData)
@@ -603,7 +610,8 @@ const CharacterManagerPage: React.FC = () => {
         }
         if (!window.confirm(`确认用当前编辑内容替换「${card.name}」吗？`)) return;
         try {
-            const payloadData = { ...characterData };
+            const payloadData = await prepareFinalDataForUpload();
+            if (!payloadData) return;
             const result = await dataCardApi.replaceCard(card.id, {
                 name: card.name,
                 description: card.description,
