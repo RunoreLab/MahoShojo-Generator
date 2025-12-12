@@ -154,10 +154,12 @@ export default function BattleDataModal({
   ) => {
     try {
       setIsLoading(true);
-      const offset = (page - 1) * cardsPerPage;
+      const useRoleTypeFilter = Boolean(currentFilters?.roleType && selectedType === 'character');
+      const effectiveLimit = useRoleTypeFilter ? 500 : cardsPerPage;
+      const offset = useRoleTypeFilter ? 0 : (page - 1) * cardsPerPage;
       const params = new URLSearchParams({
         type: selectedType,
-        limit: cardsPerPage.toString(),
+        limit: effectiveLimit.toString(),
         offset: offset.toString(),
         sortBy: currentSortBy
       });
@@ -482,7 +484,7 @@ export default function BattleDataModal({
   // 处理页码变化
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
-    if (activeTab === 'public') {
+    if (activeTab === 'public' && !(activeFilters.roleType && selectedType === 'character')) {
       loadPublicDataCards(newPage, sortBy, debouncedSearchQuery.trim() || undefined, activeFilters);
     }
   };
@@ -522,17 +524,28 @@ export default function BattleDataModal({
     [filteredFavoriteCards, currentPage, cardsPerPage]
   );
 
+  const publicPaginatedCards = useMemo(() => {
+    if (activeFilters.roleType && selectedType === 'character') {
+      return publicDataCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage);
+    }
+    return publicDataCards;
+  }, [publicDataCards, activeFilters.roleType, selectedType, currentPage, cardsPerPage]);
+
   const displayCards = activeTab === 'my'
     ? paginatedUserCards
     : activeTab === 'favorites'
       ? paginatedFavoriteCards
-      : publicDataCards;
+      : publicPaginatedCards;
+
+  const publicTotalPages = activeFilters.roleType && selectedType === 'character'
+    ? Math.max(1, Math.ceil(publicDataCards.length / cardsPerPage))
+    : null;
 
   const currentTabTotalPages = activeTab === 'my'
     ? userTotalPages
     : activeTab === 'favorites'
       ? favoritesTotalPages
-      : null;
+      : publicTotalPages;
   const typeLabel = selectedType === 'character' ? '角色' : '情景';
   const isFilterActive = useMemo(() => {
     return Boolean(
@@ -572,7 +585,7 @@ export default function BattleDataModal({
           </div>
           {/* 【新增】高级筛选面板 */}
           {showAdvancedFilters && activeTab === 'public' && (
-            <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down">
+            <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down max-h-[70vh] md:max-h-80 overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-gray-600">作者</label>
@@ -712,8 +725,12 @@ export default function BattleDataModal({
         {(
           (activeTab === 'my' && userDataCards.length > cardsPerPage) ||
           (activeTab === 'favorites' && favoriteCards.length > cardsPerPage) ||
-          (activeTab === 'public' && (displayCards.length >= cardsPerPage || currentPage > 1))
-        ) &&
+      (activeTab === 'public' && (
+        (activeFilters.roleType && selectedType === 'character')
+          ? publicPaginatedCards.length > 0 || publicTotalPages! > 1
+          : (displayCards.length >= cardsPerPage || currentPage > 1)
+      ))
+    ) &&
           <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
             <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="page-button">上一页</button>
             <span className="text-sm text-gray-600">
@@ -727,7 +744,9 @@ export default function BattleDataModal({
                   ? currentPage >= userTotalPages
                   : activeTab === 'favorites'
                     ? currentPage >= favoritesTotalPages
-                    : displayCards.length < cardsPerPage
+                    : publicTotalPages
+                      ? currentPage >= publicTotalPages
+                      : displayCards.length < cardsPerPage
               }
               className="page-button"
             >
