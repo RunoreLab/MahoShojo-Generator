@@ -228,7 +228,6 @@ const ScenarioPage: React.FC = () => {
             </div>
 
             <div className="input-group mt-6">
-              <label className="input-label">自定义 AI 供应商 (可选)</label>
               <AiProviderSelector onConfigChange={setUserProviderConfig} />
               <p className="text-xs text-gray-500 mt-1">
                 若需使用自备模型，请先选择供应商与模型并填写对应 API Key。
