@@ -7,14 +7,11 @@ import {
   getUserDataCardCapacity,
   pruneUserRecycleBin,
   upsertDataCardUpdate,
-  getDataCardUpdate,
-  deleteDataCardUpdate,
   getDataCardById,
   getUserUsedSlots
 } from '@/lib/d1';
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
-import { isHotCard } from '@/lib/constants';
 import { queryFromD1 } from '@/lib/d1';
 
 export const runtime = 'edge';
