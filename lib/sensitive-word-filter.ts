@@ -124,7 +124,7 @@ const sensitiveWordsConfig = {
     "6IKJ5aOB",
     "5YKs5oOF",
     "5oiQ55i+",
-    "5rSX6ISR",
+    // "5rSX6ISR",
     // 现实相关违禁词
     "5Lit5Zu9",
     "5Lit5Y2O5Lq65rCR5YWx5ZKM5Zu9",
