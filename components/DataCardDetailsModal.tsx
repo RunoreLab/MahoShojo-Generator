@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Info, Star, Heart, Download } from 'lucide-react';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
+import { formatDateTime } from '@/lib/constants';
 
 interface DataCardDetailsModalProps {
   isOpen: boolean;
@@ -19,12 +20,14 @@ interface DataCardDetailsModalProps {
     createdAt?: string;
     updatedAt?: string;
   };
+  pendingNotice?: string;
 }
 
 export default function DataCardDetailsModal({
   isOpen,
   onClose,
-  card
+  card,
+  pendingNotice
 }: DataCardDetailsModalProps) {
   if (!isOpen) return null;
 
@@ -106,13 +109,17 @@ export default function DataCardDetailsModal({
               <p className="text-xs text-gray-500 mt-2">
                 作者：{card.author}
               </p>
-              <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
-                <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{card.likeCount ?? 0}</span>
-                <span className="flex items-center gap-1"><Star className="w-3 h-3" />{card.favoriteCount ?? 0}</span>
-                <span className="flex items-center gap-1"><Download className="w-3 h-3" />{card.usageCount ?? 0}</span>
-              </div>
-            </div>
+          <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+            <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{card.likeCount ?? 0}</span>
+            <span className="flex items-center gap-1"><Star className="w-3 h-3" />{card.favoriteCount ?? 0}</span>
+            <span className="flex items-center gap-1"><Download className="w-3 h-3" />{card.usageCount ?? 0}</span>
           </div>
+          <div className="flex items-center gap-4 mt-2 text-[11px] text-gray-500">
+            <span>创建：{formatDateTime(card.createdAt)}</span>
+            <span>更新：{formatDateTime(card.updatedAt)}</span>
+          </div>
+        </div>
+      </div>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100"
@@ -123,9 +130,16 @@ export default function DataCardDetailsModal({
 
         {/* 详细设定内容 */}
         <div className="flex-1 overflow-auto p-6">
-          <h3 className="font-medium text-gray-700 mb-4 flex items-center gap-2">
-            <span>详细设定</span>
-          </h3>
+          <div className="mb-3 space-y-2">
+            {pendingNotice && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm px-3 py-2">
+                {pendingNotice}
+              </div>
+            )}
+            <h3 className="font-medium text-gray-700 flex items-center gap-2">
+              <span>详细设定</span>
+            </h3>
+          </div>
 
           <div className="bg-gray-50 rounded-lg p-4">
             {Object.keys(parsedData).length > 0 ? (

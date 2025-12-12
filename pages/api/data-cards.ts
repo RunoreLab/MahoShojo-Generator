@@ -5,10 +5,14 @@ import {
   updateDataCard, 
   deleteDataCard,
   getUserDataCardCapacity,
-  pruneUserRecycleBin
+  pruneUserRecycleBin,
+  upsertDataCardUpdate,
+  getDataCardById,
+  getUserUsedSlots
 } from '@/lib/d1';
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import { queryFromD1 } from '@/lib/d1';
 
 export const runtime = 'edge';
 
@@ -115,10 +119,10 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
-        // 检查用户数据卡数量限制
-        const existingCards = await getUserDataCards(userId);
+        // 检查用户数据卡数量限制（热门卡不占槽）
+        const usedSlots = await getUserUsedSlots(userId);
         const userCapacity = await getUserDataCardCapacity(userId, config.DEFAULT_DATA_CARD_CAPACITY);
-        if (existingCards.length >= userCapacity) {
+        if (usedSlots >= userCapacity) {
           return new Response(JSON.stringify({ 
             error: `数据卡数量已达上限（${userCapacity}个），请删除部分数据卡后再试` 
           }), {
@@ -166,10 +170,9 @@ export default async function handler(req: Request): Promise<Response> {
         });
       }
 
-    case 'PUT':
-      // 更新数据卡
+    case 'PUT': {
       try {
-        const { id, name, description, isPublic } = await req.json();
+        const { id, name, description, isPublic, data } = await req.json();
 
         if (!id) {
           return new Response(JSON.stringify({ error: '缺少数据卡ID' }), {
@@ -178,10 +181,9 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
-        // 敏感词检查
-        const textToCheck = `${name || ''} ${description || ''}`;
+        // 敏感词检查：标题+描述+（可选）数据
+        const textToCheck = `${name || ''} ${description || ''} ${data ? JSON.stringify(data) : ''}`;
         const sensitiveWordResult = await quickCheck(textToCheck);
-        
         if (sensitiveWordResult.hasSensitiveWords) {
           return new Response(JSON.stringify({ 
             error: 'SENSITIVE_WORD_DETECTED',
@@ -192,15 +194,81 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
-        const success = await updateDataCard(id, userId, name, description, isPublic);
-
-        if (!success) {
+        // 读取当前卡片
+        const currentCard = await getDataCardById(id, false);
+        if (!currentCard || currentCard.user_id !== userId) {
           return new Response(JSON.stringify({ error: '数据卡不存在或无权访问' }), {
             status: 404,
             headers: { 'Content-Type': 'application/json' }
           });
         }
 
+        const isExempt = user.is_review_exempt === 1;
+        const isAdmin = user.is_admin === 1;
+        const isPendingOrRejected = currentCard.review_status !== 'approved';
+        const dataChanged = data !== undefined;
+
+        // 如果不需要审核（pending/rejected 或 豁免 / 管理员），直接更新主表
+        if (isPendingOrRejected || isExempt || isAdmin) {
+          const success = await updateDataCard(
+            id,
+            userId,
+            name ?? currentCard.name,
+            description ?? currentCard.description,
+            isPublic,
+            currentCard.review_status
+          );
+
+          if (!success) {
+            return new Response(JSON.stringify({ error: '数据卡不存在或无权访问' }), {
+              status: 404,
+              headers: { 'Content-Type': 'application/json' }
+            });
+          }
+
+          // 如果带 data，一并更新
+          if (dataChanged) {
+            const dataString = JSON.stringify(data);
+            await queryFromD1(
+              'UPDATE data_cards SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
+              [dataString, id, userId]
+            );
+          }
+
+          return new Response(JSON.stringify({ success: true, message: '数据卡更新成功' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        // 普通用户更新已审核卡片：内容变更需要进入待审核表
+        if (dataChanged) {
+          const payload = {
+            name: name ?? currentCard.name,
+            description: description ?? currentCard.description,
+            data: JSON.stringify(data)
+          };
+          const ok = await upsertDataCardUpdate(id, userId, payload);
+          if (!ok) {
+            return new Response(JSON.stringify({ error: '提交更新失败' }), {
+              status: 500,
+              headers: { 'Content-Type': 'application/json' }
+            });
+          }
+          return new Response(JSON.stringify({ success: true, pendingReview: true, message: '更新已提交，待审核' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        // 仅修改元信息（名称、描述、公开状态），直接更新主表
+        const success = await updateDataCard(id, userId, name ?? currentCard.name, description ?? currentCard.description, isPublic);
+        if (!success) {
+          return new Response(JSON.stringify({ error: '数据卡不存在或无权访问' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
         return new Response(JSON.stringify({ success: true, message: '数据卡更新成功' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
@@ -212,6 +280,7 @@ export default async function handler(req: Request): Promise<Response> {
           headers: { 'Content-Type': 'application/json' }
         });
       }
+    }
 
     case 'DELETE':
       // 删除数据卡
