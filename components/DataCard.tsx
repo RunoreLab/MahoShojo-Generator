@@ -32,6 +32,7 @@ interface DataCardProps {
   isRecommended?: boolean;
   hot?: boolean;
   pending?: boolean;
+  onReplace?: () => void;
 }
 
 const typeMap = {
@@ -79,6 +80,7 @@ export default function DataCard({
   isRecommended = false,
   hot = false,
   pending = false,
+  onReplace,
 }: DataCardProps) {
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied'>('idle');
   const [liked, setLiked] = useState(false);
@@ -486,6 +488,17 @@ export default function DataCard({
           >
             编辑档案
           </button>
+          {onReplace && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onReplace();
+              }}
+              className="flex-1 min-w-[80px] text-sm px-3 py-1.5 bg-orange-100 text-orange-700 hover:bg-orange-200 rounded transition-colors flex items-center justify-center gap-1"
+            >
+              替换
+            </button>
+          )}
         </div>
       )}
     </div>

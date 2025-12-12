@@ -20,6 +20,7 @@ interface DataCardsModalProps {
   onLoadCard: (card: any) => void;
   onCancelEdit: () => void;
   onShareCard?: (card: any) => void;
+  onReplaceCard?: (card: any) => void;
   userCapacity?: number;
   onOpenRecycleBin?: () => void;
   recycleCount?: number;
@@ -40,6 +41,7 @@ export default function DataCardsModal({
   onLoadCard,
   onCancelEdit,
   onShareCard,
+  onReplaceCard,
   userCapacity = config.DEFAULT_DATA_CARD_CAPACITY,
   onOpenRecycleBin,
   recycleCount = 0,
@@ -189,6 +191,7 @@ export default function DataCardsModal({
                       onEditData={() => onLoadCard(card)}
                       onDelete={() => onDeleteCard(card.id)}
                       onShare={() => onShareCard?.(card)}
+                      onReplace={() => onReplaceCard?.(card)}
                     />
                   );
                 })}

@@ -271,14 +271,14 @@ const CharacterManagerPage: React.FC = () => {
     // 数据卡管理相关状态
     const [userDataCards, setUserDataCards] = useState<any[]>([]);
     const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
-    const [showDataCardsModal, setShowDataCardsModal] = useState(false);
-    const [recycleBinCards, setRecycleBinCards] = useState<any[]>([]);
-    const [showRecycleBinModal, setShowRecycleBinModal] = useState(false);
-    const [editingCard, setEditingCard] = useState<any | null>(null);
-    const [showSaveCardModal, setShowSaveCardModal] = useState(false);
-    const [newCardForm, setNewCardForm] = useState({ name: '', description: '', isPublic: 0 });
-    const [saveCardError, setSaveCardError] = useState<string | null>(null);
-    const [isSavingCard, setIsSavingCard] = useState(false);
+  const [showDataCardsModal, setShowDataCardsModal] = useState(false);
+  const [recycleBinCards, setRecycleBinCards] = useState<any[]>([]);
+  const [showRecycleBinModal, setShowRecycleBinModal] = useState(false);
+  const [editingCard, setEditingCard] = useState<any | null>(null);
+  const [showSaveCardModal, setShowSaveCardModal] = useState(false);
+  const [newCardForm, setNewCardForm] = useState({ name: '', description: '', isPublic: 0 });
+  const [saveCardError, setSaveCardError] = useState<string | null>(null);
+  const [isSavingCard, setIsSavingCard] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const cardsPerPage = 12;
 
@@ -592,6 +592,33 @@ const CharacterManagerPage: React.FC = () => {
                 return;
             }
             setMessage({ type: 'error', text: result.error || '更新失败' });
+        }
+    };
+
+    // 用当前编辑的 characterData 替换已有卡片
+    const handleReplaceExistingCard = async (card: any) => {
+        if (!characterData) {
+            setMessage({ type: 'error', text: '请先在编辑区加载/生成要替换的内容' });
+            return;
+        }
+        if (!window.confirm(`确认用当前编辑内容替换「${card.name}」吗？`)) return;
+        try {
+            const payloadData = { ...characterData };
+            const result = await dataCardApi.replaceCard(card.id, {
+                name: card.name,
+                description: card.description,
+                isPublic: card.is_public,
+                data: payloadData,
+            });
+            if (result.success) {
+                setMessage({ type: 'success', text: result.pendingReview ? '更新已提交审核，审核通过后生效' : '替换成功' });
+                loadUserDataCards();
+                loadUserBadges();
+            } else {
+                setMessage({ type: 'error', text: result.error || '替换失败' });
+            }
+        } catch (error) {
+            setMessage({ type: 'error', text: error instanceof Error ? error.message : '替换失败' });
         }
     };
 
@@ -2069,12 +2096,13 @@ const CharacterManagerPage: React.FC = () => {
                 onDeleteCard={handleDeleteDataCard}
                 onLoadCard={handleLoadDataCard}
                 onCancelEdit={() => setEditingCard(null)}
-                onShareCard={handleShareDataCard}
-                userCapacity={userCapacity}
-                onOpenRecycleBin={() => {
-                    setShowDataCardsModal(false);
-                    setShowRecycleBinModal(true);
-                }}
+            onShareCard={handleShareDataCard}
+            onReplaceCard={handleReplaceExistingCard}
+            userCapacity={userCapacity}
+            onOpenRecycleBin={() => {
+                setShowDataCardsModal(false);
+                setShowRecycleBinModal(true);
+            }}
                 recycleCount={recycleBinCards.length}
                 recycleLimit={config.RECYCLE_BIN_LIMIT}
             />
@@ -2099,17 +2127,18 @@ const CharacterManagerPage: React.FC = () => {
                     setIsSavingCard(false);
                 }}
                 onSave={handleConfirmSaveCard}
-                name={newCardForm.name}
-                description={newCardForm.description}
-                isPublic={newCardForm.isPublic}
-                onNameChange={(value) => setNewCardForm({ ...newCardForm, name: value })}
-                onDescriptionChange={(value) => setNewCardForm({ ...newCardForm, description: value })}
-                onPublicChange={(value) => setNewCardForm({ ...newCardForm, isPublic: value })}
-                error={saveCardError}
-                isSaving={isSavingCard}
-                currentCardCount={userDataCards.length}
-                userCapacity={userCapacity}
-            />
+            name={newCardForm.name}
+            description={newCardForm.description}
+            isPublic={newCardForm.isPublic}
+            onNameChange={(value) => setNewCardForm({ ...newCardForm, name: value })}
+            onDescriptionChange={(value) => setNewCardForm({ ...newCardForm, description: value })}
+            onPublicChange={(value) => setNewCardForm({ ...newCardForm, isPublic: value })}
+            error={saveCardError}
+            isSaving={isSavingCard}
+            currentCardCount={userDataCards.length}
+            userCapacity={userCapacity}
+          />
+
         </>
     );
 };

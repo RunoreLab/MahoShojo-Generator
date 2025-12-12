@@ -305,6 +305,34 @@ export const dataCardApi = {
     }
   },
 
+  // 替换数据卡（包含内容更新，触发审核）
+  async replaceCard(
+    id: string,
+    payload: { name?: string; description?: string; isPublic?: number; data: any }
+  ): Promise<{ success: boolean; pendingReview?: boolean; error?: string }> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) {
+      return { success: false, error: '未登录' };
+    }
+
+    try {
+      const response = await fetch('/api/data-cards', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader
+        },
+        body: JSON.stringify({ id, ...payload })
+      });
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('Replace card error:', error);
+      return { success: false, error: '替换失败' };
+    }
+  },
+
   // 删除数据卡
   async deleteCard(id: string): Promise<{
     success: boolean;
