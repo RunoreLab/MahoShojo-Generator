@@ -14,6 +14,7 @@ import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
 import { buildMagicalQuestionMeta, type MagicalQuestionMeta } from '@/lib/questionnaires';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
+import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 
 interface Questionnaire {
   questions: string[];
@@ -172,7 +173,11 @@ const DetailsPage: React.FC = () => {
   const [showIntroduction, setShowIntroduction] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
-  const { isCooldown, startCooldown, remainingTime } = useCooldown('generateDetailsCooldown', 60000);
+  const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
+  const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
+  const generatorCooldownMs = isUserCustomKey ? 3000 : 60000;
+  const generatorCooldownKey = isUserCustomKey ? 'generateDetailsCooldown:custom' : 'generateDetailsCooldown:system';
+  const { isCooldown, startCooldown, remainingTime } = useCooldown(generatorCooldownKey, generatorCooldownMs);
   const [bulkAnswers, setBulkAnswers] = useState(''); // 用于"一键填充"的textarea
   const [showLanguageSection, setShowLanguageSection] = useState(false); // 控制生成语言区域的折叠状态
   const [showBulkFillSection, setShowBulkFillSection] = useState(false); // 控制一键填充区域的折叠状态
@@ -461,6 +466,10 @@ const DetailsPage: React.FC = () => {
       setError(`请等待 ${remainingTime} 秒后再生成`);
       return;
     }
+    if (userProviderConfig && userProviderConfig.providerId !== 'system' && !userProviderConfig.apiKey?.trim()) {
+      setError('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
+      return;
+    }
     setSubmitting(true);
     setError(null); // 清除之前的错误
     // 检查
@@ -469,12 +478,26 @@ const DetailsPage: React.FC = () => {
 
     try {
       console.log('提交答案:', finalAnswers);
+      const customProviderPayload = (
+        userProviderConfig
+        && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
+        && userProviderConfig.modelId !== 'default'
+      ) ? {
+        providerId: userProviderConfig.providerId,
+        modelId: userProviderConfig.modelId,
+        apiKey: userProviderConfig.apiKey,
+      } : undefined;
+
       const response = await fetch('/api/generate-magical-girl-details', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ answers: finalAnswers, language: selectedLanguage }),
+        body: JSON.stringify({
+          answers: finalAnswers,
+          language: selectedLanguage,
+          customProvider: customProviderPayload,
+        }),
       });
 
       if (!response.ok) {
@@ -830,6 +853,12 @@ const DetailsPage: React.FC = () => {
                       </select>
                     </div>
                   )}
+                </div>
+
+                {/* 自定义 AI 供应商 */}
+                <div className="my-4 bg-gray-50 rounded-lg p-3">
+                  <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                  <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
                 </div>
 
                 {/* 批量回答问卷 */}

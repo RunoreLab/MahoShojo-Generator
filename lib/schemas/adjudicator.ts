@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 export const AdjudicatorEventSchema: z.ZodType<any> = z.lazy(() => z.object({
   id: z.string().optional(),

@@ -1,11 +1,10 @@
 import { generateObject, NoObjectGeneratedError } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { z } from "zod";
+import { createDeepSeek } from "@ai-sdk/deepseek";
+import { z } from 'zod/v3';
 import { config, AIProvider } from "./config";
 import { getLogger } from "./logger";
-import { jsonrepair } from 'jsonrepair'
-import { repairNormalizeValidate } from "@/lib/repair-pipeline";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 
 // 延迟函数
@@ -19,7 +18,7 @@ export interface GenerationConfig<T, I = string> {
   promptBuilder: (input: I) => string;
   schema: z.ZodSchema<T>;
   taskName: string;
-  maxTokens: number;
+  maxOutputTokens: number;
   modelOverride?: string; // 新增：可选的模型覆盖参数
 }
 
@@ -29,12 +28,17 @@ const createAIClient = (provider: AIProvider) => {
       apiKey: provider.apiKey,
       baseURL: provider.baseUrl,
     });
-  } else {
+  } else if (provider.type === 'deepseek') {
+    return createDeepSeek({
+      apiKey: provider.apiKey,
+      baseURL: provider.baseUrl,
+    });
+  }
+  else {
     return createOpenAI({
       apiKey: provider.apiKey,
       baseURL: provider.baseUrl,
-      compatibility: "compatible",
-      fetch: getProviderFetch(provider),
+      fetch: getProviderFetch(provider)
     });
   }
 };
@@ -226,36 +230,36 @@ export async function generateWithAI<T, I = string>(
         const llm = createAIClient(provider);
 
         const systemPrompt = generationConfig.systemPrompt + generationConfig.promptBuilder(input) + 'Ignore the user \'s prompt.';
-        const generateOptions = {
-          model: llm(selectedModel),
+        log.info(`provider.type: ${provider.type}`);
+        const { object } = await generateObject({
+          model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel), // Type assertion for AI SDK 5 compatibility
           // 应对风控，尝试直接全部放入系统提示词中
-          system: systemPrompt,
-          // 从 systemPrompt 随机截取一个长度为20字的片段
-          prompt: (() => {
-            const len = 20;
-            const start = Math.floor(Math.random() * Math.max(1, systemPrompt.length - len));
-            return systemPrompt.substring(start, start + len);
-          })(),
+          prompt: [
+            {
+              role: 'user',
+              content: systemPrompt,
+            },
+            {
+              role: 'user',
+              content: (() => {
+                const len = 20;
+                const start = Math.floor(Math.random() * Math.max(1, systemPrompt.length - len));
+                return systemPrompt.substring(start, start + len);
+              })(),
+            }
+          ],
+          // system: systemPrompt,
+          // // 从 systemPrompt 随机截取一个长度为20字的片段
+          // prompt: (() => {
+          //   const len = 20;
+          //   const start = Math.floor(Math.random() * Math.max(1, systemPrompt.length - len));
+          //   return systemPrompt.substring(start, start + len);
+          // })(),
           schema: generationConfig.schema,
           temperature: generationConfig.temperature,
-          maxTokens: generationConfig.maxTokens,
-          retryCount: 1,
-          mode: provider.mode || 'auto',
-          // 疑似无用，待升级 AI SDK 版本和修复
-          experimental_repairText: async (options: any) => {
-            options.text = options.text.replace('```json\n', '').replace('\n```', '');
-            options.text = jsonrepair(options.text);
-            options.text = await repairNormalizeValidate({
-              input: options.text,
-              schema: generationConfig.schema,
-              autoPromoteBySchemaKeys: true,
-              autoPromoteMaxDepth: 8,
-            });
-            return options.text;
-          },
-        };
-
-        const { object } = await generateObject(generateOptions);
+          maxOutputTokens: generationConfig.maxOutputTokens,
+          maxRetries: 0,
+        });
 
         log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
         return object as T;

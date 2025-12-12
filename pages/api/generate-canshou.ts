@@ -1,10 +1,12 @@
 // pages/api/generate-canshou.ts
-import { z } from 'zod';
-import { generateWithAI, GenerationConfig } from '../../lib/ai';
+import { z } from 'zod/v3';
+import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
 import { getLogger } from '../../lib/logger';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { type AIProvider } from '@/lib/config';
 
 const log = getLogger('api-gen-canshou');
 
@@ -68,6 +70,12 @@ const CanshouSchema = z.object({
   researcherNotes: z.string().describe('作为魔法国度残兽研究学者的分析、预测和警告'),
 });
 
+const CustomProviderSchema = z.object({
+  providerId: z.string().min(1),
+  modelId: z.string().min(1),
+  apiKey: z.string(),
+});
+
 type CanshouDetails = z.infer<typeof CanshouSchema>;
 
 // AI生成配置
@@ -86,7 +94,7 @@ const canshouGenerationConfig: GenerationConfig<CanshouDetails, { answers: Recor
   },
   schema: CanshouSchema,
   taskName: "生成残兽档案",
-  maxTokens: 8192,
+  maxOutputTokens: 8192,
 };
 
 // API Handler
@@ -99,7 +107,8 @@ async function handler(req: NextRequest): Promise<Response> {
   }
 
   try {
-    const { answers, language = 'zh-CN' } = await req.json();
+    const parsedBody = await req.json();
+    const { answers, language = 'zh-CN', customProvider: customProviderPayload } = parsedBody;
 
     if (!answers || typeof answers !== 'object' || Object.keys(answers).length === 0) {
       return new Response(JSON.stringify({ error: 'Answers object is required' }), {
@@ -120,8 +129,68 @@ async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
+    let customProviderOverride: AIProvider | null = null;
+    let customProviderId: string | null = null;
+    let customModelOverride: string | undefined;
+
+    if (customProviderPayload) {
+      const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
+      if (!parsedResult.success) {
+        log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
+        return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
+      }
+
+      const parsed = parsedResult.data;
+      customProviderId = parsed.providerId;
+      const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
+      if (!providerConfig) {
+        return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
+      }
+
+      const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
+      if (!modelConfig) {
+        return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
+      }
+
+      const sanitizedApiKey = parsed.apiKey.trim();
+      if (!sanitizedApiKey && providerConfig.id !== 'system') {
+        return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
+      }
+
+      const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
+      if (!sanitizedBaseUrl) {
+        customModelOverride = modelConfig.value;
+        log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
+          providerId: providerConfig.id,
+          model: modelConfig.value,
+        });
+      } else {
+        customProviderOverride = {
+          name: providerConfig.name,
+          apiKey: sanitizedApiKey,
+          baseUrl: sanitizedBaseUrl,
+          model: modelConfig.value,
+          type: providerConfig.type,
+          mode: providerConfig.mode || 'auto',
+          retryCount: 1,
+          skipProbability: 0,
+        };
+      }
+    }
+
+    const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
+    const providerOptions = (customProviderOverride || shouldDisablePolling)
+      ? {
+        ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
+        ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+      }
+      : undefined;
+
     // 调用通用AI生成函数
-    const canshouDetails = await generateWithAI({ answers, language }, canshouGenerationConfig);
+    const canshouDetails = await generateWithAI({ answers, language }, {
+      ...canshouGenerationConfig,
+      ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+    }, providerOptions);
 
     // 将用户答案和生成结果合并，并添加模板ID，为签名做准备
     const dataToSign = {

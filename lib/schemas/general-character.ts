@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { CurrentStateSchema } from './current-state';
 
 export const GENERAL_CHARACTER_TEMPLATE_ID = '通用角色' as const;

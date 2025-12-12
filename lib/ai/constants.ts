@@ -13,7 +13,7 @@ export interface AIProviderOption {
     description: string;
     docsUrl: string;
     baseUrl: string;
-    type: 'openai' | 'google';
+    type: 'openai' | 'google' | 'deepseek';
     // 待实现
     mode?: 'auto' | 'json' | 'tool';
     models: AIModelOption[];
@@ -68,7 +68,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         models: [
             {
                 value: 'gemini-3-pro-preview',
-                label: 'Gemini 3.0 Pro （预览版）',
+                label: '【大概已修复】Gemini 3.0 Pro （预览版）',
                 description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
             },
             {
@@ -143,9 +143,9 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             //     description: 'DeepSeek 最新版本。'
             // },
             // {
-            //     value: 'deepseek-ai/DeepSeek-R1-0528',
-            //     label: 'DeepSeek R1',
-            //     description: 'DeepSeek 思考版本。'
+            //     value: 'deepseek-ai/DeepSeek-V3.2',
+            //     label: 'DeepSeek V3.2',
+            //     description: 'DeepSeek 最新版本。'
             // },
             // {
             //     value: 'moonshotai/Kimi-K2-Thinking',
@@ -182,6 +182,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 label: 'Gemini 2.5 Flash Lite',
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
+            {
+                value: 'gemini-2.0-flash',
+                label: 'Gemini 2.0 Flash',
+                description: 'Google 早前的旗舰快模型，成本低且兼具多模态能力，适合作为备用通道。'
+            },
+            {
+                value: 'gemini-2.0-flash-lite',
+                label: 'Gemini 2.0 Flash Lite',
+                description: 'Google 早前的轻量版快速模型，速度极快，适合预算敏感或高并发场景。'
+            },
         ]
     },
     {
@@ -189,12 +199,12 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         name: 'DeepSeek',
         description: 'DeepSeek 官方 API 直连。',
         docsUrl: 'https://platform.deepseek.com',
-        baseUrl: 'https://api.deepseek.com/v1',
-        type: 'openai',
-        mode: 'json',
+        baseUrl: 'https://api.deepseek.com',
+        type: 'deepseek',
+        mode: 'auto',
         models: [
-            { value: 'deepseek-chat', label: 'DeepSeek-V3.2-Exp', description: 'DeepSeek 最新版本。' },
-            { value: 'deepseek-reasoner', label: 'DeepSeek-V3.2-Exp 思考模式', description: 'DeepSeek 最新版本思考模式。' },
+            { value: 'deepseek-chat', label: 'DeepSeek-V3.2', description: 'DeepSeek 最新版本。' },
+            { value: 'deepseek-reasoner', label: 'DeepSeek-V3.2 思考模式', description: 'DeepSeek 最新版本思考模式。' },
         ]
     },
 ];

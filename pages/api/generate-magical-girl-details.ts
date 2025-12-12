@@ -1,11 +1,13 @@
 // pages/api/generate-magical-girl-details.ts
-import { generateWithAI, GenerationConfig } from '../../lib/ai';
-import { z } from 'zod';
+import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
+import { z } from 'zod/v3';
 import { getRandomFlowers } from '../../lib/random-choose-hana-name';
 // import { saveToD1 } from '../../lib/d1';
 import { getLogger } from '../../lib/logger';
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
 import { buildMagicalQuestionMeta } from '../../lib/questionnaires';
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { type AIProvider } from '@/lib/config';
 
 const log = getLogger('api-gen-details');
 
@@ -96,7 +98,7 @@ const magicalGirlDetailsConfig: GenerationConfig<MagicalGirlDetails, { answers: 
   },
   schema: MagicalGirlDetailsSchema,
   taskName: "生成魔法少女详细信息",
-  maxTokens: 8192,
+  maxOutputTokens: 8192,
 }
 
 // 处理器重构：
@@ -114,6 +116,7 @@ async function handler(req: Request): Promise<Response> {
   const body = await req.json();
   const rawAnswers = body?.answers;
   const language = body?.language ?? 'zh-CN';
+  const customProviderPayload = body?.customProvider;
 
   if (!rawAnswers || !Array.isArray(rawAnswers) || rawAnswers.length === 0) {
     return new Response(JSON.stringify({ error: 'Answers array is required' }), {
@@ -155,8 +158,68 @@ async function handler(req: Request): Promise<Response> {
   }
 
   try {
+    let customProviderOverride: AIProvider | null = null;
+    let customProviderId: string | null = null;
+    let customModelOverride: string | undefined;
+
+    if (customProviderPayload) {
+      const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
+      if (!parsedResult.success) {
+        log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
+        return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
+      }
+
+      const parsed = parsedResult.data;
+      customProviderId = parsed.providerId;
+      const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
+      if (!providerConfig) {
+        return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
+      }
+
+      const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
+      if (!modelConfig) {
+        return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
+      }
+
+      const sanitizedApiKey = parsed.apiKey.trim();
+      if (!sanitizedApiKey && providerConfig.id !== 'system') {
+        return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
+      }
+
+      const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
+      if (!sanitizedBaseUrl) {
+        customModelOverride = modelConfig.value;
+        log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
+          providerId: providerConfig.id,
+          model: modelConfig.value,
+        });
+      } else {
+        customProviderOverride = {
+          name: providerConfig.name,
+          apiKey: sanitizedApiKey,
+          baseUrl: sanitizedBaseUrl,
+          model: modelConfig.value,
+          type: providerConfig.type,
+          mode: providerConfig.mode || 'auto',
+          retryCount: 1,
+          skipProbability: 0,
+        };
+      }
+    }
+
+    const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
     // 直接调用AI生成，不再入队
-    const magicalGirlDetails = await generateWithAI({ answers: normalizedAnswers, language }, magicalGirlDetailsConfig);
+    const providerOptions = (customProviderOverride || shouldDisablePolling)
+      ? {
+        ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
+        ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+      }
+      : undefined;
+
+    const magicalGirlDetails = await generateWithAI({ answers: normalizedAnswers, language }, {
+      ...magicalGirlDetailsConfig,
+      ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
+    }, providerOptions);
 
     // 异步保存到D1数据库，不阻塞对用户的响应
     // const saveData = {
@@ -204,3 +267,8 @@ async function handler(req: Request): Promise<Response> {
 }
 
 export default handler;
+const CustomProviderSchema = z.object({
+  providerId: z.string().min(1),
+  modelId: z.string().min(1),
+  apiKey: z.string(),
+});

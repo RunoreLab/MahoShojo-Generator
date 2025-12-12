@@ -6,7 +6,7 @@ export interface AIProvider {
   apiKey: string;
   baseUrl: string;
   model: string | string[]; // 支持单个模型或多个模型数组
-  type: 'openai' | 'google';
+  type: 'openai' | 'google' | 'deepseek';
   retryCount?: number;
   skipProbability?: number;
   mode?: 'json' | 'auto' | 'tool' | undefined;
@@ -15,9 +15,9 @@ export interface AIProvider {
 
 // [新增 v0.2.1] AI 安全检查策略配置接口 (SRS 3.1.1)
 export interface SafetyCheckPolicy {
-    character: 'non-native-only' | 'all' | 'none'; // 角色文件检查策略
-    scenario: 'non-native-only' | 'all' | 'none';  // 情景文件检查策略
-    userGuidance: 'all' | 'none';                   // 故事引导检查策略
+  character: 'non-native-only' | 'all' | 'none'; // 角色文件检查策略
+  scenario: 'non-native-only' | 'all' | 'none';  // 情景文件检查策略
+  userGuidance: 'all' | 'none';                   // 故事引导检查策略
 }
 
 // 解析 AI 提供商配置的函数
@@ -143,24 +143,24 @@ const getSkipNativeScenarioCheck = (): boolean => {
  * @returns {SafetyCheckPolicy} 详细的检查策略对象
  */
 const getSafetyCheckPolicy = (): SafetyCheckPolicy => {
-    try {
-        if (process.env.NEXT_PUBLIC_SAFETY_CHECK_POLICY) {
-            const parsed = JSON.parse(process.env.NEXT_PUBLIC_SAFETY_CHECK_POLICY);
-            return {
-                character: parsed.character || 'non-native-only',
-                scenario: parsed.scenario || 'non-native-only',
-                userGuidance: parsed.userGuidance || 'all',
-            };
-        }
-    } catch (e) {
-        console.error("解析 NEXT_PUBLIC_SAFETY_CHECK_POLICY 失败，使用默认值", e);
+  try {
+    if (process.env.NEXT_PUBLIC_SAFETY_CHECK_POLICY) {
+      const parsed = JSON.parse(process.env.NEXT_PUBLIC_SAFETY_CHECK_POLICY);
+      return {
+        character: parsed.character || 'non-native-only',
+        scenario: parsed.scenario || 'non-native-only',
+        userGuidance: parsed.userGuidance || 'all',
+      };
     }
-    // 默认策略
-    return {
-        character: 'non-native-only',
-        scenario: 'non-native-only',
-        userGuidance: 'all',
-    };
+  } catch (e) {
+    console.error("解析 NEXT_PUBLIC_SAFETY_CHECK_POLICY 失败，使用默认值", e);
+  }
+  // 默认策略
+  return {
+    character: 'non-native-only',
+    scenario: 'non-native-only',
+    userGuidance: 'all',
+  };
 };
 
 /**
@@ -168,8 +168,8 @@ const getSafetyCheckPolicy = (): SafetyCheckPolicy => {
  * @returns {boolean} 是否启用
  */
 const getEnableBundleSafetyCheck = (): boolean => {
-    // 默认为 true, 只有当环境变量明确设置为 'false' 时才禁用
-    return process.env.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK !== 'false';
+  // 默认为 true, 只有当环境变量明确设置为 'false' 时才禁用
+  return process.env.NEXT_PUBLIC_ENABLE_BUNDLE_SAFETY_CHECK !== 'false';
 };
 
 /**
@@ -177,11 +177,11 @@ const getEnableBundleSafetyCheck = (): boolean => {
  * @returns {'strict' | 'moderate' | 'lenient'} 提示词等级
  */
 const getAiSafetyPromptLevel = (): 'strict' | 'moderate' | 'lenient' => {
-    const level = process.env.NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL;
-    if (level === 'strict' || level === 'lenient') {
-        return level;
-    }
-    return 'moderate'; // 默认为 'moderate'
+  const level = process.env.NEXT_PUBLIC_AI_SAFETY_PROMPT_LEVEL;
+  if (level === 'strict' || level === 'lenient') {
+    return level;
+  }
+  return 'moderate'; // 默认为 'moderate'
 };
 
 /**
@@ -189,8 +189,8 @@ const getAiSafetyPromptLevel = (): 'strict' | 'moderate' | 'lenient' => {
  * @returns {boolean}
  */
 const getAllowGuidedSublimationNativeSigning = (): boolean => {
-    // 默认为 false, 只有当环境变量明确设置为 'true' 时才开启
-    return process.env.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING === 'true';
+  // 默认为 false, 只有当环境变量明确设置为 'true' 时才开启
+  return process.env.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING === 'true';
 };
 
 export const config = {
