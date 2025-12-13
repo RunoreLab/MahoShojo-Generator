@@ -4,10 +4,12 @@ import { ChangeEvent, useEffect, useRef, useState } from 'react';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleActions } from '../hooks/useBattleActions';
+import { BattleStoreState } from '../types';
 
 export function ScenarioPanel() {
-  const scenario = useBattleStore((state) => state.scenario);
-  const isGenerating = useBattleStore((state) => state.isGenerating);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const scenario = useBattleSelector((state) => state.scenario);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
   const { handleScenarioUpload, handleScenarioPaste } = useBattleActions();
   const [isPasteVisible, setIsPasteVisible] = useState(false);
   const [pastedJson, setPastedJson] = useState('');

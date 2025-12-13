@@ -6,13 +6,14 @@ import { zodResolver } from '@hookform/resolvers/zod';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleSettingsFormValues, BattleSettingsSchema } from '../utils/schemas';
-import { CombatantData } from '../types';
+import { BattleStoreState, CombatantData } from '../types';
 
 export function BattleSettings() {
-  const settings = useBattleStore((state) => state.settings);
-  const updateSettings = useBattleStore((state) => state.updateSettings);
-  const isGenerating = useBattleStore((state) => state.isGenerating);
-  const combatants = useBattleStore((state) => state.combatants);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const settings = useBattleSelector((state) => state.settings);
+  const updateSettings = useBattleSelector((state) => state.updateSettings);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const combatants = useBattleSelector((state) => state.combatants);
 
   const form = useForm<BattleSettingsFormValues>({
     resolver: zodResolver(BattleSettingsSchema),

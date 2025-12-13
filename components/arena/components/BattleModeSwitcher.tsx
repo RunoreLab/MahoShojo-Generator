@@ -1,11 +1,13 @@
 'use client';
 
 import { useBattleStore } from '../stores/useBattleStore';
+import { BattleStoreState } from '../types';
 
 export function BattleModeSwitcher() {
-  const battleMode = useBattleStore((state) => state.battleMode);
-  const setBattleMode = useBattleStore((state) => state.setBattleMode);
-  const isGenerating = useBattleStore((state) => state.isGenerating);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const battleMode = useBattleSelector((state) => state.battleMode);
+  const setBattleMode = useBattleSelector((state) => state.setBattleMode);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
 
   const renderHelper = () => {
     switch (battleMode) {

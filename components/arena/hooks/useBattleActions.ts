@@ -6,7 +6,7 @@ import { inferTemplate } from '@/lib/data-card-converter';
 import { generateRandomCanshou, generateRandomMagicalGirl } from '@/lib/random-character-generator';
 
 import { useBattleStore } from '../stores/useBattleStore';
-import { CombatantData, MAX_COMBATANTS, RandomCombatantPlaceholder } from '../types';
+import { BattleStoreState, CombatantData, MAX_COMBATANTS, RandomCombatantPlaceholder } from '../types';
 import {
   getCombatantDisplayName,
   inferCombatantType,
@@ -46,14 +46,15 @@ const verifyOrigin = async (payload: any): Promise<boolean> => {
 };
 
 export const useBattleActions = () => {
-  const combatants = useBattleStore((state) => state.combatants);
-  const isGenerating = useBattleStore((state) => state.isGenerating);
-  const setError = useBattleStore((state) => state.setError);
-  const addCombatant = useBattleStore((state) => state.addCombatant);
-  const setCombatants = useBattleStore((state) => state.setCombatants);
-  const setScenario = useBattleStore((state) => state.setScenario);
-  const setAdjudicationEvents = useBattleStore((state) => state.setAdjudicationEvents);
-  const scenario = useBattleStore((state) => state.scenario);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const combatants = useBattleSelector((state) => state.combatants);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const setError = useBattleSelector((state) => state.setError);
+  const addCombatant = useBattleSelector((state) => state.addCombatant);
+  const setCombatants = useBattleSelector((state) => state.setCombatants);
+  const setScenario = useBattleSelector((state) => state.setScenario);
+  const setAdjudicationEvents = useBattleSelector((state) => state.setAdjudicationEvents);
+  const scenario = useBattleSelector((state) => state.scenario);
 
   const appendAdjudicationEvents = useCallback(
     (events: unknown, label: string) => {
@@ -119,13 +120,14 @@ export const useBattleActions = () => {
     [addCombatant, combatants.length, isGenerating, setError]
   );
 
-  const handleTeamChange = useBattleStore((state) => state.updateCombatantTeam);
+  const handleTeamChange = useBattleSelector((state) => state.updateCombatantTeam);
 
   const handleSelectDataCard = useCallback(
     async (cardData: any) => {
       const cleanedCardData = removePrivateKeys(cardData);
       const resolvedName = getCombatantDisplayName(cleanedCardData);
       const inferredTemplate = inferTemplate(cleanedCardData);
+      const targetFilename = `${cardData._cardName || resolvedName}.json`;
 
       if (inferredTemplate === 'scenario') {
         if (useBattleStore.getState().battleMode !== 'scenario') {
@@ -147,7 +149,7 @@ export const useBattleActions = () => {
         setError(`❌ 最多只能添加 ${MAX_COMBATANTS} 位角色。`);
         return;
       }
-      if (combatants.some((c) => 'filename' in c && c.filename === resolvedName)) {
+      if (combatants.some((c) => 'filename' in c && c.filename === targetFilename)) {
         setError(`❌ 已添加同名角色: ${resolvedName}`);
         return;
       }
@@ -169,7 +171,7 @@ export const useBattleActions = () => {
       addCombatant({
         type,
         data: validation.data ?? cleanedCardData,
-        filename: `${cardData._cardName || resolvedName}.json`,
+        filename: targetFilename,
         isValid,
         isPreset: false,
         isNonStandard: false,

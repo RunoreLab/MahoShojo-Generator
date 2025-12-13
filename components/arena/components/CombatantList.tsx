@@ -6,7 +6,7 @@ import Link from 'next/link';
 
 import { getCombatantDisplayName } from '../utils/characterValidator';
 import { useBattleStore } from '../stores/useBattleStore';
-import { CombatantData } from '../types';
+import { BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from '../hooks/useBattleActions';
 
 interface CombatantListProps {
@@ -20,9 +20,10 @@ const COMBATANT_TYPE_LABELS: Record<CombatantData['type'], string> = {
 };
 
 export function CombatantList({ onShowDetails }: CombatantListProps) {
-  const combatants = useBattleStore((state) => state.combatants);
-  const isGenerating = useBattleStore((state) => state.isGenerating);
-  const removeCombatant = useBattleStore((state) => state.removeCombatant);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const combatants = useBattleSelector((state) => state.combatants);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const removeCombatant = useBattleSelector((state) => state.removeCombatant);
   const { handleAddRandomPlaceholder, handleTeamChange, handleClearRoster } = useBattleActions();
   const [copiedStatus, setCopiedStatus] = useState<Record<string, boolean>>({});
 

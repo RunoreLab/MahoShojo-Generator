@@ -6,16 +6,19 @@ import BattleReportCard, { NewsReport } from '@/components/BattleReportCard';
 import { useBattleStore } from '../stores/useBattleStore';
 import { getCombatantDisplayName } from '../utils/characterValidator';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { AdjudicationResult } from '@/types/arena';
+import { BattleStoreState, UpdatedCombatantData } from '../types';
 
 interface BattleResultProps {
   onSaveImage: (imageUrl: string) => void;
 }
 
 export function BattleResult({ onSaveImage }: BattleResultProps) {
-  const adjudicationResults = useBattleStore((state) => state.adjudicationResults);
-  const newsReport = useBattleStore((state) => state.newsReport);
-  const updatedCombatants = useBattleStore((state) => state.updatedCombatants);
-  const battleMode = useBattleStore((state) => state.battleMode);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
+  const newsReport = useBattleSelector((state) => state.newsReport);
+  const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
+  const battleMode = useBattleSelector((state) => state.battleMode);
 
   const downloadUpdatedJson = (characterData: any) => {
     const name = characterData.codename || characterData.name;
@@ -37,7 +40,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
         <div className="card mt-6">
           <h3 className="text-lg font-bold text-gray-800 mb-3">🎲 随机判定结果</h3>
           <div className="space-y-2">
-            {adjudicationResults.map((result, index) => (
+            {adjudicationResults.map((result: AdjudicationResult, index: number) => (
               <div
                 key={index}
                 className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm"
@@ -78,7 +81,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
         <div className="card mt-6">
           <h3 className="text-lg font-bold text-gray-800 mb-3">角色更新</h3>
           <div className="space-y-4">
-            {updatedCombatants.map((character) => {
+            {updatedCombatants.map((character: UpdatedCombatantData) => {
               const entries = character.arena_history?.entries;
               const latestEntry = Array.isArray(entries) && entries.length > 0 ? entries[entries.length - 1] : null;
               const stateSummary = character.current_state?.summary?.trim();
