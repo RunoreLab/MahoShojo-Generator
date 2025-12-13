@@ -12,7 +12,13 @@ export const MagicalGirlSchema = z
     magicConstruct: z.object({
       name: z.string().min(1, '缺少 magicConstruct.name'),
       form: z.string().min(1, '缺少 magicConstruct.form'),
-      basicAbilities: z.string().min(1, '缺少 magicConstruct.basicAbilities'),
+      // 预设与用户自定义的魔法少女常用数组描述基础能力，这里兼容字符串或字符串数组
+      basicAbilities: z
+        .union([
+          z.string().min(1, '缺少 magicConstruct.basicAbilities'),
+          z.array(z.string().min(1)).nonempty('缺少 magicConstruct.basicAbilities'),
+        ])
+        .transform((val) => (Array.isArray(val) ? val.join('\n') : val)),
       description: z.string().min(1, '缺少 magicConstruct.description'),
     }),
     wonderlandRule: z.object({
@@ -23,7 +29,12 @@ export const MagicalGirlSchema = z
     }),
     blooming: z.object({
       name: z.string().min(1, '缺少 blooming.name'),
-      evolvedAbilities: z.string().min(1, '缺少 blooming.evolvedAbilities'),
+      evolvedAbilities: z
+        .union([
+          z.string().min(1, '缺少 blooming.evolvedAbilities'),
+          z.array(z.string().min(1)).nonempty('缺少 blooming.evolvedAbilities'),
+        ])
+        .transform((val) => (Array.isArray(val) ? val.join('\n') : val)),
       evolvedForm: z.string().min(1, '缺少 blooming.evolvedForm'),
       evolvedOutfit: z.string().min(1, '缺少 blooming.evolvedOutfit'),
       powerLevel: z.string().min(1, '缺少 blooming.powerLevel'),
@@ -31,7 +42,12 @@ export const MagicalGirlSchema = z
     analysis: z.object({
       personalityAnalysis: z.string().min(1, '缺少 analysis.personalityAnalysis'),
       abilityReasoning: z.string().min(1, '缺少 analysis.abilityReasoning'),
-      coreTraits: z.string().min(1, '缺少 analysis.coreTraits'),
+      coreTraits: z
+        .union([
+          z.string().min(1, '缺少 analysis.coreTraits'),
+          z.array(z.string().min(1)).nonempty('缺少 analysis.coreTraits'),
+        ])
+        .transform((val) => (Array.isArray(val) ? val.join('、') : val)),
       predictionBasis: z.string().min(1, '缺少 analysis.predictionBasis'),
     }),
   })
