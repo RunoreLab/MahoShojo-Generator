@@ -1,6 +1,5 @@
 import { inferTemplate } from '@/lib/data-card-converter';
 import { GeneralCharacterSchema } from '@/lib/schemas';
-import { z } from 'zod';
 
 import { CombatantType } from '../types';
 import { CanshouSchema, MagicalGirlSchema } from './schemas';
@@ -69,7 +68,7 @@ export const normalizeMagicalGirlStructure = (payload: any): { normalized: any; 
   return { normalized, warnings };
 };
 
-const formatIssues = (issues: z.ZodIssue[]): string[] =>
+const formatIssues = (issues: Array<{ message?: string }>): string[] =>
   issues.map((issue) => issue.message || '格式校验失败');
 
 export const validateMagicalGirlData = (data: any): ValidationResult => {

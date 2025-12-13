@@ -2,6 +2,7 @@
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
+import { BattleStoreState } from '../types';
 
 const buttonTextMap: Record<string, string> = {
   daily: '生成日常故事 (´｡• ᵕ •｡`) ♡',
@@ -12,8 +13,9 @@ const buttonTextMap: Record<string, string> = {
 
 export function BattleActions() {
   const { handleGenerate, isGenerating, isCooldown, remainingTime } = useBattleEngine();
-  const combatants = useBattleStore((state) => state.combatants);
-  const battleMode = useBattleStore((state) => state.battleMode);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const combatants = useBattleSelector((state) => state.combatants);
+  const battleMode = useBattleSelector((state) => state.battleMode);
 
   const getButtonText = () => {
     if (isCooldown) return `记者赶稿中...请等待 ${remainingTime} 秒`;

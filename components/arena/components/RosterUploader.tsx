@@ -3,15 +3,17 @@
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 
 import { useBattleStore } from '../stores/useBattleStore';
-import { MAX_COMBATANTS } from '../types';
+import { BattleStoreState, MAX_COMBATANTS } from '../types';
 import { useBattleActions } from '../hooks/useBattleActions';
 
 export function RosterUploader() {
   const [isPasteVisible, setIsPasteVisible] = useState(false);
   const [pastedJson, setPastedJson] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const combatants = useBattleStore((state) => state.combatants);
-  const isGenerating = useBattleStore((state) => state.isGenerating);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const combatants = useBattleSelector((state) => state.combatants);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const setError = useBattleSelector((state) => state.setError);
   const { handleFileUpload, handlePaste } = useBattleActions();
 
   useEffect(() => {
@@ -28,6 +30,9 @@ export function RosterUploader() {
     if (!files) return;
     try {
       await handleFileUpload(files);
+      setError(null);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '上传文件解析失败');
     } finally {
       if (inputRef.current) {
         inputRef.current.value = '';
@@ -36,8 +41,13 @@ export function RosterUploader() {
   };
 
   const onPaste = async () => {
-    await handlePaste(pastedJson);
-    setPastedJson('');
+    try {
+      await handlePaste(pastedJson);
+      setError(null);
+      setPastedJson('');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '粘贴内容解析失败');
+    }
   };
 
   return (

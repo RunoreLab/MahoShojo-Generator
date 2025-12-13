@@ -8,6 +8,7 @@ import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/lib/useAuth';
 import { config as appConfig } from '@/lib/config';
+import { Preset } from '@/pages/api/get-presets';
 
 import { BattleHeader } from './components/BattleHeader';
 import { PresetSelector } from './components/PresetSelector';
@@ -22,7 +23,7 @@ import { BattleResult } from './components/BattleResult';
 import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { ArenaStatistics } from './components/ArenaStatistics';
 import { useBattleStore } from './stores/useBattleStore';
-import { CombatantData } from './types';
+import { BattleStoreState, CombatantData } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
 import { usePresetQuery, useLanguagesQuery, useStatsQuery } from './hooks/useArenaData';
 
@@ -34,11 +35,11 @@ export function ArenaPage() {
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
 
-  const combatants = useBattleStore((state) => state.combatants);
-  const battleMode = useBattleStore((state) => state.battleMode);
-  const isGenerating = useBattleStore((state) => state.isGenerating);
-  const isMatching = useBattleStore((state) => state.isMatching);
-  const error = useBattleStore((state) => state.error);
+  const combatants = useBattleStore((state: BattleStoreState) => state.combatants);
+  const battleMode = useBattleStore((state: BattleStoreState) => state.battleMode);
+  const isGenerating = useBattleStore((state: BattleStoreState) => state.isGenerating);
+  const isMatching = useBattleStore((state: BattleStoreState) => state.isMatching);
+  const error = useBattleStore((state: BattleStoreState) => state.error);
 
   const { handleSelectDataCard, handleRandomMatch } = useBattleActions();
 
@@ -49,8 +50,8 @@ export function ArenaPage() {
   const presetInfo = useMemo(() => {
     const map = new Map<string, string>();
     if (presetGrouped) {
-      presetGrouped.magicalGirl.forEach((preset) => map.set(preset.name, preset.description));
-      presetGrouped.canshou.forEach((preset) => map.set(preset.name, preset.description));
+      presetGrouped.magicalGirl.forEach((preset: Preset) => map.set(preset.name, preset.description));
+      presetGrouped.canshou.forEach((preset: Preset) => map.set(preset.name, preset.description));
     }
     return map;
   }, [presetGrouped]);

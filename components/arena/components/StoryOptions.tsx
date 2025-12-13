@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import AiProviderSelector from '@/components/AiProviderSelector';
 
 import { useBattleStore } from '../stores/useBattleStore';
-import { LanguageOption, StoryLengthOption } from '../types';
+import { BattleStoreState, LanguageOption, StoryLengthOption } from '../types';
 import { StoryPreferencesFormValues, StoryPreferencesSchema } from '../utils/schemas';
 
 const battleLevels = [
@@ -24,17 +24,18 @@ interface StoryOptionsProps {
 }
 
 export function StoryOptions({ languages }: StoryOptionsProps) {
-  const battleMode = useBattleStore((state) => state.battleMode);
-  const storyLength = useBattleStore((state) => state.storyLength);
-  const setStoryLength = useBattleStore((state) => state.setStoryLength);
-  const selectedLevel = useBattleStore((state) => state.selectedLevel);
-  const setSelectedLevel = useBattleStore((state) => state.setSelectedLevel);
-  const selectedLanguage = useBattleStore((state) => state.selectedLanguage);
-  const setSelectedLanguage = useBattleStore((state) => state.setSelectedLanguage);
-  const settings = useBattleStore((state) => state.settings);
-  const updateSettings = useBattleStore((state) => state.updateSettings);
-  const isGenerating = useBattleStore((state) => state.isGenerating);
-  const setUserProviderConfig = useBattleStore((state) => state.setUserProviderConfig);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const battleMode = useBattleSelector((state) => state.battleMode);
+  const storyLength = useBattleSelector((state) => state.storyLength);
+  const setStoryLength = useBattleSelector((state) => state.setStoryLength);
+  const selectedLevel = useBattleSelector((state) => state.selectedLevel);
+  const setSelectedLevel = useBattleSelector((state) => state.setSelectedLevel);
+  const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
+  const setSelectedLanguage = useBattleSelector((state) => state.setSelectedLanguage);
+  const settings = useBattleSelector((state) => state.settings);
+  const updateSettings = useBattleSelector((state) => state.updateSettings);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const setUserProviderConfig = useBattleSelector((state) => state.setUserProviderConfig);
 
   const form = useForm<StoryPreferencesFormValues>({
     resolver: zodResolver(StoryPreferencesSchema),
@@ -56,14 +57,14 @@ export function StoryOptions({ languages }: StoryOptionsProps) {
 
   useEffect(() => {
     const subscription = form.watch((values) => {
-      setSelectedLevel(values.selectedLevel);
-      setSelectedLanguage(values.selectedLanguage);
+      setSelectedLevel(values.selectedLevel ?? '');
+      setSelectedLanguage(values.selectedLanguage ?? selectedLanguage);
       if (typeof values.userGuidance === 'string') {
         updateSettings({ userGuidance: values.userGuidance });
       }
     });
     return () => subscription.unsubscribe();
-  }, [form, setSelectedLanguage, setSelectedLevel, updateSettings]);
+  }, [form, selectedLanguage, setSelectedLanguage, setSelectedLevel, updateSettings]);
 
   const storyOptions: { value: StoryLengthOption; label: string }[] = [
     { value: 'default', label: '默认' },

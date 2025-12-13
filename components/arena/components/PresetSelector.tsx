@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { Preset } from '@/pages/api/get-presets';
 
 import { useBattleStore } from '../stores/useBattleStore';
-import { MAX_COMBATANTS } from '../types';
+import { BattleStoreState, Combatant, MAX_COMBATANTS } from '../types';
 import { usePresetQuery } from '../hooks/useArenaData';
 import { validateCanshouData, validateMagicalGirlData } from '../utils/characterValidator';
 
@@ -113,16 +113,20 @@ export function PresetSelector() {
   const { grouped, isLoading, error } = usePresetQuery();
   const [mgPage, setMgPage] = useState(1);
   const [canshouPage, setCanshouPage] = useState(1);
-  const combatants = useBattleStore((state) => state.combatants);
-  const addCombatant = useBattleStore((state) => state.addCombatant);
-  const removeCombatant = useBattleStore((state) => state.removeCombatant);
-  const isGenerating = useBattleStore((state) => state.isGenerating);
-  const setError = useBattleStore((state) => state.setError);
-  const loadingPreset = useBattleStore((state) => state.loadingPreset);
-  const setLoadingPreset = useBattleStore((state) => state.setLoadingPreset);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const combatants = useBattleSelector((state) => state.combatants);
+  const addCombatant = useBattleSelector((state) => state.addCombatant);
+  const removeCombatant = useBattleSelector((state) => state.removeCombatant);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const setError = useBattleSelector((state) => state.setError);
+  const loadingPreset = useBattleSelector((state) => state.loadingPreset);
+  const setLoadingPreset = useBattleSelector((state) => state.setLoadingPreset);
 
   const combatantFilenames = useMemo(
-    () => combatants.filter((item): item is { filename: string } => 'filename' in item).map((item) => item.filename),
+    () =>
+      combatants
+        .filter((item): item is Combatant & { filename: string } => 'filename' in item)
+        .map((item) => item.filename),
     [combatants]
   );
 

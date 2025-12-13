@@ -8,7 +8,7 @@ import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBacku
 import { useCooldown } from '@/lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleApiResponse, CombatantData } from '../types';
+import { BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
 
 const buildBattleBackupItems = (
@@ -111,22 +111,23 @@ const checkSensitivePayload = async (
 
 export const useBattleEngine = () => {
   const router = useRouter();
-  const combatants = useBattleStore((state) => state.combatants);
-  const battleMode = useBattleStore((state) => state.battleMode);
-  const scenario = useBattleStore((state) => state.scenario);
-  const selectedLevel = useBattleStore((state) => state.selectedLevel);
-  const selectedLanguage = useBattleStore((state) => state.selectedLanguage);
-  const storyLength = useBattleStore((state) => state.storyLength);
-  const settings = useBattleStore((state) => state.settings);
-  const adjudicationEvents = useBattleStore((state) => state.adjudicationEvents);
-  const userProviderConfig = useBattleStore((state) => state.userProviderConfig);
-  const setError = useBattleStore((state) => state.setError);
-  const setNewsReport = useBattleStore((state) => state.setNewsReport);
-  const setUpdatedCombatants = useBattleStore((state) => state.setUpdatedCombatants);
-  const setAdjudicationResults = useBattleStore((state) => state.setAdjudicationResults);
-  const setIsGenerating = useBattleStore((state) => state.setIsGenerating);
-  const setCombatants = useBattleStore((state) => state.setCombatants);
-  const isGenerating = useBattleStore((state) => state.isGenerating);
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const combatants = useBattleSelector((state) => state.combatants);
+  const battleMode = useBattleSelector((state) => state.battleMode);
+  const scenario = useBattleSelector((state) => state.scenario);
+  const selectedLevel = useBattleSelector((state) => state.selectedLevel);
+  const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
+  const storyLength = useBattleSelector((state) => state.storyLength);
+  const settings = useBattleSelector((state) => state.settings);
+  const adjudicationEvents = useBattleSelector((state) => state.adjudicationEvents);
+  const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
+  const setError = useBattleSelector((state) => state.setError);
+  const setNewsReport = useBattleSelector((state) => state.setNewsReport);
+  const setUpdatedCombatants = useBattleSelector((state) => state.setUpdatedCombatants);
+  const setAdjudicationResults = useBattleSelector((state) => state.setAdjudicationResults);
+  const setIsGenerating = useBattleSelector((state) => state.setIsGenerating);
+  const setCombatants = useBattleSelector((state) => state.setCombatants);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
   const { handleResolveRandomPlaceholders } = useBattleActions();
 
   const isUserCustomKey =
@@ -166,6 +167,7 @@ export const useBattleEngine = () => {
     }
 
     const minParticipants = battleMode === 'daily' || battleMode === 'scenario' ? 1 : 2;
+    const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
     const playableCombatants = combatants.filter((item): item is CombatantData => 'data' in item);
 
     if (playableCombatants.length < minParticipants || playableCombatants.length > 10) {
@@ -197,7 +199,7 @@ export const useBattleEngine = () => {
       const sensitiveTargets = [
         JSON.stringify(freshCombatants.map((c) => c.data)),
         settings.userGuidance,
-        scenario.content ? JSON.stringify(scenario.content) : '',
+        shouldUseScenario ? JSON.stringify(scenario.content) : '',
       ];
 
       for (const payload of sensitiveTargets) {
@@ -227,7 +229,7 @@ export const useBattleEngine = () => {
         selectedLevel,
         mode: battleMode,
         userGuidance: settings.userGuidance,
-        scenario: scenario.content,
+        scenario: shouldUseScenario ? scenario.content : undefined,
         teams: Object.keys(teams).length > 0 ? teams : undefined,
         language: selectedLanguage,
         readArenaHistory: settings.readArenaHistory,
@@ -276,10 +278,10 @@ export const useBattleEngine = () => {
 
       const backupItems = buildBattleBackupItems(
         freshCombatants,
-        scenario.content,
-        scenario.fileName,
-        scenario.isNative,
-        scenarioDisplayName,
+        shouldUseScenario ? scenario.content : null,
+        shouldUseScenario ? scenario.fileName : null,
+        shouldUseScenario ? scenario.isNative : false,
+        shouldUseScenario ? scenarioDisplayName : null,
         settings.userGuidance,
         adjudicationEvents,
         result.adjudicationResults
