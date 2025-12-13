@@ -541,7 +541,12 @@ const DetailsPage: React.FC = () => {
 
         // 检查是否是 rate limit 错误
         if (errorMessage.includes('请求过于频繁')) {
-          setError('🚫 请求太频繁了！每2分钟只能生成一次哦~请稍后再试吧！');
+          const cooldownSeconds = Math.ceil(generatorCooldownMs / 1000);
+          setError(
+            isUserCustomKey
+              ? `🚫 自定义通道请求太频繁啦！每 ${cooldownSeconds} 秒生成一次就好～`
+              : `🚫 请求太频繁了！每 ${Math.max(cooldownSeconds, 60) / 60} 分钟只能生成一次哦~请稍后再试吧！`
+          );
         } else if (errorMessage.includes('网络') || error instanceof TypeError) {
           setError('🌐 网络连接有问题！请检查网络后重试~');
         } else {
@@ -552,7 +557,8 @@ const DetailsPage: React.FC = () => {
       }
     } finally {
       setSubmitting(false);
-      startCooldown();
+      // 依据当前通道实时覆盖冷却时间，确保自定义 AI 时降为 3 秒
+      startCooldown(generatorCooldownMs);
     }
   };
 
