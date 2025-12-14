@@ -110,7 +110,8 @@ export async function getUserDataCards(
     const params: any[] = [userId];
     
     if (search) {
-      sql += ' AND (name LIKE ? OR description LIKE ?)';
+      // 注意：data_card_updates 也包含 name/description 字段，未加表前缀会触发“ambiguous column name”错误
+      sql += ' AND (dc.name LIKE ? OR dc.description LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
     }
     
