@@ -13,7 +13,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 // v0.4.0 引入新的判定器类型
 import { ArenaHistory, ArenaHistoryEntry, AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
-import { inferTemplateId } from '@/lib/schemas';
+import { inferCharacterKind, inferTemplateId } from '@/lib/schemas';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import { webcrypto } from 'crypto';
 
@@ -416,6 +416,15 @@ const applyPostBattleUpdates = async (
       characterData.templateId = inferTemplateId(characterData);
       log.info(`为旧版角色 "${characterName}" 补充了 templateId: ${characterData.templateId}`);
     }
+
+    // 统一服务端角色类型，防止前端误判将通用角色当作残兽
+    const inferredKind = inferCharacterKind(characterData);
+    combatant.type =
+      inferredKind === 'magical-girl'
+        ? 'magical-girl'
+        : inferredKind === 'canshou'
+          ? 'canshou'
+          : 'general-character';
 
     let shouldSign = combatant.isNative;
     if (conflictingNames.has(characterName)) {
