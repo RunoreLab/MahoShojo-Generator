@@ -65,10 +65,10 @@ const buildBattleReportSchema = (options: { enableImpacts: boolean; enableImpact
         }
 
         if (options.enableCurrentState) {
-            impactShape.currentStateSummary = z.string().describe("该角色在战斗/事件结束后的实时状态概述。").optional();
+            impactShape.currentStateSummary = z.string().describe("该角色在本次故事后的即时状态概述。").optional();
         }
 
-        baseShape.impacts = z.array(z.object(impactShape)).describe("对每位参与该事件的核心角色的影响总结列表，反映角色当前状态。");
+        baseShape.impacts = z.array(z.object(impactShape)).describe("对每位参与该事件的核心角色的影响总结列表。");
     }
 
     return z.object(baseShape).describe("生成一份关于魔法少女的新闻报道。如果用户提供了引导，请在创作时参考，但必须确保最终内容符合魔法少女世界观和公序良俗。");
@@ -676,8 +676,12 @@ const createPromptBuilder = (
                 profileString += userAnswers.map((answer, i) => `Q: ${questions[i] || `问题 ${i + 1}`}\nA: ${answer}`).join('\n');
             }
         } else {
-            // 对于非结构化数据，告知AI并将其作为纯文本块提供
-            profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`;
+            // 对于非结构化数据，提供文本化设定
+            if (type === 'general-character' && typeof data.content === 'string') {
+                profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
+            } else {
+                profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`;
+            }
         }
         return profileString;
     }).join('\n\n');
@@ -739,7 +743,7 @@ const createPromptBuilder = (
     finalPrompt += `\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
 
     if (writeCurrentState) {
-        finalPrompt += `\n\n【当前状态同步】请在 JSON 输出的 impacts 数组每个对象中填写 currentStateSummary 字段，精确描述该角色在故事结束后的即时状态（如身体状况、物品、关系、心情或想法）。`;
+        finalPrompt += `\n\n【当前状态同步】请在输出的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式（如属性、数值），请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
     }
 
     return finalPrompt;
