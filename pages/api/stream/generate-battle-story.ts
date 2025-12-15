@@ -13,6 +13,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 // v0.4.0 引入新的判定器类型
 import { ArenaHistory, ArenaHistoryEntry, AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
+import { inferTemplateId } from '@/lib/schemas';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import { webcrypto } from 'crypto';
 
@@ -412,16 +413,7 @@ const applyPostBattleUpdates = async (
 
     // 【v0.3.0 FR-1】确保 templateId 存在，兼容旧文件
     if (!characterData.templateId) {
-      if (characterData.codename) { // 魔法少女
-        // 通过字段判断是问卷生成还是名字生成
-        characterData.templateId = characterData.magicConstruct
-          ? "魔法少女/心之花/魔法少女（问卷生成）"
-          : "魔法少女/心之花/魔法少女（名字生成）";
-      } else if (characterData.name) { // 残兽
-        characterData.templateId = "魔法少女/心之花/残兽（问卷生成）";
-      } else {
-        characterData.templateId = "魔法少女/心之花/未知";
-      }
+      characterData.templateId = inferTemplateId(characterData);
       log.info(`为旧版角色 "${characterName}" 补充了 templateId: ${characterData.templateId}`);
     }
 
