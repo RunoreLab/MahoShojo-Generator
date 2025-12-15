@@ -2,7 +2,7 @@ import { inferTemplate } from '@/lib/data-card-converter';
 import { GeneralCharacterSchema } from '@/lib/schemas';
 
 import { CombatantType } from '../types';
-import { CanshouSchema, MagicalGirlSchema } from './schemas';
+import { CanshouSchema, MagicalGirlSchema } from '@/lib/schemas';
 
 const MAGICAL_GIRL_CORE_FIELDS = {
   appearance: ['outfit', 'accessories', 'colorScheme', 'overallLook'],
