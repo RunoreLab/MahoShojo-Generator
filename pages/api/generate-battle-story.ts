@@ -13,7 +13,6 @@ import { NextRequest } from 'next/server';
 // v0.4.0 引入新的判定器类型
 import { ArenaHistory, ArenaHistoryEntry, AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import { inferCharacterKind, inferTemplateId } from '@/lib/schemas';
-import { inferTemplateId } from '@/lib/schemas';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import { webcrypto } from 'crypto';
 
@@ -568,6 +567,29 @@ const canshouVsCanshouSystemPrompt = `你是魔法国度研究院所属的魔法
   4. 胜利者判断：根据它们的设定和战斗逻辑，合理判断出胜利者。也可能两败俱伤或被第三方（例如魔法少女或环境因素）终结。
 `;
 
+// 兜底场景：【经典模式】其他战斗 的系统提示词
+const universalFallbackSystemPrompt = `
+  现在角色们在 A.R.E.N.A.竞技场中展开战斗，请根据以下规则生成战斗简报：
+  战斗推演核心规则：
+1.  等级与能力限制：角色的能力与等级严格挂钩。在推演开始前，请根据角色设定的强度，为每位角色分配合理的等级以确保战斗的平衡性和观赏性。
+    * 平衡原则：通常，参加战斗的角色等级应当是一致的。但作为平衡手段，能力设定严重过强的角色等级可以比其他人低，而设定严重过弱的角色等级则可以比其他人高。
+    * 能力锁定：角色不能使用未达到对应等级解锁的能力。
+
+2.  常规战斗模式：绝大多数战斗都围绕着角色的基本能力（例如魔法少女的【魔装】和【术式】）展开，极少情况下才可能使用高阶能力（例如【奇境】及【繁开】）。
+
+3.  领域（例如【奇境】、【巢】）的战术运用：
+    * 高昂代价：开启领域会付出巨大代价，因此通常只在面临你死我活的阵营冲突的情况下角色才会考虑使用。
+    * 战术博弈：可以描绘角色【权衡和考虑】是否要开启领域，以此来制造战术紧张感，但不一定会真的发动。
+    * 反制手段：领域并非无敌，可以被【抵消】或被【破坏】。
+
+4.  必杀技（例如【繁开】）的最终手段：
+    * 使用时机：只有顶级角色，在这么写更有益于战斗的展开的情况下，才【极小概率】允许使用必杀技。
+    * 强度限制：所使用的必杀技必须是【有代价、可被理解和应对的】，绝不能是无法破解的必胜技能。严禁使用干涉命运、时间、世界等过于强大的必杀技。
+
+请严格遵守以上战斗规则进行推演，构建一场等级合理、有来有回、充满战术博弈的精彩战斗，而不是一场单纯的能力碾压。
+注意，正义并不是必然战胜邪恶。反派有时候也能胜过正派。而且，正义与邪恶之间互有胜负才能创造出更精彩的故事。
+`;
+
 // 【情景模式】的核心系统提示词
 const scenarioModeSystemPrompt = `
 你是一位才华横溢的剧作家和故事叙述者，精通于在既定框架下演绎精彩的故事。你的任务是基于用户提供的【情景设定】和【角色档案】，创作一篇符合魔法少女世界观的新闻报道。
@@ -617,7 +639,7 @@ const createPromptBuilder = (
         const isStructured = isStructuredCharacter(data);
         const characterName = data.codename || data.name;
         const otherNames = allNames.filter(name => name !== characterName);
-        const typeDisplay = type === 'magical-girl' ? '魔法少女' : '残兽';
+        const typeDisplay = type === 'magical-girl' ? '魔法少女' : type === 'canshou' ? '残兽' : '通用角色';
         let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
         if (readArenaHistory) {
             profileString += filterAndFormatHistory(characterName, data.arena_history, otherNames, isPureBattle, historyReadLimit ?? undefined);
@@ -933,11 +955,20 @@ async function handler(req: NextRequest): Promise<Response> {
         else if (mode === 'kizuna') systemPrompt = kizunaModeSystemPrompt;
         else if (mode === 'scenario') systemPrompt = scenarioModeSystemPrompt;
         else {
-            const hasMagicalGirl = combatants.some((c: any) => c.type === 'magical-girl');
-            const hasCanshou = combatants.some((c: any) => c.type === 'canshou');
-            if (hasMagicalGirl && !hasCanshou) systemPrompt = classicModeSystemPrompt;
-            else if (!hasMagicalGirl && hasCanshou) systemPrompt = canshouVsCanshouSystemPrompt;
-            else systemPrompt = magicalGirlVsCanshouSystemPrompt;
+        const participantTypes = new Set(combatants.map((c: any) => c.type));
+        const hasOnlyMagicalGirls = participantTypes.size === 1 && participantTypes.has('magical-girl');
+        const hasOnlyCanshou = participantTypes.size === 1 && participantTypes.has('canshou');
+        const hasMagicalAndCanshouOnly = participantTypes.has('magical-girl') && participantTypes.has('canshou') && participantTypes.size === 2;
+
+        if (hasOnlyMagicalGirls) {
+            systemPrompt = classicModeSystemPrompt;
+        } else if (hasOnlyCanshou) {
+            systemPrompt = canshouVsCanshouSystemPrompt;
+        } else if (hasMagicalAndCanshouOnly) {
+            systemPrompt = magicalGirlVsCanshouSystemPrompt;
+        } else {
+            systemPrompt = universalFallbackSystemPrompt;
+        }
         }
 
         // 创建生成配置
