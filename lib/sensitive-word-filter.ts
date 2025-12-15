@@ -120,11 +120,11 @@ const sensitiveWordsConfig = {
     "5rOo5Y21",
     "5Y+X5a2V",
     "5rer6Z2h",
-    "5a2Q5a6r",
+    // "5a2Q5a6r",
     "6IKJ5aOB",
     "5YKs5oOF",
     "5oiQ55i+",
-    "5rSX6ISR",
+    // "5rSX6ISR",
     // 现实相关违禁词
     "5Lit5Zu9",
     "5Lit5Y2O5Lq65rCR5YWx5ZKM5Zu9",
