@@ -13,7 +13,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 // v0.4.0 引入新的判定器类型
 import { ArenaHistory, ArenaHistoryEntry, AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
-import { inferTemplateId } from '@/lib/schemas';
+import { inferCharacterKind, inferTemplateId } from '@/lib/schemas';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import { webcrypto } from 'crypto';
 
@@ -284,7 +284,7 @@ const filterAndFormatHistory = (
   history: ArenaHistory | undefined,
   otherParticipantNames: string[],
   isPureBattle: boolean,
-  limit?: number
+  limit?: number | null
 ): string => {
   // 如果没有历战记录，直接返回空字符串
   if (!history || !history.entries || history.entries.length === 0) {
@@ -416,6 +416,15 @@ const applyPostBattleUpdates = async (
       characterData.templateId = inferTemplateId(characterData);
       log.info(`为旧版角色 "${characterName}" 补充了 templateId: ${characterData.templateId}`);
     }
+
+    // 统一服务端角色类型，防止前端误判将通用角色当作残兽
+    const inferredKind = inferCharacterKind(characterData);
+    combatant.type =
+      inferredKind === 'magical-girl'
+        ? 'magical-girl'
+        : inferredKind === 'canshou'
+          ? 'canshou'
+          : 'general-character';
 
     let shouldSign = combatant.isNative;
     if (conflictingNames.has(characterName)) {
@@ -837,7 +846,7 @@ const createPromptBuilder = (
   finalPrompt += `\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
 
   if (writeCurrentState) {
-    finalPrompt += `\n\n【当前状态同步】请在 JSON 输出的 impacts 数组里，为每位角色填写 currentStateSummary 字段，用 1-2 句话描述事件结束后的即时状态（角色身体状况、物品、心情或想法等）。`;
+    finalPrompt += `\n\n【当前状态同步】请在输出的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式（如属性、数值），请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
   }
 
   finalPrompt += `

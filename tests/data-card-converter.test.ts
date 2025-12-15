@@ -75,6 +75,16 @@ describe('data-card-converter', () => {
     expect(inferTemplate(general)).toBe('general');
   });
 
+  it('keeps general classification even when content is empty string', () => {
+    const minimalGeneral = {
+      templateId: '通用角色',
+      name: '末伏之夜',
+      content: ''
+    };
+    expect(inferTemplate(minimalGeneral)).toBe('general');
+    expect(inferTemplateId(minimalGeneral)).toBe('通用角色');
+  });
+
   it('inferTemplate prefers general for name-only cards without templateId', () => {
     const legacy = { name: '未标记角色' };
     expect(inferTemplate(legacy)).toBe('general');
