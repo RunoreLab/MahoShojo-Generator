@@ -8,9 +8,7 @@ import {
   type MagicalGirlData,
   type ScenarioData,
   GENERAL_CHARACTER_TEMPLATE_ID,
-  isCanshou,
-  isGeneralCharacter,
-  isMagicalGirl,
+  inferCharacterKind,
   isScenarioCard
 } from './schemas';
 import type { CurrentStateData } from './schemas/current-state';
@@ -270,10 +268,9 @@ const DEFAULT_GENERAL: GeneralCharacterData = {
 };
 
 export function inferTemplate(data: unknown): InferableTemplate {
-  if (isGeneralCharacter(data)) return 'general';
+  const kind = inferCharacterKind(data);
+  if (kind !== 'unknown') return kind;
   if (isScenarioCard(data)) return 'scenario';
-  if (isMagicalGirl(data)) return 'magical-girl';
-  if (isCanshou(data)) return 'canshou';
   return 'unknown';
 }
 
