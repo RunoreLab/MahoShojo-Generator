@@ -17,6 +17,7 @@ import { RosterUploader } from './components/RosterUploader';
 import { CombatantList } from './components/CombatantList';
 import { ScenarioPanel } from './components/ScenarioPanel';
 import { BattleSettings } from './components/BattleSettings';
+import { AdjudicatorPanel } from './components/AdjudicatorPanel';
 import { StoryOptions } from './components/StoryOptions';
 import { BattleActions } from './components/BattleActions';
 import { BattleResult } from './components/BattleResult';
@@ -101,6 +102,7 @@ export function ArenaPage() {
             <BattleModeSwitcher />
             {battleMode === 'scenario' && <ScenarioPanel />}
             <BattleSettings />
+            <AdjudicatorPanel />
             <StoryOptions languages={languages} />
             <BattleActions />
             <div className="text-center mt-3">

@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 
 import AiProviderSelector from '@/components/AiProviderSelector';
+import { config as appConfig } from '@/lib/config';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, LanguageOption, StoryLengthOption } from '../types';
@@ -135,21 +136,23 @@ export function StoryOptions({ languages }: StoryOptionsProps) {
         </select>
       </div>
 
-      <div className="input-group">
-        <label htmlFor="user-guidance" className="input-label">
-          故事方向引导 (可选)
-        </label>
-        <input
-          id="user-guidance"
-          type="text"
-          className="input-field"
-          placeholder="输入关键词或一句话 (最多50字)"
-          maxLength={50}
-          disabled={isGenerating}
-          {...form.register('userGuidance')}
-        />
-        <p className="text-xs text-gray-500 mt-1">例如：“在雨中相遇”、“保卫要地”、“猫咖聚会”等。</p>
-      </div>
+      {appConfig.ENABLE_ARENA_USER_GUIDANCE && (
+        <div className="input-group">
+          <label htmlFor="user-guidance" className="input-label">
+            故事方向引导 (可选)
+          </label>
+          <input
+            id="user-guidance"
+            type="text"
+            className="input-field"
+            placeholder="输入关键词或一句话 (最多50字)"
+            maxLength={50}
+            disabled={isGenerating}
+            {...form.register('userGuidance')}
+          />
+          <p className="text-xs text-gray-500 mt-1">例如：“在雨中相遇”、“保卫要地”、“猫咖聚会”等。</p>
+        </div>
+      )}
 
       <AiProviderSelector onConfigChange={setUserProviderConfig} />
     </>
