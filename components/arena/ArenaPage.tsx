@@ -88,22 +88,24 @@ export function ArenaPage() {
             <PresetSelector />
             <DatabaseSelector
               onOpenCharacterModal={handleOpenCharacterDataModal}
-              onOpenScenarioModal={handleOpenScenarioDataModal}
               onRandomMatchCharacter={() => handleRandomMatch('character')}
-              onRandomMatchScenario={() => handleRandomMatch('scenario')}
               isAuthenticated={isAuthenticated}
               isGenerating={isGenerating}
               isMatching={isMatching}
               combatantCount={combatants.length}
-              battleMode={battleMode}
             />
             <RosterUploader />
             <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />
             <BattleModeSwitcher />
-            {battleMode === 'scenario' && <ScenarioPanel />}
+            {battleMode === 'scenario' && (
+              <ScenarioPanel
+                onOpenScenarioModal={handleOpenScenarioDataModal}
+                onRandomMatchScenario={() => handleRandomMatch('scenario')}
+                isAuthenticated={isAuthenticated}
+              />
+            )}
             <BattleSettings />
-            <AdjudicatorPanel />
-            <StoryOptions languages={languages} />
+            <StoryOptions languages={languages} afterUserGuidance={<AdjudicatorPanel />} />
             <BattleActions />
             <div className="text-center mt-3">
               <a

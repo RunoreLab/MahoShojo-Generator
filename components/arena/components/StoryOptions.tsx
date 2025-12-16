@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { ReactNode, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 
@@ -22,9 +22,10 @@ const battleLevels = [
 
 interface StoryOptionsProps {
   languages: LanguageOption[] | undefined;
+  afterUserGuidance?: ReactNode;
 }
 
-export function StoryOptions({ languages }: StoryOptionsProps) {
+export function StoryOptions({ languages, afterUserGuidance }: StoryOptionsProps) {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const storyLength = useBattleSelector((state) => state.storyLength);
@@ -99,6 +100,26 @@ export function StoryOptions({ languages }: StoryOptionsProps) {
         </div>
       )}
 
+      {appConfig.ENABLE_ARENA_USER_GUIDANCE && (
+        <div className="input-group">
+          <label htmlFor="user-guidance" className="input-label">
+            故事方向引导 (可选)
+          </label>
+          <input
+            id="user-guidance"
+            type="text"
+            className="input-field"
+            placeholder="输入关键词或一句话 (最多50字)"
+            maxLength={50}
+            disabled={isGenerating}
+            {...form.register('userGuidance')}
+          />
+          <p className="text-xs text-gray-500 mt-1">例如：“在雨中相遇”、“保卫要地”、“猫咖聚会”等。</p>
+        </div>
+      )}
+
+      {afterUserGuidance}
+
       <div className="input-group">
         <label className="input-label">期望字数</label>
         <div className="flex flex-wrap gap-2">
@@ -135,24 +156,6 @@ export function StoryOptions({ languages }: StoryOptionsProps) {
           ))}
         </select>
       </div>
-
-      {appConfig.ENABLE_ARENA_USER_GUIDANCE && (
-        <div className="input-group">
-          <label htmlFor="user-guidance" className="input-label">
-            故事方向引导 (可选)
-          </label>
-          <input
-            id="user-guidance"
-            type="text"
-            className="input-field"
-            placeholder="输入关键词或一句话 (最多50字)"
-            maxLength={50}
-            disabled={isGenerating}
-            {...form.register('userGuidance')}
-          />
-          <p className="text-xs text-gray-500 mt-1">例如：“在雨中相遇”、“保卫要地”、“猫咖聚会”等。</p>
-        </div>
-      )}
 
       <AiProviderSelector onConfigChange={setUserProviderConfig} />
     </>
