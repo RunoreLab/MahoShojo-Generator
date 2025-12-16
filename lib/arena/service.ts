@@ -5,13 +5,9 @@ import { NewsReport } from '@/components/BattleReportCard';
 import { ArenaHistoryEntry } from '@/types/arena';
 import { inferCharacterKind, inferTemplateId } from '@/lib/schemas';
 import { generateSignature, verifySignature } from '@/lib/signature';
-import { webcrypto } from 'crypto';
+import { randomUUID } from '@/lib/crypto';
 
 const log = getLogger('arena-service');
-const randomUUID =
-    typeof globalThis.crypto !== 'undefined' && typeof globalThis.crypto.randomUUID === 'function'
-        ? globalThis.crypto.randomUUID.bind(globalThis.crypto)
-        : webcrypto.randomUUID.bind(webcrypto);
 
 export const applyPostBattleUpdates = async (
     combatants: any[],

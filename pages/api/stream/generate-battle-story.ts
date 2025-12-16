@@ -15,10 +15,7 @@ import { NextRequest } from 'next/server';
 import { ArenaHistory, ArenaHistoryEntry, AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import { inferCharacterKind, inferTemplateId } from '@/lib/schemas';
 import { generateSignature, verifySignature } from '@/lib/signature';
-import { webcrypto } from 'crypto';
-
-// 兼容 Edge 和 Node.js 环境的 crypto API
-const randomUUID = typeof crypto !== 'undefined' ? crypto.randomUUID.bind(crypto) : webcrypto.randomUUID.bind(webcrypto);
+import { randomUUID } from '@/lib/crypto';
 
 const log = getLogger('api-gen-battle-story-stream');
 const MAX_COMBATANTS = 10;

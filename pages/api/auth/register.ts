@@ -1,12 +1,11 @@
 import { createUser, getUserByUsername, getUserByEmail } from '@/lib/d1';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 import { quickCheck } from '@/lib/sensitive-word-filter';
-import { webcrypto } from 'crypto';
+import { getSecureRandomValues } from '@/lib/crypto';
 
 export const runtime = 'edge';
 
-// 兼容 Edge 和 Node.js 环境的 crypto API
-const getRandomValues = typeof crypto !== 'undefined' ? crypto.getRandomValues.bind(crypto) : webcrypto.getRandomValues.bind(webcrypto);
+const getRandomValues = getSecureRandomValues;
 
 // Email validation function
 function isValidEmail(email: string): boolean {
