@@ -23,7 +23,7 @@ export interface AIProviderOption {
  * 可选 AI 供应商目录。
  * - description 用于向用户解释供应商特色。
  * - docsUrl 用于跳转至官方文档，帮助用户快速查看接入方式。
- * - baseUrl 为默认的 API 访问地址，用户仍可在 UI 中覆盖。
+ * - baseUrl 为默认的 API 访问地址（当前版本由目录固定，未在 UI 中开放覆盖）。
  * - models 按常见用途给出推荐模型，方便快速选择。
  */
 export const AI_PROVIDER_CATALOG: AIProviderOption[] = [

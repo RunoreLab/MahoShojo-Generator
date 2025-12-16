@@ -6,9 +6,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { quickCheck, type FilterResult, type SensitiveMatchDetail } from '@/lib/sensitive-word-filter';
 import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
-import { webcrypto } from 'crypto';
 import { config } from '@/lib/config';
 import { validateDataCard, ValidationResult } from '@/lib/schemas';
+import { randomUUID } from '@/lib/crypto';
 import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
@@ -38,10 +38,7 @@ import {
     TEMPLATE_LABELS,
     type DataCardTemplate,
     type InferableTemplate
-} from '@/lib/data-card-converter';
-
-// 兼容 Edge 和 Node.js 环境的 crypto API
-const randomUUID = typeof crypto !== 'undefined' ? crypto.randomUUID.bind(crypto) : webcrypto.randomUUID.bind(webcrypto);
+	} from '@/lib/data-card-converter';
 
 
 // 定义允许保持原生性的可编辑字段 (顶级键) (SRS 3.7.3)
