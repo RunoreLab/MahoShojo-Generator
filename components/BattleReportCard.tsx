@@ -53,6 +53,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
   };
 
   const modeDisplay = mode ? getModeDisplay(mode) : null;
+  const showScenarioTitle = mode === 'scenario' && report.scenario;
 
   // 处理保存为图片的功能
   const handleSaveImage = async () => {
@@ -170,7 +171,7 @@ ${adjudicationMarkdown}
       <div className="result-content">
         <img src="/arena-white.svg" style={{ marginTop: '1rem' }} width={320} height={90} alt="魔法少女竞技场" className="feature-title-svg" />
 
-        { report.scenario && <h3 className='ml-2 font-bold text-gray-100'>~ {report.scenario} ~</h3> }
+        {showScenarioTitle && <h3 className='ml-2 font-bold text-gray-100'>~ {report.scenario} ~</h3> }
         <h2 className="text-xl font-bold mt-8 mb-2" style={{ marginLeft: '0.5rem' }}>{report.headline}</h2>
         <div style={{ position: 'relative', marginLeft: '0.5rem', minHeight: '60px' }}>
           <div>
