@@ -21,17 +21,31 @@ export function BattleSettings() {
     mode: 'onChange',
   });
 
+  // 当 store 中的 settings 变化时（如从 localStorage 加载），同步到表单
   useEffect(() => {
-    form.reset(settings);
+    const currentValues = form.getValues();
+    const hasChanged = Object.keys(settings).some(
+      key => settings[key as keyof typeof settings] !== currentValues[key as keyof typeof currentValues]
+    );
+    if (hasChanged) {
+      form.reset(settings, { keepDirty: false });
+    }
   }, [settings, form]);
 
+  // 当表单值变化时，同步到 store
   useEffect(() => {
-    const subscription = form.watch((values) => {
-      if (!form.formState.isDirty) return;
-      updateSettings(values as BattleSettingsFormValues);
+    const subscription = form.watch(() => {
+      const values = form.getValues();
+      // 比较值是否真的变化了，避免无限循环
+      const hasChanged = Object.keys(values).some(
+        key => values[key as keyof typeof values] !== settings[key as keyof typeof settings]
+      );
+      if (hasChanged) {
+        updateSettings(values);
+      }
     });
     return () => subscription.unsubscribe();
-  }, [form, updateSettings]);
+  }, [form, updateSettings, settings]);
 
   const readableCombatantCount = useMemo(
     () => combatants.filter((item): item is CombatantData => 'data' in item).length,
