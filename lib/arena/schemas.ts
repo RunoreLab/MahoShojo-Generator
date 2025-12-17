@@ -23,7 +23,7 @@ export const buildBattleReportSchema = (options: { enableImpacts: boolean; enabl
         }
 
         if (options.enableCurrentState) {
-            impactShape.currentStateSummary = z.string().describe("该角色在本次故事后的即时状态概述。").optional();
+            impactShape.currentStateSummary = z.string().describe("该角色在本次故事后的即时状态概述。");
         }
 
         baseShape.impacts = z.array(z.object(impactShape)).describe("对每位参与该事件的核心角色的影响总结列表。");
