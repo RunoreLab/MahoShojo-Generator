@@ -51,6 +51,7 @@ export default function BattleDataModal({
   const [sortBy, setSortBy] = useState<'likes' | 'usage' | 'favorites' | 'created_at'>('created_at');
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [isSelecting, setIsSelecting] = useState(false); // 防止重复点击
   const cardsPerPage = 12;
 
   // 【新增】高级筛选的状态
@@ -302,6 +303,7 @@ export default function BattleDataModal({
     setSearchQuery('');
     setFilters(initialFilters); // 清空高级筛选
     setActiveFilters(initialFilters);
+    setIsSelecting(false); // 重置选择状态
 
     // 仅在用户未主动切换 Tab 时，根据登录状态决定默认标签
     if (!hasUserSelectedTabRef.current) {
@@ -341,10 +343,16 @@ export default function BattleDataModal({
 
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {
+    // 防止重复点击
+    if (isSelecting) {
+      return;
+    }
+
+    setIsSelecting(true);
     try {
       // 解析数据卡的JSON内容
       const cardData = JSON.parse(card.data);
-      
+
       // 如果是公开卡片且未使用过，增加使用次数
       if (card.is_public && !isCardUsed(card.id)) {
         try {
@@ -358,7 +366,7 @@ export default function BattleDataModal({
               type: 'usage'
             })
           });
-          
+
           if (response.ok) {
             const result = await response.json();
             if (result.success) {
@@ -381,6 +389,8 @@ export default function BattleDataModal({
       onClose();
     } catch (error) {
       console.error('解析数据卡失败:', error);
+    } finally {
+      setIsSelecting(false);
     }
   };
 
