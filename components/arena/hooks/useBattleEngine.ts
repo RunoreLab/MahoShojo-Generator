@@ -137,9 +137,11 @@ export const useBattleEngine = () => {
   const { isCooldown, startCooldown, remainingTime } = useCooldown(battleCooldownStorageKey, battleCooldownMs);
 
   const scenarioDisplayName = useMemo(() => {
+    // 只有在情景模式下才需要展示情景标题，避免切换到其他模式后沿用上一次的情景小标题
+    if (battleMode !== 'scenario') return null;
     const content = scenario.content;
     if (content) {
-      const title = content.title;
+      const title = (content as any).title;
       if (typeof title === 'string' && title.trim()) {
         return title.trim();
       }
@@ -148,7 +150,7 @@ export const useBattleEngine = () => {
       return scenario.fileName.replace(/\.json$/i, '');
     }
     return null;
-  }, [scenario.content, scenario.fileName]);
+  }, [battleMode, scenario.content, scenario.fileName]);
 
   const redirectToArrested = useCallback(
     (reason?: string, withBackup?: boolean) => {
@@ -302,8 +304,15 @@ export const useBattleEngine = () => {
       const reportWithScenario: NewsReport = {
         ...result.report,
         adjudicationResults: result.adjudicationResults,
-        scenario: scenarioDisplayName ?? result.report.scenario,
       };
+
+      // 仅在情景模式时附加情景标题，避免其它模式复用上一场情景标题
+      if (battleMode === 'scenario' && scenarioDisplayName) {
+        reportWithScenario.scenario = scenarioDisplayName;
+      } else {
+        // 非情景模式下显式移除 scenario 字段，杜绝旧标题残留
+        delete (reportWithScenario as any).scenario;
+      }
 
       setNewsReport(reportWithScenario);
       setUpdatedCombatants(result.updatedCombatants);
