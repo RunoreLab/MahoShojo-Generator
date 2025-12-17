@@ -63,7 +63,7 @@ const buildBattleReportSchema = (options: { enableImpacts: boolean; enableImpact
     }
 
     if (options.enableCurrentState) {
-      impactShape.currentStateSummary = z.string().describe("该角色在本次故事后的即时状态概述。").optional();
+      impactShape.currentStateSummary = z.string().describe("该角色在本次故事后的即时状态概述。");
     }
 
     baseShape.impacts = z.array(z.object(impactShape)).describe("对每位参与该事件的核心角色的影响总结列表。");
@@ -311,7 +311,11 @@ const filterAndFormatHistory = (
   });
 
   // 【SRS 3.1.3 - 数量限制】
-  const sliceLimit = typeof limit === 'number' && limit > 0 ? limit : 20;
+  const sliceLimit = limit === null
+    ? Infinity
+    : typeof limit === 'number' && limit > 0
+      ? limit
+      : 20;
   const selectedEntries = sliceLimit === Infinity
     ? relevantEntries
     : relevantEntries.slice(0, sliceLimit);
@@ -759,7 +763,7 @@ const createPromptBuilder = (
     let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
     // 根据 readArenaHistory 的值来决定是否格式化并添加历战记录
     if (readArenaHistory) {
-      profileString += filterAndFormatHistory(characterName, data.arena_history, otherNames, isPureBattle, historyReadLimit ?? undefined);
+      profileString += filterAndFormatHistory(characterName, data.arena_history, otherNames, isPureBattle, historyReadLimit);
     }
 
     if (readCurrentState) {
@@ -769,7 +773,16 @@ const createPromptBuilder = (
     // [SRS 3.2.2] 根据数据结构采用不同prompt格式
     if (isStructured) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { userAnswers, isPreset: _, ...restOfProfile } = data;
+      const { userAnswers, isPreset: _, ...restOfProfile } = data as Record<string, unknown>;
+
+      // 根据用户策略移除不应暴露给AI的字段，避免关闭读取后仍被模型参考
+      if (!readArenaHistory) {
+        delete (restOfProfile as Record<string, unknown>).arena_history;
+      }
+      if (!readCurrentState) {
+        delete (restOfProfile as Record<string, unknown>).current_state;
+      }
+
       profileString += `// 核心设定\n${JSON.stringify(restOfProfile, null, 2)}\n`;
       if (userAnswers && Array.isArray(userAnswers)) {
         profileString += `\n// 问卷回答 (用于理解角色深层性格与理念)\n`;
@@ -780,7 +793,18 @@ const createPromptBuilder = (
       if (type === 'general-character' && typeof data.content === 'string') {
         profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
       } else {
-        profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`;
+        let fallbackData: unknown = data;
+        if (typeof fallbackData === 'object' && fallbackData !== null) {
+          const clone = { ...(fallbackData as Record<string, unknown>) };
+          if (!readArenaHistory) {
+            delete clone.arena_history;
+          }
+          if (!readCurrentState) {
+            delete clone.current_state;
+          }
+          fallbackData = clone;
+        }
+        profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof fallbackData === 'string' ? fallbackData : JSON.stringify(fallbackData, null, 2)}\n`;
       }
     }
     return profileString;
@@ -1131,7 +1155,7 @@ async function handler(req: NextRequest): Promise<Response> {
         scenario,
         teams,
         resolvedReadArenaHistory,
-        resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit,
+        resolvedHistoryReadLimit,
         resolvedReadCurrentState,
         resolvedWriteCurrentState,
         adjudicationResults,

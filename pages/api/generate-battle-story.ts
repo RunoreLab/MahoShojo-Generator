@@ -226,7 +226,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 scenario,
                 teams,
                 resolvedReadArenaHistory,
-                resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit,
+                resolvedHistoryReadLimit,
                 resolvedReadCurrentState,
                 resolvedWriteCurrentState,
                 adjudicationResults,

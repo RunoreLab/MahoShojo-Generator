@@ -84,7 +84,11 @@ export const filterAndFormatHistory = (
         return b.id - a.id;
     });
 
-    const sliceLimit = typeof limit === 'number' && limit > 0 ? limit : 20;
+    const sliceLimit = limit === null
+        ? Infinity
+        : typeof limit === 'number' && limit > 0
+            ? limit
+            : 20;
     const selectedEntries = sliceLimit === Infinity
         ? relevantEntries
         : relevantEntries.slice(0, sliceLimit);
@@ -149,7 +153,7 @@ export const createPromptBuilder = (
         const typeDisplay = type === 'magical-girl' ? '魔法少女' : type === 'canshou' ? '残兽' : '通用角色';
         let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
         if (readArenaHistory) {
-            profileString += filterAndFormatHistory(characterName, data.arena_history, otherNames, isPureBattle, historyReadLimit ?? undefined);
+            profileString += filterAndFormatHistory(characterName, data.arena_history, otherNames, isPureBattle, historyReadLimit);
         }
         if (readCurrentState) {
             profileString += formatCurrentStateForPrompt(data.current_state);
@@ -157,9 +161,18 @@ export const createPromptBuilder = (
 
         if (isStructured) {
             const { userAnswers, ...restOfProfile } = data;
+
+            // 根据读写策略和内容移除不应暴露给AI的字段，避免在不适宜的情况下被引用
+            if (!readArenaHistory) {
+                delete (restOfProfile as Record<string, unknown>).arena_history;
+            }
+            if (!readCurrentState) {
+                delete (restOfProfile as Record<string, unknown>).current_state;
+            }
             if ('isPreset' in restOfProfile) {
                 delete (restOfProfile as Record<string, unknown>).isPreset;
             }
+
             profileString += `// 核心设定\n${JSON.stringify(restOfProfile, null, 2)}\n`;
             if (userAnswers && Array.isArray(userAnswers)) {
                 profileString += `\n// 问卷回答 (用于理解角色深层性格与理念)\n`;
@@ -169,7 +182,18 @@ export const createPromptBuilder = (
             if (type === 'general-character' && typeof data.content === 'string') {
                 profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
             } else {
-                profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`;
+                let fallbackData: unknown = data;
+                if (typeof fallbackData === 'object' && fallbackData !== null) {
+                    const clone = { ...(fallbackData as Record<string, unknown>) };
+                    if (!readArenaHistory) {
+                        delete clone.arena_history;
+                    }
+                    if (!readCurrentState) {
+                        delete clone.current_state;
+                    }
+                    fallbackData = clone;
+                }
+                profileString += `// [注意] 该角色为非结构化设定参考，请基于以下文本内容进行理解和创作：\n${typeof fallbackData === 'string' ? fallbackData : JSON.stringify(fallbackData, null, 2)}\n`;
             }
         }
         return profileString;
