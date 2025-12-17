@@ -42,6 +42,9 @@ const verifyOrigin = async (payload: any): Promise<boolean> => {
   return Boolean(isValid);
 };
 
+// 追踪正在处理中的卡片，防止重复点击
+const loadingCards = new Set<string>();
+
 export const useBattleActions = () => {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
@@ -126,44 +129,58 @@ export const useBattleActions = () => {
       const inferredTemplate = inferTemplate(cleanedCardData);
       const targetFilename = `${cardData._cardName || resolvedName}.json`;
 
-      if (inferredTemplate === 'scenario') {
-        if (useBattleStore.getState().battleMode !== 'scenario') {
-          setError('❌ 情景数据卡只能在情景模式下使用。');
+      // 检查是否已在加载中或已存在（防止重复点击）
+      if (loadingCards.has(targetFilename)) {
+        return; // 直接忽略，不显示错误信息
+      }
+
+      // 立即标记为正在加载，防止并发请求
+      loadingCards.add(targetFilename);
+
+      try {
+        if (inferredTemplate === 'scenario') {
+          if (useBattleStore.getState().battleMode !== 'scenario') {
+            setError('❌ 情景数据卡只能在情景模式下使用。');
+            return;
+          }
+
+          const isNative = await verifyOrigin(cleanedCardData);
+          setScenario({
+            content: cleanedCardData,
+            fileName: `${cardData._cardName || resolvedName}.json`,
+            isNative,
+          });
+          appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName);
+          setError(null);
           return;
         }
-        const isNative = await verifyOrigin(cleanedCardData);
-        setScenario({
-          content: cleanedCardData,
-          fileName: `${cardData._cardName || resolvedName}.json`,
-          isNative,
+
+        if (combatants.length >= MAX_COMBATANTS) {
+          setError(`❌ 最多只能添加 ${MAX_COMBATANTS} 位角色。`);
+          return;
+        }
+        if (combatants.some((c) => 'filename' in c && c.filename === targetFilename)) {
+          setError(`❌ 已添加同名角色: ${resolvedName}`);
+          return;
+        }
+
+        const type = inferCombatantType(cleanedCardData);
+        const isValid = await verifyOrigin(cleanedCardData);
+
+        addCombatant({
+          type,
+          data: cleanedCardData,
+          filename: targetFilename,
+          isValid,
+          isPreset: false,
+          isNonStandard: false,
         });
         appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName);
         setError(null);
-        return;
+      } finally {
+        // 无论成功还是失败，都要移除加载标记
+        loadingCards.delete(targetFilename);
       }
-
-      if (combatants.length >= MAX_COMBATANTS) {
-        setError(`❌ 最多只能添加 ${MAX_COMBATANTS} 位角色。`);
-        return;
-      }
-      if (combatants.some((c) => 'filename' in c && c.filename === targetFilename)) {
-        setError(`❌ 已添加同名角色: ${resolvedName}`);
-        return;
-      }
-
-      const type = inferCombatantType(cleanedCardData);
-      const isValid = await verifyOrigin(cleanedCardData);
-      
-      addCombatant({
-        type,
-        data: cleanedCardData,
-        filename: targetFilename,
-        isValid,
-        isPreset: false,
-        isNonStandard: false,
-      });
-      appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName);
-      setError(null);
     },
     [addCombatant, appendAdjudicationEvents, combatants, setError, setScenario]
   );
