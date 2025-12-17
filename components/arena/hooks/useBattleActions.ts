@@ -11,9 +11,6 @@ import {
   getCombatantDisplayName,
   inferCombatantType,
   isLegacyAdjudicatorFormat,
-  validateCanshouData,
-  validateGeneralCharacterData,
-  validateMagicalGirlData,
 } from '../utils/characterValidator';
 import { parseCombatantsFromText } from '../utils/fileParser';
 import { ScenarioSchema } from '../utils/schemas';
@@ -155,22 +152,11 @@ export const useBattleActions = () => {
       }
 
       const type = inferCombatantType(cleanedCardData);
-      let validation = validateGeneralCharacterData(cleanedCardData);
-      if (type === 'magical-girl') {
-        validation = validateMagicalGirlData(cleanedCardData);
-      } else if (type === 'canshou') {
-        validation = validateCanshouData(cleanedCardData);
-      }
-
-      if (!validation.success) {
-        setError(validation.errors?.[0] || '格式不规范');
-        return;
-      }
-
       const isValid = await verifyOrigin(cleanedCardData);
+      
       addCombatant({
         type,
-        data: validation.data ?? cleanedCardData,
+        data: cleanedCardData,
         filename: targetFilename,
         isValid,
         isPreset: false,
