@@ -102,13 +102,13 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     // --- 自定义 Markdown 渲染组件 ---
     const markdownComponents: Components = {
         // # Headline -> 主标题
-        h1: ({ node, children, ...props }) => (
+        h1: ({ children, ...props }) => (
             <h2 className="text-xl font-bold mb-4 mt-2 px-1" {...props}>
                 {children}
             </h2>
         ),
         // ## Title -> 板块分割标题
-        h2: ({ node, children, ...props }) => (
+        h2: ({ children, ...props }) => (
             <div className="mt-6 mb-2 pb-1 px-1 border-b border-gray-600/50" {...props}>
                 <h3 className="text-lg font-semibold flex items-center gap-2">
                     {children}
@@ -116,14 +116,14 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             </div>
         ),
         // ### Subtitle -> 内部小标题 (如: 胜利者, 判定结果)
-        h3: ({ node, children, ...props }) => (
+        h3: ({ children, ...props }) => (
             <h4 className="font-semibold mt-3 mb-1 px-1 text-base text-gray-200" {...props}>
                 {children}
             </h4>
         ),
         // > Blockquote -> 引用块 (用于点评、引导、特殊说明)
         // 根据内容的一致性，我们可以通过简单的正则判断给引用块不同的边框颜色
-        blockquote: ({ node, children, ...props }) => (
+        blockquote: ({ children }) => (
             // 这里只是为了演示，实际应用可能需要更复杂的逻辑，或者统一使用默认样式
             // 默认使用粉色 (记者点评样式)
             <div className="result-item my-3" style={{ background: 'rgba(131, 131, 131, 0.2)', padding: '0.5rem 1rem' }} >
@@ -133,25 +133,25 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             </div>
         ),
         // p -> 正文文本
-        p: ({ node, children, ...props }) => (
+        p: ({ children, ...props }) => (
             // <p className="text-sm px-1 opacity-90 leading-relaxed mb-2 whitespace-pre-wrap rounded" style={{ background: 'rgba(84, 84, 84, 0.5)', padding: '1rem 1rem' }} {...props}>
             <p className="text-sm px-1 opacity-90 leading-relaxed mb-2 whitespace-pre-wrap rounded" {...props}>
                 {children}
             </p>
         ),
         // ul -> 列表 (用于随机判定记录等)
-        ul: ({ node, children, ...props }) => (
+        ul: ({ children, ...props }) => (
             <ul className="list-none space-y-2 my-2 text-sm bg-black/20 p-3 rounded border-l-4 border-green-400" {...props}>
                 {children}
             </ul>
         ),
-        li: ({ node, children, ...props }) => (
+        li: ({ children, ...props }) => (
             <li className="opacity-90 pl-2 border-l border-gray-700/50" {...props}>
                 {children}
             </li>
         ),
         // code -> 行内代码或代码块 (可选：做成一种特殊的强调样式)
-        code: ({ node, className, children, ...props }) => (
+        code: ({ children, ...props }) => (
             <span className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200" {...props}>
                 {children}
             </span>
