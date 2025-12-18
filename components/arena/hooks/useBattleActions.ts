@@ -80,10 +80,31 @@ export const useBattleActions = () => {
         onAdjudicationEvents: appendAdjudicationEvents,
         verifyOrigin,
       });
-      results.forEach(addCombatant);
-      setError(null);
+
+      // 检查同名角色并过滤
+      const existingFilenames = new Set(
+        combatants.filter((c): c is CombatantData => 'filename' in c).map((c) => c.filename)
+      );
+      const duplicates: string[] = [];
+      const uniqueResults = results.filter((result) => {
+        if (existingFilenames.has(result.filename)) {
+          duplicates.push(result.filename);
+          return false;
+        }
+        return true;
+      });
+
+      // 添加唯一的角色
+      uniqueResults.forEach(addCombatant);
+
+      // 显示重复角色的警告信息
+      if (duplicates.length > 0) {
+        setError(`❌ 已忽略 ${duplicates.length} 个同名角色: ${duplicates.join(', ')}`);
+      } else {
+        setError(null);
+      }
     },
-    [addCombatant, appendAdjudicationEvents, combatants.length, setError]
+    [addCombatant, appendAdjudicationEvents, combatants, setError]
   );
 
   const handleFileUpload = useCallback(
