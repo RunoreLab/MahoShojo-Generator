@@ -46,6 +46,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下的最先进模型系列，性能很棒棒。'
             },
             {
+                value: 'gemini-3-flash-preview',
+                label: 'Gemini 3 Flash Preview',
+                description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
+            },
+            {
                 value: 'gemini-2.5-flash',
                 label: 'Gemini 2.5 Flash',
                 description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
