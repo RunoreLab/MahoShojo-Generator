@@ -13,6 +13,7 @@ export function RosterUploader() {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const [isPasting, setIsPasting] = useState(false);
   const setError = useBattleSelector((state) => state.setError);
   const { handleFileUpload, handlePaste } = useBattleActions();
 
@@ -41,12 +42,15 @@ export function RosterUploader() {
   };
 
   const onPaste = async () => {
+    setIsPasting(true);
     try {
       await handlePaste(pastedJson);
       setError(null);
       setPastedJson('');
     } catch (error) {
       setError(error instanceof Error ? error.message : '粘贴内容解析失败');
+    } finally {
+      setIsPasting(false);
     }
   };
 
@@ -86,7 +90,7 @@ export function RosterUploader() {
             />
             <button
               onClick={onPaste}
-              disabled={!pastedJson.trim() || isGenerating || combatants.length >= MAX_COMBATANTS}
+              disabled={!pastedJson.trim() || isGenerating || isPasting || combatants.length >= MAX_COMBATANTS}
               className="generate-button mt-2 mb-0"
             >
               从文本添加角色
