@@ -224,6 +224,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
             },
             {
+                value: 'gemini-3-flash-preview',
+                label: 'Gemini 3 Flash Preview',
+                description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
+            },
+            {
                 value: 'gemini-2.5-pro',
                 label: 'Gemini 2.5 Pro',
                 description: 'Google 旗下上一代的最先进模型系列，性能很棒棒。'
