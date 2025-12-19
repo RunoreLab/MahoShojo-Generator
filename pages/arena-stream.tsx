@@ -281,6 +281,7 @@ function ArenaStreamPageContent() {
                   content={completion}
                   onSaveImage={handleSaveImage}
                   mode={battleMode}
+                  scenarioName={battleMode === 'scenario' ? scenario.fileName ?? undefined : undefined}
                   isStreaming={isLoading}
                 />
               </div>

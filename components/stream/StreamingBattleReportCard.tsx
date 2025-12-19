@@ -10,6 +10,8 @@ interface StreamingBattleReportCardProps {
     content: string;
     onSaveImage?: (imageUrl: string) => void;
     mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
+    /** 情景模式下的场景名称 */
+    scenarioName?: string;
     /** 是否正在生成中（可选，用于显示加载光标等） */
     isStreaming?: boolean;
 }
@@ -18,6 +20,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     content,
     onSaveImage,
     mode,
+    scenarioName,
     isStreaming = false
 }) => {
     const cardRef = useRef<HTMLDivElement>(null);
@@ -175,7 +178,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 {/* 顶部 Logo */}
                 <img
                     src="/arena-white.svg"
-                    style={{ marginBottom: '1rem', marginTop: '0.5rem' }}
+                    style={{ marginBottom: '0rem', marginTop: '0.5rem' }}
                     width={280}
                     height={90}
                     alt="魔法少女竞技场"
@@ -189,8 +192,8 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                             alt={modeDisplay.text}
                             style={{
                                 position: 'absolute',
-                                top: '-4.5rem', // 调整位置以适应流式布局的顶部
-                                right: '0rem',
+                                top: '-7.1rem', // 调整位置以适应流式布局的顶部
+                                right: '-1rem',
                                 width: '120px',
                                 height: '60px',
                                 opacity: 0.8
@@ -198,6 +201,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                         />
                     )}
                 </div>
+                { scenarioName && <h3 className='ml-2 mb-4 font-bold text-gray-100'>~ {scenarioName.replace(".json", "")} ~</h3> }
 
                 {/* Markdown 内容渲染区域 */}
                 <div className="min-h-[200px]">
