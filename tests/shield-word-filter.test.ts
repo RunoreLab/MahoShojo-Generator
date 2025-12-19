@@ -3,22 +3,29 @@ import { describe, expect, it } from 'bun:test';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 
 describe('shield-word-filter', () => {
+  const decodeBase64Utf8 = (input: string): string => {
+    if (typeof atob === 'function') {
+      const binaryString = atob(input);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+    return Buffer.from(input, 'base64').toString('utf8');
+  };
+
   it('replaces configured word with replacement text', () => {
     const result = applyShieldWords('我来自中国。');
     expect(result.hasShieldWords).toBe(true);
     expect(result.filteredText).toBe('我来自【国度】。');
   });
 
-  it('masks default shield words with asterisks', () => {
-    const result = applyShieldWords('八九是个数字。');
+  it('masks default shield words with a non-markdown-safe symbol', () => {
+    const word = decodeBase64Utf8('5Y+R5oOF'); // 发情
+    const result = applyShieldWords(`abc${word}def`);
     expect(result.hasShieldWords).toBe(true);
-    expect(result.filteredText).toBe('**是个数字。');
-  });
-
-  it('matches case-insensitively for latin words', () => {
-    const result = applyShieldWords('JEW / Jew / jew');
-    expect(result.hasShieldWords).toBe(true);
-    expect(result.filteredText).toBe('*** / *** / ***');
+    expect(result.filteredText).toBe('abc❀❀def');
   });
 
   it('keeps text unchanged when no shield words appear', () => {

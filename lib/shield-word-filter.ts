@@ -2,7 +2,7 @@
 
 /**
  * 说明：
- * - “屏蔽词”不会触发逮捕；只会在文本中被和谐（默认星号遮罩，或按配置替换为指定文本）。
+ * - “屏蔽词”不会触发逮捕；只会在文本中被和谐（默认使用 ❀ 遮罩，或按配置替换为指定文本）。
  * - 屏蔽词词表使用 base64 编码，避免被直接扫描。
  * - 替换词不需要 base64，可明文存储。
  */
@@ -23,9 +23,10 @@ export interface ShieldWordFilterResult {
 
 // 防止屏蔽，所以用 base64 编码并直接扔文件里
 const shieldWordsConfig: ShieldWordsConfig = {
-  mask: '*',
+  // 使用非 Markdown 特殊字符作为遮罩，避免 `*` 触发强调/列表等解析
+  mask: '❀',
   words: [
-    // 默认替换为*号
+    // 默认使用 ❀ 遮罩
     // '5YWr5Lmd',
     '5Y+R5oOF',
     '5a+E55Sf',
@@ -101,7 +102,7 @@ const getReplaceMap = (): Map<string, string> => {
 export const applyShieldWords = (text: string): ShieldWordFilterResult => {
   const words = getDecodedWords();
   const replaceMap = getReplaceMap();
-  const maskChar = shieldWordsConfig.mask || '*';
+  const maskChar = shieldWordsConfig.mask || '❀';
 
   let filteredText = text;
   const detectedWords: string[] = [];
@@ -122,7 +123,9 @@ export const applyShieldWords = (text: string): ShieldWordFilterResult => {
       if (typeof replacement === 'string') {
         return replacement;
       }
-      return maskChar.repeat(Math.max(1, match.length));
+      // `match.length` 以 UTF-16 code unit 计数，遇到 emoji/代理对会产生长度偏差；这里按 code point 计数更接近“字符数”。
+      const maskLength = Math.max(1, Array.from(match).length);
+      return maskChar.repeat(maskLength);
     });
   }
 
