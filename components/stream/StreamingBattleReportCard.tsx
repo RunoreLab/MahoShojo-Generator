@@ -5,6 +5,7 @@ import { snapdom } from '@zumer/snapdom';
 import ReactMarkdown from 'react-markdown';
 import { Components } from 'react-markdown';
 import type { AdjudicationResult } from '@/types/arena';
+import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 
 interface StreamingBattleReportCardProps {
     /** 流式输入的 Markdown 文本内容 */
@@ -216,7 +217,39 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             <span className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200" {...props}>
                 {children}
             </span>
-        )
+        ),
+        table: ({ children }) => (
+            <div className="my-3 overflow-x-auto rounded-lg border border-white/15 bg-black/15">
+                <table className="min-w-full border-collapse text-left text-sm">
+                    {children}
+                </table>
+            </div>
+        ),
+        thead: ({ children }) => (
+            <thead className="bg-white/10">
+                {children}
+            </thead>
+        ),
+        tbody: ({ children }) => (
+            <tbody className="divide-y divide-white/10">
+                {children}
+            </tbody>
+        ),
+        tr: ({ children }) => (
+            <tr className="odd:bg-white/5 hover:bg-white/10 transition-colors">
+                {children}
+            </tr>
+        ),
+        th: ({ children }) => (
+            <th className="px-3 py-2 font-semibold text-gray-100 border-b border-white/10 whitespace-nowrap">
+                {children}
+            </th>
+        ),
+        td: ({ children }) => (
+            <td className="px-3 py-2 text-gray-100/90 align-top border-b border-white/5 whitespace-pre-wrap break-words">
+                {children}
+            </td>
+        ),
     };
 
     return (
@@ -272,7 +305,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
                 {/* Markdown 内容渲染区域 */}
                 <div className="min-h-[200px]">
-                    <ReactMarkdown components={markdownComponents}>
+                    <ReactMarkdown remarkPlugins={[remarkBattleTable]} components={markdownComponents}>
                         {markdownBody}
                     </ReactMarkdown>
                     {/* 闪烁光标，模拟打字效果 */}
