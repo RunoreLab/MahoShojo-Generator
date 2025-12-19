@@ -2,8 +2,10 @@
 
 import React, { useRef } from 'react';
 import { snapdom } from '@zumer/snapdom';
+import ReactMarkdown, { type Components } from 'react-markdown';
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
+import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 
 export interface NewsReport {
   headline: string;
@@ -164,6 +166,45 @@ ${adjudicationMarkdown}
     URL.revokeObjectURL(url);
   };
 
+  const markdownComponents: Components = {
+    h1: ({ children }) => <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>,
+    h2: ({ children }) => <h4 className="text-base font-semibold mt-4 mb-2">{children}</h4>,
+    h3: ({ children }) => <h5 className="text-sm font-semibold mt-3 mb-1 opacity-95">{children}</h5>,
+    p: ({ children }) => <p className="text-sm opacity-90 leading-relaxed mb-2 whitespace-pre-wrap">{children}</p>,
+    ul: ({ children }) => <ul className="list-disc pl-5 my-2 space-y-1 text-sm opacity-90">{children}</ul>,
+    ol: ({ children }) => <ol className="list-decimal pl-5 my-2 space-y-1 text-sm opacity-90">{children}</ol>,
+    li: ({ children }) => <li className="opacity-90">{children}</li>,
+    blockquote: ({ children }) => (
+      <blockquote className="my-3 border-l-4 border-white/20 bg-black/15 px-3 py-2 text-sm opacity-90">
+        {children}
+      </blockquote>
+    ),
+    hr: () => <hr className="my-4 border-white/15" />,
+    pre: ({ children }) => (
+      <pre className="my-3 overflow-x-auto rounded-lg bg-black/25 p-3 text-xs leading-relaxed">{children}</pre>
+    ),
+    code: ({ inline, children }) =>
+      inline ? (
+        <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200">{children}</code>
+      ) : (
+        <code className="font-mono text-xs">{children}</code>
+      ),
+    table: ({ children }) => (
+      <div className="my-3 overflow-x-auto rounded-lg border border-white/15 bg-black/15">
+        <table className="min-w-full border-collapse text-left text-sm">{children}</table>
+      </div>
+    ),
+    thead: ({ children }) => <thead className="bg-white/10">{children}</thead>,
+    tbody: ({ children }) => <tbody className="divide-y divide-white/10">{children}</tbody>,
+    tr: ({ children }) => <tr className="odd:bg-white/5 hover:bg-white/10 transition-colors">{children}</tr>,
+    th: ({ children }) => (
+      <th className="px-3 py-2 font-semibold text-gray-100 border-b border-white/10 whitespace-nowrap">{children}</th>
+    ),
+    td: ({ children }) => (
+      <td className="px-3 py-2 text-gray-100/90 align-top border-b border-white/5 whitespace-pre-wrap break-words">{children}</td>
+    ),
+  };
+
   return (
     <div
       ref={cardRef}
@@ -202,7 +243,9 @@ ${adjudicationMarkdown}
         
         <div className="result-item">
           <div className="result-value">
-            <p className="text-sm opacity-90 whitespace-pre-line">{bodyContent}</p>
+            <ReactMarkdown remarkPlugins={[remarkBattleTable]} components={markdownComponents}>
+              {bodyContent}
+            </ReactMarkdown>
           </div>
         </div>
 
