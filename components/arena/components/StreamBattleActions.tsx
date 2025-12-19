@@ -4,10 +4,10 @@ import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState } from '../types';
 
 const buttonTextMap: Record<string, string> = {
-  daily: '流式生成日常故事 (´｡• ᵕ •｡`) ♡',
-  kizuna: '流式生成宿命对决 (๑•̀ㅂ•́)و✧',
-  classic: '流式生成独家新闻 _φ(❐_❐✧',
-  scenario: '流式开始演绎情景 (´｡• ᵕ •｡`)',
+  daily: '生成日常故事 (´｡• ᵕ •｡`) ♡',
+  kizuna: '生成宿命对决 (๑•̀ㅂ•́)و✧',
+  classic: '生成独家新闻 _φ(❐_❐✧',
+  scenario: '开始演绎情景 (´｡• ᵕ •｡`)',
 };
 
 interface StreamBattleActionsProps {

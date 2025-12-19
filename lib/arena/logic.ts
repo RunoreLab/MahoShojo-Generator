@@ -139,7 +139,8 @@ export const createPromptBuilder = (
     readCurrentState: boolean,
     writeCurrentState: boolean,
     adjudicationResults: AdjudicationResult[] | null,
-    storyLength: string | undefined
+    storyLength: string | undefined,
+    stream : boolean | undefined = false
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const allNames = combatants.map(c => c.data.codename || c.data.name);
@@ -252,6 +253,21 @@ export const createPromptBuilder = (
 
     if (writeCurrentState) {
         finalPrompt += `\n\n【当前状态同步】请在输出的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式（如属性、数值），请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
+    }
+
+    if (stream) {
+        // 流式生成的关键：要求输出 Markdown 格式的战报
+    finalPrompt += `\n\n【输出格式】\n请以 Markdown 格式输出战报，包含以下部分：
+                    # 战报标题
+                    随后紧跟故事或者战报的正文，用段落呈现，保持流畅性和可读性
+                    ## 胜利者
+                    胜利者名称
+                    ## 最终结果
+                - 使用一级标题(#)作为战报标题
+                - 使用二级标题(##)分隔各个板块
+                - 使用三级标题(###)标注内部小标题
+                - 使用引用块(>)来强调点评或特殊说明
+                - 使用列表来展示判定记录或关键信息`;
     }
 
     return finalPrompt;
