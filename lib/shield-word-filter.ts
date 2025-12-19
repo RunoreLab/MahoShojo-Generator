@@ -54,6 +54,12 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '6IKJ5aOB',
     '6IKb6Zeo',
     '6IO45Zu0',
+    '5LiL5L2T',
+    '56eB5aSE',
+    '5ram5LmL',
+    '572p5p2v',
+    '5Liw6IW0',
+    '5rer6Z2h',
     // 使用指定词汇替换
     '5Lit5Zu9',
     '5Lit5Y2O5Lq65rCR5YWx5ZKM5Zu9',
@@ -65,6 +71,8 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '5oCn5qyy',
     '5oOF5qyy',
     '5oiQ55i+',
+    'TmF6aQ==',
+    'SGl0bGVy',
   ],
   replace: {
     // key 为 base64 编码的屏蔽词，value 为明文替换词
