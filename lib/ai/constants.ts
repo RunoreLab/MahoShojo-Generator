@@ -42,7 +42,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             },
             {
                 value: 'gemini-3-flash-preview',
-                label: 'Gemini 3 Flash Preview',
+                label: 'Gemini 3.0 Flash （预览版）',
                 description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
             },
             {
@@ -220,7 +220,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             },
             {
                 value: 'gemini-3-flash-preview',
-                label: 'Gemini 3 Flash Preview',
+                label: 'Gemini 3.0 Flash （预览版）',
                 description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
             },
             {
