@@ -10,7 +10,7 @@ import { AdjudicationResult } from '@/types/arena';
 import { verifySignature, generateSignature } from '@/lib/signature';
 import { getSystemPrompt } from '@/lib/arena/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
-import { processAdjudicationChain, createPromptBuilder } from '@/lib/arena/logic';
+import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
 import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 
 const log = getLogger('api-gen-battle-stream');
@@ -187,7 +187,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
         log.info('📝 构建提示词', { mode, combatantsCount: combatants.length, hasScenario: !!scenario });
 
-        const prompt = createPromptBuilder(
+        const prompt = createStreamPromptBuilder(
             questionnaire.questions,
             finalUserGuidance,
             needsWorldviewWarning,
