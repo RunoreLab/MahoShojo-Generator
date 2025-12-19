@@ -1,8 +1,8 @@
-import { NewsReport } from '@/components/BattleReportCard';
-import { UserAIProviderConfig } from '@/components/AiProviderSelector';
-import { Preset } from '@/pages/api/get-presets';
-import { StatsData } from '@/pages/api/get-stats';
-import { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
+import type { NewsReport } from '@/components/BattleReportCard';
+import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import type { Preset } from '@/pages/api/get-presets';
+import type { StatsData } from '@/pages/api/get-stats';
+import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 
 export const MAX_COMBATANTS = 10;
 export const ARENA_STATE_PREF_KEY = 'arena-history-state-preferences-v1';
@@ -10,6 +10,7 @@ export const ARENA_STATE_PREF_KEY = 'arena-history-state-preferences-v1';
 export type CombatantType = 'magical-girl' | 'canshou' | 'general-character';
 export type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type StoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
+export type GenerationMode = 'non-stream' | 'stream';
 
 export interface UpdatedCombatantData {
   codename?: string;
@@ -76,6 +77,9 @@ export interface BattleStoreState {
   combatants: Combatant[];
   scenario: ScenarioState;
   battleMode: BattleMode;
+  generationMode: GenerationMode;
+  isStreaming: boolean;
+  liveArticleBody: string | null;
   storyLength: StoryLengthOption;
   selectedLevel: string;
   selectedLanguage: string;
@@ -92,6 +96,9 @@ export interface BattleStoreState {
   stats: StatsData | null;
 
   setBattleMode: (mode: BattleMode) => void;
+  setGenerationMode: (mode: GenerationMode) => void;
+  setIsStreaming: (state: boolean) => void;
+  setLiveArticleBody: (body: string | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setSelectedLevel: (level: string) => void;
   setSelectedLanguage: (language: string) => void;

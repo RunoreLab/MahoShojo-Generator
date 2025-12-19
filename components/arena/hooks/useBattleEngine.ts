@@ -3,13 +3,53 @@
 import { useCallback, useMemo } from 'react';
 import { useRouter } from 'next/router';
 
-import { NewsReport } from '@/components/BattleReportCard';
+import type { NewsReport } from '@/components/BattleReportCard';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 import { useCooldown } from '@/lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
+
+interface SSEEventPayload {
+  event: string;
+  data: string;
+}
+
+const parseSSEEvent = (rawEvent: string): SSEEventPayload | null => {
+  if (!rawEvent.trim()) {
+    return null;
+  }
+
+  const lines = rawEvent.split(/\r?\n/);
+  let eventType = 'message';
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      eventType = line.slice(6).trim();
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trim());
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  return {
+    event: eventType,
+    data: dataLines.join('\n'),
+  };
+};
+
+const safeJsonParse = <T,>(input: string): T | null => {
+  try {
+    return JSON.parse(input) as T;
+  } catch {
+    return null;
+  }
+};
 
 const buildBattleBackupItems = (
   combatants: CombatantData[],
@@ -114,6 +154,7 @@ export const useBattleEngine = () => {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
+  const generationMode = useBattleSelector((state) => state.generationMode);
   const scenario = useBattleSelector((state) => state.scenario);
   const selectedLevel = useBattleSelector((state) => state.selectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
@@ -126,6 +167,8 @@ export const useBattleEngine = () => {
   const setUpdatedCombatants = useBattleSelector((state) => state.setUpdatedCombatants);
   const setAdjudicationResults = useBattleSelector((state) => state.setAdjudicationResults);
   const setIsGenerating = useBattleSelector((state) => state.setIsGenerating);
+  const setIsStreaming = useBattleSelector((state) => state.setIsStreaming);
+  const setLiveArticleBody = useBattleSelector((state) => state.setLiveArticleBody);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const { handleResolveRandomPlaceholders } = useBattleActions();
@@ -190,6 +233,8 @@ export const useBattleEngine = () => {
     }
 
     setIsGenerating(true);
+    setIsStreaming(false);
+    setLiveArticleBody(null);
     setError(null);
     setNewsReport(null);
     setUpdatedCombatants([]);
@@ -258,6 +303,205 @@ export const useBattleEngine = () => {
         };
       }
 
+      const applyBattleResult = async (result: BattleApiResponse, origin: 'battle' | 'battle-stream') => {
+        const backupItems = buildBattleBackupItems(
+          freshCombatants,
+          shouldUseScenario ? scenario.content : null,
+          shouldUseScenario ? scenario.fileName : null,
+          shouldUseScenario ? scenario.isNative : false,
+          shouldUseScenario ? scenarioDisplayName : null,
+          settings.userGuidance,
+          adjudicationEvents,
+          result.adjudicationResults
+        );
+
+        if (
+          await checkSensitivePayload(JSON.stringify(result.report), {
+            source: 'output',
+            origin,
+            reason: '使用危险符文',
+            backupItems,
+            onRedirect: redirectToArrested,
+          })
+        ) {
+          return true;
+        }
+
+        const reportWithScenario: NewsReport = {
+          ...result.report,
+          adjudicationResults: result.adjudicationResults,
+        };
+
+        // 仅在情景模式时附加情景标题，避免其它模式复用上一场情景标题
+        if (battleMode === 'scenario' && scenarioDisplayName) {
+          reportWithScenario.scenario = scenarioDisplayName;
+        } else {
+          // 非情景模式下显式移除 scenario 字段，杜绝旧标题残留
+          delete (reportWithScenario as any).scenario;
+        }
+
+        setNewsReport(reportWithScenario);
+        setUpdatedCombatants(result.updatedCombatants);
+        if (result.adjudicationResults) {
+          setAdjudicationResults(result.adjudicationResults);
+        }
+
+        const updatedRoster = freshCombatants.map((combatant) => {
+          const updated = result.updatedCombatants.find(
+            (item) => (item.codename || item.name) === (combatant.data.codename || combatant.data.name)
+          );
+          return updated ? { ...combatant, data: updated } : combatant;
+        });
+        setCombatants(updatedRoster);
+
+        return false;
+      };
+
+      if (generationMode === 'stream') {
+        const response = await fetch('/api/stream/generate-battle-story', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          try {
+            const json = JSON.parse(text);
+            if (json.shouldRedirect) {
+              redirectToArrested(json.reason || '使用危险符文');
+              return;
+            }
+            throw new Error(json.message || json.error || text);
+          } catch {
+            throw new Error('服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+          }
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('text/event-stream')) {
+          const unexpectedBody = await response.text();
+          console.error('意外的响应内容:', unexpectedBody);
+          throw new Error('服务器未返回流式数据，暂时无法生成战报。');
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error('当前浏览器不支持流式输出，请使用最新版本的现代浏览器。');
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalPayload: BattleApiResponse | null = null;
+        let shouldAbort = false;
+
+        setLiveArticleBody('');
+        setIsStreaming(true);
+
+        const placeholderReport: NewsReport = {
+          headline: '故事生成中...',
+          reporterInfo: {
+            name: '直播记者·星尘',
+            publication: '魔法少女通讯社',
+          },
+          article: {
+            body: '',
+            analysis: '记者正在实时整理点评，请稍候。',
+          },
+          officialReport: {
+            winner: '待定',
+            conclusion: '故事仍在进行，最终结论稍后揭晓。',
+          },
+          userGuidance: settings.userGuidance || undefined,
+          mode: battleMode,
+        };
+
+        if (battleMode === 'scenario' && scenarioDisplayName) {
+          placeholderReport.scenario = scenarioDisplayName;
+        }
+
+        setNewsReport(placeholderReport);
+
+        const processEvent = async (evt: SSEEventPayload) => {
+          if (evt.event === 'status' || evt.event === 'yaml') {
+            return;
+          }
+
+          if (evt.event === 'article_body') {
+            const payload = safeJsonParse<{ text: string }>(evt.data);
+            if (payload && typeof payload.text === 'string') {
+              setLiveArticleBody(payload.text);
+            }
+            return;
+          }
+
+          if (evt.event === 'error') {
+            const payload = safeJsonParse<{ message?: string }>(evt.data);
+            throw new Error(payload?.message || '生成失败');
+          }
+
+          if (evt.event === 'final') {
+            const payload = safeJsonParse<BattleApiResponse>(evt.data);
+            if (!payload) {
+              throw new Error('无法解析最终战报数据');
+            }
+
+            if (await applyBattleResult(payload, 'battle-stream')) {
+              shouldAbort = true;
+              return;
+            }
+
+            finalPayload = payload;
+            setLiveArticleBody(null);
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+          if (!value) {
+            continue;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          buffer = buffer.replace(/\r\n/g, '\n');
+
+          let boundary = buffer.indexOf('\n\n');
+          while (boundary !== -1) {
+            const rawEvent = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const parsedEvent = parseSSEEvent(rawEvent);
+            if (parsedEvent) {
+              await processEvent(parsedEvent);
+              if (shouldAbort) {
+                await reader.cancel().catch(() => undefined);
+                break;
+              }
+            }
+            boundary = buffer.indexOf('\n\n');
+          }
+
+          if (shouldAbort) {
+            break;
+          }
+        }
+
+        if (shouldAbort) {
+          setNewsReport(null);
+          setLiveArticleBody(null);
+          return;
+        }
+
+        if (!finalPayload) {
+          throw new Error('未收到完整的战报数据。');
+        }
+
+        startCooldown();
+        return;
+      }
+
       const response = await fetch('/api/generate-battle-story', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -280,66 +524,24 @@ export const useBattleEngine = () => {
 
       const result: BattleApiResponse = await response.json();
 
-      const backupItems = buildBattleBackupItems(
-        freshCombatants,
-        shouldUseScenario ? scenario.content : null,
-        shouldUseScenario ? scenario.fileName : null,
-        shouldUseScenario ? scenario.isNative : false,
-        shouldUseScenario ? scenarioDisplayName : null,
-        settings.userGuidance,
-        adjudicationEvents,
-        result.adjudicationResults
-      );
-
-      if (
-        await checkSensitivePayload(JSON.stringify(result.report), {
-          source: 'output',
-          origin: 'battle',
-          reason: '使用危险符文',
-          backupItems,
-          onRedirect: redirectToArrested,
-        })
-      ) {
+      if (await applyBattleResult(result, 'battle')) {
         return;
       }
-
-      const reportWithScenario: NewsReport = {
-        ...result.report,
-        adjudicationResults: result.adjudicationResults,
-      };
-
-      // 仅在情景模式时附加情景标题，避免其它模式复用上一场情景标题
-      if (battleMode === 'scenario' && scenarioDisplayName) {
-        reportWithScenario.scenario = scenarioDisplayName;
-      } else {
-        // 非情景模式下显式移除 scenario 字段，杜绝旧标题残留
-        delete (reportWithScenario as any).scenario;
-      }
-
-      setNewsReport(reportWithScenario);
-      setUpdatedCombatants(result.updatedCombatants);
-      if (result.adjudicationResults) {
-        setAdjudicationResults(result.adjudicationResults);
-      }
-
-      const updatedRoster = freshCombatants.map((combatant) => {
-        const updated = result.updatedCombatants.find(
-          (item) => (item.codename || item.name) === (combatant.data.codename || combatant.data.name)
-        );
-        return updated ? { ...combatant, data: updated } : combatant;
-      });
-      setCombatants(updatedRoster);
 
       startCooldown();
     } catch (error) {
       setError(`✨ 魔法失效了！${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
+      setNewsReport(null);
+      setLiveArticleBody(null);
     } finally {
       setIsGenerating(false);
+      setIsStreaming(false);
     }
   }, [
     isCooldown,
     remainingTime,
     battleMode,
+    generationMode,
     combatants,
     scenario,
     userProviderConfig,
@@ -354,6 +556,8 @@ export const useBattleEngine = () => {
     setUpdatedCombatants,
     setAdjudicationResults,
     setIsGenerating,
+    setIsStreaming,
+    setLiveArticleBody,
     setCombatants,
     handleResolveRandomPlaceholders,
     redirectToArrested,

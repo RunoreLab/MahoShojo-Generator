@@ -80,7 +80,7 @@ const CustomProviderSchema = z.object({
 
 
 // 从组件中导入的类型，用于最终返回给前端的完整数据结构
-import { NewsReport } from '@/components/stream/BattleReportCard';
+import type { NewsReport } from '@/components/BattleReportCard';
 
 // 定义API的返回体结构
 interface BattleApiResponse {

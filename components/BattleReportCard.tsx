@@ -32,10 +32,12 @@ interface BattleReportCardProps {
   onSaveImage?: (imageUrl: string) => void;
   // 战斗模式，设为可选以兼容旧功能
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
+  liveBody?: string;
 }
 
-const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode }) => {
+const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody }) => {
   const cardRef = useRef<HTMLDivElement>(null);
+  const bodyContent = liveBody ?? report.article.body;
 
   const getModeDisplay = (mode: string) => {
     switch (mode) {
@@ -129,7 +131,7 @@ ${mode ? `**模式：${modeDisplay?.text}**\n` : ''}
 ---
 
 ## 新闻正文
-${report.article.body}
+${bodyContent}
 
 ---
 
@@ -200,7 +202,7 @@ ${adjudicationMarkdown}
         
         <div className="result-item">
           <div className="result-value">
-            <p className="text-sm opacity-90 whitespace-pre-line">{report.article.body}</p>
+            <p className="text-sm opacity-90 whitespace-pre-line">{bodyContent}</p>
           </div>
         </div>
 

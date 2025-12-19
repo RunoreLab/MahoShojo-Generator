@@ -47,6 +47,9 @@ export const useBattleStore = create<BattleStoreState>()(
       combatants: [],
       scenario: defaultScenario,
       battleMode: 'classic',
+      generationMode: 'non-stream',
+      isStreaming: false,
+      liveArticleBody: null,
       storyLength: 'default',
       selectedLevel: '',
       selectedLanguage: 'zh-CN',
@@ -63,6 +66,9 @@ export const useBattleStore = create<BattleStoreState>()(
       stats: null,
 
       setBattleMode: (mode) => set({ battleMode: mode }),
+      setGenerationMode: (mode) => set({ generationMode: mode }),
+      setIsStreaming: (stateValue) => set({ isStreaming: stateValue }),
+      setLiveArticleBody: (body) => set({ liveArticleBody: body }),
       setStoryLength: (storyLength) => set({ storyLength }),
       setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
@@ -98,6 +104,8 @@ export const useBattleStore = create<BattleStoreState>()(
           combatants: [],
           newsReport: null,
           updatedCombatants: [],
+          liveArticleBody: null,
+          isStreaming: false,
         }),
 
       updateCombatantTeam: (filename, teamId) =>
@@ -134,6 +142,7 @@ export const useBattleStore = create<BattleStoreState>()(
       storage: createJSONStorage(createStorage),
       partialize: (state) => ({
         battleMode: state.battleMode,
+        generationMode: state.generationMode,
         storyLength: state.storyLength,
         selectedLevel: state.selectedLevel,
         selectedLanguage: state.selectedLanguage,

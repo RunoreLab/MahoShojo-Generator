@@ -11,7 +11,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 import { AdjudicationResult } from '@/types/arena';
 import { generateSignature, verifySignature } from '@/lib/signature';
-import { NewsReport } from '@/components/BattleReportCard';
+import type { NewsReport } from '@/components/BattleReportCard';
 import { getSystemPrompt } from '@/lib/arena/constants';
 import { buildBattleReportSchema, CustomProviderSchema } from '@/lib/arena/schemas';
 import { createPromptBuilder, processAdjudicationChain } from '@/lib/arena/logic';
