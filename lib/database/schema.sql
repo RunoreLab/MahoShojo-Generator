@@ -194,6 +194,10 @@ CREATE TABLE IF NOT EXISTS battle_report_generations (
   user_guidance_preview TEXT,            -- 用户引导（截断预览）
   adjudication_events_preview TEXT,      -- 随机判定器事件（截断预览）
 
+  combatants_write_ok BOOLEAN,           -- 角色明细是否成功写入
+  combatants_row_count INTEGER,          -- 角色明细写入行数（期望值）
+  combatants_write_error TEXT,           -- 角色明细写入失败原因（简短）
+
   custom_provider_id TEXT,               -- 自定义供应商ID（来自前端选择器）
   custom_model_id TEXT,                  -- 用户选择的模型ID（若有）
   is_downgrade BOOLEAN,
@@ -251,7 +255,8 @@ CREATE TABLE IF NOT EXISTS battle_report_generation_combatants (
   size_chars INTEGER,                    -- 角色 JSON 字符数（近似）
   size_bytes INTEGER,                    -- 角色 JSON 字节数（近似）
 
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (generation_id) REFERENCES battle_report_generations(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_battle_report_generation_combatants_generation_id ON battle_report_generation_combatants(generation_id);
