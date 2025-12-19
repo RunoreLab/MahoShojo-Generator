@@ -10,6 +10,11 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       {
+        source: '/battle-stream',
+        destination: '/arena-stream',
+        permanent: false,
+      },
+      {
         source: '/details/:path+', 
         destination: '/details',
         permanent: false, // 使用 307 临时重定向

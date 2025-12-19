@@ -133,14 +133,14 @@ function ArenaStreamPageContent() {
 ✅ **已完成：**
 - 安全的服务端验证端点（`/api/arena/update-combatants-after-stream`）
 - 前端安全更新 Hook（`useStreamCombatantUpdater`）
+- 已集成到竞技场流式生成：`generationMode === 'stream'` 生成完成后会自动调用更新端点并回写 `updatedCombatants`
 - 完整的签名验证流程
 - 原生性冲突检测
 - 防注入攻击机制
 
-❌ **待集成：**
-- 在 `pages/arena-stream.tsx` 中调用 `useStreamCombatantUpdater`
-- 添加用户反馈（更新成功/失败提示）
-- 可选：添加"跳过更新"选项
+📝 **可选改进：**
+- 为“角色更新”增加更明确的成功提示（当前仅在失败时提示）
+- 增加“跳过角色更新”开关（适合只想看故事、不想写入历战记录的场景）
 
 ---
 
@@ -158,7 +158,7 @@ function ArenaStreamPageContent() {
 
 ## 下一步
 
-1. **集成到页面**：在 `arena-stream.tsx` 中使用 `useStreamCombatantUpdater`
-2. **用户体验优化**：添加加载提示和错误提示
-3. **测试**：验证各种场景下的签名和更新逻辑
+1. **用户体验优化**：补充加载提示与成功提示
+2. **策略开关**：允许用户选择是否跳过“流式生成后的角色更新”
+3. **测试**：验证各种场景下的签名、原生性冲突与更新逻辑
 

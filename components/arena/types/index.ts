@@ -79,7 +79,7 @@ export interface BattleStoreState {
   battleMode: BattleMode;
   generationMode: GenerationMode;
   isStreaming: boolean;
-  liveArticleBody: string | null;
+  streamingMarkdown: string | null;
   storyLength: StoryLengthOption;
   selectedLevel: string;
   selectedLanguage: string;
@@ -98,7 +98,7 @@ export interface BattleStoreState {
   setBattleMode: (mode: BattleMode) => void;
   setGenerationMode: (mode: GenerationMode) => void;
   setIsStreaming: (state: boolean) => void;
-  setLiveArticleBody: (body: string | null) => void;
+  setStreamingMarkdown: (markdown: string | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setSelectedLevel: (level: string) => void;
   setSelectedLanguage: (language: string) => void;

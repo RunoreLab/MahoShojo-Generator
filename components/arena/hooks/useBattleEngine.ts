@@ -11,46 +11,7 @@ import { applyShieldWords } from '@/lib/shield-word-filter';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
-
-interface SSEEventPayload {
-  event: string;
-  data: string;
-}
-
-const parseSSEEvent = (rawEvent: string): SSEEventPayload | null => {
-  if (!rawEvent.trim()) {
-    return null;
-  }
-
-  const lines = rawEvent.split(/\r?\n/);
-  let eventType = 'message';
-  const dataLines: string[] = [];
-
-  for (const line of lines) {
-    if (line.startsWith('event:')) {
-      eventType = line.slice(6).trim();
-    } else if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).trim());
-    }
-  }
-
-  if (dataLines.length === 0) {
-    return null;
-  }
-
-  return {
-    event: eventType,
-    data: dataLines.join('\n'),
-  };
-};
-
-const safeJsonParse = <T,>(input: string): T | null => {
-  try {
-    return JSON.parse(input) as T;
-  } catch {
-    return null;
-  }
-};
+import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -176,6 +137,7 @@ const checkSensitivePayload = async (
 
 export const useBattleEngine = () => {
   const router = useRouter();
+  const { updateFromMarkdown } = useStreamCombatantUpdater();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
@@ -193,7 +155,7 @@ export const useBattleEngine = () => {
   const setAdjudicationResults = useBattleSelector((state) => state.setAdjudicationResults);
   const setIsGenerating = useBattleSelector((state) => state.setIsGenerating);
   const setIsStreaming = useBattleSelector((state) => state.setIsStreaming);
-  const setLiveArticleBody = useBattleSelector((state) => state.setLiveArticleBody);
+  const setStreamingMarkdown = useBattleSelector((state) => state.setStreamingMarkdown);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const { handleResolveRandomPlaceholders } = useBattleActions();
@@ -259,7 +221,7 @@ export const useBattleEngine = () => {
 
     setIsGenerating(true);
     setIsStreaming(false);
-    setLiveArticleBody(null);
+    setStreamingMarkdown(null);
     setError(null);
     setNewsReport(null);
     setUpdatedCombatants([]);
@@ -389,7 +351,7 @@ export const useBattleEngine = () => {
         let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
         try {
-          const response = await fetch('/api/stream/generate-battle-story', {
+          const response = await fetch('/api/arena/generate-stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody),
@@ -406,25 +368,17 @@ export const useBattleEngine = () => {
               }
               throw new Error(json.message || json.error || text);
             } catch {
-              throw new Error('服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+              throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
             }
-          }
-
-          const contentType = response.headers.get('content-type') || '';
-          if (!contentType.includes('text/event-stream')) {
-            const unexpectedBody = await response.text();
-            console.error('意外的响应内容:', unexpectedBody);
-            throw new Error('服务器未返回流式数据，暂时无法生成战报。');
           }
 
           reader = response.body?.getReader() ?? null;
           if (!reader) {
-            throw new Error('当前浏览器不支持流式输出，请使用最新版本的现代浏览器。');
+            throw new Error('无法读取响应流，请使用最新版本的现代浏览器。');
           }
 
           const decoder = new TextDecoder();
-          let buffer = '';
-          let finalPayload: BattleApiResponse | null = null;
+          let accumulatedText = '#';
           let shouldAbort = false;
           const streamBackupItems = buildBattleBackupItems(
             freshCombatants,
@@ -435,93 +389,19 @@ export const useBattleEngine = () => {
             settings.userGuidance,
             adjudicationEvents
           );
-          let lastLiveBodyLength = 0;
+          let lastCheckedLength = 0;
 
-          setLiveArticleBody('');
+          setStreamingMarkdown(accumulatedText);
           setIsStreaming(true);
 
-          const placeholderReport: NewsReport = {
-            headline: '故事生成中...',
-            reporterInfo: {
-              name: '直播记者·星尘',
-              publication: '魔法少女通讯社',
-            },
-            article: {
-              body: '',
-              analysis: '记者正在实时整理点评，请稍候。',
-            },
-            officialReport: {
-              winner: '待定',
-              conclusion: '故事仍在进行，最终结论稍后揭晓。',
-            },
-            userGuidance: settings.userGuidance ? sanitizeTextByShieldWords(settings.userGuidance) : undefined,
-            mode: battleMode,
-          };
-
-          const safeScenarioDisplayName = scenarioDisplayName ? sanitizeTextByShieldWords(scenarioDisplayName) : null;
-          if (battleMode === 'scenario' && safeScenarioDisplayName) {
-            placeholderReport.scenario = safeScenarioDisplayName;
-          }
-
-          setNewsReport(placeholderReport);
-
           const getIncrementalCheckSlice = (fullText: string): string => {
-            if (fullText.length < lastLiveBodyLength) {
-              lastLiveBodyLength = 0;
+            if (fullText.length < lastCheckedLength) {
+              lastCheckedLength = 0;
             }
-            const start = Math.max(0, lastLiveBodyLength - 64);
+            const start = Math.max(0, lastCheckedLength - 64);
             const slice = fullText.slice(start);
-            lastLiveBodyLength = fullText.length;
+            lastCheckedLength = fullText.length;
             return slice;
-          };
-
-          const processEvent = async (evt: SSEEventPayload) => {
-            if (evt.event === 'status' || evt.event === 'yaml') {
-              return;
-            }
-
-            if (evt.event === 'article_body') {
-              const payload = safeJsonParse<{ text: string }>(evt.data);
-              if (payload && typeof payload.text === 'string') {
-                const rawBody = payload.text;
-                const sliceToCheck = getIncrementalCheckSlice(rawBody);
-                if (
-                  await checkSensitivePayload(sliceToCheck, {
-                    source: 'output',
-                    origin: 'battle-stream',
-                    reason: '使用危险符文',
-                    backupItems: streamBackupItems,
-                    onRedirect: redirectToArrested,
-                  })
-                ) {
-                  shouldAbort = true;
-                  return;
-                }
-
-                setLiveArticleBody(sanitizeTextByShieldWords(rawBody));
-              }
-              return;
-            }
-
-            if (evt.event === 'error') {
-              const payload = safeJsonParse<{ message?: string }>(evt.data);
-              throw new Error(payload?.message || '生成失败');
-            }
-
-            if (evt.event === 'final') {
-              const payload = safeJsonParse<BattleApiResponse>(evt.data);
-              if (!payload) {
-                throw new Error('无法解析最终战报数据');
-              }
-
-              if (await applyBattleResult(payload, 'battle-stream')) {
-                shouldAbort = true;
-                return;
-              }
-
-              finalPayload = payload;
-              setLiveArticleBody(null);
-            }
           };
 
           while (true) {
@@ -533,23 +413,25 @@ export const useBattleEngine = () => {
               continue;
             }
 
-            buffer += decoder.decode(value, { stream: true });
-            buffer = buffer.replace(/\r\n/g, '\n');
+            const chunk = decoder.decode(value, { stream: true });
+            accumulatedText += chunk;
 
-            let boundary = buffer.indexOf('\n\n');
-            while (boundary !== -1) {
-              const rawEvent = buffer.slice(0, boundary);
-              buffer = buffer.slice(boundary + 2);
-              const parsedEvent = parseSSEEvent(rawEvent);
-              if (parsedEvent) {
-                await processEvent(parsedEvent);
-                if (shouldAbort) {
-                  await reader.cancel().catch(() => undefined);
-                  break;
-                }
-              }
-              boundary = buffer.indexOf('\n\n');
+            const sliceToCheck = getIncrementalCheckSlice(accumulatedText);
+            if (
+              await checkSensitivePayload(sliceToCheck, {
+                source: 'output',
+                origin: 'battle-stream',
+                reason: '使用危险符文',
+                backupItems: streamBackupItems,
+                onRedirect: redirectToArrested,
+              })
+            ) {
+              shouldAbort = true;
+              await reader.cancel().catch(() => undefined);
+              break;
             }
+
+            setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
 
             if (shouldAbort) {
               break;
@@ -558,15 +440,32 @@ export const useBattleEngine = () => {
 
           if (shouldAbort) {
             setNewsReport(null);
-            setLiveArticleBody(null);
+            setStreamingMarkdown(null);
             return;
           }
 
-          if (!finalPayload) {
-            throw new Error('未收到完整的战报数据。');
+          setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+          startCooldown();
+
+          if (settings.writeArenaHistory || settings.writeCurrentState) {
+            try {
+              await updateFromMarkdown(
+                accumulatedText,
+                freshCombatants,
+                battleMode,
+                {
+                  userGuidance: settings.userGuidance,
+                  writeArenaHistory: settings.writeArenaHistory,
+                  writeCurrentState: settings.writeCurrentState,
+                },
+                shouldUseScenario ? scenario.content : null
+              );
+            } catch (updateError) {
+              const message = updateError instanceof Error ? updateError.message : '发生未知错误，请重试。';
+              setError(`⚠️ 流式战报已生成，但角色更新失败：${message}`);
+            }
           }
 
-          startCooldown();
           return;
         } finally {
           if (reader) {
@@ -606,7 +505,6 @@ export const useBattleEngine = () => {
     } catch (error) {
       setError(`✨ 魔法失效了！${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
       setNewsReport(null);
-      setLiveArticleBody(null);
     } finally {
       setIsGenerating(false);
       setIsStreaming(false);
@@ -631,11 +529,12 @@ export const useBattleEngine = () => {
     setAdjudicationResults,
     setIsGenerating,
     setIsStreaming,
-    setLiveArticleBody,
+    setStreamingMarkdown,
     setCombatants,
     handleResolveRandomPlaceholders,
     redirectToArrested,
     startCooldown,
+    updateFromMarkdown,
   ]);
 
   return {
