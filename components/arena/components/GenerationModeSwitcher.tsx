@@ -19,7 +19,7 @@ export function GenerationModeSwitcher() {
           return (
             <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
               <p className="font-bold">你已选择【流式生成（实验性）】！</p>
-              <p className="mt-1">实验性功能：会实时输出正文，质量更高、体验更好，但可能出现中断、格式异常等问题。</p>
+              <p className="mt-1">实验性功能：会实时输出正文，质量更高、体验更好，但可能出现中断、格式异常等严重问题！</p>
             </div>
           );
         }
