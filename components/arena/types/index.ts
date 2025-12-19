@@ -80,6 +80,8 @@ export interface BattleStoreState {
   generationMode: GenerationMode;
   isStreaming: boolean;
   streamingMarkdown: string | null;
+  streamReporterInfo: NewsReport['reporterInfo'] | null;
+  streamUserGuidance: string | null;
   storyLength: StoryLengthOption;
   selectedLevel: string;
   selectedLanguage: string;
@@ -100,6 +102,8 @@ export interface BattleStoreState {
   setGenerationMode: (mode: GenerationMode) => void;
   setIsStreaming: (state: boolean) => void;
   setStreamingMarkdown: (markdown: string | null) => void;
+  setStreamReporterInfo: (info: NewsReport['reporterInfo'] | null) => void;
+  setStreamUserGuidance: (guidance: string | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setSelectedLevel: (level: string) => void;
   setSelectedLanguage: (language: string) => void;

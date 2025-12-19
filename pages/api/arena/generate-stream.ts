@@ -12,6 +12,7 @@ import { getSystemPrompt } from '@/lib/arena/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
 import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { getRandomJournalist } from '@/lib/random-choose-journalist';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
@@ -187,6 +188,13 @@ async function handler(req: NextRequest): Promise<Response> {
 
         log.info('📝 构建提示词', { mode, combatantsCount: combatants.length, hasScenario: !!scenario });
 
+        const reporterInfo = getRandomJournalist();
+        const streamMeta = {
+            reporterInfo,
+            userGuidance: finalUserGuidance || undefined,
+            adjudicationResults: adjudicationResults || undefined,
+        };
+
         const prompt = createStreamPromptBuilder(
             questionnaire.questions,
             finalUserGuidance,
@@ -215,7 +223,18 @@ async function handler(req: NextRequest): Promise<Response> {
 
         log.info('✅ 流式响应已生成，准备返回');
 
-        return streamResponse;
+        const headers = new Headers(streamResponse.headers);
+        try {
+            const encodedMeta = encodeURIComponent(JSON.stringify(streamMeta));
+            headers.set('x-mahoshojo-stream-meta', encodedMeta);
+        } catch (metaError) {
+            log.warn('流式战报元信息写入失败，将继续返回正文流', { metaError });
+        }
+
+        return new Response(streamResponse.body, {
+            status: streamResponse.status,
+            headers,
+        });
     } catch (error) {
         log.error('生成战斗故事时发生顶层错误', { error });
         const errorMessage = error instanceof Error ? error.message : '未知错误';

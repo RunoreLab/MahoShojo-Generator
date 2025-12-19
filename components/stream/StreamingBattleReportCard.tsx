@@ -4,6 +4,7 @@ import React, { useRef } from 'react';
 import { snapdom } from '@zumer/snapdom';
 import ReactMarkdown from 'react-markdown';
 import { Components } from 'react-markdown';
+import type { AdjudicationResult } from '@/types/arena';
 
 interface StreamingBattleReportCardProps {
     /** 流式输入的 Markdown 文本内容 */
@@ -12,6 +13,12 @@ interface StreamingBattleReportCardProps {
     mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
     /** 情景模式下的场景名称 */
     scenarioName?: string;
+    /** 记者与来源信息（用于补齐与非流式一致的展示） */
+    reporterInfo?: { name: string; publication: string } | null;
+    /** 本次生成时的故事引导快照 */
+    userGuidance?: string | null;
+    /** 本次生成时的随机判定结果 */
+    adjudicationResults?: AdjudicationResult[] | null;
     /** 是否正在生成中（可选，用于显示加载光标等） */
     isStreaming?: boolean;
 }
@@ -21,9 +28,15 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     onSaveImage,
     mode,
     scenarioName,
+    reporterInfo = null,
+    userGuidance = null,
+    adjudicationResults = null,
     isStreaming = false
 }) => {
     const cardRef = useRef<HTMLDivElement>(null);
+    const headlineMatch = content.match(/^\s*#\s*(.*)(?:\r?\n|$)/);
+    const headline = headlineMatch ? headlineMatch[1].trim() : '';
+    const markdownBody = headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content;
 
     const getModeDisplay = (mode: string) => {
         switch (mode) {
@@ -41,6 +54,50 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     };
 
     const modeDisplay = mode ? getModeDisplay(mode) : null;
+
+    const buildExportMarkdown = (): string => {
+        const metaLines: string[] = [];
+        if (reporterInfo?.name && reporterInfo?.publication) {
+            metaLines.push(`**来源：${reporterInfo.publication} | 记者：${reporterInfo.name}**`);
+        }
+        if (modeDisplay?.text) {
+            metaLines.push(`**模式：${modeDisplay.text}**`);
+        }
+
+        const metaBlock = metaLines.length > 0 ? `${metaLines.join('\n')}\n` : '';
+
+        const insertMetaAfterTitle = (raw: string): string => {
+            if (!metaBlock) return raw;
+            const match = raw.match(/^\s*#\s*.*(?:\r?\n|$)/);
+            if (!match) {
+                return `# 战斗战报\n${metaBlock}\n${raw}`.trim();
+            }
+            const head = match[0];
+            const rest = raw.slice(head.length);
+            return `${head}${metaBlock}\n${rest}`.trim();
+        };
+
+        let result = insertMetaAfterTitle(content);
+
+        const hasGuidanceSection = /(^|\n)##\s*故事引导\s*(\n|$)/.test(result);
+        if (!hasGuidanceSection && userGuidance?.trim()) {
+            result = `${result.trim()}\n\n---\n\n## 故事引导\n> ${userGuidance.trim()}\n`;
+        }
+
+        const hasAdjudicationSection = /(^|\n)##\s*随机判定记录\s*(\n|$)/.test(result);
+        if (!hasAdjudicationSection && adjudicationResults && adjudicationResults.length > 0) {
+            const adjudicationMarkdown = adjudicationResults
+                .map((res) => {
+                    const prefix = ' '.repeat(res.depth * 2);
+                    return `${prefix}- **事件**: ${res.description}\n${prefix}  - **结果**: ${res.outcome} (${res.details})`;
+                })
+                .join('\n');
+
+            result = `${result.trim()}\n\n---\n\n## 随机判定记录\n${adjudicationMarkdown}\n`;
+        }
+
+        return result.trim();
+    };
 
     // --- 截图功能逻辑 (与原组件保持一致) ---
     const handleSaveImage = async () => {
@@ -68,7 +125,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 const downloadLink = document.createElement('a');
                 downloadLink.href = imageUrl;
                 // 尝试从 content 中提取第一行作为文件名
-                const titleMatch = content.match(/^#\s+(.+)$/m);
+                const titleMatch = content.match(/^#\s*(.+)$/m);
                 const title = titleMatch ? titleMatch[1] : '战斗战报';
                 const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
                 downloadLink.download = `魔法少女速报_${sanitizedTitle}.png`;
@@ -86,12 +143,13 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
     // --- 下载 Markdown 逻辑 ---
     const handleSaveMarkdown = () => {
-        const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+        const exportMarkdown = buildExportMarkdown();
+        const blob = new Blob([exportMarkdown], { type: 'text/markdown;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
 
-        const titleMatch = content.match(/^#\s+(.+)$/m);
+        const titleMatch = exportMarkdown.match(/^#\s*(.+)$/m);
         const title = titleMatch ? titleMatch[1] : '战斗战报';
         const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
 
@@ -203,16 +261,63 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 </div>
                 { scenarioName && <h3 className='ml-2 mb-4 font-bold text-gray-100'>~ {scenarioName.replace(".json", "")} ~</h3> }
 
+                {headline && <h2 className="text-xl font-bold mb-2 mt-2 px-1">{headline}</h2>}
+
+                {reporterInfo?.name && reporterInfo?.publication && (
+                    <div className="px-1 mb-4 text-sm text-gray-300">
+                        <p>记者 | {reporterInfo.name}</p>
+                        <p>来源 | {reporterInfo.publication}</p>
+                    </div>
+                )}
+
                 {/* Markdown 内容渲染区域 */}
                 <div className="min-h-[200px]">
                     <ReactMarkdown components={markdownComponents}>
-                        {content}
+                        {markdownBody}
                     </ReactMarkdown>
                     {/* 闪烁光标，模拟打字效果 */}
                     {isStreaming && (
                         <span className="inline-block w-2 h-4 bg-pink-500 animate-pulse align-middle ml-1"></span>
                     )}
                 </div>
+
+                {userGuidance?.trim() && (
+                    <div className="mt-6 border-l-4 border-purple-400 bg-black/20 p-3 rounded">
+                        <div className="text-sm font-semibold mb-1">📖 故事引导</div>
+                        <p className="text-sm opacity-90 italic">“{userGuidance.trim()}”</p>
+                    </div>
+                )}
+
+                {adjudicationResults && adjudicationResults.length > 0 && (
+                    <div className="mt-4 border-l-4 border-green-400 bg-black/20 p-3 rounded">
+                        <div className="text-sm font-semibold mb-2">🎲 随机判定记录</div>
+                        <div className="space-y-2 text-sm">
+                            {adjudicationResults.map((result, index) => (
+                                <div key={index} style={{ marginLeft: `${result.depth * 16}px` }}>
+                                    <p className="opacity-90">
+                                        {result.depth > 0 && <span className="text-gray-400">↳ </span>}
+                                        <span className="font-semibold">{result.description}</span>
+                                    </p>
+                                    <p className="text-xs opacity-70">
+                                        判定结果:{' '}
+                                        <span
+                                            className={`font-bold ${
+                                                result.outcome === '成功' || result.outcome === '大成功'
+                                                    ? 'text-green-300'
+                                                    : result.outcome === '失败' || result.outcome === '大失败'
+                                                        ? 'text-red-300'
+                                                        : 'text-blue-300'
+                                            }`}
+                                        >
+                                            {result.outcome}
+                                        </span>{' '}
+                                        ({result.details})
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* 底部按钮 */}
                 <div className="buttons-container flex gap-2 justify-center mt-6 pt-4 border-t border-gray-700" style={{ alignItems: 'stretch' }}>
