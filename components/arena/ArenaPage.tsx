@@ -22,6 +22,7 @@ import { StoryOptions } from './components/StoryOptions';
 import { BattleActions } from './components/BattleActions';
 import { BattleResult } from './components/BattleResult';
 import { BattleModeSwitcher } from './components/BattleModeSwitcher';
+import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
 import { ArenaStatistics } from './components/ArenaStatistics';
 import { useBattleStore } from './stores/useBattleStore';
 import { BattleStoreState, CombatantData } from './types';
@@ -106,6 +107,7 @@ export function ArenaPage() {
             )}
             <BattleSettings />
             <StoryOptions languages={languages} afterUserGuidance={<AdjudicatorPanel />} />
+            <GenerationModeSwitcher />
             <BattleActions />
             <div className="text-center mt-3">
               <a

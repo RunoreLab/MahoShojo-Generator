@@ -17,6 +17,8 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
+  const generationMode = useBattleSelector((state) => state.generationMode);
+  const liveArticleBody = useBattleSelector((state) => state.liveArticleBody);
   const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
 
@@ -74,6 +76,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
           report={newsReport as NewsReport}
           onSaveImage={onSaveImage}
           mode={battleMode}
+          liveBody={generationMode === 'stream' ? (liveArticleBody ?? undefined) : undefined}
         />
       )}
 
