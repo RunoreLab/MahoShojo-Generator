@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 
 import BattleDataModal from '@/components/BattleDataModal';
@@ -72,6 +72,14 @@ export function ArenaPage() {
     setSavedImageUrl(imageUrl);
     setShowImageModal(true);
   };
+
+  useEffect(() => {
+    return () => {
+      if (savedImageUrl && savedImageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(savedImageUrl);
+      }
+    };
+  }, [savedImageUrl]);
 
   return (
     <>
@@ -164,7 +172,10 @@ export function ArenaPage() {
             <div className="flex justify-between items-center m-0">
               <div></div>
               <button
-                onClick={() => setShowImageModal(false)}
+                onClick={() => {
+                  setShowImageModal(false);
+                  setSavedImageUrl(null);
+                }}
                 className="text-gray-500 hover:text-gray-700 text-3xl leading-none"
                 style={{ marginRight: '0.5rem' }}
               >

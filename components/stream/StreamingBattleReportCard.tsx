@@ -1,11 +1,12 @@
 // components/StreamingBattleReportCard.tsx
 
-import React, { useRef } from 'react';
-import { snapdom } from '@zumer/snapdom';
+import React, { useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Components } from 'react-markdown';
 import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { capturePngBlob } from '@/lib/client/snapdomCapture';
+import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 
 interface StreamingBattleReportCardProps {
     /** 流式输入的 Markdown 文本内容 */
@@ -35,6 +36,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     isStreaming = false
 }) => {
     const cardRef = useRef<HTMLDivElement>(null);
+    const [isSavingImage, setIsSavingImage] = useState(false);
     const headlineMatch = content.match(/^\s*#\s*(.*)(?:\r?\n|$)/);
     const headline = headlineMatch ? headlineMatch[1].trim() : '';
     const markdownBody = headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content;
@@ -103,42 +105,54 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     // --- 截图功能逻辑 (与原组件保持一致) ---
     const handleSaveImage = async () => {
         if (!cardRef.current) return;
+        if (isSavingImage) return;
+
+        const buttonsContainer = cardRef.current.querySelector('.buttons-container') as HTMLElement | null;
+        const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement | null;
 
         try {
-            const buttonsContainer = cardRef.current.querySelector('.buttons-container') as HTMLElement;
-            const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
+            setIsSavingImage(true);
 
             if (buttonsContainer) buttonsContainer.style.display = 'none';
             if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-            const result = await snapdom(cardRef.current, { scale: 2 }); // 稍微调高scale以获得清晰文字
+            const titleMatch = content.match(/^#\s*(.+)$/m);
+            const title = titleMatch ? titleMatch[1] : '战斗战报';
+            const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
+            const filename = `魔法少女速报_${sanitizedTitle}.png`;
 
-            if (buttonsContainer) buttonsContainer.style.display = 'flex';
-            if (logoPlaceholder) logoPlaceholder.style.display = 'none';
+            const blob = await capturePngBlob(cardRef.current, { scale: 1, dprMax: 2, fast: false });
 
-            const imgElement = await result.toPng();
-            const imageUrl = imgElement.src;
             const isMobileDevice = /Mobi/i.test(window.navigator.userAgent);
 
             if (isMobileDevice) {
-                if (onSaveImage) onSaveImage(imageUrl);
+                const canShare = typeof navigator !== 'undefined' && 'share' in navigator && 'canShare' in navigator;
+                if (canShare && typeof File !== 'undefined') {
+                    try {
+                        const file = new File([blob], filename, { type: 'image/png' });
+                        const shareData: ShareData = { files: [file], title };
+                        if (navigator.canShare(shareData)) {
+                            await navigator.share({ files: [file], title });
+                            return;
+                        }
+                    } catch (shareError) {
+                        console.warn('图片分享失败，将回退到长按保存弹窗', shareError);
+                    }
+                }
+
+                if (onSaveImage) {
+                    onSaveImage(createBlobUrl(blob));
+                }
             } else {
-                const downloadLink = document.createElement('a');
-                downloadLink.href = imageUrl;
-                // 尝试从 content 中提取第一行作为文件名
-                const titleMatch = content.match(/^#\s*(.+)$/m);
-                const title = titleMatch ? titleMatch[1] : '战斗战报';
-                const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
-                downloadLink.download = `魔法少女速报_${sanitizedTitle}.png`;
-                document.body.appendChild(downloadLink);
-                downloadLink.click();
-                document.body.removeChild(downloadLink);
+                downloadBlob(blob, filename);
             }
         } catch (err) {
             alert('生成图片失败，请重试');
-            console.error("Image generation failed:", err);
-            const buttonsContainer = cardRef.current?.querySelector('.buttons-container') as HTMLElement;
+            console.error('Image generation failed:', err);
+        } finally {
             if (buttonsContainer) buttonsContainer.style.display = 'flex';
+            if (logoPlaceholder) logoPlaceholder.style.display = 'none';
+            setIsSavingImage(false);
         }
     };
 
@@ -357,9 +371,10 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                     {onSaveImage && (
                         <button
                             onClick={handleSaveImage}
-                            className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all"
+                            disabled={isStreaming || isSavingImage}
+                            className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                            📱 保存为图片
+                            {isSavingImage ? '生成中...' : isStreaming ? '生成中...' : '📱 保存为图片'}
                         </button>
                     )}
                     <button
