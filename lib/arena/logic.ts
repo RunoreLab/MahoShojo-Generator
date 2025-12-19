@@ -388,8 +388,8 @@ export const createStreamPromptBuilder = (
     }
 
     // 流式生成的关键：要求输出 Markdown 格式的战报
-    finalPrompt += `\n\n【输出格式】\n请以 Markdown 格式输出战报，包含以下部分：
-            # 战报标题
+    finalPrompt += `\n\n【输出格式】\n请以 Markdown 格式输出战报，请严格按照格式输出，不要携带任何其他内容：
+            # 故事 / 战报标题
             随后紧跟故事或者战报的正文，用段落呈现，保持流畅性和可读性
             ## 胜利者
             胜利者名称
