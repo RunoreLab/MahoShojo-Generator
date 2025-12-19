@@ -60,17 +60,11 @@ const sensitiveWordsConfig = {
     // 新增违禁词
     "5LiL5L2T6auY5r2u",
     "54ix5ray",
-    "56eB5aSE",
     "54OI5aOr",
-    "5ram5LmL",
     // 慈爱眷者相关违禁词
-    "5LiL5L2T",
     "5amK",
     "5aaT5aWz",
     "57K+5ray",
-    "5bCP56m0",
-    "572p5p2v",
-    "56eB5aSE",
     "5rer5Lmx",
     "5rer6I2h",
     "5by65aW4",
@@ -81,7 +75,6 @@ const sensitiveWordsConfig = {
     "54ix5oqa",
     "5aiH5ZCf",
     "5r2u5ZC5",
-    "5Liw6IW0",
     "6IuX5bqK",
     "5qao5Y+W",
     "6Zi06YGT",
@@ -89,10 +82,8 @@ const sensitiveWordsConfig = {
     // 奥菲利亚相关违禁词
     "5rOo5Y21",
     "5Y+X5a2V",
-    "5rer6Z2h",
     "5YKs5oOF",
-    // 现实相关违禁词
-    "5aSp5a6J6Zeo",
+    // 侮辱性词汇
     "5rue57qz",
     "5pSv6YKj",
     // 涉政人物
@@ -121,8 +112,6 @@ const sensitiveWordsConfig = {
     "54q55aSq",
     "56eN5peP54Gt57ud",
     "57qz57K5",
-    "TmF6aQ==",
-    "SGl0bGVy",
   ],
   encoding: "base64",
   original_count: 71
