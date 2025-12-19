@@ -159,6 +159,8 @@ export const useBattleEngine = () => {
   const setIsRedoingUpdates = useBattleSelector((state) => state.setIsRedoingUpdates);
   const setIsStreaming = useBattleSelector((state) => state.setIsStreaming);
   const setStreamingMarkdown = useBattleSelector((state) => state.setStreamingMarkdown);
+  const setStreamReporterInfo = useBattleSelector((state) => state.setStreamReporterInfo);
+  const setStreamUserGuidance = useBattleSelector((state) => state.setStreamUserGuidance);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
@@ -230,6 +232,8 @@ export const useBattleEngine = () => {
     setNewsReport(null);
     setUpdatedCombatants([]);
     setAdjudicationResults(null);
+    setStreamReporterInfo(null);
+    setStreamUserGuidance(null);
 
     try {
       await handleResolveRandomPlaceholders();
@@ -376,14 +380,47 @@ export const useBattleEngine = () => {
             }
           }
 
-          reader = response.body?.getReader() ?? null;
-          if (!reader) {
-            throw new Error('无法读取响应流，请使用最新版本的现代浏览器。');
-          }
+	          reader = response.body?.getReader() ?? null;
+	          if (!reader) {
+	            throw new Error('无法读取响应流，请使用最新版本的现代浏览器。');
+	          }
 
-          const decoder = new TextDecoder();
-          let accumulatedText = '#';
-          let shouldAbort = false;
+	          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
+	          if (metaHeader) {
+	            try {
+	              const parsed = JSON.parse(decodeURIComponent(metaHeader));
+	              const reporterInfo = parsed?.reporterInfo;
+	              if (reporterInfo && typeof reporterInfo === 'object') {
+	                const name = typeof reporterInfo.name === 'string' ? reporterInfo.name : '';
+	                const publication = typeof reporterInfo.publication === 'string' ? reporterInfo.publication : '';
+	                if (name && publication) {
+	                  setStreamReporterInfo({ name: sanitizeTextByShieldWords(name), publication: sanitizeTextByShieldWords(publication) });
+	                }
+	              }
+
+	              const userGuidance = typeof parsed?.userGuidance === 'string' ? parsed.userGuidance.trim() : '';
+	              if (userGuidance) {
+	                setStreamUserGuidance(sanitizeTextByShieldWords(userGuidance));
+	              }
+
+	              const adjudicationResults = Array.isArray(parsed?.adjudicationResults) ? parsed.adjudicationResults : null;
+	              if (adjudicationResults && adjudicationResults.length > 0) {
+	                setAdjudicationResults(adjudicationResults);
+	              }
+	            } catch (metaError) {
+	              // 元信息解析失败不影响正文流式展示
+	              console.warn('解析流式战报元信息失败，将继续渲染正文', metaError);
+	            }
+	          } else {
+	            const snapshotGuidance = settings.userGuidance.trim();
+	            if (snapshotGuidance) {
+	              setStreamUserGuidance(sanitizeTextByShieldWords(snapshotGuidance));
+	            }
+	          }
+
+	          const decoder = new TextDecoder();
+	          let accumulatedText = '#';
+	          let shouldAbort = false;
           const streamBackupItems = buildBattleBackupItems(
             freshCombatants,
             shouldUseScenario ? scenario.content : null,
@@ -521,7 +558,7 @@ export const useBattleEngine = () => {
       setIsGenerating(false);
       setIsStreaming(false);
     }
-  }, [
+	  }, [
     isCooldown,
     remainingTime,
     battleMode,
@@ -542,12 +579,14 @@ export const useBattleEngine = () => {
     setIsGenerating,
     setIsStreaming,
     setStreamingMarkdown,
+    setStreamReporterInfo,
+    setStreamUserGuidance,
     setCombatants,
     handleResolveRandomPlaceholders,
     redirectToArrested,
     startCooldown,
     updateFromMarkdown,
-  ]);
+	  ]);
 
   const handleRedoUpdates = useCallback(async () => {
     if (isCooldown) {

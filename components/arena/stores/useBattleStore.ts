@@ -50,6 +50,8 @@ export const useBattleStore = create<BattleStoreState>()(
       generationMode: 'non-stream',
       isStreaming: false,
       streamingMarkdown: null,
+      streamReporterInfo: null,
+      streamUserGuidance: null,
       storyLength: 'default',
       selectedLevel: '',
       selectedLanguage: 'zh-CN',
@@ -70,6 +72,8 @@ export const useBattleStore = create<BattleStoreState>()(
       setGenerationMode: (mode) => set({ generationMode: mode }),
       setIsStreaming: (stateValue) => set({ isStreaming: stateValue }),
       setStreamingMarkdown: (markdown) => set({ streamingMarkdown: markdown }),
+      setStreamReporterInfo: (info) => set({ streamReporterInfo: info }),
+      setStreamUserGuidance: (guidance) => set({ streamUserGuidance: guidance }),
       setStoryLength: (storyLength) => set({ storyLength }),
       setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
@@ -107,6 +111,8 @@ export const useBattleStore = create<BattleStoreState>()(
           updatedCombatants: [],
           streamingMarkdown: null,
           isStreaming: false,
+          streamReporterInfo: null,
+          streamUserGuidance: null,
         }),
 
       updateCombatantTeam: (filename, teamId) =>

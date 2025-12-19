@@ -24,6 +24,8 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const newsReport = useBattleSelector((state) => state.newsReport);
   const generationMode = useBattleSelector((state) => state.generationMode);
   const streamingMarkdown = useBattleSelector((state) => state.streamingMarkdown);
+  const streamReporterInfo = useBattleSelector((state) => state.streamReporterInfo);
+  const streamUserGuidance = useBattleSelector((state) => state.streamUserGuidance);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
   const settings = useBattleSelector((state) => state.settings);
@@ -95,6 +97,9 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               onSaveImage={onSaveImage}
               mode={battleMode}
               scenarioName={battleMode === 'scenario' ? scenario.fileName ?? undefined : undefined}
+              reporterInfo={streamReporterInfo}
+              userGuidance={streamUserGuidance}
+              adjudicationResults={adjudicationResults}
               isStreaming={isGenerating}
             />
           </div>
