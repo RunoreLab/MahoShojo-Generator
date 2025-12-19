@@ -222,3 +222,32 @@ export async function createBattleReportGenerationRecord(
     return null;
   }
 }
+
+export async function updateBattleReportGenerationCombatantsWriteResult(
+  id: string,
+  payload: { ok: boolean; expectedRows: number; errorMessage?: string | null }
+): Promise<boolean> {
+  try {
+    const nowIso = new Date().toISOString();
+    const sql = `
+      UPDATE battle_report_generations
+      SET combatants_write_ok = ?,
+          combatants_row_count = ?,
+          combatants_write_error = ?,
+          updated_at = ?
+      WHERE id = ?;
+    `;
+    const params: unknown[] = [
+      payload.ok ? 1 : 0,
+      payload.expectedRows,
+      payload.ok ? null : (payload.errorMessage || 'unknown error'),
+      nowIso,
+      id,
+    ];
+    const result = (await queryFromD1(sql, params)) as any;
+    return Boolean(result?.success);
+  } catch (error) {
+    console.error('更新 battle_report_generations.combatants_* 失败:', error);
+    return false;
+  }
+}

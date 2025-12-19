@@ -16,7 +16,12 @@ import { getSystemPrompt } from '@/lib/arena/constants';
 import { buildBattleReportSchema, CustomProviderSchema } from '@/lib/arena/schemas';
 import { createPromptBuilder, processAdjudicationChain } from '@/lib/arena/logic';
 import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
-import { createBattleReportGenerationRecord, createBattleReportGenerationCombatants, getUserByAuthKey } from '@/lib/d1';
+import {
+    createBattleReportGenerationRecord,
+    createBattleReportGenerationCombatants,
+    updateBattleReportGenerationCombatantsWriteResult,
+    getUserByAuthKey
+} from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
@@ -422,7 +427,15 @@ async function handler(req: NextRequest): Promise<Response> {
                         sizeBytes: payload ? toBytes(payload) : null,
                     };
                 });
-                await createBattleReportGenerationCombatants(rows);
+                const combatantsWrite = await createBattleReportGenerationCombatants(rows);
+                if (!combatantsWrite.ok) {
+                    log.warn('战报生成记录：角色明细写入失败', { recordId, errorMessage: combatantsWrite.errorMessage });
+                }
+                await updateBattleReportGenerationCombatantsWriteResult(recordId, {
+                    ok: combatantsWrite.ok,
+                    expectedRows: rows.length,
+                    errorMessage: combatantsWrite.errorMessage ?? null,
+                });
             }
         })();
 

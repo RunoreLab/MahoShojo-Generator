@@ -17,9 +17,9 @@ export interface BattleReportGenerationCombatantInsert {
 
 export async function createBattleReportGenerationCombatants(
   combatants: BattleReportGenerationCombatantInsert[]
-): Promise<boolean> {
+): Promise<{ ok: boolean; errorMessage?: string }> {
   try {
-    if (!combatants.length) return true;
+    if (!combatants.length) return { ok: true };
     const nowIso = new Date().toISOString();
 
     const valuesSql = combatants.map(() => `(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
@@ -63,9 +63,10 @@ export async function createBattleReportGenerationCombatants(
     }
 
     const result = (await queryFromD1(sql, params)) as any;
-    return Boolean(result?.success);
+    return { ok: Boolean(result?.success) };
   } catch (error) {
-    console.error('写入 battle_report_generation_combatants 失败:', error);
-    return false;
+    const errorMessage = error instanceof Error ? error.message : 'unknown error';
+    console.error('写入 battle_report_generation_combatants 失败:', { errorMessage, error });
+    return { ok: false, errorMessage };
   }
 }
