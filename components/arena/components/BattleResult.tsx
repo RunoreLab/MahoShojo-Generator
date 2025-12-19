@@ -2,6 +2,7 @@
 
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import BattleReportCard, { NewsReport } from '@/components/BattleReportCard';
+import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { getCombatantDisplayName } from '../utils/characterValidator';
@@ -18,9 +19,11 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
   const generationMode = useBattleSelector((state) => state.generationMode);
-  const liveArticleBody = useBattleSelector((state) => state.liveArticleBody);
+  const streamingMarkdown = useBattleSelector((state) => state.streamingMarkdown);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
   const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
+  const scenario = useBattleSelector((state) => state.scenario);
 
   const downloadUpdatedJson = (characterData: any) => {
     const name = characterData.codename || characterData.name;
@@ -71,13 +74,20 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
         </div>
       )}
 
-      {newsReport && (
-        <BattleReportCard
-          report={newsReport as NewsReport}
-          onSaveImage={onSaveImage}
-          mode={battleMode}
-          liveBody={generationMode === 'stream' ? (liveArticleBody ?? undefined) : undefined}
-        />
+      {generationMode === 'stream' ? (
+        streamingMarkdown ? (
+          <div className="mt-6">
+            <StreamingBattleReportCard
+              content={streamingMarkdown}
+              onSaveImage={onSaveImage}
+              mode={battleMode}
+              scenarioName={battleMode === 'scenario' ? scenario.fileName ?? undefined : undefined}
+              isStreaming={isGenerating}
+            />
+          </div>
+        ) : null
+      ) : (
+        newsReport && <BattleReportCard report={newsReport as NewsReport} onSaveImage={onSaveImage} mode={battleMode} />
       )}
 
       {updatedCombatants.length > 0 && (

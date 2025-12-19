@@ -34,24 +34,61 @@ interface UpdateCombatantsPayload {
  */
 const parseMarkdownReport = (markdown: string, mode: string): { headline: string; winner: string } | null => {
   try {
-    // 提取第一个一级标题作为 headline
-    const headlineMatch = markdown.match(/^#\s+(.+)$/m);
-    const headline = headlineMatch ? headlineMatch[1].trim() : '魔法少女速报';
+    const normalized = markdown.replace(/\r\n/g, '\n');
+    const lines = normalized.split('\n');
+
+    // 提取第一个一级标题作为 headline（兼容 "#标题" / "# 标题"）
+    const headlineMatch = normalized.match(/^#\s*(.+)$/m);
+    const headline = headlineMatch?.[1]?.trim() || '魔法少女速报';
+
+    const stripMarkdown = (text: string): string =>
+      text
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/^\s*[-*]\s+/, '')
+        .trim();
+
+    const extractSectionLines = (headingRegex: RegExp): string[] | null => {
+      const startIndex = lines.findIndex((line) => headingRegex.test(line.trim()));
+      if (startIndex === -1) return null;
+
+      const sectionLines: string[] = [];
+      for (let i = startIndex + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^#{1,6}\s*/.test(line.trim())) {
+          break;
+        }
+        sectionLines.push(line);
+      }
+
+      return sectionLines;
+    };
 
     // 提取胜利者信息（根据不同模式有不同的关键词）
     let winner = '未知';
 
-    if (mode === 'daily') {
-      // 日常模式：查找 "参与者" 或类似字段
-      const participantMatch = markdown.match(/参与(?:者|角色)[：:]\s*(.+)/);
-      if (participantMatch) {
-        winner = participantMatch[1].trim();
+    const winnerSection = extractSectionLines(/^##\s*(?:胜利者|获胜者|优胜者)\s*$/);
+    if (winnerSection) {
+      const meaningful = winnerSection.map((line) => line.trim()).filter(Boolean);
+      const bulletItems = meaningful
+        .map((line) => {
+          const match = line.match(/^\s*[-*]\s+(.+)$/);
+          return match?.[1]?.trim() ?? null;
+        })
+        .filter((item): item is string => Boolean(item));
+
+      if (bulletItems.length > 0) {
+        winner = bulletItems.map(stripMarkdown).join('、');
+      } else if (meaningful.length > 0) {
+        winner = stripMarkdown(meaningful[0]);
       }
     } else {
-      // 竞技模式：查找 "胜利者" 或 "获胜者"
-      const winnerMatch = markdown.match(/(?:胜利者|获胜者|优胜者)[：:]\s*(.+)/);
-      if (winnerMatch) {
-        winner = winnerMatch[1].trim();
+      // 兼容旧版输出：使用 "胜利者: xxx" / "参与者: xxx" 的行内格式
+      const inlineMatch =
+        normalized.match(/(?:胜利者|获胜者|优胜者)[：:]\s*(.+)/) ??
+        (mode === 'daily' ? normalized.match(/参与(?:者|角色)[：:]\s*(.+)/) : null);
+      if (inlineMatch?.[1]) {
+        winner = stripMarkdown(inlineMatch[1]);
       }
     }
 
@@ -70,6 +107,7 @@ export const useStreamCombatantUpdater = () => {
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   const setCombatants = useBattleStore((state: BattleStoreState) => state.setCombatants);
+  const setUpdatedCombatants = useBattleStore((state: BattleStoreState) => state.setUpdatedCombatants);
 
   /**
    * 安全地更新角色数据
@@ -100,6 +138,7 @@ export const useStreamCombatantUpdater = () => {
       const result = await response.json();
 
       if (result.updatedCombatants && result.updatedCombatants.length > 0) {
+        setUpdatedCombatants(result.updatedCombatants);
         // 合并更新后的数据到当前角色列表
         const currentCombatants = useBattleStore.getState().combatants;
         const updatedRoster = currentCombatants.map((combatant) => {
@@ -115,6 +154,8 @@ export const useStreamCombatantUpdater = () => {
 
         setCombatants(updatedRoster);
         log.info('成功更新角色数据', { count: result.updatedCombatants.length });
+      } else if (Array.isArray(result.updatedCombatants)) {
+        setUpdatedCombatants([]);
       }
 
       return result;
@@ -126,7 +167,7 @@ export const useStreamCombatantUpdater = () => {
     } finally {
       setIsUpdating(false);
     }
-  }, [setCombatants]);
+  }, [setCombatants, setUpdatedCombatants]);
 
   /**
    * 从 Markdown 内容更新角色（简化版）
