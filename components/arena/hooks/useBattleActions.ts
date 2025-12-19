@@ -145,6 +145,14 @@ export const useBattleActions = () => {
 
   const handleSelectDataCard = useCallback(
     async (cardData: any) => {
+      const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : undefined;
+      const sourceDataCardName = typeof cardData?._cardName === 'string' ? cardData._cardName : undefined;
+      const sourceDataCardUpdatedAt = typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : undefined;
+      const sourceIsPublic = typeof cardData?._isPublic === 'boolean'
+        ? cardData._isPublic
+        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : undefined);
+      const sourceAuthor = typeof cardData?._author === 'string' ? cardData._author : undefined;
+
       const cleanedCardData = removePrivateKeys(cardData);
       const resolvedName = getCombatantDisplayName(cleanedCardData);
       const inferredTemplate = inferTemplate(cleanedCardData);
@@ -170,6 +178,11 @@ export const useBattleActions = () => {
             content: cleanedCardData,
             fileName: `${cardData._cardName || resolvedName}.json`,
             isNative,
+            sourceDataCardId,
+            sourceDataCardUpdatedAt,
+            sourceDataCardName,
+            sourceIsPublic,
+            sourceAuthor,
           });
           appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName);
           setError(null);
@@ -195,6 +208,11 @@ export const useBattleActions = () => {
           isValid,
           isPreset: false,
           isNonStandard: false,
+          sourceDataCardId,
+          sourceDataCardUpdatedAt,
+          sourceDataCardName,
+          sourceIsPublic,
+          sourceAuthor,
         });
         appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName);
         setError(null);
@@ -226,6 +244,8 @@ export const useBattleActions = () => {
           _cardId: result.card.id,
           _cardName: result.card.name,
           _isPublic: result.card.is_public,
+          _updatedAt: result.card.updated_at,
+          _createdAt: result.card.created_at,
           _author: result.card.username || '未知',
         });
       } catch (error) {
