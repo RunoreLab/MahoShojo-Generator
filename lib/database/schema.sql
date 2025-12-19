@@ -154,9 +154,14 @@ CREATE TABLE IF NOT EXISTS battle_report_generations (
   duration_ms INTEGER NOT NULL,
   status TEXT NOT NULL,                  -- completed / aborted / failed
 
+  generation_mode TEXT NOT NULL,         -- stream / non-stream
+  endpoint TEXT NOT NULL,                -- 写入来源（如 api/arena/generate）
+
   ip TEXT,                               -- 客户端 IP（来自 CF-Connecting-IP 或 X-Forwarded-For）
   ip_anonymized TEXT,                    -- 脱敏后的 IP（IPv4 /24 或 IPv6 /64）
   user_agent TEXT,
+  referer TEXT,
+  accept_language TEXT,
   cf_ray TEXT,
   cf_country TEXT,
 
@@ -166,6 +171,8 @@ CREATE TABLE IF NOT EXISTS battle_report_generations (
 
   mode TEXT NOT NULL,                    -- classic / kizuna / daily / scenario
   scenario_title TEXT,                   -- 情景标题（若有）
+  scenario_data_card_id TEXT,            -- 情景数据卡ID（若来自数据库）
+  scenario_data_card_updated_at TEXT,    -- 情景数据卡更新时间（若来自数据库）
   language TEXT,
   selected_level TEXT,
   story_length TEXT,                     -- default / short / standard / detailed / long
@@ -176,10 +183,20 @@ CREATE TABLE IF NOT EXISTS battle_report_generations (
   read_current_state BOOLEAN,
   write_current_state BOOLEAN,
 
+  combatant_count INTEGER,
+  has_scenario BOOLEAN,
+  has_user_guidance BOOLEAN,
+  has_adjudication_events BOOLEAN,
+  has_teams BOOLEAN,
+  input_chars INTEGER,
+  input_bytes INTEGER,
+
   user_guidance_preview TEXT,            -- 用户引导（截断预览）
   adjudication_events_preview TEXT,      -- 随机判定器事件（截断预览）
 
   custom_provider_id TEXT,               -- 自定义供应商ID（来自前端选择器）
+  custom_model_id TEXT,                  -- 用户选择的模型ID（若有）
+  is_downgrade BOOLEAN,
   ai_provider_name TEXT,                 -- 实际使用的提供商（系统负载均衡后）
   ai_provider_type TEXT,                 -- openai / google / deepseek
   ai_model TEXT,                         -- 实际使用的模型
@@ -210,3 +227,33 @@ CREATE INDEX IF NOT EXISTS idx_battle_report_generations_user_id ON battle_repor
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_winner ON battle_report_generations(winner);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_mode ON battle_report_generations(mode);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_status ON battle_report_generations(status);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_generation_mode ON battle_report_generations(generation_mode);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_endpoint ON battle_report_generations(endpoint);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_scenario_data_card_id ON battle_report_generations(scenario_data_card_id);
+
+-- 战报生成记录-参战者明细表
+-- 用于记录每条生成记录中每位角色的可查询信息（未来排行榜/统计的关键维度）。
+CREATE TABLE IF NOT EXISTS battle_report_generation_combatants (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  generation_id TEXT NOT NULL,
+  sort_index INTEGER NOT NULL,
+
+  name TEXT NOT NULL,                    -- 角色名/代号（以 codename 优先）
+  type TEXT,                             -- magical-girl / canshou / general-character
+  template_id TEXT,
+  is_native BOOLEAN,
+  is_preset BOOLEAN,
+  team_id INTEGER,
+
+  data_card_id TEXT,                     -- 角色数据卡ID（若来自数据库）
+  data_card_updated_at TEXT,             -- 角色数据卡更新时间（若来自数据库）
+
+  size_chars INTEGER,                    -- 角色 JSON 字符数（近似）
+  size_bytes INTEGER,                    -- 角色 JSON 字节数（近似）
+
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_battle_report_generation_combatants_generation_id ON battle_report_generation_combatants(generation_id);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generation_combatants_data_card_id ON battle_report_generation_combatants(data_card_id);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generation_combatants_name ON battle_report_generation_combatants(name);
