@@ -12,6 +12,7 @@ import { useBattleStore } from '../stores/useBattleStore';
 import { BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
+import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -154,10 +155,12 @@ export const useBattleEngine = () => {
   const setUpdatedCombatants = useBattleSelector((state) => state.setUpdatedCombatants);
   const setAdjudicationResults = useBattleSelector((state) => state.setAdjudicationResults);
   const setIsGenerating = useBattleSelector((state) => state.setIsGenerating);
+  const setIsRedoingUpdates = useBattleSelector((state) => state.setIsRedoingUpdates);
   const setIsStreaming = useBattleSelector((state) => state.setIsStreaming);
   const setStreamingMarkdown = useBattleSelector((state) => state.setStreamingMarkdown);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
   const { handleResolveRandomPlaceholders } = useBattleActions();
 
   const isUserCustomKey =
@@ -449,6 +452,14 @@ export const useBattleEngine = () => {
 
           if (settings.writeArenaHistory || settings.writeCurrentState) {
             try {
+              const trimmedForUpdate = accumulatedText.trim();
+              const looksLikeCompleteReport =
+                trimmedForUpdate.length >= 120 && /^#{2,6}\s+/m.test(trimmedForUpdate) && trimmedForUpdate !== '#';
+
+              if (!looksLikeCompleteReport) {
+                throw new Error('战报内容不完整，已取消角色更新（请等待战报完整生成后重试）。');
+              }
+
               await updateFromMarkdown(
                 accumulatedText,
                 freshCombatants,
@@ -537,9 +548,128 @@ export const useBattleEngine = () => {
     updateFromMarkdown,
   ]);
 
+  const handleRedoUpdates = useCallback(async () => {
+    if (isCooldown) {
+      setError(`冷却中，请等待 ${remainingTime} 秒后再重做更新。`);
+      return;
+    }
+
+    const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
+    const roster = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
+
+    if (roster.length === 0) {
+      setError('⚠️ 没有可更新的参战角色。');
+      return;
+    }
+
+    if (!(settings.writeArenaHistory || settings.writeCurrentState)) {
+      setError('⚠️ 已关闭历战记录/当前状态写入，本次无需重做角色更新。');
+      return;
+    }
+
+    const state = useBattleStore.getState();
+    const reportMarkdown =
+      generationMode === 'stream'
+        ? (state.streamingMarkdown ?? '').trim()
+        : (state.newsReport ? toBattleReportMarkdown(state.newsReport) : '').trim();
+
+    if (!reportMarkdown || reportMarkdown.length < 120) {
+      setError('⚠️ 战报内容不足，无法重做角色更新。');
+      return;
+    }
+
+    setIsRedoingUpdates(true);
+    setError(null);
+
+    try {
+      const requestBody: Record<string, unknown> = {
+        combatants: roster.map((combatant) => ({
+          type: combatant.type,
+          data: combatant.data,
+          isNative: combatant.isValid,
+          isPreset: combatant.isPreset,
+        })),
+        battleReportMarkdown: reportMarkdown,
+        mode: battleMode,
+        userGuidance: settings.userGuidance,
+        scenario: shouldUseScenario ? scenario.content : undefined,
+        writeArenaHistory: settings.writeArenaHistory,
+        writeCurrentState: settings.writeCurrentState,
+      };
+
+      if (
+        userProviderConfig &&
+        (userProviderConfig.apiKey || userProviderConfig.providerId === 'system') &&
+        userProviderConfig.modelId !== 'default'
+      ) {
+        requestBody.customProvider = {
+          providerId: userProviderConfig.providerId,
+          modelId: userProviderConfig.modelId,
+          apiKey: userProviderConfig.apiKey,
+        };
+      }
+
+      const response = await fetch('/api/arena/redo-combatant-updates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        try {
+          const json = JSON.parse(text);
+          if (json.shouldRedirect) {
+            redirectToArrested(json.reason || '使用危险符文');
+            return;
+          }
+          throw new Error(json.message || json.error || text);
+        } catch {
+          throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+        }
+      }
+
+      const result = await response.json();
+      const updated = Array.isArray(result.updatedCombatants) ? result.updatedCombatants : [];
+
+      setUpdatedCombatants(updated);
+      const updatedRoster = roster.map((combatant) => {
+        const next = updated.find(
+          (item: any) => (item.codename || item.name) === (combatant.data.codename || combatant.data.name)
+        );
+        return next ? { ...combatant, data: next } : combatant;
+      });
+      setCombatants(updatedRoster);
+
+      startCooldown();
+    } catch (error) {
+      setError(`⚠️ 重做角色更新失败：${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
+    } finally {
+      setIsRedoingUpdates(false);
+    }
+  }, [
+    isCooldown,
+    remainingTime,
+    battleMode,
+    generationMode,
+    scenario.content,
+    settings.userGuidance,
+    settings.writeArenaHistory,
+    settings.writeCurrentState,
+    userProviderConfig,
+    setCombatants,
+    setError,
+    setUpdatedCombatants,
+    setIsRedoingUpdates,
+    redirectToArrested,
+    startCooldown,
+  ]);
+
   return {
     handleGenerate,
+    handleRedoUpdates,
     isGenerating,
+    isRedoingUpdates,
     isCooldown,
     remainingTime,
   };

@@ -4,7 +4,7 @@ import { getLogger } from '@/lib/logger';
 import questionnaire from '@/public/questionnaire.json';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
-// import { quickCheck } from '@/lib/sensitive-word-filter';
+import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 import { AdjudicationResult } from '@/types/arena';
 import { verifySignature, generateSignature } from '@/lib/signature';
@@ -173,15 +173,15 @@ async function handler(req: NextRequest): Promise<Response> {
             textForFinalCheck.push(...contentsToAIFlag.map(i => i.content));
         }
 
-        // const combinedText = textForFinalCheck.join('\n\n');
+        const combinedText = textForFinalCheck.join('\n\n');
         const needsWorldviewWarning = false;
 
-        // if (combinedText) {
-        //     if (appConfig.ENABLE_SENSITIVE_WORD_FILTER && (await quickCheck(combinedText)).hasSensitiveWords) {
-        //         log.warn('检测到敏感词 (本地过滤)，请求被拒绝', { text: combinedText });
-        //         return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '使用危险符文' }), { status: 400 });
-        //     }
-        // }
+        if (combinedText) {
+            if (appConfig.ENABLE_SENSITIVE_WORD_FILTER && (await quickCheck(combinedText)).hasSensitiveWords) {
+                log.warn('检测到敏感词 (本地过滤)，请求被拒绝', { text: combinedText });
+                return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '使用危险符文' }), { status: 400 });
+            }
+        }
 
         const systemPrompt = getSystemPrompt(mode, combatants);
 

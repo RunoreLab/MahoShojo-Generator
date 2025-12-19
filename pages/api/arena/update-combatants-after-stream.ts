@@ -44,6 +44,14 @@ async function handler(req: NextRequest): Promise<Response> {
             );
         }
 
+        if (writeArenaHistory) {
+            const headline = typeof report?.headline === 'string' ? report.headline.trim() : '';
+            const winner = typeof report?.officialReport?.winner === 'string' ? report.officialReport.winner.trim() : '';
+            if (!headline || headline === '魔法少女速报' || !winner || winner === '未知') {
+                return new Response(JSON.stringify({ error: '战报内容不完整，已拒绝写入历战记录。' }), { status: 400 });
+            }
+        }
+
         // 关键：验证每个角色的原生性
         // 如果角色声称自己是原生的（isNative: true），必须验证签名
         const verifiedCombatants = await Promise.all(

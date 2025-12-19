@@ -90,6 +90,7 @@ export interface BattleStoreState {
   updatedCombatants: UpdatedCombatantData[];
   error: string | null;
   isGenerating: boolean;
+  isRedoingUpdates: boolean;
   isMatching: 'character' | 'scenario' | null;
   loadingPreset: string | null;
   userProviderConfig: UserAIProviderConfig | null;
@@ -121,6 +122,7 @@ export interface BattleStoreState {
 
   setError: (message: string | null) => void;
   setIsGenerating: (state: boolean) => void;
+  setIsRedoingUpdates: (state: boolean) => void;
   setIsMatching: (target: 'character' | 'scenario' | null) => void;
   setLoadingPreset: (filename: string | null) => void;
   setUserProviderConfig: (config: UserAIProviderConfig | null) => void;

@@ -99,6 +99,26 @@ const parseMarkdownReport = (markdown: string, mode: string): { headline: string
   }
 };
 
+const getValidatedMarkdownReport = (
+  markdown: string,
+  mode: string
+): { headline: string; winner: string } | null => {
+  const trimmed = markdown.trim();
+  if (!trimmed || trimmed === '#') return null;
+  if (trimmed.length < 120) return null;
+  if (!/^#{2,6}\s+/m.test(markdown)) return null;
+
+  const parsed = parseMarkdownReport(markdown, mode);
+  if (!parsed) return null;
+
+  const headline = parsed.headline.trim();
+  const winner = parsed.winner.trim();
+  if (!headline || headline === '魔法少女速报') return null;
+  if (!winner || winner === '未知') return null;
+
+  return { headline, winner };
+};
+
 /**
  * Hook：流式生成后安全更新角色数据
  */
@@ -186,9 +206,9 @@ export const useStreamCombatantUpdater = () => {
       },
       scenario?: any
     ) => {
-      const parsed = parseMarkdownReport(markdown, mode);
+      const parsed = getValidatedMarkdownReport(markdown, mode);
       if (!parsed) {
-        throw new Error('无法解析 Markdown 内容');
+        throw new Error('战报内容不完整，已取消角色更新（请等待战报完整生成后重试）。');
       }
 
       const payload: UpdateCombatantsPayload = {
