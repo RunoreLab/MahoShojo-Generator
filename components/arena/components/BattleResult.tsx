@@ -5,6 +5,7 @@ import BattleReportCard, { NewsReport } from '@/components/BattleReportCard';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 
 import { useBattleStore } from '../stores/useBattleStore';
+import { useBattleEngine } from '../hooks/useBattleEngine';
 import { getCombatantDisplayName } from '../utils/characterValidator';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { AdjudicationResult } from '@/types/arena';
@@ -15,6 +16,7 @@ interface BattleResultProps {
 }
 
 export function BattleResult({ onSaveImage }: BattleResultProps) {
+  const { handleRedoUpdates, isCooldown, remainingTime, isRedoingUpdates } = useBattleEngine();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
@@ -22,8 +24,12 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const streamingMarkdown = useBattleSelector((state) => state.streamingMarkdown);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
+  const settings = useBattleSelector((state) => state.settings);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const scenario = useBattleSelector((state) => state.scenario);
+
+  const hasBattleReport = generationMode === 'stream' ? Boolean(streamingMarkdown) : Boolean(newsReport);
+  const canWriteUpdates = settings.writeArenaHistory || settings.writeCurrentState;
 
   const downloadUpdatedJson = (characterData: any) => {
     const name = characterData.codename || characterData.name;
@@ -90,10 +96,25 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
         newsReport && <BattleReportCard report={newsReport as NewsReport} onSaveImage={onSaveImage} mode={battleMode} />
       )}
 
-      {updatedCombatants.length > 0 && (
+      {hasBattleReport && canWriteUpdates && (
         <div className="card mt-6">
-          <h3 className="text-lg font-bold text-gray-800 mb-3">角色更新</h3>
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <h3 className="text-lg font-bold text-gray-800">角色更新</h3>
+            <button
+              onClick={() => handleRedoUpdates()}
+              disabled={isGenerating || isRedoingUpdates || isCooldown}
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-purple-500 rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
+              title={isCooldown ? `冷却中，请等待 ${remainingTime} 秒` : '基于战报重做角色更新'}
+            >
+              {isCooldown ? `冷却中 ${remainingTime}s` : isRedoingUpdates ? '重做中...' : '重做角色更新'}
+            </button>
+          </div>
           <div className="space-y-4">
+            {updatedCombatants.length === 0 && (
+              <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
+                本次尚未产生可展示的角色更新。你仍可点击“重做角色更新”，让 AI 基于战报生成（或修正）历战记录/当前状态摘要。
+              </div>
+            )}
             {updatedCombatants.map((character: UpdatedCombatantData) => {
               const entries = character.arena_history?.entries;
               const latestEntry = Array.isArray(entries) && entries.length > 0 ? entries[entries.length - 1] : null;
