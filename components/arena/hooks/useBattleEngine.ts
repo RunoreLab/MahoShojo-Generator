@@ -13,6 +13,7 @@ import { BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
+import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -573,8 +574,9 @@ export const useBattleEngine = () => {
         ? (state.streamingMarkdown ?? '').trim()
         : (state.newsReport ? toBattleReportMarkdown(state.newsReport) : '').trim();
 
-    if (!reportMarkdown || reportMarkdown.length < 120) {
-      setError('⚠️ 战报内容不足，无法重做角色更新。');
+    const redoPrecheck = precheckBattleReportForRedo(reportMarkdown, battleMode);
+    if (!redoPrecheck.ok) {
+      setError(`⚠️ ${redoPrecheck.error}`);
       return;
     }
 

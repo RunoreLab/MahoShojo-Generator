@@ -14,7 +14,7 @@ import { CustomProviderSchema } from '@/lib/arena/schemas';
 import {
   buildRedoCombatantUpdatesSchema,
   createRedoCombatantUpdatesPrompt,
-  parseBattleReportFromMarkdown,
+  precheckBattleReportForRedo,
 } from '@/lib/arena/redo-updates';
 import { redoPostBattleUpdates } from '@/lib/arena/service';
 
@@ -51,17 +51,28 @@ async function handler(req: NextRequest): Promise<Response> {
     }
 
     const reportMarkdown = typeof battleReportMarkdown === 'string' ? battleReportMarkdown.trim() : '';
-    if (!reportMarkdown || reportMarkdown.length < 120) {
-      return new Response(JSON.stringify({ error: '战报内容过短，无法重做角色更新。' }), { status: 400 });
+    const redoPrecheck = precheckBattleReportForRedo(reportMarkdown, mode);
+    if (!redoPrecheck.ok) {
+      return new Response(JSON.stringify({ error: redoPrecheck.error }), { status: 400 });
     }
+    const parsedReport = redoPrecheck.parsed;
 
-    const parsedReport = parseBattleReportFromMarkdown(reportMarkdown, mode);
-    if (!parsedReport) {
-      return new Response(JSON.stringify({ error: '无法从战报中解析标题/胜利者，已取消重做。' }), { status: 400 });
-    }
-    if (!parsedReport.headline.trim() || parsedReport.headline.trim() === '魔法少女速报' || !parsedReport.winner.trim() || parsedReport.winner.trim() === '未知') {
-      return new Response(JSON.stringify({ error: '战报内容不完整（标题/胜利者缺失），已取消重做。' }), { status: 400 });
-    }
+    const verifiedCombatants = await Promise.all(
+      combatants.map(async (combatant: any) => {
+        const claimedNative = Boolean(combatant?.isNative);
+        if (!claimedNative) {
+          return { ...combatant, isNative: false };
+        }
+
+        const isValid = await verifySignature(combatant.data);
+        if (!isValid) {
+          log.warn(`角色 ${combatant?.data?.codename || combatant?.data?.name} 声称原生但签名无效，将视为非原生`);
+          return { ...combatant, isNative: false };
+        }
+
+        return { ...combatant, isNative: true };
+      })
+    );
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;
@@ -126,16 +137,20 @@ async function handler(req: NextRequest): Promise<Response> {
 
     const finalUserGuidance = typeof userGuidance === 'string' ? userGuidance.trim() : '';
 
+    const isScenarioNative = scenario ? await verifySignature(scenario) : true;
+    if (scenario && !isScenarioNative) {
+      log.warn('情景声称原生但签名无效');
+    }
+
     const inputsToCheck: { type: keyof SafetyCheckPolicy; content: string; isNative: boolean }[] = [];
     if (finalUserGuidance) {
       inputsToCheck.push({ type: 'userGuidance', content: finalUserGuidance, isNative: false });
     }
     inputsToCheck.push({ type: 'userGuidance', content: reportMarkdown, isNative: false });
     if (scenario) {
-      const isNative = await verifySignature(scenario);
-      inputsToCheck.push({ type: 'scenario', content: JSON.stringify(scenario), isNative });
+      inputsToCheck.push({ type: 'scenario', content: JSON.stringify(scenario), isNative: isScenarioNative });
     }
-    combatants.forEach((c: any) => {
+    verifiedCombatants.forEach((c: any) => {
       inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: Boolean(c.isNative) });
     });
 
@@ -164,7 +179,7 @@ async function handler(req: NextRequest): Promise<Response> {
       }
     }
 
-    const participantNames = combatants.map((c: any) => c?.data?.codename || c?.data?.name).filter(Boolean);
+    const participantNames = verifiedCombatants.map((c: any) => c?.data?.codename || c?.data?.name).filter(Boolean);
     if (participantNames.length === 0) {
       return new Response(JSON.stringify({ error: '参战角色缺少名称' }), { status: 400 });
     }
@@ -181,7 +196,7 @@ async function handler(req: NextRequest): Promise<Response> {
       promptBuilder: () =>
         createRedoCombatantUpdatesPrompt({
           battleReportMarkdown: reportMarkdown,
-          combatants: combatants.map((c: any) => ({
+          combatants: verifiedCombatants.map((c: any) => ({
             name: (c?.data?.codename || c?.data?.name || '').toString(),
             type: (c?.type || '角色').toString(),
             currentState: c?.data?.current_state ?? null,
@@ -219,27 +234,6 @@ async function handler(req: NextRequest): Promise<Response> {
         };
       });
     })();
-
-    const verifiedCombatants = await Promise.all(
-      combatants.map(async (combatant: any) => {
-        if (combatant?.isNative) {
-          const isValid = await verifySignature(combatant.data);
-          if (!isValid) {
-            log.warn(`角色 ${combatant.data.codename || combatant.data.name} 声称原生但签名无效，将视为非原生`);
-            return {
-              ...combatant,
-              isNative: false,
-            };
-          }
-        }
-        return combatant;
-      })
-    );
-
-    const isScenarioNative = scenario ? await verifySignature(scenario) : true;
-    if (scenario && !isScenarioNative) {
-      log.warn('情景声称原生但签名无效');
-    }
 
     const minimalReport = {
       headline: parsedReport.headline,
