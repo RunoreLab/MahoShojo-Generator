@@ -185,7 +185,7 @@ function ArenaStreamPageContent() {
         throw new Error('无法读取响应流');
       }
 
-      let accumulatedText = '';
+      let accumulatedText = '#';
       let chunkCount = 0;
       let abortedDueToSensitiveWord = false;
 

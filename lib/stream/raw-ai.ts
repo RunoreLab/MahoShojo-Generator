@@ -229,6 +229,10 @@ export async function generateWithStreamAI(
                         {
                             role: 'user',
                             content: generationConfig.prompt,
+                        },
+                        {
+                            role: 'assistant',
+                            content: '#',
                         }
                     ],
                     temperature: generationConfig.temperature,
