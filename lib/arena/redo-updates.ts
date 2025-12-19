@@ -89,6 +89,33 @@ export const parseBattleReportFromMarkdown = (
   return { headline, winner };
 };
 
+export type RedoBattleReportPrecheckResult =
+  | { ok: true; parsed: { headline: string; winner: string } }
+  | { ok: false; error: string };
+
+export const precheckBattleReportForRedo = (
+  markdown: string,
+  mode: string
+): RedoBattleReportPrecheckResult => {
+  const reportMarkdown = typeof markdown === 'string' ? markdown.trim() : '';
+  if (!reportMarkdown || reportMarkdown.length < 120) {
+    return { ok: false, error: '战报内容过短，无法重做角色更新。' };
+  }
+
+  const parsedReport = parseBattleReportFromMarkdown(reportMarkdown, mode);
+  if (!parsedReport) {
+    return { ok: false, error: '无法从战报中解析标题/胜利者，已取消重做。' };
+  }
+
+  const headline = parsedReport.headline.trim();
+  const winner = parsedReport.winner.trim();
+  if (!headline || headline === '魔法少女速报' || !winner || winner === '未知') {
+    return { ok: false, error: '战报内容不完整（标题/胜利者缺失），已取消重做。' };
+  }
+
+  return { ok: true, parsed: { headline, winner } };
+};
+
 const compactJsonForPrompt = (value: unknown, maxLen = 1400): string => {
   let text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   if (text.length > maxLen) {
@@ -149,4 +176,3 @@ ${combatants
 ${compactJsonForPrompt(battleReportMarkdown, 12000)}
 `.trim();
 };
-

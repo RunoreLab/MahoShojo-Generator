@@ -7,7 +7,9 @@ import StreamingBattleReportCard from '@/components/stream/StreamingBattleReport
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
 import { getCombatantDisplayName } from '../utils/characterValidator';
+import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 import { AdjudicationResult } from '@/types/arena';
 import { BattleStoreState, UpdatedCombatantData } from '../types';
 
@@ -30,6 +32,11 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
 
   const hasBattleReport = generationMode === 'stream' ? Boolean(streamingMarkdown) : Boolean(newsReport);
   const canWriteUpdates = settings.writeArenaHistory || settings.writeCurrentState;
+  const reportMarkdownForRedo =
+    generationMode === 'stream'
+      ? (streamingMarkdown ?? '').trim()
+      : (newsReport ? toBattleReportMarkdown(newsReport as NewsReport) : '').trim();
+  const redoPrecheck = precheckBattleReportForRedo(reportMarkdownForRedo, battleMode);
 
   const downloadUpdatedJson = (characterData: any) => {
     const name = characterData.codename || characterData.name;
@@ -102,9 +109,15 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
             <h3 className="text-lg font-bold text-gray-800">角色更新</h3>
             <button
               onClick={() => handleRedoUpdates()}
-              disabled={isGenerating || isRedoingUpdates || isCooldown}
+              disabled={isGenerating || isRedoingUpdates || isCooldown || !redoPrecheck.ok}
               className="px-3 py-1.5 text-xs font-semibold text-white bg-purple-500 rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
-              title={isCooldown ? `冷却中，请等待 ${remainingTime} 秒` : '基于战报重做角色更新'}
+              title={
+                isCooldown
+                  ? `冷却中，请等待 ${remainingTime} 秒`
+                  : !redoPrecheck.ok
+                    ? redoPrecheck.error
+                    : '基于战报重做角色更新'
+              }
             >
               {isCooldown ? `冷却中 ${remainingTime}s` : isRedoingUpdates ? '重做中...' : '重做角色更新'}
             </button>
