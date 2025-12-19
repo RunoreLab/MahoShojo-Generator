@@ -1,7 +1,7 @@
 // pages/api/generate-battle-story.ts
 
 import { z } from 'zod/v3';
-import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '@/lib/ai';
+import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
 import { getLogger } from '@/lib/logger';
 import questionnaire from '@/public/questionnaire.json';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
@@ -16,6 +16,14 @@ import { getSystemPrompt } from '@/lib/arena/constants';
 import { buildBattleReportSchema, CustomProviderSchema } from '@/lib/arena/schemas';
 import { createPromptBuilder, processAdjudicationChain } from '@/lib/arena/logic';
 import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
+import { createBattleReportGenerationRecord, getUserByAuthKey } from '@/lib/d1';
+import { applyShieldWords } from '@/lib/shield-word-filter';
+import {
+    anonymizeIp,
+    buildContentPreview,
+    getClientIpFromHeaders,
+    normalizeUsage,
+} from '@/lib/arena/battle-report-log-utils';
 
 const log = getLogger('api-gen-battle-story');
 const MAX_COMBATANTS = 10;
@@ -34,6 +42,9 @@ async function handler(req: NextRequest): Promise<Response> {
     if (req.method !== 'POST') {
         return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
     }
+
+    const startedAtMs = Date.now();
+    const startedAtIso = new Date(startedAtMs).toISOString();
 
     try {
         const body = await req.json();
@@ -54,7 +65,10 @@ async function handler(req: NextRequest): Promise<Response> {
             isDowngrade = false,
             adjudicationEvents,
             storyLength,
-            customProvider: customProviderPayload
+            customProvider: customProviderPayload,
+            scenarioTitle,
+            scenarioSourceDataCardId,
+            scenarioSourceDataCardUpdatedAt,
         } = body;
 
         const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
@@ -238,7 +252,9 @@ async function handler(req: NextRequest): Promise<Response> {
             modelOverride: resolvedModelOverride, // 使用轻量模型或自定义覆盖模型
         };
 
-        const aiResult = await generateWithAI<BattleReportResult, { combatants: any[] }>({ combatants }, generationConfig, providerOptions);
+        const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+        const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+        const aiResult = await generateWithAI<BattleReportResult, { combatants: any[] }>({ combatants }, generationConfig, aiOptions);
 
         // 组合成完整的前端报告对象
         const impactsFromAI = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
@@ -279,6 +295,102 @@ async function handler(req: NextRequest): Promise<Response> {
             updatedCombatants,
             adjudicationResults: adjudicationResults || undefined // v0.4.0 新增
         };
+
+        const endedAtMs = Date.now();
+        const endedAtIso = new Date(endedAtMs).toISOString();
+        const durationMs = Math.max(0, endedAtMs - startedAtMs);
+
+        const ip = getClientIpFromHeaders(req.headers);
+        const ipAnonymized = anonymizeIp(ip);
+        const authHeader = req.headers.get('authorization');
+        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+        const reportJson = JSON.stringify(report);
+        const outputPreview = buildContentPreview(reportJson, { headChars: 800, tailChars: 800 });
+        const shieldResult = applyShieldWords(outputPreview);
+        const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
+            ? await quickCheck(outputPreview)
+            : { hasSensitiveWords: false };
+
+        const usage = normalizeUsage(aiTelemetry.usage);
+
+        const recordPromise = (async () => {
+            const user = authKey ? await getUserByAuthKey(authKey) : null;
+            await createBattleReportGenerationRecord({
+                startedAt: startedAtIso,
+                endedAt: endedAtIso,
+                durationMs,
+                status: 'completed',
+                ip,
+                ipAnonymized,
+                userAgent: req.headers.get('user-agent'),
+                cfRay: req.headers.get('cf-ray'),
+                cfCountry: req.headers.get('cf-ipcountry'),
+                userId: user?.id ?? null,
+                username: user?.username ?? null,
+                userPrefix: user?.prefix ?? null,
+                mode,
+                scenarioTitle: typeof scenarioTitle === 'string'
+                    ? scenarioTitle.trim() || null
+                    : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+                language: typeof language === 'string' ? language : null,
+                selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
+                storyLength: typeof storyLength === 'string' ? storyLength : null,
+                readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
+                arenaHistoryReadLimit: resolvedReadArenaHistory
+                    ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
+                    : null,
+                writeArenaHistory: typeof resolvedWriteArenaHistory === 'boolean' ? resolvedWriteArenaHistory : null,
+                readCurrentState: typeof resolvedReadCurrentState === 'boolean' ? resolvedReadCurrentState : null,
+                writeCurrentState: typeof resolvedWriteCurrentState === 'boolean' ? resolvedWriteCurrentState : null,
+                userGuidancePreview: finalUserGuidance ? buildContentPreview(finalUserGuidance, { headChars: 300, tailChars: 300 }) : null,
+                adjudicationEventsPreview: Array.isArray(adjudicationEvents)
+                    ? buildContentPreview(JSON.stringify(adjudicationEvents), { headChars: 300, tailChars: 300 })
+                    : null,
+                customProviderId,
+                aiProviderName: aiTelemetry.providerName ?? null,
+                aiProviderType: aiTelemetry.providerType ?? null,
+                aiModel: aiTelemetry.model ?? null,
+                headline: typeof report?.headline === 'string' ? report.headline : null,
+                winner: typeof report?.officialReport?.winner === 'string' ? report.officialReport.winner : null,
+                outputChars: reportJson.length,
+                outputBytes: reportJson.length,
+                promptTokens: usage?.promptTokens ?? null,
+                completionTokens: usage?.completionTokens ?? null,
+                totalTokens: usage?.totalTokens ?? null,
+                cachedTokens: usage?.cachedTokens ?? null,
+                reasoningTokens: usage?.reasoningTokens ?? null,
+                outputPreview,
+                outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
+                outputHasShieldWords: shieldResult.hasShieldWords,
+                extraJson: {
+                    source: 'api/generate-battle-story',
+                    scenario: {
+                        dataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
+                        dataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
+                    },
+                    combatants: Array.isArray(combatants)
+                        ? combatants.map((c: any) => ({
+                            type: c?.type ?? null,
+                            name: c?.data?.codename || c?.data?.name || null,
+                            isNative: Boolean(c?.isNative),
+                            isPreset: Boolean(c?.isPreset),
+                            sizeChars: typeof c?.data === 'object' ? JSON.stringify(c.data).length : null,
+                            dataCardId: c?.sourceDataCardId ?? null,
+                            dataCardUpdatedAt: c?.sourceDataCardUpdatedAt ?? null,
+                        }))
+                        : null,
+                    resolvedModelOverride: resolvedModelOverride ?? null,
+                },
+            });
+        })();
+
+        const executionContext = (req as any).context;
+        if (executionContext?.waitUntil) {
+            executionContext.waitUntil(recordPromise);
+        } else {
+            void recordPromise;
+        }
 
         return new Response(JSON.stringify(apiResponse), {
             status: 200,

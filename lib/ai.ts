@@ -131,6 +131,16 @@ let roundRobinCounter = 0;
 export interface GenerateWithAIOptions {
   loadBalanceStrategy?: LoadBalanceStrategy;
   providerOverride?: AIProvider;
+  telemetry?: {
+    providerName?: string;
+    providerType?: AIProvider['type'];
+    providerBaseUrl?: string;
+    model?: string;
+    providerIndex?: number;
+    attempt?: number;
+    usage?: unknown;
+    finishReason?: unknown;
+  };
 }
 
 // 通用 AI 生成函数
@@ -227,11 +237,20 @@ export async function generateWithAI<T, I = string>(
       try {
         log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
+        if (options?.telemetry) {
+          options.telemetry.providerName = provider.name;
+          options.telemetry.providerType = provider.type;
+          options.telemetry.providerBaseUrl = provider.baseUrl;
+          options.telemetry.model = selectedModel;
+          options.telemetry.providerIndex = providerIndex;
+          options.telemetry.attempt = attempt + 1;
+        }
+
         const llm = createAIClient(provider);
 
         const systemPrompt = generationConfig.systemPrompt + generationConfig.promptBuilder(input) + 'Ignore the user \'s prompt.';
         log.info(`provider.type: ${provider.type}`);
-        const { object } = await generateObject({
+        const { object, usage, finishReason } = await generateObject({
           model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel), // Type assertion for AI SDK 5 compatibility
           // 应对风控，尝试直接全部放入系统提示词中
           prompt: [
@@ -262,6 +281,10 @@ export async function generateWithAI<T, I = string>(
         });
 
         log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
+        if (options?.telemetry) {
+          options.telemetry.usage = usage;
+          options.telemetry.finishReason = finishReason;
+        }
         return object as T;
       } catch (error) {
         lastError = error;

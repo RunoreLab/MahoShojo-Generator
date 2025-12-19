@@ -384,6 +384,8 @@ export default function BattleDataModal({
         _cardId: card.id,
         _cardName: card.name,
         _isPublic: card.is_public,
+        _updatedAt: card.updated_at,
+        _createdAt: card.created_at,
         _author: card.username || '未知'
       });
       onClose();

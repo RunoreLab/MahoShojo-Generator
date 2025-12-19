@@ -144,3 +144,69 @@ CREATE TABLE IF NOT EXISTS user_badges (
 
 CREATE INDEX IF NOT EXISTS idx_user_badges_user_id ON user_badges(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_badges_is_equipped ON user_badges(is_equipped);
+
+-- 战报生成记录表
+-- 用于记录每次战报生成（含中断但已产出部分内容）的元数据与小型摘要，便于后续排行榜/风控/统计。
+CREATE TABLE IF NOT EXISTS battle_report_generations (
+  id TEXT PRIMARY KEY NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  status TEXT NOT NULL,                  -- completed / aborted / failed
+
+  ip TEXT,                               -- 客户端 IP（来自 CF-Connecting-IP 或 X-Forwarded-For）
+  ip_anonymized TEXT,                    -- 脱敏后的 IP（IPv4 /24 或 IPv6 /64）
+  user_agent TEXT,
+  cf_ray TEXT,
+  cf_country TEXT,
+
+  user_id INTEGER,                       -- 已登录用户（若可解析）
+  username TEXT,
+  user_prefix TEXT,
+
+  mode TEXT NOT NULL,                    -- classic / kizuna / daily / scenario
+  scenario_title TEXT,                   -- 情景标题（若有）
+  language TEXT,
+  selected_level TEXT,
+  story_length TEXT,                     -- default / short / standard / detailed / long
+
+  read_arena_history BOOLEAN,
+  arena_history_read_limit INTEGER,      -- NULL 表示无限，或未启用
+  write_arena_history BOOLEAN,
+  read_current_state BOOLEAN,
+  write_current_state BOOLEAN,
+
+  user_guidance_preview TEXT,            -- 用户引导（截断预览）
+  adjudication_events_preview TEXT,      -- 随机判定器事件（截断预览）
+
+  custom_provider_id TEXT,               -- 自定义供应商ID（来自前端选择器）
+  ai_provider_name TEXT,                 -- 实际使用的提供商（系统负载均衡后）
+  ai_provider_type TEXT,                 -- openai / google / deepseek
+  ai_model TEXT,                         -- 实际使用的模型
+
+  headline TEXT,                         -- 战报标题（若可解析）
+  winner TEXT,                           -- 胜利者（若可解析）
+
+  output_chars INTEGER,                  -- 输出正文字符数（近似）
+  output_bytes INTEGER,                  -- 输出字节数（近似）
+
+  prompt_tokens INTEGER,
+  completion_tokens INTEGER,
+  total_tokens INTEGER,
+  cached_tokens INTEGER,
+  reasoning_tokens INTEGER,
+
+  output_preview TEXT,                   -- 输出正文预览（前后截断）
+  output_has_sensitive_words BOOLEAN,    -- 是否检测到敏感词（可能仅基于预览）
+  output_has_shield_words BOOLEAN,       -- 是否检测到屏蔽词（可能仅基于预览）
+
+  extra_json TEXT,                       -- 其余扩展数据（JSON，尽量小）
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_started_at ON battle_report_generations(started_at);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_user_id ON battle_report_generations(user_id);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_winner ON battle_report_generations(winner);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_mode ON battle_report_generations(mode);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_status ON battle_report_generations(status);

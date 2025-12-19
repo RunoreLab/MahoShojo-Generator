@@ -13,6 +13,16 @@ import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
 import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
+import { createBattleReportGenerationRecord, getUserByAuthKey } from '@/lib/d1';
+import { applyShieldWords } from '@/lib/shield-word-filter';
+import {
+    anonymizeIp,
+    buildContentPreview,
+    extractHeadlineFromMarkdown,
+    extractWinnerFromText,
+    getClientIpFromHeaders,
+    normalizeUsage,
+} from '@/lib/arena/battle-report-log-utils';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
@@ -25,6 +35,9 @@ async function handler(req: NextRequest): Promise<Response> {
     if (req.method !== 'POST') {
         return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
     }
+
+    const startedAtMs = Date.now();
+    const startedAtIso = new Date(startedAtMs).toISOString();
 
     try {
         const body = await req.json();
@@ -39,20 +52,23 @@ async function handler(req: NextRequest): Promise<Response> {
             useArenaHistory,
             arenaHistoryReadLimit,
             readArenaHistory,
-            // writeArenaHistory,
+            writeArenaHistory,
             readCurrentState,
             writeCurrentState,
             adjudicationEvents,
             storyLength,
-            customProvider: customProviderPayload
+            customProvider: customProviderPayload,
+            scenarioTitle,
+            scenarioSourceDataCardId,
+            scenarioSourceDataCardUpdatedAt,
         } = body;
 
         const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
             ? readArenaHistory
             : (typeof useArenaHistory === 'boolean' ? useArenaHistory : true);
-        // const resolvedWriteArenaHistory = typeof writeArenaHistory === 'boolean'
-        //     ? writeArenaHistory
-        //     : (typeof useArenaHistory === 'boolean' ? useArenaHistory : true);
+        const resolvedWriteArenaHistory = typeof writeArenaHistory === 'boolean'
+            ? writeArenaHistory
+            : (typeof useArenaHistory === 'boolean' ? useArenaHistory : true);
         const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
         const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
         const resolvedHistoryReadLimit = resolvedReadArenaHistory
@@ -219,19 +235,205 @@ async function handler(req: NextRequest): Promise<Response> {
             modelOverride: customModelOverride,
         };
 
-        const streamResponse = await generateWithStreamAI(generationConfig, providerOptions);
+        const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+        const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+        const streamResult = await generateWithStreamAI(generationConfig, aiOptions);
+        const streamResponse = streamResult.response;
+        const usagePromise = streamResult.usagePromise;
 
         log.info('✅ 流式响应已生成，准备返回');
 
         const headers = new Headers(streamResponse.headers);
         try {
-            const encodedMeta = encodeURIComponent(JSON.stringify(streamMeta));
+            const encodedMeta = encodeURIComponent(JSON.stringify({
+                ...streamMeta,
+                ai: {
+                    providerName: aiTelemetry.providerName,
+                    providerType: aiTelemetry.providerType,
+                    model: aiTelemetry.model,
+                },
+            }));
             headers.set('x-mahoshojo-stream-meta', encodedMeta);
         } catch (metaError) {
             log.warn('流式战报元信息写入失败，将继续返回正文流', { metaError });
         }
 
-        return new Response(streamResponse.body, {
+        const originalBody = streamResponse.body;
+        if (!originalBody) {
+            return new Response(JSON.stringify({ error: '无法读取响应流' }), { status: 500 });
+        }
+
+        // 包装流：一边转发给客户端，一边收集少量预览与统计信息；在完成/中断后异步写入 battle_report_generations。
+        const ip = getClientIpFromHeaders(req.headers);
+        const ipAnonymized = anonymizeIp(ip);
+        const authHeader = req.headers.get('authorization');
+        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+        const headLimit = 800;
+        const tailLimit = 800;
+        const maxFullChars = headLimit + tailLimit + 16;
+
+        let outputBytes = 0;
+        let outputChars = 0;
+        let headText = '';
+        let tailText = '';
+        let fullText: string | null = '';
+
+        const decoder = new TextDecoder();
+        const appendText = (text: string) => {
+            if (!text) return;
+            outputChars += text.length;
+
+            if (fullText !== null) {
+                if (fullText.length + text.length <= maxFullChars) {
+                    fullText += text;
+                } else {
+                    fullText = null;
+                }
+            }
+
+            if (headText.length < headLimit) {
+                headText += text.slice(0, headLimit - headText.length);
+            }
+
+            tailText = (tailText + text).slice(-tailLimit);
+        };
+
+        let finalized = false;
+        const executionContext = (req as any).context;
+
+        const finalizeOnce = (status: 'completed' | 'aborted' | 'failed', errorMessage?: string) => {
+            if (finalized) return;
+            finalized = true;
+
+            const endedAtMs = Date.now();
+            const endedAtIso = new Date(endedAtMs).toISOString();
+            const durationMs = Math.max(0, endedAtMs - startedAtMs);
+
+            // 仅在“已输出部分内容且非失败”时记录
+            if (outputBytes <= 0 || status === 'failed') return;
+
+            const previewSource = (fullText !== null ? fullText : `${headText}……${tailText}`) || '';
+            const outputPreview = buildContentPreview(previewSource, { headChars: headLimit, tailChars: tailLimit });
+
+            const recordPromise = (async () => {
+                const user = authKey ? await getUserByAuthKey(authKey) : null;
+                const usage = normalizeUsage(await usagePromise?.catch(() => null));
+
+                const shieldResult = applyShieldWords(outputPreview);
+                const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
+                    ? await quickCheck(outputPreview)
+                    : { hasSensitiveWords: false };
+
+                await createBattleReportGenerationRecord({
+                    startedAt: startedAtIso,
+                    endedAt: endedAtIso,
+                    durationMs,
+                    status,
+                    ip,
+                    ipAnonymized,
+                    userAgent: req.headers.get('user-agent'),
+                    cfRay: req.headers.get('cf-ray'),
+                    cfCountry: req.headers.get('cf-ipcountry'),
+                    userId: user?.id ?? null,
+                    username: user?.username ?? null,
+                    userPrefix: user?.prefix ?? null,
+                    mode,
+                    scenarioTitle: typeof scenarioTitle === 'string'
+                        ? scenarioTitle.trim() || null
+                        : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+                    language: typeof language === 'string' ? language : null,
+                    selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
+                    storyLength: typeof storyLength === 'string' ? storyLength : null,
+                    readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
+                    arenaHistoryReadLimit: resolvedReadArenaHistory
+                        ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
+                        : null,
+                    writeArenaHistory: typeof resolvedWriteArenaHistory === 'boolean' ? resolvedWriteArenaHistory : null,
+                    readCurrentState: typeof resolvedReadCurrentState === 'boolean' ? resolvedReadCurrentState : null,
+                    writeCurrentState: typeof resolvedWriteCurrentState === 'boolean' ? resolvedWriteCurrentState : null,
+                    userGuidancePreview: finalUserGuidance ? buildContentPreview(finalUserGuidance, { headChars: 300, tailChars: 300 }) : null,
+                    adjudicationEventsPreview: Array.isArray(adjudicationEvents)
+                        ? buildContentPreview(JSON.stringify(adjudicationEvents), { headChars: 300, tailChars: 300 })
+                        : null,
+                    customProviderId: customProviderId ?? null,
+                    aiProviderName: aiTelemetry.providerName ?? null,
+                    aiProviderType: aiTelemetry.providerType ?? null,
+                    aiModel: aiTelemetry.model ?? null,
+                    headline: extractHeadlineFromMarkdown(previewSource),
+                    winner: extractWinnerFromText(previewSource),
+                    outputChars,
+                    outputBytes,
+                    promptTokens: usage?.promptTokens ?? null,
+                    completionTokens: usage?.completionTokens ?? null,
+                    totalTokens: usage?.totalTokens ?? null,
+                    cachedTokens: usage?.cachedTokens ?? null,
+                    reasoningTokens: usage?.reasoningTokens ?? null,
+                    outputPreview,
+                    outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
+                    outputHasShieldWords: shieldResult.hasShieldWords,
+                    extraJson: {
+                        source: 'api/arena/generate-stream',
+                        errorMessage: errorMessage ?? null,
+                        scenario: {
+                            dataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
+                            dataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
+                        },
+                        combatants: Array.isArray(combatants)
+                            ? combatants.map((c: any) => ({
+                                type: c?.type ?? null,
+                                name: c?.data?.codename || c?.data?.name || null,
+                                isNative: Boolean(c?.isNative),
+                                isPreset: Boolean(c?.isPreset),
+                                sizeChars: typeof c?.data === 'object' ? JSON.stringify(c.data).length : null,
+                                dataCardId: c?.sourceDataCardId ?? null,
+                                dataCardUpdatedAt: c?.sourceDataCardUpdatedAt ?? null,
+                            }))
+                            : null,
+                    },
+                });
+            })();
+
+            if (executionContext?.waitUntil) {
+                executionContext.waitUntil(recordPromise);
+            } else {
+                void recordPromise;
+            }
+        };
+
+        const reader = originalBody.getReader();
+        const wrappedBody = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+                try {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        appendText(decoder.decode());
+                        controller.close();
+                        finalizeOnce('completed');
+                        return;
+                    }
+
+                    if (value) {
+                        outputBytes += value.byteLength;
+                        appendText(decoder.decode(value, { stream: true }));
+                        controller.enqueue(value);
+                    }
+                } catch (streamError) {
+                    controller.error(streamError);
+                    finalizeOnce('failed', streamError instanceof Error ? streamError.message : 'stream error');
+                }
+            },
+            async cancel(reason) {
+                try {
+                    await reader.cancel(reason);
+                } catch {
+                    // 忽略取消时的二次错误
+                }
+                finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
+            }
+        });
+
+        return new Response(wrappedBody, {
             status: streamResponse.status,
             headers,
         });

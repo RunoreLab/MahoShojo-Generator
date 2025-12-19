@@ -30,6 +30,11 @@ export interface CombatantData {
   isNonStandard?: boolean;
   wasCorrected?: boolean;
   teamId?: number;
+  sourceDataCardId?: string;
+  sourceDataCardUpdatedAt?: string;
+  sourceDataCardName?: string;
+  sourceIsPublic?: boolean;
+  sourceAuthor?: string;
 }
 
 export interface RandomCombatantPlaceholder {
@@ -45,6 +50,11 @@ export interface ScenarioState {
   content: Record<string, unknown> | null;
   fileName: string | null;
   isNative: boolean;
+  sourceDataCardId?: string;
+  sourceDataCardUpdatedAt?: string;
+  sourceDataCardName?: string;
+  sourceIsPublic?: boolean;
+  sourceAuthor?: string;
 }
 
 export interface BattleSettings {

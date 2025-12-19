@@ -127,13 +127,21 @@ let roundRobinCounter = 0;
 export interface GenerateWithAIOptions {
     loadBalanceStrategy?: LoadBalanceStrategy;
     providerOverride?: AIProvider;
+    telemetry?: {
+        providerName?: string;
+        providerType?: AIProvider['type'];
+        providerBaseUrl?: string;
+        model?: string;
+        providerIndex?: number;
+        attempt?: number;
+    };
 }
 
 // 通用 AI 生成函数
 export async function generateWithStreamAI(
     generationConfig: RawGenerationConfig,
     options?: GenerateWithAIOptions
-): Promise<Response> {
+): Promise<{ response: Response; usagePromise?: Promise<unknown>; telemetry?: GenerateWithAIOptions['telemetry'] }> {
     const baseProviders: AIProvider[] = [
         ...(options?.providerOverride ? [options.providerOverride] : []),
         ...config.PROVIDERS,
@@ -222,6 +230,15 @@ export async function generateWithStreamAI(
             try {
                 log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
+                if (options?.telemetry) {
+                    options.telemetry.providerName = provider.name;
+                    options.telemetry.providerType = provider.type;
+                    options.telemetry.providerBaseUrl = provider.baseUrl;
+                    options.telemetry.model = selectedModel;
+                    options.telemetry.providerIndex = providerIndex;
+                    options.telemetry.attempt = attempt + 1;
+                }
+
                 const llm = createAIClient(provider);
                 const result = streamText({
                     model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel),
@@ -241,7 +258,11 @@ export async function generateWithStreamAI(
                 });
 
                 log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
-                return result.toTextStreamResponse();
+                return {
+                    response: result.toTextStreamResponse(),
+                    usagePromise: (result as any).usage,
+                    telemetry: options?.telemetry,
+                };
             } catch (error) {
                 lastError = error;
                 log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error });
