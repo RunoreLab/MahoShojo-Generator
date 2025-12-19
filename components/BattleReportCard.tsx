@@ -2,10 +2,12 @@
 
 import React, { useRef } from 'react';
 import { snapdom } from '@zumer/snapdom';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+
+type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
 export interface NewsReport {
   headline: string;
@@ -183,12 +185,32 @@ ${adjudicationMarkdown}
     pre: ({ children }) => (
       <pre className="my-3 overflow-x-auto rounded-lg bg-black/25 p-3 text-xs leading-relaxed">{children}</pre>
     ),
-    code: ({ inline, children }) =>
-      inline ? (
-        <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200">{children}</code>
+    code: ({ inline, className, children, node, ...props }: MarkdownCodeProps) => {
+      void node;
+
+      const text =
+        typeof children === 'string'
+          ? children
+          : Array.isArray(children)
+            ? children.filter((child): child is string => typeof child === 'string').join('')
+            : '';
+
+      const looksLikeBlock = Boolean(className && /\blanguage-/.test(className)) || text.includes('\n');
+      const isInline = typeof inline === 'boolean' ? inline : !looksLikeBlock;
+
+      return isInline ? (
+        <code
+          className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200"
+          {...props}
+        >
+          {children}
+        </code>
       ) : (
-        <code className="font-mono text-xs">{children}</code>
-      ),
+        <code className={['font-mono text-xs', className].filter(Boolean).join(' ')} {...props}>
+          {children}
+        </code>
+      );
+    },
     table: ({ children }) => (
       <div className="my-3 overflow-x-auto rounded-lg border border-white/15 bg-black/15">
         <table className="min-w-full border-collapse text-left text-sm">{children}</table>
