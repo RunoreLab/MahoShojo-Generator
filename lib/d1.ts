@@ -70,6 +70,11 @@ export {
   type BattleReportGenerationStatus
 } from './database/battle-report-generations';
 
+export {
+  createBattleReportGenerationCombatants,
+  type BattleReportGenerationCombatantInsert,
+} from './database/battle-report-generation-combatants';
+
 // 重新导出徽章相关功能
 export {
   getUserBadges,

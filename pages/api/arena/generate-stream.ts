@@ -13,7 +13,7 @@ import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
 import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
-import { createBattleReportGenerationRecord, getUserByAuthKey } from '@/lib/d1';
+import { createBattleReportGenerationRecord, createBattleReportGenerationCombatants, getUserByAuthKey } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
@@ -325,14 +325,26 @@ async function handler(req: NextRequest): Promise<Response> {
                     ? await quickCheck(outputPreview)
                     : { hasSensitiveWords: false };
 
-                await createBattleReportGenerationRecord({
+                const inputJson = JSON.stringify({
+                    combatants,
+                    userGuidance: finalUserGuidance,
+                    scenario,
+                    teams,
+                });
+                const inputBytes = new TextEncoder().encode(inputJson).length;
+
+                const recordId = await createBattleReportGenerationRecord({
                     startedAt: startedAtIso,
                     endedAt: endedAtIso,
                     durationMs,
                     status,
+                    generationMode: 'stream',
+                    endpoint: 'api/arena/generate-stream',
                     ip,
                     ipAnonymized,
                     userAgent: req.headers.get('user-agent'),
+                    referer: req.headers.get('referer'),
+                    acceptLanguage: req.headers.get('accept-language'),
                     cfRay: req.headers.get('cf-ray'),
                     cfCountry: req.headers.get('cf-ipcountry'),
                     userId: user?.id ?? null,
@@ -342,6 +354,8 @@ async function handler(req: NextRequest): Promise<Response> {
                     scenarioTitle: typeof scenarioTitle === 'string'
                         ? scenarioTitle.trim() || null
                         : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+                    scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
+                    scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
                     language: typeof language === 'string' ? language : null,
                     selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
                     storyLength: typeof storyLength === 'string' ? storyLength : null,
@@ -352,11 +366,20 @@ async function handler(req: NextRequest): Promise<Response> {
                     writeArenaHistory: typeof resolvedWriteArenaHistory === 'boolean' ? resolvedWriteArenaHistory : null,
                     readCurrentState: typeof resolvedReadCurrentState === 'boolean' ? resolvedReadCurrentState : null,
                     writeCurrentState: typeof resolvedWriteCurrentState === 'boolean' ? resolvedWriteCurrentState : null,
+                    combatantCount: Array.isArray(combatants) ? combatants.length : null,
+                    hasScenario: Boolean(scenario),
+                    hasUserGuidance: Boolean(finalUserGuidance),
+                    hasAdjudicationEvents: Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0,
+                    hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
+                    inputChars: inputJson.length,
+                    inputBytes,
                     userGuidancePreview: finalUserGuidance ? buildContentPreview(finalUserGuidance, { headChars: 300, tailChars: 300 }) : null,
                     adjudicationEventsPreview: Array.isArray(adjudicationEvents)
                         ? buildContentPreview(JSON.stringify(adjudicationEvents), { headChars: 300, tailChars: 300 })
                         : null,
                     customProviderId: customProviderId ?? null,
+                    customModelId: customProviderPayload?.modelId ?? null,
+                    isDowngrade: null,
                     aiProviderName: aiTelemetry.providerName ?? null,
                     aiProviderType: aiTelemetry.providerType ?? null,
                     aiModel: aiTelemetry.model ?? null,
@@ -373,12 +396,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
                     outputHasShieldWords: shieldResult.hasShieldWords,
                     extraJson: {
-                        source: 'api/arena/generate-stream',
                         errorMessage: errorMessage ?? null,
-                        scenario: {
-                            dataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
-                            dataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
-                        },
                         combatants: Array.isArray(combatants)
                             ? combatants.map((c: any) => ({
                                 type: c?.type ?? null,
@@ -392,6 +410,29 @@ async function handler(req: NextRequest): Promise<Response> {
                             : null,
                     },
                 });
+
+                if (recordId && Array.isArray(combatants)) {
+                    const toBytes = (value: string) => new TextEncoder().encode(value).length;
+                    const rows = combatants.map((c: any, index: number) => {
+                        const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
+                        const payload = typeof c?.data === 'object' ? JSON.stringify(c.data) : '';
+                        return {
+                            generationId: recordId,
+                            sortIndex: index,
+                            name,
+                            type: typeof c?.type === 'string' ? c.type : null,
+                            templateId: typeof c?.data?.templateId === 'string' ? c.data.templateId : null,
+                            isNative: typeof c?.isNative === 'boolean' ? c.isNative : null,
+                            isPreset: typeof c?.isPreset === 'boolean' ? c.isPreset : null,
+                            teamId: typeof c?.teamId === 'number' ? c.teamId : null,
+                            dataCardId: typeof c?.sourceDataCardId === 'string' ? c.sourceDataCardId : null,
+                            dataCardUpdatedAt: typeof c?.sourceDataCardUpdatedAt === 'string' ? c.sourceDataCardUpdatedAt : null,
+                            sizeChars: payload ? payload.length : null,
+                            sizeBytes: payload ? toBytes(payload) : null,
+                        };
+                    });
+                    await createBattleReportGenerationCombatants(rows);
+                }
             })();
 
             if (executionContext?.waitUntil) {

@@ -16,7 +16,7 @@ import { getSystemPrompt } from '@/lib/arena/constants';
 import { buildBattleReportSchema, CustomProviderSchema } from '@/lib/arena/schemas';
 import { createPromptBuilder, processAdjudicationChain } from '@/lib/arena/logic';
 import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
-import { createBattleReportGenerationRecord, getUserByAuthKey } from '@/lib/d1';
+import { createBattleReportGenerationRecord, createBattleReportGenerationCombatants, getUserByAuthKey } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
@@ -306,6 +306,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
 
         const reportJson = JSON.stringify(report);
+        const outputBytes = new TextEncoder().encode(reportJson).length;
         const outputPreview = buildContentPreview(reportJson, { headChars: 800, tailChars: 800 });
         const shieldResult = applyShieldWords(outputPreview);
         const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
@@ -313,17 +314,28 @@ async function handler(req: NextRequest): Promise<Response> {
             : { hasSensitiveWords: false };
 
         const usage = normalizeUsage(aiTelemetry.usage);
+        const inputJson = JSON.stringify({
+            combatants,
+            userGuidance: finalUserGuidance,
+            scenario,
+            teams,
+        });
+        const inputBytes = new TextEncoder().encode(inputJson).length;
 
         const recordPromise = (async () => {
             const user = authKey ? await getUserByAuthKey(authKey) : null;
-            await createBattleReportGenerationRecord({
+            const recordId = await createBattleReportGenerationRecord({
                 startedAt: startedAtIso,
                 endedAt: endedAtIso,
                 durationMs,
                 status: 'completed',
+                generationMode: 'non-stream',
+                endpoint: 'api/generate-battle-story',
                 ip,
                 ipAnonymized,
                 userAgent: req.headers.get('user-agent'),
+                referer: req.headers.get('referer'),
+                acceptLanguage: req.headers.get('accept-language'),
                 cfRay: req.headers.get('cf-ray'),
                 cfCountry: req.headers.get('cf-ipcountry'),
                 userId: user?.id ?? null,
@@ -333,6 +345,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 scenarioTitle: typeof scenarioTitle === 'string'
                     ? scenarioTitle.trim() || null
                     : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+                scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
+                scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
                 language: typeof language === 'string' ? language : null,
                 selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
                 storyLength: typeof storyLength === 'string' ? storyLength : null,
@@ -343,18 +357,27 @@ async function handler(req: NextRequest): Promise<Response> {
                 writeArenaHistory: typeof resolvedWriteArenaHistory === 'boolean' ? resolvedWriteArenaHistory : null,
                 readCurrentState: typeof resolvedReadCurrentState === 'boolean' ? resolvedReadCurrentState : null,
                 writeCurrentState: typeof resolvedWriteCurrentState === 'boolean' ? resolvedWriteCurrentState : null,
+                combatantCount: Array.isArray(combatants) ? combatants.length : null,
+                hasScenario: Boolean(scenario),
+                hasUserGuidance: Boolean(finalUserGuidance),
+                hasAdjudicationEvents: Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0,
+                hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
+                inputChars: inputJson.length,
+                inputBytes,
                 userGuidancePreview: finalUserGuidance ? buildContentPreview(finalUserGuidance, { headChars: 300, tailChars: 300 }) : null,
                 adjudicationEventsPreview: Array.isArray(adjudicationEvents)
                     ? buildContentPreview(JSON.stringify(adjudicationEvents), { headChars: 300, tailChars: 300 })
                     : null,
                 customProviderId,
+                customModelId: customProviderPayload?.modelId ?? null,
+                isDowngrade: Boolean(isDowngrade),
                 aiProviderName: aiTelemetry.providerName ?? null,
                 aiProviderType: aiTelemetry.providerType ?? null,
                 aiModel: aiTelemetry.model ?? null,
                 headline: typeof report?.headline === 'string' ? report.headline : null,
                 winner: typeof report?.officialReport?.winner === 'string' ? report.officialReport.winner : null,
                 outputChars: reportJson.length,
-                outputBytes: reportJson.length,
+                outputBytes,
                 promptTokens: usage?.promptTokens ?? null,
                 completionTokens: usage?.completionTokens ?? null,
                 totalTokens: usage?.totalTokens ?? null,
@@ -364,11 +387,6 @@ async function handler(req: NextRequest): Promise<Response> {
                 outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
                 outputHasShieldWords: shieldResult.hasShieldWords,
                 extraJson: {
-                    source: 'api/generate-battle-story',
-                    scenario: {
-                        dataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
-                        dataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
-                    },
                     combatants: Array.isArray(combatants)
                         ? combatants.map((c: any) => ({
                             type: c?.type ?? null,
@@ -383,6 +401,29 @@ async function handler(req: NextRequest): Promise<Response> {
                     resolvedModelOverride: resolvedModelOverride ?? null,
                 },
             });
+
+            if (recordId && Array.isArray(combatants)) {
+                const toBytes = (value: string) => new TextEncoder().encode(value).length;
+                const rows = combatants.map((c: any, index: number) => {
+                    const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
+                    const payload = typeof c?.data === 'object' ? JSON.stringify(c.data) : '';
+                    return {
+                        generationId: recordId,
+                        sortIndex: index,
+                        name,
+                        type: typeof c?.type === 'string' ? c.type : null,
+                        templateId: typeof c?.data?.templateId === 'string' ? c.data.templateId : null,
+                        isNative: typeof c?.isNative === 'boolean' ? c.isNative : null,
+                        isPreset: typeof c?.isPreset === 'boolean' ? c.isPreset : null,
+                        teamId: typeof c?.teamId === 'number' ? c.teamId : null,
+                        dataCardId: typeof c?.sourceDataCardId === 'string' ? c.sourceDataCardId : null,
+                        dataCardUpdatedAt: typeof c?.sourceDataCardUpdatedAt === 'string' ? c.sourceDataCardUpdatedAt : null,
+                        sizeChars: payload ? payload.length : null,
+                        sizeBytes: payload ? toBytes(payload) : null,
+                    };
+                });
+                await createBattleReportGenerationCombatants(rows);
+            }
         })();
 
         const executionContext = (req as any).context;
