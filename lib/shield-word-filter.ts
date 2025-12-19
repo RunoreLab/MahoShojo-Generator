@@ -29,7 +29,7 @@ const shieldWordsConfig: ShieldWordsConfig = {
     // 默认使用 ❀ 遮罩
     // '5YWr5Lmd',
     '5Y+R5oOF',
-    '5a+E55Sf',
+    // '5a+E55Sf',
     '5a2Q5a6r',
     // '5rSX6ISR',
     '5Lmg6L+R5bmz',
