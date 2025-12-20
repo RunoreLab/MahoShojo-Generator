@@ -27,6 +27,8 @@ interface DashboardStats {
   battleReportGenerationsAbortFailToday: number;
   battleReportGenerationAbortFailRateToday: number;
   serverTimeIso: string;
+  d1NowUtc: string;
+  d1NowLocal: string;
 }
 
 interface StatCardProps {
@@ -61,6 +63,7 @@ const AdminHomePage: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastServerTimeIso, setLastServerTimeIso] = useState<string | null>(null);
+  const [lastD1NowLocal, setLastD1NowLocal] = useState<string | null>(null);
 
   // 在组件挂载时通过useEffect获取数据
   useEffect(() => {
@@ -75,6 +78,7 @@ const AdminHomePage: React.FC = () => {
         if (data.success) {
           setStats(data.stats);
           setLastServerTimeIso(data.stats?.serverTimeIso || null);
+          setLastD1NowLocal(data.stats?.d1NowLocal || null);
         }
       } catch (error) {
         console.error(error);
@@ -116,7 +120,10 @@ const AdminHomePage: React.FC = () => {
               <h2 className="text-xl font-semibold text-gray-700">平台概览</h2>
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <Clock className="w-4 h-4" />
-                <span>服务器时间：{formatServerTime(lastServerTimeIso)}</span>
+                <span>
+                  服务器时间：{formatServerTime(lastServerTimeIso)}
+                  {lastD1NowLocal ? `（D1 local: ${lastD1NowLocal}）` : ''}
+                </span>
               </div>
             </div>
             {loading ? (
