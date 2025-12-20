@@ -255,11 +255,48 @@ export async function generateWithStreamAI(
                     temperature: generationConfig.temperature,
                     maxOutputTokens: generationConfig.maxOutputTokens,
                     maxRetries: 0,
+                    onError: ({ error }) => {
+                        log.error(`流式传输过程中出错: 提供商: ${provider.name} 模型: ${selectedModel}`, { error });
+                    },
+                });
+
+                // 预检流：在返回流之前，先尝试读取第一个 chunk 来验证连接成功
+                const reader = result.textStream.getReader();
+                const firstChunk = await reader.read();
+
+                if (firstChunk.done) {
+                    throw new Error('流意外结束，没有内容生成');
+                }
+
+                // 创建一个新的 ReadableStream，将已读取的 chunk 和剩余流合并
+                const combinedStream = new ReadableStream<string>({
+                    start(controller) {
+                        // 先推送已读取的第一个 chunk
+                        if (firstChunk.value) {
+                            controller.enqueue(firstChunk.value);
+                        }
+                    },
+                    async pull(controller) {
+                        const { done, value } = await reader.read();
+                        if (done) {
+                            controller.close();
+                        } else {
+                            controller.enqueue(value);
+                        }
+                    },
+                    cancel() {
+                        reader.cancel();
+                    }
                 });
 
                 log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
+
                 return {
-                    response: result.toTextStreamResponse(),
+                    response: new Response(combinedStream.pipeThrough(new TextEncoderStream()), {
+                        headers: {
+                            'Content-Type': 'text/plain; charset=utf-8',
+                        },
+                    }),
                     usagePromise: (result as any).usage,
                     telemetry: options?.telemetry,
                 };
