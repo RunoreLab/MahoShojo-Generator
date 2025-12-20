@@ -51,6 +51,7 @@ export default async function handler(req: NextRequest) {
       isRecommended: searchParams.get('isRecommended') as '0' | '1' | undefined,
       type: searchParams.get('type') as 'character' | 'scenario' | undefined,
       search: searchParams.get('search') || undefined,
+      includePendingUpdates: searchParams.get('includePendingUpdates') === '1',
     };
     
     // 清理掉值为 undefined 或空的筛选条件

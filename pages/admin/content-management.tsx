@@ -23,32 +23,23 @@ interface DataCard {
   is_recommended: number;
   created_at: string;
   updated_at: string;
+  pending_update_id?: string | null;
+  pending_update_name?: string | null;
+  pending_update_description?: string | null;
+  pending_update_data?: string | null;
+  pending_update_created_at?: string | null;
 }
 
-type ReviewQueueItemKind = 'new' | 'update';
-
-interface ReviewQueueItem {
-  target_id: string;
-  kind: ReviewQueueItemKind;
-  data_card_id: string;
-  update_id: string | null;
+interface AiTargetSnapshotItem {
+  kind: 'card' | 'update';
+  cardId: string;
+  updateId?: string;
   name: string;
   description: string;
   data: string;
-  original_name: string | null;
-  original_description: string | null;
-  original_data: string | null;
-  type: 'character' | 'scenario';
-  username: string;
-  is_public: -1 | 0 | 1;
-  review_status: 'pending' | 'approved' | 'rejected';
-  is_recommended: number;
-  like_count: number;
-  usage_count: number;
-  favorite_count: number;
-  created_at: string;
-  updated_at: string;
-  submitted_at: string;
+  originalName?: string;
+  originalDescription?: string;
+  originalData?: string;
 }
 
 // AI审查结果类型
@@ -80,19 +71,6 @@ const ContentManagementPage: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
 
-  // 统一待审核队列（新建 + 更新）
-  const [queueItems, setQueueItems] = useState<ReviewQueueItem[]>([]);
-  const [queueTotal, setQueueTotal] = useState(0);
-  const [queueLoading, setQueueLoading] = useState(false);
-  const [queueSelectedIds, setQueueSelectedIds] = useState<Set<string>>(new Set());
-  const [queueFilters, setQueueFilters] = useState({
-    page: 1,
-    limit: 20,
-    search: '',
-    kind: '' as '' | ReviewQueueItemKind,
-    type: '' as '' | DataCard['type'],
-  });
-
   // AI 审查相关状态
   const [showAiReviewModal, setShowAiReviewModal] = useState(false);
   const [isAiReviewing, setIsAiReviewing] = useState(false);
@@ -102,7 +80,7 @@ const ContentManagementPage: React.FC = () => {
   const [aiModel, setAiModel] = useState('gemini-2.5-flash-lite');
   const [externalReviewContent, setExternalReviewContent] = useState(''); // [新增] 外部审查粘贴内容
   const [copyStatus, setCopyStatus] = useState(''); // [新增] 复制按钮状态
-  const [aiTargetSnapshotById, setAiTargetSnapshotById] = useState<Record<string, ReviewQueueItem>>({});
+  const [aiTargetSnapshotById, setAiTargetSnapshotById] = useState<Record<string, AiTargetSnapshotItem>>({});
 
   const fetchData = useCallback(async (currentFilters: typeof filters) => {
     setLoading(true);
@@ -116,6 +94,7 @@ const ContentManagementPage: React.FC = () => {
         isPublic: currentFilters.isPublic,
         type: currentFilters.type,
         isRecommended: currentFilters.isRecommended,
+        includePendingUpdates: '1',
       });
       const response = await fetch(`/api/admin/data-cards?${params.toString()}`);
       if (!response.ok) throw new Error('获取数据失败');
@@ -129,30 +108,6 @@ const ContentManagementPage: React.FC = () => {
     }
   }, []);
 
-  const fetchQueue = useCallback(async (currentFilters: typeof queueFilters) => {
-    setQueueLoading(true);
-    setQueueSelectedIds(new Set());
-    try {
-      const params = new URLSearchParams({
-        page: currentFilters.page.toString(),
-        limit: currentFilters.limit.toString(),
-      });
-      if (currentFilters.search) params.set('search', currentFilters.search);
-      if (currentFilters.kind) params.set('kind', currentFilters.kind);
-      if (currentFilters.type) params.set('type', currentFilters.type);
-
-      const res = await fetch(`/api/admin/review-queue?${params.toString()}`);
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || '获取待审核队列失败');
-      setQueueItems(data.items || []);
-      setQueueTotal(data.total || 0);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setQueueLoading(false);
-    }
-  }, []);
-  
   useEffect(() => {
     if (router.isReady) {
       const newFilters = {
@@ -197,24 +152,12 @@ const ContentManagementPage: React.FC = () => {
   }, [router]);
 
   const debouncedUpdateUrl = useMemo(() => debounce(updateUrl, 300), [updateUrl]);
-  const debouncedFetchQueue = useMemo(() => debounce(fetchQueue, 300), [fetchQueue]);
 
   useEffect(() => {
     return () => {
       debouncedUpdateUrl.cancel();
     };
   }, [debouncedUpdateUrl]);
-
-  useEffect(() => {
-    return () => {
-      debouncedFetchQueue.cancel();
-    };
-  }, [debouncedFetchQueue]);
-
-  useEffect(() => {
-    if (!router.isReady) return;
-    debouncedFetchQueue(queueFilters);
-  }, [router.isReady, queueFilters, debouncedFetchQueue]);
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -228,13 +171,6 @@ const ContentManagementPage: React.FC = () => {
       const newFilters = { ...filters, page: newPage };
       setFilters(newFilters);
       updateUrl(newFilters);
-    }
-  };
-
-  const handleQueuePageChange = (newPage: number) => {
-    const totalPages = Math.ceil(queueTotal / queueFilters.limit);
-    if (newPage > 0 && newPage <= totalPages) {
-      setQueueFilters({ ...queueFilters, page: newPage });
     }
   };
 
@@ -252,59 +188,81 @@ const ContentManagementPage: React.FC = () => {
     setSelectedIds(newSelectedIds);
   };
 
-  const handleViewDetails = (card: DataCard) => {
+  const openDetailsModal = (card: DataCard, pendingNotice?: string) => {
     setSelectedCardDetails(card);
-    setDetailsPendingNotice(undefined);
+    setDetailsPendingNotice(pendingNotice);
     setIsDetailsModalOpen(true);
   };
 
-  const handleQueueFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    const newFilters = { ...queueFilters, [name]: value, page: 1 };
-    setQueueFilters(newFilters);
-  };
-
-  const handleQueueSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setQueueSelectedIds(e.target.checked ? new Set(queueItems.map(i => i.target_id)) : new Set());
-  };
-
-  const handleQueueSelectOne = (targetId: string) => {
-    const next = new Set(queueSelectedIds);
-    if (next.has(targetId)) next.delete(targetId);
-    else next.add(targetId);
-    setQueueSelectedIds(next);
-  };
-
-  const handleViewQueueDetails = (item: ReviewQueueItem, variant: 'current' | 'original') => {
-    const isOriginal = variant === 'original';
-    const resolvedName = isOriginal ? (item.original_name ?? item.name) : item.name;
-    const resolvedDescription = isOriginal ? (item.original_description ?? item.description) : item.description;
-    const resolvedData = isOriginal ? (item.original_data ?? item.data) : item.data;
-
-    const card: DataCard = {
-      id: item.data_card_id,
-      name: resolvedName,
-      description: resolvedDescription,
-      data: resolvedData,
-      type: item.type,
-      is_public: item.is_public,
-      review_status: item.kind === 'update' && !isOriginal ? 'pending' : item.review_status,
-      username: item.username,
-      like_count: item.like_count,
-      usage_count: item.usage_count,
-      favorite_count: item.favorite_count,
-      is_recommended: item.is_recommended,
-      created_at: item.created_at,
-      updated_at: item.kind === 'update' && !isOriginal ? item.submitted_at : item.updated_at,
+  const buildCardFromPendingUpdate = (card: DataCard, variant: 'update' | 'original'): DataCard => {
+    if (variant === 'original') return card;
+    return {
+      ...card,
+      name: card.pending_update_name ?? card.name,
+      description: card.pending_update_description ?? card.description,
+      data: card.pending_update_data ?? card.data,
+      updated_at: card.pending_update_created_at ?? card.updated_at,
     };
+  };
 
-    setSelectedCardDetails(card);
-    if (item.kind === 'update') {
-      setDetailsPendingNotice(isOriginal ? '这是当前线上版本（原版），用于对比参考。' : '这是用户提交的更新版本，审核通过后将覆盖线上版本。');
-    } else {
-      setDetailsPendingNotice(undefined);
+  const handleViewDetails = (card: DataCard) => {
+    if (card.pending_update_id) {
+      openDetailsModal(buildCardFromPendingUpdate(card, 'update'), '这是用户提交的更新版本，审核通过后将覆盖线上版本。');
+      return;
     }
-    setIsDetailsModalOpen(true);
+    openDetailsModal(card);
+  };
+
+  const handleViewOriginalDetails = (card: DataCard) => {
+    if (!card.pending_update_id) return;
+    openDetailsModal(buildCardFromPendingUpdate(card, 'original'), '这是当前线上版本（原版），用于对比参考。');
+  };
+
+  const handleViewDetailsFromAiTarget = (targetId: string, variant: 'review' | 'original') => {
+    const snapshot = aiTargetSnapshotById[targetId];
+    if (!snapshot) return;
+
+    const baseCard = dataCards.find(card => card.id === snapshot.cardId);
+    if (!baseCard) {
+      alert('当前列表中找不到该卡片数据，请关闭模态框后刷新页面再试。');
+      return;
+    }
+
+    if (snapshot.kind === 'update') {
+      if (variant === 'original') {
+        openDetailsModal(
+          {
+            ...baseCard,
+            name: snapshot.originalName ?? baseCard.name,
+            description: snapshot.originalDescription ?? baseCard.description,
+            data: snapshot.originalData ?? baseCard.data,
+          },
+          '这是当前线上版本（原版），用于对比参考。'
+        );
+        return;
+      }
+
+      openDetailsModal(
+        {
+          ...baseCard,
+          name: snapshot.name,
+          description: snapshot.description,
+          data: snapshot.data,
+          updated_at: new Date().toISOString(),
+        },
+        '这是用户提交的更新版本，审核通过后将覆盖线上版本。'
+      );
+      return;
+    }
+
+    openDetailsModal(
+      {
+        ...baseCard,
+        name: snapshot.name,
+        description: snapshot.description,
+        data: snapshot.data,
+      }
+    );
   };
 
   const handleBatchAction = async (action: string, value?: any) => {
@@ -319,7 +277,7 @@ const ContentManagementPage: React.FC = () => {
       });
       if (!response.ok) throw new Error('操作失败');
       alert('操作成功！');
-      fetchData(filters);
+      await fetchData(filters);
     } catch (error) {
       alert(`操作失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
@@ -363,45 +321,69 @@ const ContentManagementPage: React.FC = () => {
     }
   };
 
-  const executeQueueReview = async (items: ReviewQueueItem[], action: 'approve' | 'reject') => {
-    const cardIds = items.filter(i => i.kind === 'new').map(i => i.data_card_id);
-    const updateIds = items.filter(i => i.kind === 'update' && i.update_id).map(i => i.update_id as string);
-
-    if (cardIds.length === 0 && updateIds.length === 0) return;
-
-    if (cardIds.length > 0) {
-      const res = await fetch('/api/admin/data-cards/batch-update', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cardIds, action }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.success === false) throw new Error(data.error || '批量更新数据卡失败');
+  const executeBatchReviewUpdates = async (updateIds: string[], action: 'approve' | 'reject') => {
+    const res = await fetch('/api/admin/data-card-updates/batch-review', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updateIds, action }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      const failedIds: string[] = Array.isArray(data.failedIds) ? data.failedIds : [];
+      return { processed: Number(data.processed || 0), failedIds };
     }
-
-    if (updateIds.length > 0) {
-      const res = await fetch('/api/admin/data-card-updates/batch-review', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updateIds, action }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.success === false) throw new Error(data.error || '批量审核更新失败');
-    }
+    return { processed: Number(data.processed || updateIds.length), failedIds: [] as string[] };
   };
 
-  const handleQueueBatchReview = async (action: 'approve' | 'reject') => {
-    if (queueSelectedIds.size === 0) return alert('请至少选择一个待审核项目');
-    const items = queueItems.filter(i => queueSelectedIds.has(i.target_id));
-    if (!window.confirm(`确定要${action === 'approve' ? '通过' : '拒绝'}选中的 ${items.length} 个项目吗？`)) return;
+  const executeBatchUpdateCards = async (cardIds: string[], action: 'approve' | 'reject') => {
+    const res = await fetch('/api/admin/data-cards/batch-update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cardIds, action }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || '批量更新数据卡失败');
+  };
+
+  const handleBatchReviewWithUpdates = async (action: 'approve' | 'reject') => {
+    if (selectedIds.size === 0) return alert('请至少选择一个项目');
+
+    const selectedCards = dataCards.filter(card => selectedIds.has(card.id));
+    const updateIds = selectedCards
+      .map(card => card.pending_update_id)
+      .filter((id): id is string => Boolean(id));
+    const cardIds = selectedCards
+      .filter(card => !card.pending_update_id)
+      .map(card => card.id);
+
+    if (
+      !window.confirm(
+        `即将${action === 'approve' ? '通过' : '拒绝'}：` +
+          `${cardIds.length} 条卡片审查、${updateIds.length} 条更新审查。是否继续？`
+      )
+    ) {
+      return;
+    }
 
     try {
-      await executeQueueReview(items, action);
+      if (updateIds.length > 0) {
+        const { processed, failedIds } = await executeBatchReviewUpdates(updateIds, action);
+        if (failedIds.length > 0) {
+          alert(`更新审查存在部分失败：成功 ${processed - failedIds.length}，失败 ${failedIds.length}。请刷新后重试。`);
+          await fetchData(filters);
+          return;
+        }
+      }
+
+      if (cardIds.length > 0) {
+        await executeBatchUpdateCards(cardIds, action);
+      }
+
       alert('操作成功！');
-      await fetchQueue(queueFilters);
       await fetchData(filters);
     } catch (error) {
       alert(`操作失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      await fetchData(filters);
     }
   };
 
@@ -416,27 +398,58 @@ const ContentManagementPage: React.FC = () => {
   };
 
   const handleStartAiReview = async () => {
-    const selected = queueItems.filter(i => queueSelectedIds.has(i.target_id));
-    const candidates = selected.length > 0 ? selected : queueItems;
-    const itemsToReview = candidates.slice(0, aiBatchSize);
-    if (itemsToReview.length === 0) return alert('当前待审核队列为空。');
-
     setIsAiReviewing(true);
     setAiReviewResults([]);
     try {
-      const snapshot: Record<string, ReviewQueueItem> = {};
-      for (const item of itemsToReview) snapshot[item.target_id] = item;
-      setAiTargetSnapshotById(snapshot);
+      const candidates = selectedIds.size > 0
+        ? Array.from(selectedIds)
+        : dataCards
+            .filter(card => card.review_status === 'pending' || Boolean(card.pending_update_id))
+            .map(card => card.id);
+      const cardIdsToReview = candidates.slice(0, aiBatchSize);
 
+      if (cardIdsToReview.length === 0) {
+        alert('当前页面没有可审查内容（新建待审 / 更新待审）。');
+        return;
+      }
+
+      const cardById = new Map(dataCards.map(card => [card.id, card]));
+      const snapshot: Record<string, AiTargetSnapshotItem> = {};
       const targets: Array<{ kind: 'card' | 'update'; id: string; targetId: string }> = [];
-      for (const item of itemsToReview) {
-        if (item.kind === 'update') {
-          if (!item.update_id) continue;
-          targets.push({ kind: 'update', id: item.update_id, targetId: item.target_id });
+
+      for (const cardId of cardIdsToReview) {
+        const card = cardById.get(cardId);
+        if (!card) continue;
+
+        if (card.pending_update_id) {
+          const targetId = `update:${card.pending_update_id}`;
+          targets.push({ kind: 'update', id: card.pending_update_id, targetId });
+          snapshot[targetId] = {
+            kind: 'update',
+            cardId,
+            updateId: card.pending_update_id,
+            name: card.pending_update_name ?? card.name,
+            description: card.pending_update_description ?? card.description,
+            data: card.pending_update_data ?? card.data,
+            originalName: card.name,
+            originalDescription: card.description,
+            originalData: card.data,
+          };
           continue;
         }
-        targets.push({ kind: 'card', id: item.data_card_id, targetId: item.target_id });
+
+        const targetId = `card:${cardId}`;
+        targets.push({ kind: 'card', id: cardId, targetId });
+        snapshot[targetId] = {
+          kind: 'card',
+          cardId,
+          name: card.name,
+          description: card.description,
+          data: card.data,
+        };
       }
+
+      setAiTargetSnapshotById(snapshot);
 
       const response = await fetch('/api/admin/ai-review', {
         method: 'POST',
@@ -467,20 +480,47 @@ const ContentManagementPage: React.FC = () => {
     if (!window.confirm(`即将通过 ${approveTargetIds.length} 项，拒绝 ${rejectTargetIds.length} 项。是否继续？`)) return;
 
     try {
-      const approveItems = approveTargetIds
-        .map(id => aiTargetSnapshotById[id])
-        .filter((item): item is ReviewQueueItem => Boolean(item));
-      const rejectItems = rejectTargetIds
-        .map(id => aiTargetSnapshotById[id])
-        .filter((item): item is ReviewQueueItem => Boolean(item));
+      const approveUpdateIds: string[] = [];
+      const rejectUpdateIds: string[] = [];
+      const approveCardIds: string[] = [];
+      const rejectCardIds: string[] = [];
 
-      if (approveItems.length > 0) await executeQueueReview(approveItems, 'approve');
-      if (rejectItems.length > 0) await executeQueueReview(rejectItems, 'reject');
+      for (const targetId of approveTargetIds) {
+        const item = aiTargetSnapshotById[targetId];
+        if (!item) continue;
+        if (item.kind === 'update' && item.updateId) approveUpdateIds.push(item.updateId);
+        if (item.kind === 'card') approveCardIds.push(item.cardId);
+      }
+      for (const targetId of rejectTargetIds) {
+        const item = aiTargetSnapshotById[targetId];
+        if (!item) continue;
+        if (item.kind === 'update' && item.updateId) rejectUpdateIds.push(item.updateId);
+        if (item.kind === 'card') rejectCardIds.push(item.cardId);
+      }
+
+      if (approveUpdateIds.length > 0) {
+        const { failedIds } = await executeBatchReviewUpdates(approveUpdateIds, 'approve');
+        if (failedIds.length > 0) {
+          alert(`通过更新存在失败 ${failedIds.length} 条，请刷新后重试。`);
+          await fetchData(filters);
+          return;
+        }
+      }
+      if (rejectUpdateIds.length > 0) {
+        const { failedIds } = await executeBatchReviewUpdates(rejectUpdateIds, 'reject');
+        if (failedIds.length > 0) {
+          alert(`拒绝更新存在失败 ${failedIds.length} 条，请刷新后重试。`);
+          await fetchData(filters);
+          return;
+        }
+      }
+
+      if (approveCardIds.length > 0) await executeBatchUpdateCards(approveCardIds, 'approve');
+      if (rejectCardIds.length > 0) await executeBatchUpdateCards(rejectCardIds, 'reject');
 
       alert('操作成功！');
       setShowAiReviewModal(false);
-      await fetchQueue(queueFilters);
-      await fetchData(filters); // 刷新主列表
+      await fetchData(filters);
     } catch (error) {
       alert(`执行失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
@@ -488,31 +528,67 @@ const ContentManagementPage: React.FC = () => {
 
   // [新增] 外部审查 - 复制内容到剪贴板
   const handleCopyToClipboard = () => {
-    const selected = queueItems.filter(i => queueSelectedIds.has(i.target_id));
-    const candidates = selected.length > 0 ? selected : queueItems;
-    const itemsToCopy = candidates.slice(0, aiBatchSize);
-    if (itemsToCopy.length === 0) return alert('当前待审核队列为空。');
+    const cardById = new Map(dataCards.map(card => [card.id, card]));
+    const candidates = selectedIds.size > 0
+      ? Array.from(selectedIds)
+      : dataCards
+          .filter(card => card.review_status === 'pending' || Boolean(card.pending_update_id))
+          .map(card => card.id);
+    const cardIdsToCopy = candidates.slice(0, aiBatchSize);
+    if (cardIdsToCopy.length === 0) return alert('当前没有可复制的内容。');
 
-    const snapshot: Record<string, ReviewQueueItem> = {};
-    for (const item of itemsToCopy) snapshot[item.target_id] = item;
-    setAiTargetSnapshotById(snapshot);
+    const snapshot: Record<string, AiTargetSnapshotItem> = {};
+    const cardsToCopy = cardIdsToCopy.map(cardId => {
+      const card = cardById.get(cardId);
+      if (!card) return null;
+      if (card.pending_update_id) {
+        const targetId = `update:${card.pending_update_id}`;
+        snapshot[targetId] = {
+          kind: 'update',
+          cardId,
+          updateId: card.pending_update_id,
+          name: card.pending_update_name ?? card.name,
+          description: card.pending_update_description ?? card.description,
+          data: card.pending_update_data ?? card.data,
+          originalName: card.name,
+          originalDescription: card.description,
+          originalData: card.data,
+        };
+        let parsedData: any = card.pending_update_data ?? card.data;
+        try {
+          parsedData = JSON.parse(parsedData);
+        } catch {
+          // ignore
+        }
+        return {
+          id: targetId,
+          content: {
+            name: card.pending_update_name ?? card.name,
+            description: card.pending_update_description ?? card.description,
+            data: parsedData,
+          },
+        };
+      }
 
-    const cardsToCopy = itemsToCopy.map(item => {
-      let parsedData: any = item.data;
+      const targetId = `card:${cardId}`;
+      snapshot[targetId] = { kind: 'card', cardId, name: card.name, description: card.description, data: card.data };
+      let parsedData: any = card.data;
       try {
-        parsedData = JSON.parse(item.data);
+        parsedData = JSON.parse(card.data);
       } catch {
         // ignore
       }
       return {
-        id: item.target_id,
+        id: targetId,
         content: {
-          name: item.name,
-          description: item.description,
+          name: card.name,
+          description: card.description,
           data: parsedData,
         },
       };
-    });
+    }).filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+    setAiTargetSnapshotById(snapshot);
     
     const promptForLLM = `
 You are a content moderator. Please review the following data cards based on our content policy (no politics, hate speech, explicit content, etc.). 
@@ -574,7 +650,6 @@ ${JSON.stringify(cardsToCopy, null, 2)}
   };
 
   const totalPages = Math.ceil(total / filters.limit);
-  const queueTotalPages = Math.ceil(queueTotal / queueFilters.limit);
   const getReviewStatusBadge = (status: DataCard['review_status']) => {
       const map = {
           pending: { text: '待审查', color: 'bg-yellow-100 text-yellow-800' },
@@ -606,193 +681,6 @@ ${JSON.stringify(cardsToCopy, null, 2)}
             </Link>
           </div>
           <h1 className="text-2xl font-bold text-gray-800 mb-4">内容档案管理</h1>
-
-	          {/* 待审核队列（新建 + 更新） */}
-	          <div className="bg-white p-4 rounded-lg shadow-sm mb-4">
-	            <div className="flex flex-col gap-3">
-	              <div className="flex items-start justify-between gap-4">
-	                <div>
-	                  <h2 className="text-lg font-semibold text-gray-800">待审核队列</h2>
-	                  <p className="text-xs text-gray-500 mt-1">
-	                    统一展示“新建待审查”和“待审核更新”，支持批量操作与 AI 辅助审查（更新通过后覆盖线上版本）。
-	                  </p>
-	                </div>
-	                <div className="flex items-center gap-2">
-	                  <span className="text-xs text-gray-500">{queueLoading ? '加载中…' : `共 ${queueTotal} 项`}</span>
-	                  <button onClick={() => fetchQueue(queueFilters)} className="admin-button-sm bg-gray-100 text-gray-700 hover:bg-gray-200">
-	                    刷新
-	                  </button>
-	                </div>
-	              </div>
-
-	              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-	                <input
-	                  type="text"
-	                  name="search"
-	                  value={queueFilters.search}
-	                  onChange={handleQueueFilterChange}
-	                  placeholder="搜索名称 / 描述 / 作者 / 卡片ID…"
-	                  className="input-field"
-	                />
-	                <select name="kind" value={queueFilters.kind} onChange={handleQueueFilterChange} className="input-field">
-	                  <option value="">全部来源</option>
-	                  <option value="new">新建待审查</option>
-	                  <option value="update">更新待审核</option>
-	                </select>
-	                <select name="type" value={queueFilters.type} onChange={handleQueueFilterChange} className="input-field">
-	                  <option value="">全部类型</option>
-	                  <option value="character">角色</option>
-	                  <option value="scenario">情景</option>
-	                </select>
-	              </div>
-
-	              <div className="flex flex-wrap items-center gap-2">
-	                <span className="text-sm text-gray-600 mr-2">
-	                  选中 {queueSelectedIds.size} / {queueItems.length}（当前页）· 共 {queueTotal} 项
-	                </span>
-	                <button
-	                  onClick={() => handleQueueBatchReview('approve')}
-	                  disabled={queueSelectedIds.size === 0}
-	                  className="admin-button-sm bg-green-600 hover:bg-green-700 disabled:opacity-50"
-	                >
-	                  批量通过
-	                </button>
-	                <button
-	                  onClick={() => handleQueueBatchReview('reject')}
-	                  disabled={queueSelectedIds.size === 0}
-	                  className="admin-button-sm bg-red-600 hover:bg-red-700 disabled:opacity-50"
-	                >
-	                  批量拒绝
-	                </button>
-	                <button onClick={handleOpenAiReview} className="admin-button-sm bg-indigo-600 hover:bg-indigo-700">
-	                  AI 辅助审查
-	                </button>
-	              </div>
-	            </div>
-
-	            <div className="mt-4 overflow-x-auto">
-	              <table className="min-w-full divide-y divide-gray-200 text-sm">
-	                <thead>
-	                  <tr className="bg-gray-50 text-gray-700">
-	                    <th className="px-3 py-2 text-left">
-	                      <input
-	                        type="checkbox"
-	                        onChange={handleQueueSelectAll}
-	                        checked={queueItems.length > 0 && queueSelectedIds.size === queueItems.length}
-	                      />
-	                    </th>
-	                    <th className="px-3 py-2 text-left">来源</th>
-	                    <th className="px-3 py-2 text-left">名称 / 作者</th>
-	                    <th className="px-3 py-2 text-left">类型</th>
-	                    <th className="px-3 py-2 text-left">提交时间</th>
-	                    <th className="px-3 py-2 text-left">描述</th>
-	                    <th className="px-3 py-2 text-left">操作</th>
-	                  </tr>
-	                </thead>
-	                <tbody className="divide-y divide-gray-200">
-	                  {queueLoading ? (
-	                    <tr><td colSpan={7} className="text-center p-6 text-gray-500">加载中…</td></tr>
-	                  ) : queueItems.length === 0 ? (
-	                    <tr><td colSpan={7} className="text-center p-6 text-gray-500">暂无待审核内容</td></tr>
-	                  ) : (
-	                    queueItems.map((item) => (
-	                      <tr key={item.target_id} className="hover:bg-gray-50">
-	                        <td className="px-3 py-2">
-	                          <input
-	                            type="checkbox"
-	                            onChange={() => handleQueueSelectOne(item.target_id)}
-	                            checked={queueSelectedIds.has(item.target_id)}
-	                          />
-	                        </td>
-	                        <td className="px-3 py-2">
-	                          {item.kind === 'update' ? (
-	                            <span className="inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-800">更新</span>
-	                          ) : (
-	                            <span className="inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800">新建</span>
-	                          )}
-	                        </td>
-	                        <td className="px-3 py-2">
-	                          <button
-	                            onClick={() => handleViewQueueDetails(item, 'current')}
-	                            className="font-medium text-purple-700 hover:underline text-left"
-	                          >
-	                            {item.name}
-	                            {item.is_recommended === 1 && (
-	                              <span className="ml-2 inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-amber-100 text-amber-700">推荐</span>
-	                            )}
-	                          </button>
-	                          <div className="text-xs text-gray-500">by {item.username}</div>
-	                          {item.kind === 'update' && (
-	                            <div className="text-[11px] text-gray-500 mt-1">
-	                              原：{item.original_name || '（空）'} → 新：{item.name || '（空）'}
-	                            </div>
-	                          )}
-	                        </td>
-	                        <td className="px-3 py-2">{item.type === 'character' ? '角色' : '情景'}</td>
-	                        <td className="px-3 py-2 text-xs text-gray-500">{item.submitted_at}</td>
-	                        <td className="px-3 py-2 text-xs text-gray-600 max-w-[320px] truncate">
-	                          {item.description || '（无描述）'}
-	                        </td>
-	                        <td className="px-3 py-2">
-	                          <div className="flex flex-wrap gap-2">
-	                            {item.kind === 'update' && (
-	                              <button
-	                                onClick={() => handleViewQueueDetails(item, 'original')}
-	                                className="admin-button-sm bg-gray-100 text-gray-700 hover:bg-gray-200"
-	                              >
-	                                看原版
-	                              </button>
-	                            )}
-	                            <button
-	                              onClick={async () => {
-	                                try {
-	                                  await executeQueueReview([item], 'approve');
-	                                  await fetchQueue(queueFilters);
-	                                  await fetchData(filters);
-	                                } catch (error) {
-	                                  alert(`操作失败: ${error instanceof Error ? error.message : '未知错误'}`);
-	                                }
-	                              }}
-	                              className="admin-button-sm bg-green-100 text-green-800 hover:bg-green-200"
-	                            >
-	                              通过
-	                            </button>
-	                            <button
-	                              onClick={async () => {
-	                                try {
-	                                  await executeQueueReview([item], 'reject');
-	                                  await fetchQueue(queueFilters);
-	                                  await fetchData(filters);
-	                                } catch (error) {
-	                                  alert(`操作失败: ${error instanceof Error ? error.message : '未知错误'}`);
-	                                }
-	                              }}
-	                              className="admin-button-sm bg-red-100 text-red-800 hover:bg-red-200"
-	                            >
-	                              拒绝
-	                            </button>
-	                          </div>
-	                        </td>
-	                      </tr>
-	                    ))
-	                  )}
-	                </tbody>
-	              </table>
-	            </div>
-
-	            {/* 队列分页 */}
-	            {queueTotalPages > 1 && (
-	              <div className="flex justify-between items-center mt-4 text-sm">
-	                <button onClick={() => handleQueuePageChange(queueFilters.page - 1)} disabled={queueLoading || queueFilters.page <= 1} className="admin-button-sm">
-	                  上一页
-	                </button>
-	                <span>第 {queueFilters.page} / {queueTotalPages} 页 (共 {queueTotal} 项)</span>
-	                <button onClick={() => handleQueuePageChange(queueFilters.page + 1)} disabled={queueLoading || queueFilters.page >= queueTotalPages} className="admin-button-sm">
-	                  下一页
-	                </button>
-	              </div>
-	            )}
-	          </div>
 
           {/* 筛选器区域 */}
           <div className="bg-white p-4 rounded-lg shadow-sm mb-4">
@@ -834,17 +722,17 @@ ${JSON.stringify(cardsToCopy, null, 2)}
           <div className="bg-white p-4 rounded-lg shadow-sm mb-4 flex flex-wrap items-center gap-2">
             <span className="text-sm text-gray-600 mr-4">选中 {selectedIds.size} / {dataCards.length} 项 (共 {total} 项)</span>
             <div className="flex-grow flex flex-wrap gap-2">
-                <button onClick={() => handleBatchAction('approve')} className="admin-button-sm bg-green-500 hover:bg-green-600">通过审查</button>
-                <button onClick={() => handleBatchAction('reject')} className="admin-button-sm bg-red-500 hover:bg-red-600">拒绝审查</button>
-                <button onClick={() => handleBatchAction('set_public_status', 1)} className="admin-button-sm bg-blue-500 hover:bg-blue-600">设为公开</button>
-                <button onClick={() => handleBatchAction('set_public_status', 0)} className="admin-button-sm bg-gray-500 hover:bg-gray-600">设为私有</button>
-                <button onClick={() => handleBatchAction('set_public_status', -1)} className="admin-button-sm bg-zinc-500 hover:bg-zinc-600">设为封禁</button>
+                <button onClick={() => handleBatchReviewWithUpdates('approve')} className="admin-button-sm bg-green-600 hover:bg-green-700 text-white">通过审查</button>
+                <button onClick={() => handleBatchReviewWithUpdates('reject')} className="admin-button-sm bg-red-600 hover:bg-red-700 text-white">拒绝审查</button>
+                <button onClick={() => handleBatchAction('set_public_status', 1)} className="admin-button-sm bg-blue-600 hover:bg-blue-700 text-white">设为公开</button>
+                <button onClick={() => handleBatchAction('set_public_status', 0)} className="admin-button-sm bg-gray-600 hover:bg-gray-700 text-white">设为私有</button>
+                <button onClick={() => handleBatchAction('set_public_status', -1)} className="admin-button-sm bg-zinc-700 hover:bg-zinc-800 text-white">设为封禁</button>
                 <button onClick={() => handleBatchAction('set_recommended', 1)} className="admin-button-sm bg-amber-500 hover:bg-amber-600 text-white">设为推荐</button>
                 <button onClick={() => handleBatchAction('set_recommended', 0)} className="admin-button-sm bg-amber-200 hover:bg-amber-300 text-amber-800">取消推荐</button>
-                <button onClick={handleExport} className="admin-button-sm bg-teal-500 hover:bg-teal-600 disabled:opacity-50" disabled={isExporting || selectedIds.size === 0}>
+                <button onClick={handleExport} className="admin-button-sm bg-teal-600 hover:bg-teal-700 text-white disabled:opacity-50" disabled={isExporting || selectedIds.size === 0}>
                   {isExporting ? '导出中...' : '导出选中项'}
                 </button>
-	                <button onClick={handleOpenAiReview} className="admin-button-sm bg-indigo-500 hover:bg-indigo-600">AI 辅助审查（队列）</button>
+                <button onClick={handleOpenAiReview} className="admin-button-sm bg-indigo-600 hover:bg-indigo-700 text-white">AI 辅助审查</button>
             </div>
           </div>
           
@@ -869,57 +757,100 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                 ) : dataCards.length === 0 ? (
                   <tr><td colSpan={8} className="text-center p-8">未找到符合条件的数据</td></tr>
                 ) : (
-                  dataCards.map(card => (
-                    <tr key={card.id} className="bg-white border-b hover:bg-gray-50">
-                      <td className="p-4"><input type="checkbox" onChange={() => handleSelectOne(card.id)} checked={selectedIds.has(card.id)} /></td>
-                      <td className="px-6 py-4">
-                        <button
-                          onClick={() => handleViewDetails(card)}
-                          className="font-medium text-purple-600 hover:underline text-left"
-                        >
-                          {card.name}
-                          {card.is_recommended === 1 && (
-                            <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full bg-amber-100 text-amber-700">
-                              <span>推荐</span>
-                            </span>
-                          )}
-                        </button>
-                        <div className="text-xs text-gray-500">by {card.username}</div>
-                      </td>
-                      <td className="px-6 py-4">{card.type === 'character' ? '角色' : '情景'}</td>
-                      <td className="px-6 py-4">{getPublicStatusBadge(card.is_public)}</td>
-                      <td className="px-6 py-4">{getReviewStatusBadge(card.review_status)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        ❤️ {card.like_count} / ⭐ {card.favorite_count} / 📥 {card.usage_count}
-                      </td>
-                      {/* 内容预览列 */}
-                      <td className="px-6 py-4 text-xs text-gray-500 max-w-xs">
-                        {(() => {
-                            // 定义无意义的默认描述
-                            const defaultDescriptions = ['角色数据卡', '情景数据卡'];
-                            // 判断当前描述是否有意义
-                            const isMeaningfulDescription = card.description && !defaultDescriptions.includes(card.description.trim());
-                            
-                            // 如果描述有意义，则显示描述；否则，显示data字段的内容
-                            const contentToShow = isMeaningfulDescription ? card.description : card.data;
-                            let titleToShow = contentToShow;
-                            try {
-                                // 为悬浮提示（title）美化JSON格式
-                                if (!isMeaningfulDescription) {
-                                    titleToShow = JSON.stringify(JSON.parse(card.data), null, 2);
-                                }
-                            } catch(e) { console.error('❌ 发生解析错误:', e); }
+                  dataCards.map(card => {
+                    const hasPendingUpdate = Boolean(card.pending_update_id);
+                    const displayName = hasPendingUpdate ? (card.pending_update_name ?? card.name) : card.name;
+                    const displayDescription = hasPendingUpdate ? (card.pending_update_description ?? card.description) : card.description;
+                    const displayData = hasPendingUpdate ? (card.pending_update_data ?? card.data) : card.data;
 
-                            return (
-                                <p className="truncate" title={titleToShow}>
-                                    {contentToShow}
-                                </p>
-                            );
-                        })()}
-                      </td>
-                      <td className="px-6 py-4">{new Date(card.updated_at).toLocaleString()}</td>
-                    </tr>
-                  ))
+                    return (
+                      <tr key={card.id} className="bg-white border-b hover:bg-gray-50">
+                        <td className="p-4">
+                          <input type="checkbox" onChange={() => handleSelectOne(card.id)} checked={selectedIds.has(card.id)} />
+                        </td>
+                        <td className="px-6 py-4">
+                          <button
+                            onClick={() => handleViewDetails(card)}
+                            className="font-medium text-purple-600 hover:underline text-left"
+                          >
+                            {displayName}
+                            {hasPendingUpdate && (
+                              <span className="ml-2 inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-amber-100 text-amber-800">
+                                更新待审核
+                              </span>
+                            )}
+                            {!hasPendingUpdate && card.review_status === 'pending' && (
+                              <span className="ml-2 inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-blue-100 text-blue-800">
+                                新建待审
+                              </span>
+                            )}
+                            {card.is_recommended === 1 && (
+                              <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full bg-amber-100 text-amber-700">
+                                <span>推荐</span>
+                              </span>
+                            )}
+                          </button>
+                          <div className="text-xs text-gray-500">by {card.username}</div>
+                          {hasPendingUpdate && (
+                            <div className="mt-1 flex items-center gap-2">
+                              <span className="text-[11px] text-gray-500">原：{card.name}</span>
+                              <button onClick={() => handleViewOriginalDetails(card)} className="text-[11px] text-gray-500 hover:text-gray-800 underline">
+                                看原版
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">{card.type === 'character' ? '角色' : '情景'}</td>
+                        <td className="px-6 py-4">{getPublicStatusBadge(card.is_public)}</td>
+                        <td className="px-6 py-4">
+                          <div className="space-y-1">
+                            {hasPendingUpdate && (
+                              <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-800">
+                                更新待审核
+                              </span>
+                            )}
+                            {getReviewStatusBadge(card.review_status)}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          ❤️ {card.like_count} / ⭐ {card.favorite_count} / 📥 {card.usage_count}
+                        </td>
+                        <td className="px-6 py-4 text-xs text-gray-500 max-w-xs">
+                          {(() => {
+                              const defaultDescriptions = ['角色数据卡', '情景数据卡'];
+                              const normalizedDescription = (displayDescription || '').trim();
+                              const isMeaningfulDescription = normalizedDescription && !defaultDescriptions.includes(normalizedDescription);
+
+                              const contentToShow = isMeaningfulDescription ? normalizedDescription : (displayData || '');
+                              let titleToShow = contentToShow;
+                              try {
+                                  if (!isMeaningfulDescription && displayData) {
+                                      titleToShow = JSON.stringify(JSON.parse(displayData), null, 2);
+                                  }
+                              } catch (e) {
+                                console.error('❌ 发生解析错误:', e);
+                              }
+
+                              return (
+                                  <p className="truncate" title={titleToShow}>
+                                      {contentToShow}
+                                  </p>
+                              );
+                          })()}
+                        </td>
+                        <td className="px-6 py-4">
+                          {hasPendingUpdate ? (
+                            <div className="space-y-0.5">
+                              <div className="text-sm text-gray-700">{new Date(card.pending_update_created_at || card.updated_at).toLocaleString()}</div>
+                              <div className="text-[11px] text-gray-500">更新提交</div>
+                            </div>
+                          ) : (
+                            new Date(card.updated_at).toLocaleString()
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -974,13 +905,13 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                                         <option value="qwen-turbo-latest">Qwen Turbo (Latest)</option>
                                       </select>
                                   </div>
-                                  <button onClick={handleStartAiReview} disabled={isAiReviewing} className="admin-button-sm bg-indigo-500 hover:bg-indigo-600 self-end">
+                                  <button onClick={handleStartAiReview} disabled={isAiReviewing} className="admin-button-sm bg-indigo-600 hover:bg-indigo-700 text-white self-end">
                                       {isAiReviewing ? '审查中...' : `开始审查`}
                                   </button>
                               </div>
-	                              <p className="text-xs text-gray-500">
-	                                若已在“待审核队列”中勾选内容，则优先审查勾选项；否则从当前队列页起取最多 {aiBatchSize} 项。AI 给出“拒绝”不会自动勾选，需管理员确认。
-	                              </p>
+                              <p className="text-xs text-gray-500">
+                                若已在下方大列表中勾选内容，则优先审查勾选项；否则从当前列表中选取“新建待审 / 更新待审”最多 {aiBatchSize} 项。AI 给出“拒绝”不会自动勾选，需管理员确认。
+                              </p>
                           </div>
                           <div className="flex-grow overflow-y-auto p-4 border-t">
                               {isAiReviewing && <div className="text-center">AI 正在努力分析中...</div>}
@@ -995,14 +926,14 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                                               {aiTargetSnapshotById[res.id] && (
                                                 <div className="mt-2 flex flex-wrap gap-2">
                                                   <button
-                                                    onClick={() => handleViewQueueDetails(aiTargetSnapshotById[res.id], 'current')}
+                                                    onClick={() => handleViewDetailsFromAiTarget(res.id, 'review')}
                                                     className="admin-button-sm bg-gray-100 text-gray-700 hover:bg-gray-200"
                                                   >
-                                                    查看详情
+                                                    {aiTargetSnapshotById[res.id].kind === 'update' ? '查看更新' : '查看详情'}
                                                   </button>
                                                   {aiTargetSnapshotById[res.id].kind === 'update' && (
                                                     <button
-                                                      onClick={() => handleViewQueueDetails(aiTargetSnapshotById[res.id], 'original')}
+                                                      onClick={() => handleViewDetailsFromAiTarget(res.id, 'original')}
                                                       className="admin-button-sm bg-gray-100 text-gray-700 hover:bg-gray-200"
                                                     >
                                                       看原版
@@ -1024,15 +955,15 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                       <div className="w-full md:w-1/2 flex flex-col">
                           <div className="p-4">
                               <h3 className="font-semibold mb-2">外部 AI 审查工作流</h3>
-                              <button onClick={handleCopyToClipboard} className="admin-button-sm bg-gray-600 hover:bg-gray-700 w-full mb-2">1. 复制内容以供外部审查</button>
+                              <button onClick={handleCopyToClipboard} className="admin-button-sm bg-gray-700 hover:bg-gray-800 text-white w-full mb-2">1. 复制内容以供外部审查</button>
                               {copyStatus && <p className="text-xs text-green-600 text-center mb-2">{copyStatus}</p>}
                               <textarea value={externalReviewContent} onChange={e => setExternalReviewContent(e.target.value)} placeholder="2. 在此处粘贴外部 AI 返回的 JSON 数组结果..." className="input-field w-full h-32 resize-y"></textarea>
-                              <button onClick={handleParseAndApply} className="admin-button-sm bg-blue-600 hover:bg-blue-700 w-full mt-2">3. 解析并应用建议</button>
+                              <button onClick={handleParseAndApply} className="admin-button-sm bg-blue-700 hover:bg-blue-800 text-white w-full mt-2">3. 解析并应用建议</button>
                           </div>
                       </div>
                   </div>
                   <div className="p-4 border-t flex justify-end">
-                      <button onClick={handleExecuteMarkedActions} disabled={Object.keys(markedActions).length === 0} className="admin-button-sm bg-green-600 hover:bg-green-700">
+                      <button onClick={handleExecuteMarkedActions} disabled={Object.keys(markedActions).length === 0} className="admin-button-sm bg-green-700 hover:bg-green-800 text-white">
                           执行所有已标记操作 ({Object.keys(markedActions).length})
                       </button>
                   </div>

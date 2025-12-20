@@ -93,6 +93,7 @@ export async function getAdminDataCards(filters: {
   isRecommended?: '0' | '1';
   type?: 'character' | 'scenario';
   search?: string; // 搜索名称、描述或作者名
+  includePendingUpdates?: boolean; // 是否将待审核更新信息合并进列表
 }): Promise<{ cards: any[], total: number }> {
   const {
     page = 1,
@@ -104,6 +105,7 @@ export async function getAdminDataCards(filters: {
     isRecommended,
     type,
     search,
+    includePendingUpdates = false,
   } = filters;
 
   const offset = (page - 1) * limit;
@@ -112,8 +114,12 @@ export async function getAdminDataCards(filters: {
 
   // --- 动态构建 WHERE 子句 ---
   if (reviewStatus) {
-    whereClauses.push('dc.review_status = ?');
-    params.push(reviewStatus);
+    if (includePendingUpdates && reviewStatus === 'pending') {
+      whereClauses.push("(dc.review_status = 'pending' OR dcu.id IS NOT NULL)");
+    } else {
+      whereClauses.push('dc.review_status = ?');
+      params.push(reviewStatus);
+    }
   }
   if (isPublic) {
     whereClauses.push('dc.is_public = ?');
@@ -129,18 +135,39 @@ export async function getAdminDataCards(filters: {
   }
   if (search) {
     // 搜索范围包括卡片名称、描述和作者用户名
-    whereClauses.push('(dc.name LIKE ? OR dc.description LIKE ? OR u.username LIKE ?)');
-    const searchTerm = `%${search}%`;
-    params.push(searchTerm, searchTerm, searchTerm);
+    if (includePendingUpdates) {
+      whereClauses.push('(dc.name LIKE ? OR dc.description LIKE ? OR u.username LIKE ? OR dc.id LIKE ? OR dcu.name LIKE ? OR dcu.description LIKE ?)');
+      const searchTerm = `%${search}%`;
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+    } else {
+      whereClauses.push('(dc.name LIKE ? OR dc.description LIKE ? OR u.username LIKE ? OR dc.id LIKE ?)');
+      const searchTerm = `%${search}%`;
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+    }
   }
 
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
   // --- 分别构建数据查询和总数查询 ---
+  const pendingUpdateSelectSql = includePendingUpdates
+    ? `,
+      dcu.id AS pending_update_id,
+      dcu.name AS pending_update_name,
+      dcu.description AS pending_update_description,
+      dcu.data AS pending_update_data,
+      dcu.created_at AS pending_update_created_at
+    `
+    : '';
+
+  const pendingUpdateJoinSql = includePendingUpdates
+    ? 'LEFT JOIN data_card_updates dcu ON dcu.data_card_id = dc.id'
+    : '';
+
   const dataSql = `
-    SELECT dc.*, u.username 
+    SELECT dc.*, u.username ${pendingUpdateSelectSql}
     FROM data_cards dc
     JOIN users u ON dc.user_id = u.id
+    ${pendingUpdateJoinSql}
     ${whereSql}
     ORDER BY dc.${sortBy} ${sortOrder.toUpperCase()}
     LIMIT ? OFFSET ?;
@@ -149,6 +176,7 @@ export async function getAdminDataCards(filters: {
     SELECT COUNT(dc.id) as total
     FROM data_cards dc
     JOIN users u ON dc.user_id = u.id
+    ${pendingUpdateJoinSql}
     ${whereSql};
   `;
 
@@ -405,174 +433,6 @@ export async function getReviewTargetsForAiReview(
   }
 
   return rows;
-}
-
-export type AdminReviewQueueItemKind = 'new' | 'update';
-
-export interface AdminReviewQueueItem {
-  target_id: string;
-  kind: AdminReviewQueueItemKind;
-  data_card_id: string;
-  update_id: string | null;
-  name: string;
-  description: string;
-  data: string;
-  original_name: string | null;
-  original_description: string | null;
-  original_data: string | null;
-  type: 'character' | 'scenario';
-  username: string;
-  is_public: -1 | 0 | 1;
-  review_status: 'pending' | 'approved' | 'rejected';
-  is_recommended: number;
-  like_count: number;
-  usage_count: number;
-  favorite_count: number;
-  created_at: string;
-  updated_at: string;
-  submitted_at: string;
-}
-
-/**
- * [Admin] 获取统一的“待审核队列”，包含新建待审查(data_cards.review_status='pending')和待审核更新(data_card_updates)。
- */
-export async function getAdminReviewQueue(filters: {
-  page?: number;
-  limit?: number;
-  search?: string;
-  type?: 'character' | 'scenario';
-  kind?: AdminReviewQueueItemKind;
-}): Promise<{ items: AdminReviewQueueItem[]; total: number }> {
-  const { page = 1, limit = 20, search, type, kind } = filters;
-
-  const offset = (page - 1) * limit;
-  const whereClauses: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (kind) {
-    whereClauses.push('q.kind = ?');
-    params.push(kind);
-  }
-  if (type) {
-    whereClauses.push('q.type = ?');
-    params.push(type);
-  }
-  if (search) {
-    whereClauses.push('(q.name LIKE ? OR q.description LIKE ? OR q.username LIKE ? OR q.data_card_id LIKE ?)');
-    const s = `%${search}%`;
-    params.push(s, s, s, s);
-  }
-
-  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-
-  const baseCte = `
-    WITH q AS (
-      SELECT
-        ('card:' || dc.id) AS target_id,
-        'new' AS kind,
-        dc.id AS data_card_id,
-        NULL AS update_id,
-        dc.name AS name,
-        dc.description AS description,
-        dc.data AS data,
-        NULL AS original_name,
-        NULL AS original_description,
-        NULL AS original_data,
-        dc.type AS type,
-        u.username AS username,
-        dc.is_public AS is_public,
-        dc.review_status AS review_status,
-        dc.is_recommended AS is_recommended,
-        dc.like_count AS like_count,
-        dc.usage_count AS usage_count,
-        dc.favorite_count AS favorite_count,
-        dc.created_at AS created_at,
-        dc.updated_at AS updated_at,
-        dc.created_at AS submitted_at
-      FROM data_cards dc
-      JOIN users u ON dc.user_id = u.id
-      WHERE dc.review_status = 'pending'
-
-      UNION ALL
-
-      SELECT
-        ('update:' || dcu.id) AS target_id,
-        'update' AS kind,
-        dc.id AS data_card_id,
-        dcu.id AS update_id,
-        COALESCE(dcu.name, dc.name) AS name,
-        COALESCE(dcu.description, dc.description) AS description,
-        COALESCE(dcu.data, dc.data) AS data,
-        dc.name AS original_name,
-        dc.description AS original_description,
-        dc.data AS original_data,
-        dc.type AS type,
-        u.username AS username,
-        dc.is_public AS is_public,
-        dc.review_status AS review_status,
-        dc.is_recommended AS is_recommended,
-        dc.like_count AS like_count,
-        dc.usage_count AS usage_count,
-        dc.favorite_count AS favorite_count,
-        dc.created_at AS created_at,
-        dc.updated_at AS updated_at,
-        dcu.created_at AS submitted_at
-      FROM data_card_updates dcu
-      JOIN data_cards dc ON dcu.data_card_id = dc.id
-      JOIN users u ON dc.user_id = u.id
-    )
-  `;
-
-  const dataSql = `
-    ${baseCte}
-    SELECT
-      q.target_id,
-      q.kind,
-      q.data_card_id,
-      q.update_id,
-      q.name,
-      q.description,
-      q.data,
-      q.original_name,
-      q.original_description,
-      q.original_data,
-      q.type,
-      q.username,
-      q.is_public,
-      q.review_status,
-      q.is_recommended,
-      q.like_count,
-      q.usage_count,
-      q.favorite_count,
-      q.created_at,
-      q.updated_at,
-      q.submitted_at
-    FROM q
-    ${whereSql}
-    ORDER BY q.submitted_at DESC
-    LIMIT ? OFFSET ?;
-  `;
-
-  const countSql = `
-    ${baseCte}
-    SELECT COUNT(q.target_id) AS total
-    FROM q
-    ${whereSql};
-  `;
-
-  try {
-    const dataParams = [...params, limit, offset];
-    const countParams = [...params];
-    const dataResult = (await queryFromD1(dataSql, dataParams)) as any;
-    const countResult = (await queryFromD1(countSql, countParams)) as any;
-
-    const items = dataResult?.success ? dataResult.result[0]?.results || [] : [];
-    const total = countResult?.success ? countResult.result[0]?.results[0]?.total || 0 : 0;
-    return { items, total };
-  } catch (error) {
-    console.error('[Admin] 获取待审核队列失败:', error);
-    throw error;
-  }
 }
 
 /**

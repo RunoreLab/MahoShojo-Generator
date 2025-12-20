@@ -272,10 +272,10 @@ const UserManagementPage: React.FC = () => {
 
           <div className="bg-white p-4 rounded-lg shadow-sm mb-4 flex flex-wrap items-center gap-2">
             <span className="text-sm text-gray-600 mr-4">选中 {selectedIds.size} 项</span>
-            <button onClick={() => handleBatchAction('set_exempt')} className="admin-button-sm bg-green-500 hover:bg-green-600">设为豁免</button>
-            <button onClick={() => handleBatchAction('remove_exempt')} className="admin-button-sm bg-yellow-500 hover:bg-yellow-600">取消豁免</button>
-            <button onClick={() => handleBatchAction('ban')} className="admin-button-sm bg-red-500 hover:bg-red-600">封禁</button>
-            <button onClick={() => handleBatchAction('unban')} className="admin-button-sm bg-gray-500 hover:bg-gray-600">解封</button>
+            <button onClick={() => handleBatchAction('set_exempt')} className="admin-button-sm bg-green-600 hover:bg-green-700 text-white">设为豁免</button>
+            <button onClick={() => handleBatchAction('remove_exempt')} className="admin-button-sm bg-amber-500 hover:bg-amber-600 text-white">取消豁免</button>
+            <button onClick={() => handleBatchAction('ban')} className="admin-button-sm bg-red-600 hover:bg-red-700 text-white">封禁</button>
+            <button onClick={() => handleBatchAction('unban')} className="admin-button-sm bg-gray-700 hover:bg-gray-800 text-white">解封</button>
           </div>
 
           <div className="bg-white rounded-lg shadow-sm overflow-x-auto">
