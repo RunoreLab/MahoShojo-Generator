@@ -603,192 +603,194 @@ export default function BattleDataModal({
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">×</button>
         <h2 className="text-xl font-bold mb-4 pr-8">选择{typeLabel}数据卡</h2>
 
-        {/* 筛选和排序区域 */}
-        <div className="mb-2">
-          <div className="flex flex-wrap gap-2 mb-2 items-center">
-            <div className="flex-1 relative min-w-[250px]">
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={`搜索${typeLabel}名称或粘贴分享链接...`} className="w-full input-field pr-10" />
-              {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
-            </div>
-            <SortSelector value={sortBy} onChange={handleSortChange} />
-            <button onClick={() => setShowAdvancedFilters(!showAdvancedFilters)} className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-              <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
-            </button>
-          </div>
-          {/* 【新增】高级筛选面板 */}
-          {showAdvancedFilters && activeTab === 'public' && (
-            <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down max-h-[70vh] md:max-h-80 overflow-y-auto">
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-gray-600">作者</label>
-                  <input type="text" name="author" value={filters.author} onChange={handleFilterChange} placeholder="输入作者名" className="input-field" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-gray-600">点赞数</label>
-                  <div className="flex gap-2">
-                    <input type="number" name="minLikes" value={filters.minLikes} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
-                    <input type="number" name="maxLikes" value={filters.maxLikes} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-gray-600">使用数</label>
-                  <div className="flex gap-2">
-                    <input type="number" name="minUsage" value={filters.minUsage} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
-                    <input type="number" name="maxUsage" value={filters.maxUsage} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-gray-600">收藏数</label>
-                  <div className="flex gap-2">
-                    <input type="number" name="minFavorites" value={filters.minFavorites} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
-                    <input type="number" name="maxFavorites" value={filters.maxFavorites} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-gray-600">角色类型</label>
-                  <select
-                    name="roleType"
-                    value={filters.roleType}
-                    onChange={handleFilterChange}
-                    className="input-field disabled:bg-gray-100 disabled:text-gray-400"
-                    disabled={selectedType !== 'character'}
-                  >
-                    <option value="">全部</option>
-                    <option value="magical-girl">魔法少女</option>
-                    <option value="canshou">残兽</option>
-                    <option value="general">通用</option>
-                  </select>
-                </div>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {/* 筛选和排序区域 */}
+          <div className="mb-2">
+            <div className="flex flex-wrap gap-2 mb-2 items-center">
+              <div className="flex-1 relative min-w-[250px]">
+                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={`搜索${typeLabel}名称或粘贴分享链接...`} className="w-full input-field pr-10" />
+                {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
               </div>
-              <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
-                <input
-                  type="checkbox"
-                  name="recommendedOnly"
-                  checked={filters.recommendedOnly}
-                  onChange={handleFilterChange}
-                  className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                />
-                仅查看管理员推荐
-              </label>
-              <div className="flex justify-end gap-2 pt-2">
-                <button onClick={resetFilters} className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">重置</button>
-                <button onClick={applyFilters} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700">应用筛选</button>
-              </div>
+              <SortSelector value={sortBy} onChange={handleSortChange} />
+              <button onClick={() => setShowAdvancedFilters(!showAdvancedFilters)} className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+              </button>
             </div>
-          )}
-        </div>
-
-        {/* 标签页切换 */}
-        <div className="flex gap-2 mb-4">
-          {isAuthenticated && (
-            <button
-              onClick={() => {
-                hasUserSelectedTabRef.current = true;
-                setActiveTab('my');
-                setCurrentPage(1);
-                loadUserDataCards(undefined, sortBy);
-              }}
-              className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'my' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-            >
-              我的{typeLabel} ({userDataCards.length})
-            </button>
-          )}
-          <button
-            onClick={() => {
-              hasUserSelectedTabRef.current = true;
-              setActiveTab('public');
-              setCurrentPage(1);
-              loadPublicDataCards(1, sortBy, '', filters);
-            }}
-            className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-          >
-            公开{typeLabel}
-          </button>
-          {isAuthenticated && (
-            <button
-              onClick={() => {
-                hasUserSelectedTabRef.current = true;
-                setActiveTab('favorites');
-                setCurrentPage(1);
-                loadFavorites(selectedType, true, sortBy);
-              }}
-              className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'favorites' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-            >
-              我的收藏 ({favoriteCards.length})
-            </button>
-          )}
-        </div>
-
-        {/* 内容区域 */}
-        <div className="flex-1 overflow-auto">
-          {isLoading ? <div className="flex justify-center items-center h-full"><div className="text-gray-500">加载中...</div></div>
-            : displayCards.length === 0 ? <div className="text-center text-gray-500 py-8">暂无数据卡</div>
-              : <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {displayCards.map((card: any) => {
-                  const isFavorited = favoriteIds.has(card.id);
-                  const enableFavorite = isAuthenticated && activeTab !== 'my';
-
-                  return (
-                    <div key={card.id} className="cursor-pointer h-full" onClick={() => handleSelectCard(card)}>
-                      <DataCard
-                        id={card.id}
-                        name={card.name}
-                        description={card.description}
-                        type={card.type}
-                        roleType={card.roleType}
-                        isPublic={card.is_public}
-                        reviewStatus={card.review_status}
-                        usageCount={card.usage_count}
-                        likeCount={card.like_count}
-                        favoriteCount={card.favorite_count}
-                        isFavorited={isFavorited}
-                        canFavorite={enableFavorite}
-                        isRecommended={card.is_recommended === 1}
-                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
-                        onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
-                        onAuthorClick={handleAuthorClick}
-                        onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
-                        onDownload={() => handleDownloadCard(card)}
-                      />
+            {/* 【新增】高级筛选面板 */}
+            {showAdvancedFilters && activeTab === 'public' && (
+              <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">作者</label>
+                    <input type="text" name="author" value={filters.author} onChange={handleFilterChange} placeholder="输入作者名" className="input-field" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">点赞数</label>
+                    <div className="flex gap-2">
+                      <input type="number" name="minLikes" value={filters.minLikes} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                      <input type="number" name="maxLikes" value={filters.maxLikes} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
                     </div>
-                  );
-                })}
-              </div>}
-        </div>
-        
-        {/* 分页与底部 */}
-        {(
-          (activeTab === 'my' && userDataCards.length > cardsPerPage) ||
-          (activeTab === 'favorites' && favoriteCards.length > cardsPerPage) ||
-      (activeTab === 'public' && (
-        (activeFilters.roleType && selectedType === 'character')
-          ? publicPaginatedCards.length > 0 || publicTotalPages! > 1
-          : (displayCards.length >= cardsPerPage || currentPage > 1)
-      ))
-    ) &&
-          <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
-            <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="page-button">上一页</button>
-            <span className="text-sm text-gray-600">
-              第 {currentPage} 页
-              {currentTabTotalPages ? ` / ${currentTabTotalPages}` : ''}
-            </span>
-            <button
-              onClick={() => handlePageChange(currentPage + 1)}
-              disabled={
-                activeTab === 'my'
-                  ? currentPage >= userTotalPages
-                  : activeTab === 'favorites'
-                    ? currentPage >= favoritesTotalPages
-                    : publicTotalPages
-                      ? currentPage >= publicTotalPages
-                      : displayCards.length < cardsPerPage
-              }
-              className="page-button"
-            >
-              下一页
-            </button>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">使用数</label>
+                    <div className="flex gap-2">
+                      <input type="number" name="minUsage" value={filters.minUsage} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                      <input type="number" name="maxUsage" value={filters.maxUsage} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">收藏数</label>
+                    <div className="flex gap-2">
+                      <input type="number" name="minFavorites" value={filters.minFavorites} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                      <input type="number" name="maxFavorites" value={filters.maxFavorites} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">角色类型</label>
+                    <select
+                      name="roleType"
+                      value={filters.roleType}
+                      onChange={handleFilterChange}
+                      className="input-field disabled:bg-gray-100 disabled:text-gray-400"
+                      disabled={selectedType !== 'character'}
+                    >
+                      <option value="">全部</option>
+                      <option value="magical-girl">魔法少女</option>
+                      <option value="canshou">残兽</option>
+                      <option value="general">通用</option>
+                    </select>
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+                  <input
+                    type="checkbox"
+                    name="recommendedOnly"
+                    checked={filters.recommendedOnly}
+                    onChange={handleFilterChange}
+                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                  />
+                  仅查看管理员推荐
+                </label>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={resetFilters} className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">重置</button>
+                  <button onClick={applyFilters} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700">应用筛选</button>
+                </div>
+              </div>
+            )}
           </div>
-        }
+
+          {/* 标签页切换 */}
+          <div className="flex gap-2 mb-4">
+            {isAuthenticated && (
+              <button
+                onClick={() => {
+                  hasUserSelectedTabRef.current = true;
+                  setActiveTab('my');
+                  setCurrentPage(1);
+                  loadUserDataCards(undefined, sortBy);
+                }}
+                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'my' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+              >
+                我的{typeLabel} ({userDataCards.length})
+              </button>
+            )}
+            <button
+              onClick={() => {
+                hasUserSelectedTabRef.current = true;
+                setActiveTab('public');
+                setCurrentPage(1);
+                loadPublicDataCards(1, sortBy, '', filters);
+              }}
+              className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+            >
+              公开{typeLabel}
+            </button>
+            {isAuthenticated && (
+              <button
+                onClick={() => {
+                  hasUserSelectedTabRef.current = true;
+                  setActiveTab('favorites');
+                  setCurrentPage(1);
+                  loadFavorites(selectedType, true, sortBy);
+                }}
+                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'favorites' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+              >
+                我的收藏 ({favoriteCards.length})
+              </button>
+            )}
+          </div>
+
+          {/* 内容区域 */}
+          <div>
+            {isLoading ? <div className="flex justify-center items-center min-h-[40vh]"><div className="text-gray-500">加载中...</div></div>
+              : displayCards.length === 0 ? <div className="text-center text-gray-500 py-8">暂无数据卡</div>
+                : <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {displayCards.map((card: any) => {
+                    const isFavorited = favoriteIds.has(card.id);
+                    const enableFavorite = isAuthenticated && activeTab !== 'my';
+
+                    return (
+                      <div key={card.id} className="cursor-pointer h-full" onClick={() => handleSelectCard(card)}>
+                        <DataCard
+                          id={card.id}
+                          name={card.name}
+                          description={card.description}
+                          type={card.type}
+                          roleType={card.roleType}
+                          isPublic={card.is_public}
+                          reviewStatus={card.review_status}
+                          usageCount={card.usage_count}
+                          likeCount={card.like_count}
+                          favoriteCount={card.favorite_count}
+                          isFavorited={isFavorited}
+                          canFavorite={enableFavorite}
+                          isRecommended={card.is_recommended === 1}
+                          author={activeTab === 'my' ? '我' : (card.username || '未知')}
+                          onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
+                          onAuthorClick={handleAuthorClick}
+                          onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
+                          onDownload={() => handleDownloadCard(card)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>}
+          </div>
+
+          {/* 分页与底部 */}
+          {(
+            (activeTab === 'my' && userDataCards.length > cardsPerPage) ||
+            (activeTab === 'favorites' && favoriteCards.length > cardsPerPage) ||
+            (activeTab === 'public' && (
+              (activeFilters.roleType && selectedType === 'character')
+                ? publicPaginatedCards.length > 0 || publicTotalPages! > 1
+                : (displayCards.length >= cardsPerPage || currentPage > 1)
+            ))
+          ) &&
+            <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
+              <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="page-button">上一页</button>
+              <span className="text-sm text-gray-600">
+                第 {currentPage} 页
+                {currentTabTotalPages ? ` / ${currentTabTotalPages}` : ''}
+              </span>
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={
+                  activeTab === 'my'
+                    ? currentPage >= userTotalPages
+                    : activeTab === 'favorites'
+                      ? currentPage >= favoritesTotalPages
+                      : publicTotalPages
+                        ? currentPage >= publicTotalPages
+                        : displayCards.length < cardsPerPage
+                }
+                className="page-button"
+              >
+                下一页
+              </button>
+            </div>
+          }
+        </div>
       </div>
 
       {/* 详情模态框 */}
