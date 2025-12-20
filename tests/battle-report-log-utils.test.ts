@@ -2,9 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   anonymizeIp,
+  buildCombatantsFallbackForExtraJson,
   buildContentPreview,
+  compactExtraJson,
   extractHeadlineFromMarkdown,
   extractWinnerFromText,
+  normalizeErrorMessage,
   normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
 
@@ -54,6 +57,65 @@ describe('battle-report-log-utils', () => {
       cachedTokens: 4,
       reasoningTokens: 7,
     });
+  });
+
+  test('normalizeErrorMessage: 去空格、截断、非字符串返回 null', () => {
+    expect(normalizeErrorMessage(null)).toBeNull();
+    expect(normalizeErrorMessage('   ')).toBeNull();
+    expect(normalizeErrorMessage('  hello  ')).toBe('hello');
+    expect(normalizeErrorMessage('a'.repeat(10), 5)).toBe('aaaaa…');
+    expect(normalizeErrorMessage('a'.repeat(10), 0)).toBeNull();
+  });
+
+  test('compactExtraJson: 去掉空值/空白/空数组/空对象，但保留 0/false', () => {
+    expect(compactExtraJson(null)).toBeNull();
+    expect(compactExtraJson({})).toBeNull();
+
+    const compacted = compactExtraJson({
+      a: null,
+      b: undefined,
+      c: '',
+      d: '  ',
+      e: [],
+      f: {},
+      g: 0,
+      h: false,
+      i: ' ok ',
+      j: [1],
+      k: { x: 1 },
+    });
+
+    expect(compacted).toEqual({
+      g: 0,
+      h: false,
+      i: 'ok',
+      j: [1],
+      k: { x: 1 },
+    });
+  });
+
+  test('buildCombatantsFallbackForExtraJson: 生成最小兜底参战者摘要', () => {
+    const fallback = buildCombatantsFallbackForExtraJson([
+      { type: 'magical-girl', isNative: true, data: { codename: '小圆' } },
+      { type: 'general-character', isPreset: false, teamId: 2, sourceDataCardId: 'card_1', data: { name: 'QB' } },
+    ]);
+
+    expect(fallback).toEqual([
+      {
+        sortIndex: 0,
+        name: '小圆',
+        type: 'magical-girl',
+        isNative: true,
+      },
+      {
+        sortIndex: 1,
+        name: 'QB',
+        type: 'general-character',
+        isPreset: false,
+        teamId: 2,
+        dataCardId: 'card_1',
+      },
+    ]);
   });
 });
 

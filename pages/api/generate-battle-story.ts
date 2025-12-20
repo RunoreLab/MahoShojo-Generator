@@ -19,14 +19,17 @@ import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
 import {
     createBattleReportGenerationRecord,
     createBattleReportGenerationCombatants,
+    updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
     getUserByAuthKey
 } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
+    buildCombatantsFallbackForExtraJson,
     buildContentPreview,
     getClientIpFromHeaders,
+    compactExtraJson,
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
 
@@ -469,20 +472,9 @@ async function handler(req: NextRequest): Promise<Response> {
                 outputPreview,
                 outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
                 outputHasShieldWords: shieldResult.hasShieldWords,
-                extraJson: {
-                    combatants: Array.isArray(combatants)
-                        ? combatants.map((c: any) => ({
-                            type: c?.type ?? null,
-                            name: c?.data?.codename || c?.data?.name || null,
-                            isNative: Boolean(c?.isNative),
-                            isPreset: Boolean(c?.isPreset),
-                            sizeChars: typeof c?.data === 'object' ? JSON.stringify(c.data).length : null,
-                            dataCardId: c?.sourceDataCardId ?? null,
-                            dataCardUpdatedAt: c?.sourceDataCardUpdatedAt ?? null,
-                        }))
-                        : null,
+                extraJson: compactExtraJson({
                     resolvedModelOverride: resolvedModelOverride ?? null,
-                },
+                }),
             });
 
             if (recordId && Array.isArray(combatants)) {
@@ -514,6 +506,17 @@ async function handler(req: NextRequest): Promise<Response> {
                     expectedRows: rows.length,
                     errorMessage: combatantsWrite.errorMessage ?? null,
                 });
+
+                if (!combatantsWrite.ok) {
+                    await updateBattleReportGenerationExtraJson(
+                        recordId,
+                        compactExtraJson({
+                            resolvedModelOverride: resolvedModelOverride ?? null,
+                            combatantsFallbackReason: 'combatants-table-write-failed',
+                            combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
+                        })
+                    );
+                }
             }
         })();
 

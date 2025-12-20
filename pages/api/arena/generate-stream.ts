@@ -16,16 +16,20 @@ import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
     createBattleReportGenerationRecord,
     createBattleReportGenerationCombatants,
+    updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
     getUserByAuthKey
 } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
+    buildCombatantsFallbackForExtraJson,
     buildContentPreview,
     extractHeadlineFromMarkdown,
     extractWinnerFromText,
     getClientIpFromHeaders,
+    normalizeErrorMessage,
+    compactExtraJson,
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
 
@@ -481,23 +485,12 @@ async function handler(req: NextRequest): Promise<Response> {
                     outputPreview,
                     outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
                     outputHasShieldWords: shieldResult.hasShieldWords,
-                    extraJson: {
-                        errorMessage: normalizedErrorMessage ?? null,
-                        combatants: Array.isArray(combatants)
-                            ? combatants.map((c: any) => ({
-                                type: c?.type ?? null,
-                                name: c?.data?.codename || c?.data?.name || null,
-                                isNative: Boolean(c?.isNative),
-                                isPreset: Boolean(c?.isPreset),
-                                sizeChars: typeof c?.data === 'object' ? JSON.stringify(c.data).length : null,
-                                dataCardId: c?.sourceDataCardId ?? null,
-                                dataCardUpdatedAt: c?.sourceDataCardUpdatedAt ?? null,
-                            }))
-                            : null,
-                    },
+                    extraJson: compactExtraJson({
+                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+                    }),
                 });
 
-                if (recordId && Array.isArray(combatants)) {
+                if (recordId && Array.isArray(combatants) && normalizedStatus !== 'failed') {
                     const toBytes = (value: string) => new TextEncoder().encode(value).length;
                     const rows = combatants.map((c: any, index: number) => {
                         const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
@@ -526,6 +519,17 @@ async function handler(req: NextRequest): Promise<Response> {
                         expectedRows: rows.length,
                         errorMessage: combatantsWrite.errorMessage ?? null,
                     });
+
+                    if (!combatantsWrite.ok) {
+                        await updateBattleReportGenerationExtraJson(
+                            recordId,
+                            compactExtraJson({
+                                errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+                                combatantsFallbackReason: 'combatants-table-write-failed',
+                                combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
+                            })
+                        );
+                    }
                 }
             })();
 
