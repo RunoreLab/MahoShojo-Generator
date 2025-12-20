@@ -6,7 +6,7 @@ import Head from 'next/head';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
-import { QqGroupJoinSection } from '@/components/QqGroupJoinSection';
+import { qqGroups } from '@/lib/communityGroups';
 import { useAuth } from '@/lib/useAuth';
 import { config as appConfig } from '@/lib/config';
 import { Preset } from '@/pages/api/get-presets';
@@ -118,7 +118,27 @@ export function ArenaPage() {
             <StoryOptions languages={languages} afterUserGuidance={<AdjudicatorPanel />} />
             <GenerationModeSwitcher />
             <BattleActions />
-            <QqGroupJoinSection />
+            <div className="text-center mt-3">
+              <div className="text-sm font-semibold">
+                点击加入QQ群（任选其一）：
+                <div className="text-sm text-blue-600 font-semibold">
+                  {qqGroups.map((group, index) => (
+                    <span key={group.groupCode}>
+                      {index > 0 ? ' / ' : ' '}
+                      <a
+                        href={group.joinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:underline"
+                        title={group.name}
+                      >
+                        {group.groupCode}
+                      </a>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
             <div className="text-center mt-3">
               <a
                 href="https://pd.qq.com/s/brisxifbl"
