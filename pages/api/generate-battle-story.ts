@@ -443,7 +443,7 @@ async function handler(req: NextRequest): Promise<Response> {
         if (executionContext?.waitUntil) {
             executionContext.waitUntil(recordPromise);
         } else {
-            void recordPromise;
+            await recordPromise;
         }
 
         return new Response(JSON.stringify(apiResponse), {
