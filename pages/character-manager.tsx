@@ -228,6 +228,7 @@ const collectSensitiveIssues = async (value: any, path = '', parentPath = ''): P
     if (isObject(value)) {
         for (const key of Object.keys(value)) {
             if (key === 'signature') continue;
+            if (key.startsWith('_')) continue;
             const childPath = path ? `${path}.${key}` : key;
             const childIssues = await collectSensitiveIssues(value[key], childPath, childPath);
             issues.push(...childIssues);
@@ -1067,6 +1068,7 @@ const CharacterManagerPage: React.FC = () => {
         return sortedKeys.map(key => {
             const currentPath = path ? `${path}.${key}` : key;
             // 过滤掉不应在表单中编辑的字段
+            if (key.startsWith('_')) return null;
             if (key === 'signature' || key === 'isPreset' || key === 'arena_history' || key === 'current_state' || key === 'adjudicationEvents') return null;
             if (key === 'templateId') return null;
 
