@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Save, X, Database, Eye, Ban, CheckCircle, AlertTriangle, Calendar, User, Hash } from 'lucide-react';
 import { getDataCardStatus } from '@/lib/database/data-cards';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 
 interface DataCard {
   id: string;
@@ -27,6 +28,7 @@ interface EditFormData {
 }
 
 export default function CharacterManagement() {
+  const router = useRouter();
   const [cards, setCards] = useState<DataCard[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCard, setSelectedCard] = useState<DataCard | null>(null);
@@ -149,8 +151,26 @@ export default function CharacterManagement() {
   };
 
   useEffect(() => {
+    if (!router.isReady) return;
+
+    const id = typeof router.query.id === 'string' ? router.query.id.trim() : '';
+    const search = typeof router.query.search === 'string' ? router.query.search.trim() : '';
+
+    if (id) {
+      setSearchTerm(id);
+      fetchCards(1, id, typeFilter, statusFilter).then(() => fetchCardDetails(id));
+      return;
+    }
+
+    if (search) {
+      setSearchTerm(search);
+      fetchCards(1, search, typeFilter, statusFilter);
+      return;
+    }
+
     fetchCards();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-line react-hooks/exhaustive-deps
+  }, [router.isReady]);
 
   useEffect(() => {
     if (message) {

@@ -23,11 +23,15 @@ interface DashboardStats {
   bannedDataCardsCount: number;
   newUsersToday: number;
   newDataCardsToday: number;
+  battleReportGenerationsToday: number;
+  battleReportGenerationsAbortFailToday: number;
+  battleReportGenerationAbortFailRateToday: number;
+  serverTimeIso: string;
 }
 
 interface StatCardProps {
   title: string;
-  value: number;
+  value: number | string;
   icon: React.ElementType;
   color: string;
   note?: string;
@@ -56,6 +60,7 @@ const AdminHomePage: React.FC = () => {
   // 定义存储统计数据和加载状态的state
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastServerTimeIso, setLastServerTimeIso] = useState<string | null>(null);
 
   // 在组件挂载时通过useEffect获取数据
   useEffect(() => {
@@ -69,6 +74,7 @@ const AdminHomePage: React.FC = () => {
         const data = await response.json();
         if (data.success) {
           setStats(data.stats);
+          setLastServerTimeIso(data.stats?.serverTimeIso || null);
         }
       } catch (error) {
         console.error(error);
@@ -78,7 +84,19 @@ const AdminHomePage: React.FC = () => {
     };
 
     fetchStats();
-  }, []); // 空依赖数组确保只在挂载时运行一次
+
+    // 为了让“服务器时间”与当日统计更接近实时，这里定时刷新一次（避免频繁请求）
+    const timer = setInterval(fetchStats, 60_000);
+    return () => clearInterval(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const formatPercent = (rate: number) => `${(Math.max(0, Math.min(1, rate)) * 100).toFixed(1)}%`;
+  const formatServerTime = (iso: string | null) => {
+    if (!iso) return '—';
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    return `${date.toISOString().replace('T', ' ').replace('Z', ' UTC')}`;
+  };
 
   return (
     <>
@@ -94,7 +112,13 @@ const AdminHomePage: React.FC = () => {
 
           {/* 数据统计卡片区域 */}
           <div className="mb-10">
-            <h2 className="text-xl font-semibold text-gray-700 mb-4">平台概览</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-700">平台概览</h2>
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <Clock className="w-4 h-4" />
+                <span>服务器时间：{formatServerTime(lastServerTimeIso)}</span>
+              </div>
+            </div>
             {loading ? (
               <div className="text-center p-8 bg-white rounded-lg shadow-sm">加载中...</div>
             ) : (
@@ -102,6 +126,20 @@ const AdminHomePage: React.FC = () => {
                 <StatCard title="待审查内容" value={stats?.pendingReviewCount ?? 0} icon={Clock} color="bg-yellow-500" note="需要管理员尽快处理" />
                 <StatCard title="今日新增用户" value={stats?.newUsersToday ?? 0} icon={UserPlus} color="bg-green-500" />
                 <StatCard title="今日新增档案" value={stats?.newDataCardsToday ?? 0} icon={FilePlus} color="bg-blue-500" />
+                <StatCard
+                  title="今日战报生成"
+                  value={stats?.battleReportGenerationsToday ?? 0}
+                  icon={FileText}
+                  color="bg-purple-600"
+                  note={`中断/失败：${stats?.battleReportGenerationsAbortFailToday ?? 0}（${formatPercent(stats?.battleReportGenerationAbortFailRateToday ?? 0)}）`}
+                />
+                <StatCard
+                  title="今日中断/失败率"
+                  value={formatPercent(stats?.battleReportGenerationAbortFailRateToday ?? 0)}
+                  icon={AlertTriangle}
+                  color="bg-orange-500"
+                  note="（中断+失败）/（生成总数）"
+                />
                 <StatCard title="违规档案总数" value={stats?.bannedDataCardsCount ?? 0} icon={AlertTriangle} color="bg-red-500" />
                 <StatCard title="用户总数" value={stats?.totalUsers ?? 0} icon={Users} color="bg-teal-500" />
                 <StatCard title="档案总数" value={stats?.totalDataCards ?? 0} icon={FileText} color="bg-indigo-500" />
@@ -158,6 +196,18 @@ const AdminHomePage: React.FC = () => {
                   </div>
                   <p className="text-gray-600 text-sm">
                     快速查看和编辑单个用户的基本信息，例如封禁状态、数据卡槽位和特殊头衔。
+                  </p>
+                </a>
+              </Link>
+
+              <Link href="/admin/battle-report-generations" legacyBehavior>
+                <a className="admin-card bg-orange-50 border-orange-200 hover:border-orange-400">
+                  <div className="flex items-center text-orange-700 mb-3">
+                    <FileText className="w-8 h-8" />
+                    <h2 className="text-xl font-semibold ml-3">战报生成记录</h2>
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    浏览、筛选、检索并导出战报生成记录，快速跳转到相关用户与角色卡的管理页面。
                   </p>
                 </a>
               </Link>

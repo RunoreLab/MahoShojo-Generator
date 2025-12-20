@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Save, X, Users, UserCheck, UserX, AlertTriangle } from 'lucide-react';
 import Link from 'next/link'; // 导入 Link 组件
+import { useRouter } from 'next/router';
 
 interface User {
   id: number;
@@ -24,6 +25,7 @@ interface UserFormData {
 }
 
 export default function UserManagement() {
+  const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -145,8 +147,26 @@ export default function UserManagement() {
   };
 
   useEffect(() => {
+    if (!router.isReady) return;
+
+    const username = typeof router.query.username === 'string' ? router.query.username.trim() : '';
+    const search = typeof router.query.search === 'string' ? router.query.search.trim() : '';
+
+    if (username) {
+      setSearchTerm(username);
+      fetchUsers(1, username).then(() => fetchUserDetails(username));
+      return;
+    }
+
+    if (search) {
+      setSearchTerm(search);
+      fetchUsers(1, search);
+      return;
+    }
+
     fetchUsers();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady]);
 
   useEffect(() => {
     if (message) {

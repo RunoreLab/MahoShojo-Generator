@@ -17,8 +17,13 @@ export async function getDashboardStats(): Promise<{
   bannedDataCardsCount: number;
   newUsersToday: number;
   newDataCardsToday: number;
+  battleReportGenerationsToday: number;
+  battleReportGenerationsAbortFailToday: number;
+  battleReportGenerationAbortFailRateToday: number;
+  serverTimeIso: string;
 }> {
   try {
+    const serverTimeIso = new Date().toISOString();
     // 定义所有需要执行的查询
     const queries = {
       totalUsers: "SELECT COUNT(id) as total FROM users;",
@@ -29,6 +34,8 @@ export async function getDashboardStats(): Promise<{
       // 注意：D1 使用 strftime 和 'now', 'localtime' 来处理日期
       newUsersToday: "SELECT COUNT(id) as total FROM users WHERE DATE(created_at) = DATE('now', 'localtime');",
       newDataCardsToday: "SELECT COUNT(id) as total FROM data_cards WHERE DATE(created_at) = DATE('now', 'localtime');",
+      battleReportGenerationsToday: "SELECT COUNT(id) as total FROM battle_report_generations WHERE DATE(started_at) = DATE('now', 'localtime');",
+      battleReportGenerationsAbortFailToday: "SELECT COUNT(id) as total FROM battle_report_generations WHERE DATE(started_at) = DATE('now', 'localtime') AND status IN ('aborted','failed');",
     };
 
     // 使用 Promise.all 并行执行所有查询
@@ -50,8 +57,16 @@ export async function getDashboardStats(): Promise<{
       bannedUsersCountResult,
       bannedDataCardsCountResult,
       newUsersTodayResult,
-      newDataCardsTodayResult
+      newDataCardsTodayResult,
+      battleReportGenerationsTodayResult,
+      battleReportGenerationsAbortFailTodayResult,
     ] = results;
+
+    const battleReportGenerationsToday = getCount(battleReportGenerationsTodayResult);
+    const battleReportGenerationsAbortFailToday = getCount(battleReportGenerationsAbortFailTodayResult);
+    const battleReportGenerationAbortFailRateToday = battleReportGenerationsToday > 0
+      ? battleReportGenerationsAbortFailToday / battleReportGenerationsToday
+      : 0;
 
     return {
       totalUsers: getCount(totalUsersResult),
@@ -61,6 +76,10 @@ export async function getDashboardStats(): Promise<{
       bannedDataCardsCount: getCount(bannedDataCardsCountResult),
       newUsersToday: getCount(newUsersTodayResult),
       newDataCardsToday: getCount(newDataCardsTodayResult),
+      battleReportGenerationsToday,
+      battleReportGenerationsAbortFailToday,
+      battleReportGenerationAbortFailRateToday,
+      serverTimeIso,
     };
 
   } catch (error) {
@@ -74,6 +93,10 @@ export async function getDashboardStats(): Promise<{
       bannedDataCardsCount: 0,
       newUsersToday: 0,
       newDataCardsToday: 0,
+      battleReportGenerationsToday: 0,
+      battleReportGenerationsAbortFailToday: 0,
+      battleReportGenerationAbortFailRateToday: 0,
+      serverTimeIso: new Date().toISOString(),
     };
   }
 }
