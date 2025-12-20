@@ -178,6 +178,13 @@ body.announcement-visible {
     box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1);
   }
 
+  .admin-button-sm {
+    @apply inline-flex items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium border border-transparent bg-white text-gray-700 shadow-sm transition-colors;
+    @apply hover:bg-gray-50;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+  }
+
   .generate-button {
     width: 100%;
     padding: 15px;

@@ -338,6 +338,243 @@ export async function getCardsForReview(cardIds: string[]): Promise<{ id: string
   }
 }
 
+export type AdminAiReviewTarget =
+  | { kind: 'card'; id: string; targetId: string }
+  | { kind: 'update'; id: string; targetId: string };
+
+/**
+ * [Admin] 根据目标列表获取AI审查所需的核心内容，支持“新建待审查”与“待审核更新”。
+ * - kind='card'：直接读取 data_cards
+ * - kind='update'：读取 data_card_updates，并用 COALESCE 合成“待审核版本内容”
+ */
+export async function getReviewTargetsForAiReview(
+  targets: AdminAiReviewTarget[]
+): Promise<{ id: string; name: string; description: string; data: string }[]> {
+  if (targets.length === 0) return [];
+
+  const cardTargets = targets.filter((t): t is Extract<AdminAiReviewTarget, { kind: 'card' }> => t.kind === 'card');
+  const updateTargets = targets.filter((t): t is Extract<AdminAiReviewTarget, { kind: 'update' }> => t.kind === 'update');
+
+  const rows: { id: string; name: string; description: string; data: string }[] = [];
+
+  if (cardTargets.length > 0) {
+    const ids = cardTargets.map(t => t.id);
+    const placeholders = ids.map(() => '?').join(', ');
+    const sql = `SELECT id, name, description, data FROM data_cards WHERE id IN (${placeholders})`;
+
+    const result = (await queryFromD1(sql, ids)) as any;
+    const items = result?.success ? result.result[0]?.results || [] : [];
+
+    const targetIdById = new Map(cardTargets.map(t => [t.id, t.targetId]));
+    for (const item of items) {
+      rows.push({
+        id: targetIdById.get(item.id) || item.id,
+        name: item.name,
+        description: item.description,
+        data: item.data,
+      });
+    }
+  }
+
+  if (updateTargets.length > 0) {
+    const ids = updateTargets.map(t => t.id);
+    const placeholders = ids.map(() => '?').join(', ');
+    const sql = `
+      SELECT
+        dcu.id AS update_id,
+        COALESCE(dcu.name, dc.name) AS name,
+        COALESCE(dcu.description, dc.description) AS description,
+        COALESCE(dcu.data, dc.data) AS data
+      FROM data_card_updates dcu
+      JOIN data_cards dc ON dcu.data_card_id = dc.id
+      WHERE dcu.id IN (${placeholders});
+    `;
+
+    const result = (await queryFromD1(sql, ids)) as any;
+    const items = result?.success ? result.result[0]?.results || [] : [];
+
+    const targetIdById = new Map(updateTargets.map(t => [t.id, t.targetId]));
+    for (const item of items) {
+      rows.push({
+        id: targetIdById.get(item.update_id) || item.update_id,
+        name: item.name,
+        description: item.description,
+        data: item.data,
+      });
+    }
+  }
+
+  return rows;
+}
+
+export type AdminReviewQueueItemKind = 'new' | 'update';
+
+export interface AdminReviewQueueItem {
+  target_id: string;
+  kind: AdminReviewQueueItemKind;
+  data_card_id: string;
+  update_id: string | null;
+  name: string;
+  description: string;
+  data: string;
+  original_name: string | null;
+  original_description: string | null;
+  original_data: string | null;
+  type: 'character' | 'scenario';
+  username: string;
+  is_public: -1 | 0 | 1;
+  review_status: 'pending' | 'approved' | 'rejected';
+  is_recommended: number;
+  like_count: number;
+  usage_count: number;
+  favorite_count: number;
+  created_at: string;
+  updated_at: string;
+  submitted_at: string;
+}
+
+/**
+ * [Admin] 获取统一的“待审核队列”，包含新建待审查(data_cards.review_status='pending')和待审核更新(data_card_updates)。
+ */
+export async function getAdminReviewQueue(filters: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  type?: 'character' | 'scenario';
+  kind?: AdminReviewQueueItemKind;
+}): Promise<{ items: AdminReviewQueueItem[]; total: number }> {
+  const { page = 1, limit = 20, search, type, kind } = filters;
+
+  const offset = (page - 1) * limit;
+  const whereClauses: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (kind) {
+    whereClauses.push('q.kind = ?');
+    params.push(kind);
+  }
+  if (type) {
+    whereClauses.push('q.type = ?');
+    params.push(type);
+  }
+  if (search) {
+    whereClauses.push('(q.name LIKE ? OR q.description LIKE ? OR q.username LIKE ? OR q.data_card_id LIKE ?)');
+    const s = `%${search}%`;
+    params.push(s, s, s, s);
+  }
+
+  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  const baseCte = `
+    WITH q AS (
+      SELECT
+        ('card:' || dc.id) AS target_id,
+        'new' AS kind,
+        dc.id AS data_card_id,
+        NULL AS update_id,
+        dc.name AS name,
+        dc.description AS description,
+        dc.data AS data,
+        NULL AS original_name,
+        NULL AS original_description,
+        NULL AS original_data,
+        dc.type AS type,
+        u.username AS username,
+        dc.is_public AS is_public,
+        dc.review_status AS review_status,
+        dc.is_recommended AS is_recommended,
+        dc.like_count AS like_count,
+        dc.usage_count AS usage_count,
+        dc.favorite_count AS favorite_count,
+        dc.created_at AS created_at,
+        dc.updated_at AS updated_at,
+        dc.created_at AS submitted_at
+      FROM data_cards dc
+      JOIN users u ON dc.user_id = u.id
+      WHERE dc.review_status = 'pending'
+
+      UNION ALL
+
+      SELECT
+        ('update:' || dcu.id) AS target_id,
+        'update' AS kind,
+        dc.id AS data_card_id,
+        dcu.id AS update_id,
+        COALESCE(dcu.name, dc.name) AS name,
+        COALESCE(dcu.description, dc.description) AS description,
+        COALESCE(dcu.data, dc.data) AS data,
+        dc.name AS original_name,
+        dc.description AS original_description,
+        dc.data AS original_data,
+        dc.type AS type,
+        u.username AS username,
+        dc.is_public AS is_public,
+        dc.review_status AS review_status,
+        dc.is_recommended AS is_recommended,
+        dc.like_count AS like_count,
+        dc.usage_count AS usage_count,
+        dc.favorite_count AS favorite_count,
+        dc.created_at AS created_at,
+        dc.updated_at AS updated_at,
+        dcu.created_at AS submitted_at
+      FROM data_card_updates dcu
+      JOIN data_cards dc ON dcu.data_card_id = dc.id
+      JOIN users u ON dc.user_id = u.id
+    )
+  `;
+
+  const dataSql = `
+    ${baseCte}
+    SELECT
+      q.target_id,
+      q.kind,
+      q.data_card_id,
+      q.update_id,
+      q.name,
+      q.description,
+      q.data,
+      q.original_name,
+      q.original_description,
+      q.original_data,
+      q.type,
+      q.username,
+      q.is_public,
+      q.review_status,
+      q.is_recommended,
+      q.like_count,
+      q.usage_count,
+      q.favorite_count,
+      q.created_at,
+      q.updated_at,
+      q.submitted_at
+    FROM q
+    ${whereSql}
+    ORDER BY q.submitted_at DESC
+    LIMIT ? OFFSET ?;
+  `;
+
+  const countSql = `
+    ${baseCte}
+    SELECT COUNT(q.target_id) AS total
+    FROM q
+    ${whereSql};
+  `;
+
+  try {
+    const dataParams = [...params, limit, offset];
+    const countParams = [...params];
+    const dataResult = (await queryFromD1(dataSql, dataParams)) as any;
+    const countResult = (await queryFromD1(countSql, countParams)) as any;
+
+    const items = dataResult?.success ? dataResult.result[0]?.results || [] : [];
+    const total = countResult?.success ? countResult.result[0]?.results[0]?.total || 0 : 0;
+    return { items, total };
+  } catch (error) {
+    console.error('[Admin] 获取待审核队列失败:', error);
+    throw error;
+  }
+}
+
 /**
  * [Admin] 获取用户列表，支持复杂的多维度筛选和分页
  * [修改] 增加了 card count 相关的筛选参数
