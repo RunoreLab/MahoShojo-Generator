@@ -307,7 +307,7 @@ async function handler(req: NextRequest): Promise<Response> {
         let finalized = false;
         const executionContext = (req as any).context;
 
-        const finalizeOnce = (status: 'completed' | 'aborted' | 'failed', errorMessage?: string) => {
+        const finalizeOnce = async (status: 'completed' | 'aborted' | 'failed', errorMessage?: string) => {
             if (finalized) return;
             finalized = true;
 
@@ -448,10 +448,14 @@ async function handler(req: NextRequest): Promise<Response> {
                 }
             })();
 
-            if (executionContext?.waitUntil) {
-                executionContext.waitUntil(recordPromise);
-            } else {
-                void recordPromise;
+            try {
+                if (executionContext?.waitUntil) {
+                    executionContext.waitUntil(recordPromise);
+                } else {
+                    await recordPromise;
+                }
+            } catch (writeError) {
+                log.warn('战报生成记录：写入失败', { writeError });
             }
         };
 
@@ -462,8 +466,8 @@ async function handler(req: NextRequest): Promise<Response> {
                     const { done, value } = await reader.read();
                     if (done) {
                         appendText(decoder.decode());
+                        await finalizeOnce('completed');
                         controller.close();
-                        finalizeOnce('completed');
                         return;
                     }
 
@@ -474,7 +478,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     }
                 } catch (streamError) {
                     controller.error(streamError);
-                    finalizeOnce('failed', streamError instanceof Error ? streamError.message : 'stream error');
+                    await finalizeOnce('failed', streamError instanceof Error ? streamError.message : 'stream error');
                 }
             },
             async cancel(reason) {
@@ -483,7 +487,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 } catch {
                     // 忽略取消时的二次错误
                 }
-                finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
+                await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
             }
         });
 
