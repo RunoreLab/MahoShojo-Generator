@@ -505,8 +505,19 @@ export const useBattleEngine = () => {
           if (!looksLikeCompleteReport) {
             if (!trimmedForValidation || trimmedForValidation === '#') {
               setStreamingMarkdown(null);
+              setError('✨ 魔法失效了！服务端响应为空，未收到有效内容。');
+            } else {
+              // 尝试判断内容是否是一段纯文本报错（通常比较短，且不包含 Markdown 标题符）
+              const isLikelyErrorMessage = trimmedForValidation.length < 300 && !trimmedForValidation.includes('# ');
+              
+              if (isLikelyErrorMessage) {
+                // 直接显示服务端返回的错误文字
+                setError(`✨ 生成失败，服务端返回信息：${trimmedForValidation}`);
+              } else {
+                // 内容很长但格式不对，或者是半截战报
+                setError(`✨ 魔法失效了！战报生成中断或格式校验失败（当前长度 ${trimmedForValidation.length} 字符）。`);
+              }
             }
-            setError('✨ 魔法失效了！战报生成中断或内容不完整，本次不进入冷却，请重试。');
             return;
           }
 
