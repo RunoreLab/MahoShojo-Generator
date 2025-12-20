@@ -496,18 +496,24 @@ export const useBattleEngine = () => {
           }
 
           setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+
+          const trimmedForValidation = accumulatedText.trim();
+          const looksLikeCompleteReport =
+            trimmedForValidation.length >= 120 && /^#{2,6}\s+/m.test(trimmedForValidation) && trimmedForValidation !== '#';
+
+          // 与非流式保持一致：生成失败/中断时不进入冷却，并优先展示“生成失败”而不是“角色更新失败”。
+          if (!looksLikeCompleteReport) {
+            if (!trimmedForValidation || trimmedForValidation === '#') {
+              setStreamingMarkdown(null);
+            }
+            setError('✨ 魔法失效了！战报生成中断或内容不完整，本次不进入冷却，请重试。');
+            return;
+          }
+
           startCooldown();
 
           if (settings.writeArenaHistory || settings.writeCurrentState) {
             try {
-              const trimmedForUpdate = accumulatedText.trim();
-              const looksLikeCompleteReport =
-                trimmedForUpdate.length >= 120 && /^#{2,6}\s+/m.test(trimmedForUpdate) && trimmedForUpdate !== '#';
-
-              if (!looksLikeCompleteReport) {
-                throw new Error('战报内容不完整，已取消角色更新（请等待战报完整生成后重试）。');
-              }
-
               await updateFromMarkdown(
                 accumulatedText,
                 freshCombatants,
