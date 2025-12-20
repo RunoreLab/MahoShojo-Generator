@@ -2,6 +2,8 @@ import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 
+import { qqGroups } from '@/lib/communityGroups';
+
 interface FooterProps {
   className?: string;
   textWhite?: boolean;
@@ -21,7 +23,21 @@ export default function Footer({ className = "footer", textWhite = false }: Foot
         </Link>
       </p>
       <p>
-        交流群 <a href="https://qun.qq.com/universal-share/share?ac=1&busi_data=eyJncm91cENvZGUiOiIxMDU5ODMwOTUyIiwidG9rZW4iOiJNUFN6UVpBRVZNNU9COWpBa21DU1lxczRObXhiKy9kSzEvbHhOcnNpT1RBZEVRU3dtZ2hUQjJVNGtuYk5ISDhrIiwidWluIjoiMTAxOTcyNzcxMCJ9&data=DxfxSXDeGY3mgLKqoTGEoHkfqpums19TEW8Alu5Ikc3uCmV0O8YkLVLyRTMOp61VjFN387-7QL8-j2AFHUX2QXq525oXb8rl0lNhm0K453Q&svctype=5&tempid=h5_group_info" target="_blank" rel="noopener noreferrer" className="footer-link">1059830952</a>
+        交流群{' '}
+        {qqGroups.map((group, index) => (
+          <React.Fragment key={group.groupCode}>
+            {index > 0 ? ' / ' : null}
+            <a
+              href={group.joinUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="footer-link"
+              title={group.name}
+            >
+              {group.groupCode}
+            </a>
+          </React.Fragment>
+        ))}
       </p>
       <p>
         腾讯频道 <a href="https://pd.qq.com/s/brisxifbl" target="_blank" rel="noopener noreferrer" className="footer-link">pd73230758</a>
