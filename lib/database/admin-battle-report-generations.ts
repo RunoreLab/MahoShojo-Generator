@@ -229,8 +229,8 @@ export async function getAdminBattleReportGenerations(
       brg.generation_mode,
       brg.endpoint,
       brg.user_id,
-      brg.username,
-      brg.user_prefix,
+      COALESCE(brg.username, u.username) AS username,
+      COALESCE(brg.user_prefix, u.prefix) AS user_prefix,
       brg.mode,
       brg.scenario_title,
       brg.scenario_data_card_id,
@@ -255,6 +255,7 @@ export async function getAdminBattleReportGenerations(
       group_concat(c.name, ' / ') AS combatant_names,
       group_concat(c.data_card_id, ' / ') AS combatant_card_ids
     FROM battle_report_generations brg
+    LEFT JOIN users u ON u.id = brg.user_id
     LEFT JOIN battle_report_generation_combatants c ON c.generation_id = brg.id
     ${whereSql}
     GROUP BY brg.id
@@ -283,7 +284,15 @@ export async function getAdminBattleReportGenerations(
 }
 
 export async function getAdminBattleReportGenerationDetail(id: string): Promise<AdminBattleReportGenerationDetail | null> {
-  const generationSql = `SELECT * FROM battle_report_generations WHERE id = ?;`;
+  const generationSql = `
+    SELECT
+      brg.*,
+      COALESCE(brg.username, u.username) AS username,
+      COALESCE(brg.user_prefix, u.prefix) AS user_prefix
+    FROM battle_report_generations brg
+    LEFT JOIN users u ON u.id = brg.user_id
+    WHERE brg.id = ?;
+  `;
   const combatantsSql = `
     SELECT *
     FROM battle_report_generation_combatants
