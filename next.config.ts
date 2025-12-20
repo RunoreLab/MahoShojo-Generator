@@ -15,7 +15,12 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       {
-        source: '/details:path+',
+        source: '/battle-stream',
+        destination: '/arena-stream',
+        permanent: false,
+      },
+      {
+        source: '/details/:path+', 
         destination: '/details',
         permanent: false, // 使用 307 临时重定向
       },
@@ -25,9 +30,6 @@ const nextConfig: NextConfig = {
   // 其他配置
   typescript: {
     ignoreBuildErrors: false,
-  },
-  eslint: {
-    ignoreDuringBuilds: false,
   },
 };
 

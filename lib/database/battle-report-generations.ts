@@ -1,0 +1,253 @@
+import { queryFromD1, generateUUID } from './core';
+
+export type BattleReportGenerationStatus = 'completed' | 'aborted' | 'failed';
+export type BattleReportGenerationMode = 'stream' | 'non-stream';
+
+export interface BattleReportGenerationInsert {
+  id?: string;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  status: BattleReportGenerationStatus;
+  generationMode: BattleReportGenerationMode;
+  endpoint: string;
+
+  ip?: string | null;
+  ipAnonymized?: string | null;
+  userAgent?: string | null;
+  referer?: string | null;
+  acceptLanguage?: string | null;
+  cfRay?: string | null;
+  cfCountry?: string | null;
+
+  userId?: number | null;
+  username?: string | null;
+  userPrefix?: string | null;
+
+  mode: string;
+  scenarioTitle?: string | null;
+  scenarioDataCardId?: string | null;
+  scenarioDataCardUpdatedAt?: string | null;
+  language?: string | null;
+  selectedLevel?: string | null;
+  storyLength?: string | null;
+
+  readArenaHistory?: boolean | null;
+  arenaHistoryReadLimit?: number | null;
+  writeArenaHistory?: boolean | null;
+  readCurrentState?: boolean | null;
+  writeCurrentState?: boolean | null;
+
+  combatantCount?: number | null;
+  hasScenario?: boolean | null;
+  hasUserGuidance?: boolean | null;
+  hasAdjudicationEvents?: boolean | null;
+  hasTeams?: boolean | null;
+  inputChars?: number | null;
+  inputBytes?: number | null;
+
+  userGuidancePreview?: string | null;
+  adjudicationEventsPreview?: string | null;
+
+  customProviderId?: string | null;
+  customModelId?: string | null;
+  isDowngrade?: boolean | null;
+  aiProviderName?: string | null;
+  aiProviderType?: string | null;
+  aiModel?: string | null;
+
+  headline?: string | null;
+  winner?: string | null;
+
+  outputChars?: number | null;
+  outputBytes?: number | null;
+
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  cachedTokens?: number | null;
+  reasoningTokens?: number | null;
+
+  outputPreview?: string | null;
+  outputHasSensitiveWords?: boolean | null;
+  outputHasShieldWords?: boolean | null;
+
+  extraJson?: Record<string, unknown> | null;
+}
+
+export async function createBattleReportGenerationRecord(
+  payload: BattleReportGenerationInsert
+): Promise<string | null> {
+  try {
+    const nowIso = new Date().toISOString();
+    const id = payload.id ?? generateUUID();
+
+    const sql = `
+      INSERT INTO battle_report_generations (
+        id,
+        started_at,
+        ended_at,
+        duration_ms,
+        status,
+        generation_mode,
+        endpoint,
+        ip,
+        ip_anonymized,
+        user_agent,
+        referer,
+        accept_language,
+        cf_ray,
+        cf_country,
+        user_id,
+        username,
+        user_prefix,
+        mode,
+        scenario_title,
+        scenario_data_card_id,
+        scenario_data_card_updated_at,
+        language,
+        selected_level,
+        story_length,
+        read_arena_history,
+        arena_history_read_limit,
+        write_arena_history,
+        read_current_state,
+        write_current_state,
+        combatant_count,
+        has_scenario,
+        has_user_guidance,
+        has_adjudication_events,
+        has_teams,
+        input_chars,
+        input_bytes,
+        user_guidance_preview,
+        adjudication_events_preview,
+        custom_provider_id,
+        custom_model_id,
+        is_downgrade,
+        ai_provider_name,
+        ai_provider_type,
+        ai_model,
+        headline,
+        winner,
+        output_chars,
+        output_bytes,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cached_tokens,
+        reasoning_tokens,
+        output_preview,
+        output_has_sensitive_words,
+        output_has_shield_words,
+        extra_json,
+        created_at,
+        updated_at
+      ) VALUES (
+        ?,?,?,?,?,?,?,?,?,?,?,?,
+        ?,?,?,?,?,?,?,?,?,?,?,?,
+        ?,?,?,?,?,?,?,?,?,?,?,?,
+        ?,?,?,?,?,?,?,?,?,?,?,?,
+        ?,?,?,?,?,?,?,?,?,?,?
+      );
+    `;
+
+    const params: unknown[] = [
+      id,
+      payload.startedAt,
+      payload.endedAt,
+      payload.durationMs,
+      payload.status,
+      payload.generationMode,
+      payload.endpoint,
+      payload.ip ?? null,
+      payload.ipAnonymized ?? null,
+      payload.userAgent ?? null,
+      payload.referer ?? null,
+      payload.acceptLanguage ?? null,
+      payload.cfRay ?? null,
+      payload.cfCountry ?? null,
+      payload.userId ?? null,
+      payload.username ?? null,
+      payload.userPrefix ?? null,
+      payload.mode,
+      payload.scenarioTitle ?? null,
+      payload.scenarioDataCardId ?? null,
+      payload.scenarioDataCardUpdatedAt ?? null,
+      payload.language ?? null,
+      payload.selectedLevel ?? null,
+      payload.storyLength ?? null,
+      typeof payload.readArenaHistory === 'boolean' ? (payload.readArenaHistory ? 1 : 0) : null,
+      payload.arenaHistoryReadLimit ?? null,
+      typeof payload.writeArenaHistory === 'boolean' ? (payload.writeArenaHistory ? 1 : 0) : null,
+      typeof payload.readCurrentState === 'boolean' ? (payload.readCurrentState ? 1 : 0) : null,
+      typeof payload.writeCurrentState === 'boolean' ? (payload.writeCurrentState ? 1 : 0) : null,
+      payload.combatantCount ?? null,
+      typeof payload.hasScenario === 'boolean' ? (payload.hasScenario ? 1 : 0) : null,
+      typeof payload.hasUserGuidance === 'boolean' ? (payload.hasUserGuidance ? 1 : 0) : null,
+      typeof payload.hasAdjudicationEvents === 'boolean' ? (payload.hasAdjudicationEvents ? 1 : 0) : null,
+      typeof payload.hasTeams === 'boolean' ? (payload.hasTeams ? 1 : 0) : null,
+      payload.inputChars ?? null,
+      payload.inputBytes ?? null,
+      payload.userGuidancePreview ?? null,
+      payload.adjudicationEventsPreview ?? null,
+      payload.customProviderId ?? null,
+      payload.customModelId ?? null,
+      typeof payload.isDowngrade === 'boolean' ? (payload.isDowngrade ? 1 : 0) : null,
+      payload.aiProviderName ?? null,
+      payload.aiProviderType ?? null,
+      payload.aiModel ?? null,
+      payload.headline ?? null,
+      payload.winner ?? null,
+      payload.outputChars ?? null,
+      payload.outputBytes ?? null,
+      payload.promptTokens ?? null,
+      payload.completionTokens ?? null,
+      payload.totalTokens ?? null,
+      payload.cachedTokens ?? null,
+      payload.reasoningTokens ?? null,
+      payload.outputPreview ?? null,
+      typeof payload.outputHasSensitiveWords === 'boolean' ? (payload.outputHasSensitiveWords ? 1 : 0) : null,
+      typeof payload.outputHasShieldWords === 'boolean' ? (payload.outputHasShieldWords ? 1 : 0) : null,
+      payload.extraJson ? JSON.stringify(payload.extraJson) : null,
+      nowIso,
+      nowIso,
+    ];
+
+    const result = (await queryFromD1(sql, params)) as any;
+    if (result?.success) return id;
+    return null;
+  } catch (error) {
+    console.error('写入 battle_report_generations 失败:', error);
+    return null;
+  }
+}
+
+export async function updateBattleReportGenerationCombatantsWriteResult(
+  id: string,
+  payload: { ok: boolean; expectedRows: number; errorMessage?: string | null }
+): Promise<boolean> {
+  try {
+    const nowIso = new Date().toISOString();
+    const sql = `
+      UPDATE battle_report_generations
+      SET combatants_write_ok = ?,
+          combatants_row_count = ?,
+          combatants_write_error = ?,
+          updated_at = ?
+      WHERE id = ?;
+    `;
+    const params: unknown[] = [
+      payload.ok ? 1 : 0,
+      payload.expectedRows,
+      payload.ok ? null : (payload.errorMessage || 'unknown error'),
+      nowIso,
+      id,
+    ];
+    const result = (await queryFromD1(sql, params)) as any;
+    return Boolean(result?.success);
+  } catch (error) {
+    console.error('更新 battle_report_generations.combatants_* 失败:', error);
+    return false;
+  }
+}

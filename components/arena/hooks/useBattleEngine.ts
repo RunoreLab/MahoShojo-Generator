@@ -1,0 +1,722 @@
+'use client';
+
+import { useCallback, useMemo } from 'react';
+import { useRouter } from 'next/router';
+
+import type { NewsReport } from '@/components/BattleReportCard';
+import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
+import { useCooldown } from '@/lib/cooldown';
+import { quickCheck } from '@/lib/sensitive-word-filter';
+import { applyShieldWords } from '@/lib/shield-word-filter';
+import { useBattleStore } from '../stores/useBattleStore';
+import { BattleApiResponse, BattleStoreState, CombatantData } from '../types';
+import { useBattleActions } from './useBattleActions';
+import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
+import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
+import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
+
+const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
+
+const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
+  ...report,
+  headline: sanitizeTextByShieldWords(report.headline),
+  scenario: report.scenario ? sanitizeTextByShieldWords(report.scenario) : undefined,
+  reporterInfo: {
+    ...report.reporterInfo,
+    name: sanitizeTextByShieldWords(report.reporterInfo.name),
+    publication: sanitizeTextByShieldWords(report.reporterInfo.publication),
+  },
+  article: {
+    ...report.article,
+    body: sanitizeTextByShieldWords(report.article.body),
+    analysis: sanitizeTextByShieldWords(report.article.analysis),
+  },
+  officialReport: {
+    ...report.officialReport,
+    winner: sanitizeTextByShieldWords(report.officialReport.winner),
+    conclusion: sanitizeTextByShieldWords(report.officialReport.conclusion),
+  },
+  userGuidance: report.userGuidance ? sanitizeTextByShieldWords(report.userGuidance) : undefined,
+});
+
+const buildBattleBackupItems = (
+  combatants: CombatantData[],
+  scenarioContent: Record<string, unknown> | null,
+  scenarioFileName: string | null,
+  isScenarioNative: boolean,
+  scenarioDisplayName: string | null,
+  userGuidance: string,
+  adjudicationEvents: any[],
+  adjudicationResults?: any[] | null
+): ArrestedBackupDraftItem[] => {
+  const items: ArrestedBackupDraftItem[] = [];
+
+  combatants.forEach((combatant, index) => {
+    items.push({
+      id: `combatant-${index}`,
+      label: `参战者：${combatant.data.codename || combatant.data.name || combatant.filename}`,
+      filename: combatant.filename,
+      content: combatant.data,
+      description: combatant.isPreset ? '预设角色' : '用户上传角色',
+    });
+  });
+
+  if (scenarioContent) {
+    items.push({
+      id: 'scenario',
+      label: scenarioDisplayName ? `情景：${scenarioDisplayName}` : '情景设定',
+      filename: scenarioFileName || 'scenario.json',
+      content: scenarioContent,
+      description: isScenarioNative ? '原生情景文件' : '用户自定义情景',
+    });
+  }
+
+  if (userGuidance.trim()) {
+    items.push({
+      id: 'user-guidance',
+      label: '故事引导文本',
+      filename: 'user-guidance.txt',
+      mimeType: 'text/plain',
+      content: userGuidance.trim(),
+    });
+  }
+
+  if (adjudicationEvents.length > 0) {
+    items.push({
+      id: 'adjudication-events',
+      label: '随机判定器配置',
+      filename: 'adjudication-events.json',
+      content: adjudicationEvents,
+      description: '用户设置的随机事件链',
+    });
+  }
+
+  if (adjudicationResults?.length) {
+    items.push({
+      id: 'adjudication-results',
+      label: '随机判定结果',
+      filename: 'adjudication-results.json',
+      content: adjudicationResults,
+      description: '本次生成返回的判定结果',
+    });
+  }
+
+  return items;
+};
+
+const checkSensitivePayload = async (
+  payload: string,
+  options: {
+    source?: ArrestedBackupTriggerSource;
+    reason?: string;
+    origin?: string;
+    backupItems?: ArrestedBackupDraftItem[];
+    onRedirect?: (reason?: string, withBackup?: boolean) => void;
+  }
+): Promise<boolean> => {
+  const result = await quickCheck(payload);
+  if (!result.hasSensitiveWords) {
+    return false;
+  }
+
+  if (options.source === 'output') {
+    const backupItems = options.backupItems ?? [];
+    if (backupItems.length > 0) {
+      persistArrestedBackup({
+        triggerSource: 'output',
+        origin: options.origin || 'battle',
+        reason: options.reason,
+        items: backupItems,
+      });
+    }
+    options.onRedirect?.(options.reason, (options.backupItems?.length ?? 0) > 0);
+    return true;
+  }
+
+  options.onRedirect?.(options.reason);
+  return true;
+};
+
+export const useBattleEngine = () => {
+  const router = useRouter();
+  const { updateFromMarkdown } = useStreamCombatantUpdater();
+  const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const combatants = useBattleSelector((state) => state.combatants);
+  const battleMode = useBattleSelector((state) => state.battleMode);
+  const generationMode = useBattleSelector((state) => state.generationMode);
+  const scenario = useBattleSelector((state) => state.scenario);
+  const selectedLevel = useBattleSelector((state) => state.selectedLevel);
+  const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
+  const storyLength = useBattleSelector((state) => state.storyLength);
+  const settings = useBattleSelector((state) => state.settings);
+  const adjudicationEvents = useBattleSelector((state) => state.adjudicationEvents);
+  const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
+  const setError = useBattleSelector((state) => state.setError);
+  const setNewsReport = useBattleSelector((state) => state.setNewsReport);
+  const setUpdatedCombatants = useBattleSelector((state) => state.setUpdatedCombatants);
+  const setAdjudicationResults = useBattleSelector((state) => state.setAdjudicationResults);
+  const setIsGenerating = useBattleSelector((state) => state.setIsGenerating);
+  const setIsRedoingUpdates = useBattleSelector((state) => state.setIsRedoingUpdates);
+  const setIsStreaming = useBattleSelector((state) => state.setIsStreaming);
+  const setStreamingMarkdown = useBattleSelector((state) => state.setStreamingMarkdown);
+  const setStreamReporterInfo = useBattleSelector((state) => state.setStreamReporterInfo);
+  const setStreamUserGuidance = useBattleSelector((state) => state.setStreamUserGuidance);
+  const setCombatants = useBattleSelector((state) => state.setCombatants);
+  const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
+  const { handleResolveRandomPlaceholders } = useBattleActions();
+
+  const isUserCustomKey =
+    userProviderConfig?.providerId !== 'system' && Boolean(userProviderConfig?.apiKey?.trim());
+  const battleCooldownMs = isUserCustomKey ? 3000 : 120000;
+  const battleCooldownStorageKey = isUserCustomKey ? 'generateBattleCooldown:custom' : 'generateBattleCooldown:system';
+  const { isCooldown, startCooldown, remainingTime } = useCooldown(battleCooldownStorageKey, battleCooldownMs);
+
+  const scenarioDisplayName = useMemo(() => {
+    // 只有在情景模式下才需要展示情景标题，避免切换到其他模式后沿用上一次的情景小标题
+    if (battleMode !== 'scenario') return null;
+    const content = scenario.content;
+    if (content) {
+      const title = (content as any).title;
+      if (typeof title === 'string' && title.trim()) {
+        return title.trim();
+      }
+    }
+    if (scenario.fileName) {
+      return scenario.fileName.replace(/\.json$/i, '');
+    }
+    return null;
+  }, [battleMode, scenario.content, scenario.fileName]);
+
+  const redirectToArrested = useCallback(
+    (reason?: string, withBackup?: boolean) => {
+      const query: Record<string, string> = {};
+      if (reason) query.reason = reason;
+      if (withBackup) query.backup = '1';
+      router.push({ pathname: '/arrested', query });
+    },
+    [router]
+  );
+
+  const handleGenerate = useCallback(async () => {
+    if (isCooldown) {
+      setError(`冷却中，请等待 ${remainingTime} 秒后再生成。`);
+      return;
+    }
+
+    const minParticipants = battleMode === 'daily' || battleMode === 'scenario' ? 1 : 2;
+    const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
+
+    // 计算总角色数（包括占位符，因为它们会被解析为真实角色）
+    const totalCombatants = combatants.length;
+
+    if (totalCombatants < minParticipants || totalCombatants > 10) {
+      setError(`⚠️ 该模式需要 ${minParticipants} 到 10 位角色。`);
+      return;
+    }
+
+    if (battleMode === 'scenario' && !scenario.content) {
+      setError('⚠️ 情景模式下，请先上传一个情景文件。');
+      return;
+    }
+
+    if (userProviderConfig && userProviderConfig.providerId !== 'system' && !userProviderConfig.apiKey) {
+      setError('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
+      return;
+    }
+
+    setIsGenerating(true);
+    setIsStreaming(false);
+    setStreamingMarkdown(null);
+    setError(null);
+    setNewsReport(null);
+    setUpdatedCombatants([]);
+    setAdjudicationResults(null);
+    setStreamReporterInfo(null);
+    setStreamUserGuidance(null);
+
+    try {
+      await handleResolveRandomPlaceholders();
+
+      const freshCombatants = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
+
+      const sensitiveTargets = [
+        JSON.stringify(freshCombatants.map((c) => c.data)),
+        settings.userGuidance,
+        shouldUseScenario ? JSON.stringify(scenario.content) : '',
+      ];
+
+      for (const payload of sensitiveTargets) {
+        if (payload && (await checkSensitivePayload(payload, { onRedirect: redirectToArrested }))) {
+          return;
+        }
+      }
+
+      const teams: Record<number, string[]> = {};
+      freshCombatants.forEach((combatant) => {
+        if (combatant.teamId) {
+          if (!teams[combatant.teamId]) teams[combatant.teamId] = [];
+          teams[combatant.teamId].push(combatant.data.codename || combatant.data.name);
+        }
+      });
+
+      const numericLimit = settings.isArenaHistoryUnlimited ? null : Math.max(1, settings.readArenaHistoryLimit);
+      const arenaHistoryReadLimit = settings.readArenaHistory ? numericLimit ?? null : undefined;
+
+      const requestBody: Record<string, unknown> = {
+        combatants: freshCombatants.map((combatant) => ({
+          type: combatant.type,
+          data: combatant.data,
+          isNative: combatant.isValid,
+          isPreset: combatant.isPreset,
+          sourceDataCardId: combatant.sourceDataCardId,
+          sourceDataCardUpdatedAt: combatant.sourceDataCardUpdatedAt,
+        })),
+        selectedLevel,
+        mode: battleMode,
+        userGuidance: settings.userGuidance,
+        scenario: shouldUseScenario ? scenario.content : undefined,
+        scenarioTitle: shouldUseScenario ? scenarioDisplayName : undefined,
+        scenarioSourceDataCardId: shouldUseScenario ? scenario.sourceDataCardId : undefined,
+        scenarioSourceDataCardUpdatedAt: shouldUseScenario ? scenario.sourceDataCardUpdatedAt : undefined,
+        teams: Object.keys(teams).length > 0 ? teams : undefined,
+        language: selectedLanguage,
+        readArenaHistory: settings.readArenaHistory,
+        arenaHistoryReadLimit,
+        writeArenaHistory: settings.writeArenaHistory,
+        readCurrentState: settings.readCurrentState,
+        writeCurrentState: settings.writeCurrentState,
+        isDowngrade: false,
+        adjudicationEvents,
+        storyLength,
+      };
+
+      if (
+        userProviderConfig &&
+        (userProviderConfig.apiKey || userProviderConfig.providerId === 'system') &&
+        userProviderConfig.modelId !== 'default'
+      ) {
+        requestBody.customProvider = {
+          providerId: userProviderConfig.providerId,
+          modelId: userProviderConfig.modelId,
+          apiKey: userProviderConfig.apiKey,
+        };
+      }
+
+      const applyBattleResult = async (result: BattleApiResponse, origin: 'battle' | 'battle-stream') => {
+        const backupItems = buildBattleBackupItems(
+          freshCombatants,
+          shouldUseScenario ? scenario.content : null,
+          shouldUseScenario ? scenario.fileName : null,
+          shouldUseScenario ? scenario.isNative : false,
+          shouldUseScenario ? scenarioDisplayName : null,
+          settings.userGuidance,
+          adjudicationEvents,
+          result.adjudicationResults
+        );
+
+        if (
+          await checkSensitivePayload(JSON.stringify(result.report), {
+            source: 'output',
+            origin,
+            reason: '使用危险符文',
+            backupItems,
+            onRedirect: redirectToArrested,
+          })
+        ) {
+          return true;
+        }
+
+        const safeScenarioDisplayName = scenarioDisplayName ? sanitizeTextByShieldWords(scenarioDisplayName) : null;
+
+        const reportWithScenario: NewsReport = {
+          ...sanitizeReportByShieldWords(result.report),
+          adjudicationResults: result.adjudicationResults,
+        };
+
+        // 仅在情景模式时附加情景标题，避免其它模式复用上一场情景标题
+        if (battleMode === 'scenario' && safeScenarioDisplayName) {
+          reportWithScenario.scenario = safeScenarioDisplayName;
+        } else {
+          // 非情景模式下显式移除 scenario 字段，杜绝旧标题残留
+          delete (reportWithScenario as any).scenario;
+        }
+
+        setNewsReport(reportWithScenario);
+        setUpdatedCombatants(result.updatedCombatants);
+        if (result.adjudicationResults) {
+          setAdjudicationResults(result.adjudicationResults);
+        }
+
+        const updatedRoster = freshCombatants.map((combatant) => {
+          const updated = result.updatedCombatants.find(
+            (item) => (item.codename || item.name) === (combatant.data.codename || combatant.data.name)
+          );
+          return updated ? { ...combatant, data: updated } : combatant;
+        });
+        setCombatants(updatedRoster);
+
+        return false;
+      };
+
+      if (generationMode === 'stream') {
+        const abortController = new AbortController();
+        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+        try {
+          const response = await fetch('/api/arena/generate-stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+            signal: abortController.signal,
+          });
+
+          if (!response.ok) {
+            const text = await response.text();
+            try {
+              const json = JSON.parse(text);
+              if (json.shouldRedirect) {
+                redirectToArrested(json.reason || '使用危险符文');
+                return;
+              }
+              throw new Error(json.message || json.error || text);
+            } catch {
+              throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+            }
+          }
+
+	          reader = response.body?.getReader() ?? null;
+	          if (!reader) {
+	            throw new Error('无法读取响应流，请使用最新版本的现代浏览器。');
+	          }
+
+	          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
+	          if (metaHeader) {
+	            try {
+	              const parsed = JSON.parse(decodeURIComponent(metaHeader));
+	              const reporterInfo = parsed?.reporterInfo;
+	              if (reporterInfo && typeof reporterInfo === 'object') {
+	                const name = typeof reporterInfo.name === 'string' ? reporterInfo.name : '';
+	                const publication = typeof reporterInfo.publication === 'string' ? reporterInfo.publication : '';
+	                if (name && publication) {
+	                  setStreamReporterInfo({ name: sanitizeTextByShieldWords(name), publication: sanitizeTextByShieldWords(publication) });
+	                }
+	              }
+
+	              const userGuidance = typeof parsed?.userGuidance === 'string' ? parsed.userGuidance.trim() : '';
+	              if (userGuidance) {
+	                setStreamUserGuidance(sanitizeTextByShieldWords(userGuidance));
+	              }
+
+	              const adjudicationResults = Array.isArray(parsed?.adjudicationResults) ? parsed.adjudicationResults : null;
+	              if (adjudicationResults && adjudicationResults.length > 0) {
+	                setAdjudicationResults(adjudicationResults);
+	              }
+	            } catch (metaError) {
+	              // 元信息解析失败不影响正文流式展示
+	              console.warn('解析流式战报元信息失败，将继续渲染正文', metaError);
+	            }
+	          } else {
+	            const snapshotGuidance = settings.userGuidance.trim();
+	            if (snapshotGuidance) {
+	              setStreamUserGuidance(sanitizeTextByShieldWords(snapshotGuidance));
+	            }
+	          }
+
+	          const decoder = new TextDecoder();
+	          let accumulatedText = '#';
+	          let shouldAbort = false;
+          const streamBackupItems = buildBattleBackupItems(
+            freshCombatants,
+            shouldUseScenario ? scenario.content : null,
+            shouldUseScenario ? scenario.fileName : null,
+            shouldUseScenario ? scenario.isNative : false,
+            shouldUseScenario && scenarioDisplayName ? sanitizeTextByShieldWords(scenarioDisplayName) : null,
+            settings.userGuidance,
+            adjudicationEvents
+          );
+          let lastCheckedLength = 0;
+
+          setStreamingMarkdown(accumulatedText);
+          setIsStreaming(true);
+
+          const getIncrementalCheckSlice = (fullText: string): string => {
+            if (fullText.length < lastCheckedLength) {
+              lastCheckedLength = 0;
+            }
+            const start = Math.max(0, lastCheckedLength - 64);
+            const slice = fullText.slice(start);
+            lastCheckedLength = fullText.length;
+            return slice;
+          };
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) {
+              break;
+            }
+            if (!value) {
+              continue;
+            }
+
+            const chunk = decoder.decode(value, { stream: true });
+            accumulatedText += chunk;
+
+            const sliceToCheck = getIncrementalCheckSlice(accumulatedText);
+            if (
+              await checkSensitivePayload(sliceToCheck, {
+                source: 'output',
+                origin: 'battle-stream',
+                reason: '使用危险符文',
+                backupItems: streamBackupItems,
+                onRedirect: redirectToArrested,
+              })
+            ) {
+              shouldAbort = true;
+              await reader.cancel().catch(() => undefined);
+              break;
+            }
+
+            setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+
+            if (shouldAbort) {
+              break;
+            }
+          }
+
+          if (shouldAbort) {
+            setNewsReport(null);
+            setStreamingMarkdown(null);
+            return;
+          }
+
+          setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+          startCooldown();
+
+          if (settings.writeArenaHistory || settings.writeCurrentState) {
+            try {
+              const trimmedForUpdate = accumulatedText.trim();
+              const looksLikeCompleteReport =
+                trimmedForUpdate.length >= 120 && /^#{2,6}\s+/m.test(trimmedForUpdate) && trimmedForUpdate !== '#';
+
+              if (!looksLikeCompleteReport) {
+                throw new Error('战报内容不完整，已取消角色更新（请等待战报完整生成后重试）。');
+              }
+
+              await updateFromMarkdown(
+                accumulatedText,
+                freshCombatants,
+                battleMode,
+                {
+                  userGuidance: settings.userGuidance,
+                  writeArenaHistory: settings.writeArenaHistory,
+                  writeCurrentState: settings.writeCurrentState,
+                },
+                shouldUseScenario ? scenario.content : null
+              );
+            } catch (updateError) {
+              const message = updateError instanceof Error ? updateError.message : '发生未知错误，请重试。';
+              setError(`⚠️ 流式战报已生成，但角色更新失败：${message}`);
+            }
+          }
+
+          return;
+        } finally {
+          if (reader) {
+            await reader.cancel().catch(() => undefined);
+          }
+          abortController.abort();
+        }
+      }
+
+      const response = await fetch('/api/generate-battle-story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        try {
+          const json = JSON.parse(text);
+          if (json.shouldRedirect) {
+            redirectToArrested(json.reason || '使用危险符文');
+            return;
+          }
+          throw new Error(json.message || json.error || text);
+        } catch {
+          throw new Error('服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+        }
+      }
+
+      const result: BattleApiResponse = await response.json();
+
+      if (await applyBattleResult(result, 'battle')) {
+        return;
+      }
+
+      startCooldown();
+    } catch (error) {
+      setError(`✨ 魔法失效了！${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
+      setNewsReport(null);
+    } finally {
+      setIsGenerating(false);
+      setIsStreaming(false);
+    }
+	  }, [
+    isCooldown,
+    remainingTime,
+    battleMode,
+    generationMode,
+    combatants,
+    scenario,
+    userProviderConfig,
+    settings,
+    selectedLevel,
+    selectedLanguage,
+    storyLength,
+    adjudicationEvents,
+    scenarioDisplayName,
+    setError,
+    setNewsReport,
+    setUpdatedCombatants,
+    setAdjudicationResults,
+    setIsGenerating,
+    setIsStreaming,
+    setStreamingMarkdown,
+    setStreamReporterInfo,
+    setStreamUserGuidance,
+    setCombatants,
+    handleResolveRandomPlaceholders,
+    redirectToArrested,
+    startCooldown,
+    updateFromMarkdown,
+	  ]);
+
+  const handleRedoUpdates = useCallback(async () => {
+    if (isCooldown) {
+      setError(`冷却中，请等待 ${remainingTime} 秒后再重做更新。`);
+      return;
+    }
+
+    const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
+    const roster = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
+
+    if (roster.length === 0) {
+      setError('⚠️ 没有可更新的参战角色。');
+      return;
+    }
+
+    if (!(settings.writeArenaHistory || settings.writeCurrentState)) {
+      setError('⚠️ 已关闭历战记录/当前状态写入，本次无需重做角色更新。');
+      return;
+    }
+
+    const state = useBattleStore.getState();
+    const reportMarkdown =
+      generationMode === 'stream'
+        ? (state.streamingMarkdown ?? '').trim()
+        : (state.newsReport ? toBattleReportMarkdown(state.newsReport) : '').trim();
+
+    const redoPrecheck = precheckBattleReportForRedo(reportMarkdown, battleMode);
+    if (!redoPrecheck.ok) {
+      setError(`⚠️ ${redoPrecheck.error}`);
+      return;
+    }
+
+    setIsRedoingUpdates(true);
+    setError(null);
+
+    try {
+      const requestBody: Record<string, unknown> = {
+        combatants: roster.map((combatant) => ({
+          type: combatant.type,
+          data: combatant.data,
+          isNative: combatant.isValid,
+          isPreset: combatant.isPreset,
+        })),
+        battleReportMarkdown: reportMarkdown,
+        mode: battleMode,
+        userGuidance: settings.userGuidance,
+        scenario: shouldUseScenario ? scenario.content : undefined,
+        writeArenaHistory: settings.writeArenaHistory,
+        writeCurrentState: settings.writeCurrentState,
+      };
+
+      if (
+        userProviderConfig &&
+        (userProviderConfig.apiKey || userProviderConfig.providerId === 'system') &&
+        userProviderConfig.modelId !== 'default'
+      ) {
+        requestBody.customProvider = {
+          providerId: userProviderConfig.providerId,
+          modelId: userProviderConfig.modelId,
+          apiKey: userProviderConfig.apiKey,
+        };
+      }
+
+      const response = await fetch('/api/arena/redo-combatant-updates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        try {
+          const json = JSON.parse(text);
+          if (json.shouldRedirect) {
+            redirectToArrested(json.reason || '使用危险符文');
+            return;
+          }
+          throw new Error(json.message || json.error || text);
+        } catch {
+          throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+        }
+      }
+
+      const result = await response.json();
+      const updated = Array.isArray(result.updatedCombatants) ? result.updatedCombatants : [];
+
+      setUpdatedCombatants(updated);
+      const updatedRoster = roster.map((combatant) => {
+        const next = updated.find(
+          (item: any) => (item.codename || item.name) === (combatant.data.codename || combatant.data.name)
+        );
+        return next ? { ...combatant, data: next } : combatant;
+      });
+      setCombatants(updatedRoster);
+
+      startCooldown();
+    } catch (error) {
+      setError(`⚠️ 重做角色更新失败：${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
+    } finally {
+      setIsRedoingUpdates(false);
+    }
+  }, [
+    isCooldown,
+    remainingTime,
+    battleMode,
+    generationMode,
+    scenario.content,
+    settings.userGuidance,
+    settings.writeArenaHistory,
+    settings.writeCurrentState,
+    userProviderConfig,
+    setCombatants,
+    setError,
+    setUpdatedCombatants,
+    setIsRedoingUpdates,
+    redirectToArrested,
+    startCooldown,
+  ]);
+
+  return {
+    handleGenerate,
+    handleRedoUpdates,
+    isGenerating,
+    isRedoingUpdates,
+    isCooldown,
+    remainingTime,
+  };
+};

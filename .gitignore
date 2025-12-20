@@ -43,4 +43,11 @@ next-env.d.ts
 # wrangler
 .wrangler/
 
+# IDEs and editors
 .idea/
+
+# OS files
+.next/
+.home/
+.tmp/
+.npm-cache/

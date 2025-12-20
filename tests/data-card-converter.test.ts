@@ -4,7 +4,7 @@ import {
   convertDataCard,
   inferTemplate
 } from '@/lib/data-card-converter';
-import { validateDataCard } from '@/lib/schemas';
+import { inferTemplateId, validateDataCard } from '@/lib/schemas';
 
 describe('data-card-converter', () => {
   it('creates a blank general character card with default content', () => {
@@ -73,5 +73,35 @@ describe('data-card-converter', () => {
     expect(result.success).toBe(true);
     expect(result.type).toBe('general');
     expect(inferTemplate(general)).toBe('general');
+  });
+
+  it('keeps general classification even when content is empty string', () => {
+    const minimalGeneral = {
+      templateId: '通用角色',
+      name: '末伏之夜',
+      content: ''
+    };
+    expect(inferTemplate(minimalGeneral)).toBe('general');
+    expect(inferTemplateId(minimalGeneral)).toBe('通用角色');
+  });
+
+  it('inferTemplate prefers general for name-only cards without templateId', () => {
+    const legacy = { name: '未标记角色' };
+    expect(inferTemplate(legacy)).toBe('general');
+    expect(inferTemplateId(legacy)).toBe('通用角色');
+  });
+
+  it('inferTemplateId detects canshou features when present', () => {
+    const beast = { name: '侵蚀体', materialAndSkin: '晶体' };
+    expect(inferTemplate(beast)).toBe('canshou');
+    expect(inferTemplateId(beast)).toBe('魔法少女/心之花/残兽（问卷生成）');
+  });
+
+  it('inferTemplateId distinguishes magical girls by codename and construct', () => {
+    const mgWithConstruct = { codename: '光刃', magicConstruct: { name: '光刃' } };
+    expect(inferTemplateId(mgWithConstruct)).toBe('魔法少女/心之花/魔法少女（问卷生成）');
+
+    const mgNameOnly = { codename: '星辉' };
+    expect(inferTemplateId(mgNameOnly)).toBe('魔法少女/心之花/魔法少女（名字生成）');
   });
 });

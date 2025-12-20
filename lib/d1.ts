@@ -63,6 +63,19 @@ export {
   getRecentBattles
 } from './database/arena';
 
+// 重新导出战报生成记录相关功能
+export {
+  createBattleReportGenerationRecord,
+  updateBattleReportGenerationCombatantsWriteResult,
+  type BattleReportGenerationInsert,
+  type BattleReportGenerationStatus
+} from './database/battle-report-generations';
+
+export {
+  createBattleReportGenerationCombatants,
+  type BattleReportGenerationCombatantInsert,
+} from './database/battle-report-generation-combatants';
+
 // 重新导出徽章相关功能
 export {
   getUserBadges,

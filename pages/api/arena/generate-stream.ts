@@ -1,0 +1,503 @@
+// pages/api/arena/generate-stream.ts
+
+import { getLogger } from '@/lib/logger';
+import questionnaire from '@/public/questionnaire.json';
+import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { quickCheck } from '@/lib/sensitive-word-filter';
+import { NextRequest } from 'next/server';
+import { AdjudicationResult } from '@/types/arena';
+import { verifySignature, generateSignature } from '@/lib/signature';
+import { getSystemPrompt } from '@/lib/arena/constants';
+import { CustomProviderSchema } from '@/lib/arena/schemas';
+import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
+import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { getRandomJournalist } from '@/lib/random-choose-journalist';
+import {
+    createBattleReportGenerationRecord,
+    createBattleReportGenerationCombatants,
+    updateBattleReportGenerationCombatantsWriteResult,
+    getUserByAuthKey
+} from '@/lib/d1';
+import { applyShieldWords } from '@/lib/shield-word-filter';
+import {
+    anonymizeIp,
+    buildContentPreview,
+    extractHeadlineFromMarkdown,
+    extractWinnerFromText,
+    getClientIpFromHeaders,
+    normalizeUsage,
+} from '@/lib/arena/battle-report-log-utils';
+
+const log = getLogger('api-gen-battle-stream');
+const MAX_COMBATANTS = 10;
+
+export const config = {
+    runtime: 'edge',
+};
+
+async function handler(req: NextRequest): Promise<Response> {
+    if (req.method !== 'POST') {
+        return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
+    }
+
+    const startedAtMs = Date.now();
+    const startedAtIso = new Date(startedAtMs).toISOString();
+
+    try {
+        const body = await req.json();
+        const {
+            combatants,
+            selectedLevel,
+            mode = 'classic',
+            userGuidance,
+            scenario,
+            teams,
+            language = 'zh-CN',
+            useArenaHistory,
+            arenaHistoryReadLimit,
+            readArenaHistory,
+            writeArenaHistory,
+            readCurrentState,
+            writeCurrentState,
+            adjudicationEvents,
+            storyLength,
+            customProvider: customProviderPayload,
+            scenarioTitle,
+            scenarioSourceDataCardId,
+            scenarioSourceDataCardUpdatedAt,
+        } = body;
+
+        const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
+            ? readArenaHistory
+            : (typeof useArenaHistory === 'boolean' ? useArenaHistory : true);
+        const resolvedWriteArenaHistory = typeof writeArenaHistory === 'boolean'
+            ? writeArenaHistory
+            : (typeof useArenaHistory === 'boolean' ? useArenaHistory : true);
+        const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
+        const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
+        const resolvedHistoryReadLimit = resolvedReadArenaHistory
+            ? (() => {
+                if (arenaHistoryReadLimit === null) return Infinity;
+                if (typeof arenaHistoryReadLimit === 'number' && Number.isFinite(arenaHistoryReadLimit)) {
+                    return Math.max(1, Math.floor(arenaHistoryReadLimit));
+                }
+                return 3;
+            })()
+            : 0;
+
+        let customProviderOverride: AIProvider | null = null;
+        let customProviderId: string | null = null;
+        let customModelOverride: string | undefined;
+        if (customProviderPayload) {
+            const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
+            if (!parsedResult.success) {
+                log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
+                return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
+            }
+
+            const parsed = parsedResult.data;
+            customProviderId = parsed.providerId;
+            const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
+            if (!providerConfig) {
+                return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
+            }
+
+            const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
+            if (!modelConfig) {
+                return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
+            }
+
+            const sanitizedApiKey = parsed.apiKey.trim();
+            if (!sanitizedApiKey && providerConfig.id !== 'system') {
+                return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
+            }
+
+            const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
+            if (!sanitizedBaseUrl) {
+                customModelOverride = modelConfig.value;
+                log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
+                    providerId: providerConfig.id,
+                    model: modelConfig.value,
+                });
+            } else {
+                customProviderOverride = {
+                    name: providerConfig.name,
+                    apiKey: sanitizedApiKey,
+                    baseUrl: sanitizedBaseUrl,
+                    model: modelConfig.value,
+                    type: providerConfig.type,
+                    mode: providerConfig.mode || 'auto',
+                    retryCount: 1,
+                    skipProbability: 0,
+                };
+            }
+        }
+
+        const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
+        const providerOptions: GenerateWithAIOptions = (customProviderOverride || shouldDisablePolling)
+            ? {
+                ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
+                ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+            }
+            : {};
+
+        const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
+        if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > MAX_COMBATANTS) {
+            const errorMessage = `该模式需要 ${minParticipants} 到 ${MAX_COMBATANTS} 位角色`;
+            return new Response(JSON.stringify({ error: errorMessage }), { status: 400 });
+        }
+
+        // 为客户端生成的随机角色补上签名
+        for (const combatant of combatants) {
+            if (combatant.isNative && !combatant.data.signature) {
+                log.info(`为客户端生成的原生角色 ${combatant.data.codename || combatant.data.name} 进行补签...`);
+                combatant.data.signature = await generateSignature(combatant.data);
+            }
+        }
+
+        // 执行判定
+        let adjudicationResults: AdjudicationResult[] | null = null;
+        if (adjudicationEvents && Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0) {
+            log.info('开始处理随机判定器事件链...');
+            adjudicationResults = processAdjudicationChain(adjudicationEvents);
+            log.info('判定器事件链处理完成', { results: adjudicationResults });
+        }
+
+        // 内容安全检查
+        const inputsToCheck: { type: keyof SafetyCheckPolicy, content: string, isNative: boolean }[] = [];
+
+        const finalUserGuidance = userGuidance?.trim() || null;
+        if (finalUserGuidance) {
+            inputsToCheck.push({ type: 'userGuidance', content: finalUserGuidance, isNative: false });
+        }
+        if (scenario) {
+            const isNative = await verifySignature(scenario);
+            inputsToCheck.push({ type: 'scenario', content: JSON.stringify(scenario), isNative });
+        }
+        combatants.forEach((c: any) => {
+            inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
+        });
+
+        const policy = appConfig.SAFETY_CHECK_POLICY;
+        const contentsToAIFlag = inputsToCheck.filter(input => {
+            const checkPolicy = policy[input.type];
+            return checkPolicy === 'all' || (checkPolicy === 'non-native-only' && !input.isNative);
+        });
+
+        const textForFinalCheck: string[] = [];
+
+        if (contentsToAIFlag.length > 0 && appConfig.ENABLE_BUNDLE_SAFETY_CHECK) {
+            log.info('触发"连坐"机制，打包所有非原生内容进行检查。');
+            const nonNativeContents = inputsToCheck.filter(i => !i.isNative).map(i => i.content);
+            textForFinalCheck.push(...nonNativeContents);
+        } else {
+            textForFinalCheck.push(...contentsToAIFlag.map(i => i.content));
+        }
+
+        const combinedText = textForFinalCheck.join('\n\n');
+        const needsWorldviewWarning = false;
+
+        if (combinedText) {
+            if (appConfig.ENABLE_SENSITIVE_WORD_FILTER && (await quickCheck(combinedText)).hasSensitiveWords) {
+                log.warn('检测到敏感词 (本地过滤)，请求被拒绝', { text: combinedText });
+                return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '使用危险符文' }), { status: 400 });
+            }
+        }
+
+        const systemPrompt = getSystemPrompt(mode, combatants);
+
+        log.info('📝 构建提示词', { mode, combatantsCount: combatants.length, hasScenario: !!scenario });
+
+        const reporterInfo = getRandomJournalist();
+        const streamMeta = {
+            reporterInfo,
+            userGuidance: finalUserGuidance || undefined,
+            adjudicationResults: adjudicationResults || undefined,
+        };
+
+        const prompt = createStreamPromptBuilder(
+            questionnaire.questions,
+            finalUserGuidance,
+            needsWorldviewWarning,
+            language,
+            selectedLevel,
+            mode,
+            scenario,
+            teams,
+            resolvedReadArenaHistory,
+            resolvedHistoryReadLimit,
+            resolvedReadCurrentState,
+            resolvedWriteCurrentState,
+            adjudicationResults,
+            storyLength,
+        )({ combatants });
+
+        const generationConfig: RawGenerationConfig = {
+            prompt: `${systemPrompt}\n\n${prompt}`,
+            temperature: 0.9,
+            maxOutputTokens: 8192,
+            modelOverride: customModelOverride,
+        };
+
+        const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+        const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+        const streamResult = await generateWithStreamAI(generationConfig, aiOptions);
+        const streamResponse = streamResult.response;
+        const usagePromise = streamResult.usagePromise;
+
+        log.info('✅ 流式响应已生成，准备返回');
+
+        const headers = new Headers(streamResponse.headers);
+        try {
+            const encodedMeta = encodeURIComponent(JSON.stringify({
+                ...streamMeta,
+                ai: {
+                    providerName: aiTelemetry.providerName,
+                    providerType: aiTelemetry.providerType,
+                    model: aiTelemetry.model,
+                },
+            }));
+            headers.set('x-mahoshojo-stream-meta', encodedMeta);
+        } catch (metaError) {
+            log.warn('流式战报元信息写入失败，将继续返回正文流', { metaError });
+        }
+
+        const originalBody = streamResponse.body;
+        if (!originalBody) {
+            return new Response(JSON.stringify({ error: '无法读取响应流' }), { status: 500 });
+        }
+
+        // 包装流：一边转发给客户端，一边收集少量预览与统计信息；在完成/中断后异步写入 battle_report_generations。
+        const ip = getClientIpFromHeaders(req.headers);
+        const ipAnonymized = anonymizeIp(ip);
+        const authHeader = req.headers.get('authorization');
+        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+        const headLimit = 800;
+        const tailLimit = 800;
+        const maxFullChars = headLimit + tailLimit + 16;
+
+        let outputBytes = 0;
+        let outputChars = 0;
+        let headText = '';
+        let tailText = '';
+        let fullText: string | null = '';
+
+        const decoder = new TextDecoder();
+        const appendText = (text: string) => {
+            if (!text) return;
+            outputChars += text.length;
+
+            if (fullText !== null) {
+                if (fullText.length + text.length <= maxFullChars) {
+                    fullText += text;
+                } else {
+                    fullText = null;
+                }
+            }
+
+            if (headText.length < headLimit) {
+                headText += text.slice(0, headLimit - headText.length);
+            }
+
+            tailText = (tailText + text).slice(-tailLimit);
+        };
+
+        let finalized = false;
+        const executionContext = (req as any).context;
+
+        const finalizeOnce = (status: 'completed' | 'aborted' | 'failed', errorMessage?: string) => {
+            if (finalized) return;
+            finalized = true;
+
+            const endedAtMs = Date.now();
+            const endedAtIso = new Date(endedAtMs).toISOString();
+            const durationMs = Math.max(0, endedAtMs - startedAtMs);
+
+            // 仅在“已输出部分内容且非失败”时记录
+            if (outputBytes <= 0 || status === 'failed') return;
+
+            const previewSource = (fullText !== null ? fullText : `${headText}……${tailText}`) || '';
+            const outputPreview = buildContentPreview(previewSource, { headChars: headLimit, tailChars: tailLimit });
+
+            const recordPromise = (async () => {
+                const user = authKey ? await getUserByAuthKey(authKey) : null;
+                const usage = normalizeUsage(await usagePromise?.catch(() => null));
+
+                const shieldResult = applyShieldWords(outputPreview);
+                const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
+                    ? await quickCheck(outputPreview)
+                    : { hasSensitiveWords: false };
+
+                const inputJson = JSON.stringify({
+                    combatants,
+                    userGuidance: finalUserGuidance,
+                    scenario,
+                    teams,
+                });
+                const inputBytes = new TextEncoder().encode(inputJson).length;
+
+                const recordId = await createBattleReportGenerationRecord({
+                    startedAt: startedAtIso,
+                    endedAt: endedAtIso,
+                    durationMs,
+                    status,
+                    generationMode: 'stream',
+                    endpoint: 'api/arena/generate-stream',
+                    ip,
+                    ipAnonymized,
+                    userAgent: req.headers.get('user-agent'),
+                    referer: req.headers.get('referer'),
+                    acceptLanguage: req.headers.get('accept-language'),
+                    cfRay: req.headers.get('cf-ray'),
+                    cfCountry: req.headers.get('cf-ipcountry'),
+                    userId: user?.id ?? null,
+                    username: user?.username ?? null,
+                    userPrefix: user?.prefix ?? null,
+                    mode,
+                    scenarioTitle: typeof scenarioTitle === 'string'
+                        ? scenarioTitle.trim() || null
+                        : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+                    scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
+                    scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
+                    language: typeof language === 'string' ? language : null,
+                    selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
+                    storyLength: typeof storyLength === 'string' ? storyLength : null,
+                    readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
+                    arenaHistoryReadLimit: resolvedReadArenaHistory
+                        ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
+                        : null,
+                    writeArenaHistory: typeof resolvedWriteArenaHistory === 'boolean' ? resolvedWriteArenaHistory : null,
+                    readCurrentState: typeof resolvedReadCurrentState === 'boolean' ? resolvedReadCurrentState : null,
+                    writeCurrentState: typeof resolvedWriteCurrentState === 'boolean' ? resolvedWriteCurrentState : null,
+                    combatantCount: Array.isArray(combatants) ? combatants.length : null,
+                    hasScenario: Boolean(scenario),
+                    hasUserGuidance: Boolean(finalUserGuidance),
+                    hasAdjudicationEvents: Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0,
+                    hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
+                    inputChars: inputJson.length,
+                    inputBytes,
+                    userGuidancePreview: finalUserGuidance ? buildContentPreview(finalUserGuidance, { headChars: 300, tailChars: 300 }) : null,
+                    adjudicationEventsPreview: Array.isArray(adjudicationEvents)
+                        ? buildContentPreview(JSON.stringify(adjudicationEvents), { headChars: 300, tailChars: 300 })
+                        : null,
+                    customProviderId: customProviderId ?? null,
+                    customModelId: customProviderPayload?.modelId ?? null,
+                    isDowngrade: null,
+                    aiProviderName: aiTelemetry.providerName ?? null,
+                    aiProviderType: aiTelemetry.providerType ?? null,
+                    aiModel: aiTelemetry.model ?? null,
+                    headline: extractHeadlineFromMarkdown(previewSource),
+                    winner: extractWinnerFromText(previewSource),
+                    outputChars,
+                    outputBytes,
+                    promptTokens: usage?.promptTokens ?? null,
+                    completionTokens: usage?.completionTokens ?? null,
+                    totalTokens: usage?.totalTokens ?? null,
+                    cachedTokens: usage?.cachedTokens ?? null,
+                    reasoningTokens: usage?.reasoningTokens ?? null,
+                    outputPreview,
+                    outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
+                    outputHasShieldWords: shieldResult.hasShieldWords,
+                    extraJson: {
+                        errorMessage: errorMessage ?? null,
+                        combatants: Array.isArray(combatants)
+                            ? combatants.map((c: any) => ({
+                                type: c?.type ?? null,
+                                name: c?.data?.codename || c?.data?.name || null,
+                                isNative: Boolean(c?.isNative),
+                                isPreset: Boolean(c?.isPreset),
+                                sizeChars: typeof c?.data === 'object' ? JSON.stringify(c.data).length : null,
+                                dataCardId: c?.sourceDataCardId ?? null,
+                                dataCardUpdatedAt: c?.sourceDataCardUpdatedAt ?? null,
+                            }))
+                            : null,
+                    },
+                });
+
+                if (recordId && Array.isArray(combatants)) {
+                    const toBytes = (value: string) => new TextEncoder().encode(value).length;
+                    const rows = combatants.map((c: any, index: number) => {
+                        const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
+                        const payload = typeof c?.data === 'object' ? JSON.stringify(c.data) : '';
+                        return {
+                            generationId: recordId,
+                            sortIndex: index,
+                            name,
+                            type: typeof c?.type === 'string' ? c.type : null,
+                            templateId: typeof c?.data?.templateId === 'string' ? c.data.templateId : null,
+                            isNative: typeof c?.isNative === 'boolean' ? c.isNative : null,
+                            isPreset: typeof c?.isPreset === 'boolean' ? c.isPreset : null,
+                            teamId: typeof c?.teamId === 'number' ? c.teamId : null,
+                            dataCardId: typeof c?.sourceDataCardId === 'string' ? c.sourceDataCardId : null,
+                            dataCardUpdatedAt: typeof c?.sourceDataCardUpdatedAt === 'string' ? c.sourceDataCardUpdatedAt : null,
+                            sizeChars: payload ? payload.length : null,
+                            sizeBytes: payload ? toBytes(payload) : null,
+                        };
+                    });
+                    const combatantsWrite = await createBattleReportGenerationCombatants(rows);
+                    if (!combatantsWrite.ok) {
+                        log.warn('战报生成记录：角色明细写入失败', { recordId, errorMessage: combatantsWrite.errorMessage });
+                    }
+                    await updateBattleReportGenerationCombatantsWriteResult(recordId, {
+                        ok: combatantsWrite.ok,
+                        expectedRows: rows.length,
+                        errorMessage: combatantsWrite.errorMessage ?? null,
+                    });
+                }
+            })();
+
+            if (executionContext?.waitUntil) {
+                executionContext.waitUntil(recordPromise);
+            } else {
+                void recordPromise;
+            }
+        };
+
+        const reader = originalBody.getReader();
+        const wrappedBody = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+                try {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        appendText(decoder.decode());
+                        controller.close();
+                        finalizeOnce('completed');
+                        return;
+                    }
+
+                    if (value) {
+                        outputBytes += value.byteLength;
+                        appendText(decoder.decode(value, { stream: true }));
+                        controller.enqueue(value);
+                    }
+                } catch (streamError) {
+                    controller.error(streamError);
+                    finalizeOnce('failed', streamError instanceof Error ? streamError.message : 'stream error');
+                }
+            },
+            async cancel(reason) {
+                try {
+                    await reader.cancel(reason);
+                } catch {
+                    // 忽略取消时的二次错误
+                }
+                finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
+            }
+        });
+
+        return new Response(wrappedBody, {
+            status: streamResponse.status,
+            headers,
+        });
+    } catch (error) {
+        log.error('生成战斗故事时发生顶层错误', { error });
+        const errorMessage = error instanceof Error ? error.message : '未知错误';
+        return new Response(JSON.stringify({ error: '生成失败，请稍后重试', message: errorMessage }), {
+            status: 500,
+        });
+    }
+}
+
+export default handler;

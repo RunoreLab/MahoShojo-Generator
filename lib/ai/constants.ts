@@ -23,7 +23,7 @@ export interface AIProviderOption {
  * 可选 AI 供应商目录。
  * - description 用于向用户解释供应商特色。
  * - docsUrl 用于跳转至官方文档，帮助用户快速查看接入方式。
- * - baseUrl 为默认的 API 访问地址，用户仍可在 UI 中覆盖。
+ * - baseUrl 为默认的 API 访问地址（当前版本由目录固定，未在 UI 中开放覆盖）。
  * - models 按常见用途给出推荐模型，方便快速选择。
  */
 export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
@@ -39,6 +39,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'default',
                 label: '默认策略',
                 description: '与之前一样的没有变化的调用顺序，默认使用 Gemini 2.5 Flash 模型。'
+            },
+            {
+                value: 'gemini-3-flash-preview',
+                label: 'Gemini 3.0 Flash （预览版）',
+                description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
             },
             {
                 value: 'gemini-2.5-flash',
@@ -119,6 +124,52 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         ]
     },
     {
+        id: 'yiye',
+        name: '一叶知秋 API (测试)',
+        description: '一叶知秋 API 也为用户提供了国内外广泛的模型库。',
+        docsUrl: 'https://88996.cloud/register?aff=ITPX',
+        baseUrl: 'https://88996.cloud/v1',
+        type: 'openai',
+        mode: 'json',
+        models: [
+            {
+                value: 'gemini-3-pro-preview',
+                label: 'Gemini 3.0 Pro (测试)',
+                description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
+            },
+            {
+                value: 'gemini-2.5-pro',
+                label: 'Gemini 2.5 Pro',
+                description: 'Google 旗下上一代的最先进模型系列，性能很棒棒。'
+            },
+            // {
+            //     value: 'gemini-2.5-pro-payg',
+            //     label: 'Gemini 2.5 Pro (按次计费)',
+            //     description: '按次计费，场景和人数或生成字数多的时候选用此模型性价比更高哦！'
+            // },
+            // {
+            //     value: 'gemini-2.5-flash',
+            //     label: 'Gemini 2.5 Flash',
+            //     description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
+            // },
+            // {
+            //     value: 'gemini-2.5-flash-lite',
+            //     label: 'Gemini 2.5 Flash Lite',
+            //     description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+            // },
+            // {
+            //     value: 'glm-4.6',
+            //     label: 'GLM-4.6',
+            //     description: '智谱旗下的大模型。'
+            // },
+            // {
+            //     value: 'deepseek-v3.2-exp',
+            //     label: 'DeepSeek V3.2 Exp',
+            //     description: 'DeepSeek 最新版本。'
+            // },
+        ]
+    },
+    {
         id: 'modelscope',
         name: '魔搭 Modelscope',
         description: '阿里云旗下专注于人工智能领域的开源模型平台，提供针对国内大模型的免费推理服务。',
@@ -166,6 +217,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-3-pro-preview',
                 label: 'Gemini 3.0 Pro （预览版）',
                 description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
+            },
+            {
+                value: 'gemini-3-flash-preview',
+                label: 'Gemini 3.0 Flash （预览版）',
+                description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
             },
             {
                 value: 'gemini-2.5-pro',
