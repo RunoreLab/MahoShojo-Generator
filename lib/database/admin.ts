@@ -160,8 +160,23 @@ export async function getAdminDataCards(filters: {
     : '';
 
   const pendingUpdateJoinSql = includePendingUpdates
-    ? 'LEFT JOIN data_card_updates dcu ON dcu.data_card_id = dc.id'
+    ? `LEFT JOIN (
+        SELECT dcu.*
+        FROM data_card_updates dcu
+        JOIN (
+          SELECT data_card_id, MAX(created_at) AS created_at
+          FROM data_card_updates
+          GROUP BY data_card_id
+        ) latest ON latest.data_card_id = dcu.data_card_id AND latest.created_at = dcu.created_at
+        JOIN (
+          SELECT data_card_id, created_at, MAX(id) AS id
+          FROM data_card_updates
+          GROUP BY data_card_id, created_at
+        ) latest2 ON latest2.data_card_id = dcu.data_card_id AND latest2.created_at = dcu.created_at AND latest2.id = dcu.id
+      ) dcu ON dcu.data_card_id = dc.id`
     : '';
+
+  const countSelectSql = includePendingUpdates ? 'COUNT(DISTINCT dc.id) as total' : 'COUNT(dc.id) as total';
 
   const dataSql = `
     SELECT dc.*, u.username ${pendingUpdateSelectSql}
@@ -173,7 +188,7 @@ export async function getAdminDataCards(filters: {
     LIMIT ? OFFSET ?;
   `;
   const countSql = `
-    SELECT COUNT(dc.id) as total
+    SELECT ${countSelectSql}
     FROM data_cards dc
     JOIN users u ON dc.user_id = u.id
     ${pendingUpdateJoinSql}

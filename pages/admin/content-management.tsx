@@ -228,32 +228,32 @@ const ContentManagementPage: React.FC = () => {
       return;
     }
 
-    if (snapshot.kind === 'update') {
-      if (variant === 'original') {
+      if (snapshot.kind === 'update') {
+        if (variant === 'original') {
+          openDetailsModal(
+            {
+              ...baseCard,
+              name: snapshot.originalName ?? baseCard.name,
+              description: snapshot.originalDescription ?? baseCard.description,
+              data: snapshot.originalData ?? baseCard.data,
+            },
+            '这是当前线上版本（原版），用于对比参考。'
+          );
+          return;
+        }
+
         openDetailsModal(
           {
             ...baseCard,
-            name: snapshot.originalName ?? baseCard.name,
-            description: snapshot.originalDescription ?? baseCard.description,
-            data: snapshot.originalData ?? baseCard.data,
+            name: snapshot.name,
+            description: snapshot.description,
+            data: snapshot.data,
+            updated_at: baseCard.pending_update_created_at ?? baseCard.updated_at,
           },
-          '这是当前线上版本（原版），用于对比参考。'
+          '这是用户提交的更新版本，审核通过后将覆盖线上版本。'
         );
         return;
       }
-
-      openDetailsModal(
-        {
-          ...baseCard,
-          name: snapshot.name,
-          description: snapshot.description,
-          data: snapshot.data,
-          updated_at: new Date().toISOString(),
-        },
-        '这是用户提交的更新版本，审核通过后将覆盖线上版本。'
-      );
-      return;
-    }
 
     openDetailsModal(
       {
