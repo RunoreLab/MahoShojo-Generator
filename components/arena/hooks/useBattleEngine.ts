@@ -14,6 +14,7 @@ import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
+import { authStorage } from '@/lib/auth';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -303,6 +304,10 @@ export const useBattleEngine = () => {
         };
       }
 
+      const authHeader = await authStorage.getAuthHeader();
+      const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authHeader) requestHeaders.Authorization = authHeader;
+
       const applyBattleResult = async (result: BattleApiResponse, origin: 'battle' | 'battle-stream') => {
         const backupItems = buildBattleBackupItems(
           freshCombatants,
@@ -366,7 +371,7 @@ export const useBattleEngine = () => {
         try {
           const response = await fetch('/api/arena/generate-stream', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: requestHeaders,
             body: JSON.stringify(requestBody),
             signal: abortController.signal,
           });
@@ -531,7 +536,7 @@ export const useBattleEngine = () => {
 
       const response = await fetch('/api/generate-battle-story', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: requestHeaders,
         body: JSON.stringify(requestBody),
       });
 
