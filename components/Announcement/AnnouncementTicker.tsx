@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 
+import { interpolateWithQQGroups } from '@/lib/communityGroups';
+
 interface Announcement {
   id: string;
   date: string;
@@ -153,10 +155,20 @@ const AnnouncementTicker: React.FC = () => {
                       p: ({ children }) => <p className="mb-4 leading-relaxed">{children}</p>,
                       ul: ({ children }) => <ul className="list-disc pl-8 mb-4">{children}</ul>,
                       li: ({ children }) => <li className="mb-2">{children}</li>,
-                      code: ({ children }) => <code className="bg-gray-100 px-2 py-1 rounded text-sm">{children}</code>
+                      code: ({ children }) => <code className="bg-gray-100 px-2 py-1 rounded text-sm">{children}</code>,
+                      a: ({ children, href }) => (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {children}
+                        </a>
+                      ),
                     }}
                   >
-                    {selectedAnnouncement.content}
+                    {interpolateWithQQGroups(selectedAnnouncement.content)}
                   </ReactMarkdown>
                 </div>
                 <div className="px-6 py-4 border-t border-gray-200 flex justify-start">
@@ -198,7 +210,7 @@ const AnnouncementTicker: React.FC = () => {
                         )}
                       </div>
                       <p className="text-gray-700 text-sm leading-relaxed mb-3">
-                        {announcement.content.substring(0, 100).replace(/[#*\n]/g, '')}...
+                        {interpolateWithQQGroups(announcement.content).substring(0, 100).replace(/[#*\n]/g, '')}...
                       </p>
                       <div className="flex justify-end">
                         <button
