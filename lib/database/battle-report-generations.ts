@@ -251,3 +251,24 @@ export async function updateBattleReportGenerationCombatantsWriteResult(
     return false;
   }
 }
+
+export async function updateBattleReportGenerationExtraJson(
+  id: string,
+  extraJson: Record<string, unknown> | null
+): Promise<boolean> {
+  try {
+    const nowIso = new Date().toISOString();
+    const sql = `
+      UPDATE battle_report_generations
+      SET extra_json = ?,
+          updated_at = ?
+      WHERE id = ?;
+    `;
+    const params: unknown[] = [extraJson ? JSON.stringify(extraJson) : null, nowIso, id];
+    const result = (await queryFromD1(sql, params)) as any;
+    return Boolean(result?.success);
+  } catch (error) {
+    console.error('更新 battle_report_generations.extra_json 失败:', error);
+    return false;
+  }
+}

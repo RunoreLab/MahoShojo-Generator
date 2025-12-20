@@ -16,16 +16,20 @@ import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
     createBattleReportGenerationRecord,
     createBattleReportGenerationCombatants,
+    updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
     getUserByAuthKey
 } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
+    buildCombatantsFallbackForExtraJson,
     buildContentPreview,
     extractHeadlineFromMarkdown,
     extractWinnerFromText,
     getClientIpFromHeaders,
+    normalizeErrorMessage,
+    compactExtraJson,
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
 
@@ -41,13 +45,19 @@ async function handler(req: NextRequest): Promise<Response> {
         return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
     }
 
-    const startedAtMs = Date.now();
-    const startedAtIso = new Date(startedAtMs).toISOString();
+	    const startedAtMs = Date.now();
+	    const startedAtIso = new Date(startedAtMs).toISOString();
 
-    try {
-        const body = await req.json();
-        const {
-            combatants,
+	    // 用于在异常/提前返回时补齐 battle_report_generations 记录（避免“失败/敏感词拦截没有记录”）。
+	    let snapshotMode: string = 'classic';
+	    let snapshotLanguage: string | null = null;
+	    let snapshotSelectedLevel: string | null = null;
+	    let snapshotStoryLength: string | null = null;
+
+	    try {
+	        const body = await req.json();
+	        const {
+	            combatants,
             selectedLevel,
             mode = 'classic',
             userGuidance,
@@ -65,8 +75,13 @@ async function handler(req: NextRequest): Promise<Response> {
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioSourceDataCardId,
-            scenarioSourceDataCardUpdatedAt,
-        } = body;
+	            scenarioSourceDataCardUpdatedAt,
+	        } = body;
+
+	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
+	        snapshotLanguage = typeof language === 'string' ? language : null;
+	        snapshotSelectedLevel = typeof selectedLevel === 'string' ? selectedLevel : null;
+	        snapshotStoryLength = typeof storyLength === 'string' ? storyLength : null;
 
         const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
             ? readArenaHistory
@@ -198,12 +213,79 @@ async function handler(req: NextRequest): Promise<Response> {
         const combinedText = textForFinalCheck.join('\n\n');
         const needsWorldviewWarning = false;
 
-        if (combinedText) {
-            if (appConfig.ENABLE_SENSITIVE_WORD_FILTER && (await quickCheck(combinedText)).hasSensitiveWords) {
-                log.warn('检测到敏感词 (本地过滤)，请求被拒绝', { text: combinedText });
-                return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '使用危险符文' }), { status: 400 });
-            }
-        }
+	        if (combinedText) {
+	            if (appConfig.ENABLE_SENSITIVE_WORD_FILTER && (await quickCheck(combinedText)).hasSensitiveWords) {
+	                log.warn('检测到敏感词 (本地过滤)，请求被拒绝', { text: combinedText });
+
+	                const endedAtMs = Date.now();
+	                const endedAtIso = new Date(endedAtMs).toISOString();
+	                const durationMs = Math.max(0, endedAtMs - startedAtMs);
+	                const ip = getClientIpFromHeaders(req.headers);
+	                const ipAnonymized = anonymizeIp(ip);
+	                const authHeader = req.headers.get('authorization');
+	                const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+	                const recordPromise = (async () => {
+	                    try {
+	                        const user = authKey ? await getUserByAuthKey(authKey) : null;
+	                        await createBattleReportGenerationRecord({
+	                            startedAt: startedAtIso,
+	                            endedAt: endedAtIso,
+	                            durationMs,
+	                            status: 'failed',
+	                            generationMode: 'stream',
+	                            endpoint: 'api/arena/generate-stream',
+	                            ip,
+	                            ipAnonymized,
+	                            userAgent: req.headers.get('user-agent'),
+	                            referer: req.headers.get('referer'),
+	                            acceptLanguage: req.headers.get('accept-language'),
+	                            cfRay: req.headers.get('cf-ray'),
+	                            cfCountry: req.headers.get('cf-ipcountry'),
+	                            userId: user?.id ?? null,
+	                            username: user?.username ?? null,
+	                            userPrefix: user?.prefix ?? null,
+	                            mode: snapshotMode,
+	                            scenarioTitle: typeof scenarioTitle === 'string'
+	                                ? scenarioTitle.trim() || null
+	                                : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+	                            scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
+	                            scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
+	                            language: snapshotLanguage,
+	                            selectedLevel: snapshotSelectedLevel,
+	                            storyLength: snapshotStoryLength,
+	                            readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
+	                            arenaHistoryReadLimit: resolvedReadArenaHistory
+	                                ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
+	                                : null,
+	                            writeArenaHistory: typeof resolvedWriteArenaHistory === 'boolean' ? resolvedWriteArenaHistory : null,
+	                            readCurrentState: typeof resolvedReadCurrentState === 'boolean' ? resolvedReadCurrentState : null,
+	                            writeCurrentState: typeof resolvedWriteCurrentState === 'boolean' ? resolvedWriteCurrentState : null,
+	                            combatantCount: Array.isArray(combatants) ? combatants.length : null,
+	                            hasScenario: Boolean(scenario),
+	                            hasUserGuidance: typeof userGuidance === 'string' ? Boolean(userGuidance.trim()) : false,
+	                            hasAdjudicationEvents: Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0,
+	                            hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
+	                            extraJson: {
+	                                errorMessage: 'rejected by sensitive input filter',
+	                                rejectedBy: 'sensitive-input',
+	                            },
+	                        });
+	                    } catch (writeError) {
+	                        log.warn('战报生成记录：写入失败（敏感词拒绝）', { writeError });
+	                    }
+	                })();
+
+	                const executionContext = (req as any).context;
+	                if (executionContext?.waitUntil) {
+	                    executionContext.waitUntil(recordPromise);
+	                } else {
+	                    await recordPromise;
+	                }
+
+	                return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '使用危险符文' }), { status: 400 });
+	            }
+	        }
 
         const systemPrompt = getSystemPrompt(mode, combatants);
 
@@ -315,8 +397,11 @@ async function handler(req: NextRequest): Promise<Response> {
             const endedAtIso = new Date(endedAtMs).toISOString();
             const durationMs = Math.max(0, endedAtMs - startedAtMs);
 
-            // 仅在“已输出部分内容且非失败”时记录
-            if (outputBytes <= 0 || status === 'failed') return;
+            // 统一记录：completed / aborted / failed 都写入（即便输出为空），避免“失败/中断没有记录”。
+            const normalizedStatus: 'completed' | 'aborted' | 'failed' =
+              status === 'completed' && outputBytes <= 0 ? 'failed' : status;
+            const normalizedErrorMessage =
+              normalizedStatus !== status ? (errorMessage || 'empty output') : errorMessage;
 
             const previewSource = (fullText !== null ? fullText : `${headText}……${tailText}`) || '';
             const outputPreview = buildContentPreview(previewSource, { headChars: headLimit, tailChars: tailLimit });
@@ -342,7 +427,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     startedAt: startedAtIso,
                     endedAt: endedAtIso,
                     durationMs,
-                    status,
+                    status: normalizedStatus,
                     generationMode: 'stream',
                     endpoint: 'api/arena/generate-stream',
                     ip,
@@ -400,23 +485,12 @@ async function handler(req: NextRequest): Promise<Response> {
                     outputPreview,
                     outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
                     outputHasShieldWords: shieldResult.hasShieldWords,
-                    extraJson: {
-                        errorMessage: errorMessage ?? null,
-                        combatants: Array.isArray(combatants)
-                            ? combatants.map((c: any) => ({
-                                type: c?.type ?? null,
-                                name: c?.data?.codename || c?.data?.name || null,
-                                isNative: Boolean(c?.isNative),
-                                isPreset: Boolean(c?.isPreset),
-                                sizeChars: typeof c?.data === 'object' ? JSON.stringify(c.data).length : null,
-                                dataCardId: c?.sourceDataCardId ?? null,
-                                dataCardUpdatedAt: c?.sourceDataCardUpdatedAt ?? null,
-                            }))
-                            : null,
-                    },
+                    extraJson: compactExtraJson({
+                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+                    }),
                 });
 
-                if (recordId && Array.isArray(combatants)) {
+                if (recordId && Array.isArray(combatants) && normalizedStatus !== 'failed') {
                     const toBytes = (value: string) => new TextEncoder().encode(value).length;
                     const rows = combatants.map((c: any, index: number) => {
                         const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
@@ -445,6 +519,17 @@ async function handler(req: NextRequest): Promise<Response> {
                         expectedRows: rows.length,
                         errorMessage: combatantsWrite.errorMessage ?? null,
                     });
+
+                    if (!combatantsWrite.ok) {
+                        await updateBattleReportGenerationExtraJson(
+                            recordId,
+                            compactExtraJson({
+                                errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+                                combatantsFallbackReason: 'combatants-table-write-failed',
+                                combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
+                            })
+                        );
+                    }
                 }
             })();
 
@@ -495,13 +580,63 @@ async function handler(req: NextRequest): Promise<Response> {
             status: streamResponse.status,
             headers,
         });
-    } catch (error) {
-        log.error('生成战斗故事时发生顶层错误', { error });
-        const errorMessage = error instanceof Error ? error.message : '未知错误';
-        return new Response(JSON.stringify({ error: '生成失败，请稍后重试', message: errorMessage }), {
-            status: 500,
-        });
-    }
-}
+	    } catch (error) {
+	        log.error('生成战斗故事时发生顶层错误', { error });
+	        const errorMessage = error instanceof Error ? error.message : '未知错误';
+
+	        const endedAtMs = Date.now();
+	        const endedAtIso = new Date(endedAtMs).toISOString();
+	        const durationMs = Math.max(0, endedAtMs - startedAtMs);
+	        const ip = getClientIpFromHeaders(req.headers);
+	        const ipAnonymized = anonymizeIp(ip);
+	        const authHeader = req.headers.get('authorization');
+	        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+	        const recordPromise = (async () => {
+	            try {
+	                const user = authKey ? await getUserByAuthKey(authKey) : null;
+	                await createBattleReportGenerationRecord({
+	                    startedAt: startedAtIso,
+	                    endedAt: endedAtIso,
+	                    durationMs,
+	                    status: 'failed',
+	                    generationMode: 'stream',
+	                    endpoint: 'api/arena/generate-stream',
+	                    ip,
+	                    ipAnonymized,
+	                    userAgent: req.headers.get('user-agent'),
+	                    referer: req.headers.get('referer'),
+	                    acceptLanguage: req.headers.get('accept-language'),
+	                    cfRay: req.headers.get('cf-ray'),
+	                    cfCountry: req.headers.get('cf-ipcountry'),
+	                    userId: user?.id ?? null,
+	                    username: user?.username ?? null,
+	                    userPrefix: user?.prefix ?? null,
+	                    mode: snapshotMode,
+	                    language: snapshotLanguage,
+	                    selectedLevel: snapshotSelectedLevel,
+	                    storyLength: snapshotStoryLength,
+	                    extraJson: {
+	                        errorMessage,
+	                        stage: 'top-level-catch',
+	                    },
+	                });
+	            } catch (writeError) {
+	                log.warn('战报生成记录：写入失败（顶层错误）', { writeError });
+	            }
+	        })();
+
+	        const executionContext = (req as any).context;
+	        if (executionContext?.waitUntil) {
+	            executionContext.waitUntil(recordPromise);
+	        } else {
+	            await recordPromise;
+	        }
+
+	        return new Response(JSON.stringify({ error: '生成失败，请稍后重试', message: errorMessage }), {
+	            status: 500,
+	        });
+	    }
+	}
 
 export default handler;
