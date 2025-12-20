@@ -135,3 +135,62 @@ export function normalizeUsage(usage: unknown): UsageLike | null {
     ...(reasoningTokens !== null ? { reasoningTokens } : {}),
   };
 }
+
+export function normalizeErrorMessage(errorMessage: unknown, maxChars: number = 300): string | null {
+  if (typeof errorMessage !== 'string') return null;
+  const trimmed = errorMessage.trim();
+  if (!trimmed) return null;
+  const safeMax = Math.max(0, Math.floor(maxChars));
+  if (safeMax <= 0) return null;
+  return trimmed.length <= safeMax ? trimmed : `${trimmed.slice(0, safeMax)}…`;
+}
+
+export function compactExtraJson(value: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null;
+  const out: Record<string, unknown> = {};
+
+  for (const [key, raw] of Object.entries(value)) {
+    if (raw === null || raw === undefined) continue;
+
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) continue;
+      out[key] = trimmed;
+      continue;
+    }
+
+    if (Array.isArray(raw)) {
+      if (raw.length === 0) continue;
+      out[key] = raw;
+      continue;
+    }
+
+    if (typeof raw === 'object') {
+      if (Object.keys(raw as Record<string, unknown>).length === 0) continue;
+      out[key] = raw;
+      continue;
+    }
+
+    out[key] = raw;
+  }
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+export function buildCombatantsFallbackForExtraJson(combatants: unknown): Array<Record<string, unknown>> | null {
+  if (!Array.isArray(combatants) || combatants.length <= 0) return null;
+
+  return combatants.map((c: any, index: number) => {
+    const compacted = compactExtraJson({
+      sortIndex: index,
+      name: c?.data?.codename || c?.data?.name || null,
+      type: typeof c?.type === 'string' ? c.type : null,
+      isNative: typeof c?.isNative === 'boolean' ? c.isNative : null,
+      isPreset: typeof c?.isPreset === 'boolean' ? c.isPreset : null,
+      teamId: typeof c?.teamId === 'number' ? c.teamId : null,
+      dataCardId: typeof c?.sourceDataCardId === 'string' ? c.sourceDataCardId : null,
+      dataCardUpdatedAt: typeof c?.sourceDataCardUpdatedAt === 'string' ? c.sourceDataCardUpdatedAt : null,
+    });
+    return compacted ?? { sortIndex: index };
+  });
+}

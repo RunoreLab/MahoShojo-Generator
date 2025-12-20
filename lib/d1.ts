@@ -66,6 +66,7 @@ export {
 // 重新导出战报生成记录相关功能
 export {
   createBattleReportGenerationRecord,
+  updateBattleReportGenerationExtraJson,
   updateBattleReportGenerationCombatantsWriteResult,
   type BattleReportGenerationInsert,
   type BattleReportGenerationStatus
