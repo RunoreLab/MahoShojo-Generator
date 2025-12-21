@@ -57,6 +57,16 @@ const logoConfigs: LogoConfig[] = [
     color: 'white'
   },
   {
+    id: 'pvp-arena',
+    src: '/arena-white.svg',
+    width: 280,
+    height: 80,
+    alt: 'PVP 对战（测试版）',
+    href: '/pvp',
+    className: 'battle-arena',
+    color: 'white'
+  },
+  {
     id: 'scenario-generator',
     src: '/scenario.svg',
     width: 280,

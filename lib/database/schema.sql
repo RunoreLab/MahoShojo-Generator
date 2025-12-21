@@ -262,3 +262,113 @@ CREATE TABLE IF NOT EXISTS battle_report_generation_combatants (
 CREATE INDEX IF NOT EXISTS idx_battle_report_generation_combatants_generation_id ON battle_report_generation_combatants(generation_id);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generation_combatants_data_card_id ON battle_report_generation_combatants(data_card_id);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generation_combatants_name ON battle_report_generation_combatants(name);
+
+-- =================================================================
+-- PVP 房间制对战（MVP：2人、轮询）
+-- =================================================================
+
+-- PVP 房间
+CREATE TABLE IF NOT EXISTS pvp_rooms (
+  id TEXT PRIMARY KEY NOT NULL,
+  host_user_id INTEGER NOT NULL,
+  status TEXT NOT NULL,            -- open / closed
+  phase TEXT NOT NULL,             -- waiting / submitting / dealing / choosing / resolving / finished / aborted / closed
+  rules_json TEXT NOT NULL,
+  join_code_hash TEXT,
+  join_code_salt TEXT,
+  version INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,
+  last_activity_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_rooms_status ON pvp_rooms(status);
+CREATE INDEX IF NOT EXISTS idx_pvp_rooms_updated_at ON pvp_rooms(updated_at);
+
+-- PVP 房间玩家
+CREATE TABLE IF NOT EXISTS pvp_room_players (
+  room_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  seat INTEGER,
+  joined_at TEXT NOT NULL,
+  PRIMARY KEY (room_id, user_id),
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_room_players_room_id ON pvp_room_players(room_id);
+
+-- PVP 提交
+CREATE TABLE IF NOT EXISTS pvp_room_submissions (
+  room_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  submission_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (room_id, user_id),
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- PVP 手牌
+CREATE TABLE IF NOT EXISTS pvp_room_hands (
+  room_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  hand_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (room_id, user_id),
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- PVP 卡快照（保证复盘一致）
+CREATE TABLE IF NOT EXISTS pvp_room_card_snapshots (
+  id TEXT PRIMARY KEY NOT NULL,
+  room_id TEXT NOT NULL,
+  owner_user_id INTEGER NOT NULL,
+  ref_json TEXT NOT NULL,
+  card_type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  source_updated_at TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_room_card_snapshots_room_id ON pvp_room_card_snapshots(room_id);
+
+-- PVP 回合
+CREATE TABLE IF NOT EXISTS pvp_rounds (
+  id TEXT PRIMARY KEY NOT NULL,
+  room_id TEXT NOT NULL,
+  round_index INTEGER NOT NULL,
+  status TEXT NOT NULL,           -- pending / resolving / completed / aborted
+  battle_generation_id TEXT,
+  public_snapshot_json TEXT,
+  result_json TEXT,
+  winner_user_id INTEGER,
+  winner_name TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (winner_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_rounds_room_id ON pvp_rounds(room_id);
+
+-- PVP 回合出牌
+CREATE TABLE IF NOT EXISTS pvp_round_choices (
+  round_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  choice_ref_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (round_id, user_id),
+  FOREIGN KEY (round_id) REFERENCES pvp_rounds(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_round_choices_round_id ON pvp_round_choices(round_id);
