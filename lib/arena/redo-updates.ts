@@ -1,5 +1,7 @@
 import { z } from 'zod/v3';
 
+export const STREAM_TRUNCATED_BY_SENSITIVE_MARKER = 'mahoshojo:stream-truncated-sensitive';
+
 export const buildRedoCombatantUpdatesSchema = (options: {
   enableImpactText: boolean;
   enableCurrentState: boolean;
@@ -100,6 +102,10 @@ export const precheckBattleReportForRedo = (
   const reportMarkdown = typeof markdown === 'string' ? markdown.trim() : '';
   if (!reportMarkdown || reportMarkdown.length < 120) {
     return { ok: false, error: '战报内容过短，无法重做角色更新。' };
+  }
+
+  if (reportMarkdown.includes(STREAM_TRUNCATED_BY_SENSITIVE_MARKER)) {
+    return { ok: false, error: '战报已因敏感词被截断，无法重做角色更新。' };
   }
 
   const parsedReport = parseBattleReportFromMarkdown(reportMarkdown, mode);

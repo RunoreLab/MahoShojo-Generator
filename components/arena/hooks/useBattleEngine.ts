@@ -13,10 +13,32 @@ import { BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
-import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
+import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
 import { authStorage } from '@/lib/auth';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
+
+const buildStreamSensitiveArrestWarrantMarkdown = (reason?: string): string => {
+  const safeReason = reason?.trim() ? `（原因：${reason.trim()}）` : '';
+  return [
+    '',
+    '',
+    '---',
+    '',
+    '<!-- ' + STREAM_TRUNCATED_BY_SENSITIVE_MARKER + ' -->',
+    '',
+    '## 逮捕令',
+    '',
+    '** 批 准 逮 捕 **',
+    '',
+    `内容违反调查院规定${safeReason}，系统已自动截断。`,
+    '',
+    '⚠️ ** 金绿猫眼权杖严正声明 ** ⚠️',
+    '',
+    '城际网络并非法外之地！',
+    '',
+  ].join('\n');
+};
 
 const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
   ...report,
@@ -445,14 +467,15 @@ export const useBattleEngine = () => {
           setStreamingMarkdown(accumulatedText);
           setIsStreaming(true);
 
-          const getIncrementalCheckSlice = (fullText: string): string => {
+          const getIncrementalCheckSlice = (fullText: string): { slice: string; startIndex: number } => {
             if (fullText.length < lastCheckedLength) {
               lastCheckedLength = 0;
             }
-            const start = Math.max(0, lastCheckedLength - 64);
+            const overlap = 256;
+            const start = Math.max(0, lastCheckedLength - overlap);
             const slice = fullText.slice(start);
             lastCheckedLength = fullText.length;
-            return slice;
+            return { slice, startIndex: start };
           };
 
           while (true) {
@@ -467,16 +490,39 @@ export const useBattleEngine = () => {
             const chunk = decoder.decode(value, { stream: true });
             accumulatedText += chunk;
 
-            const sliceToCheck = getIncrementalCheckSlice(accumulatedText);
-            if (
-              await checkSensitivePayload(sliceToCheck, {
-                source: 'output',
-                origin: 'battle-stream',
-                reason: '使用危险符文',
-                backupItems: streamBackupItems,
-                onRedirect: redirectToArrested,
-              })
-            ) {
+            const { slice: sliceToCheck, startIndex: sliceStartIndex } = getIncrementalCheckSlice(accumulatedText);
+            const sensitiveCheck = await quickCheck(sliceToCheck);
+            if (sensitiveCheck.hasSensitiveWords) {
+              if (streamBackupItems.length > 0) {
+                persistArrestedBackup({
+                  triggerSource: 'output',
+                  origin: 'battle-stream',
+                  reason: '使用危险符文',
+                  items: streamBackupItems,
+                });
+              }
+
+              const firstMatch = sensitiveCheck.matchDetails.reduce<null | { startIndex: number }>((picked, item) => {
+                if (!picked) return { startIndex: item.startIndex };
+                return item.startIndex < picked.startIndex ? { startIndex: item.startIndex } : picked;
+              }, null);
+
+              const fallbackMatchIndex = (() => {
+                const candidates = sensitiveCheck.detectedWords
+                  .filter((word) => typeof word === 'string' && word.trim() && !word.includes('变体'))
+                  .map((word) => sliceToCheck.indexOf(word))
+                  .filter((index) => index >= 0);
+                return candidates.length > 0 ? Math.min(...candidates) : 0;
+              })();
+
+              const cutStartInSlice = firstMatch?.startIndex ?? fallbackMatchIndex;
+
+              const cutIndex = Math.max(0, Math.min(accumulatedText.length, sliceStartIndex + cutStartInSlice));
+              accumulatedText = accumulatedText.slice(0, cutIndex);
+              accumulatedText += buildStreamSensitiveArrestWarrantMarkdown('使用危险符文');
+
+              setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+
               shouldAbort = true;
               await reader.cancel().catch(() => undefined);
               break;
@@ -491,7 +537,6 @@ export const useBattleEngine = () => {
 
           if (shouldAbort) {
             setNewsReport(null);
-            setStreamingMarkdown(null);
             return;
           }
 
