@@ -296,6 +296,25 @@ export async function getPvpEligibleDataCard(cardId: string, requestUserId: numb
   }
 }
 
+export async function clearPvpRoomMatchState(roomId: string): Promise<boolean> {
+  try {
+    // 注意：pvp_round_choices 没有 room_id，需要通过 rounds 关联删除
+    await queryFromD1(
+      `DELETE FROM pvp_round_choices WHERE round_id IN (SELECT id FROM pvp_rounds WHERE room_id = ?)`,
+      [roomId]
+    );
+    await queryFromD1('DELETE FROM pvp_rounds WHERE room_id = ?', [roomId]);
+    await queryFromD1('DELETE FROM pvp_room_hands WHERE room_id = ?', [roomId]);
+    await queryFromD1('DELETE FROM pvp_room_submissions WHERE room_id = ?', [roomId]);
+    await queryFromD1('DELETE FROM pvp_room_card_snapshots WHERE room_id = ?', [roomId]);
+
+    return true;
+  } catch (error) {
+    console.error('清理 PVP 对局状态失败:', error);
+    return false;
+  }
+}
+
 export async function upsertPvpRoomHand(roomId: string, userId: number, handJson: string): Promise<boolean> {
   try {
     const now = new Date().toISOString();

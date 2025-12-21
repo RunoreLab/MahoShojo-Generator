@@ -74,6 +74,7 @@ export {
   upsertPvpRoomSubmission,
   getPvpRoomSubmissions,
   getPvpEligibleDataCard,
+  clearPvpRoomMatchState,
   upsertPvpRoomHand,
   getPvpRoomHands,
   createPvpCardSnapshot,

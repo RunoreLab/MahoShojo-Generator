@@ -64,5 +64,27 @@ export default async function handler(req: Request): Promise<Response> {
   const ok = await upsertPvpRoundChoice(roundId, auth.user.id, JSON.stringify(choice));
   if (!ok) return json({ error: '提交选择失败' }, { status: 500 });
 
-  return json({ success: true });
+  // 自动结算：双方都已选则直接触发 resolve（幂等，多请求并发也安全）
+  try {
+    const players = await getPvpRoomPlayers(roomId);
+    if (players.length === 2) {
+      const origin = new URL(req.url).origin;
+      const resolveRes = await fetch(new URL(`/api/pvp/rooms/${roomId}/rounds/${roundId}/resolve`, origin).toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(req.headers.get('authorization') ? { Authorization: req.headers.get('authorization') as string } : {}),
+        },
+        body: JSON.stringify({ expectedVersion }),
+      });
+      if (resolveRes.ok) {
+        const resolved = await resolveRes.json().catch(() => null);
+        return json({ success: true, resolved });
+      }
+    }
+  } catch {
+    // 自动结算失败不影响出牌成功，交由房主/玩家手动点结算或等待轮询触发
+  }
+
+  return json({ success: true, readyToResolve: true });
 }

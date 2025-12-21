@@ -74,11 +74,13 @@ PVP 可用卡必须满足：
 - `pages/api/pvp/rooms/[roomId]/join.ts:1` 加入房间（`expectedVersion` 可不传）
 - `pages/api/pvp/rooms/[roomId]/password.ts:1` 房主设/清口令
 - `pages/api/pvp/rooms/[roomId]/leave.ts:1` 离开房间
+- `pages/api/pvp/rooms/[roomId]/restart.ts:1` 房主重开（清理对局数据）
+- `pages/api/pvp/rooms/[roomId]/kick.ts:1` 房主踢人
 - `pages/api/pvp/rooms/[roomId]/submit.ts:1` 提交卡组
 - `pages/api/pvp/rooms/[roomId]/start.ts:1` 房主发牌并创建首轮
 - `pages/api/pvp/rooms/[roomId]/index.ts:1` 拉取房间状态（按身份过滤手牌）
 - `pages/api/pvp/rooms/[roomId]/rounds/[roundId]/choose.ts:1` 出牌
-- `pages/api/pvp/rooms/[roomId]/rounds/[roundId]/resolve.ts:1` 房主结算（生成战报）
+- `pages/api/pvp/rooms/[roomId]/rounds/[roundId]/resolve.ts:1` 任一玩家可结算（生成战报，幂等）
 
 > 备注：Pages Router 的 Edge API 动态路由未稳定提供 `params`，所以使用 `lib/pvp/route.ts` 从 `req.url` 解析 `roomId/roundId`。
 
@@ -104,4 +106,3 @@ PVP 可用卡必须满足：
 - 暂未做“重开一局/清空房间”的管理按钮
 - `pvp_rounds.battle_generation_id` 暂未串联（`/api/generate-battle-story` 当前响应不返回 generationId）
 - 目前 UI 的“卡选择器”是最小可用版本（列表 + 选择），后续可复用现有卡牌组件做更美观的卡片式选择
-
