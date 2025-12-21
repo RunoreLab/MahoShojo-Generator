@@ -9,6 +9,7 @@ import {
   getPvpRoomHands,
   getPvpRoomPlayers,
   getPvpRoomSubmissions,
+  updatePvpMatch,
   updatePvpRoomCas,
   upsertPvpRoomHand,
 } from '@/lib/d1';
@@ -92,6 +93,12 @@ export default async function handler(req: Request): Promise<Response> {
     if (sub.cards.length !== rules.cardsPerPlayer) return json({ error: '提交数量与房间规则不一致，请重新提交' }, { status: 409 });
   }
 
+  // 防御：若 submitting 阶段仍存在手牌，说明上一次对局清理不完整
+  const existingHandsBeforeStart = await getPvpRoomHands(roomId);
+  if (existingHandsBeforeStart.length > 0) {
+    return json({ error: '检测到残留手牌数据，请房主先重开房间再开始', code: 'RUNTIME_STATE_DIRTY' }, { status: 409 });
+  }
+
   const matchId = generateUUID();
   const matchStartedAt = new Date().toISOString();
 
@@ -103,6 +110,34 @@ export default async function handler(req: Request): Promise<Response> {
   if (!casToDealing) return json({ error: '开始失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
   const dealingVersion = expectedVersion + 1;
 
+  const abortAndRollback = async (reason: string, extra?: Record<string, unknown>): Promise<boolean> => {
+    const now = new Date().toISOString();
+
+    // best-effort：标记对战为 aborted（若对战记录尚未创建则该更新会失败，但不影响回滚）
+    await updatePvpMatch(matchId, {
+      status: 'aborted',
+      endedAt: now,
+      winnerUserId: null,
+      resultJson: JSON.stringify({ reason, ...(extra ?? {}) }),
+    });
+
+    const patch = {
+      phase: 'submitting' as const,
+      current_match_id: null,
+      last_activity_at: now,
+    };
+
+    const ok = await updatePvpRoomCas(roomId, dealingVersion, patch);
+    if (ok) return true;
+
+    // 回滚 CAS 失败时，尝试刷新版本并在“仍处于 dealing 且 matchId 未变”的条件下再试一次
+    const refreshed = await getPvpRoomById(roomId);
+    if (!refreshed) return false;
+    if (refreshed.phase !== 'dealing') return false;
+    if (refreshed.current_match_id !== matchId) return false;
+    return await updatePvpRoomCas(roomId, refreshed.version, patch);
+  };
+
   const matchOk = await createPvpMatch({
     id: matchId,
     roomId,
@@ -111,11 +146,10 @@ export default async function handler(req: Request): Promise<Response> {
     startedAt: matchStartedAt,
   });
   if (!matchOk) {
-    await updatePvpRoomCas(roomId, dealingVersion, {
-      phase: 'submitting',
-      current_match_id: null,
-      last_activity_at: new Date().toISOString(),
-    });
+    const rolledBack = await abortAndRollback('match-create-failed');
+    if (!rolledBack) {
+      return json({ error: '创建对战记录失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+    }
     return json({ error: '创建对战记录失败' }, { status: 500 });
   }
 
@@ -130,19 +164,11 @@ export default async function handler(req: Request): Promise<Response> {
     }))
   );
   if (!matchPlayersOk) {
-    await updatePvpRoomCas(roomId, dealingVersion, {
-      phase: 'submitting',
-      current_match_id: null,
-      last_activity_at: new Date().toISOString(),
-    });
+    const rolledBack = await abortAndRollback('match-players-create-failed');
+    if (!rolledBack) {
+      return json({ error: '创建对战参与者快照失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+    }
     return json({ error: '创建对战参与者快照失败' }, { status: 500 });
-  }
-
-  // 若已经存在手牌（例如房主重复点），直接进入 choosing
-  const existingHands = await getPvpRoomHands(roomId);
-  if (existingHands.length >= rules.participants) {
-    await updatePvpRoomCas(roomId, dealingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
-    return json({ success: true, alreadyDealt: true });
   }
 
   // 合并提交卡，按规则去重
@@ -170,8 +196,12 @@ export default async function handler(req: Request): Promise<Response> {
 
   const needed = rules.participants * rules.dealPerPlayer;
   if (deckCards.length <= needed) {
-    await updatePvpRoomCas(roomId, dealingVersion, { phase: 'submitting', last_activity_at: new Date().toISOString() });
-    return json({ error: `卡池不足以保持手牌隐藏：需要 > ${needed} 张，实际 ${deckCards.length} 张`, code: 'DECK_TOO_SMALL' }, { status: 409 });
+    const rolledBack = await abortAndRollback('deck-too-small', { needed, actual: deckCards.length });
+    const error = `卡池不足以保持手牌隐藏：需要 > ${needed} 张，实际 ${deckCards.length} 张`;
+    if (!rolledBack) {
+      return json({ error: `${error}（且回滚失败，请房主点击“重开房间”恢复）`, code: 'ROLLBACK_FAILED' }, { status: 409 });
+    }
+    return json({ error, code: 'DECK_TOO_SMALL' }, { status: 409 });
   }
 
   // 再校验 data_card 版本与可用性，并生成快照
@@ -180,12 +210,18 @@ export default async function handler(req: Request): Promise<Response> {
     if (card.ref.kind === 'data_card') {
       const latest = await getPvpEligibleDataCard(card.ref.id, ownerUserId);
       if (!latest) {
-        await updatePvpRoomCas(roomId, dealingVersion, { phase: 'submitting', last_activity_at: new Date().toISOString() });
+        const rolledBack = await abortAndRollback('card-not-eligible', { cardId: card.ref.id });
+        if (!rolledBack) {
+          return json({ error: '存在不可用的数据卡，请重新提交（且回滚失败，请房主点击“重开房间”恢复）', code: 'ROLLBACK_FAILED' }, { status: 409 });
+        }
         return json({ error: '存在不可用的数据卡，请重新提交', code: 'CARD_NOT_ELIGIBLE' }, { status: 409 });
       }
       const currentUpdatedAt = typeof latest.updated_at === 'string' ? latest.updated_at : null;
       if (card.ref.updatedAt && currentUpdatedAt && card.ref.updatedAt !== currentUpdatedAt) {
-        await updatePvpRoomCas(roomId, dealingVersion, { phase: 'submitting', last_activity_at: new Date().toISOString() });
+        const rolledBack = await abortAndRollback('card-version-mismatch', { cardId: card.ref.id });
+        if (!rolledBack) {
+          return json({ error: '数据卡版本已变更，请重新提交（且回滚失败，请房主点击“重开房间”恢复）', code: 'ROLLBACK_FAILED' }, { status: 409 });
+        }
         return json({ error: '数据卡版本已变更，请重新提交', code: 'CARD_VERSION_MISMATCH', cardId: card.ref.id }, { status: 409 });
       }
     }
@@ -200,7 +236,10 @@ export default async function handler(req: Request): Promise<Response> {
       sourceUpdatedAt: card.ref.kind === 'data_card' ? card.ref.updatedAt : null,
     });
     if (!snapshotId) {
-      await updatePvpRoomCas(roomId, dealingVersion, { phase: 'submitting', last_activity_at: new Date().toISOString() });
+      const rolledBack = await abortAndRollback('snapshot-create-failed');
+      if (!rolledBack) {
+        return json({ error: '生成快照失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+      }
       return json({ error: '生成快照失败' }, { status: 500 });
     }
     snapshotDeck.push({ kind: 'snapshot', id: snapshotId });
@@ -213,7 +252,10 @@ export default async function handler(req: Request): Promise<Response> {
     allowDrawPile: false,
   });
   if ('error' in dealt) {
-    await updatePvpRoomCas(roomId, dealingVersion, { phase: 'submitting', last_activity_at: new Date().toISOString() });
+    const rolledBack = await abortAndRollback('deal-failed', { message: dealt.error });
+    if (!rolledBack) {
+      return json({ error: `${dealt.error}（且回滚失败，请房主点击“重开房间”恢复）`, code: 'ROLLBACK_FAILED' }, { status: 409 });
+    }
     return json({ error: dealt.error, code: 'DEAL_FAILED' }, { status: 409 });
   }
 
@@ -224,7 +266,10 @@ export default async function handler(req: Request): Promise<Response> {
     const hand = dealt.hands[i]!;
     const ok = await upsertPvpRoomHand(roomId, player.user_id, JSON.stringify(hand));
     if (!ok) {
-      await updatePvpRoomCas(roomId, dealingVersion, { phase: 'submitting', last_activity_at: new Date().toISOString() });
+      const rolledBack = await abortAndRollback('hand-write-failed', { userId: player.user_id });
+      if (!rolledBack) {
+        return json({ error: '写入手牌失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+      }
       return json({ error: '写入手牌失败' }, { status: 500 });
     }
   }
@@ -244,7 +289,10 @@ export default async function handler(req: Request): Promise<Response> {
     }),
   });
   if (!roundId) {
-    await updatePvpRoomCas(roomId, dealingVersion, { phase: 'submitting', last_activity_at: new Date().toISOString() });
+    const rolledBack = await abortAndRollback('round-create-failed');
+    if (!rolledBack) {
+      return json({ error: '创建回合失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+    }
     return json({ error: '创建回合失败' }, { status: 500 });
   }
 
