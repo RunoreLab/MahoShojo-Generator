@@ -12,6 +12,8 @@ import {
   updatePvpRound,
   upsertPvpRoomHand,
 } from '@/lib/d1';
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
@@ -19,7 +21,7 @@ import type { PvpHandState, PvpRoomRules, PvpSnapshotRef } from '@/lib/pvp/types
 
 export const runtime = 'edge';
 
-type ResolveBody = { expectedVersion?: number };
+type ResolveBody = { expectedVersion?: number; customProvider?: unknown };
 
 const parseRules = (rulesJson: string): PvpRoomRules | null => {
   try {
@@ -63,6 +65,26 @@ export default async function handler(req: Request): Promise<Response> {
 
   const body = await readJson<ResolveBody>(req);
   if ('response' in body) return body.response;
+
+  const rawCustomProvider = (body.data as ResolveBody).customProvider;
+  let customProvider: { providerId: string; modelId: string; apiKey: string } | null = null;
+  if (rawCustomProvider !== undefined) {
+    const parsed = CustomProviderSchema.safeParse(rawCustomProvider);
+    if (!parsed.success) return json({ error: '自定义 AI 供应商配置无效' }, { status: 400 });
+
+    const providerConfig = AI_PROVIDER_CATALOG.find((item) => item.id === parsed.data.providerId);
+    if (!providerConfig) return json({ error: '未知的模型供应商 ID' }, { status: 400 });
+    const modelConfig = providerConfig.models.find((model) => model.value === parsed.data.modelId);
+    if (!modelConfig) return json({ error: '未知的模型 ID' }, { status: 400 });
+
+    const apiKey = parsed.data.apiKey.trim();
+    if (providerConfig.id !== 'system' && !apiKey) return json({ error: 'API Key 不能为空' }, { status: 400 });
+
+    // 与竞技场保持一致：系统默认策略（modelId=default）不需要透传到生成接口
+    if (!(providerConfig.id === 'system' && parsed.data.modelId === 'default')) {
+      customProvider = { ...parsed.data, apiKey };
+    }
+  }
 
   const roomId = getRoomIdFromRequestUrl(req.url);
   const roundId = getRoundIdFromRequestUrl(req.url);
@@ -197,6 +219,7 @@ export default async function handler(req: Request): Promise<Response> {
           readCurrentState: false,
           writeCurrentState: false,
           useArenaHistory: false,
+          ...(customProvider ? { customProvider } : {}),
           pvpContext: {
             roomId,
             matchId,

@@ -5,10 +5,13 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
+import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import BattleReportCard from '@/components/BattleReportCard';
 import Footer from '@/components/Footer';
 import { authStorage } from '@/lib/auth';
+import { useCooldown } from '@/lib/cooldown';
 import { useAuth } from '@/lib/useAuth';
+import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import type { PvpRoomRules } from '@/lib/pvp/types';
 
 import { useMyCharacterCardsQuery, usePresetsQuery, usePublicCharacterCardsQuery } from './hooks/usePvpCatalog';
@@ -28,6 +31,8 @@ export function PvpRoomPage() {
   const router = useRouter();
   const { user, isAuthenticated, loading } = useAuth();
   const roomId = typeof router.query.roomId === 'string' ? router.query.roomId : '';
+
+  const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
   const [joinPassword, setJoinPassword] = useState('');
   const [joined, setJoined] = useState(false);
@@ -109,6 +114,11 @@ export function PvpRoomPage() {
   const version: number = room?.version ?? 0;
   const players = useMemo(() => (Array.isArray(roomQuery.data?.players) ? roomQuery.data.players : []), [roomQuery.data?.players]);
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
+
+  const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
+  const battleCooldownMs = isUserCustomKey ? 3000 : 120000;
+  const battleCooldownStorageKey = isUserCustomKey ? 'pvp.generateBattleCooldown:custom' : 'pvp.generateBattleCooldown:system';
+  const { isCooldown, startCooldown, remainingTime } = useCooldown(battleCooldownStorageKey, battleCooldownMs);
 
   const playerLabelById = useMemo(() => {
     const map = new Map<number, string>();
@@ -219,20 +229,28 @@ export function PvpRoomPage() {
   });
 
   const resolveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (payload?: { customProvider?: UserAIProviderConfig | null }) => {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
       const authHeader = await authStorage.getAuthHeader();
       if (!authHeader) throw new Error('未登录');
+
+      const customProvider = buildCustomProviderPayload(payload?.customProvider ?? null);
       const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ expectedVersion: version }),
+        body: JSON.stringify({
+          expectedVersion: version,
+          ...(customProvider ? { customProvider } : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || '结算失败');
       return data;
     },
-    onSuccess: () => void roomQuery.refetch(),
+    onSuccess: () => {
+      startCooldown();
+      void roomQuery.refetch();
+    },
     onError: (e) => setError(e instanceof Error ? e.message : '结算失败'),
   });
 
@@ -269,6 +287,22 @@ export function PvpRoomPage() {
     onSuccess: () => void roomQuery.refetch(),
     onError: (e) => setError(e instanceof Error ? e.message : '重开失败'),
   });
+
+  const isCustomProviderMissingKey = Boolean(
+    userProviderConfig?.providerId && userProviderConfig.providerId !== 'system' && !userProviderConfig.apiKey?.trim()
+  );
+
+  const handleResolve = () => {
+    if (isCooldown) {
+      setError(`冷却中，请等待 ${remainingTime} 秒后再生成战报。`);
+      return;
+    }
+    if (isCustomProviderMissingKey) {
+      setError('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
+      return;
+    }
+    resolveMutation.mutate({ customProvider: userProviderConfig });
+  };
 
   const kickMutation = useMutation({
     mutationFn: async (targetUserId: number) => {
@@ -588,14 +622,34 @@ export function PvpRoomPage() {
                         choices?.hasChosenMe &&
                         (choices?.chosenCount ?? 0) >= (choices?.totalPlayers ?? players.length)
                       ) && (
-                        <button
-                          className="generate-button mt-3 w-full"
-                          style={{ backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #d97706)' }}
-                          onClick={() => resolveMutation.mutate()}
-                          disabled={resolveMutation.isPending}
-                        >
-                          {resolveMutation.isPending ? '结算中…' : '结算（生成战报）'}
-                        </button>
+                        <>
+                          <details className="mt-3 rounded-md bg-white border">
+                            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">AI 设置（可选）</summary>
+                            <div className="px-3 pb-3">
+                              <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                              <div className="mt-2 text-xs text-gray-600">
+                                使用自带 API Key：冷却 3 秒；使用系统默认：冷却 120 秒。
+                                {isCooldown ? `（剩余 ${remainingTime} 秒）` : ''}
+                              </div>
+                              {isCustomProviderMissingKey && (
+                                <div className="mt-2 text-xs text-red-600">已选择自定义供应商但 API Key 为空，请补齐或切回系统默认。</div>
+                              )}
+                            </div>
+                          </details>
+
+                          <button
+                            className="generate-button mt-3 w-full"
+                            style={{ backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #d97706)' }}
+                            onClick={handleResolve}
+                            disabled={resolveMutation.isPending || isCooldown || isCustomProviderMissingKey}
+                          >
+                            {resolveMutation.isPending
+                              ? '结算中…'
+                              : isCooldown
+                                ? `冷却中（${remainingTime}s）`
+                                : '结算（生成战报）'}
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
