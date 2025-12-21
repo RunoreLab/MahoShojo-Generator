@@ -1,49 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { snapdom } from '@zumer/snapdom';
-import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState, CurrentStateField } from '@/types/arena';
+import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { GeneralCharacterData } from '@/lib/schemas/general-character';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
-
-const formatCurrentStateValue = (field: CurrentStateField) => {
-  if (field.type === 'boolean') {
-    return field.value ? '是' : '否';
-  }
-  if (field.type === 'number') {
-    return typeof field.value === 'number' ? field.value : Number(field.value) || 0;
-  }
-  return String(field.value ?? '');
-};
-
-const renderCurrentStatePanel = (state?: CharacterCurrentState | null) => {
-  if (!state) return null;
-  const hasSummary = Boolean(state.summary && state.summary.trim());
-  const fields = Array.isArray(state.fields) ? state.fields : [];
-  const hasFields = fields.length > 0;
-  if (!hasSummary && !hasFields) return null;
-
-  return (
-    <div className="result-item">
-      <div className="result-label">🧭 当前状态</div>
-      <div className="result-value text-sm space-y-2">
-        {hasSummary && <p className="leading-relaxed">{state.summary}</p>}
-        {hasFields && (
-          <ul className="text-xs space-y-1">
-            {fields.map(field => (
-              <li key={field.id} className="flex justify-between gap-2">
-                <span className="font-semibold text-gray-700">{field.label}</span>
-                <span className="text-gray-900">{formatCurrentStateValue(field)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {state.updated_at && (
-          <p className="text-[10px] text-gray-400">最近更新：{new Date(state.updated_at).toLocaleString()}</p>
-        )}
-      </div>
-    </div>
-  );
-};
+import { CurrentStatePanel } from '@/components/CurrentStatePanel';
+import { MarkdownBlock } from '@/components/MarkdownBlock';
 
 export interface GeneralCharacterDetails extends GeneralCharacterData {
   arena_history?: ArenaHistory | null;
@@ -210,7 +172,9 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
                 <p className="text-gray-200">
                   <strong>类型:</strong> {entry.type} | <strong>胜者:</strong> {entry.winner || '未知'}
                 </p>
-                <p className="text-gray-100 leading-relaxed" style={{ whiteSpace: 'pre-wrap' }}>{entry.impact || '暂无影响描述'}</p>
+                <div className="mt-1 text-gray-100 leading-relaxed">
+                  <MarkdownBlock content={entry.impact || '暂无影响描述'} variant="dark" />
+                </div>
               </div>
             ))}
           </div>
@@ -278,7 +242,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
           </div>
         </div>
 
-        {renderCurrentStatePanel(general?.current_state)}
+        <CurrentStatePanel state={general?.current_state} variant="dark" />
 
         {renderHistory()}
 

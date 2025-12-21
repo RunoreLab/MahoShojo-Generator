@@ -1,7 +1,9 @@
 // components/CanshouCard.tsx
 import React, { useRef, useState } from 'react';
 import { snapdom } from '@zumer/snapdom';
-import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState, CurrentStateField } from '@/types/arena';
+import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
+import { CurrentStatePanel } from '@/components/CurrentStatePanel';
+import { MarkdownBlock } from '@/components/MarkdownBlock';
 
 export interface CanshouDetails {
   name: string;
@@ -19,46 +21,6 @@ export interface CanshouDetails {
   arena_history?: ArenaHistory;
   current_state?: CharacterCurrentState | null;
 }
-
-const formatCurrentStateValue = (field: CurrentStateField) => {
-  if (field.type === 'boolean') {
-    return field.value ? '是' : '否';
-  }
-  if (field.type === 'number') {
-    return typeof field.value === 'number' ? field.value : Number(field.value) || 0;
-  }
-  return String(field.value ?? '');
-};
-
-const renderCurrentStatePanel = (state?: CharacterCurrentState | null) => {
-  if (!state) return null;
-  const hasSummary = Boolean(state.summary && state.summary.trim());
-  const fields = Array.isArray(state.fields) ? state.fields : [];
-  const hasFields = fields.length > 0;
-  if (!hasSummary && !hasFields) return null;
-
-  return (
-    <div className="result-item">
-      <div className="result-label">🧭 当前状态</div>
-      <div className="result-value text-sm space-y-2">
-        {hasSummary && <p className="leading-relaxed">{state.summary}</p>}
-        {hasFields && (
-          <ul className="text-xs space-y-1">
-            {fields.map(field => (
-              <li key={field.id} className="flex justify-between gap-2">
-                <span className="font-semibold text-gray-700">{field.label}</span>
-                <span className="text-gray-900">{formatCurrentStateValue(field)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {state.updated_at && (
-          <p className="text-[10px] text-gray-400">最近更新：{new Date(state.updated_at).toLocaleString()}</p>
-        )}
-      </div>
-    </div>
-  );
-};
 
 interface CanshouCardProps {
   canshou: CanshouDetails;
@@ -147,62 +109,84 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
         </div>
 
         <div className="flex">
-          <div className="result-item w-full mr-4">
-            <div className="result-label">核心概念</div>
-            <div className="result-value">{canshou.coreConcept}</div>
-          </div>
-          <div className="result-item w-full">
-            <div className="result-label">核心情感/欲望</div>
-            <div className="result-value">{canshou.coreEmotion}</div>
+        <div className="result-item w-full mr-4">
+          <div className="result-label">核心概念</div>
+          <div className="result-value text-sm">
+            <MarkdownBlock content={canshou.coreConcept} variant="dark" />
           </div>
         </div>
-
-        <div className="result-item">
-          <div className="result-label">进化阶段</div>
-          <div className="result-value">{canshou.evolutionStage}</div>
+        <div className="result-item w-full">
+          <div className="result-label">核心情感/欲望</div>
+          <div className="result-value text-sm">
+            <MarkdownBlock content={canshou.coreEmotion} variant="dark" />
+          </div>
         </div>
+      </div>
 
-        <div className="result-item">
-          <div className="result-label">外貌描述</div>
-          <div className="result-value text-sm">{canshou.appearance}</div>
+      <div className="result-item">
+        <div className="result-label">进化阶段</div>
+        <div className="result-value text-sm">
+          <MarkdownBlock content={canshou.evolutionStage} variant="dark" />
         </div>
+      </div>
 
-        <div className="result-item">
-          <div className="result-label">材质/表皮</div>
-          <div className="result-value text-sm">{canshou.materialAndSkin}</div>
+      <div className="result-item">
+        <div className="result-label">外貌描述</div>
+        <div className="result-value text-sm">
+          <MarkdownBlock content={canshou.appearance} variant="dark" />
         </div>
+      </div>
 
-        <div className="result-item">
-          <div className="result-label">特征/附属物</div>
-          <div className="result-value text-sm">{canshou.featuresAndAppendages}</div>
+      <div className="result-item">
+        <div className="result-label">材质/表皮</div>
+        <div className="result-value text-sm">
+          <MarkdownBlock content={canshou.materialAndSkin} variant="dark" />
         </div>
+      </div>
 
-        <div className="result-item">
-          <div className="result-label">攻击方式</div>
-          <div className="result-value text-sm">{canshou.attackMethod}</div>
+      <div className="result-item">
+        <div className="result-label">特征/附属物</div>
+        <div className="result-value text-sm">
+          <MarkdownBlock content={canshou.featuresAndAppendages} variant="dark" />
         </div>
+      </div>
 
-        <div className="result-item">
-          <div className="result-label">特殊能力</div>
-          <div className="result-value text-sm">{canshou.specialAbility}</div>
+      <div className="result-item">
+        <div className="result-label">攻击方式</div>
+        <div className="result-value text-sm">
+          <MarkdownBlock content={canshou.attackMethod} variant="dark" />
         </div>
+      </div>
 
-        <div className="result-item">
-          <div className="result-label">起源</div>
-          <div className="result-value text-sm">{canshou.origin}</div>
+      <div className="result-item">
+        <div className="result-label">特殊能力</div>
+        <div className="result-value text-sm">
+          <MarkdownBlock content={canshou.specialAbility} variant="dark" />
         </div>
+      </div>
 
-        <div className="result-item">
-          <div className="result-label">诞生环境</div>
-          <div className="result-value text-sm">{canshou.birthEnvironment}</div>
+      <div className="result-item">
+        <div className="result-label">起源</div>
+        <div className="result-value text-sm">
+          <MarkdownBlock content={canshou.origin} variant="dark" />
         </div>
+      </div>
 
-        <div className="result-item border-l-4 border-red-400">
-          <div className="result-label">研究员笔记</div>
-          <div className="result-value text-sm italic">{canshou.researcherNotes}</div>
+      <div className="result-item">
+        <div className="result-label">诞生环境</div>
+        <div className="result-value text-sm">
+          <MarkdownBlock content={canshou.birthEnvironment} variant="dark" />
         </div>
+      </div>
+
+      <div className="result-item border-l-4 border-red-400">
+        <div className="result-label">研究员笔记</div>
+        <div className="result-value text-sm italic">
+          <MarkdownBlock content={canshou.researcherNotes} variant="dark" />
+        </div>
+      </div>
         
-        {renderCurrentStatePanel(canshou.current_state)}
+        <CurrentStatePanel state={canshou.current_state} variant="dark" />
 
         {/*
           【修复】对历战记录进行健壮性检查。
@@ -220,7 +204,10 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
                   <div key={entry.id} className="p-2 bg-black bg-opacity-10 rounded">
                     <p><strong>{entry.title}</strong></p>
                     <p><strong>类型:</strong> {entry.type} | <strong>胜利者:</strong> {entry.winner}</p>
-                    <p><strong>影响:</strong> {entry.impact}</p>
+                    <div className="mt-1">
+                      <p className="font-semibold">影响:</p>
+                      <MarkdownBlock content={entry.impact || '暂无影响描述'} variant="dark" />
+                    </div>
                   </div>
                 ))}
               </div>
