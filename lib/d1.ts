@@ -63,6 +63,37 @@ export {
   getRecentBattles
 } from './database/arena';
 
+// 重新导出 PVP 相关功能
+export {
+  createPvpRoom,
+  getPvpRoomById,
+  getPvpRoomPlayers,
+  addPvpRoomPlayer,
+  removePvpRoomPlayer,
+  updatePvpRoomCas,
+  upsertPvpRoomSubmission,
+  getPvpRoomSubmissions,
+  getPvpEligibleDataCard,
+  upsertPvpRoomHand,
+  getPvpRoomHands,
+  createPvpCardSnapshot,
+  getPvpCardSnapshots,
+  createPvpRound,
+  getPvpRoundById,
+  getLatestPvpRoundByRoom,
+  getPvpRoundsByRoom,
+  updatePvpRound,
+  upsertPvpRoundChoice,
+  getPvpRoundChoices,
+  getPvpCardSnapshotById,
+  type PvpRoomPhase,
+  type PvpRoomStatus,
+  type PvpRoundStatus,
+  type PvpRoomRow,
+  type PvpRoomPlayerRow,
+  type PvpRoundRow,
+} from './database/pvp';
+
 // 重新导出战报生成记录相关功能
 export {
   createBattleReportGenerationRecord,
