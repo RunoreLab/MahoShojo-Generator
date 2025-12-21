@@ -3,7 +3,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
 import { loadPresetCard } from '@/lib/pvp/preset';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
-import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpDataCardRef, PvpPresetRef, PvpRoomRules, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
@@ -22,7 +22,7 @@ type SubmitBody = {
   acceptPrivateDisclosure?: boolean;
 };
 
-export default async function handler(req: Request): Promise<Response> {
+async function submitHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -102,7 +102,19 @@ export default async function handler(req: Request): Promise<Response> {
     if (rawRef.kind === 'preset') {
       const filename = typeof rawRef.filename === 'string' ? rawRef.filename.trim() : '';
       if (!filename) return json({ error: 'preset.filename 不能为空' }, { status: 400 });
-      const preset = await loadPresetCard(origin, filename);
+      let preset: Awaited<ReturnType<typeof loadPresetCard>>;
+      try {
+        preset = await loadPresetCard(origin, filename);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '无法读取预设卡';
+        const statusMatch = message.match(/HTTP\s+(\d{3})/i);
+        const statusFromMessage = statusMatch ? Number(statusMatch[1]) : null;
+        const status =
+          typeof statusFromMessage === 'number' && Number.isFinite(statusFromMessage) && statusFromMessage >= 400 && statusFromMessage < 500
+            ? statusFromMessage
+            : 500;
+        return json({ error: message, code: 'PRESET_LOAD_FAILED' }, { status });
+      }
       submittedCards.push({
         ref: { kind: 'preset', filename } satisfies PvpPresetRef,
         name: preset.name,
@@ -144,3 +156,5 @@ export default async function handler(req: Request): Promise<Response> {
 
   return json({ success: true, submitted: true, nextVersion: expectedVersion + 1 });
 }
+
+export default withPvpErrorBoundary(submitHandler);

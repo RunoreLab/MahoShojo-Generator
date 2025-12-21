@@ -1,12 +1,12 @@
 import { createPvpRoom } from '@/lib/d1';
 import { PVP_ROOM_TTL_MS } from '@/lib/pvp/constants';
 import { generateSaltHex, hashJoinCode } from '@/lib/pvp/crypto';
-import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { parsePvpRules } from '@/lib/pvp/validate';
 
 export const runtime = 'edge';
 
-export default async function handler(req: Request): Promise<Response> {
+async function roomsHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, { status: 405 });
   }
@@ -37,4 +37,6 @@ export default async function handler(req: Request): Promise<Response> {
 
   return json({ success: true, roomId: room.roomId });
 }
+
+export default withPvpErrorBoundary(roomsHandler);
 

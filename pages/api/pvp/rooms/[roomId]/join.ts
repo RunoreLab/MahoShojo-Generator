@@ -1,7 +1,7 @@
 import { addPvpRoomPlayer, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
 import { constantTimeEqual, hashJoinCode } from '@/lib/pvp/crypto';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
-import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpRoomRules } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
@@ -22,7 +22,7 @@ const pickSeat = (existingSeats: Array<number | null>, maxPlayers: number): numb
   return null;
 };
 
-export default async function handler(req: Request): Promise<Response> {
+async function joinHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -87,3 +87,5 @@ export default async function handler(req: Request): Promise<Response> {
 
   return json({ success: true, advanced: shouldAdvance, casOk });
 }
+
+export default withPvpErrorBoundary(joinHandler);

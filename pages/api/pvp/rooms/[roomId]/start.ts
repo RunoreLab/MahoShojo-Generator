@@ -15,7 +15,7 @@ import {
 } from '@/lib/d1';
 import { dealSnapshots } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
-import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpCardRef, PvpRoomRules, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
@@ -40,7 +40,7 @@ const parseSubmission = (raw: string): PvpSubmissionPayload | null => {
 
 type StartBody = { expectedVersion?: number };
 
-export default async function handler(req: Request): Promise<Response> {
+async function startHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -303,3 +303,5 @@ export default async function handler(req: Request): Promise<Response> {
 
   return json({ success: true, roundId, nextVersion: dealingVersion + 1 });
 }
+
+export default withPvpErrorBoundary(startHandler);
