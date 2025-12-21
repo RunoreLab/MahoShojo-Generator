@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
+import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
 
 describe('precheckBattleReportForRedo', () => {
   it('rejects too-short markdown', () => {
@@ -39,6 +39,16 @@ describe('precheckBattleReportForRedo', () => {
     if (result.ok) {
       expect(result.parsed.headline).toBe('破晓之战');
       expect(result.parsed.winner).toBe('A');
+    }
+  });
+
+  it('rejects truncated markdown with sensitive marker', () => {
+    const longText = '这是一个很长的战报正文。'.repeat(20);
+    const markdown = `# 破晓之战\n\n${longText}\n\n## 胜利者\n- A\n\n<!-- ${STREAM_TRUNCATED_BY_SENSITIVE_MARKER} -->\n`;
+    const result = precheckBattleReportForRedo(markdown, 'classic');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe('战报已因敏感词被截断，无法重做角色更新。');
     }
   });
 });
