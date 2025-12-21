@@ -14,6 +14,23 @@ import { visit } from 'unist-util-visit';
 
 type Align = 'left' | 'right' | 'center' | null;
 
+function getFileSourceText(file: unknown): string | null {
+  if (!file || typeof file !== 'object') return null;
+
+  const value = (file as { value?: unknown }).value;
+  if (typeof value === 'string') return value;
+
+  if (value instanceof Uint8Array) {
+    try {
+      return new TextDecoder().decode(value);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 function splitTableLine(line: string): string[] {
   const trimmed = line.trim();
   const withoutLeading = trimmed.startsWith('|') ? trimmed.slice(1) : trimmed;
@@ -122,17 +139,38 @@ function tryParseTableFromParagraphText(raw: string): Table | null {
 
 function paragraphToPlainText(node: Paragraph): string | null {
   if (node.children.length === 0) return null;
-  if (node.children.some((child) => child.type !== 'text')) return null;
-  return (node.children as Text[]).map((child) => child.value).join('');
+
+  const extract = (child: PhrasingContent): string => {
+    if (child.type === 'text') return (child as Text).value;
+    if (child.type === 'break') return '\n';
+
+    const maybeParent = child as unknown as { children?: unknown };
+    if (Array.isArray(maybeParent.children)) {
+      return (maybeParent.children as PhrasingContent[]).map(extract).join('');
+    }
+
+    return '';
+  };
+
+  const value = node.children.map(extract).join('');
+  return value.trim().length > 0 ? value : null;
 }
 
 const remarkBattleTable: Plugin<[], Root> = () => {
-  return (tree) => {
+  return (tree, file) => {
     visit(tree, 'paragraph', (node, index, parent) => {
       if (!parent || typeof index !== 'number') return;
       if ((parent as Parent).type === 'tableCell') return;
 
-      const text = paragraphToPlainText(node);
+      const source = getFileSourceText(file);
+      const startOffset = node.position?.start?.offset;
+      const endOffset = node.position?.end?.offset;
+      const raw =
+        typeof startOffset === 'number' && typeof endOffset === 'number' && typeof source === 'string'
+          ? source.slice(startOffset, endOffset)
+          : null;
+
+      const text = raw ?? paragraphToPlainText(node);
       if (!text) return;
 
       const table = tryParseTableFromParagraphText(text);
