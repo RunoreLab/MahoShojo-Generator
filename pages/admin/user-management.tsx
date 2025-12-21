@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Save, X, Users, UserCheck, UserX, AlertTriangle } from 'lucide-react';
 import Link from 'next/link'; // 导入 Link 组件
 import { useRouter } from 'next/router';
+import { debounce } from '@/lib/debounce';
 
 interface User {
   id: number;
@@ -34,41 +35,83 @@ export default function UserManagement() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const isComposingRef = useRef(false);
+  const skipNextAutoSearchRef = useRef(false);
+  const lastAutoSearchTermRef = useRef<string>('');
+  const userListAbortControllerRef = useRef<AbortController | null>(null);
 
   // 获取所有用户
-  const fetchUsers = async (page = 1, search = '') => {
+  const fetchUsers = useCallback(async (page = 1, search = '') => {
     setLoading(true);
+    userListAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    userListAbortControllerRef.current = abortController;
     try {
+      const normalizedSearch = search.trim();
       const params = new URLSearchParams({
         page: page.toString(),
         limit: '20',
-        ...(search && { search })
+        ...(normalizedSearch && { search: normalizedSearch })
       });
 
-      const response = await fetch(`/api/admin/users?${params}`);
+      const response = await fetch(`/api/admin/users?${params}`, { signal: abortController.signal });
       if (response.ok) {
         const data = await response.json();
-        setUsers(data.users || []);
-        setTotalPages(data.totalPages || 1);
-        setCurrentPage(data.currentPage || 1);
+        const usersFromApi = (data?.users as User[] | undefined) || [];
+        const limitFromApi = typeof data?.limit === 'number' ? data.limit : 20;
+        const totalFromApi = typeof data?.total === 'number' ? data.total : undefined;
+        const pageFromApi = typeof data?.page === 'number' ? data.page : undefined;
+
+        setUsers(usersFromApi);
+        if (typeof data?.totalPages === 'number') {
+          setTotalPages(data.totalPages || 1);
+        } else if (typeof totalFromApi === 'number') {
+          setTotalPages(Math.max(1, Math.ceil(totalFromApi / Math.max(1, limitFromApi))));
+        } else {
+          setTotalPages(1);
+        }
+        if (typeof data?.currentPage === 'number') {
+          setCurrentPage(data.currentPage || 1);
+        } else if (typeof pageFromApi === 'number') {
+          setCurrentPage(pageFromApi || 1);
+        } else {
+          setCurrentPage(1);
+        }
       } else {
         setMessage({ type: 'error', text: '获取用户列表失败' });
       }
     } catch (error) {
+      if (abortController.signal.aborted) {
+        return;
+      }
       setMessage({ type: 'error', text: '获取用户列表失败: ' + error });
     } finally {
-      setLoading(false);
+      if (!abortController.signal.aborted) {
+        setLoading(false);
+      }
     }
-  };
+  }, []);
 
   // 搜索用户
-  const handleSearch = async (e: React.FormEvent) => {
+  const handleSearch = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isComposingRef.current) return;
+    lastAutoSearchTermRef.current = searchTerm.trim();
     await fetchUsers(1, searchTerm);
-  };
+  }, [fetchUsers, searchTerm]);
+
+  const debouncedAutoSearch = useMemo(
+    () =>
+      debounce((term: string) => {
+        if (lastAutoSearchTermRef.current === term) return;
+        lastAutoSearchTermRef.current = term;
+        fetchUsers(1, term);
+      }, 450),
+    [fetchUsers]
+  );
 
   // 获取单个用户详情
-  const fetchUserDetails = async (username: string) => {
+  const fetchUserDetails = useCallback(async (username: string) => {
     setLoading(true);
     try {
       const response = await fetch(`/api/admin/users?username=${encodeURIComponent(username)}`);
@@ -91,7 +134,7 @@ export default function UserManagement() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
 
   // 保存用户更新
@@ -153,12 +196,14 @@ export default function UserManagement() {
     const search = typeof router.query.search === 'string' ? router.query.search.trim() : '';
 
     if (username) {
+      skipNextAutoSearchRef.current = true;
       setSearchTerm(username);
       fetchUsers(1, username).then(() => fetchUserDetails(username));
       return;
     }
 
     if (search) {
+      skipNextAutoSearchRef.current = true;
       setSearchTerm(search);
       fetchUsers(1, search);
       return;
@@ -167,6 +212,26 @@ export default function UserManagement() {
     fetchUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady]);
+
+  useEffect(() => {
+    if (!router.isReady) return;
+    if (skipNextAutoSearchRef.current) {
+      skipNextAutoSearchRef.current = false;
+      lastAutoSearchTermRef.current = searchTerm.trim();
+      return;
+    }
+    if (isComposingRef.current) return;
+
+    debouncedAutoSearch(searchTerm.trim());
+    return () => debouncedAutoSearch.cancel();
+  }, [debouncedAutoSearch, router.isReady, searchTerm]);
+
+  useEffect(() => {
+    return () => {
+      debouncedAutoSearch.cancel();
+      userListAbortControllerRef.current?.abort();
+    };
+  }, [debouncedAutoSearch]);
 
   useEffect(() => {
     if (message) {
@@ -216,9 +281,25 @@ export default function UserManagement() {
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input
                       type="text"
-                      placeholder="搜索用户名..."
+                      placeholder="搜索用户名（停止输入后自动搜索）..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
+                      onCompositionStart={() => {
+                        isComposingRef.current = true;
+                      }}
+                      onCompositionEnd={() => {
+                        isComposingRef.current = false;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        if ((e.nativeEvent as unknown as { isComposing?: boolean }).isComposing) {
+                          e.preventDefault();
+                          return;
+                        }
+                        if (isComposingRef.current) {
+                          e.preventDefault();
+                        }
+                      }}
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     />
                   </div>
@@ -266,7 +347,7 @@ export default function UserManagement() {
               {totalPages > 1 && (
                 <div className="flex justify-center gap-2 mt-4">
                   <button
-                    onClick={() => fetchUsers(currentPage - 1, searchTerm)}
+                    onClick={() => fetchUsers(currentPage - 1, searchTerm.trim())}
                     disabled={currentPage === 1 || loading}
                     className="px-3 py-1 bg-gray-200 text-gray-700 rounded disabled:opacity-50"
                   >
@@ -276,7 +357,7 @@ export default function UserManagement() {
                     {currentPage} / {totalPages}
                   </span>
                   <button
-                    onClick={() => fetchUsers(currentPage + 1, searchTerm)}
+                    onClick={() => fetchUsers(currentPage + 1, searchTerm.trim())}
                     disabled={currentPage === totalPages || loading}
                     className="px-3 py-1 bg-gray-200 text-gray-700 rounded disabled:opacity-50"
                   >
