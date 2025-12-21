@@ -54,9 +54,11 @@
 基于你当前写入的决策，我建议我们把 MVP 的“确定口径”写死为下面这组（方便后续实现、测试、对外文案一致）：
 - 人数：2 人
 - 卡来源：预设 + 数据库卡（公开库 / 自己私库），不允许 inline 上传
+- 私有卡披露：私有卡一旦提交到房间内，对手可查看**完整 JSON（问卷/能力/设定全量）**；前端需要醒目告知并要求确认
+- 卡可用性：允许使用 `review_status=pending` 的卡；禁止 `review_status=rejected` 的卡；禁止被封禁用户的卡（见第 12 节校验规则）
 - 去重：按（`kind`,`idOrFilename`）去重；`data_card` 额外带 `updatedAt` 做版本校验
-- 对局：默认单局；多局制采用“弃牌制”，并要求手牌数覆盖最大轮数（或启用公共抽牌堆）
-- 结算：winner ∈ {A,B,平局}，不在集合则重试→平局
+- 对局：默认单局；多局制采用“弃牌制”，默认 `mostWinsAfterMaxRounds`
+- 结算：winner ∈ {A,B,平局}，不在集合则纠错重试→平局
 
 ---
 
@@ -163,7 +165,7 @@
 建议补齐字段：
 - `expires_at`：TEXT（ISO），用于懒清理与 UI 倒计时
 - `last_activity_at`：TEXT（ISO），用于活跃判定
-- `join_code`：TEXT（可选，房间口令；避免 roomId 被转发后被陌生人插入）
+- `join_code_hash` / `join_code_salt`：TEXT（可选，房间口令；默认不设置，但房主可按需开启）
 
 #### `pvp_room_players`
 - `room_id`：TEXT
@@ -237,7 +239,8 @@ CREATE TABLE IF NOT EXISTS pvp_rooms (
   status TEXT NOT NULL,            -- open / closed
   phase TEXT NOT NULL,             -- waiting / submitting / dealing / choosing / resolving / finished / aborted / closed
   rules_json TEXT NOT NULL,
-  join_code TEXT,
+  join_code_hash TEXT,
+  join_code_salt TEXT,
   version INTEGER NOT NULL DEFAULT 0,
   expires_at TEXT,
   last_activity_at TEXT,
@@ -342,6 +345,7 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 ### 端点草案
 - `POST /api/pvp/rooms`：创建房间（返回 `roomId`）
 - `POST /api/pvp/rooms/:roomId/join`：加入房间
+- `POST /api/pvp/rooms/:roomId/password`：房主设置/清空房间口令（可选，MVP 可延后）
 - （建议新增）`POST /api/pvp/rooms/:roomId/leave`：离开房间（触发 aborted / 让房主可踢人/重置）
 - `POST /api/pvp/rooms/:roomId/submit`：提交卡组
 - `POST /api/pvp/rooms/:roomId/start`：房主开始（锁定提交 → 发牌 → 进入 choosing）
@@ -420,6 +424,10 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - 即使是私有卡，只要被提交到房间，就会在该房间内对对手可见（至少在该局期间）
 - 前端与 API 需要明确提示用户：提交即视为同意在房间内公开展示该卡
 
+建议 UI 做到“可证明的告知与确认”：
+- 在用户尝试提交私有卡时，弹出确认对话框，明确说明“对手可查看完整 JSON（含问卷/能力/设定全量）”
+- `submit` API 要求显式字段 `acceptPrivateDisclosure=true`（若提交内容包含私有卡），避免纯前端拦截被绕过
+
 ---
 
 ## 11. 里程碑路线图（建议）
@@ -461,6 +469,12 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 ### 12.3 提交卡组
 - 校验：玩家在房间内，`phase=submitting`
 - 校验：每张卡引用有效，且玩家有权选择（自己的私库卡 / 公开卡 / 预设）
+- 校验：卡可用性
+  - `data_cards.deleted_at IS NULL`
+  - `data_cards.review_status != 'rejected'`（允许 `pending`）
+  - 卡作者未被封禁（建议按 `users.is_banned` 判断；如果未来引入“卡级封禁”字段，再升级校验）
+  - 重要：如果数据库存在 `data_card_updates`（待审核新版本），PVP 默认只使用主表 `data_cards.data`，避免“未审核内容在 PVP 中生效”
+- 私有披露：若提交列表中包含私有卡，必须要求用户确认（`acceptPrivateDisclosure=true`）
 - 写入：`pvp_room_submissions`（覆盖式 upsert）
 - UI：展示双方提交列表（允许查看详情）
 
@@ -501,7 +515,12 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 
 ## 13. 我建议你回答的几个问题（决定实现复杂度）
 
-1. 你希望“私有卡被提交后”对对手可见的范围是：仅标题/简介，还是完整 JSON（问卷/能力/设定全量）？
-2. PVP 是否允许使用“未审核（pending/rejected）”的卡？（如果允许，可能更容易出现争议与风控拦截）
-3. 你更喜欢 BO 的默认规则是哪一种：`firstToWins` 还是 `mostWinsAfterMaxRounds`？
-4. 是否需要房间口令 `join_code`？（如果你会在群里转发 roomId，我建议默认开启）
+你已经确认了：
+1. 私有卡提交后对手可见完整 JSON，并需要醒目告知
+2. 允许 `pending`，禁止 `rejected` 与被封禁的卡
+3. BO 默认 `mostWinsAfterMaxRounds`
+4. 默认无口令，但房主可按需设置密码
+
+还建议你继续确认两个会影响实现的点：
+1. `mostWinsAfterMaxRounds` 的平局规则：默认直接 `draw`，还是启用 `suddenDeath` 加赛？
+2. “房主可设置密码”是否需要支持“中途修改”？（我建议：房间 `waiting/submitting` 可改，`choosing/resolving` 禁止改，避免恶意锁人）
