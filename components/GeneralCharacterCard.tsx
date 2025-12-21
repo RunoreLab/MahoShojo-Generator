@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState, CurrentStateField } from '@/types/arena';
 import { GeneralCharacterData } from '@/lib/schemas/general-character';
+import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 
 const formatCurrentStateValue = (field: CurrentStateField) => {
   if (field.type === 'boolean') {
@@ -240,6 +241,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
           <div className="result-label">角色设定</div>
           <div className="result-value bg-white/95 rounded-xl p-4 shadow-inner text-sm leading-relaxed text-gray-800">
             <ReactMarkdown
+              remarkPlugins={[remarkBattleTable]}
               components={{
                 h1: ({ children }) => <h1 className="text-2xl font-bold my-3 text-indigo-700">{children}</h1>,
                 h2: ({ children }) => <h2 className="text-xl font-semibold my-3 text-indigo-600">{children}</h2>,
@@ -253,6 +255,22 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
                   <blockquote className="border-l-4 border-indigo-300 pl-4 italic text-gray-600 my-3">{children}</blockquote>
                 ),
                 code: ({ children }) => <code className="bg-gray-100 rounded px-1 py-0.5 text-xs text-gray-700">{children}</code>,
+                table: ({ children }) => (
+                  <div className="my-3 overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                    <table className="min-w-full border-collapse text-left text-sm">{children}</table>
+                  </div>
+                ),
+                thead: ({ children }) => <thead className="bg-gray-50">{children}</thead>,
+                tbody: ({ children }) => <tbody className="divide-y divide-gray-200">{children}</tbody>,
+                tr: ({ children }) => <tr className="odd:bg-white even:bg-gray-50/40">{children}</tr>,
+                th: ({ children }) => (
+                  <th className="px-3 py-2 font-semibold text-gray-700 border-b border-gray-200 whitespace-nowrap">{children}</th>
+                ),
+                td: ({ children }) => (
+                  <td className="px-3 py-2 text-gray-800 align-top border-b border-gray-100 whitespace-pre-wrap break-words">
+                    {children}
+                  </td>
+                ),
               }}
             >
               {general?.content?.trim() || '（content 字段为空，建议补充完整的角色设定，包括外观、能力、背景。）'}
