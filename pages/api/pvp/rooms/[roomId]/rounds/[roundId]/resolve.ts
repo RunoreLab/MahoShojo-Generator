@@ -23,6 +23,17 @@ export const runtime = 'edge';
 
 type ResolveBody = { expectedVersion?: number; customProvider?: unknown };
 
+type PvpPickedSnapshot = NonNullable<Awaited<ReturnType<typeof getPvpCardSnapshotById>>>;
+
+type PvpPickedPlayer = {
+  userId: number;
+  seat: number;
+  username: string | null;
+  prefix: string | null;
+  token: string;
+  snapshot: PvpPickedSnapshot;
+};
+
 const parseRules = (rulesJson: string): PvpRoomRules | null => {
   try {
     return JSON.parse(rulesJson) as PvpRoomRules;
@@ -136,15 +147,17 @@ export default async function handler(req: Request): Promise<Response> {
   const missing = sortedPlayers.filter((p) => !choiceByUserId.has(p.user_id));
   if (missing.length > 0) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
 
-  const picked = [];
+  const picked: PvpPickedPlayer[] = [];
   for (let i = 0; i < sortedPlayers.length; i++) {
     const player = sortedPlayers[i]!;
+    const seat = player.seat;
+    if (typeof seat !== 'number') return json({ error: '房间座位异常' }, { status: 500 });
     const choice = choiceByUserId.get(player.user_id)!;
     const snap = await getPvpCardSnapshotById(choice.id);
     if (!snap) return json({ error: '快照不存在，请重试' }, { status: 409 });
     picked.push({
       userId: player.user_id,
-      seat: player.seat,
+      seat,
       username: player.username ?? null,
       prefix: player.prefix ?? null,
       token: `P${i + 1}`,
