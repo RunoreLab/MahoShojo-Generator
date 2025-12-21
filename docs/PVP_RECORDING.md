@@ -286,10 +286,34 @@ CREATE INDEX IF NOT EXISTS idx_pvp_rounds_match_id ON pvp_rounds(match_id);
 
 ### 6.1 数据库迁移顺序（建议）
 
-1. `ALTER TABLE battle_report_generations ADD COLUMN ...`（pvp_* 三列 + 索引）
-2. 新建 `pvp_matches` / `pvp_match_players`
-3. `ALTER TABLE pvp_rooms ADD COLUMN current_match_id` + 索引
-4. `ALTER TABLE pvp_rounds ADD COLUMN match_id` + 索引
+你当前的线上状态是：
+- **`battle_report_generations` 已存在**（需要增量加列/加索引）
+- **PVP 相关表暂未创建**（可等 PVP 首次上线时再统一建表/加列）
+
+因此建议分两步走：
+
+#### 第一步：仅迁移 `battle_report_generations`（当前必须）
+
+```sql
+ALTER TABLE battle_report_generations ADD COLUMN pvp_room_id TEXT;
+ALTER TABLE battle_report_generations ADD COLUMN pvp_match_id TEXT;
+ALTER TABLE battle_report_generations ADD COLUMN pvp_round_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_room_id
+  ON battle_report_generations(pvp_room_id);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_match_id
+  ON battle_report_generations(pvp_match_id);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_round_id
+  ON battle_report_generations(pvp_round_id);
+```
+
+> 说明：这些列均为可空，不影响现有战报生成与查询；新增索引用于后续高频筛选（例如“只看 PVP 生成记录”）。
+
+#### 第二步：PVP 首次上线时执行（后续）
+
+1. 新建 `pvp_matches` / `pvp_match_players`
+2. `ALTER TABLE pvp_rooms ADD COLUMN current_match_id` + 索引
+3. `ALTER TABLE pvp_rounds ADD COLUMN match_id` + 索引
 
 ### 6.2 兼容策略
 
