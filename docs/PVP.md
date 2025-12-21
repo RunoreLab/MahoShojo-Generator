@@ -56,6 +56,7 @@
 - 卡来源：预设 + 数据库卡（公开库 / 自己私库），不允许 inline 上传
 - 私有卡披露：私有卡一旦提交到房间内，对手可查看**完整 JSON（问卷/能力/设定全量）**；前端需要醒目告知并要求确认
 - 卡可用性：允许使用 `review_status=pending` 的卡；禁止 `review_status=rejected` 的卡；禁止被封禁用户的卡（见第 12 节校验规则）
+- 卡封禁：禁止使用 `is_public = -1` 的卡（表示卡被封禁，与 `review_status` 语义不同）
 - 去重：按（`kind`,`idOrFilename`）去重；`data_card` 额外带 `updatedAt` 做版本校验
 - 对局：默认单局；多局制采用“弃牌制”，默认 `mostWinsAfterMaxRounds`
 - 结算：winner ∈ {A,B,平局}，不在集合则纠错重试→平局
@@ -472,7 +473,8 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - 校验：卡可用性
   - `data_cards.deleted_at IS NULL`
   - `data_cards.review_status != 'rejected'`（允许 `pending`）
-  - 卡作者未被封禁（建议按 `users.is_banned` 判断；如果未来引入“卡级封禁”字段，再升级校验）
+  - `data_cards.is_public != -1`（卡被封禁：无论公开/私有都不可用于 PVP）
+  - 卡作者未被封禁（建议按 `users.is_banned` 判断）
   - 重要：如果数据库存在 `data_card_updates`（待审核新版本），PVP 默认只使用主表 `data_cards.data`，避免“未审核内容在 PVP 中生效”
 - 私有披露：若提交列表中包含私有卡，必须要求用户确认（`acceptPrivateDisclosure=true`）
 - 写入：`pvp_room_submissions`（覆盖式 upsert）
@@ -522,5 +524,5 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 4. 默认无口令，但房主可按需设置密码
 
 还建议你继续确认两个会影响实现的点：
-1. `mostWinsAfterMaxRounds` 的平局规则：默认直接 `draw`，还是启用 `suddenDeath` 加赛？
-2. “房主可设置密码”是否需要支持“中途修改”？（我建议：房间 `waiting/submitting` 可改，`choosing/resolving` 禁止改，避免恶意锁人）
+1. `mostWinsAfterMaxRounds` 的平局规则：你已确认默认直接 `draw`
+2. 房主密码的中途修改：你已确认按建议执行（仅 `waiting/submitting` 可改，`choosing/resolving` 禁止改）
