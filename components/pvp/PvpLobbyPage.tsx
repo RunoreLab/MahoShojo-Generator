@@ -31,8 +31,8 @@ export function PvpLobbyPage() {
   const [isCreating, setIsCreating] = useState(false);
 
   const isRulesValid = useMemo(() => {
-    return rules.cardsPerPlayer > rules.dealPerPlayer;
-  }, [rules.cardsPerPlayer, rules.dealPerPlayer]);
+    return rules.participants >= 2 && rules.participants <= 6 && rules.cardsPerPlayer > rules.dealPerPlayer;
+  }, [rules.participants, rules.cardsPerPlayer, rules.dealPerPlayer]);
 
   const handleCreateRoom = async () => {
     setError(null);
@@ -92,7 +92,7 @@ export function PvpLobbyPage() {
           <div className="card" style={{ border: '2px solid #ccc', background: '#f9f9f9' }}>
             <h1 className="text-xl font-bold mb-2">PVP 对战大厅</h1>
             <p className="text-sm text-gray-700 mb-4">
-              目前为 MVP：2人房间 + 房间轮询 + 同时出牌 + 战报结算。
+              目前支持：房间制 + 轮询 + 同时出牌 + 战报结算（2-6 人同局）。
             </p>
 
             {!loading && !isAuthenticated && (
@@ -108,6 +108,17 @@ export function PvpLobbyPage() {
                   建议：提交数 &gt; 发牌数（否则可推导对手手牌）。
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-sm">
+                  <label className="flex flex-col gap-1 col-span-2">
+                    <span>人数（2-6）</span>
+                    <input
+                      className="border rounded px-2 py-1"
+                      type="number"
+                      min={2}
+                      max={6}
+                      value={rules.participants}
+                      onChange={(e) => setRules((r) => ({ ...r, participants: Number(e.target.value) }))}
+                    />
+                  </label>
                   <label className="flex flex-col gap-1">
                     <span>每人提交</span>
                     <input
@@ -211,4 +222,3 @@ export function PvpLobbyPage() {
     </>
   );
 }
-

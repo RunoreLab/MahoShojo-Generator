@@ -1,10 +1,19 @@
 import { clearPvpRoomMatchState, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import type { PvpRoomRules } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
 
 type RestartBody = { expectedVersion?: number };
+
+const parseRules = (rulesJson: string): PvpRoomRules | null => {
+  try {
+    return JSON.parse(rulesJson) as PvpRoomRules;
+  } catch {
+    return null;
+  }
+};
 
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
@@ -30,6 +39,9 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: '对局进行中，不能重开（请先结束/离开）', code: 'PHASE_FORBIDDEN' }, { status: 409 });
   }
 
+  const rules = parseRules(room.rules_json);
+  if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
+
   const players = await getPvpRoomPlayers(roomId);
   if (players.length <= 0) return json({ error: '房间玩家异常' }, { status: 500 });
 
@@ -38,11 +50,10 @@ export default async function handler(req: Request): Promise<Response> {
 
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     status: 'open',
-    phase: players.length >= 2 ? 'submitting' : 'waiting',
+    phase: players.length >= rules.participants ? 'submitting' : 'waiting',
     last_activity_at: new Date().toISOString(),
   });
 
   if (!ok) return json({ error: '重开失败（版本冲突）', code: 'VERSION_CONFLICT' }, { status: 409 });
   return json({ success: true });
 }
-

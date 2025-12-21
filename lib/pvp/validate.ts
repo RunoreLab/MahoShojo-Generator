@@ -5,7 +5,8 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const raw = (input && typeof input === 'object') ? (input as any) : {};
 
   const participants = raw.participants ?? DEFAULT_PVP_RULES.participants;
-  if (participants !== 2) return { error: 'PVP 目前仅支持 2 人房间' };
+  const participantCount = Number.isFinite(participants) ? Math.floor(participants) : DEFAULT_PVP_RULES.participants;
+  if (participantCount < 2 || participantCount > 6) return { error: 'participants 超出范围(2-6)' };
 
   const cardsPerPlayer = Number.isFinite(raw.cardsPerPlayer) ? Math.floor(raw.cardsPerPlayer) : DEFAULT_PVP_RULES.cardsPerPlayer;
   if (cardsPerPlayer < 1 || cardsPerPlayer > 10) return { error: 'cardsPerPlayer 超出范围(1-10)' };
@@ -31,7 +32,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   if (tieBreaker !== 'draw') return { error: 'bestOf.tieBreaker 仅支持 draw' };
 
   const rules: PvpRoomRules = {
-    participants: 2,
+    participants: participantCount,
     cardsPerPlayer,
     dealPerPlayer,
     dedupe,

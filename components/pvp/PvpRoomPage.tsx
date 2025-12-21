@@ -79,12 +79,15 @@ export function PvpRoomPage() {
     },
   });
 
+  const isJoining = joinMutation.isPending;
+  const joinRoom = joinMutation.mutateAsync;
+
   useEffect(() => {
-    if (!roomId || !isAuthenticated || joined || joinMutation.isPending) return;
+    if (!roomId || !isAuthenticated || joined || isJoining) return;
     const cached = getCachedPassword(roomId);
     setJoinPassword(cached);
-    void joinMutation.mutateAsync({ password: cached || undefined });
-  }, [roomId, isAuthenticated, joined, joinMutation.isPending]);
+    void joinRoom({ password: cached || undefined });
+  }, [roomId, isAuthenticated, joined, isJoining, joinRoom]);
 
   const roomQuery = useQuery({
     queryKey: ['pvp', 'room', roomId],
@@ -104,8 +107,20 @@ export function PvpRoomPage() {
   const rules: PvpRoomRules | null = room?.rules || null;
   const phase: string = room?.phase || 'unknown';
   const version: number = room?.version ?? 0;
-  const players = Array.isArray(roomQuery.data?.players) ? roomQuery.data.players : [];
+  const players = useMemo(() => (Array.isArray(roomQuery.data?.players) ? roomQuery.data.players : []), [roomQuery.data?.players]);
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
+
+  const playerLabelById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const p of players) {
+      const userId = typeof p?.userId === 'number' ? p.userId : null;
+      if (!userId) continue;
+      const prefix = typeof p.prefix === 'string' && p.prefix ? `${p.prefix} ` : '';
+      const username = typeof p.username === 'string' && p.username ? p.username : `用户${userId}`;
+      map.set(userId, `${prefix}${username}`);
+    }
+    return map;
+  }, [players]);
 
   const submissions = Array.isArray(roomQuery.data?.submissions) ? roomQuery.data.submissions : [];
   const myHand = roomQuery.data?.myHand;
@@ -350,12 +365,22 @@ export function PvpRoomPage() {
                     <div>版本：{version}</div>
                     {rules && (
                       <div className="mt-2 text-xs text-gray-600 whitespace-pre-wrap">
-                        规则：提交 {rules.cardsPerPlayer} / 发牌 {rules.dealPerPlayer} / 去重 {String(rules.dedupe)} / 模式 {rules.mode}
+                        规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 发牌 {rules.dealPerPlayer} / 去重 {String(rules.dedupe)} / 模式 {rules.mode}
                       </div>
                     )}
                     {score && (
                       <div className="mt-2 text-xs text-gray-600">
-                        赛制：最多 {score.maxRounds} 轮；当前比分（你/对手）：{score.myWins} / {score.otherWins}
+                        赛制：最多 {score.maxRounds} 轮；当前胜场：
+                        <div className="mt-1 space-y-0.5">
+                          {(score.winsByUserId || [])
+                            .slice()
+                            .sort((a: any, b: any) => (b.wins ?? 0) - (a.wins ?? 0))
+                            .map((x: any) => (
+                              <div key={x.userId}>
+                                {playerLabelById.get(x.userId) || `用户${x.userId}`}：{x.wins ?? 0}
+                              </div>
+                            ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -364,24 +389,22 @@ export function PvpRoomPage() {
                     <div className="font-semibold mb-1">玩家</div>
                     <div className="space-y-1">
                       {players.map((p: any) => (
-                        <div key={p.userId}>
-                          [{p.seat ?? '?'}] {p.prefix ? `${p.prefix} ` : ''}{p.username} {p.userId === room.hostUserId ? '(房主)' : ''}
+                        <div key={p.userId} className="flex items-center justify-between gap-2">
+                          <div>
+                            [{p.seat ?? '?'}] {p.prefix ? `${p.prefix} ` : ''}{p.username} {p.userId === room.hostUserId ? '(房主)' : ''}
+                          </div>
+                          {isHost && p.userId !== room.hostUserId && (
+                            <button
+                              className="px-2 py-1 rounded border bg-gray-50 hover:bg-gray-100 text-xs"
+                              onClick={() => kickMutation.mutate(p.userId)}
+                              disabled={kickMutation.isPending}
+                            >
+                              踢出
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
-                    {isHost && players.length > 1 && (
-                      <button
-                        className="generate-button mt-3 w-full"
-                        style={{ backgroundColor: '#ef4444', backgroundImage: 'linear-gradient(to right, #ef4444, #dc2626)' }}
-                        onClick={() => {
-                          const other = players.find((p: any) => p.userId !== room.hostUserId);
-                          if (other?.userId) kickMutation.mutate(other.userId);
-                        }}
-                        disabled={kickMutation.isPending}
-                      >
-                        {kickMutation.isPending ? '踢人中…' : '踢出对手'}
-                      </button>
-                    )}
                     <button
                       className="generate-button mt-3 w-full"
                       style={{ backgroundColor: '#ef4444', backgroundImage: 'linear-gradient(to right, #ef4444, #dc2626)' }}
@@ -458,15 +481,15 @@ export function PvpRoomPage() {
                         {submitMutation.isPending ? '提交中…' : '提交卡组'}
                       </button>
 
-                      {isHost && (
-                        <button
-                          className="generate-button w-full mt-2"
-                          style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}
-                          disabled={startMutation.isPending || submissions.length < 2}
-                          onClick={() => startMutation.mutate()}
-                        >
-                          {startMutation.isPending ? '发牌中…' : '开始对局（发牌）'}
-                        </button>
+                        {isHost && (
+                          <button
+                            className="generate-button w-full mt-2"
+                            style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}
+                            disabled={startMutation.isPending || submissions.length < rules.participants}
+                            onClick={() => startMutation.mutate()}
+                          >
+                            {startMutation.isPending ? '发牌中…' : '开始对局（发牌）'}
+                          </button>
                       )}
                     </div>
 
@@ -556,10 +579,15 @@ export function PvpRoomPage() {
                       </div>
 
                       <div className="text-sm text-gray-700 mt-3">
-                        我方已选：{choices?.hasChosenMe ? '是' : '否'} / 对手已选：{choices?.hasChosenOther ? '是' : '否'}
+                        已选人数：{choices?.chosenCount ?? 0} / {choices?.totalPlayers ?? players.length}；
+                        我方已选：{choices?.hasChosenMe ? '是' : '否'}
+                        {typeof choices?.hasChosenOther === 'boolean' ? ` / 对手已选：${choices.hasChosenOther ? '是' : '否'}` : ''}
                       </div>
 
-                      {(choices?.hasChosenMe && choices?.hasChosenOther) && (
+                      {Boolean(
+                        choices?.hasChosenMe &&
+                        (choices?.chosenCount ?? 0) >= (choices?.totalPlayers ?? players.length)
+                      ) && (
                         <button
                           className="generate-button mt-3 w-full"
                           style={{ backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #d97706)' }}

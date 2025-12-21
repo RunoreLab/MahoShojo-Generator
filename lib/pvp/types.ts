@@ -33,7 +33,7 @@ export interface PvpBestOfRules {
 }
 
 export interface PvpRoomRules {
-  participants: 2;
+  participants: number; // 2-6（前端与校验层限制）
   cardsPerPlayer: number; // 每人提交数量
   dealPerPlayer: number;  // 每人初始手牌数量
   dedupe: boolean;
@@ -64,7 +64,8 @@ export interface PvpHandState {
 }
 
 export interface PvpWinnerResolution {
-  winner: 'A' | 'B' | 'draw';
+  winnerUserId: number | null;
+  winnerName: string;
   rawWinnerText?: string | null;
   attempts: number;
   error?: string | null;

@@ -102,14 +102,19 @@ export default async function handler(req: Request): Promise<Response> {
 
   if (latestRound) {
     const choices = await getPvpRoundChoices(latestRound.id);
-    const hasChosenMe = choices.some((c) => c.user_id === auth.user.id);
-    const hasChosenOther = choices.some((c) => c.user_id !== auth.user.id);
+    const chosenUserIds = new Set(choices.map((c) => c.user_id));
+    const hasChosenMe = chosenUserIds.has(auth.user.id);
+    const chosenCount = chosenUserIds.size;
+    const totalPlayers = players.length;
+    const hasChosenOther = totalPlayers === 2 ? choices.some((c) => c.user_id !== auth.user.id) : null;
     choicesState = {
       roundId: latestRound.id,
       roundIndex: latestRound.round_index,
       status: latestRound.status,
       hasChosenMe,
-      hasChosenOther,
+      ...(hasChosenOther === null ? {} : { hasChosenOther }),
+      chosenCount,
+      totalPlayers,
     };
 
     if (latestRound.status === 'completed' && latestRound.result_json) {
@@ -124,10 +129,14 @@ export default async function handler(req: Request): Promise<Response> {
   let score: any = null;
   if (rules.bestOf.enabled) {
     const rounds = await getPvpRoundsByRoom(roomId);
-    const myWins = rounds.filter((r) => r.winner_user_id === auth.user.id).length;
-    const otherId = players.find((p) => p.user_id !== auth.user.id)?.user_id ?? null;
-    const otherWins = otherId ? rounds.filter((r) => r.winner_user_id === otherId).length : 0;
-    score = { myWins, otherWins, maxRounds: rules.bestOf.maxRounds };
+    const winsByUserId = players.map((p) => ({
+      userId: p.user_id,
+      wins: rounds.filter((r) => r.winner_user_id === p.user_id).length,
+    }));
+    const myWins = winsByUserId.find((x) => x.userId === auth.user.id)?.wins ?? 0;
+    const otherId = players.length === 2 ? (players.find((p) => p.user_id !== auth.user.id)?.user_id ?? null) : null;
+    const otherWins = otherId ? (winsByUserId.find((x) => x.userId === otherId)?.wins ?? 0) : null;
+    score = { winsByUserId, myWins, ...(otherWins === null ? {} : { otherWins }), maxRounds: rules.bestOf.maxRounds };
   }
 
   return json({
