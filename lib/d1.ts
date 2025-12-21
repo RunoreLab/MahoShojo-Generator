@@ -94,6 +94,10 @@ export {
   createPvpMatchPlayers,
   updatePvpMatch,
   getPvpMatchById,
+  getPvpMatchesByUserId,
+  getPvpUserSummariesByUserIds,
+  type PvpMatchPlayerRow,
+  type PvpUserSummaryRow,
   type PvpMatchRow,
   type PvpMatchStatus,
   type PvpRoomPhase,
@@ -109,13 +113,18 @@ export {
   createBattleReportGenerationRecord,
   updateBattleReportGenerationExtraJson,
   updateBattleReportGenerationCombatantsWriteResult,
+  getBattleReportGenerationByIdLite,
+  getBattleReportGenerationsByUserIdLite,
   type BattleReportGenerationInsert,
-  type BattleReportGenerationStatus
+  type BattleReportGenerationStatus,
+  type BattleReportGenerationRowLite
 } from './database/battle-report-generations';
 
 export {
   createBattleReportGenerationCombatants,
+  getBattleReportGenerationCombatantsByGenerationId,
   type BattleReportGenerationCombatantInsert,
+  type BattleReportGenerationCombatantRow,
 } from './database/battle-report-generation-combatants';
 
 // 重新导出徽章相关功能
