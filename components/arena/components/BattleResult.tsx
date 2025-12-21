@@ -12,6 +12,7 @@ import { inferTemplate } from '@/lib/data-card-converter';
 import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 import { AdjudicationResult } from '@/types/arena';
 import { BattleStoreState, UpdatedCombatantData } from '../types';
+import { MarkdownBlock } from '@/components/MarkdownBlock';
 
 interface BattleResultProps {
   onSaveImage: (imageUrl: string) => void;
@@ -151,15 +152,22 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
                       <p className="font-semibold text-gray-700">
                         {name} <span className="text-xs text-gray-500">({typeDisplay})</span>
                       </p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        <span className="font-medium">历战记录：</span>
-                        {latestEntry ? latestEntry.impact : '已跳过写入，改为仅更新其它字段。'}
-                      </p>
+                      <div className="text-sm text-gray-600 mt-2">
+                        <div className="font-medium text-gray-700">历战记录</div>
+                        <div className="mt-1">
+                          <MarkdownBlock
+                            content={latestEntry ? latestEntry.impact : '已跳过写入，改为仅更新其它字段。'}
+                            variant="light"
+                          />
+                        </div>
+                      </div>
                       {stateSummary && (
-                        <p className="text-sm text-gray-600 mt-1">
-                          <span className="font-medium">当前状态：</span>
-                          {stateSummary}
-                        </p>
+                        <div className="text-sm text-gray-600 mt-3">
+                          <div className="font-medium text-gray-700">当前状态</div>
+                          <div className="mt-1">
+                            <MarkdownBlock content={stateSummary} variant="light" />
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>
