@@ -15,6 +15,7 @@ import QuestionNavigator from '../components/QuestionNavigator';
 import { buildMagicalQuestionMeta, type MagicalQuestionMeta } from '@/lib/questionnaires';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 
 interface Questionnaire {
   questions: string[];
@@ -442,22 +443,39 @@ const DetailsPage: React.FC = () => {
   };
 
   const handleBulkFill = () => {
-    const lines = bulkAnswers.split('\n');
-    if (lines.length > questions.length) {
-      setError(`⚠️ 粘贴的答案有 ${lines.length} 行，超过了问卷问题总数 ${questions.length}！`);
+    const parsed = parseBulkQuestionnaireAnswers(bulkAnswers, {
+      expectedCount: questions.length,
+      orderedQuestionIds: questions.map((_, index) => `MG-${index + 1}`),
+    });
+
+    if (parsed.entries.length === 0) {
+      setError('⚠️ 未识别到可填充的答案。支持逐行答案、Q/A 格式、编号列表，以及 JSON（数组/含 userAnswers）。');
       return;
     }
+
     const newAnswers = [...answers];
-    lines.forEach((line, index) => {
-      if (index < questions.length) {
-        const maxLength = Math.max(questionMeta[index]?.maxLength ?? 200, 150);
-        newAnswers[index] = line.slice(0, maxLength);
+    let appliedCount = 0;
+    let ignoredCount = 0;
+    parsed.entries.forEach(entry => {
+      if (entry.index < 0 || entry.index >= questions.length) {
+        ignoredCount += 1;
+        return;
       }
+      const maxLength = Math.max(questionMeta[entry.index]?.maxLength ?? 200, 150);
+      newAnswers[entry.index] = entry.value.slice(0, maxLength);
+      appliedCount += 1;
     });
     setAnswers(newAnswers);
     setCurrentAnswer(newAnswers[currentQuestionIndex] || '');
     setError(null);
-    alert(`成功填充了 ${lines.length} 个答案！`);
+    const formatLabel = parsed.format === 'qa'
+      ? 'Q/A'
+      : parsed.format === 'json'
+        ? 'JSON'
+        : parsed.format === 'paragraphs'
+          ? '段落'
+          : '逐行';
+    alert(`成功填充了 ${appliedCount} 个答案（识别格式：${formatLabel}${ignoredCount > 0 ? `，忽略了 ${ignoredCount} 条超出范围的内容` : ''}）！`);
     setBulkAnswers('');
   };
 
@@ -882,7 +900,7 @@ const DetailsPage: React.FC = () => {
                         id="bulk-answers"
                         value={bulkAnswers}
                         onChange={(e) => setBulkAnswers(e.target.value)}
-                        placeholder="在此处粘贴所有答案，每行一个。"
+                        placeholder="在此处粘贴所有答案：支持每行一个、Q/A 复制内容、编号列表、JSON。"
                         className="input-field h-20"
                         rows={4}
                       />
