@@ -41,7 +41,7 @@
 - **多局制语义**：多局是“每局重新发牌”，还是“同一手牌打多轮（打出即弃）”？两者的体验与实现差异很大。
   - 你的决策：同一手牌 **打出即弃**；若有人手牌打空但对局未结束，将弃牌堆重新平均分配。
   - 建议补齐“终局保证”：为了避免循环与争议，建议把“手牌用尽后再分牌”作为**可选规则**，并提供一个更稳定的默认方案：  
-    - 默认：要求 `handSize >= maxRounds`（例如 BO5 则手牌至少 5），手牌打完即比赛结束（比分相同判平局或触发加赛规则）；  
+    - 默认：要求 `dealPerPlayer >= maxRounds`（例如 BO5 则手牌至少 5），手牌打完即比赛结束（比分相同判平局或触发加赛规则）；  
     - 可选：引入“公共抽牌堆”（发牌时多余的牌进入 `drawPile`），每轮结束双方各从 `drawPile` 补到固定手牌数，直到 `drawPile` 用尽。  
     这两种都比“循环弃牌堆”更容易保证对局可结束、也更像卡牌游戏体验。
 - **胜负裁判可信度**：仅靠 LLM 解析战报赢家会有波动、被提示词注入影响；需要“结果约束/兜底”。
@@ -71,7 +71,10 @@
 
 ### 规则（建议锁定，便于快速上线）
 - 仅支持 **2 人**（先做对局闭环；多人房间后面再扩）。
-- 每人提交 **3 张角色卡**，合池去重后洗牌，**各发 3 张**（若去重后不足 6 张则提示“池子不足，需要补卡/允许不去重”）。
+- 默认规则建议改为“提交数 > 发牌数”，否则玩家在拿到手牌后可直接推导出对手手牌集合，失去信息博弈：
+  - 每人提交 **4 张角色卡**（`cardsPerPlayer=4`）
+  - 合池去重后洗牌，**各发 3 张**（`dealPerPlayer=3`）
+  - 剩余牌进入“暗置区”（不对任一方展示），用于保持手牌不可推导
 - 房主可调整设置，例如对局模式、每人提交数据卡数量等等。
   - 建议对“模式”做白名单：PVP 默认只开放 `classic` / `kizuna` / `scenario`；不建议开放 `daily`，因为 `winner` 字段在日常语义下允许“列出多人”，会让 PVP 结算变得不确定。
 - 单局：双方从手牌**同时**选择 1 张对战（服务器在双方都选好前不向对方暴露选择）。
@@ -85,12 +88,12 @@
 
 ### 建议补齐：多局制的“明确数学规则”（避免实现时互相理解不一致）
 强烈建议把多局制拆成三个可配置参数：
-- `maxRounds`：最多进行多少轮（建议默认 = `handSize`，保证必定结束）
+- `maxRounds`：最多进行多少轮（建议默认 = `dealPerPlayer`，保证必定结束）
 - `winCondition`：胜利条件（`firstToWins` / `mostWinsAfterMaxRounds`）
 - `tieBreaker`：平局处理（`draw` / `suddenDeath`）
 
 推荐默认（易实现、体验稳定）：
-- `handSize >= maxRounds`（例如 BO5 → 每人至少 5 张）
+- `dealPerPlayer >= maxRounds`（例如 BO5 → 每人至少 5 张）
 - `winCondition = mostWinsAfterMaxRounds`（你已确认的默认规则）
 - `tieBreaker = draw`（保守且避免无限加赛）
 
@@ -370,7 +373,8 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 {
   "rules": {
     "participants": 2,
-    "cardsPerPlayer": 3,
+    "cardsPerPlayer": 4,
+    "dealPerPlayer": 3,
     "dedupe": true,
     "mode": "classic",
     "bestOf": { "enabled": false, "maxRounds": 3, "winCondition": "mostWinsAfterMaxRounds", "tieBreaker": "draw" }
