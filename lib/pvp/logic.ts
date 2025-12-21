@@ -87,3 +87,36 @@ export const normalizeWinner = (raw: string | null | undefined, aName: string, b
   return 'invalid';
 };
 
+export type WinnerMultiCanonical =
+  | { kind: 'draw' }
+  | { kind: 'index'; index: number }
+  | { kind: 'invalid'; matchedIndexes: number[] };
+
+const stripWinnerText = (text: string): string => {
+  return text
+    .trim()
+    .replace(/^[\s"'“”‘’]+/g, '')
+    .replace(/[\s"'“”‘’]+$/g, '')
+    .trim();
+};
+
+export const normalizeWinnerFromCandidates = (
+  raw: string | null | undefined,
+  candidateNames: string[],
+): WinnerMultiCanonical => {
+  if (!raw) return { kind: 'invalid', matchedIndexes: [] };
+  const stripped = stripWinnerText(raw);
+  if (!stripped) return { kind: 'invalid', matchedIndexes: [] };
+
+  if (stripped === '平局' || stripped.toLowerCase() === 'draw') return { kind: 'draw' };
+
+  const exactIndex = candidateNames.findIndex((name) => name === stripped);
+  if (exactIndex >= 0) return { kind: 'index', index: exactIndex };
+
+  const matchedIndexes = candidateNames
+    .map((name, index) => (raw.includes(name) ? index : -1))
+    .filter((index) => index >= 0);
+
+  if (matchedIndexes.length === 1) return { kind: 'index', index: matchedIndexes[0]! };
+  return { kind: 'invalid', matchedIndexes };
+};

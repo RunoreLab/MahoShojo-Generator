@@ -11,7 +11,7 @@ import {
   updatePvpRound,
   upsertPvpRoomHand,
 } from '@/lib/d1';
-import { normalizeWinner } from '@/lib/pvp/logic';
+import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
 import type { PvpHandState, PvpRoomRules, PvpSnapshotRef } from '@/lib/pvp/types';
@@ -84,9 +84,8 @@ export default async function handler(req: Request): Promise<Response> {
   const players = await getPvpRoomPlayers(roomId);
   const sortedPlayers = [...players].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
   if (!sortedPlayers.some((p) => p.user_id === auth.user.id)) return json({ error: '你不在该房间中' }, { status: 403 });
-  if (sortedPlayers.length !== 2) return json({ error: '房间玩家异常' }, { status: 500 });
-  const playerA = sortedPlayers[0]!;
-  const playerB = sortedPlayers[1]!;
+  if (sortedPlayers.length !== rules.participants) return json({ error: '房间玩家数量与规则不一致' }, { status: 500 });
+  if (sortedPlayers.some((p) => typeof p.seat !== 'number')) return json({ error: '房间座位异常' }, { status: 500 });
 
   const round = await getPvpRoundById(roundId);
   if (!round || round.room_id !== roomId) return json({ error: '回合不存在' }, { status: 404 });
@@ -100,19 +99,33 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const choices = await getPvpRoundChoices(roundId);
-  if (choices.length < 2) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
+  if (choices.length < rules.participants) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
 
-  const choiceA = choices.find((c) => c.user_id === playerA.user_id);
-  const choiceB = choices.find((c) => c.user_id === playerB.user_id);
-  if (!choiceA || !choiceB) return json({ error: '选择数据不完整' }, { status: 409 });
+  const choiceByUserId = new Map<number, PvpSnapshotRef>();
+  for (const row of choices) {
+    const parsed = parseChoice(row.choice_ref_json);
+    if (!parsed) return json({ error: '选择数据损坏' }, { status: 500 });
+    choiceByUserId.set(row.user_id, parsed);
+  }
 
-  const parsedChoiceA = parseChoice(choiceA.choice_ref_json);
-  const parsedChoiceB = parseChoice(choiceB.choice_ref_json);
-  if (!parsedChoiceA || !parsedChoiceB) return json({ error: '选择数据损坏' }, { status: 500 });
+  const missing = sortedPlayers.filter((p) => !choiceByUserId.has(p.user_id));
+  if (missing.length > 0) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
 
-  const snapA = await getPvpCardSnapshotById(parsedChoiceA.id);
-  const snapB = await getPvpCardSnapshotById(parsedChoiceB.id);
-  if (!snapA || !snapB) return json({ error: '快照不存在，请重试' }, { status: 409 });
+  const picked = [];
+  for (let i = 0; i < sortedPlayers.length; i++) {
+    const player = sortedPlayers[i]!;
+    const choice = choiceByUserId.get(player.user_id)!;
+    const snap = await getPvpCardSnapshotById(choice.id);
+    if (!snap) return json({ error: '快照不存在，请重试' }, { status: 409 });
+    picked.push({
+      userId: player.user_id,
+      seat: player.seat,
+      username: player.username ?? null,
+      prefix: player.prefix ?? null,
+      token: `P${i + 1}`,
+      snapshot: snap,
+    });
+  }
 
   // CAS：进入 resolving（避免重复触发）
   if (room.phase === 'choosing') {
@@ -133,16 +146,28 @@ export default async function handler(req: Request): Promise<Response> {
   const origin = new URL(req.url).origin;
   const authHeader = req.headers.get('authorization') || '';
 
+  const candidateTokens = picked.map((p) => p.token);
+  const candidateNames = picked.map((p) => p.snapshot.name);
+
   const buildGuidance = (attempt: number) => {
-    const base = `【PVP 裁判规则】胜利者必须是“${snapA.name}”或“${snapB.name}”或“平局”，只能写其中一个，不得输出其他名字或多个胜利者。`;
+    const mapping = picked.map((p) => `- ${p.token}：${p.snapshot.name}`).join('\n');
+    const tokenList = candidateTokens.map((t) => `“${t}”`).join('、');
+    const base = [
+      '【PVP 裁判规则】',
+      `本轮参战者：\n${mapping}`,
+      `你必须在 officialReport.winner 字段只输出以下之一：${tokenList} 或 “平局”。`,
+      '输出必须完全一致（不要加任何解释、标点或额外文字）。',
+      '战报正文中请继续使用角色名叙述，不要在正文中使用 P1/P2…代号。',
+    ].join('\n');
     if (attempt === 0) return base;
-    return `${base}\n【纠错】你上一轮输出的胜利者不符合规则，请严格按规则重新输出。`;
+    return `${base}\n【纠错】你上一轮的 officialReport.winner 不符合规则，请严格按规则输出。`;
   };
 
   let report: any | null = null;
   let rawWinnerText: string | null = null;
   let attempts = 0;
-  let canonical: 'A' | 'B' | 'draw' | 'invalid' = 'invalid';
+  let winnerIndex: number | null = null;
+  let isDraw = false;
   let lastError: string | null = null;
 
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -155,10 +180,12 @@ export default async function handler(req: Request): Promise<Response> {
           ...(authHeader ? { Authorization: authHeader } : {}),
         },
         body: JSON.stringify({
-          combatants: [
-            { type: snapA.card_type, data: JSON.parse(snapA.data_json), isNative: false, isPreset: false },
-            { type: snapB.card_type, data: JSON.parse(snapB.data_json), isNative: false, isPreset: false },
-          ],
+          combatants: picked.map((p) => ({
+            type: p.snapshot.card_type,
+            data: JSON.parse(p.snapshot.data_json),
+            isNative: false,
+            isPreset: false,
+          })),
           mode: rules.mode,
           language: 'zh-CN',
           userGuidance: buildGuidance(attempt),
@@ -179,55 +206,79 @@ export default async function handler(req: Request): Promise<Response> {
       const data = await res.json();
       report = data?.report ?? null;
       rawWinnerText = report?.officialReport?.winner ?? null;
-      const normalized = normalizeWinner(rawWinnerText, snapA.name, snapB.name);
-      canonical = normalized;
-      if (canonical !== 'invalid') break;
+      const byToken = normalizeWinnerFromCandidates(rawWinnerText, candidateTokens);
+      if (byToken.kind === 'draw') {
+        isDraw = true;
+        winnerIndex = null;
+        break;
+      }
+      if (byToken.kind === 'index') {
+        isDraw = false;
+        winnerIndex = byToken.index;
+        break;
+      }
+
+      const byName = normalizeWinnerFromCandidates(rawWinnerText, candidateNames);
+      if (byName.kind === 'draw') {
+        isDraw = true;
+        winnerIndex = null;
+        break;
+      }
+      if (byName.kind === 'index') {
+        const name = candidateNames[byName.index]!;
+        const occurrences = candidateNames.filter((n) => n === name).length;
+        if (occurrences === 1) {
+          isDraw = false;
+          winnerIndex = byName.index;
+          break;
+        }
+      }
+
+      lastError = 'winner 不合法，请重试';
     } catch (error) {
       lastError = error instanceof Error ? error.message : '战报生成失败';
     }
   }
 
-  const finalWinner = canonical === 'invalid' ? 'draw' : canonical;
-  const winnerUserId =
-    finalWinner === 'A' ? playerA.user_id : finalWinner === 'B' ? playerB.user_id : null;
-  const winnerName =
-    finalWinner === 'A' ? snapA.name : finalWinner === 'B' ? snapB.name : '平局';
+  const resolvedWinnerUserId = isDraw || winnerIndex === null ? null : picked[winnerIndex]!.userId;
+  const resolvedWinnerName = isDraw || winnerIndex === null ? '平局' : picked[winnerIndex]!.snapshot.name;
+
+  if (report?.officialReport) {
+    report.officialReport.winner = resolvedWinnerName;
+  }
 
   const resultJson = JSON.stringify({
-    winner: finalWinner,
-    winnerName,
+    winnerUserId: resolvedWinnerUserId,
+    winnerName: resolvedWinnerName,
     rawWinnerText,
     attempts,
-    error: canonical === 'invalid' ? (lastError || 'winner 不合法，已判平局') : null,
-    combatants: {
-      A: { snapshotId: snapA.id, name: snapA.name, type: snapA.card_type },
-      B: { snapshotId: snapB.id, name: snapB.name, type: snapB.card_type },
-    },
+    error: winnerIndex === null && !isDraw ? (lastError || 'winner 不合法，已判平局') : null,
+    combatants: picked.map((p) => ({
+      token: p.token,
+      userId: p.userId,
+      seat: p.seat,
+      snapshotId: p.snapshot.id,
+      name: p.snapshot.name,
+      type: p.snapshot.card_type,
+    })),
     report,
   });
 
   await updatePvpRound(roundId, {
     status: 'completed',
     resultJson,
-    winnerUserId,
-    winnerName,
+    winnerUserId: resolvedWinnerUserId,
+    winnerName: resolvedWinnerName,
   });
 
   // 更新手牌：移除出牌并放入弃牌
   const hands = await getPvpRoomHands(roomId);
-  const handRowA = hands.find((h) => h.user_id === playerA.user_id);
-  const handRowB = hands.find((h) => h.user_id === playerB.user_id);
-  if (handRowA) {
-    const parsed = parseHand(handRowA.hand_json);
-    if (parsed) {
-      await upsertPvpRoomHand(roomId, playerA.user_id, JSON.stringify(moveToDiscard(parsed, snapA.id)));
-    }
-  }
-  if (handRowB) {
-    const parsed = parseHand(handRowB.hand_json);
-    if (parsed) {
-      await upsertPvpRoomHand(roomId, playerB.user_id, JSON.stringify(moveToDiscard(parsed, snapB.id)));
-    }
+  for (const p of picked) {
+    const handRow = hands.find((h) => h.user_id === p.userId);
+    if (!handRow) continue;
+    const parsed = parseHand(handRow.hand_json);
+    if (!parsed) continue;
+    await upsertPvpRoomHand(roomId, p.userId, JSON.stringify(moveToDiscard(parsed, p.snapshot.id)));
   }
 
   // 多局制：到达 maxRounds 才结算整场胜负，否则继续下一轮
@@ -241,9 +292,18 @@ export default async function handler(req: Request): Promise<Response> {
   let matchWinnerUserId: number | null = null;
   if (rules.bestOf.enabled) {
     const rounds = await getPvpRoundsByRoom(roomId);
-    const aWins = rounds.filter((r) => r.winner_user_id === playerA.user_id).length;
-    const bWins = rounds.filter((r) => r.winner_user_id === playerB.user_id).length;
-    matchWinnerUserId = aWins === bWins ? null : (aWins > bWins ? playerA.user_id : playerB.user_id);
+    const winCounts = new Map<number, number>();
+    for (const p of sortedPlayers) winCounts.set(p.user_id, 0);
+    for (const r of rounds) {
+      if (!r.winner_user_id) continue;
+      if (!winCounts.has(r.winner_user_id)) continue;
+      winCounts.set(r.winner_user_id, (winCounts.get(r.winner_user_id) || 0) + 1);
+    }
+
+    let maxWins = 0;
+    for (const wins of winCounts.values()) maxWins = Math.max(maxWins, wins);
+    const top = [...winCounts.entries()].filter(([, wins]) => wins === maxWins).map(([userId]) => userId);
+    matchWinnerUserId = top.length === 1 ? top[0]! : null;
   }
 
   await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'finished', last_activity_at: new Date().toISOString() });

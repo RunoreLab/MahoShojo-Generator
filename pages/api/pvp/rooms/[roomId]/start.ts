@@ -70,7 +70,8 @@ export default async function handler(req: Request): Promise<Response> {
   if (players.length < rules.participants) return json({ error: '人数不足，无法开始' }, { status: 409 });
 
   const sortedPlayers = [...players].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
-  if (sortedPlayers.length !== 2) return json({ error: '房间玩家异常' }, { status: 500 });
+  if (sortedPlayers.length !== rules.participants) return json({ error: '房间玩家数量与规则不一致' }, { status: 500 });
+  if (sortedPlayers.some((p) => typeof p.seat !== 'number')) return json({ error: '房间座位异常' }, { status: 500 });
 
   const submissions = await getPvpRoomSubmissions(roomId);
   if (submissions.length < rules.participants) return json({ error: '仍有玩家未提交卡组' }, { status: 409 });
