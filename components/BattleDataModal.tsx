@@ -421,10 +421,14 @@ export default function BattleDataModal({
         ...cardData,
         _cardId: card.id,
         _cardName: card.name,
+        _cardDescription: card.description || '',
         _isPublic: card.is_public,
         _updatedAt: card.updated_at,
         _createdAt: card.created_at,
-        _author: card.username || '未知'
+        _author: card.username || '未知',
+        _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
+        _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
+        _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
       });
       onClose();
     } catch (error) {

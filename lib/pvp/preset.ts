@@ -21,7 +21,7 @@ export const loadPresetCard = async (origin: string, filename: string): Promise<
   const url = new URL(`/presets/${safeFilename}`, origin);
   const res = await fetch(url.toString(), { method: 'GET' });
   if (!res.ok) {
-    throw new Error(`无法读取预设卡: ${safeFilename}`);
+    throw new Error(`无法读取预设卡: ${safeFilename}（HTTP ${res.status}）`);
   }
 
   const data = await res.json();

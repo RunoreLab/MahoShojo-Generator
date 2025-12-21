@@ -1,6 +1,6 @@
 import { clearPvpRoomRuntimeState, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
-import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpRoomRules } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
@@ -15,7 +15,7 @@ const parseRules = (rulesJson: string): PvpRoomRules | null => {
   }
 };
 
-export default async function handler(req: Request): Promise<Response> {
+async function restartHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -58,3 +58,5 @@ export default async function handler(req: Request): Promise<Response> {
   if (!ok) return json({ error: '重开失败（版本冲突）', code: 'VERSION_CONFLICT' }, { status: 409 });
   return json({ success: true });
 }
+
+export default withPvpErrorBoundary(restartHandler);

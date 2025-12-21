@@ -16,7 +16,7 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
-import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpRoomRules, PvpSnapshotRef } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
@@ -68,7 +68,7 @@ const moveToDiscard = (hand: PvpHandState, snapshotId: string): PvpHandState => 
   return { ...hand, cards, discarded };
 };
 
-export default async function handler(req: Request): Promise<Response> {
+async function resolveHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -381,3 +381,5 @@ export default async function handler(req: Request): Promise<Response> {
 
   return json({ success: true, roundResolved: true, result: JSON.parse(resultJson), matchWinnerUserId });
 }
+
+export default withPvpErrorBoundary(resolveHandler);

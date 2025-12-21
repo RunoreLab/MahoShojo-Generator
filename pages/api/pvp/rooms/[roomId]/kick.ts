@@ -1,12 +1,12 @@
 import { getPvpRoomById, getPvpRoomPlayers, removePvpRoomPlayer, updatePvpMatch, updatePvpRoomCas } from '@/lib/d1';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
-import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
 export const runtime = 'edge';
 
 type KickBody = { expectedVersion?: number; userId?: number };
 
-export default async function handler(req: Request): Promise<Response> {
+async function kickHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
@@ -59,3 +59,5 @@ export default async function handler(req: Request): Promise<Response> {
 
   return json({ success: true });
 }
+
+export default withPvpErrorBoundary(kickHandler);

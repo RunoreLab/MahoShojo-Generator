@@ -11,6 +11,7 @@ interface DatabaseSelectorProps {
   isGenerating: boolean;
   isMatching: 'character' | 'scenario' | null;
   combatantCount: number;
+  maxCombatants?: number;
 }
 
 export function DatabaseSelector({
@@ -20,6 +21,7 @@ export function DatabaseSelector({
   isGenerating,
   isMatching,
   combatantCount,
+  maxCombatants = MAX_COMBATANTS,
 }: DatabaseSelectorProps) {
   return (
     <div className="mb-6">
@@ -27,14 +29,14 @@ export function DatabaseSelector({
       <div className="flex gap-2">
         <button
           onClick={onOpenCharacterModal}
-          disabled={isGenerating || combatantCount >= MAX_COMBATANTS}
+          disabled={isGenerating || combatantCount >= maxCombatants}
           className="flex-1 px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
         >
           浏览在线角色库
         </button>
         <button
           onClick={onRandomMatchCharacter}
-          disabled={isGenerating || isMatching !== null || combatantCount >= MAX_COMBATANTS}
+          disabled={isGenerating || isMatching !== null || combatantCount >= maxCombatants}
           className="flex-1 px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
         >
           {isMatching === 'character' ? '匹配中...' : '随机匹配角色'}
