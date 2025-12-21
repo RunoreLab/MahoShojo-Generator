@@ -89,6 +89,13 @@ PVP 可用卡必须满足：
 - `pages/pvp/[roomId].tsx:1` 房间页
 - `components/pvp/PvpLobbyPage.tsx:1`
 - `components/pvp/PvpRoomPage.tsx:1`
+- `pages/me.tsx:1` 个人页（战报记录 / PVP 战绩，提示“可能被清理”）
+
+### 2.6 统计/战绩接口
+- `pages/api/pvp/users/summary.ts:1` 房间内查询玩家简要战绩（wins/losses/draws）
+- `pages/api/me/battle-reports.ts:1` 我的战报记录列表
+- `pages/api/me/battle-reports/[generationId]/regenerate.ts:1` 根据记录重生战报（尽力复现）
+- `pages/api/me/pvp.ts:1` 我的 PVP 战绩 + 最近对局
 
 ## 3. 运行与迁移提示
 

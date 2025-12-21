@@ -115,6 +115,49 @@ export function PvpRoomPage() {
   const players = useMemo(() => (Array.isArray(roomQuery.data?.players) ? roomQuery.data.players : []), [roomQuery.data?.players]);
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
 
+  const userIdsForSummary = useMemo(
+    () =>
+      players
+        .map((p: any) => (typeof p?.userId === 'number' ? p.userId : null))
+        .filter((id: any): id is number => typeof id === 'number' && Number.isFinite(id)),
+    [players]
+  );
+
+  const userSummaryQuery = useQuery({
+    queryKey: ['pvp', 'user-summaries', userIdsForSummary.slice().sort((a: number, b: number) => a - b).join(',')],
+    enabled: Boolean(joined && isAuthenticated && userIdsForSummary.length > 0),
+    staleTime: 10_000,
+    queryFn: async () => {
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch('/api/pvp/users/summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ userIds: userIdsForSummary }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '加载战绩失败');
+      return data as { users: Array<{ userId: number; wins: number; losses: number; draws: number; completedMatches: number; winRate: number }> };
+    },
+  });
+
+  const pvpSummaryByUserId = useMemo(() => {
+    const map = new Map<number, { wins: number; losses: number; draws: number; completedMatches: number; winRate: number }>();
+    const list = userSummaryQuery.data?.users;
+    if (!Array.isArray(list)) return map;
+    for (const item of list) {
+      if (!item || typeof item.userId !== 'number') continue;
+      map.set(item.userId, {
+        wins: item.wins ?? 0,
+        losses: item.losses ?? 0,
+        draws: item.draws ?? 0,
+        completedMatches: item.completedMatches ?? 0,
+        winRate: item.winRate ?? 0,
+      });
+    }
+    return map;
+  }, [userSummaryQuery.data?.users]);
+
   const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
   const battleCooldownMs = isUserCustomKey ? 3000 : 120000;
   const battleCooldownStorageKey = isUserCustomKey ? 'pvp.generateBattleCooldown:custom' : 'pvp.generateBattleCooldown:system';
@@ -425,7 +468,19 @@ export function PvpRoomPage() {
                       {players.map((p: any) => (
                         <div key={p.userId} className="flex items-center justify-between gap-2">
                           <div>
-                            [{p.seat ?? '?'}] {p.prefix ? `${p.prefix} ` : ''}{p.username} {p.userId === room.hostUserId ? '(房主)' : ''}
+                            <div>
+                              [{p.seat ?? '?'}] {p.prefix ? `${p.prefix} ` : ''}{p.username} {p.userId === room.hostUserId ? '(房主)' : ''}
+                            </div>
+                            {typeof p.userId === 'number' && (
+                              <div className="text-xs text-gray-600">
+                                {(() => {
+                                  const s = pvpSummaryByUserId.get(p.userId);
+                                  if (!s) return '战绩：暂无';
+                                  return `战绩：${s.wins}胜 ${s.losses}负 ${s.draws}平（${s.completedMatches}场，胜率 ${s.winRate}%）`;
+                                })()}
+                                <span className="ml-2 text-gray-500">（记录可能随时清理）</span>
+                              </div>
+                            )}
                           </div>
                           {isHost && p.userId !== room.hostUserId && (
                             <button

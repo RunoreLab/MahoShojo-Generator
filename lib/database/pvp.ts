@@ -667,6 +667,97 @@ export interface PvpMatchRow {
   updated_at: string;
 }
 
+export interface PvpMatchPlayerRow {
+  match_id: string;
+  user_id: number;
+  seat: number;
+  username: string | null;
+  user_prefix: string | null;
+  joined_at: string;
+}
+
+export interface PvpUserSummaryRow {
+  user_id: number;
+  completed_matches: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  aborted_matches: number;
+  last_played_at: string | null;
+}
+
+export async function getPvpUserSummariesByUserIds(userIds: number[]): Promise<PvpUserSummaryRow[]> {
+  try {
+    const ids = [...new Set(userIds.filter((n) => Number.isFinite(n)).map((n) => Math.floor(n)))].filter((n) => n > 0);
+    if (ids.length <= 0) return [];
+
+    const placeholders = ids.map(() => '?').join(', ');
+    const result = await queryFromD1(
+      `SELECT
+        mp.user_id AS user_id,
+        SUM(CASE WHEN m.status = 'completed' THEN 1 ELSE 0 END) AS completed_matches,
+        SUM(CASE WHEN m.status = 'completed' AND m.winner_user_id = mp.user_id THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN m.status = 'completed' AND m.winner_user_id IS NULL THEN 1 ELSE 0 END) AS draws,
+        SUM(CASE WHEN m.status = 'completed' AND m.winner_user_id IS NOT NULL AND m.winner_user_id != mp.user_id THEN 1 ELSE 0 END) AS losses,
+        SUM(CASE WHEN m.status = 'aborted' THEN 1 ELSE 0 END) AS aborted_matches,
+        MAX(m.started_at) AS last_played_at
+      FROM pvp_match_players mp
+      JOIN pvp_matches m ON m.id = mp.match_id
+      WHERE mp.user_id IN (${placeholders})
+      GROUP BY mp.user_id`,
+      ids
+    ) as any;
+
+    if (result.success && result.result?.[0]?.results) {
+      return result.result[0].results as PvpUserSummaryRow[];
+    }
+    return [];
+  } catch (error) {
+    console.error('读取 PVP 用户战绩摘要失败:', error);
+    return [];
+  }
+}
+
+export async function getPvpMatchesByUserId(
+  userId: number,
+  limit: number
+): Promise<{ matches: PvpMatchRow[]; players: PvpMatchPlayerRow[] }> {
+  try {
+    const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+    const matchesResult = await queryFromD1(
+      `SELECT m.*
+       FROM pvp_match_players mp
+       JOIN pvp_matches m ON m.id = mp.match_id
+       WHERE mp.user_id = ?
+       ORDER BY m.started_at DESC
+       LIMIT ?`,
+      [userId, safeLimit]
+    ) as any;
+
+    const matches = (matchesResult.success && matchesResult.result?.[0]?.results)
+      ? (matchesResult.result[0].results as PvpMatchRow[])
+      : [];
+
+    if (matches.length <= 0) return { matches: [], players: [] };
+
+    const matchIds = matches.map((m) => m.id);
+    const placeholders = matchIds.map(() => '?').join(', ');
+    const playersResult = await queryFromD1(
+      `SELECT * FROM pvp_match_players WHERE match_id IN (${placeholders}) ORDER BY match_id ASC, seat ASC`,
+      matchIds
+    ) as any;
+
+    const players = (playersResult.success && playersResult.result?.[0]?.results)
+      ? (playersResult.result[0].results as PvpMatchPlayerRow[])
+      : [];
+
+    return { matches, players };
+  } catch (error) {
+    console.error('读取 PVP 对战列表失败:', error);
+    return { matches: [], players: [] };
+  }
+}
+
 export async function createPvpMatch(input: {
   id: string;
   roomId: string;

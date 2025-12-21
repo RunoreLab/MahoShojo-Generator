@@ -150,20 +150,25 @@ export default function Home() {
               {loading ? (
                 <span className="text-sm text-gray-600">加载中...</span>
               ) : isAuthenticated ? (
-                <Link
-                  href="/character-manager"
-                  className="inline-flex items-center px-4 py-2 text-sm bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 transition-colors"
-                >
-                  <span>欢迎回来，</span>
-                  <UserWithTitle
-                    username={user?.username || ''}
-                    usernameClassName="text-pink-700 font-semibold"
-                    titleClassName="text-xs"
-                    badges={userBadges}
-                    showBadges={true}
-                  />
-                  <span className="ml-2">点击进入档案馆</span>
-                </Link>
+                <div className="flex flex-col items-center gap-2">
+                  <Link
+                    href="/character-manager"
+                    className="inline-flex items-center px-4 py-2 text-sm bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 transition-colors"
+                  >
+                    <span>欢迎回来，</span>
+                    <UserWithTitle
+                      username={user?.username || ''}
+                      usernameClassName="text-pink-700 font-semibold"
+                      titleClassName="text-xs"
+                      badges={userBadges}
+                      showBadges={true}
+                    />
+                    <span className="ml-2">点击进入档案馆</span>
+                  </Link>
+                  <Link href="/me" className="text-sm text-blue-600 hover:underline">
+                    个人页：战报记录 / PVP 战绩（测试版）
+                  </Link>
+                </div>
               ) : (
                 <Link
                   href="/character-manager"
