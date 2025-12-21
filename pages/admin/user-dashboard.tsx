@@ -1,6 +1,6 @@
 // pages/admin/user-dashboard.tsx
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -26,6 +26,8 @@ const UserManagementPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const isComposingSearchRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [filters, setFilters] = useState({
     page: 1,
     limit: 20,
@@ -42,58 +44,59 @@ const UserManagementPage: React.FC = () => {
   });
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
-  // 从 URL 查询参数初始化筛选器状态
-  const initializeFilters = useCallback(() => {
-    if (router.isReady) {
-      setFilters(prev => ({
-        ...prev,
-        page: parseInt(router.query.page as string || '1', 10),
-        search: router.query.search as string || '',
-        status: router.query.status as string || '',
-        regDateStart: router.query.regDateStart as string || '',
-        regDateEnd: router.query.regDateEnd as string || '',
-        loginDateStart: router.query.loginDateStart as string || '',
-        loginDateEnd: router.query.loginDateEnd as string || '',
-        minPublicCards: router.query.minPublicCards as string || '',
-        maxPublicCards: router.query.maxPublicCards as string || '',
-        minBannedCards: router.query.minBannedCards as string || '',
-        maxBannedCards: router.query.maxBannedCards as string || '',
-      }));
-    }
-  }, [router.isReady, router.query]);
-
-  useEffect(() => {
-    initializeFilters();
-  }, [initializeFilters]);
-  
   // 获取数据
   const fetchData = useCallback(async (currentFilters: typeof filters) => {
     setLoading(true);
     setSelectedIds(new Set());
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     try {
-        const params = new URLSearchParams();
-        Object.entries(currentFilters).forEach(([key, value]) => {
-            if (value) params.append(key, String(value));
-        });
+      const params = new URLSearchParams();
+      Object.entries(currentFilters).forEach(([key, value]) => {
+        if (!value) return;
+        const normalized = typeof value === 'string' ? value.trim() : value;
+        if (normalized === '') return;
+        params.append(key, String(normalized));
+      });
 
-      const response = await fetch(`/api/admin/users?${params.toString()}`);
+      const response = await fetch(`/api/admin/users?${params.toString()}`, { signal: abortController.signal });
       if (!response.ok) throw new Error('获取用户数据失败');
       const data = await response.json();
       setUsers(data.users);
       setTotal(data.total);
     } catch (error) {
+      if (abortController.signal.aborted) return;
       console.error(error);
     } finally {
-      setLoading(false);
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
+      if (!abortController.signal.aborted) {
+        setLoading(false);
+      }
     }
   }, []);
 
-  // 当筛选器状态变化时（由 router.query 触发），获取数据
   useEffect(() => {
-    if (router.isReady) {
-      fetchData(filters);
-    }
-  }, [router.isReady, router.query, fetchData, filters]);
+    if (!router.isReady) return;
+    const nextFilters = {
+      page: parseInt((router.query.page as string) || '1', 10),
+      limit: 20,
+      search: (router.query.search as string) || '',
+      status: (router.query.status as string) || '',
+      regDateStart: (router.query.regDateStart as string) || '',
+      regDateEnd: (router.query.regDateEnd as string) || '',
+      loginDateStart: (router.query.loginDateStart as string) || '',
+      loginDateEnd: (router.query.loginDateEnd as string) || '',
+      minPublicCards: (router.query.minPublicCards as string) || '',
+      maxPublicCards: (router.query.maxPublicCards as string) || '',
+      minBannedCards: (router.query.minBannedCards as string) || '',
+      maxBannedCards: (router.query.maxBannedCards as string) || '',
+    };
+    setFilters(nextFilters);
+    fetchData(nextFilters);
+  }, [router.isReady, router.query, fetchData]);
 
   // 更新 URL
   const updateUrl = useCallback((newFilters: typeof filters) => {
@@ -118,8 +121,18 @@ const UserManagementPage: React.FC = () => {
     const { name, value } = e.target;
     const newFilters = { ...filters, [name]: value, page: 1 };
     setFilters(newFilters);
+
+    const isComposing = name === 'search' && (isComposingSearchRef.current || (e.nativeEvent as unknown as { isComposing?: boolean }).isComposing);
+    if (isComposing) return;
+
     debouncedUpdateUrl(newFilters);
   };
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
   
   // 批量操作
   const handleBatchAction = async (action: string) => {
@@ -182,8 +195,14 @@ const UserManagementPage: React.FC = () => {
               <input 
                   type="text" 
                   name="search" 
-                  defaultValue={filters.search} 
-                  onChange={handleFilterChange} 
+                  defaultValue={router.query.search as string || ''} 
+                  onChange={handleFilterChange}
+                  onCompositionStart={() => {
+                    isComposingSearchRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    isComposingSearchRef.current = false;
+                  }}
                   placeholder="搜索用户名或邮箱..."
                   className="input-field"
               />

@@ -1,6 +1,6 @@
 // pages/admin/content-management.tsx
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -52,6 +52,8 @@ interface AiReviewResult {
 
 const ContentManagementPage: React.FC = () => {
   const router = useRouter();
+  const isComposingSearchRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [selectedCardDetails, setSelectedCardDetails] = useState<DataCard | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [detailsPendingNotice, setDetailsPendingNotice] = useState<string | undefined>(undefined);
@@ -85,26 +87,35 @@ const ContentManagementPage: React.FC = () => {
   const fetchData = useCallback(async (currentFilters: typeof filters) => {
     setLoading(true);
     setSelectedIds(new Set());
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     try {
       const params = new URLSearchParams({
         page: currentFilters.page.toString(),
         limit: currentFilters.limit.toString(),
-        search: currentFilters.search,
+        search: currentFilters.search.trim(),
         reviewStatus: currentFilters.reviewStatus,
         isPublic: currentFilters.isPublic,
         type: currentFilters.type,
         isRecommended: currentFilters.isRecommended,
         includePendingUpdates: '1',
       });
-      const response = await fetch(`/api/admin/data-cards?${params.toString()}`);
+      const response = await fetch(`/api/admin/data-cards?${params.toString()}`, { signal: abortController.signal });
       if (!response.ok) throw new Error('获取数据失败');
       const data = await response.json();
       setDataCards(data.cards);
       setTotal(data.total);
     } catch (error) {
+      if (abortController.signal.aborted) return;
       console.error(error);
     } finally {
-      setLoading(false);
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
+      if (!abortController.signal.aborted) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -163,8 +174,16 @@ const ContentManagementPage: React.FC = () => {
     const { name, value } = e.target;
     const newFilters = { ...filters, [name]: value, page: 1 };
     setFilters(newFilters);
+    const isComposing = name === 'search' && (isComposingSearchRef.current || (e.nativeEvent as unknown as { isComposing?: boolean }).isComposing);
+    if (isComposing) return;
     debouncedUpdateUrl(newFilters);
   };
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
   
   const handlePageChange = (newPage: number) => {
     if (newPage > 0 && newPage <= Math.ceil(total / filters.limit)) {
@@ -690,6 +709,12 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                 name="search"
                 defaultValue={router.query.search || ''} // 使用 router.query 初始化以避免UI跳动
                 onChange={handleFilterChange}
+                onCompositionStart={() => {
+                  isComposingSearchRef.current = true;
+                }}
+                onCompositionEnd={() => {
+                  isComposingSearchRef.current = false;
+                }}
                 placeholder="搜索名称、描述、作者..."
                 className="input-field"
               />

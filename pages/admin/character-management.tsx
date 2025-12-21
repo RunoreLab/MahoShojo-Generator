@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { Search, Save, X, Database, Eye, Ban, CheckCircle, AlertTriangle, Calendar, User, Hash } from 'lucide-react';
 import { getDataCardStatus } from '@/lib/database/data-cards';
 import Link from 'next/link';
@@ -40,20 +40,26 @@ export default function CharacterManagement() {
   const [typeFilter, setTypeFilter] = useState<'all' | 'character' | 'scenario'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'public' | 'private' | 'banned'>('all');
   const [viewingData, setViewingData] = useState(false);
+  const isComposingRef = useRef(false);
+  const cardsAbortControllerRef = useRef<AbortController | null>(null);
 
   // 获取所有角色卡
   const fetchCards = async (page = 1, search = '', type = typeFilter, status = statusFilter) => {
     setLoading(true);
+    cardsAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    cardsAbortControllerRef.current = abortController;
     try {
+      const normalizedSearch = search.trim();
       const params = new URLSearchParams({
         page: page.toString(),
         limit: '20',
-        ...(search && { search }),
+        ...(normalizedSearch && { search: normalizedSearch }),
         ...(type !== 'all' && { type }),
         ...(status !== 'all' && { status })
       });
 
-      const response = await fetch(`/api/admin/data-cards?${params}`);
+      const response = await fetch(`/api/admin/data-cards?${params}`, { signal: abortController.signal });
       if (response.ok) {
         const data = await response.json();
         setCards(data.cards || []);
@@ -63,16 +69,20 @@ export default function CharacterManagement() {
         setMessage({ type: 'error', text: '获取角色卡列表失败' });
       }
     } catch (error) {
+      if (abortController.signal.aborted) return;
       setMessage({ type: 'error', text: '获取角色卡列表失败: ' + error });
     } finally {
-      setLoading(false);
+      if (!abortController.signal.aborted) {
+        setLoading(false);
+      }
     }
   };
 
   // 搜索角色卡
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    await fetchCards(1, searchTerm, typeFilter, statusFilter);
+    if (isComposingRef.current) return;
+    await fetchCards(1, searchTerm.trim(), typeFilter, statusFilter);
   };
 
   // 获取单个角色卡详情
@@ -169,7 +179,7 @@ export default function CharacterManagement() {
     }
 
     fetchCards();
-    // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady]);
 
   useEffect(() => {
@@ -178,6 +188,12 @@ export default function CharacterManagement() {
       return () => clearTimeout(timer);
     }
   }, [message]);
+
+  useEffect(() => {
+    return () => {
+      cardsAbortControllerRef.current?.abort();
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
@@ -219,6 +235,22 @@ export default function CharacterManagement() {
                       placeholder="搜索角色卡名称..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
+                      onCompositionStart={() => {
+                        isComposingRef.current = true;
+                      }}
+                      onCompositionEnd={() => {
+                        isComposingRef.current = false;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        if ((e.nativeEvent as unknown as { isComposing?: boolean }).isComposing) {
+                          e.preventDefault();
+                          return;
+                        }
+                        if (isComposingRef.current) {
+                          e.preventDefault();
+                        }
+                      }}
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     />
                   </div>
@@ -257,7 +289,7 @@ export default function CharacterManagement() {
 
                 <button
                   type="button"
-                  onClick={() => fetchCards(1, searchTerm, typeFilter, statusFilter)}
+                  onClick={() => fetchCards(1, searchTerm.trim(), typeFilter, statusFilter)}
                   className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm"
                 >
                   应用筛选
@@ -316,7 +348,7 @@ export default function CharacterManagement() {
               {totalPages > 1 && (
                 <div className="flex justify-center gap-2 mt-4">
                   <button
-                    onClick={() => fetchCards(currentPage - 1, searchTerm, typeFilter, statusFilter)}
+                    onClick={() => fetchCards(currentPage - 1, searchTerm.trim(), typeFilter, statusFilter)}
                     disabled={currentPage === 1 || loading}
                     className="px-3 py-1 bg-gray-200 text-gray-700 rounded disabled:opacity-50"
                   >
@@ -326,7 +358,7 @@ export default function CharacterManagement() {
                     {currentPage} / {totalPages}
                   </span>
                   <button
-                    onClick={() => fetchCards(currentPage + 1, searchTerm, typeFilter, statusFilter)}
+                    onClick={() => fetchCards(currentPage + 1, searchTerm.trim(), typeFilter, statusFilter)}
                     disabled={currentPage === totalPages || loading}
                     className="px-3 py-1 bg-gray-200 text-gray-700 rounded disabled:opacity-50"
                   >
