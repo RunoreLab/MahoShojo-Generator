@@ -1,6 +1,6 @@
 // components/BattleDataModal.tsx
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import DataCard from './DataCard';
 import SortSelector from './SortSelector';
 import DataCardDetailsModal from './DataCardDetailsModal';
@@ -37,6 +37,8 @@ export default function BattleDataModal({
   selectedType
 }: BattleDataModalProps) {
   const { isAuthenticated } = useAuth();
+  const isComposingSearchRef = useRef(false);
+  const publicFetchAbortControllerRef = useRef<AbortController | null>(null);
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
   const [publicDataCards, setPublicDataCards] = useState<any[]>([]);
   const [favoriteCards, setFavoriteCards] = useState<any[]>([]);
@@ -131,9 +133,12 @@ export default function BattleDataModal({
 
   // 通过 ID 获取数据卡并显示在列表中
   const loadCardByIdForDisplay = useCallback(async (cardId: string) => {
+    publicFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    publicFetchAbortControllerRef.current = abortController;
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/public-data-cards?id=${cardId}`);
+      const response = await fetch(`/api/public-data-cards?id=${cardId}`, { signal: abortController.signal });
       if (response.ok) {
         const result = await response.json();
         setPublicDataCards(result.success && result.card ? mapWithRoleType([result.card]) : []);
@@ -141,10 +146,16 @@ export default function BattleDataModal({
         setPublicDataCards([]);
       }
     } catch (error) {
+      if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return;
+      }
       console.error('通过ID获取数据卡失败:', error);
       setPublicDataCards([]);
     } finally {
-      setIsLoading(false);
+      if (publicFetchAbortControllerRef.current === abortController) {
+        publicFetchAbortControllerRef.current = null;
+        setIsLoading(false);
+      }
     }
   }, [mapWithRoleType]);
 
@@ -155,6 +166,9 @@ export default function BattleDataModal({
     currentSearchTerm?: string,
     currentFilters?: Filters
   ) => {
+    publicFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    publicFetchAbortControllerRef.current = abortController;
     try {
       setIsLoading(true);
       const useRoleTypeFilter = Boolean(currentFilters?.roleType && selectedType === 'character');
@@ -180,7 +194,7 @@ export default function BattleDataModal({
         if (currentFilters.recommendedOnly) params.append('recommendedOnly', '1');
       }
 
-      const response = await fetch(`/api/public-data-cards?${params}`);
+      const response = await fetch(`/api/public-data-cards?${params}`, { signal: abortController.signal });
       if (response.ok) {
         const result = await response.json();
         let cards = result.success ? (result.cards || []) : [];
@@ -191,9 +205,15 @@ export default function BattleDataModal({
         setPublicDataCards(cards);
       }
     } catch (error) {
+      if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return;
+      }
       console.error('获取公开数据卡失败:', error);
     } finally {
-      setIsLoading(false);
+      if (publicFetchAbortControllerRef.current === abortController) {
+        publicFetchAbortControllerRef.current = null;
+        setIsLoading(false);
+      }
     }
   }, [selectedType, cardsPerPage, mapWithRoleType]);
 
@@ -256,13 +276,25 @@ export default function BattleDataModal({
     }
   }, [isAuthenticated, selectedType, sortFavorites, mapWithRoleType, sortBy]);
 
-  // 防抖功能 - 延迟500ms执行搜索
+  // 防抖功能 - 延迟500ms执行搜索（兼容 IME：组词期不触发，结束后会继续等待并触发）
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery);
-    }, 500);
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    return () => clearTimeout(timer);
+    const schedule = () => {
+      timer = setTimeout(() => {
+        if (isComposingSearchRef.current) {
+          schedule();
+          return;
+        }
+        setDebouncedSearchQuery(searchQuery);
+      }, 500);
+    };
+
+    schedule();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [searchQuery]);
 
   // 当防抖搜索词变化时执行搜索
@@ -293,6 +325,12 @@ export default function BattleDataModal({
       loadPublicDataCards(1, sortBy, trimmed || undefined, activeFilters);
     }
   }, [debouncedSearchQuery, isOpen, activeTab, loadUserDataCards, loadCardByIdForDisplay, loadPublicDataCards, sortBy, activeFilters]);
+
+  useEffect(() => {
+    return () => {
+      publicFetchAbortControllerRef.current?.abort();
+    };
+  }, []);
 
 
   // 当模态框打开时加载数据
@@ -608,7 +646,19 @@ export default function BattleDataModal({
           <div className="mb-2">
             <div className="flex flex-wrap gap-2 mb-2 items-center">
               <div className="flex-1 relative min-w-[250px]">
-                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={`搜索${typeLabel}名称或粘贴分享链接...`} className="w-full input-field pr-10" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onCompositionStart={() => {
+                    isComposingSearchRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    isComposingSearchRef.current = false;
+                  }}
+                  placeholder={`搜索${typeLabel}名称或粘贴分享链接...`}
+                  className="w-full input-field pr-10"
+                />
                 {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
               </div>
               <SortSelector value={sortBy} onChange={handleSortChange} />
