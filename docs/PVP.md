@@ -87,7 +87,7 @@
 
 推荐默认（易实现、体验稳定）：
 - `handSize >= maxRounds`（例如 BO5 → 每人至少 5 张）
-- `winCondition = firstToWins`（例如 `firstToWins = 3`）
+- `winCondition = mostWinsAfterMaxRounds`（你已确认的默认规则）
 - `tieBreaker = draw`（保守且避免无限加赛）
 
 ---
@@ -344,8 +344,8 @@ CREATE INDEX IF NOT EXISTS idx_pvp_round_choices_round_id ON pvp_round_choices(r
 MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 
 ### 端点草案
-- `POST /api/pvp/rooms`：创建房间（返回 `roomId`）
-- `POST /api/pvp/rooms/:roomId/join`：加入房间
+- `POST /api/pvp/rooms`：创建房间（返回 `roomId`；可选携带房间口令）
+- `POST /api/pvp/rooms/:roomId/join`：加入房间（若启用口令则需 `password`）
 - `POST /api/pvp/rooms/:roomId/password`：房主设置/清空房间口令（可选，MVP 可延后）
 - （建议新增）`POST /api/pvp/rooms/:roomId/leave`：离开房间（触发 aborted / 让房主可踢人/重置）
 - `POST /api/pvp/rooms/:roomId/submit`：提交卡组
@@ -353,6 +353,54 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - `GET /api/pvp/rooms/:roomId`：拉取房间状态（按身份过滤私密字段）
 - `POST /api/pvp/rooms/:roomId/rounds/:roundId/choose`：提交本轮选择（不对他人暴露）
 - `POST /api/pvp/rooms/:roomId/rounds/:roundId/resolve`：房主或系统触发结算（也可由服务端检测“双方已选”自动触发）
+
+### 7.1 请求/响应约定（建议，便于前后端对齐）
+
+通用：
+- 鉴权：`Authorization: Bearer <auth_key>`
+- 并发控制：所有“会改变房间状态”的写接口都带 `expectedVersion`
+- 错误返回建议统一：`{ error: string, code?: string, details?: unknown }`
+
+`POST /api/pvp/rooms`（创建房间）
+```json
+{
+  "rules": {
+    "participants": 2,
+    "cardsPerPlayer": 3,
+    "dedupe": true,
+    "mode": "classic",
+    "bestOf": { "enabled": false, "maxRounds": 3, "winCondition": "mostWinsAfterMaxRounds", "tieBreaker": "draw" }
+  },
+  "password": "可选，房间口令明文，仅用于一次性设置"
+}
+```
+
+`POST /api/pvp/rooms/:roomId/join`（加入房间）
+```json
+{ "expectedVersion": 0, "password": "若房间启用口令则必填" }
+```
+
+`POST /api/pvp/rooms/:roomId/password`（设置/清空房间口令）
+- 仅房主可调用
+- 仅允许在 `waiting/submitting` 阶段修改（`choosing/resolving` 禁止改，避免恶意锁人）
+- 建议只保存 `hash+salt`，不保存明文
+
+`POST /api/pvp/rooms/:roomId/submit`（提交卡组）
+```json
+{
+  "expectedVersion": 3,
+  "cards": [
+    { "kind": "data_card", "id": "uuid", "updatedAt": "2025-12-01 12:00:00" },
+    { "kind": "preset", "filename": "M01_centaurea.json" }
+  ],
+  "acceptPrivateDisclosure": true
+}
+```
+
+`GET /api/pvp/rooms/:roomId`（拉取房间）
+- 返回按身份过滤：对手手牌与对手选择永不返回；最多返回 `hasChosen` 这类布尔位。
+
+> 注：`updatedAt` 的格式需与数据库 `data_cards.updated_at` 保持一致（目前为 SQLite DATETIME 字符串），否则版本校验会出现误判。
 
 ### 并发与一致性（关键）
 每个写接口都带 `expectedVersion`：
@@ -458,12 +506,14 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 
 ### 12.1 创建房间
 - 输入：房间规则（人数=2、每人提交数、是否去重、模式、BO 配置、是否情景等）
-- 输出：`roomId`（推荐 UUID）、`join_code`（可选）
+- 输出：`roomId`（推荐 UUID）、房间口令状态（可选）
 - 默认阶段：`waiting`
 - 写入：`pvp_rooms` + `pvp_room_players(房主)`
+ - 口令：默认不设置；若房主设置口令，应只保存 `join_code_hash/join_code_salt`，不保存明文
 
 ### 12.2 加入房间
 - 校验：房间存在、未 `closed`、人数未满、口令正确（若启用）
+  - 若 `pvp_rooms.join_code_hash` 非空：`join` 请求必须携带 `password`，服务端用 `salt` 计算 hash 后做常量时间比较
 - 幂等：重复 join 返回同一结果
 - 达到人数后：房主可点击“开始提交”（或自动进入 `submitting`）
 
@@ -479,6 +529,27 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - 私有披露：若提交列表中包含私有卡，必须要求用户确认（`acceptPrivateDisclosure=true`）
 - 写入：`pvp_room_submissions`（覆盖式 upsert）
 - UI：展示双方提交列表（允许查看详情）
+
+建议写死一条“可用卡查询”的 SQL 模板（便于实现一致、减少漏判）：
+
+```sql
+-- 参数：:cardId, :requestUserId
+SELECT
+  dc.*,
+  u.username AS author_username,
+  u.is_banned AS author_is_banned
+FROM data_cards dc
+JOIN users u ON u.id = dc.user_id
+WHERE
+  dc.id = :cardId
+  AND dc.deleted_at IS NULL
+  AND dc.is_public != -1
+  AND dc.review_status IN ('approved', 'pending')
+  AND (dc.user_id = :requestUserId OR dc.is_public = 1)
+  AND (u.is_banned IS NULL OR u.is_banned = '');
+```
+
+> 说明：`dc.is_public` 在本项目里实际是“整数枚举”（-1 封禁 / 0 私有 / 1 公开），因此不要用“BOOLEAN 语义”写死判断。
 
 ### 12.4 开始对局（锁定提交 → 发牌）
 建议把 `start` 设计成“可重试的幂等流程”，防止中途失败导致房间卡死。
@@ -513,6 +584,14 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 6. 写入：`pvp_rounds(status=completed, winner_*)`
 7. 更新手牌：从双方手牌移除已出牌（写回 `pvp_room_hands`），并根据规则创建下一轮或结束比赛
 
+建议补齐两条实现策略（能显著降低线上诡异问题）：
+- PVP 结算优先使用 **non-stream + schema** 的生成方式（减少“流式内容解析 winner”的不确定性）；房间 UI 可用 loading/进度条替代流式输出
+- 在 `submit`/`start` 阶段对“将要喂给 AI 的最终卡内容”做一次 `quickCheck`，提前拦截敏感词，避免对局结算阶段才失败导致体验很差
+
+异常处理建议（防对局卡死/被恶意卡牌拖垮）：
+- 若触发敏感词拦截：建议直接将本轮标记为 `aborted` 或 `completed+draw`（你已选择平局优先的保守策略），并返回通用错误文案；不要把“具体触发内容”回传给对手
+- 若 AI 连续失败（网络/供应商错误）：按重试上限后判 `draw`，并记录 `result_json.error`
+
 ---
 
 ## 13. 我建议你回答的几个问题（决定实现复杂度）
@@ -523,6 +602,6 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 3. BO 默认 `mostWinsAfterMaxRounds`
 4. 默认无口令，但房主可按需设置密码
 
-还建议你继续确认两个会影响实现的点：
-1. `mostWinsAfterMaxRounds` 的平局规则：你已确认默认直接 `draw`
-2. 房主密码的中途修改：你已确认按建议执行（仅 `waiting/submitting` 可改，`choosing/resolving` 禁止改）
+实现口径补充（你已确认）：
+1. `mostWinsAfterMaxRounds` 的平局规则：默认直接 `draw`
+2. 房主密码的中途修改：仅 `waiting/submitting` 可改，`choosing/resolving` 禁止改
