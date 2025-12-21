@@ -103,5 +103,6 @@ PVP 可用卡必须满足：
 
 - 已支持“全员都已选则自动结算（幂等）”，仍保留手动结算按钮作为兜底
 - 暂未做观战视角
-- `pvp_rounds.battle_generation_id` 暂未串联（`/api/generate-battle-story` 当前响应不返回 generationId）
+- `pvp_rounds.battle_generation_id` 暂未串联（`/api/generate-battle-story` 当前响应不返回 generationId；且 `battle_report_generations` 也缺少 PVP 上下文，无法可靠区分 PVP vs 非 PVP）
+- 下一步（记录功能改进）：见 `docs/PVP_RECORDING.md`
 - 目前 UI 的“卡选择器”是最小可用版本（列表 + 选择），后续可复用现有卡牌组件做更美观的卡片式选择
