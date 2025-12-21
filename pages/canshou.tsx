@@ -11,6 +11,7 @@ import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 
 // 定义问卷和问题的类型
 interface Question {
@@ -390,24 +391,41 @@ const CanshouPage: React.FC = () => {
   };
 
   const handleBulkFill = () => {
-    const lines = bulkAnswers.split('\n');
-    if (lines.length > questionnaire!.questions.length) {
-      setError(`⚠️ 粘贴的答案有 ${lines.length} 行，超过了问卷问题总数 ${questionnaire!.questions.length}！`);
+    const parsed = parseBulkQuestionnaireAnswers(bulkAnswers, {
+      expectedCount: questionnaire!.questions.length,
+      orderedQuestionIds: questionnaire!.questions.map(question => question.id),
+    });
+
+    if (parsed.entries.length === 0) {
+      setError('⚠️ 未识别到可填充的答案。支持逐行答案、Q/A 格式、编号列表，以及 JSON（数组/含 userAnswers/按问题 id）。');
       return;
     }
+
     const newAnswers = { ...answers };
-    lines.forEach((line, index) => {
-      if (index < questionnaire!.questions.length) {
-        const questionId = questionnaire!.questions[index].id;
-        const questionDef = questionnaire!.questions[index];
-        const limit = (questionDef.type === 'text' || questionDef.allowCustom) ? 240 : 180;
-        newAnswers[questionId] = line.slice(0, limit);
+    let appliedCount = 0;
+    let ignoredCount = 0;
+    parsed.entries.forEach(entry => {
+      if (entry.index < 0 || entry.index >= questionnaire!.questions.length) {
+        ignoredCount += 1;
+        return;
       }
+      const questionDef = questionnaire!.questions[entry.index];
+      const questionId = questionDef.id;
+      const limit = (questionDef.type === 'text' || questionDef.allowCustom) ? 240 : 180;
+      newAnswers[questionId] = entry.value.slice(0, limit);
+      appliedCount += 1;
     });
     setAnswers(newAnswers);
     setCurrentAnswer(newAnswers[questionnaire!.questions[currentQuestionIndex].id] || '');
     setError(null);
-    alert(`成功填充了 ${lines.length} 个答案！`);
+    const formatLabel = parsed.format === 'qa'
+      ? 'Q/A'
+      : parsed.format === 'json'
+        ? 'JSON'
+        : parsed.format === 'paragraphs'
+          ? '段落'
+          : '逐行';
+    alert(`成功填充了 ${appliedCount} 个答案（识别格式：${formatLabel}${ignoredCount > 0 ? `，忽略了 ${ignoredCount} 条超出范围的内容` : ''}）！`);
     setBulkAnswers('');
   };
 
@@ -637,7 +655,7 @@ const CanshouPage: React.FC = () => {
                         id="bulk-answers"
                         value={bulkAnswers}
                         onChange={(e) => setBulkAnswers(e.target.value)}
-                        placeholder="在此处粘贴所有答案，每行一个。"
+                        placeholder="在此处粘贴所有答案：支持每行一个、Q/A 复制内容、编号列表、JSON。"
                         className="input-field h-20"
                         rows={4}
                       />
