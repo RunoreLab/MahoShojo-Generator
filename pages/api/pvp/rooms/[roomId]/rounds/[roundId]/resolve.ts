@@ -69,7 +69,6 @@ export default async function handler(req: Request): Promise<Response> {
 
   const room = await getPvpRoomById(roomId);
   if (!room) return json({ error: '房间不存在' }, { status: 404 });
-  if (room.host_user_id !== auth.user.id) return json({ error: '仅房主可结算' }, { status: 403 });
 
   const expectedVersion = Number.isFinite(body.data.expectedVersion) ? Math.floor(body.data.expectedVersion as number) : null;
   if (expectedVersion === null) return json({ error: '缺少 expectedVersion' }, { status: 400 });
@@ -82,6 +81,13 @@ export default async function handler(req: Request): Promise<Response> {
   const rules = parseRules(room.rules_json);
   if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
 
+  const players = await getPvpRoomPlayers(roomId);
+  const sortedPlayers = [...players].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
+  if (!sortedPlayers.some((p) => p.user_id === auth.user.id)) return json({ error: '你不在该房间中' }, { status: 403 });
+  if (sortedPlayers.length !== 2) return json({ error: '房间玩家异常' }, { status: 500 });
+  const playerA = sortedPlayers[0]!;
+  const playerB = sortedPlayers[1]!;
+
   const round = await getPvpRoundById(roundId);
   if (!round || round.room_id !== roomId) return json({ error: '回合不存在' }, { status: 404 });
 
@@ -92,12 +98,6 @@ export default async function handler(req: Request): Promise<Response> {
   if (round.status !== 'pending' && round.status !== 'resolving') {
     return json({ error: '回合不可结算', code: 'ROUND_FORBIDDEN' }, { status: 409 });
   }
-
-  const players = await getPvpRoomPlayers(roomId);
-  const sortedPlayers = [...players].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
-  if (sortedPlayers.length !== 2) return json({ error: '房间玩家异常' }, { status: 500 });
-  const playerA = sortedPlayers[0]!;
-  const playerB = sortedPlayers[1]!;
 
   const choices = await getPvpRoundChoices(roundId);
   if (choices.length < 2) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
@@ -117,7 +117,14 @@ export default async function handler(req: Request): Promise<Response> {
   // CAS：进入 resolving（避免重复触发）
   if (room.phase === 'choosing') {
     const ok = await updatePvpRoomCas(roomId, expectedVersion, { phase: 'resolving', last_activity_at: new Date().toISOString() });
-    if (!ok) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
+    if (!ok) {
+      // 竞争下可能被其它请求先推进，读取最新状态后继续（幂等）
+      const refreshed = await getPvpRoomById(roomId);
+      if (!refreshed) return json({ error: '房间不存在' }, { status: 404 });
+      if (refreshed.phase !== 'resolving' && refreshed.phase !== 'finished') {
+        return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
+      }
+    }
   }
   const resolvingVersion = room.phase === 'choosing' ? expectedVersion + 1 : expectedVersion;
 

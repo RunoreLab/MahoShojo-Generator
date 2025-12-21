@@ -238,6 +238,40 @@ export function PvpRoomPage() {
     onError: (e) => setError(e instanceof Error ? e.message : '更新口令失败'),
   });
 
+  const restartMutation = useMutation({
+    mutationFn: async () => {
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '重开失败');
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => setError(e instanceof Error ? e.message : '重开失败'),
+  });
+
+  const kickMutation = useMutation({
+    mutationFn: async (targetUserId: number) => {
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/kick`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version, userId: targetUserId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '踢人失败');
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => setError(e instanceof Error ? e.message : '踢人失败'),
+  });
+
   const addDataCard = (card: any, isPublic: boolean) => {
     const id = String(card.id);
     if (!id) return;
@@ -335,6 +369,19 @@ export function PvpRoomPage() {
                         </div>
                       ))}
                     </div>
+                    {isHost && players.length > 1 && (
+                      <button
+                        className="generate-button mt-3 w-full"
+                        style={{ backgroundColor: '#ef4444', backgroundImage: 'linear-gradient(to right, #ef4444, #dc2626)' }}
+                        onClick={() => {
+                          const other = players.find((p: any) => p.userId !== room.hostUserId);
+                          if (other?.userId) kickMutation.mutate(other.userId);
+                        }}
+                        disabled={kickMutation.isPending}
+                      >
+                        {kickMutation.isPending ? '踢人中…' : '踢出对手'}
+                      </button>
+                    )}
                     <button
                       className="generate-button mt-3 w-full"
                       style={{ backgroundColor: '#ef4444', backgroundImage: 'linear-gradient(to right, #ef4444, #dc2626)' }}
@@ -512,7 +559,7 @@ export function PvpRoomPage() {
                         我方已选：{choices?.hasChosenMe ? '是' : '否'} / 对手已选：{choices?.hasChosenOther ? '是' : '否'}
                       </div>
 
-                      {isHost && choices?.hasChosenMe && choices?.hasChosenOther && (
+                      {(choices?.hasChosenMe && choices?.hasChosenOther) && (
                         <button
                           className="generate-button mt-3 w-full"
                           style={{ backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #d97706)' }}
@@ -539,6 +586,17 @@ export function PvpRoomPage() {
                   <div className="p-3 rounded-md bg-green-50 text-green-800 text-sm mt-4">
                     对局已结束。
                   </div>
+                )}
+
+                {isHost && (phase === 'finished' || phase === 'aborted' || phase === 'waiting' || phase === 'submitting') && (
+                  <button
+                    className="generate-button mt-3 w-full"
+                    style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}
+                    onClick={() => restartMutation.mutate()}
+                    disabled={restartMutation.isPending}
+                  >
+                    {restartMutation.isPending ? '重开中…' : '重开一局（清空对局数据）'}
+                  </button>
                 )}
 
                 {error && (
