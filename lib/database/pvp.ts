@@ -17,6 +17,7 @@ export interface PvpRoomRow {
   status: PvpRoomStatus;
   phase: PvpRoomPhase;
   rules_json: string;
+  current_match_id: string | null;
   join_code_hash: string | null;
   join_code_salt: string | null;
   version: number;
@@ -54,16 +55,17 @@ export async function createPvpRoom(input: CreatePvpRoomInput): Promise<{ roomId
 
     const result = await queryFromD1(
       `INSERT INTO pvp_rooms (
-        id, host_user_id, status, phase, rules_json,
+        id, host_user_id, status, phase, rules_json, current_match_id,
         join_code_hash, join_code_salt,
         version, expires_at, last_activity_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
       [
         roomId,
         input.hostUserId,
         status,
         phase,
         input.rulesJson,
+        null,
         input.joinCodeHash ?? null,
         input.joinCodeSalt ?? null,
         input.expiresAt ?? null,
@@ -151,7 +153,12 @@ export async function removePvpRoomPlayer(roomId: string, userId: number): Promi
 export async function updatePvpRoomCas(
   roomId: string,
   expectedVersion: number,
-  patch: Partial<Pick<PvpRoomRow, 'status' | 'phase' | 'rules_json' | 'join_code_hash' | 'join_code_salt' | 'expires_at' | 'last_activity_at'>>
+  patch: Partial<
+    Pick<
+      PvpRoomRow,
+      'status' | 'phase' | 'rules_json' | 'current_match_id' | 'join_code_hash' | 'join_code_salt' | 'expires_at' | 'last_activity_at'
+    >
+  >
 ): Promise<boolean> {
   const fields: string[] = [];
   const params: any[] = [];
@@ -167,6 +174,10 @@ export async function updatePvpRoomCas(
   if (patch.rules_json !== undefined) {
     fields.push('rules_json = ?');
     params.push(patch.rules_json);
+  }
+  if (patch.current_match_id !== undefined) {
+    fields.push('current_match_id = ?');
+    params.push(patch.current_match_id);
   }
   if (patch.join_code_hash !== undefined) {
     fields.push('join_code_hash = ?');
@@ -298,12 +309,6 @@ export async function getPvpEligibleDataCard(cardId: string, requestUserId: numb
 
 export async function clearPvpRoomMatchState(roomId: string): Promise<boolean> {
   try {
-    // 注意：pvp_round_choices 没有 room_id，需要通过 rounds 关联删除
-    await queryFromD1(
-      `DELETE FROM pvp_round_choices WHERE round_id IN (SELECT id FROM pvp_rounds WHERE room_id = ?)`,
-      [roomId]
-    );
-    await queryFromD1('DELETE FROM pvp_rounds WHERE room_id = ?', [roomId]);
     await queryFromD1('DELETE FROM pvp_room_hands WHERE room_id = ?', [roomId]);
     await queryFromD1('DELETE FROM pvp_room_submissions WHERE room_id = ?', [roomId]);
     await queryFromD1('DELETE FROM pvp_room_card_snapshots WHERE room_id = ?', [roomId]);
@@ -313,6 +318,10 @@ export async function clearPvpRoomMatchState(roomId: string): Promise<boolean> {
     console.error('清理 PVP 对局状态失败:', error);
     return false;
   }
+}
+
+export async function clearPvpRoomRuntimeState(roomId: string): Promise<boolean> {
+  return clearPvpRoomMatchState(roomId);
 }
 
 export async function upsertPvpRoomHand(roomId: string, userId: number, handJson: string): Promise<boolean> {
@@ -424,6 +433,7 @@ export async function getPvpCardSnapshots(roomId: string): Promise<PvpCardSnapsh
 
 export interface CreatePvpRoundInput {
   roomId: string;
+  matchId?: string | null;
   roundIndex: number;
   status?: PvpRoundStatus;
   publicSnapshotJson?: string | null;
@@ -435,9 +445,9 @@ export async function createPvpRound(input: CreatePvpRoundInput): Promise<string
     const now = new Date().toISOString();
     const status: PvpRoundStatus = input.status ?? 'pending';
     const result = await queryFromD1(
-      `INSERT INTO pvp_rounds (id, room_id, round_index, status, public_snapshot_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [roundId, input.roomId, input.roundIndex, status, input.publicSnapshotJson ?? null, now]
+      `INSERT INTO pvp_rounds (id, room_id, match_id, round_index, status, public_snapshot_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [roundId, input.roomId, input.matchId ?? null, input.roundIndex, status, input.publicSnapshotJson ?? null, now]
     ) as any;
     return result.success ? roundId : null;
   } catch (error) {
@@ -449,6 +459,7 @@ export async function createPvpRound(input: CreatePvpRoundInput): Promise<string
 export interface PvpRoundRow {
   id: string;
   room_id: string;
+  match_id: string | null;
   round_index: number;
   status: PvpRoundStatus;
   battle_generation_id: string | null;
@@ -488,6 +499,22 @@ export async function getLatestPvpRoundByRoom(roomId: string): Promise<PvpRoundR
   }
 }
 
+export async function getLatestPvpRoundByMatch(matchId: string): Promise<PvpRoundRow | null> {
+  try {
+    const result = await queryFromD1(
+      'SELECT * FROM pvp_rounds WHERE match_id = ? ORDER BY round_index DESC LIMIT 1',
+      [matchId]
+    ) as any;
+    if (result.success && result.result?.[0]?.results?.length > 0) {
+      return result.result[0].results[0] as PvpRoundRow;
+    }
+    return null;
+  } catch (error) {
+    console.error('读取 pvp_rounds(最新, match) 失败:', error);
+    return null;
+  }
+}
+
 export async function getPvpRoundsByRoom(roomId: string): Promise<PvpRoundRow[]> {
   try {
     const result = await queryFromD1(
@@ -500,6 +527,22 @@ export async function getPvpRoundsByRoom(roomId: string): Promise<PvpRoundRow[]>
     return [];
   } catch (error) {
     console.error('读取 pvp_rounds(列表) 失败:', error);
+    return [];
+  }
+}
+
+export async function getPvpRoundsByMatch(matchId: string): Promise<PvpRoundRow[]> {
+  try {
+    const result = await queryFromD1(
+      'SELECT * FROM pvp_rounds WHERE match_id = ? ORDER BY round_index ASC',
+      [matchId]
+    ) as any;
+    if (result.success && result.result?.[0]?.results) {
+      return result.result[0].results as PvpRoundRow[];
+    }
+    return [];
+  } catch (error) {
+    console.error('读取 pvp_rounds(列表, match) 失败:', error);
     return [];
   }
 }
@@ -604,6 +647,109 @@ export async function getPvpCardSnapshotById(snapshotId: string): Promise<PvpCar
     return null;
   } catch (error) {
     console.error('读取 pvp_room_card_snapshots(id) 失败:', error);
+    return null;
+  }
+}
+
+export type PvpMatchStatus = 'active' | 'completed' | 'aborted';
+
+export interface PvpMatchRow {
+  id: string;
+  room_id: string;
+  status: PvpMatchStatus;
+  rules_json: string;
+  participants: number;
+  started_at: string;
+  ended_at: string | null;
+  winner_user_id: number | null;
+  result_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function createPvpMatch(input: {
+  id: string;
+  roomId: string;
+  rulesJson: string;
+  participants: number;
+  startedAt: string;
+}): Promise<boolean> {
+  try {
+    const now = new Date().toISOString();
+    const result = await queryFromD1(
+      `INSERT INTO pvp_matches (
+        id, room_id, status, rules_json, participants, started_at, ended_at, winner_user_id, result_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [input.id, input.roomId, 'active', input.rulesJson, input.participants, input.startedAt, null, null, null, now, now]
+    ) as any;
+    return Boolean(result?.success);
+  } catch (error) {
+    console.error('写入 pvp_matches 失败:', error);
+    return false;
+  }
+}
+
+export async function createPvpMatchPlayers(
+  matchId: string,
+  players: Array<{ userId: number; seat: number; username: string | null; userPrefix: string | null; joinedAt: string }>
+): Promise<boolean> {
+  try {
+    for (const p of players) {
+      await queryFromD1(
+        `INSERT OR REPLACE INTO pvp_match_players (match_id, user_id, seat, username, user_prefix, joined_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [matchId, p.userId, p.seat, p.username, p.userPrefix, p.joinedAt]
+      );
+    }
+    return true;
+  } catch (error) {
+    console.error('写入 pvp_match_players 失败:', error);
+    return false;
+  }
+}
+
+export async function updatePvpMatch(matchId: string, patch: { status?: PvpMatchStatus; endedAt?: string | null; winnerUserId?: number | null; resultJson?: string | null }): Promise<boolean> {
+  const fields: string[] = [];
+  const params: any[] = [];
+  if (patch.status !== undefined) {
+    fields.push('status = ?');
+    params.push(patch.status);
+  }
+  if (patch.endedAt !== undefined) {
+    fields.push('ended_at = ?');
+    params.push(patch.endedAt);
+  }
+  if (patch.winnerUserId !== undefined) {
+    fields.push('winner_user_id = ?');
+    params.push(patch.winnerUserId);
+  }
+  if (patch.resultJson !== undefined) {
+    fields.push('result_json = ?');
+    params.push(patch.resultJson);
+  }
+  if (fields.length <= 0) return false;
+
+  try {
+    const now = new Date().toISOString();
+    fields.push('updated_at = ?');
+    params.push(now);
+    const result = await queryFromD1(`UPDATE pvp_matches SET ${fields.join(', ')} WHERE id = ?`, [...params, matchId]) as any;
+    return Boolean(result?.success && result.result?.[0]?.meta?.changes > 0);
+  } catch (error) {
+    console.error('更新 pvp_matches 失败:', error);
+    return false;
+  }
+}
+
+export async function getPvpMatchById(matchId: string): Promise<PvpMatchRow | null> {
+  try {
+    const result = await queryFromD1('SELECT * FROM pvp_matches WHERE id = ?', [matchId]) as any;
+    if (result.success && result.result?.[0]?.results?.length > 0) {
+      return result.result[0].results[0] as PvpMatchRow;
+    }
+    return null;
+  } catch (error) {
+    console.error('读取 pvp_matches 失败:', error);
     return null;
   }
 }

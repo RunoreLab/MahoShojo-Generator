@@ -72,6 +72,10 @@ export interface BattleReportGenerationInsert {
   outputHasSensitiveWords?: boolean | null;
   outputHasShieldWords?: boolean | null;
 
+  pvpRoomId?: string | null;
+  pvpMatchId?: string | null;
+  pvpRoundId?: string | null;
+
   extraJson?: Record<string, unknown> | null;
 }
 
@@ -140,6 +144,9 @@ export async function createBattleReportGenerationRecord(
         output_preview,
         output_has_sensitive_words,
         output_has_shield_words,
+        pvp_room_id,
+        pvp_match_id,
+        pvp_round_id,
         extra_json,
         created_at,
         updated_at
@@ -148,7 +155,7 @@ export async function createBattleReportGenerationRecord(
         ?,?,?,?,?,?,?,?,?,?,?,?,
         ?,?,?,?,?,?,?,?,?,?,?,?,
         ?,?,?,?,?,?,?,?,?,?,?,?,
-        ?,?,?,?,?,?,?,?,?,?,?
+        ?,?,?,?,?,?,?,?,?,?,?,?,?,?
       );
     `;
 
@@ -209,6 +216,9 @@ export async function createBattleReportGenerationRecord(
       payload.outputPreview ?? null,
       typeof payload.outputHasSensitiveWords === 'boolean' ? (payload.outputHasSensitiveWords ? 1 : 0) : null,
       typeof payload.outputHasShieldWords === 'boolean' ? (payload.outputHasShieldWords ? 1 : 0) : null,
+      payload.pvpRoomId ?? null,
+      payload.pvpMatchId ?? null,
+      payload.pvpRoundId ?? null,
       payload.extraJson ? JSON.stringify(payload.extraJson) : null,
       nowIso,
       nowIso,

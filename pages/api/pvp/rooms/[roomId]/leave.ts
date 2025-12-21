@@ -1,4 +1,4 @@
-import { getPvpRoomById, getPvpRoomPlayers, removePvpRoomPlayer, updatePvpRoomCas } from '@/lib/d1';
+import { getPvpRoomById, getPvpRoomPlayers, removePvpRoomPlayer, updatePvpMatch, updatePvpRoomCas } from '@/lib/d1';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
 
@@ -46,6 +46,19 @@ export default async function handler(req: Request): Promise<Response> {
 
   const ok = await updatePvpRoomCas(roomId, expectedVersion, { ...patch, last_activity_at: now });
   if (!ok) return json({ error: '离开房间时状态更新失败', code: 'UPDATE_FAILED' }, { status: 409 });
+
+  if (room.current_match_id && (isInMatch || room.phase === 'dealing')) {
+    await updatePvpMatch(room.current_match_id, {
+      status: 'aborted',
+      endedAt: now,
+      winnerUserId: null,
+      resultJson: JSON.stringify({
+        reason: 'player-left',
+        leavingUserId: auth.user.id,
+        isHostLeaving,
+      }),
+    });
+  }
 
   return json({ success: true });
 }
