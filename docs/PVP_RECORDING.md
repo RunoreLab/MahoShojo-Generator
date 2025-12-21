@@ -1,4 +1,4 @@
-# PVP 记录功能改进设计（对战记录 ↔ 战报生成记录关联）
+# PVP 记录功能（对战记录 ↔ 战报生成记录关联）
 
 更新时间：2025-12-21  
 适用范围：房间制 PVP（2-6 人、轮询、回合制选牌→结算→战报）
@@ -8,31 +8,36 @@
 
 ---
 
+## 0. 落地状态（截至 2025-12-21）
+
+- [x] `pvp_matches` / `pvp_match_players`：持久化整场对战与参与者快照
+- [x] `pvp_rounds.match_id`：回合绑定到 match
+- [x] `POST /api/generate-battle-story`：支持 `pvpContext`，并在成功/失败分支写入 `battle_report_generations.pvp_*`
+- [x] `POST /api/pvp/.../resolve`：读取 `generationId` 写回 `pvp_rounds.battle_generation_id`
+- [ ] 线上 D1 已执行迁移（`schema.sql` 只是目标结构，需在实际环境 `ALTER TABLE/CREATE INDEX`）
+- [ ] 对外“历史/复盘/统计”查询 API 与 UI（目前数据已可承载，但缺少产品形态）
+
 ## 1. 现状梳理（已实现）
 
 ### 1.1 PVP 流程与存储
 
-- PVP 房间与对局状态使用 D1 表 `pvp_rooms` / `pvp_room_players` / `pvp_room_submissions` / `pvp_room_hands` / `pvp_room_card_snapshots` / `pvp_rounds` / `pvp_round_choices`。
+- PVP 房间与对局状态使用 D1 表 `pvp_rooms` / `pvp_room_players` / `pvp_room_submissions` / `pvp_room_hands` / `pvp_room_card_snapshots` / `pvp_rounds` / `pvp_round_choices`，并引入 `pvp_matches` / `pvp_match_players` 持久化整场对战。
 - PVP 结算由 `POST /api/pvp/rooms/:roomId/rounds/:roundId/resolve` 触发，内部调用 `POST /api/generate-battle-story` 生成战报。
-- `pvp_rounds` 结构中预留了 `battle_generation_id` 字段，但当前未串联（`/api/generate-battle-story` 响应不返回 generationId，PVP 无法写回）。
+- `pvp_rounds.battle_generation_id` 已串联：生成端点返回 `generationId`，PVP resolve 会写回（成功/失败场景都会 best-effort 记录）。
 
 ### 1.2 战报生成记录（battle_report_generations）
 
 - `POST /api/generate-battle-story` 在成功/失败（含敏感词拒绝、顶层 catch）都会写入：
   - `battle_report_generations`
   - `battle_report_generation_combatants`
-- 该表目前可以记录 endpoint / mode / winner / output_preview 等，但**无法可靠判断“这条记录是不是某场 PVP 触发的”**：
-  - PVP 与非 PVP 可能复用同一个 endpoint（`api/generate-battle-story`），且 `mode`（classic/scenario...）也不足以区分。
+- `battle_report_generations` 已增加并写入可空字段 `pvp_room_id` / `pvp_match_id` / `pvp_round_id`，因此可以可靠筛选并定位 PVP 触发的生成记录。
 
-### 1.3 当前“记录能力”的缺口
+### 1.3 当前“记录能力”的剩余缺口（产品化）
 
-1. **缺少“PVP 对战历史”的持久化语义**  
-   当前 `POST /api/pvp/rooms/:roomId/restart` 会通过 `clearPvpRoomMatchState(roomId)` 删除：
-   - `pvp_rounds` / `pvp_round_choices` / `pvp_room_hands` / `pvp_room_submissions` / `pvp_room_card_snapshots`  
-   这意味着：PVP 的“胜负、回合结果、回放材料”会被清理，无法用于排行/生涯统计。
-2. **缺少“战报生成记录 ↔ PVP 对战记录”的强关联**  
-   `battle_report_generations` 没有 PVP 上下文字段；`pvp_rounds.battle_generation_id` 也未写入，导致无法定位：
-   - “这条战报生成记录属于哪一场 PVP（哪一局/哪一回合）？”
+1. **缺少“对战历史/复盘/排行”的对外能力**  
+   数据层已具备（`pvp_matches` / `pvp_rounds` / `battle_report_generations.pvp_*`），但尚未提供面向用户/运营的查询 API 与 UI。
+2. **线上迁移落地不确定性**  
+   由于 `lib/database/schema.sql` 仅是目标结构，实际 D1 环境若未执行 `ALTER TABLE/CREATE INDEX`，会出现“代码写入字段但线上缺列”的风险。
 
 ---
 
@@ -100,9 +105,14 @@
 
 > 推荐选择：**方案 A**（把“区分”和“关联”两件事都做到数据层的一等公民）。
 
+落地说明：
+- 当前实现已按 **方案 A** 执行；方案 B/C 可视为备选思路留档。
+
 ---
 
 ## 4. 推荐数据模型（方案 A）
+
+> 说明：以下字段/表结构已经体现在 `lib/database/schema.sql` 与当前代码中；这里保留为“线上 D1 迁移参考”与设计留档。
 
 ### 4.1 battle_report_generations：新增 PVP 关联字段（可空）
 

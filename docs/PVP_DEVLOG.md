@@ -103,6 +103,23 @@ PVP 可用卡必须满足：
 
 - 已支持“全员都已选则自动结算（幂等）”，仍保留手动结算按钮作为兜底
 - 暂未做观战视角
-- `pvp_rounds.battle_generation_id` 暂未串联（`/api/generate-battle-story` 当前响应不返回 generationId；且 `battle_report_generations` 也缺少 PVP 上下文，无法可靠区分 PVP vs 非 PVP）
-- 下一步（记录功能改进）：见 `docs/PVP_RECORDING.md`
+- 已串联“战报生成记录 ↔ PVP”：`resolve` 会把 `POST /api/generate-battle-story` 返回的 `generationId` 写入 `pvp_rounds.battle_generation_id`；同时生成端点支持 `pvpContext` 并写入 `battle_report_generations.pvp_*` 字段（注意：线上 D1 仍需执行迁移）
+- 暂未提供“对战历史/复盘/排行”的独立页面与 API（虽然 `pvp_matches` / `pvp_rounds` 已可持久化承载）
+- 暂未做“阶段超时/自动中止”的规则与 UI（目前仅有 `expires_at` 的房间过期懒清理）
+- `scenario` 模式尚未引入“情景选择/抽取与透传”，当前仅透传 `mode` 给战报生成端点（体验与规则需进一步定义）
 - 目前 UI 的“卡选择器”是最小可用版本（列表 + 选择），后续可复用现有卡牌组件做更美观的卡片式选择
+
+## 5. 后续开发建议（优先级）
+
+### P1：可复盘与可运营（强烈建议先做）
+- **对战历史（Match/Round）查询 API**：按 `userId` 列表、按 `matchId` 详情；与 `battle_report_generations` 的 `pvp_*` 字段联动（用于排查失败、风控、统计）
+- **PVP 历史 UI**：用户个人战绩页（最近 N 场、胜负/比分、回合战报）；房间页可快捷跳转到当前 match 的详情
+- **迁移落地流程**：把 `lib/database/schema.sql` 的新增列/索引在实际 D1 环境执行，并补一份“上线迁移 checklist”（避免“代码已写但线上缺列”）
+
+### P2：玩法与体验增强（可并行推进）
+- **观战视角**：允许只读访问 `finished`（或 `aborted`）后的公开区与战报，不暴露任何手牌/选择
+- **阶段超时与中止规则**：`submitting/choosing/resolving` 超时策略 + 懒清理/房主一键结束
+- **Scenario 模式**：明确情景来源与公开范围，透传 `scenario`（及来源信息）给战报生成端点
+
+### P3：实时性与更强一致性（成本更高）
+- 将轮询升级为 SSE / Durable Objects（房间级广播），减少延迟与请求量，并提升状态一致性
