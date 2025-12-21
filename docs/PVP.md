@@ -219,13 +219,14 @@
 #### `pvp_rounds`
 - `id`：TEXT（roundId）
 - `room_id`：TEXT
+- `match_id`：TEXT（matchId；用于将回合绑定到“哪一场对战”，便于复盘/统计；房间可 `restart` 复用时尤为重要）
 - `round_index`：INTEGER（从 1 开始）
 - `battle_generation_id`：TEXT（复用现有 `battle_report_generations.id`，便于日志与统计串起来）
 - `public_snapshot_json`：TEXT（公开信息：提交池摘要、情景信息、双方出战牌的公开展示等）
 - `result_json`：TEXT（winner、raw、错误原因等）
 - `created_at`
 
-建议补齐字段：
+字段（当前实现已使用）：
 - `status`：TEXT（pending/resolving/completed/aborted）
 - `winner_user_id`：INTEGER（可选，便于统计；平局为空）
 - `winner_name`：TEXT（与战报一致，便于 UI 展示）
@@ -249,6 +250,7 @@ CREATE TABLE IF NOT EXISTS pvp_rooms (
   status TEXT NOT NULL,            -- open / closed
   phase TEXT NOT NULL,             -- waiting / submitting / dealing / choosing / resolving / finished / aborted / closed
   rules_json TEXT NOT NULL,
+  current_match_id TEXT,
   join_code_hash TEXT,
   join_code_salt TEXT,
   version INTEGER NOT NULL DEFAULT 0,
@@ -259,6 +261,7 @@ CREATE TABLE IF NOT EXISTS pvp_rooms (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pvp_rooms_status ON pvp_rooms(status);
+CREATE INDEX IF NOT EXISTS idx_pvp_rooms_current_match_id ON pvp_rooms(current_match_id);
 CREATE INDEX IF NOT EXISTS idx_pvp_rooms_updated_at ON pvp_rooms(updated_at);
 
 -- PVP 房间玩家
@@ -311,6 +314,7 @@ CREATE INDEX IF NOT EXISTS idx_pvp_room_card_snapshots_room_id ON pvp_room_card_
 CREATE TABLE IF NOT EXISTS pvp_rounds (
   id TEXT PRIMARY KEY NOT NULL,
   room_id TEXT NOT NULL,
+  match_id TEXT,
   round_index INTEGER NOT NULL,
   status TEXT NOT NULL,           -- pending / resolving / completed / aborted
   battle_generation_id TEXT,
@@ -322,6 +326,40 @@ CREATE TABLE IF NOT EXISTS pvp_rounds (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pvp_rounds_room_id ON pvp_rounds(room_id);
+CREATE INDEX IF NOT EXISTS idx_pvp_rounds_match_id ON pvp_rounds(match_id);
+
+-- PVP 对战（整场）记录：用于排行/生涯统计（与 room 可复用解耦）
+CREATE TABLE IF NOT EXISTS pvp_matches (
+  id TEXT PRIMARY KEY NOT NULL,
+  room_id TEXT NOT NULL,
+  status TEXT NOT NULL, -- active / completed / aborted
+  rules_json TEXT NOT NULL,
+  participants INTEGER NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  winner_user_id INTEGER,
+  result_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_matches_room_id ON pvp_matches(room_id);
+CREATE INDEX IF NOT EXISTS idx_pvp_matches_status ON pvp_matches(status);
+CREATE INDEX IF NOT EXISTS idx_pvp_matches_started_at ON pvp_matches(started_at);
+
+-- PVP 对战参与者快照
+CREATE TABLE IF NOT EXISTS pvp_match_players (
+  match_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  seat INTEGER NOT NULL,
+  username TEXT,
+  user_prefix TEXT,
+  joined_at TEXT NOT NULL,
+  PRIMARY KEY (match_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_match_players_match_id ON pvp_match_players(match_id);
+CREATE INDEX IF NOT EXISTS idx_pvp_match_players_user_id ON pvp_match_players(user_id);
 
 -- PVP 回合出牌
 CREATE TABLE IF NOT EXISTS pvp_round_choices (
