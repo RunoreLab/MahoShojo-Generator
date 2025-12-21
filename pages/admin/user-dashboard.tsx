@@ -102,8 +102,9 @@ const UserManagementPage: React.FC = () => {
   const updateUrl = useCallback((newFilters: typeof filters) => {
     const query: { [key: string]: any } = {};
     Object.entries(newFilters).forEach(([key, value]) => {
-      if (value && key !== 'limit' && !(key === 'page' && value === 1)) {
-        query[key] = value;
+      const normalized = typeof value === 'string' ? value.trim() : value;
+      if (normalized && key !== 'limit' && !(key === 'page' && value === 1)) {
+        query[key] = normalized;
       }
     });
     router.push({ pathname: router.pathname, query }, undefined, { shallow: true });
@@ -195,13 +196,35 @@ const UserManagementPage: React.FC = () => {
               <input 
                   type="text" 
                   name="search" 
-                  defaultValue={router.query.search as string || ''} 
+                  value={filters.search}
                   onChange={handleFilterChange}
                   onCompositionStart={() => {
                     isComposingSearchRef.current = true;
                   }}
-                  onCompositionEnd={() => {
+                  onCompositionEnd={(e) => {
                     isComposingSearchRef.current = false;
+                    const newFilters = { ...filters, search: e.currentTarget.value, page: 1 };
+                    setFilters(newFilters);
+                    debouncedUpdateUrl(newFilters);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    if ((e.nativeEvent as unknown as { isComposing?: boolean }).isComposing || isComposingSearchRef.current) {
+                      e.preventDefault();
+                      return;
+                    }
+                    e.preventDefault();
+                    const newFilters = { ...filters, search: e.currentTarget.value, page: 1 };
+                    setFilters(newFilters);
+                    debouncedUpdateUrl.cancel();
+                    updateUrl(newFilters);
+                  }}
+                  onBlur={(e) => {
+                    if (isComposingSearchRef.current) return;
+                    const newFilters = { ...filters, search: e.currentTarget.value, page: 1 };
+                    setFilters(newFilters);
+                    debouncedUpdateUrl.cancel();
+                    updateUrl(newFilters);
                   }}
                   placeholder="搜索用户名或邮箱..."
                   className="input-field"

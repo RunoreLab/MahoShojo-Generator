@@ -286,9 +286,11 @@ export default function UserManagement() {
                       onChange={(e) => setSearchTerm(e.target.value)}
                       onCompositionStart={() => {
                         isComposingRef.current = true;
+                        debouncedAutoSearch.cancel();
                       }}
-                      onCompositionEnd={() => {
+                      onCompositionEnd={(e) => {
                         isComposingRef.current = false;
+                        debouncedAutoSearch(e.currentTarget.value.trim());
                       }}
                       onKeyDown={(e) => {
                         if (e.key !== 'Enter') return;

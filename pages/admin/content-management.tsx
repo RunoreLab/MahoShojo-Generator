@@ -153,7 +153,7 @@ const ContentManagementPage: React.FC = () => {
   const updateUrl = useCallback((newFilters: typeof filters) => {
       const query: { [key: string]: any } = {};
       if (newFilters.page > 1) query.page = newFilters.page;
-      if (newFilters.search) query.search = newFilters.search;
+      if (newFilters.search.trim()) query.search = newFilters.search.trim();
       if (newFilters.reviewStatus) query.reviewStatus = newFilters.reviewStatus;
       if (newFilters.isPublic) query.isPublic = newFilters.isPublic;
       if (newFilters.type) query.type = newFilters.type;
@@ -712,8 +712,30 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                 onCompositionStart={() => {
                   isComposingSearchRef.current = true;
                 }}
-                onCompositionEnd={() => {
+                onCompositionEnd={(e) => {
                   isComposingSearchRef.current = false;
+                  const newFilters = { ...filters, search: e.currentTarget.value, page: 1 };
+                  setFilters(newFilters);
+                  debouncedUpdateUrl(newFilters);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  if ((e.nativeEvent as unknown as { isComposing?: boolean }).isComposing || isComposingSearchRef.current) {
+                    e.preventDefault();
+                    return;
+                  }
+                  e.preventDefault();
+                  const newFilters = { ...filters, search: e.currentTarget.value, page: 1 };
+                  setFilters(newFilters);
+                  debouncedUpdateUrl.cancel();
+                  updateUrl(newFilters);
+                }}
+                onBlur={(e) => {
+                  if (isComposingSearchRef.current) return;
+                  const newFilters = { ...filters, search: e.currentTarget.value, page: 1 };
+                  setFilters(newFilters);
+                  debouncedUpdateUrl.cancel();
+                  updateUrl(newFilters);
                 }}
                 placeholder="搜索名称、描述、作者..."
                 className="input-field"
