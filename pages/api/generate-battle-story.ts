@@ -44,6 +44,7 @@ interface BattleApiResponse {
     report: NewsReport;
     updatedCombatants: any[];
     adjudicationResults?: AdjudicationResult[];
+    generationId?: string;
 }
 
 async function handler(req: NextRequest): Promise<Response> {
@@ -59,6 +60,9 @@ async function handler(req: NextRequest): Promise<Response> {
     let snapshotLanguage: string | null = null;
     let snapshotSelectedLevel: string | null = null;
     let snapshotStoryLength: string | null = null;
+    let snapshotPvpRoomId: string | null = null;
+    let snapshotPvpMatchId: string | null = null;
+    let snapshotPvpRoundId: string | null = null;
 
     try {
         const body = await req.json();
@@ -83,12 +87,88 @@ async function handler(req: NextRequest): Promise<Response> {
             scenarioTitle,
             scenarioSourceDataCardId,
             scenarioSourceDataCardUpdatedAt,
+            pvpContext,
         } = body;
 
         snapshotMode = typeof mode === 'string' ? mode : 'classic';
         snapshotLanguage = typeof language === 'string' ? language : null;
         snapshotSelectedLevel = typeof selectedLevel === 'string' ? selectedLevel : null;
         snapshotStoryLength = typeof storyLength === 'string' ? storyLength : null;
+
+        const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
+            if (!value || typeof value !== 'object') return null;
+            const roomId = typeof (value as any).roomId === 'string' ? (value as any).roomId.trim() : '';
+            const matchId = typeof (value as any).matchId === 'string' ? (value as any).matchId.trim() : '';
+            const roundId = typeof (value as any).roundId === 'string' ? (value as any).roundId.trim() : '';
+            if (!roomId || !matchId || !roundId) return null;
+            if (roomId.length > 128 || matchId.length > 128 || roundId.length > 128) return null;
+            return { roomId, matchId, roundId };
+        };
+        const parsedPvpContext = pvpContext !== undefined ? parsePvpContext(pvpContext) : null;
+        if (pvpContext !== undefined && !parsedPvpContext) {
+            return new Response(JSON.stringify({ error: 'pvpContext 无效' }), { status: 400 });
+        }
+        snapshotPvpRoomId = parsedPvpContext?.roomId ?? null;
+        snapshotPvpMatchId = parsedPvpContext?.matchId ?? null;
+        snapshotPvpRoundId = parsedPvpContext?.roundId ?? null;
+        const isPvpRequest = Boolean(snapshotPvpMatchId && snapshotPvpRoundId);
+
+        const writeFailedRecordIfNeeded = async (payload: { statusCode: number; message: string; stage: string }): Promise<Response> => {
+            if (!isPvpRequest) {
+                return new Response(JSON.stringify({ error: payload.message }), { status: payload.statusCode });
+            }
+
+            const endedAtMs = Date.now();
+            const endedAtIso = new Date(endedAtMs).toISOString();
+            const durationMs = Math.max(0, endedAtMs - startedAtMs);
+            const ip = getClientIpFromHeaders(req.headers);
+            const ipAnonymized = anonymizeIp(ip);
+            const authHeader = req.headers.get('authorization');
+            const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+            const user = authKey ? await getUserByAuthKey(authKey) : null;
+
+            const recordId = await createBattleReportGenerationRecord({
+                startedAt: startedAtIso,
+                endedAt: endedAtIso,
+                durationMs,
+                status: 'failed',
+                generationMode: 'non-stream',
+                endpoint: 'api/generate-battle-story',
+                ip,
+                ipAnonymized,
+                userAgent: req.headers.get('user-agent'),
+                referer: req.headers.get('referer'),
+                acceptLanguage: req.headers.get('accept-language'),
+                cfRay: req.headers.get('cf-ray'),
+                cfCountry: req.headers.get('cf-ipcountry'),
+                userId: user?.id ?? null,
+                username: user?.username ?? null,
+                userPrefix: user?.prefix ?? null,
+                mode: snapshotMode,
+                scenarioTitle: typeof scenarioTitle === 'string'
+                    ? scenarioTitle.trim() || null
+                    : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+                scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
+                scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
+                language: snapshotLanguage,
+                selectedLevel: snapshotSelectedLevel,
+                storyLength: snapshotStoryLength,
+                combatantCount: Array.isArray(combatants) ? combatants.length : null,
+                hasScenario: Boolean(scenario),
+                hasUserGuidance: typeof userGuidance === 'string' ? Boolean(userGuidance.trim()) : false,
+                hasAdjudicationEvents: Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0,
+                hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
+                pvpRoomId: snapshotPvpRoomId,
+                pvpMatchId: snapshotPvpMatchId,
+                pvpRoundId: snapshotPvpRoundId,
+                extraJson: {
+                    errorMessage: payload.message,
+                    stage: payload.stage,
+                },
+            });
+
+            return new Response(JSON.stringify({ error: payload.message, generationId: recordId }), { status: payload.statusCode });
+        };
 
         const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
             ? readArenaHistory
@@ -121,24 +201,24 @@ async function handler(req: NextRequest): Promise<Response> {
             const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
             if (!parsedResult.success) {
                 log.warn('自定义 AI 供应商配置校验失败', { providerId: customProviderPayload?.providerId, issues: parsedResult.error.issues });
-                return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
+                return await writeFailedRecordIfNeeded({ statusCode: 400, message: '自定义 AI 供应商配置无效', stage: 'custom-provider-validate' });
             }
 
             const parsed = parsedResult.data;
             customProviderId = parsed.providerId;
             const providerConfig = AI_PROVIDER_CATALOG.find(item => item.id === parsed.providerId);
             if (!providerConfig) {
-                return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
+                return await writeFailedRecordIfNeeded({ statusCode: 400, message: '未知的模型供应商 ID', stage: 'custom-provider-providerId' });
             }
 
             const modelConfig = providerConfig.models.find(model => model.value === parsed.modelId);
             if (!modelConfig) {
-                return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
+                return await writeFailedRecordIfNeeded({ statusCode: 400, message: '未知的模型 ID', stage: 'custom-provider-modelId' });
             }
 
             const sanitizedApiKey = parsed.apiKey.trim();
             if (!sanitizedApiKey && providerConfig.id !== 'system') {
-                return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
+                return await writeFailedRecordIfNeeded({ statusCode: 400, message: 'API Key 不能为空', stage: 'custom-provider-apiKey' });
             }
 
             const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
@@ -174,7 +254,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
         if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > MAX_COMBATANTS) {
             const errorMessage = `该模式需要 ${minParticipants} 到 ${MAX_COMBATANTS} 位角色`;
-            return new Response(JSON.stringify({ error: errorMessage }), { status: 400 });
+            return await writeFailedRecordIfNeeded({ statusCode: 400, message: errorMessage, stage: 'combatants-count' });
         }
 
         // 在进行操作之前，先为客户端生成的随机角色补上签名。
@@ -250,7 +330,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 const recordPromise = (async () => {
                     try {
                         const user = authKey ? await getUserByAuthKey(authKey) : null;
-                        await createBattleReportGenerationRecord({
+                        const recordId = await createBattleReportGenerationRecord({
                             startedAt: startedAtIso,
                             endedAt: endedAtIso,
                             durationMs,
@@ -288,24 +368,35 @@ async function handler(req: NextRequest): Promise<Response> {
                             hasUserGuidance: typeof userGuidance === 'string' ? Boolean(userGuidance.trim()) : false,
                             hasAdjudicationEvents: Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0,
                             hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
+                            pvpRoomId: snapshotPvpRoomId,
+                            pvpMatchId: snapshotPvpMatchId,
+                            pvpRoundId: snapshotPvpRoundId,
                             extraJson: {
                                 errorMessage: 'rejected by sensitive input filter',
                                 rejectedBy: 'sensitive-input',
                             },
                         });
+                        return recordId;
                     } catch (writeError) {
                         log.warn('战报生成记录：写入失败（敏感词拒绝）', { writeError });
+                        return null;
                     }
                 })();
 
                 const executionContext = (req as any).context;
-                if (executionContext?.waitUntil) {
-                    executionContext.waitUntil(recordPromise);
-                } else {
-                    await recordPromise;
-                }
+                const shouldAwait = isPvpRequest || !executionContext?.waitUntil;
+                const generationId = shouldAwait ? await recordPromise : null;
+                if (!shouldAwait) executionContext.waitUntil(recordPromise);
 
-                return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '使用危险符文' }), { status: 400 });
+                return new Response(
+                    JSON.stringify({
+                        error: '输入内容不合规',
+                        shouldRedirect: true,
+                        reason: '使用危险符文',
+                        ...(generationId ? { generationId } : {}),
+                    }),
+                    { status: 400 }
+                );
             }
         }
 
@@ -472,6 +563,9 @@ async function handler(req: NextRequest): Promise<Response> {
                 outputPreview,
                 outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
                 outputHasShieldWords: shieldResult.hasShieldWords,
+                pvpRoomId: snapshotPvpRoomId,
+                pvpMatchId: snapshotPvpMatchId,
+                pvpRoundId: snapshotPvpRoundId,
                 extraJson: compactExtraJson({
                     resolvedModelOverride: resolvedModelOverride ?? null,
                 }),
@@ -518,13 +612,16 @@ async function handler(req: NextRequest): Promise<Response> {
                     );
                 }
             }
+
+            return recordId;
         })();
 
         const executionContext = (req as any).context;
-        if (executionContext?.waitUntil) {
-            executionContext.waitUntil(recordPromise);
-        } else {
-            await recordPromise;
+        const shouldAwait = isPvpRequest || !executionContext?.waitUntil;
+        const generationId = shouldAwait ? await recordPromise : null;
+        if (!shouldAwait) executionContext.waitUntil(recordPromise);
+        if (generationId) {
+            (apiResponse as any).generationId = generationId;
         }
 
         return new Response(JSON.stringify(apiResponse), {
@@ -546,7 +643,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const recordPromise = (async () => {
             try {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
-                await createBattleReportGenerationRecord({
+                const recordId = await createBattleReportGenerationRecord({
                     startedAt: startedAtIso,
                     endedAt: endedAtIso,
                     durationMs,
@@ -567,26 +664,36 @@ async function handler(req: NextRequest): Promise<Response> {
                     language: snapshotLanguage,
                     selectedLevel: snapshotSelectedLevel,
                     storyLength: snapshotStoryLength,
+                    pvpRoomId: snapshotPvpRoomId,
+                    pvpMatchId: snapshotPvpMatchId,
+                    pvpRoundId: snapshotPvpRoundId,
                     extraJson: {
                         errorMessage,
                         stage: 'top-level-catch',
                     },
                 });
+                return recordId;
             } catch (writeError) {
                 log.warn('战报生成记录：写入失败（顶层错误）', { writeError });
+                return null;
             }
         })();
 
         const executionContext = (req as any).context;
-        if (executionContext?.waitUntil) {
-            executionContext.waitUntil(recordPromise);
-        } else {
-            await recordPromise;
-        }
+        const shouldAwait = Boolean(snapshotPvpMatchId && snapshotPvpRoundId) || !executionContext?.waitUntil;
+        const generationId = shouldAwait ? await recordPromise : null;
+        if (!shouldAwait) executionContext.waitUntil(recordPromise);
 
-        return new Response(JSON.stringify({ error: '生成失败，当前服务器可能正忙，请稍后重试', message: errorMessage }), {
+        return new Response(
+            JSON.stringify({
+                error: '生成失败，当前服务器可能正忙，请稍后重试',
+                message: errorMessage,
+                ...(generationId ? { generationId } : {}),
+            }),
+            {
             status: 500,
-        });
+            }
+        );
     }
 }
 

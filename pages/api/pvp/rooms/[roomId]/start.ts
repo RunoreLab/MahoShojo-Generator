@@ -1,6 +1,9 @@
 import {
   createPvpCardSnapshot,
+  createPvpMatch,
+  createPvpMatchPlayers,
   createPvpRound,
+  generateUUID,
   getPvpEligibleDataCard,
   getPvpRoomById,
   getPvpRoomHands,
@@ -89,12 +92,51 @@ export default async function handler(req: Request): Promise<Response> {
     if (sub.cards.length !== rules.cardsPerPlayer) return json({ error: '提交数量与房间规则不一致，请重新提交' }, { status: 409 });
   }
 
+  const matchId = generateUUID();
+  const matchStartedAt = new Date().toISOString();
+
   const casToDealing = await updatePvpRoomCas(roomId, expectedVersion, {
     phase: 'dealing',
-    last_activity_at: new Date().toISOString(),
+    current_match_id: matchId,
+    last_activity_at: matchStartedAt,
   });
   if (!casToDealing) return json({ error: '开始失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
   const dealingVersion = expectedVersion + 1;
+
+  const matchOk = await createPvpMatch({
+    id: matchId,
+    roomId,
+    rulesJson: room.rules_json,
+    participants: rules.participants,
+    startedAt: matchStartedAt,
+  });
+  if (!matchOk) {
+    await updatePvpRoomCas(roomId, dealingVersion, {
+      phase: 'submitting',
+      current_match_id: null,
+      last_activity_at: new Date().toISOString(),
+    });
+    return json({ error: '创建对战记录失败' }, { status: 500 });
+  }
+
+  const matchPlayersOk = await createPvpMatchPlayers(
+    matchId,
+    sortedPlayers.map((p) => ({
+      userId: p.user_id,
+      seat: p.seat ?? 0,
+      username: p.username ?? null,
+      userPrefix: p.prefix ?? null,
+      joinedAt: p.joined_at,
+    }))
+  );
+  if (!matchPlayersOk) {
+    await updatePvpRoomCas(roomId, dealingVersion, {
+      phase: 'submitting',
+      current_match_id: null,
+      last_activity_at: new Date().toISOString(),
+    });
+    return json({ error: '创建对战参与者快照失败' }, { status: 500 });
+  }
 
   // 若已经存在手牌（例如房主重复点），直接进入 choosing
   const existingHands = await getPvpRoomHands(roomId);
@@ -189,6 +231,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   const roundId = await createPvpRound({
     roomId,
+    matchId,
     roundIndex: 1,
     status: 'pending',
     publicSnapshotJson: JSON.stringify({

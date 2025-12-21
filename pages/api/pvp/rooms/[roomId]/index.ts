@@ -1,12 +1,12 @@
 import {
-  getLatestPvpRoundByRoom,
   getPvpCardSnapshotById,
   getPvpRoomById,
   getPvpRoomHands,
   getPvpRoomPlayers,
   getPvpRoomSubmissions,
   getPvpRoundChoices,
-  getPvpRoundsByRoom,
+  getLatestPvpRoundByMatch,
+  getPvpRoundsByMatch,
   updatePvpRoomCas,
 } from '@/lib/d1';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
@@ -96,7 +96,8 @@ export default async function handler(req: Request): Promise<Response> {
     }
   }
 
-  const latestRound = await getLatestPvpRoundByRoom(roomId);
+  const currentMatchId = room.current_match_id;
+  const latestRound = currentMatchId ? await getLatestPvpRoundByMatch(currentMatchId) : null;
   let choicesState: any = null;
   let latestRoundResult: any = null;
 
@@ -127,8 +128,8 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   let score: any = null;
-  if (rules.bestOf.enabled) {
-    const rounds = await getPvpRoundsByRoom(roomId);
+  if (rules.bestOf.enabled && currentMatchId) {
+    const rounds = await getPvpRoundsByMatch(currentMatchId);
     const winsByUserId = players.map((p) => ({
       userId: p.user_id,
       wins: rounds.filter((r) => r.winner_user_id === p.user_id).length,
@@ -148,6 +149,7 @@ export default async function handler(req: Request): Promise<Response> {
       phase: room.phase,
       version: room.version,
       expiresAt: room.expires_at,
+      currentMatchId,
       rules,
     },
     players: players.map((p) => ({ userId: p.user_id, username: p.username, prefix: p.prefix, seat: p.seat })),

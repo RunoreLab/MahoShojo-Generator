@@ -6,8 +6,9 @@ import {
   getPvpRoomPlayers,
   getPvpRoundById,
   getPvpRoundChoices,
-  getPvpRoundsByRoom,
+  getPvpRoundsByMatch,
   updatePvpRoomCas,
+  updatePvpMatch,
   updatePvpRound,
   upsertPvpRoomHand,
 } from '@/lib/d1';
@@ -89,6 +90,8 @@ export default async function handler(req: Request): Promise<Response> {
 
   const round = await getPvpRoundById(roundId);
   if (!round || round.room_id !== roomId) return json({ error: '回合不存在' }, { status: 404 });
+  const matchId = round.match_id ?? room.current_match_id;
+  if (!matchId) return json({ error: '对战上下文缺失，请房主重开房间后再试', code: 'MATCH_CONTEXT_MISSING' }, { status: 409 });
 
   // 幂等：回合已完成则直接返回结果
   if (round.status === 'completed' && round.result_json) {
@@ -194,16 +197,35 @@ export default async function handler(req: Request): Promise<Response> {
           readCurrentState: false,
           writeCurrentState: false,
           useArenaHistory: false,
+          pvpContext: {
+            roomId,
+            matchId,
+            roundId,
+          },
         }),
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        lastError = text || '战报生成失败';
+        const raw = await res.text();
+        let generationId: string | null = null;
+        try {
+          const parsed = JSON.parse(raw);
+          generationId = typeof parsed?.generationId === 'string' ? parsed.generationId : null;
+        } catch {
+          generationId = null;
+        }
+        if (generationId) {
+          await updatePvpRound(roundId, { battleGenerationId: generationId });
+        }
+        lastError = raw || '战报生成失败';
         continue;
       }
 
       const data = await res.json();
+      const generationId = typeof data?.generationId === 'string' ? data.generationId : null;
+      if (generationId) {
+        await updatePvpRound(roundId, { battleGenerationId: generationId });
+      }
       report = data?.report ?? null;
       rawWinnerText = report?.officialReport?.winner ?? null;
       const byToken = normalizeWinnerFromCandidates(rawWinnerText, candidateTokens);
@@ -283,7 +305,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   // 多局制：到达 maxRounds 才结算整场胜负，否则继续下一轮
   if (rules.bestOf.enabled && round.round_index < rules.bestOf.maxRounds) {
-    const nextRoundId = await createPvpRound({ roomId, roundIndex: round.round_index + 1, status: 'pending' });
+    const nextRoundId = await createPvpRound({ roomId, matchId, roundIndex: round.round_index + 1, status: 'pending' });
     await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
     return json({ success: true, roundResolved: true, result: JSON.parse(resultJson), nextRoundId });
   }
@@ -291,7 +313,7 @@ export default async function handler(req: Request): Promise<Response> {
   // 若启用 bestOf，计算整场胜负（最多 wins），平局则 draw
   let matchWinnerUserId: number | null = null;
   if (rules.bestOf.enabled) {
-    const rounds = await getPvpRoundsByRoom(roomId);
+    const rounds = await getPvpRoundsByMatch(matchId);
     const winCounts = new Map<number, number>();
     for (const p of sortedPlayers) winCounts.set(p.user_id, 0);
     for (const r of rounds) {
@@ -305,6 +327,19 @@ export default async function handler(req: Request): Promise<Response> {
     const top = [...winCounts.entries()].filter(([, wins]) => wins === maxWins).map(([userId]) => userId);
     matchWinnerUserId = top.length === 1 ? top[0]! : null;
   }
+
+  const endedAt = new Date().toISOString();
+  const matchResultJson = JSON.stringify({
+    matchWinnerUserId: rules.bestOf.enabled ? matchWinnerUserId : resolvedWinnerUserId,
+    finalRoundIndex: round.round_index,
+    bestOf: rules.bestOf,
+  });
+  await updatePvpMatch(matchId, {
+    status: 'completed',
+    endedAt,
+    winnerUserId: rules.bestOf.enabled ? matchWinnerUserId : resolvedWinnerUserId,
+    resultJson: matchResultJson,
+  });
 
   await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'finished', last_activity_at: new Date().toISOString() });
 

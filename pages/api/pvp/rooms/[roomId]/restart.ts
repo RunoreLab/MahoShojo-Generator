@@ -1,4 +1,4 @@
-import { clearPvpRoomMatchState, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
+import { clearPvpRoomRuntimeState, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
 import type { PvpRoomRules } from '@/lib/pvp/types';
@@ -45,12 +45,13 @@ export default async function handler(req: Request): Promise<Response> {
   const players = await getPvpRoomPlayers(roomId);
   if (players.length <= 0) return json({ error: '房间玩家异常' }, { status: 500 });
 
-  const cleared = await clearPvpRoomMatchState(roomId);
+  const cleared = await clearPvpRoomRuntimeState(roomId);
   if (!cleared) return json({ error: '清理对局数据失败' }, { status: 500 });
 
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     status: 'open',
     phase: players.length >= rules.participants ? 'submitting' : 'waiting',
+    current_match_id: null,
     last_activity_at: new Date().toISOString(),
   });
 
