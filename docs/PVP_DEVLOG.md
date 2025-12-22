@@ -58,6 +58,8 @@ PVP 可用卡必须满足：
 
 ### 2.1 D1 Schema
 - `lib/database/schema.sql:1`（已追加 `pvp_*` 表）
+  - 追加：`users.is_bot`（机器人用户标记）
+  - 追加：`pvp_room_bots`（房间内 Bot 配置/策略）
 
 ### 2.2 数据库访问层
 - `lib/database/pvp.ts:1`
@@ -68,6 +70,7 @@ PVP 可用卡必须满足：
 - `lib/pvp/crypto.ts:1`（口令 hash + 常量时间比较）
 - `lib/pvp/validate.ts:1`（规则校验，强制 `cardsPerPlayer > dealPerPlayer`）
 - `lib/pvp/logic.ts:1`（发牌/赢家归一化）
+ - `lib/pvp/bot/*`（机器人策略与出牌逻辑）
 
 ### 2.4 API 路由（Edge Runtime）
 - `pages/api/pvp/rooms/index.ts:1` 创建房间
@@ -76,6 +79,7 @@ PVP 可用卡必须满足：
 - `pages/api/pvp/rooms/[roomId]/leave.ts:1` 离开房间
 - `pages/api/pvp/rooms/[roomId]/restart.ts:1` 房主重开（清理对局数据）
 - `pages/api/pvp/rooms/[roomId]/kick.ts:1` 房主踢人
+- `pages/api/pvp/rooms/[roomId]/bots/add.ts:1` 房主添加机器人（自动提交卡组/自动出牌）
 - `pages/api/pvp/rooms/[roomId]/submit.ts:1` 提交卡组
 - `pages/api/pvp/rooms/[roomId]/start.ts:1` 房主发牌并创建首轮
 - `pages/api/pvp/rooms/[roomId]/permissions.ts:1` 房主设置：是否允许其他玩家调整 AI 设置并结算

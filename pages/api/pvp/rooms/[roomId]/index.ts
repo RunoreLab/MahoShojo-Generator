@@ -177,6 +177,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
       username: p.username,
       prefix: p.prefix,
       seat: p.seat,
+      isBot: Boolean((p as any).is_bot),
       badges: badgesByUserId.get(p.user_id) || [],
     })),
     submissions,

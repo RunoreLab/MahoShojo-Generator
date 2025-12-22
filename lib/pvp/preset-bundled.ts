@@ -52,7 +52,8 @@ const PRESET_DATA_BY_FILENAME: Record<string, unknown> = {
   'M90_goose.json': M90_goose,
 };
 
+export const BUNDLED_PRESET_FILENAMES: string[] = Object.keys(PRESET_DATA_BY_FILENAME);
+
 export const getBundledPresetData = (filename: string): unknown | null => {
   return PRESET_DATA_BY_FILENAME[filename] ?? null;
 };
-
