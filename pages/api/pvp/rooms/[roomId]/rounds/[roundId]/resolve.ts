@@ -18,6 +18,7 @@ import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { buildPvpSensitiveArrestWarrantReport } from '@/lib/pvp/arrest-warrant';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
@@ -344,11 +345,15 @@ async function resolveHandler(req: Request): Promise<Response> {
       if (!res.ok) {
         let generationId: string | null = null;
         let errorMessage: string | null = null;
+        let shouldRedirect = false;
+        let redirectReason: string | null = null;
         if (isJsonLike(res.headers.get('content-type'), raw)) {
           try {
             const parsed = JSON.parse(raw);
             generationId = typeof parsed?.generationId === 'string' ? parsed.generationId : null;
             errorMessage = typeof parsed?.error === 'string' ? parsed.error : null;
+            shouldRedirect = Boolean(parsed?.shouldRedirect) || parsed?.redirect === '/arrested';
+            redirectReason = typeof parsed?.reason === 'string' ? parsed.reason : null;
           } catch {
             generationId = null;
             errorMessage = null;
@@ -357,6 +362,22 @@ async function resolveHandler(req: Request): Promise<Response> {
 
         if (generationId) {
           await updatePvpRound(roundId, { battleGenerationId: generationId });
+        }
+
+        // PVP 特殊处理：敏感词触发逮捕时，不跳转 /arrested，而是将战报改为“逮捕令”并判定平局。
+        if (shouldRedirect) {
+          report = buildPvpSensitiveArrestWarrantReport({
+            reason: redirectReason,
+            roomId,
+            matchId,
+            roundId,
+            issuedAt: new Date(),
+          });
+          rawWinnerText = '平局';
+          isDraw = true;
+          winnerIndex = null;
+          lastError = null;
+          break;
         }
 
         if (!isJsonLike(res.headers.get('content-type'), raw)) {
