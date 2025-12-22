@@ -767,8 +767,8 @@ export function PvpRoomPage() {
         <title>PVP 房间 - {roomId || '...'}</title>
       </Head>
       <div className="magic-background-white">
-        <div className="mx-auto w-full max-w-6xl px-4 py-8">
-          <div className="rounded-2xl bg-white/90 backdrop-blur border border-white/40 shadow-xl p-5 md:p-7">
+        <div className="container">
+          <div className="card" style={{ border: '2px solid #ccc', background: '#f9f9f9' }}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">PVP 房间</h1>

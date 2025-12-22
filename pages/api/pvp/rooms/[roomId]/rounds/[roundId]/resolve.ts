@@ -299,6 +299,22 @@ async function resolveHandler(req: Request): Promise<Response> {
     }
   }
 
+  // 生成失败：不要直接判平局并结束对局，否则前端只会看到“对局已结束”却没有战报卡片。
+  // 这里回退到 choosing + pending，允许玩家/房主直接重试结算。
+  if (!report) {
+    await updatePvpRound(roundId, { status: 'pending' });
+    await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
+    return json(
+      {
+        error: '战报生成失败，请稍后重试',
+        code: 'BATTLE_REPORT_GENERATION_FAILED',
+        detail: lastError || 'unknown',
+        attempts,
+      },
+      { status: 502 }
+    );
+  }
+
   const resolvedWinnerUserId = isDraw || winnerIndex === null ? null : picked[winnerIndex]!.userId;
   const resolvedWinnerName = isDraw || winnerIndex === null ? '平局' : picked[winnerIndex]!.snapshot.name;
 
