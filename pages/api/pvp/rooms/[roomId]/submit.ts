@@ -6,6 +6,7 @@ import { loadPresetCard } from '@/lib/pvp/preset';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpDataCardRef, PvpPresetRef, PvpRoomRules, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
+import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export const runtime = 'edge';
 
@@ -55,6 +56,7 @@ async function submitHandler(req: Request): Promise<Response> {
   if (cards.length !== rules.cardsPerPlayer) return json({ error: `需要提交 ${rules.cardsPerPlayer} 张卡` }, { status: 400 });
 
   const origin = getRequestOrigin(req);
+  const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
 
   const submittedCards: PvpSubmittedCard[] = [];
   let hasPrivateCard = false;
@@ -105,7 +107,7 @@ async function submitHandler(req: Request): Promise<Response> {
       if (!filename) return json({ error: 'preset.filename 不能为空' }, { status: 400 });
       let preset: Awaited<ReturnType<typeof loadPresetCard>>;
       try {
-        preset = await loadPresetCard(origin, filename);
+        preset = await loadPresetCard(origin, filename, subrequestAuthHeaders);
       } catch (error) {
         const message = error instanceof Error ? error.message : '无法读取预设卡';
         const statusMatch = message.match(/HTTP\s+(\d{3})/i);
