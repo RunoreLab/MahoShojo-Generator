@@ -176,6 +176,50 @@ export function PvpRoomPage() {
   const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [versionConflictRetryUntil, setVersionConflictRetryUntil] = useState<number | null>(null);
+  const [versionConflictSecondsLeft, setVersionConflictSecondsLeft] = useState(0);
+
+  const clearVersionConflictRetry = () => {
+    setVersionConflictRetryUntil(null);
+    setVersionConflictSecondsLeft(0);
+  };
+
+  const scheduleVersionConflictRetry = (message: string) => {
+    const until = Date.now() + 3000;
+    setError(message);
+    setVersionConflictRetryUntil(until);
+    setVersionConflictSecondsLeft(3);
+  };
+
+  const handlePvpRequestError = (e: unknown, fallback: string) => {
+    const err = e as any;
+    const message = e instanceof Error ? e.message : fallback;
+
+    if (err?.code === 'VERSION_CONFLICT') {
+      scheduleVersionConflictRetry(message);
+      return;
+    }
+
+    clearVersionConflictRetry();
+    setError(message);
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!versionConflictRetryUntil) return;
+
+    const tick = () => {
+      const msLeft = versionConflictRetryUntil - Date.now();
+      const secondsLeft = Math.max(0, Math.ceil(msLeft / 1000));
+      setVersionConflictSecondsLeft(secondsLeft);
+      if (msLeft <= 0) window.location.reload();
+    };
+
+    tick();
+    const intervalId = window.setInterval(tick, 200);
+    return () => window.clearInterval(intervalId);
+  }, [versionConflictRetryUntil]);
+
   const presetsQuery = usePresetQuery();
 
   const joinMutation = useMutation({
@@ -519,6 +563,9 @@ export function PvpRoomPage() {
       .filter((c) => Boolean(c.snapshotId));
   }, [myHand?.cards]);
 
+  const isHandDealing = phase === 'choosing' && myHand === null;
+  const canOpenHand = !isHandDealing && myHandCards.length > 0;
+
   const hasPrivateSelected = useMemo(() => selected.some((c) => c.kind === 'data_card' && c.isPublic === false), [selected]);
   const selectedPresetFilenames = useMemo(
     () => selected.filter((c): c is Extract<CardRef, { kind: 'preset' }> => c.kind === 'preset').map((c) => c.filename),
@@ -593,12 +640,13 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => {
+      clearVersionConflictRetry();
       setError(null);
       setShowSubmitEditor(false);
       clearSelected();
       void roomQuery.refetch();
     },
-    onError: (e) => setError(e instanceof Error ? e.message : '提交失败'),
+    onError: (e) => handlePvpRequestError(e, '提交失败'),
   });
 
   const startMutation = useMutation({
@@ -623,7 +671,7 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => void roomQuery.refetch(),
-    onError: (e) => setError(e instanceof Error ? e.message : '开始失败'),
+    onError: (e) => handlePvpRequestError(e, '开始失败'),
   });
 
   const chooseMutation = useMutation({
@@ -649,7 +697,7 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => void roomQuery.refetch(),
-    onError: (e) => setError(e instanceof Error ? e.message : '出牌失败'),
+    onError: (e) => handlePvpRequestError(e, '出牌失败'),
   });
 
   const chooseFromHandModal = async (snapshotId: string) => {
@@ -695,7 +743,7 @@ export function PvpRoomPage() {
     },
     onError: (e: any) => {
       if (e?.code === 'ROOM_RESOLVING' || e?.code === 'ROUND_RESOLVING') return;
-      setError(e instanceof Error ? e.message : '结算失败');
+      handlePvpRequestError(e, '结算失败');
     },
   });
 
@@ -721,7 +769,7 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => void roomQuery.refetch(),
-    onError: (e) => setError(e instanceof Error ? e.message : '更新口令失败'),
+    onError: (e) => handlePvpRequestError(e, '更新口令失败'),
   });
 
   const permissionsMutation = useMutation({
@@ -746,7 +794,7 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => void roomQuery.refetch(),
-    onError: (e) => setError(e instanceof Error ? e.message : '更新设置失败'),
+    onError: (e) => handlePvpRequestError(e, '更新设置失败'),
   });
 
   const rulesMutation = useMutation({
@@ -775,7 +823,7 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => void roomQuery.refetch(),
-    onError: (e) => setError(e instanceof Error ? e.message : '更新规则失败'),
+    onError: (e) => handlePvpRequestError(e, '更新规则失败'),
   });
 
   const scenarioMutation = useMutation({
@@ -806,7 +854,7 @@ export function PvpRoomPage() {
       setScenarioDraft(null);
       void roomQuery.refetch();
     },
-    onError: (e) => setError(e instanceof Error ? e.message : '更新情景失败'),
+    onError: (e) => handlePvpRequestError(e, '更新情景失败'),
   });
 
   const restartMutation = useMutation({
@@ -831,7 +879,7 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => void roomQuery.refetch(),
-    onError: (e) => setError(e instanceof Error ? e.message : '重开失败'),
+    onError: (e) => handlePvpRequestError(e, '重开失败'),
   });
 
   const confirmMutation = useMutation({
@@ -857,7 +905,7 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => void roomQuery.refetch(),
-    onError: (e) => setError(e instanceof Error ? e.message : '确认失败'),
+    onError: (e) => handlePvpRequestError(e, '确认失败'),
   });
 
   const isCustomProviderMissingKey = Boolean(
@@ -985,7 +1033,7 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => void roomQuery.refetch(),
-    onError: (e) => setError(e instanceof Error ? e.message : '踢人失败'),
+    onError: (e) => handlePvpRequestError(e, '踢人失败'),
   });
 
   const addBotMutation = useMutation({
@@ -1010,7 +1058,7 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => void roomQuery.refetch(),
-    onError: (e) => setError(e instanceof Error ? e.message : '添加机器人失败'),
+    onError: (e) => handlePvpRequestError(e, '添加机器人失败'),
   });
 
   const removeBotMutation = useMutation({
@@ -1035,7 +1083,7 @@ export function PvpRoomPage() {
       return data;
     },
     onSuccess: () => void roomQuery.refetch(),
-    onError: (e) => setError(e instanceof Error ? e.message : '移除机器人失败'),
+    onError: (e) => handlePvpRequestError(e, '移除机器人失败'),
   });
 
   const cardKey = (c: CardRef): string => (c.kind === 'data_card' ? `data_card:${c.id}` : `preset:${c.filename}`);
@@ -1611,7 +1659,7 @@ export function PvpRoomPage() {
                                 onRandomMatchScenario={handleRandomMatchScenario}
                                 onScenarioUpload={handleScenarioUpload}
                                 onScenarioPaste={handleScenarioPaste}
-                                onActionError={(e) => setError(`❌ ${e.message}`)}
+                                onActionError={(e) => handlePvpRequestError(e, '操作失败')}
                                 isAuthenticated={isAuthenticated}
                                 isGenerating={rulesMutation.isPending || scenarioMutation.isPending}
                                 isMatchingBlocked={isScenarioMatching}
@@ -1893,13 +1941,20 @@ export function PvpRoomPage() {
                         <button
                           className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                           onClick={() => setShowHandModal(true)}
-                          disabled={myHandCards.length <= 0}
+                          disabled={!canOpenHand}
                         >
-                          打开手牌
+                          {isHandDealing ? '发牌中…' : '打开手牌'}
                         </button>
                       </div>
 
-                      {myHandCards.length <= 0 && <div className="text-sm text-gray-700 mt-3">暂无手牌数据，请刷新。</div>}
+                      {isHandDealing ? (
+                        <div className="text-sm text-gray-700 mt-3 flex items-center gap-2">
+                          <span className="inline-block w-4 h-4 rounded-full border-2 border-gray-400 border-t-transparent animate-spin" />
+                          正在发牌/同步手牌，请稍候…
+                        </div>
+                      ) : myHandCards.length <= 0 ? (
+                        <div className="text-sm text-gray-700 mt-3">手牌为空，暂时无法出牌。</div>
+                      ) : null}
 
                       <div className="text-sm text-gray-700 mt-3">
                         已选人数：{choices?.chosenCount ?? 0} / {choices?.totalPlayers ?? players.length}；
@@ -2031,8 +2086,26 @@ export function PvpRoomPage() {
                 )}
 
                 {error && (
-                  <div className="p-3 rounded-md bg-red-100 text-red-800 text-sm mt-4 whitespace-pre-wrap">
-                    {error}
+                  <div
+                    className={[
+                      'p-3 rounded-md text-sm mt-4',
+                      versionConflictRetryUntil ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800',
+                    ].join(' ')}
+                  >
+                    <div className="whitespace-pre-wrap">{error}</div>
+                    {versionConflictRetryUntil ? (
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <div className="text-sm">
+                          版本冲突，{versionConflictSecondsLeft} 秒后自动刷新重试…
+                        </div>
+                        <button
+                          className="px-2 py-1 rounded border bg-white hover:bg-gray-50 text-sm"
+                          onClick={() => window.location.reload()}
+                        >
+                          立即刷新
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 )}
 
