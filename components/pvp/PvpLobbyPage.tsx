@@ -4,12 +4,16 @@ import { useMemo, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 
+import BattleDataModal from '@/components/BattleDataModal';
 import Footer from '@/components/Footer';
 import { PvpHeroBanner } from '@/components/pvp/PvpHeroBanner';
+import { BattleModeSelector } from '@/components/shared/BattleModeSelector';
+import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { authStorage } from '@/lib/auth';
+import { inferTemplate } from '@/lib/data-card-converter';
 import { useAuth } from '@/lib/useAuth';
 import { DEFAULT_PVP_RULES } from '@/lib/pvp/defaults';
-import type { PvpRoomRules } from '@/lib/pvp/types';
+import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
 
 const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
 
@@ -28,12 +32,42 @@ const saveRoomPassword = (roomId: string, password: string) => {
   sessionStorage.setItem(`${PASSWORD_CACHE_PREFIX}${roomId}`, trimmed);
 };
 
+const removePrivateKeys = (obj: any): any => {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(removePrivateKeys);
+  }
+  const cleaned: any = {};
+  for (const key of Object.keys(obj)) {
+    if (!key.startsWith('_')) {
+      cleaned[key] = removePrivateKeys(obj[key]);
+    }
+  }
+  return cleaned;
+};
+
+const verifyOrigin = async (payload: any): Promise<boolean> => {
+  const response = await fetch('/api/verify-origin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) return false;
+  const { isValid } = await response.json();
+  return Boolean(isValid);
+};
+
 export function PvpLobbyPage() {
   const router = useRouter();
   const { isAuthenticated, loading } = useAuth();
 
   const [rules, setRules] = useState<PvpRoomRules>(DEFAULT_PVP_RULES);
   const [createPassword, setCreatePassword] = useState('');
+  const [scenarioSelection, setScenarioSelection] = useState<PvpScenarioSelection | null>(null);
+  const [isScenarioMatching, setIsScenarioMatching] = useState(false);
+  const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [joinRoomId, setJoinRoomId] = useState('');
   const [joinPassword, setJoinPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -46,12 +80,99 @@ export function PvpLobbyPage() {
     return true;
   }, [rules.participants, rules.cardsPerPlayer, rules.dealPerPlayer, rules.bestOf?.enabled, rules.bestOf?.maxRounds]);
 
+  const ensureScenarioSelectedIfNeeded = (): boolean => {
+    if (rules.mode !== 'scenario') return true;
+    if (!scenarioSelection) {
+      setError('情景模式必须选择一个情景（可从在线情景库选择 / 随机匹配 / 上传 / 粘贴）。');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSelectScenarioCard = async (cardData: any) => {
+    const cleaned = removePrivateKeys(cardData);
+    if (inferTemplate(cleaned) !== 'scenario') {
+      setError('❌ 请选择“情景”类型的数据卡。');
+      return;
+    }
+    const isNative = await verifyOrigin(cleaned);
+    const fileBase = typeof cardData?._cardName === 'string' ? cardData._cardName : (typeof cleaned?.title === 'string' ? cleaned.title : '情景');
+    const fileName = `${String(fileBase).trim() || '情景'}.json`;
+    setScenarioSelection({
+      content: cleaned,
+      fileName,
+      isNative,
+      sourceDataCardId: typeof cardData?._cardId === 'string' ? cardData._cardId : undefined,
+      sourceDataCardUpdatedAt: typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : undefined,
+      sourceDataCardName: typeof cardData?._cardName === 'string' ? cardData._cardName : undefined,
+      sourceIsPublic: typeof cardData?._isPublic === 'boolean'
+        ? cardData._isPublic
+        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : undefined),
+      sourceAuthor: typeof cardData?._author === 'string' ? cardData._author : undefined,
+    });
+    setError(null);
+  };
+
+  const handleRandomMatchScenario = async () => {
+    setError(null);
+    setIsScenarioMatching(true);
+    setError('正在从数据库中随机寻找一份公开的情景...');
+    try {
+      const response = await fetch('/api/random-public-card?type=scenario');
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || '无法获取随机情景');
+      }
+      const cardData = JSON.parse(result.card.data);
+      await handleSelectScenarioCard({
+        ...cardData,
+        _cardId: result.card.id,
+        _cardName: result.card.name,
+        _isPublic: result.card.is_public,
+        _updatedAt: result.card.updated_at,
+        _createdAt: result.card.created_at,
+        _author: result.card.username || '未知',
+      });
+    } catch (e) {
+      setError(`❌ 随机匹配失败: ${e instanceof Error ? e.message : '未知错误'}`);
+    } finally {
+      setIsScenarioMatching(false);
+    }
+  };
+
+  const handleScenarioUpload = async (file: File) => {
+    const text = await file.text();
+    const json = JSON.parse(text);
+    if (!json || typeof json !== 'object' || Array.isArray(json)) {
+      throw new Error('情景文件内容必须是一个 JSON 对象');
+    }
+    if (typeof (json as any).title !== 'string' || !(json as any).title.trim()) {
+      throw new Error('情景文件缺少 title');
+    }
+    const isNative = await verifyOrigin(json);
+    setScenarioSelection({ content: json as any, fileName: file.name, isNative });
+    setError(null);
+  };
+
+  const handleScenarioPaste = async (text: string) => {
+    const json = JSON.parse(text);
+    if (!json || typeof json !== 'object' || Array.isArray(json)) {
+      throw new Error('情景文本必须是一个 JSON 对象');
+    }
+    const title = typeof (json as any).title === 'string' ? (json as any).title.trim() : '';
+    if (!title) throw new Error('情景文本缺少 title');
+    const isNative = await verifyOrigin(json);
+    setScenarioSelection({ content: json as any, fileName: `${title}.json`, isNative });
+    setError(null);
+  };
+
   const handleCreateRoom = async () => {
     setError(null);
     if (!isAuthenticated) {
       setError('请先登录后再创建房间。');
       return;
     }
+    if (!ensureScenarioSelectedIfNeeded()) return;
     if (!isRulesValid) {
       if (rules.cardsPerPlayer <= rules.dealPerPlayer) {
         setError('规则不合法：cardsPerPlayer 必须 > dealPerPlayer（保证对手手牌不可被直接推出）。');
@@ -73,7 +194,11 @@ export function PvpLobbyPage() {
       const res = await fetch('/api/pvp/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ rules, password: createPassword.trim() || undefined }),
+        body: JSON.stringify({
+          rules,
+          password: createPassword.trim() || undefined,
+          ...(rules.mode === 'scenario' && scenarioSelection ? { scenario: scenarioSelection } : {}),
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -175,18 +300,26 @@ export function PvpLobbyPage() {
                       />
                       <span>去重（建议开启）</span>
                     </label>
-                    <label className="flex flex-col gap-1 col-span-2">
-                      <span className="text-gray-800">模式</span>
-                      <select
-                        className="border rounded px-2 py-1"
-                        value={rules.mode}
-                        onChange={(e) => setRules((r) => ({ ...r, mode: e.target.value as any }))}
-                      >
-                        <option value="classic">classic</option>
-                        <option value="kizuna">kizuna</option>
-                        <option value="scenario">scenario</option>
-                      </select>
-                    </label>
+                    <div className="col-span-2">
+                      <BattleModeSelector value={rules.mode} onChange={(next) => setRules((r) => ({ ...r, mode: next }))} />
+                    </div>
+                    {rules.mode === 'scenario' && (
+                      <div className="col-span-2 border rounded-lg p-3 bg-white">
+                        <ScenarioPickerPanel
+                          onOpenScenarioModal={() => setShowScenarioModal(true)}
+                          onRandomMatchScenario={handleRandomMatchScenario}
+                          onScenarioUpload={handleScenarioUpload}
+                          onScenarioPaste={handleScenarioPaste}
+                          onActionError={(e) => setError(`❌ ${e.message}`)}
+                          isAuthenticated={isAuthenticated}
+                          isGenerating={isCreating}
+                          isMatchingBlocked={isScenarioMatching}
+                          isMatchingScenario={isScenarioMatching}
+                          scenarioFileName={scenarioSelection?.fileName ?? null}
+                          isScenarioNative={scenarioSelection?.isNative === true}
+                        />
+                      </div>
+                    )}
                     <div className="col-span-2 border rounded-lg p-3 bg-gray-50">
                       <label className="flex items-center gap-2 text-gray-800">
                         <input
@@ -229,7 +362,7 @@ export function PvpLobbyPage() {
 
                   <button
                     onClick={handleCreateRoom}
-                    disabled={!isAuthenticated || isCreating || !isRulesValid}
+                    disabled={!isAuthenticated || isCreating || !isRulesValid || (rules.mode === 'scenario' && !scenarioSelection)}
                     className="generate-button mt-3 w-full"
                     style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
                   >
@@ -291,6 +424,16 @@ export function PvpLobbyPage() {
           <Footer />
         </div>
       </div>
+
+      {showScenarioModal && (
+        <BattleDataModal
+          isOpen={showScenarioModal}
+          onClose={() => setShowScenarioModal(false)}
+          onSelectCard={(card) => void handleSelectScenarioCard(card)}
+          selectedType="scenario"
+          titleOverride="选择情景"
+        />
+      )}
     </>
   );
 }

@@ -12,6 +12,7 @@ import {
 } from '@/lib/d1';
 import { botUserIdForClient, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
+import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpSubmissionPayload } from '@/lib/pvp/types';
 import type { UserBadge } from '@/types/badge';
@@ -63,6 +64,19 @@ async function getRoomHandler(req: Request): Promise<Response> {
   const rules = parsed.internal.rules;
   const bots = parsed.internal.bots;
   const postRoundRaw = (parsed.internal.raw as any)?._postRound;
+  const scenarioSelection = parsePvpScenarioSelection((parsed.internal.raw as any)?._scenario);
+  const scenario = scenarioSelection
+    ? {
+        fileName: scenarioSelection.fileName,
+        isNative: scenarioSelection.isNative ?? false,
+        title: getPvpScenarioTitle(scenarioSelection),
+        sourceDataCardId: scenarioSelection.sourceDataCardId ?? null,
+        sourceDataCardUpdatedAt: scenarioSelection.sourceDataCardUpdatedAt ?? null,
+        sourceDataCardName: scenarioSelection.sourceDataCardName ?? null,
+        sourceIsPublic: typeof scenarioSelection.sourceIsPublic === 'boolean' ? scenarioSelection.sourceIsPublic : null,
+        sourceAuthor: scenarioSelection.sourceAuthor ?? null,
+      }
+    : null;
 
   const players = await getPvpRoomPlayers(roomId);
   const isPlayer = players.some((p) => p.user_id === auth.user.id);
@@ -219,6 +233,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
       lastActivityAt: room.last_activity_at,
       currentMatchId,
       rules,
+      scenario,
     },
     players: [
       ...players.map((p) => ({

@@ -18,8 +18,8 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const dedupe = typeof raw.dedupe === 'boolean' ? raw.dedupe : DEFAULT_PVP_RULES.dedupe;
 
   const mode = raw.mode ?? DEFAULT_PVP_RULES.mode;
-  if (mode !== 'classic' && mode !== 'kizuna' && mode !== 'scenario') {
-    return { error: 'mode 必须是 classic/kizuna/scenario' };
+  if (mode !== 'daily' && mode !== 'classic' && mode !== 'kizuna' && mode !== 'scenario') {
+    return { error: 'mode 必须是 daily/classic/kizuna/scenario' };
   }
 
   const bestOfRaw = (raw.bestOf && typeof raw.bestOf === 'object') ? raw.bestOf : {};

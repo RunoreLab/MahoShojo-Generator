@@ -18,6 +18,7 @@ import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { dealSnapshots } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
+import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpCardRef, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
 
@@ -68,6 +69,10 @@ async function startHandler(req: Request): Promise<Response> {
   const rules = internal.rules;
   const bots = internal.bots;
   const recordMatch = bots.length <= 0;
+  const scenarioSelection = parsePvpScenarioSelection((internal.raw as any)?._scenario);
+  if (rules.mode === 'scenario' && !scenarioSelection) {
+    return json({ error: '当前为情景模式，但尚未选择情景', code: 'SCENARIO_MISSING' }, { status: 409 });
+  }
 
   const players = await getPvpRoomPlayers(roomId);
   const totalParticipants = players.length + bots.length;
