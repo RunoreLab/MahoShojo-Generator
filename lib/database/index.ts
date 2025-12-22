@@ -5,3 +5,4 @@ export * from './data-cards';
 export * from './arena';
 export * from './battle-report-generations';
 export * from './battle-report-generation-combatants';
+export * from './pvp';

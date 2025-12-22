@@ -41,6 +41,9 @@ export {
   permanentlyDeleteDataCards,
   verifyCardOwnership,
   getPublicDataCards,
+  getRandomPublicCard,
+  getRandomPublicCardExcluding,
+  getDataCardStatsByIds,
   getDataCardById,
   incrementDataCardLike,
   incrementDataCardUsage
@@ -63,18 +66,68 @@ export {
   getRecentBattles
 } from './database/arena';
 
+// 重新导出 PVP 相关功能
+export {
+  createPvpRoom,
+  getPvpRoomById,
+  getPvpRoomPlayers,
+  addPvpRoomPlayer,
+  removePvpRoomPlayer,
+  updatePvpRoomCas,
+  upsertPvpRoomSubmission,
+  getPvpRoomSubmissions,
+  getPvpEligibleDataCard,
+  clearPvpRoomMatchState,
+  clearPvpRoomRuntimeState,
+  upsertPvpRoomHand,
+  getPvpRoomHands,
+  createPvpCardSnapshot,
+  getPvpCardSnapshots,
+  createPvpRound,
+  getPvpRoundById,
+  getLatestPvpRoundByRoom,
+  getLatestPvpRoundByMatch,
+  getPvpRoundsByRoom,
+  getPvpRoundsByMatch,
+  updatePvpRound,
+  upsertPvpRoundChoice,
+  getPvpRoundChoices,
+  getPvpCardSnapshotById,
+  createPvpMatch,
+  createPvpMatchPlayers,
+  updatePvpMatch,
+  getPvpMatchById,
+  getPvpMatchesByUserId,
+  getPvpUserSummariesByUserIds,
+  type PvpMatchPlayerRow,
+  type PvpUserSummaryRow,
+  type PvpMatchRow,
+  type PvpMatchStatus,
+  type PvpRoomPhase,
+  type PvpRoomStatus,
+  type PvpRoundStatus,
+  type PvpRoomRow,
+  type PvpRoomPlayerRow,
+  type PvpRoundRow,
+} from './database/pvp';
+
 // 重新导出战报生成记录相关功能
 export {
   createBattleReportGenerationRecord,
   updateBattleReportGenerationExtraJson,
   updateBattleReportGenerationCombatantsWriteResult,
+  getBattleReportGenerationByIdLite,
+  getBattleReportGenerationsByUserIdLite,
   type BattleReportGenerationInsert,
-  type BattleReportGenerationStatus
+  type BattleReportGenerationStatus,
+  type BattleReportGenerationRowLite
 } from './database/battle-report-generations';
 
 export {
   createBattleReportGenerationCombatants,
+  getBattleReportGenerationCombatantsByGenerationId,
   type BattleReportGenerationCombatantInsert,
+  type BattleReportGenerationCombatantRow,
 } from './database/battle-report-generation-combatants';
 
 // 重新导出徽章相关功能

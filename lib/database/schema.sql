@@ -222,6 +222,12 @@ CREATE TABLE IF NOT EXISTS battle_report_generations (
   output_has_shield_words BOOLEAN,       -- 是否检测到屏蔽词（可能仅基于预览）
 
   extra_json TEXT,                       -- 其余扩展数据（JSON，尽量小）
+
+  -- PVP 关联（可空；普通竞技场战报不填）
+  pvp_room_id TEXT,
+  pvp_match_id TEXT,
+  pvp_round_id TEXT,
+
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -234,6 +240,9 @@ CREATE INDEX IF NOT EXISTS idx_battle_report_generations_status ON battle_report
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_generation_mode ON battle_report_generations(generation_mode);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_endpoint ON battle_report_generations(endpoint);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_scenario_data_card_id ON battle_report_generations(scenario_data_card_id);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_room_id ON battle_report_generations(pvp_room_id);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_match_id ON battle_report_generations(pvp_match_id);
+CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_round_id ON battle_report_generations(pvp_round_id);
 
 -- 战报生成记录-参战者明细表
 -- 用于记录每条生成记录中每位角色的可查询信息（未来排行榜/统计的关键维度）。
@@ -262,3 +271,154 @@ CREATE TABLE IF NOT EXISTS battle_report_generation_combatants (
 CREATE INDEX IF NOT EXISTS idx_battle_report_generation_combatants_generation_id ON battle_report_generation_combatants(generation_id);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generation_combatants_data_card_id ON battle_report_generation_combatants(data_card_id);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generation_combatants_name ON battle_report_generation_combatants(name);
+
+-- =================================================================
+-- PVP 房间制对战（MVP：2人、轮询）
+-- =================================================================
+
+-- PVP 房间
+CREATE TABLE IF NOT EXISTS pvp_rooms (
+  id TEXT PRIMARY KEY NOT NULL,
+  host_user_id INTEGER NOT NULL,
+  status TEXT NOT NULL,            -- open / closed
+  phase TEXT NOT NULL,             -- waiting / submitting / dealing / choosing / resolving / finished / aborted / closed
+  rules_json TEXT NOT NULL,
+  current_match_id TEXT,
+  join_code_hash TEXT,
+  join_code_salt TEXT,
+  version INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,
+  last_activity_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_rooms_status ON pvp_rooms(status);
+CREATE INDEX IF NOT EXISTS idx_pvp_rooms_updated_at ON pvp_rooms(updated_at);
+CREATE INDEX IF NOT EXISTS idx_pvp_rooms_current_match_id ON pvp_rooms(current_match_id);
+
+-- PVP 房间玩家
+CREATE TABLE IF NOT EXISTS pvp_room_players (
+  room_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  seat INTEGER,
+  joined_at TEXT NOT NULL,
+  PRIMARY KEY (room_id, user_id),
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_room_players_room_id ON pvp_room_players(room_id);
+
+-- PVP 提交
+CREATE TABLE IF NOT EXISTS pvp_room_submissions (
+  room_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  submission_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (room_id, user_id),
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- PVP 手牌
+CREATE TABLE IF NOT EXISTS pvp_room_hands (
+  room_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  hand_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (room_id, user_id),
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- PVP 卡快照（保证复盘一致）
+CREATE TABLE IF NOT EXISTS pvp_room_card_snapshots (
+  id TEXT PRIMARY KEY NOT NULL,
+  room_id TEXT NOT NULL,
+  owner_user_id INTEGER NOT NULL,
+  ref_json TEXT NOT NULL,
+  card_type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  source_updated_at TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_room_card_snapshots_room_id ON pvp_room_card_snapshots(room_id);
+
+-- PVP 回合
+CREATE TABLE IF NOT EXISTS pvp_rounds (
+  id TEXT PRIMARY KEY NOT NULL,
+  room_id TEXT NOT NULL,
+  match_id TEXT,
+  round_index INTEGER NOT NULL,
+  status TEXT NOT NULL,           -- pending / resolving / completed / aborted
+  battle_generation_id TEXT,
+  public_snapshot_json TEXT,
+  result_json TEXT,
+  winner_user_id INTEGER,
+  winner_name TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (winner_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_rounds_room_id ON pvp_rounds(room_id);
+CREATE INDEX IF NOT EXISTS idx_pvp_rounds_match_id ON pvp_rounds(match_id);
+
+-- PVP 对战（整场）记录：用于排行/生涯统计（与 room 可复用解耦）
+CREATE TABLE IF NOT EXISTS pvp_matches (
+  id TEXT PRIMARY KEY NOT NULL,
+  room_id TEXT NOT NULL,
+  status TEXT NOT NULL, -- active / completed / aborted
+  rules_json TEXT NOT NULL,
+  participants INTEGER NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  winner_user_id INTEGER,
+  result_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (winner_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_matches_room_id ON pvp_matches(room_id);
+CREATE INDEX IF NOT EXISTS idx_pvp_matches_status ON pvp_matches(status);
+CREATE INDEX IF NOT EXISTS idx_pvp_matches_started_at ON pvp_matches(started_at);
+
+-- PVP 对战参与者快照
+CREATE TABLE IF NOT EXISTS pvp_match_players (
+  match_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  seat INTEGER NOT NULL,
+  username TEXT,
+  user_prefix TEXT,
+  joined_at TEXT NOT NULL,
+  PRIMARY KEY (match_id, user_id),
+  FOREIGN KEY (match_id) REFERENCES pvp_matches(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_match_players_match_id ON pvp_match_players(match_id);
+CREATE INDEX IF NOT EXISTS idx_pvp_match_players_user_id ON pvp_match_players(user_id);
+
+-- PVP 回合出牌
+CREATE TABLE IF NOT EXISTS pvp_round_choices (
+  round_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  choice_ref_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (round_id, user_id),
+  FOREIGN KEY (round_id) REFERENCES pvp_rounds(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_round_choices_round_id ON pvp_round_choices(round_id);

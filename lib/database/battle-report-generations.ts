@@ -72,6 +72,10 @@ export interface BattleReportGenerationInsert {
   outputHasSensitiveWords?: boolean | null;
   outputHasShieldWords?: boolean | null;
 
+  pvpRoomId?: string | null;
+  pvpMatchId?: string | null;
+  pvpRoundId?: string | null;
+
   extraJson?: Record<string, unknown> | null;
 }
 
@@ -140,6 +144,9 @@ export async function createBattleReportGenerationRecord(
         output_preview,
         output_has_sensitive_words,
         output_has_shield_words,
+        pvp_room_id,
+        pvp_match_id,
+        pvp_round_id,
         extra_json,
         created_at,
         updated_at
@@ -148,7 +155,7 @@ export async function createBattleReportGenerationRecord(
         ?,?,?,?,?,?,?,?,?,?,?,?,
         ?,?,?,?,?,?,?,?,?,?,?,?,
         ?,?,?,?,?,?,?,?,?,?,?,?,
-        ?,?,?,?,?,?,?,?,?,?,?
+        ?,?,?,?,?,?,?,?,?,?,?,?,?,?
       );
     `;
 
@@ -209,6 +216,9 @@ export async function createBattleReportGenerationRecord(
       payload.outputPreview ?? null,
       typeof payload.outputHasSensitiveWords === 'boolean' ? (payload.outputHasSensitiveWords ? 1 : 0) : null,
       typeof payload.outputHasShieldWords === 'boolean' ? (payload.outputHasShieldWords ? 1 : 0) : null,
+      payload.pvpRoomId ?? null,
+      payload.pvpMatchId ?? null,
+      payload.pvpRoundId ?? null,
       payload.extraJson ? JSON.stringify(payload.extraJson) : null,
       nowIso,
       nowIso,
@@ -220,6 +230,124 @@ export async function createBattleReportGenerationRecord(
   } catch (error) {
     console.error('写入 battle_report_generations 失败:', error);
     return null;
+  }
+}
+
+export interface BattleReportGenerationRowLite {
+  id: string;
+  started_at: string;
+  ended_at: string;
+  duration_ms: number;
+  status: BattleReportGenerationStatus;
+  generation_mode: BattleReportGenerationMode;
+  endpoint: string;
+  user_id: number | null;
+  mode: string;
+  scenario_title: string | null;
+  scenario_data_card_id: string | null;
+  scenario_data_card_updated_at: string | null;
+  language: string | null;
+  selected_level: string | null;
+  story_length: string | null;
+  headline: string | null;
+  winner: string | null;
+  output_preview: string | null;
+  pvp_room_id: string | null;
+  pvp_match_id: string | null;
+  pvp_round_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getBattleReportGenerationByIdLite(
+  generationId: string
+): Promise<BattleReportGenerationRowLite | null> {
+  try {
+    const result = (await queryFromD1(
+      `SELECT
+        id,
+        started_at,
+        ended_at,
+        duration_ms,
+        status,
+        generation_mode,
+        endpoint,
+        user_id,
+        mode,
+        scenario_title,
+        scenario_data_card_id,
+        scenario_data_card_updated_at,
+        language,
+        selected_level,
+        story_length,
+        headline,
+        winner,
+        output_preview,
+        pvp_room_id,
+        pvp_match_id,
+        pvp_round_id,
+        created_at,
+        updated_at
+      FROM battle_report_generations
+      WHERE id = ?`,
+      [generationId]
+    )) as any;
+
+    if (result.success && result.result?.[0]?.results?.length > 0) {
+      return result.result[0].results[0] as BattleReportGenerationRowLite;
+    }
+    return null;
+  } catch (error) {
+    console.error('读取 battle_report_generations(id) 失败:', error);
+    return null;
+  }
+}
+
+export async function getBattleReportGenerationsByUserIdLite(
+  userId: number,
+  limit: number
+): Promise<BattleReportGenerationRowLite[]> {
+  try {
+    const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+    const result = (await queryFromD1(
+      `SELECT
+        id,
+        started_at,
+        ended_at,
+        duration_ms,
+        status,
+        generation_mode,
+        endpoint,
+        user_id,
+        mode,
+        scenario_title,
+        scenario_data_card_id,
+        scenario_data_card_updated_at,
+        language,
+        selected_level,
+        story_length,
+        headline,
+        winner,
+        output_preview,
+        pvp_room_id,
+        pvp_match_id,
+        pvp_round_id,
+        created_at,
+        updated_at
+      FROM battle_report_generations
+      WHERE user_id = ?
+      ORDER BY started_at DESC
+      LIMIT ?`,
+      [userId, safeLimit]
+    )) as any;
+
+    if (result.success && result.result?.[0]?.results) {
+      return result.result[0].results as BattleReportGenerationRowLite[];
+    }
+    return [];
+  } catch (error) {
+    console.error('读取 battle_report_generations(user) 失败:', error);
+    return [];
   }
 }
 
