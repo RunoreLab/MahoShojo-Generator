@@ -186,7 +186,7 @@
 - `host_user_id`：INTEGER
 - `status`：TEXT（open/closed）
 - `phase`：TEXT（waiting/submitting/choosing/resolving/finished）
-- `rules_json`：TEXT（卡数、BO、去重策略、是否情景模式等）
+- `rules_json`：TEXT（卡数、BO、去重策略、是否展示提交详情、是否洗混卡组、是否情景模式等）
 - `version`：INTEGER（乐观锁，每次写入 +1）
 - `created_at` / `updated_at`
 
@@ -436,6 +436,8 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
     "cardsPerPlayer": 4,
     "dealPerPlayer": 3,
     "dedupe": true,
+    "showAllSubmissions": true,
+    "shuffleDecks": true,
     "mode": "classic",
     "bestOf": { "enabled": false, "maxRounds": 3, "winCondition": "mostWinsAfterMaxRounds", "tieBreaker": "draw" }
   },
@@ -541,14 +543,15 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - `/pvp/[roomId]`：房间页面（含阶段提示、提交池展示、手牌与选牌、战报展示）
 
 房间页最关键的 3 个视图区：
-1. **公开区**：参与者列表、房间规则、各玩家提交卡组（公开）
+1. **公开区**：参与者列表、房间规则、提交进度（以及可选：各玩家提交卡组详情）
 2. **私密区**：我的手牌（仅自己可见）、我的选择按钮
 3. **结果区**：战报、winner、可选“下一局/重赛”
 
 ### 建议补齐：提交卡的“公开范围”文案
-因为你允许“查看各用户提交的卡详情”，这意味着：
-- 即使是私有卡，只要被提交到房间，就会在该房间内对对手可见（至少在该局期间）
-- 前端与 API 需要明确提示用户：提交即视为同意在房间内公开展示该卡
+因为房主可能开启“显示所有人提交的卡组”，这意味着：
+- 即使是私有卡，只要被提交到房间，**就可能**在该房间内对其他玩家可见（取决于房间规则 `showAllSubmissions`）
+- 即便房间关闭展示，私有卡仍会参与发牌与战报生成，战报也可能间接暴露设定
+- 前端与 API 需要明确提示用户：提交即视为同意在房间内使用该卡（并可能在房间内展示其完整 JSON）
 
 建议 UI 做到“可证明的告知与确认”：
 - 在用户尝试提交私有卡时，弹出确认对话框，明确说明“对手可查看完整 JSON（含问卷/能力/设定全量）”

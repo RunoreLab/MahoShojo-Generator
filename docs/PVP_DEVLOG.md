@@ -12,6 +12,10 @@
 - 结算调用：复用现有非流式端点 `POST /api/generate-battle-story`（并显式关闭 arena_history / current_state 的读写）
 - 多局制配置：大厅创建房间可启用/设置；房间内（房主）可在 `waiting/submitting` 阶段调整规则
 - 结算推进策略：生成战报后进入 `reviewing`，只有全员“确认已阅读”后才推进下一回合或结束
+- 新增房间规则：
+  - `showAllSubmissions`：是否显示所有人提交的卡组详情（默认 true；关闭时仅展示提交进度与自己的详情）
+  - `shuffleDecks`：是否合池洗混后发牌（默认 true；关闭时每位玩家仅从自己提交的卡组中按提交顺序抽取手牌）
+- 大厅“创建房间”规则设置已用 localStorage 持久化（与竞技场类似的 zustand persist）：`pvp-lobby-storage`
 
 ## 1. 关键工程决策
 

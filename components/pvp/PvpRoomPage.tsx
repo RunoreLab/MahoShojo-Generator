@@ -385,6 +385,35 @@ export function PvpRoomPage() {
   }, [players]);
 
   const submissions = useMemo(() => (Array.isArray(roomQuery.data?.submissions) ? roomQuery.data.submissions : []), [roomQuery.data?.submissions]);
+  const submissionStatus = useMemo(
+    () => (Array.isArray((roomQuery.data as any)?.submissionStatus) ? (roomQuery.data as any).submissionStatus : []),
+    [roomQuery.data],
+  );
+  const submissionStatusByUserId = useMemo(() => {
+    const map = new Map<number, { hasSubmitted: boolean; submittedCount: number; hasPrivateCard: boolean }>();
+    for (const item of submissionStatus as any[]) {
+      const userId = typeof item?.userId === 'number' ? item.userId : null;
+      if (userId === null) continue;
+      map.set(userId, {
+        hasSubmitted: item?.hasSubmitted === true,
+        submittedCount: Number.isFinite(item?.submittedCount) ? Number(item.submittedCount) : 0,
+        hasPrivateCard: item?.hasPrivateCard === true,
+      });
+    }
+    return map;
+  }, [submissionStatus]);
+  const submissionStatusBySeat = useMemo(() => {
+    return players.map((p) => {
+      const userId = typeof p?.userId === 'number' ? p.userId : null;
+      const fallback = { hasSubmitted: false, submittedCount: 0, hasPrivateCard: false };
+      const status = userId === null ? fallback : (submissionStatusByUserId.get(userId) ?? fallback);
+      return { userId, seat: p.seat ?? null, isBot: Boolean(p.isBot), ...status };
+    });
+  }, [players, submissionStatusByUserId]);
+  const submittedParticipantCount = useMemo(
+    () => submissionStatusBySeat.filter((s) => s.hasSubmitted).length,
+    [submissionStatusBySeat],
+  );
   const mySubmission = useMemo(() => {
     const myUserId = user?.id;
     if (!myUserId) return null;
@@ -1292,7 +1321,7 @@ export function PvpRoomPage() {
                     ) : null}
                     {rules && (
                       <div className="mt-2 text-xs text-gray-600 whitespace-pre-wrap">
-                        规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 发牌 {rules.dealPerPlayer} / 去重 {String(rules.dedupe)} / 模式 {rules.mode}
+                        规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 发牌 {rules.dealPerPlayer} / 去重 {String(rules.dedupe)} / 展示提交 {String(rules.showAllSubmissions)} / 洗混 {String(rules.shuffleDecks)} / 模式 {rules.mode}
                       </div>
                     )}
                     {rules?.bestOf?.enabled && latestRound ? (
@@ -1511,6 +1540,24 @@ export function PvpRoomPage() {
                               disabled={rulesMutation.isPending}
                             />
                             <span>去重</span>
+                          </label>
+                          <label className="flex items-center gap-2 col-span-2">
+                            <input
+                              type="checkbox"
+                              checked={rulesDraft.showAllSubmissions}
+                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, showAllSubmissions: e.target.checked } : r))}
+                              disabled={rulesMutation.isPending}
+                            />
+                            <span>显示所有人提交的卡组</span>
+                          </label>
+                          <label className="flex items-center gap-2 col-span-2">
+                            <input
+                              type="checkbox"
+                              checked={rulesDraft.shuffleDecks}
+                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, shuffleDecks: e.target.checked } : r))}
+                              disabled={rulesMutation.isPending}
+                            />
+                            <span>洗混卡组后发牌（关闭则按各自提交发牌）</span>
                           </label>
                           <div className="col-span-2">
                             <BattleModeSelector
@@ -1787,7 +1834,7 @@ export function PvpRoomPage() {
                         <button
                           className="generate-button w-full mt-3"
                           style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}
-                          disabled={startMutation.isPending || submissions.length < rules.participants}
+                          disabled={startMutation.isPending || submittedParticipantCount < rules.participants}
                           onClick={() => startMutation.mutate()}
                         >
                           {startMutation.isPending ? '发牌中…' : '开始对局（发牌）'}
@@ -1956,47 +2003,66 @@ export function PvpRoomPage() {
 
                 <div className="p-3 rounded-md bg-white border mt-4">
                   <div className="font-semibold text-sm mb-2">提交情况</div>
+                  {rules?.showAllSubmissions ? (
+                    <div className="text-xs text-gray-600 mb-2">当前房间允许查看所有人的提交详情。</div>
+                  ) : (
+                    <div className="text-xs text-gray-600 mb-2">房主已关闭“显示所有人提交的卡组”，你只能查看自己的提交详情。</div>
+                  )}
                   <div className="space-y-3">
-                    {submissions.map((s: any) => (
-                      <details key={s.userId} className="text-sm">
-                        <summary className="cursor-pointer">
-                          {usernameById.get(s.userId) || `用户${s.userId}`}：已提交 {s.cards?.length || 0} 张{s.hasPrivateCard ? '（含私有）' : ''}
-                        </summary>
-                        <div className="mt-2 space-y-2">
-                          {(s.cards || []).map((c: any, idx: number) => {
-                            const label = `${c.name || '未命名'} / ${c.type || 'unknown'} / ${c.source?.isPublic ? '公开' : '私有'}`;
-                            return (
-                              <div key={`${idx}-${c.name}`} className="text-xs border rounded p-2 bg-gray-50 flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <div className="font-semibold break-words">{label}</div>
-                                  {c.source?.authorUsername && (
-                                    <div className="text-[11px] text-gray-600 mt-1">作者：{c.source.authorUsername}</div>
-                                  )}
-                                </div>
-                                <button
-                                  className="px-2 py-1 rounded border bg-white hover:bg-gray-100 flex-shrink-0"
-                                  onClick={() => {
-                                    const username = usernameById.get(s.userId) || `用户${s.userId}`;
-                                    setDetailsCard({
-                                      id: `pvp:submission:${s.userId}:${idx}`,
-                                      name: c.name || '未命名',
-                                      description: `PVP 提交卡（${username}）`,
-                                      type: 'character',
-                                      data: typeof c.dataJson === 'string' ? c.dataJson : JSON.stringify(c.dataJson ?? {}),
-                                      isPublic: Boolean(c.source?.isPublic ?? true),
-                                      author: c.source?.authorUsername || username,
-                                    });
-                                    setShowDetailsModal(true);
-                                  }}
-                                >
-                                  详情
-                                </button>
+                    {submissionStatusBySeat
+                      .filter((s) => typeof s.userId === 'number')
+                      .map((s) => {
+                        const userId = s.userId as number;
+                        const username = usernameById.get(userId) || `用户${userId}`;
+                        const detailed = submissions.find((x: any) => typeof x?.userId === 'number' && x.userId === userId) as any | null;
+                        const summaryText = s.hasSubmitted
+                          ? `已提交 ${s.submittedCount} 张${s.hasPrivateCard ? '（含私有）' : ''}`
+                          : '未提交';
+
+                        return (
+                          <details key={userId} className="text-sm">
+                            <summary className="cursor-pointer">
+                              {username}：{summaryText}
+                            </summary>
+                            {detailed ? (
+                              <div className="mt-2 space-y-2">
+                                {(detailed.cards || []).map((c: any, idx: number) => {
+                                  const label = `${c.name || '未命名'} / ${c.type || 'unknown'} / ${c.source?.isPublic ? '公开' : '私有'}`;
+                                  return (
+                                    <div key={`${idx}-${c.name}`} className="text-xs border rounded p-2 bg-gray-50 flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <div className="font-semibold break-words">{label}</div>
+                                        {c.source?.authorUsername && (
+                                          <div className="text-[11px] text-gray-600 mt-1">作者：{c.source.authorUsername}</div>
+                                        )}
+                                      </div>
+                                      <button
+                                        className="px-2 py-1 rounded border bg-white hover:bg-gray-100 flex-shrink-0"
+                                        onClick={() => {
+                                          setDetailsCard({
+                                            id: `pvp:submission:${userId}:${idx}`,
+                                            name: c.name || '未命名',
+                                            description: `PVP 提交卡（${username}）`,
+                                            type: 'character',
+                                            data: typeof c.dataJson === 'string' ? c.dataJson : JSON.stringify(c.dataJson ?? {}),
+                                            isPublic: Boolean(c.source?.isPublic ?? true),
+                                            author: c.source?.authorUsername || username,
+                                          });
+                                          setShowDetailsModal(true);
+                                        }}
+                                      >
+                                        详情
+                                      </button>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                            );
-                          })}
-                        </div>
-                      </details>
-                    ))}
+                            ) : s.hasSubmitted ? (
+                              <div className="mt-2 text-xs text-gray-600">该玩家已提交，但详情已被房间设置隐藏。</div>
+                            ) : null}
+                          </details>
+                        );
+                      })}
                   </div>
                 </div>
               </>
