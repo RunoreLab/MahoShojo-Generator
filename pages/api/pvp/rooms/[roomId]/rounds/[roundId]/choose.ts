@@ -1,4 +1,5 @@
 import { getPvpRoundById, getPvpRoomById, getPvpRoomHands, getPvpRoomPlayers, getPvpRoundChoices, upsertPvpRoundChoice } from '@/lib/d1';
+import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
@@ -69,7 +70,7 @@ async function chooseHandler(req: Request): Promise<Response> {
     const players = await getPvpRoomPlayers(roomId);
     const choices = await getPvpRoundChoices(roundId);
     if (players.length >= 2 && choices.length >= players.length) {
-      const origin = new URL(req.url).origin;
+      const origin = getRequestOrigin(req);
       const resolveRes = await fetch(new URL(`/api/pvp/rooms/${roomId}/rounds/${roundId}/resolve`, origin).toString(), {
         method: 'POST',
         headers: {

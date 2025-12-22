@@ -11,8 +11,10 @@ import BattleReportCard from '@/components/BattleReportCard';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
 import { PresetGridPicker } from '@/components/PresetGridPicker';
+import { UserWithTitle } from '@/components/UserTitle';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 import { usePresetQuery } from '@/components/arena/hooks/useArenaData';
+import { PvpHandModal, type PvpHandCardItem } from '@/components/pvp/PvpHandModal';
 import { authStorage } from '@/lib/auth';
 import { useCooldown } from '@/lib/cooldown';
 import { useAuth } from '@/lib/useAuth';
@@ -20,6 +22,7 @@ import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/cus
 import type { PvpRoomRules } from '@/lib/pvp/types';
 
 import type { Preset } from '@/pages/api/get-presets';
+import type { UserBadge } from '@/types/badge';
 
 const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
 
@@ -88,6 +91,14 @@ type CardRef =
     }
   | { kind: 'preset'; filename: string; name: string; description: string; presetType: Preset['type'] };
 
+type PvpRoomPlayerView = {
+  userId: number;
+  username: string;
+  prefix?: string | null;
+  seat?: number | null;
+  badges?: UserBadge[];
+};
+
 export function PvpRoomPage() {
   const router = useRouter();
   const { user, isAuthenticated, loading } = useAuth();
@@ -102,6 +113,7 @@ export function PvpRoomPage() {
   const [selected, setSelected] = useState<CardRef[]>([]);
   const [acceptPrivateDisclosure, setAcceptPrivateDisclosure] = useState(false);
   const [showBattleDataModal, setShowBattleDataModal] = useState(false);
+  const [showHandModal, setShowHandModal] = useState(false);
   const [isMatching, setIsMatching] = useState<'character' | 'scenario' | null>(null);
   const [mgPage, setMgPage] = useState(1);
   const [canshouPage, setCanshouPage] = useState(1);
@@ -191,8 +203,12 @@ export function PvpRoomPage() {
   const rules: PvpRoomRules | null = room?.rules || null;
   const phase: string = room?.phase || 'unknown';
   const version: number = room?.version ?? 0;
-  const players = useMemo(() => (Array.isArray(roomQuery.data?.players) ? roomQuery.data.players : []), [roomQuery.data?.players]);
+  const players = useMemo<PvpRoomPlayerView[]>(() => (Array.isArray(roomQuery.data?.players) ? (roomQuery.data.players as PvpRoomPlayerView[]) : []), [roomQuery.data?.players]);
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
+
+  useEffect(() => {
+    if (phase !== 'choosing') setShowHandModal(false);
+  }, [phase]);
 
   const userIdsForSummary = useMemo(
     () =>
@@ -263,11 +279,24 @@ export function PvpRoomPage() {
   }, [players]);
 
   const submissions = Array.isArray(roomQuery.data?.submissions) ? roomQuery.data.submissions : [];
-  const myHand = roomQuery.data?.myHand;
+  const myHand = roomQuery.data?.myHand as { cards?: any[]; discarded?: any[]; drawPile?: any[] } | null | undefined;
   const choices = roomQuery.data?.choices;
   const latestRound = roomQuery.data?.latestRound;
   const latestRoundResult = roomQuery.data?.latestRoundResult;
   const score = roomQuery.data?.score;
+
+  const myHandCards = useMemo<PvpHandCardItem[]>(() => {
+    const list = Array.isArray(myHand?.cards) ? myHand?.cards : [];
+    return list
+      .map((c: any) => ({
+        snapshotId: typeof c?.snapshotId === 'string' ? c.snapshotId : String(c?.snapshotId ?? ''),
+        name: typeof c?.name === 'string' ? c.name : '未命名',
+        type: typeof c?.type === 'string' ? c.type : null,
+        dataJson: typeof c?.dataJson === 'string' ? c.dataJson : c?.dataJson ? JSON.stringify(c.dataJson) : null,
+        ref: c?.ref ?? null,
+      }))
+      .filter((c) => Boolean(c.snapshotId));
+  }, [myHand?.cards]);
 
   const hasPrivateSelected = useMemo(() => selected.some((c) => c.kind === 'data_card' && c.isPublic === false), [selected]);
   const selectedPresetFilenames = useMemo(
@@ -399,6 +428,15 @@ export function PvpRoomPage() {
     onSuccess: () => void roomQuery.refetch(),
     onError: (e) => setError(e instanceof Error ? e.message : '出牌失败'),
   });
+
+  const chooseFromHandModal = async (snapshotId: string) => {
+    try {
+      await chooseMutation.mutateAsync(snapshotId);
+      setShowHandModal(false);
+    } catch {
+      // error 已由 chooseMutation.onError 处理
+    }
+  };
 
   const resolveMutation = useMutation({
     mutationFn: async (payload?: { customProvider?: UserAIProviderConfig | null }) => {
@@ -729,15 +767,17 @@ export function PvpRoomPage() {
         <title>PVP 房间 - {roomId || '...'}</title>
       </Head>
       <div className="magic-background-white">
-        <div className="container">
-          <div className="card" style={{ border: '2px solid #ccc', background: '#f9f9f9' }}>
-            <div className="flex items-center justify-between">
-              <h1 className="text-xl font-bold">PVP 房间</h1>
-              <button onClick={() => window.location.assign('/pvp')} className="footer-link">
+        <div className="mx-auto w-full max-w-6xl px-4 py-8">
+          <div className="rounded-2xl bg-white/90 backdrop-blur border border-white/40 shadow-xl p-5 md:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">PVP 房间</h1>
+                <div className="text-sm text-gray-600 mt-1 break-all">房间ID：{roomId || '加载中…'}</div>
+              </div>
+              <button onClick={() => window.location.assign('/pvp')} className="text-sm text-blue-600 hover:underline">
                 返回大厅
               </button>
             </div>
-            <div className="text-sm text-gray-700 mt-1 break-all">房间ID：{roomId || '加载中…'}</div>
 
             {!loading && !isAuthenticated && (
               <div className="p-3 rounded-md bg-yellow-100 text-yellow-800 text-sm mt-3">
@@ -773,10 +813,13 @@ export function PvpRoomPage() {
 
             {roomQuery.data && (
               <>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="p-3 rounded-md bg-white border text-sm">
-                    <div>阶段：<span className="font-semibold">{phase}</span></div>
-                    <div>版本：{version}</div>
+                <div className="mt-5 grid grid-cols-1 gap-4">
+                  <div className="p-4 rounded-xl bg-white border text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-semibold text-gray-900">房间信息</div>
+                      <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">阶段：{phase}</span>
+                    </div>
+                    <div className="mt-2 text-gray-700">版本：{version}</div>
                     {rules && (
                       <div className="mt-2 text-xs text-gray-600 whitespace-pre-wrap">
                         规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 发牌 {rules.dealPerPlayer} / 去重 {String(rules.dedupe)} / 模式 {rules.mode}
@@ -799,17 +842,31 @@ export function PvpRoomPage() {
                     )}
                   </div>
 
-                  <div className="p-3 rounded-md bg-white border text-sm">
-                    <div className="font-semibold mb-1">玩家</div>
-                    <div className="space-y-1">
-                      {players.map((p: any) => (
-                        <div key={p.userId} className="flex items-center justify-between gap-2">
-                          <div>
-                            <div>
-                              [{p.seat ?? '?'}] {playerLabelById.get(p.userId) || `用户${p.userId}`}{p.userId === room.hostUserId ? '（房主）' : ''}
-                            </div>
-                            {typeof p.userId === 'number' && (
-                              <div className="text-xs text-gray-600">
+                  <div className="p-4 rounded-xl bg-white border text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-semibold text-gray-900">玩家</div>
+                      <div className="text-xs text-gray-500">共 {players.length} 人</div>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {players.map((p) => (
+                        <div key={p.userId} className="rounded-lg border bg-gray-50 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center flex-wrap gap-2">
+                                <span className="px-2 py-0.5 rounded-full bg-white border text-xs text-gray-700">座位 {p.seat ?? '?'}</span>
+                                <UserWithTitle
+                                  username={p.username || `用户${p.userId}`}
+                                  prefix={p.prefix}
+                                  badges={Array.isArray(p.badges) ? p.badges : []}
+                                  showBadges={true}
+                                  usernameClassName="font-semibold text-gray-900"
+                                  titleClassName="text-xs"
+                                />
+                                {p.userId === room.hostUserId ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 text-xs">房主</span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 text-xs text-gray-600">
                                 {(() => {
                                   const s = pvpSummaryByUserId.get(p.userId);
                                   if (!s) return '战绩：暂无';
@@ -817,17 +874,17 @@ export function PvpRoomPage() {
                                 })()}
                                 <span className="ml-2 text-gray-500">（记录可能随时清理）</span>
                               </div>
-                            )}
+                            </div>
+                            {isHost && p.userId !== room.hostUserId ? (
+                              <button
+                                className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs disabled:opacity-50"
+                                onClick={() => kickMutation.mutate(p.userId)}
+                                disabled={kickMutation.isPending}
+                              >
+                                踢出
+                              </button>
+                            ) : null}
                           </div>
-                          {isHost && p.userId !== room.hostUserId && (
-                            <button
-                              className="px-2 py-1 rounded border bg-gray-50 hover:bg-gray-100 text-xs"
-                              onClick={() => kickMutation.mutate(p.userId)}
-                              disabled={kickMutation.isPending}
-                            >
-                              踢出
-                            </button>
-                          )}
                         </div>
                       ))}
                     </div>
@@ -1015,43 +1072,25 @@ export function PvpRoomPage() {
 
                 {phase === 'choosing' && (
                   <div className="mt-4">
-                    <div className="p-3 rounded-md bg-white border">
-                      <div className="font-semibold text-sm mb-2">我的手牌</div>
-                      {!myHand?.cards?.length && <div className="text-sm text-gray-700">暂无手牌数据，请刷新。</div>}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                        {(myHand?.cards || []).map((c: any) => (
-                          <div key={c.snapshotId} className="border rounded p-2 text-xs">
-                            <div className="font-semibold">{c.name}</div>
-                            <div className="text-gray-600">{c.type}</div>
-                            <div className="mt-2 flex gap-2">
-                              <button
-                                className="flex-1 px-2 py-1 rounded border bg-gray-50 hover:bg-gray-100"
-                                onClick={() => {
-                                  setDetailsCard({
-                                    id: String(c.snapshotId),
-                                    name: c.name || '未命名',
-                                    description: 'PVP 手牌（快照）',
-                                    type: 'character',
-                                    data: typeof c.dataJson === 'string' ? c.dataJson : JSON.stringify(c.dataJson ?? {}),
-                                    isPublic: true,
-                                    author: 'PVP 快照',
-                                  });
-                                  setShowDetailsModal(true);
-                                }}
-                              >
-                                详情
-                              </button>
-                              <button
-                                className="flex-1 px-2 py-1 rounded border bg-gray-50 hover:bg-gray-100"
-                                onClick={() => chooseMutation.mutate(c.snapshotId)}
-                                disabled={chooseMutation.isPending || choices?.hasChosenMe}
-                              >
-                                {choices?.hasChosenMe ? '已选择' : '出战'}
-                              </button>
-                            </div>
+                    <div className="p-4 rounded-xl bg-white border">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-sm text-gray-900">我的手牌</div>
+                          <div className="text-xs text-gray-600 mt-1">
+                            手牌 {myHandCards.length} 张；弃牌 {Array.isArray(myHand?.discarded) ? myHand?.discarded.length : 0} 张；
+                            牌堆 {Array.isArray(myHand?.drawPile) ? myHand?.drawPile.length : 0} 张
                           </div>
-                        ))}
+                        </div>
+                        <button
+                          className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={() => setShowHandModal(true)}
+                          disabled={myHandCards.length <= 0}
+                        >
+                          打开手牌
+                        </button>
                       </div>
+
+                      {myHandCards.length <= 0 && <div className="text-sm text-gray-700 mt-3">暂无手牌数据，请刷新。</div>}
 
                       <div className="text-sm text-gray-700 mt-3">
                         已选人数：{choices?.chosenCount ?? 0} / {choices?.totalPlayers ?? players.length}；
@@ -1095,6 +1134,30 @@ export function PvpRoomPage() {
                     </div>
                   </div>
                 )}
+
+                <PvpHandModal
+                  isOpen={showHandModal}
+                  onClose={() => setShowHandModal(false)}
+                  cards={myHandCards}
+                  hasChosenMe={Boolean(choices?.hasChosenMe)}
+                  isChoosing={chooseMutation.isPending}
+                  onOpenDetails={(c) => {
+                    const refKind = typeof c?.ref?.kind === 'string' ? c.ref.kind : '';
+                    const author =
+                      refKind === 'preset' ? '预设角色（快照）' : refKind === 'data_card' ? '数据卡（快照）' : 'PVP 快照';
+                    setDetailsCard({
+                      id: String(c.snapshotId),
+                      name: c.name || '未命名',
+                      description: refKind ? `PVP 手牌（${refKind}）` : 'PVP 手牌（快照）',
+                      type: 'character',
+                      data: typeof c.dataJson === 'string' ? c.dataJson : JSON.stringify(c.dataJson ?? {}),
+                      isPublic: true,
+                      author,
+                    });
+                    setShowDetailsModal(true);
+                  }}
+                  onChoose={chooseFromHandModal}
+                />
 
                 {latestRoundResult?.report && (
                   <div className="mt-4">
