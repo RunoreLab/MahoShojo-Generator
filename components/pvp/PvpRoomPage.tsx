@@ -471,7 +471,27 @@ export function PvpRoomPage() {
   const latestRound = roomQuery.data?.latestRound;
   const latestRoundResult = roomQuery.data?.latestRoundResult;
   const confirmations = roomQuery.data?.confirmations as { roundId: string; confirmedHumans: number; totalHumans: number; hasConfirmedMe: boolean } | null | undefined;
+  const pendingAction = roomQuery.data?.pendingAction as
+    | { kind: 'submit' | 'choose' | 'confirm'; pendingUserId: number; pendingUsername?: string | null; deadlineAt: string; secondsLeft?: number; canHostForce?: boolean }
+    | null
+    | undefined;
   const score = roomQuery.data?.score;
+
+  const pendingActionDeadlineAt = typeof pendingAction?.deadlineAt === 'string' ? pendingAction.deadlineAt : null;
+  const [pendingActionSecondsLeft, setPendingActionSecondsLeft] = useState(0);
+  useEffect(() => {
+    if (!pendingActionDeadlineAt) {
+      setPendingActionSecondsLeft(0);
+      return;
+    }
+    const tick = () => {
+      const msLeft = Date.parse(pendingActionDeadlineAt) - Date.now();
+      setPendingActionSecondsLeft(Math.max(0, Math.ceil(msLeft / 1000)));
+    };
+    tick();
+    const id = window.setInterval(tick, 200);
+    return () => window.clearInterval(id);
+  }, [pendingActionDeadlineAt]);
 
   const latestWinnerText = useMemo(() => {
     if (!latestRoundResult) return null;
@@ -1034,6 +1054,31 @@ export function PvpRoomPage() {
     },
     onSuccess: () => void roomQuery.refetch(),
     onError: (e) => handlePvpRequestError(e, '踢人失败'),
+  });
+
+  const forceActionMutation = useMutation({
+    mutationFn: async (kind: 'submit' | 'choose' | 'confirm') => {
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/force`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version, kind }),
+      });
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) {
+        const payload = (data || {}) as ApiErrorPayload;
+        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+          status: res.status,
+          code: payload.code,
+          traceId: payload.traceId,
+          detail: payload.detail,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => handlePvpRequestError(e, '强制操作失败'),
   });
 
   const addBotMutation = useMutation({
@@ -1796,6 +1841,12 @@ export function PvpRoomPage() {
                           <div className="text-xs text-gray-600">
                             注意：提交私有卡会让对手可查看完整 JSON（问卷/能力/设定全量）。
                           </div>
+                          {pendingAction?.kind === 'submit' ? (
+                            <div className="text-xs text-amber-700 mt-2">
+                              仅剩最后一位玩家未提交：{pendingAction.pendingUsername || `用户${pendingAction.pendingUserId}`}。
+                              {pendingActionSecondsLeft > 0 ? `倒计时 ${pendingActionSecondsLeft}s 后房主可强制随机提交。` : '倒计时结束，房主可强制随机提交。'}
+                            </div>
+                          ) : null}
                         </div>
                         {mySubmission && !showSubmitEditor ? (
                           <button
@@ -1951,6 +2002,18 @@ export function PvpRoomPage() {
                         </div>
                       )}
 
+                      {isHost && pendingAction?.kind === 'submit' ? (
+                        <button
+                          className="generate-button w-full mt-3"
+                          style={{ backgroundColor: '#ef4444', backgroundImage: 'linear-gradient(to right, #ef4444, #dc2626)' }}
+                          disabled={forceActionMutation.isPending || pendingActionSecondsLeft > 0}
+                          onClick={() => forceActionMutation.mutate('submit')}
+                          title={pendingActionSecondsLeft > 0 ? '倒计时未结束' : '强制为最后一位未提交玩家随机生成并提交卡组'}
+                        >
+                          {forceActionMutation.isPending ? '强制中…' : pendingActionSecondsLeft > 0 ? `强制随机提交（${pendingActionSecondsLeft}s）` : '强制随机提交'}
+                        </button>
+                      ) : null}
+
                       {isHost && (
                         <button
                           className="generate-button w-full mt-3"
@@ -1999,6 +2062,25 @@ export function PvpRoomPage() {
                         我方已选：{choices?.hasChosenMe ? '是' : '否'}
                         {typeof choices?.hasChosenOther === 'boolean' ? ` / 对手已选：${choices.hasChosenOther ? '是' : '否'}` : ''}
                       </div>
+
+                      {pendingAction?.kind === 'choose' ? (
+                        <div className="text-xs text-amber-700 mt-2">
+                          仅剩最后一位玩家未出牌：{pendingAction.pendingUsername || `用户${pendingAction.pendingUserId}`}。
+                          {pendingActionSecondsLeft > 0 ? `倒计时 ${pendingActionSecondsLeft}s 后房主可强制随机出牌。` : '倒计时结束，房主可强制随机出牌。'}
+                        </div>
+                      ) : null}
+
+                      {isHost && pendingAction?.kind === 'choose' ? (
+                        <button
+                          className="generate-button w-full mt-3"
+                          style={{ backgroundColor: '#ef4444', backgroundImage: 'linear-gradient(to right, #ef4444, #dc2626)' }}
+                          disabled={forceActionMutation.isPending || pendingActionSecondsLeft > 0}
+                          onClick={() => forceActionMutation.mutate('choose')}
+                          title={pendingActionSecondsLeft > 0 ? '倒计时未结束' : '强制为最后一位未出牌玩家随机从其手牌中出牌'}
+                        >
+                          {forceActionMutation.isPending ? '强制中…' : pendingActionSecondsLeft > 0 ? `强制随机出牌（${pendingActionSecondsLeft}s）` : '强制随机出牌'}
+                        </button>
+                      ) : null}
 
                       {Boolean(
                         choices?.hasChosenMe &&
@@ -2085,15 +2167,32 @@ export function PvpRoomPage() {
                         '正在统计确认人数…'
                       )}
                     </div>
+                    {pendingAction?.kind === 'confirm' ? (
+                      <div className="text-xs text-amber-700 mt-2">
+                        仅剩最后一位玩家未确认：{pendingAction.pendingUsername || `用户${pendingAction.pendingUserId}`}。
+                        {pendingActionSecondsLeft > 0 ? `倒计时 ${pendingActionSecondsLeft}s 后房主可强制确认。` : '倒计时结束，房主可强制确认。'}
+                      </div>
+                    ) : null}
                     <button
                       className="generate-button mt-3 w-full"
                       style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
                       onClick={() => confirmMutation.mutate()}
-                      disabled={confirmMutation.isPending || Boolean(confirmations?.hasConfirmedMe)}
-                      title={confirmations?.hasConfirmedMe ? '你已确认' : '确认已阅读本轮战报，推进下一回合/结束'}
+                      disabled={confirmMutation.isPending}
+                      title={confirmations?.hasConfirmedMe ? '你已确认，可再次点击尝试推进' : '确认已阅读本轮战报，推进下一回合/结束'}
                     >
-                      {confirmations?.hasConfirmedMe ? '已确认' : confirmMutation.isPending ? '确认中…' : '确认已阅读（推进）'}
+                      {confirmMutation.isPending ? '确认中…' : confirmations?.hasConfirmedMe ? '已确认（尝试推进）' : '确认已阅读（推进）'}
                     </button>
+                    {isHost && pendingAction?.kind === 'confirm' ? (
+                      <button
+                        className="generate-button mt-2 w-full"
+                        style={{ backgroundColor: '#ef4444', backgroundImage: 'linear-gradient(to right, #ef4444, #dc2626)' }}
+                        disabled={forceActionMutation.isPending || pendingActionSecondsLeft > 0}
+                        onClick={() => forceActionMutation.mutate('confirm')}
+                        title={pendingActionSecondsLeft > 0 ? '倒计时未结束' : '强制为最后一位未确认玩家执行确认'}
+                      >
+                        {forceActionMutation.isPending ? '强制中…' : pendingActionSecondsLeft > 0 ? `强制确认（${pendingActionSecondsLeft}s）` : '强制确认'}
+                      </button>
+                    ) : null}
                     <div className="text-xs text-gray-500 mt-2">
                       提示：所有玩家确认后才会进入下一回合或结束对局。
                     </div>

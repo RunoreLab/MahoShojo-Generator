@@ -158,7 +158,7 @@
 
 ### 状态定义（建议扩展）
 - `closed`：房间关闭（不再接受加入/提交）
-- `aborted`：对局中止（玩家退出、超时、风控拦截、AI 连续失败等）
+- `aborted`：对局中止（房主关闭、风控拦截、AI 连续失败等；**普通玩家退出/被踢优先走“托管机器人接管”而不是直接中止**）
 
 > `finished` 表示“正常完局”；`aborted` 表示“非正常终止”。两者在 UI 呈现、统计、是否计入战绩上应区别对待。
 
@@ -167,8 +167,9 @@
 - 任何会影响公平性的动作（如重新发牌、重开本局）必须只允许房主发起，并且需要全员同意或明确规则（建议 MVP 不提供“重发”）。
 
 ### 建议补齐：超时/退出/无效局（避免房间卡死）
-- 增加 `aborted`（或 `void`）结局：有人中途退出、超时未选牌、敏感词拦截/AI 连续失败等，统一进入“本轮无效/直接判负/判平局”的规则。
-- 为每个阶段配置超时（示例）：`submitting` 10 分钟、`choosing` 3 分钟、`resolving` 2 分钟；超时后由房主一键“结束房间”或系统自动判定。
+- **最后一位未操作倒计时 + 房主强制**：当仅剩最后一位真人玩家未操作（`submitting/choosing/reviewing`），前端展示 30s 倒计时；倒计时结束后房主可强制随机提交/出牌/确认（服务端仍做校验）。
+- **退出/踢出 → 托管机器人接管**：真人玩家在对局中途退出或被房主踢出后，自动用机器人接管其座位，继承其提交/手牌/当轮出牌状态继续游戏（忙碌阶段如 `dealing/resolving/advancing` 建议先限制操作，避免一致性问题）。
+- `aborted`（或 `void`）结局仍保留作为兜底：房主关闭、风控拦截、AI 连续失败等，统一进入“本局无效/直接判负/判平局”的策略。
 - D1 没有后台定时任务时，可在 `GET room` 时做“懒清理”：若 `now > expires_at` 则将房间置 `closed` 并返回提示。
 
 ---
@@ -413,7 +414,9 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - `POST /api/pvp/rooms/:roomId/join`：加入房间（若启用口令则需 `password`）
 - `POST /api/pvp/rooms/:roomId/rules`：房主更新房间规则（仅 `waiting/submitting`；修改提交数通常需要清空已提交卡组）
 - `POST /api/pvp/rooms/:roomId/password`：房主设置/清空房间口令（可选，MVP 可延后）
-- （建议新增）`POST /api/pvp/rooms/:roomId/leave`：离开房间（触发 aborted / 让房主可踢人/重置）
+- `POST /api/pvp/rooms/:roomId/leave`：离开房间（房主离开会关闭房间；非房主在 `submitting/choosing/reviewing` 离开会触发“托管机器人接管”）
+- `POST /api/pvp/rooms/:roomId/kick`：房主踢人（`submitting/choosing/reviewing` 默认同样走“托管机器人接管”）
+- `POST /api/pvp/rooms/:roomId/force`：房主强制随机操作（最后一位未操作玩家的 `submit/choose/confirm`）
 - `POST /api/pvp/rooms/:roomId/submit`：提交卡组
 - `POST /api/pvp/rooms/:roomId/start`：房主开始（锁定提交 → 发牌 → 进入 choosing）
 - `GET /api/pvp/rooms/:roomId`：拉取房间状态（按身份过滤私密字段）

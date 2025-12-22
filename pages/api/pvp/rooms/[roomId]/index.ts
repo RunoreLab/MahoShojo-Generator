@@ -15,6 +15,7 @@ import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
+import { canForcePendingAction, computeLastPendingChooseAction, computeLastPendingConfirmAction, computeLastPendingSubmissionAction } from '@/lib/pvp/pending-action';
 import type { PvpHandState, PvpSubmissionPayload } from '@/lib/pvp/types';
 import type { UserBadge } from '@/types/badge';
 
@@ -45,6 +46,9 @@ async function getRoomHandler(req: Request): Promise<Response> {
 
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
+
+  const serverNowIso = new Date().toISOString();
+  const serverNowMs = Date.parse(serverNowIso);
 
   const roomId = getRoomIdFromRequestUrl(req.url);
   if (!roomId) return json({ error: '缺少 roomId' }, { status: 400 });
@@ -170,11 +174,13 @@ async function getRoomHandler(req: Request): Promise<Response> {
   let choicesState: any = null;
   let latestRoundResult: any = null;
   let confirmations: any = null;
+  let pendingAction: any = null;
 
   if (latestRound) {
     const choices = await getPvpRoundChoices(latestRound.id);
-    const chosenUserIds = new Set(choices.map((c) => c.user_id));
-    const hasChosenMe = chosenUserIds.has(auth.user.id);
+    const playerUserIds = new Set<number>(players.map((p) => p.user_id));
+    const chosenUserIds = new Set(choices.filter((c) => playerUserIds.has(c.user_id)).map((c) => c.user_id));
+    const hasChosenMe = playerUserIds.has(auth.user.id) ? chosenUserIds.has(auth.user.id) : false;
     const botChosen = bots.filter((b) => Boolean(b.choicesByRoundId?.[latestRound.id])).length;
     const chosenCount = chosenUserIds.size + botChosen;
     const totalPlayers = players.length + bots.length;
@@ -191,6 +197,23 @@ async function getRoomHandler(req: Request): Promise<Response> {
       totalPlayers,
     };
 
+    if (room.phase === 'choosing') {
+      const pending = computeLastPendingChooseAction({
+        nowMs: serverNowMs,
+        phaseFallbackAt: latestRound.created_at ?? room.last_activity_at ?? room.updated_at,
+        players: players.map((p) => ({ userId: p.user_id })),
+        choices: choices.map((c) => ({ userId: c.user_id, updatedAt: c.updated_at })),
+      });
+      if (pending) {
+        const pendingUsername = players.find((p) => p.user_id === pending.pendingUserId)?.username ?? null;
+        pendingAction = {
+          ...pending,
+          pendingUsername,
+          canHostForce: auth.user.id === room.host_user_id && canForcePendingAction(pending, serverNowMs),
+        };
+      }
+    }
+
     if (latestRound.status === 'completed' && latestRound.result_json) {
       try {
         latestRoundResult = JSON.parse(latestRound.result_json);
@@ -206,6 +229,10 @@ async function getRoomHandler(req: Request): Promise<Response> {
     const confirmedUserIds = Array.isArray((postRoundRaw as any).confirmedUserIds)
       ? (postRoundRaw as any).confirmedUserIds.filter((x: any) => typeof x === 'number' && Number.isFinite(x)).map((x: number) => Math.floor(x))
       : [];
+    const postRoundCreatedAt = typeof (postRoundRaw as any).createdAt === 'string' ? String((postRoundRaw as any).createdAt) : null;
+    const confirmedAtByUserId = (postRoundRaw as any).confirmedAtByUserId && typeof (postRoundRaw as any).confirmedAtByUserId === 'object'
+      ? ((postRoundRaw as any).confirmedAtByUserId as Record<string, string>)
+      : null;
     if (roundId && roundId === latestRound.id) {
       const confirmedSet = new Set<number>(confirmedUserIds);
       const hasConfirmedMe = confirmedSet.has(auth.user.id);
@@ -215,6 +242,42 @@ async function getRoomHandler(req: Request): Promise<Response> {
         confirmedHumans,
         totalHumans: players.length,
         hasConfirmedMe,
+      };
+
+      if (room.phase === 'reviewing') {
+        const pending = computeLastPendingConfirmAction({
+          nowMs: serverNowMs,
+          phaseFallbackAt: room.last_activity_at ?? room.updated_at,
+          postRoundCreatedAt,
+          players: players.map((p) => ({ userId: p.user_id })),
+          confirmedUserIds,
+          confirmedAtByUserId,
+        });
+        if (pending) {
+          const pendingUsername = players.find((p) => p.user_id === pending.pendingUserId)?.username ?? null;
+          pendingAction = {
+            ...pending,
+            pendingUsername,
+            canHostForce: auth.user.id === room.host_user_id && canForcePendingAction(pending, serverNowMs),
+          };
+        }
+      }
+    }
+  }
+
+  if (!pendingAction && room.phase === 'submitting' && rules.cardsPerPlayer > 0) {
+    const pending = computeLastPendingSubmissionAction({
+      nowMs: serverNowMs,
+      phaseFallbackAt: room.last_activity_at ?? room.updated_at,
+      players: players.map((p) => ({ userId: p.user_id })),
+      submissions: submissionsRows.map((r) => ({ userId: r.user_id, updatedAt: r.updated_at })),
+    });
+    if (pending) {
+      const pendingUsername = players.find((p) => p.user_id === pending.pendingUserId)?.username ?? null;
+      pendingAction = {
+        ...pending,
+        pendingUsername,
+        canHostForce: auth.user.id === room.host_user_id && canForcePendingAction(pending, serverNowMs),
       };
     }
   }
@@ -258,6 +321,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
 
   return json({
     success: true,
+    serverNow: serverNowIso,
     room: {
       id: room.id,
       hostUserId: room.host_user_id,
@@ -297,6 +361,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
     choices: choicesState,
     latestRoundResult,
     confirmations,
+    pendingAction,
     score,
   });
 }
