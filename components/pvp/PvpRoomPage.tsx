@@ -15,6 +15,8 @@ import { UserWithTitle } from '@/components/UserTitle';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 import { usePresetQuery } from '@/components/arena/hooks/useArenaData';
 import { PvpHeroBanner } from '@/components/pvp/PvpHeroBanner';
+import { PvpScoreboard } from '@/components/pvp/PvpScoreboard';
+import { BattleModeSelector } from '@/components/shared/BattleModeSelector';
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { authStorage } from '@/lib/auth';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -355,17 +357,30 @@ export function PvpRoomPage() {
   const battleCooldownStorageKey = isUserCustomKey ? 'pvp.generateBattleCooldown:custom' : 'pvp.generateBattleCooldown:system';
   const { isCooldown, startCooldown, remainingTime } = useCooldown(battleCooldownStorageKey, battleCooldownMs);
 
-  const playerLabelById = useMemo(() => {
+  const playerDisplayBySeat = useMemo(() => {
     const map = new Map<number, string>();
     for (const p of players) {
+      const seat = typeof p?.seat === 'number' ? p.seat : null;
+      if (seat === null) continue;
       const userId = typeof p?.userId === 'number' ? p.userId : null;
-      if (!userId) continue;
       const prefix = typeof p.prefix === 'string' && p.prefix ? `${p.prefix} ` : '';
-      const username = typeof p.username === 'string' && p.username ? p.username : `用户${userId}`;
-      map.set(userId, `${prefix}${username}`);
+      const username =
+        typeof p.username === 'string' && p.username
+          ? p.username
+          : (typeof userId === 'number' ? `用户${userId}` : '未知玩家');
+      map.set(seat, `${prefix}${username}${p.isBot ? '（机器人）' : ''}`);
     }
     return map;
   }, [players]);
+
+  const latestWinnerText = useMemo(() => {
+    if (!latestRoundResult) return null;
+    const winnerName = typeof latestRoundResult?.winnerName === 'string' ? latestRoundResult.winnerName : '平局';
+    const winnerSeat = typeof latestRoundResult?.winnerSeat === 'number' ? latestRoundResult.winnerSeat : null;
+    if (winnerSeat === null || winnerName === '平局') return '平局';
+    const playerLabel = playerDisplayBySeat.get(winnerSeat) || '未知玩家';
+    return `座位 ${winnerSeat} · ${playerLabel}（角色：${winnerName}）`;
+  }, [latestRoundResult, playerDisplayBySeat]);
 
   const usernameById = useMemo(() => {
     const map = new Map<number, string>();
@@ -1290,22 +1305,9 @@ export function PvpRoomPage() {
                         我的手牌：{myHandCards.length} 张；弃牌：{Array.isArray(myHand?.discarded) ? myHand?.discarded.length : 0} 张
                       </div>
                     ) : null}
-                    {score && (
-                      <div className="mt-2 text-xs text-gray-600">
-                        赛制：最多 {score.maxRounds} 轮；当前胜场：
-                        <div className="mt-1 space-y-0.5">
-                          {(score.winsByUserId || [])
-                            .slice()
-                            .sort((a: any, b: any) => (b.wins ?? 0) - (a.wins ?? 0))
-                            .map((x: any) => (
-                              <div key={x.userId}>
-                                {playerLabelById.get(x.userId) || `用户${x.userId}`}：{x.wins ?? 0}
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
+
+                  <PvpScoreboard score={score} players={players} />
 
                   <div className="p-4 rounded-xl bg-white border text-sm">
                     <div className="flex items-center justify-between gap-3">
@@ -1510,20 +1512,15 @@ export function PvpRoomPage() {
                             />
                             <span>去重</span>
                           </label>
-                          <label className="flex flex-col gap-1 col-span-2">
-                            <span>模式</span>
-                            <select
-                              className="border rounded px-2 py-1"
-                              value={rulesDraft.mode}
-                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, mode: e.target.value as any } : r))}
+                          <div className="col-span-2">
+                            <BattleModeSelector
+                              value={rulesDraft.mode as any}
+                              onChange={(next) => setRulesDraft((r) => (r ? { ...r, mode: next as any } : r))}
                               disabled={rulesMutation.isPending}
-                            >
-                              <option value="daily">daily</option>
-                              <option value="classic">classic</option>
-                              <option value="kizuna">kizuna</option>
-                              <option value="scenario">scenario</option>
-                            </select>
-                          </label>
+                              label="模式"
+                              showHelper={true}
+                            />
+                          </div>
                           {rulesDraft.mode === 'scenario' && (
                             <div className="col-span-2 border rounded p-3 bg-white">
                               <div className="text-xs text-gray-600 mb-2">房间情景（所有情景模式回合都会使用该情景结算）</div>
@@ -1898,7 +1895,7 @@ export function PvpRoomPage() {
                       }}
                     />
                     <div className="text-sm text-gray-700 mt-2">
-                      本轮胜者：<span className="font-semibold">{latestRoundResult.winnerName || '平局'}</span>
+                      本轮胜者：<span className="font-semibold">{latestWinnerText || '平局'}</span>
                     </div>
                   </div>
                 )}
