@@ -78,9 +78,10 @@ PVP 可用卡必须满足：
 - `pages/api/pvp/rooms/[roomId]/kick.ts:1` 房主踢人
 - `pages/api/pvp/rooms/[roomId]/submit.ts:1` 提交卡组
 - `pages/api/pvp/rooms/[roomId]/start.ts:1` 房主发牌并创建首轮
+- `pages/api/pvp/rooms/[roomId]/permissions.ts:1` 房主设置：是否允许其他玩家调整 AI 设置并结算
 - `pages/api/pvp/rooms/[roomId]/index.ts:1` 拉取房间状态（按身份过滤手牌）
 - `pages/api/pvp/rooms/[roomId]/rounds/[roundId]/choose.ts:1` 出牌
-- `pages/api/pvp/rooms/[roomId]/rounds/[roundId]/resolve.ts:1` 任一玩家可结算（生成战报，幂等）
+- `pages/api/pvp/rooms/[roomId]/rounds/[roundId]/resolve.ts:1` 结算回合（生成战报，幂等；默认仅房主可结算）
 
 > 备注：Pages Router 的 Edge API 动态路由未稳定提供 `params`，所以使用 `lib/pvp/route.ts` 从 `req.url` 解析 `roomId/roundId`。
 
@@ -108,7 +109,7 @@ PVP 可用卡必须满足：
 
 ## 4. 已知限制 / TODO
 
-- 已支持“全员都已选则自动结算（幂等）”，仍保留手动结算按钮作为兜底
+- 已支持“全员都已选则自动结算（幂等）”：当房主结算/或房主允许其他玩家结算时，出牌接口会尝试自动触发结算；仍保留手动结算按钮作为兜底
 - 暂未做观战视角
 - 已串联“战报生成记录 ↔ PVP”：`resolve` 会把 `POST /api/generate-battle-story` 返回的 `generationId` 写入 `pvp_rounds.battle_generation_id`；同时生成端点支持 `pvpContext` 并写入 `battle_report_generations.pvp_*` 字段（注意：线上 D1 仍需执行迁移）
 - 暂未提供“对战历史/复盘/排行”的独立页面与 API（虽然 `pvp_matches` / `pvp_rounds` 已可持久化承载）

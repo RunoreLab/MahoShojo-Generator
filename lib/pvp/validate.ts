@@ -31,6 +31,9 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const tieBreaker = bestOfRaw.tieBreaker ?? DEFAULT_PVP_RULES.bestOf.tieBreaker;
   if (tieBreaker !== 'draw') return { error: 'bestOf.tieBreaker 仅支持 draw' };
 
+  const allowNonHostControl =
+    typeof raw.allowNonHostControl === 'boolean' ? raw.allowNonHostControl : DEFAULT_PVP_RULES.allowNonHostControl;
+
   const rules: PvpRoomRules = {
     participants: participantCount,
     cardsPerPlayer,
@@ -38,6 +41,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     dedupe,
     mode,
     bestOf: { enabled, maxRounds, winCondition, tieBreaker },
+    allowNonHostControl,
   };
 
   if (enabled && dealPerPlayer < maxRounds) {

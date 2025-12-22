@@ -39,6 +39,11 @@ export interface PvpRoomRules {
   dedupe: boolean;
   mode: PvpMode;
   bestOf: PvpBestOfRules;
+  /**
+   * 是否允许非房主玩家调整 AI 设置并触发结算（默认 false，更安全）。
+   * 兼容旧房间：若缺失则视为 false。
+   */
+  allowNonHostControl?: boolean;
 }
 
 export interface PvpSubmittedCard {

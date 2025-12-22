@@ -15,7 +15,62 @@ interface BattleDataModalProps {
   onClose: () => void;
   onSelectCard: (card: any) => void;
   selectedType: 'character' | 'scenario';
+  initialTab?: BattleDataTab;
+  visibleTabs?: BattleDataTab[];
+  titleOverride?: string;
+  pvpHandTab?: PvpHandTabProps;
 }
+
+type BattleDataTab = 'my' | 'public' | 'favorites' | 'pvpHand';
+
+type PvpHandTabCard = {
+  snapshotId: string;
+  name: string;
+  type?: string | null;
+  dataJson?: string | null;
+  ref?: any;
+};
+
+type PvpHandTabProps = {
+  cards: PvpHandTabCard[];
+  hasChosenMe: boolean;
+  isChoosing: boolean;
+  onChoose: (snapshotId: string) => void;
+};
+
+const getPvpHandSourceLabel = (ref: any): string => {
+  const kind = typeof ref?.kind === 'string' ? ref.kind : '';
+  if (kind === 'preset') return '预设';
+  if (kind === 'data_card') return '数据卡';
+  return '快照';
+};
+
+const getPvpHandRefHint = (ref: any): string | null => {
+  const kind = typeof ref?.kind === 'string' ? ref.kind : '';
+  if (kind === 'preset') return typeof ref?.filename === 'string' ? ref.filename : null;
+  if (kind === 'data_card') return typeof ref?.id === 'string' ? ref.id : null;
+  return null;
+};
+
+const getPvpHandPreviewText = (dataJson: string | null | undefined): string => {
+  if (!dataJson) return '';
+  try {
+    const parsed = JSON.parse(dataJson);
+    const codename = typeof parsed?.codename === 'string' ? parsed.codename : null;
+    const name = typeof parsed?.name === 'string' ? parsed.name : null;
+    const templateId: unknown = parsed?.templateId || parsed?.template || parsed?.template_id;
+    const templateText = typeof templateId === 'string' ? templateId : null;
+    const parts = [codename, name, templateText].filter((x): x is string => typeof x === 'string' && Boolean(x.trim()));
+    const line = parts.join(' / ').trim();
+    if (line) return line.length > 120 ? `${line.slice(0, 120)}…` : line;
+  } catch {
+    // ignore
+  }
+
+  const collapsed = dataJson.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return '';
+  return collapsed.length > 120 ? `${collapsed.slice(0, 120)}…` : collapsed;
+};
 
 // 【新增】筛选条件的状态接口
 interface Filters {
@@ -34,7 +89,11 @@ export default function BattleDataModal({
   isOpen,
   onClose,
   onSelectCard,
-  selectedType
+  selectedType,
+  initialTab,
+  visibleTabs,
+  titleOverride,
+  pvpHandTab
 }: BattleDataModalProps) {
   const { isAuthenticated } = useAuth();
   const isComposingSearchRef = useRef(false);
@@ -44,7 +103,7 @@ export default function BattleDataModal({
   const [favoriteCards, setFavoriteCards] = useState<any[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'my' | 'public' | 'favorites'>('public');
+  const [activeTab, setActiveTab] = useState<BattleDataTab>('public');
   // 记录用户是否主动切换过 Tab，防止排序等状态变动时被意外重置
   const hasUserSelectedTabRef = React.useRef(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -71,6 +130,30 @@ export default function BattleDataModal({
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [activeFilters, setActiveFilters] = useState<Filters>(initialFilters);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  const effectiveTabs = useMemo<BattleDataTab[]>(() => {
+    const candidates = Array.isArray(visibleTabs) && visibleTabs.length > 0
+      ? visibleTabs
+      : ([
+        ...(pvpHandTab ? (['pvpHand'] as const) : []),
+        ...(isAuthenticated ? (['my'] as const) : []),
+        'public' as const,
+        ...(isAuthenticated ? (['favorites'] as const) : []),
+      ] as const);
+
+    const seen = new Set<BattleDataTab>();
+    const out: BattleDataTab[] = [];
+    for (const tab of candidates as BattleDataTab[]) {
+      if ((tab === 'my' || tab === 'favorites') && !isAuthenticated) continue;
+      if (tab === 'pvpHand' && !pvpHandTab) continue;
+      if (seen.has(tab)) continue;
+      seen.add(tab);
+      out.push(tab);
+    }
+    return out.length > 0 ? out : ['public'];
+  }, [visibleTabs, pvpHandTab, isAuthenticated]);
+
+  const isPvpHandTab = activeTab === 'pvpHand';
 
   const inferRoleType = useCallback((card: any): 'magical-girl' | 'canshou' | 'general' | null => {
     if (!card || card.type !== 'character') return null;
@@ -315,6 +398,10 @@ export default function BattleDataModal({
       return;
     }
 
+    if (activeTab === 'pvpHand') {
+      return;
+    }
+
     // 检查是否包含 UUID 格式的 ID
     const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
     const match = trimmed.match(uuidRegex);
@@ -343,31 +430,36 @@ export default function BattleDataModal({
     setActiveFilters(initialFilters);
     setIsSelecting(false); // 重置选择状态
 
-    // 仅在用户未主动切换 Tab 时，根据登录状态决定默认标签
-    if (!hasUserSelectedTabRef.current) {
-      if (isAuthenticated) {
-        setActiveTab('my');
-      } else {
-        setActiveTab('public');
+    const fallbackTab: BattleDataTab = effectiveTabs[0] ?? 'public';
+    const canUseInitialTab = Boolean(initialTab && effectiveTabs.includes(initialTab));
+    const desiredDefaultTab: BattleDataTab = isAuthenticated ? 'my' : 'public';
+
+    const nextTab: BattleDataTab = (() => {
+      if (canUseInitialTab) return initialTab as BattleDataTab;
+      if (!hasUserSelectedTabRef.current) {
+        return effectiveTabs.includes(desiredDefaultTab) ? desiredDefaultTab : fallbackTab;
       }
-    } else {
-      // 处理从登录态变为未登录的情况，强制回到公开区
-      if (!isAuthenticated && activeTab !== 'public') {
-        setActiveTab('public');
-      }
-    }
+      if (!isAuthenticated && activeTab !== 'public' && effectiveTabs.includes('public')) return 'public';
+      return effectiveTabs.includes(activeTab) ? activeTab : fallbackTab;
+    })();
+
+    setActiveTab(nextTab);
 
     // 按当前 Tab 触发首屏加载
-    if (isAuthenticated && (activeTab === 'my' || (!hasUserSelectedTabRef.current && activeTab === 'public'))) {
+    if (isAuthenticated && effectiveTabs.includes('my') && (nextTab === 'my' || (!hasUserSelectedTabRef.current && nextTab === 'public'))) {
       loadUserDataCards(undefined, sortBy);
-      loadFavorites(selectedType, false, sortBy);
+      if (effectiveTabs.includes('favorites')) {
+        loadFavorites(selectedType, false, sortBy);
+      }
     }
 
-    if (activeTab === 'favorites') {
+    if (isAuthenticated && effectiveTabs.includes('favorites') && nextTab === 'favorites') {
       loadFavorites(selectedType, true, sortBy);
     }
 
-    loadPublicDataCards(1, sortBy);
+    if (effectiveTabs.includes('public')) {
+      loadPublicDataCards(1, sortBy);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, selectedType, isAuthenticated]);
 
@@ -588,6 +680,20 @@ export default function BattleDataModal({
     });
   }, [favoriteCards, debouncedSearchQuery]);
 
+  const filteredPvpHandCards = useMemo<PvpHandTabCard[]>(() => {
+    const cards = Array.isArray(pvpHandTab?.cards) ? pvpHandTab.cards : [];
+    const keyword = debouncedSearchQuery.trim().toLowerCase();
+    if (!keyword) return cards;
+
+    return cards.filter((card) => {
+      const name = (card.name || '').toLowerCase();
+      const type = (typeof card.type === 'string' ? card.type : '').toLowerCase();
+      const source = getPvpHandSourceLabel(card.ref).toLowerCase();
+      const refHint = (getPvpHandRefHint(card.ref) || '').toLowerCase();
+      return `${name} ${type} ${source} ${refHint}`.includes(keyword);
+    });
+  }, [pvpHandTab?.cards, debouncedSearchQuery]);
+
   const favoritesTotalPages = Math.max(1, Math.ceil(filteredFavoriteCards.length / cardsPerPage));
   const paginatedUserCards = useMemo(
     () => userDataCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
@@ -609,7 +715,9 @@ export default function BattleDataModal({
     ? paginatedUserCards
     : activeTab === 'favorites'
       ? paginatedFavoriteCards
-      : publicPaginatedCards;
+      : activeTab === 'public'
+        ? publicPaginatedCards
+        : [];
 
   const publicTotalPages = activeFilters.roleType && selectedType === 'character'
     ? Math.max(1, Math.ceil(publicDataCards.length / cardsPerPage))
@@ -619,7 +727,9 @@ export default function BattleDataModal({
     ? userTotalPages
     : activeTab === 'favorites'
       ? favoritesTotalPages
-      : publicTotalPages;
+      : activeTab === 'public'
+        ? publicTotalPages
+        : null;
   const typeLabel = selectedType === 'character' ? '角色' : '情景';
   const isFilterActive = useMemo(() => {
     return Boolean(
@@ -643,7 +753,7 @@ export default function BattleDataModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg mx-4 p-6 max-w-7xl w-full h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">×</button>
-        <h2 className="text-xl font-bold mb-4 pr-8">选择{typeLabel}数据卡</h2>
+	        <h2 className="text-xl font-bold mb-4 pr-8">{titleOverride || (isPvpHandTab ? '我的手牌' : `选择${typeLabel}数据卡`)}</h2>
 
         <div className="flex-1 min-h-0 overflow-y-auto">
           {/* 筛选和排序区域 */}
@@ -658,18 +768,23 @@ export default function BattleDataModal({
                     isComposingSearchRef.current = true;
                   }}
                   onCompositionEnd={() => {
-                    isComposingSearchRef.current = false;
-                  }}
-                  placeholder={`搜索${typeLabel}名称或粘贴分享链接...`}
-                  className="w-full input-field pr-10"
-                />
-                {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
-              </div>
-              <SortSelector value={sortBy} onChange={handleSortChange} />
-              <button onClick={() => setShowAdvancedFilters(!showAdvancedFilters)} className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-                <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
-              </button>
-            </div>
+	                    isComposingSearchRef.current = false;
+	                  }}
+	                  placeholder={isPvpHandTab ? '搜索手牌：名称 / 类型 / 来源（预设/数据卡）' : `搜索${typeLabel}名称或粘贴分享链接...`}
+	                  className="w-full input-field pr-10"
+	                />
+	                {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
+	              </div>
+	              {!isPvpHandTab && <SortSelector value={sortBy} onChange={handleSortChange} />}
+	              {!isPvpHandTab && (
+	                <button
+	                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+	                  className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+	                >
+	                  <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+	                </button>
+	              )}
+	            </div>
             {/* 【新增】高级筛选面板 */}
             {showAdvancedFilters && activeTab === 'public' && (
               <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down">
@@ -735,7 +850,19 @@ export default function BattleDataModal({
 
           {/* 标签页切换 */}
           <div className="flex gap-2 mb-4">
-            {isAuthenticated && (
+            {effectiveTabs.includes('pvpHand') && (
+              <button
+                onClick={() => {
+                  hasUserSelectedTabRef.current = true;
+                  setActiveTab('pvpHand');
+                  setCurrentPage(1);
+                }}
+                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'pvpHand' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+              >
+                手牌 ({pvpHandTab?.cards?.length ?? 0})
+              </button>
+            )}
+            {effectiveTabs.includes('my') && (
               <button
                 onClick={() => {
                   hasUserSelectedTabRef.current = true;
@@ -748,18 +875,20 @@ export default function BattleDataModal({
                 我的{typeLabel} ({userDataCards.length})
               </button>
             )}
-            <button
-              onClick={() => {
-                hasUserSelectedTabRef.current = true;
-                setActiveTab('public');
-                setCurrentPage(1);
-                loadPublicDataCards(1, sortBy, '', filters);
-              }}
-              className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-            >
-              公开{typeLabel}
-            </button>
-            {isAuthenticated && (
+            {effectiveTabs.includes('public') && (
+              <button
+                onClick={() => {
+                  hasUserSelectedTabRef.current = true;
+                  setActiveTab('public');
+                  setCurrentPage(1);
+                  loadPublicDataCards(1, sortBy, '', filters);
+                }}
+                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+              >
+                公开{typeLabel}
+              </button>
+            )}
+            {effectiveTabs.includes('favorites') && (
               <button
                 onClick={() => {
                   hasUserSelectedTabRef.current = true;
@@ -774,42 +903,105 @@ export default function BattleDataModal({
             )}
           </div>
 
-          {/* 内容区域 */}
-          <div>
-            {isLoading ? <div className="flex justify-center items-center min-h-[40vh]"><div className="text-gray-500">加载中...</div></div>
-              : displayCards.length === 0 ? <div className="text-center text-gray-500 py-8">暂无数据卡</div>
-                : <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {displayCards.map((card: any) => {
-                    const isFavorited = favoriteIds.has(card.id);
-                    const enableFavorite = isAuthenticated && activeTab !== 'my';
+	          {/* 内容区域 */}
+	          <div>
+	            {isPvpHandTab ? (
+	              filteredPvpHandCards.length === 0 ? (
+	                <div className="text-center text-gray-500 py-8">暂无手牌</div>
+	              ) : (
+	                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+	                  {filteredPvpHandCards.map((card) => {
+	                    const sourceLabel = getPvpHandSourceLabel(card.ref);
+	                    const refHint = getPvpHandRefHint(card.ref);
+	                    const type = typeof card.type === 'string' && card.type ? card.type : 'unknown';
+	                    const preview = getPvpHandPreviewText(card.dataJson);
 
-                    return (
-                      <div key={card.id} className="cursor-pointer h-full" onClick={() => handleSelectCard(card)}>
-                        <DataCard
-                          id={card.id}
-                          name={card.name}
-                          description={card.description}
-                          type={card.type}
-                          roleType={card.roleType}
-                          isPublic={card.is_public}
-                          reviewStatus={card.review_status}
-                          usageCount={card.usage_count}
-                          likeCount={card.like_count}
-                          favoriteCount={card.favorite_count}
-                          isFavorited={isFavorited}
-                          canFavorite={enableFavorite}
-                          isRecommended={card.is_recommended === 1}
-                          author={activeTab === 'my' ? '我' : (card.username || '未知')}
-                          onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
-                          onAuthorClick={handleAuthorClick}
-                          onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
-                          onDownload={() => handleDownloadCard(card)}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>}
-          </div>
+	                    const disableChoose = Boolean(pvpHandTab?.isChoosing || pvpHandTab?.hasChosenMe);
+
+	                    return (
+	                      <div key={card.snapshotId} className="rounded-lg border bg-white p-4 flex flex-col">
+	                        <div className="min-w-0">
+	                          <div className="font-semibold text-gray-900 break-words">{card.name || '未命名'}</div>
+	                          <div className="mt-1 flex flex-wrap gap-2 text-xs">
+	                            <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{type}</span>
+	                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{sourceLabel}</span>
+	                            {refHint && <span className="px-2 py-0.5 rounded-full bg-white border text-gray-600">{refHint}</span>}
+	                          </div>
+	                        </div>
+
+	                        {preview ? <div className="mt-3 text-xs text-gray-600 break-words">{preview}</div> : null}
+
+	                        <div className="mt-4 grid grid-cols-2 gap-2">
+	                          <button
+	                            className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm"
+	                            onClick={() => {
+	                              const author = sourceLabel === '预设' ? '预设角色（快照）' : sourceLabel === '数据卡' ? '数据卡（快照）' : 'PVP 快照';
+	                              setSelectedCard({
+	                                id: `pvp:hand:${card.snapshotId}`,
+	                                name: card.name || '未命名',
+	                                description: refHint ? `PVP 手牌（${sourceLabel}快照：${refHint}）` : `PVP 手牌（${sourceLabel}快照）`,
+	                                type: 'character',
+	                                data: typeof card.dataJson === 'string' ? card.dataJson : JSON.stringify(card.dataJson ?? {}),
+	                                is_public: true,
+	                                username: author,
+	                              });
+	                              setShowDetailsModal(true);
+	                            }}
+	                          >
+	                            详情
+	                          </button>
+	                          <button
+	                            className="px-3 py-2 rounded-lg text-sm text-white bg-gradient-to-r from-pink-500 to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+	                            onClick={() => pvpHandTab?.onChoose(card.snapshotId)}
+	                            disabled={disableChoose}
+	                            title={pvpHandTab?.hasChosenMe ? '你已选择过出战卡' : undefined}
+	                          >
+	                            {pvpHandTab?.hasChosenMe ? '已出战' : pvpHandTab?.isChoosing ? '提交中…' : '出战'}
+	                          </button>
+	                        </div>
+	                      </div>
+	                    );
+	                  })}
+	                </div>
+	              )
+	            ) : isLoading ? (
+	              <div className="flex justify-center items-center min-h-[40vh]"><div className="text-gray-500">加载中...</div></div>
+	            ) : displayCards.length === 0 ? (
+	              <div className="text-center text-gray-500 py-8">暂无数据卡</div>
+	            ) : (
+	              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+	                {displayCards.map((card: any) => {
+	                  const isFavorited = favoriteIds.has(card.id);
+	                  const enableFavorite = isAuthenticated && activeTab !== 'my';
+
+	                  return (
+	                    <div key={card.id} className="cursor-pointer h-full" onClick={() => handleSelectCard(card)}>
+	                      <DataCard
+	                        id={card.id}
+	                        name={card.name}
+	                        description={card.description}
+	                        type={card.type}
+	                        roleType={card.roleType}
+	                        isPublic={card.is_public}
+	                        reviewStatus={card.review_status}
+	                        usageCount={card.usage_count}
+	                        likeCount={card.like_count}
+	                        favoriteCount={card.favorite_count}
+	                        isFavorited={isFavorited}
+	                        canFavorite={enableFavorite}
+	                        isRecommended={card.is_recommended === 1}
+	                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
+	                        onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
+	                        onAuthorClick={handleAuthorClick}
+	                        onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
+	                        onDownload={() => handleDownloadCard(card)}
+	                      />
+	                    </div>
+	                  );
+	                })}
+	              </div>
+	            )}
+	          </div>
 
           {/* 分页与底部 */}
           {(
