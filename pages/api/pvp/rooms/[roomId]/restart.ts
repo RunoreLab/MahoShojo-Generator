@@ -44,7 +44,7 @@ async function restartHandler(req: Request): Promise<Response> {
   const nextRulesJson = clearPvpRoomRuntimeFromRulesJson(room.rules_json);
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     status: 'open',
-    phase: players.length >= rules.participants ? 'submitting' : 'waiting',
+    phase: players.length >= rules.participants ? (rules.cardsPerPlayer > 0 ? 'submitting' : 'waiting') : 'waiting',
     current_match_id: null,
     rules_json: nextRulesJson,
     last_activity_at: new Date().toISOString(),

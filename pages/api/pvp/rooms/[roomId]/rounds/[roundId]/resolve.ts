@@ -282,7 +282,7 @@ async function resolveHandler(req: Request): Promise<Response> {
     const tokenList = candidateTokens.map((t) => `“${t}”`).join('、');
     const base = [
       '【PVP 裁判规则】',
-      `本轮参战者：\n${mapping}`,
+      `本轮参战者：\n${mapping}。`,
       `你必须在 officialReport.winner 字段只输出以下之一：${tokenList} 或 “平局”。`,
       '输出必须完全一致（不要加任何解释、标点或额外文字）。',
       '战报正文中请继续使用角色名叙述，不要在正文中使用 P1/P2…代号。',

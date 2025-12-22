@@ -15,6 +15,9 @@ import {
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
+import { getRequestOrigin } from '@/lib/pvp/origin';
+import { loadPresetCard } from '@/lib/pvp/preset';
+import { BUNDLED_PRESET_FILENAMES } from '@/lib/pvp/preset-bundled';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
@@ -204,6 +207,8 @@ async function confirmHandler(req: Request): Promise<Response> {
     const submittedDataCardIds = normalizeStringArray((internal.raw as any)?._submittedDataCardIds);
     const publicDrawnDataCardIds = new Set<string>(normalizeStringArray((internal.raw as any)?._publicDrawnCardIds));
     const excludePublicDataCardIds = new Set<string>([...submittedDataCardIds, ...publicDrawnDataCardIds]);
+    const submittedPresetFilenames = normalizeStringArray((internal.raw as any)?._submittedPresetFilenames);
+    const presetDrawnFilenames = new Set<string>(normalizeStringArray((internal.raw as any)?._presetDrawnFilenames));
 
     const dirtyUserIds = new Set<number>();
 
@@ -263,6 +268,66 @@ async function confirmHandler(req: Request): Promise<Response> {
       return { kind: 'snapshot', id: snapshotId };
     };
 
+    const origin = getRequestOrigin(req);
+
+    const buildPresetFilenameVariants = (filename: string): string[] => {
+      const raw = typeof filename === 'string' ? filename.trim() : '';
+      if (!raw) return [];
+      const lower = raw.toLowerCase();
+      if (lower.endsWith('.json')) return [raw, raw.slice(0, -5)];
+      return [raw, `${raw}.json`];
+    };
+
+    const isPresetExcluded = (candidate: string, exclude: Set<string>): boolean => {
+      const variants = buildPresetFilenameVariants(candidate);
+      return variants.some((v) => exclude.has(v));
+    };
+
+    const drawPresetSnapshot = async (ownerUserId: number): Promise<PvpSnapshotRef | null> => {
+      const exclude = new Set<string>();
+      for (const f of submittedPresetFilenames) for (const v of buildPresetFilenameVariants(f)) exclude.add(v);
+      for (const f of presetDrawnFilenames) for (const v of buildPresetFilenameVariants(f)) exclude.add(v);
+
+      const candidates = BUNDLED_PRESET_FILENAMES.filter((f) => !isPresetExcluded(f, exclude));
+      if (candidates.length <= 0) return null;
+
+      const picked = candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+      if (!picked) return null;
+
+      let preset: Awaited<ReturnType<typeof loadPresetCard>>;
+      try {
+        preset = await loadPresetCard(origin, picked);
+      } catch {
+        return null;
+      }
+
+      const snapshotId = await createPvpCardSnapshot({
+        roomId,
+        ownerUserId,
+        refJson: JSON.stringify({
+          kind: 'preset',
+          filename: picked,
+          drawnFromPreset: true,
+          sourceIsPublic: true,
+          sourceAuthor: null,
+        }),
+        cardType: preset.type,
+        name: preset.name || '预设卡牌',
+        dataJson: preset.dataJson,
+        sourceUpdatedAt: null,
+      });
+      if (!snapshotId) return null;
+
+      presetDrawnFilenames.add(picked);
+      return { kind: 'snapshot', id: snapshotId };
+    };
+
+    const drawFallbackSnapshot = async (ownerUserId: number): Promise<PvpSnapshotRef | null> => {
+      if (rules.drawSource === 'preset') return await drawPresetSnapshot(ownerUserId);
+      if (rules.drawSource === 'preset+public') return (await drawPresetSnapshot(ownerUserId)) ?? (await drawPublicSnapshot(ownerUserId));
+      return await drawPublicSnapshot(ownerUserId);
+    };
+
     const dealToHand = async (ownerUserId: number, hand: PvpHandState): Promise<PvpHandState> => {
       const nextCards: PvpSnapshotRef[] = [];
       let need = dealWhenEmpty;
@@ -284,7 +349,7 @@ async function confirmHandler(req: Request): Promise<Response> {
       }
 
       while (need > 0) {
-        const snap = await drawPublicSnapshot(ownerUserId);
+        const snap = await drawFallbackSnapshot(ownerUserId);
         if (!snap) break;
         nextCards.push(snap);
         need -= 1;
@@ -347,6 +412,7 @@ async function confirmHandler(req: Request): Promise<Response> {
     (internal.raw as any)._drawPile = drawPile;
     (internal.raw as any)._usedPile = usedPile;
     (internal.raw as any)._publicDrawnCardIds = [...publicDrawnDataCardIds];
+    (internal.raw as any)._presetDrawnFilenames = [...presetDrawnFilenames];
 
     const nextRoundId = await createPvpRound({
       roomId,

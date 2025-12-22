@@ -146,7 +146,10 @@ async function addBotHandler(req: Request): Promise<Response> {
   });
 
   const totalAfter = players.length + internal.bots.length;
-  const shouldAdvance = room.phase === 'waiting' && totalAfter >= internal.rules.participants;
+  const shouldAdvance =
+    room.phase === 'waiting' &&
+    internal.rules.cardsPerPlayer > 0 &&
+    totalAfter >= internal.rules.participants;
 
   const now = new Date().toISOString();
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {

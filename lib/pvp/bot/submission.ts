@@ -26,7 +26,7 @@ export async function buildBotSubmissionPayload(options: {
   rng?: Rng;
 }): Promise<PvpSubmissionPayload> {
   const rng = options.rng ?? Math.random;
-  const needed = Math.max(1, Math.floor(options.rules.cardsPerPlayer));
+  const needed = Math.max(0, Math.floor(options.rules.cardsPerPlayer));
 
   const used = new Set<string>();
   for (const key of options.excludeRefKeys ?? []) used.add(key);
