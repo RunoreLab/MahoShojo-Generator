@@ -588,6 +588,27 @@ export async function getRandomPublicCard(
   }
 }
 
+export async function getDataCardStatsByIds(ids: string[]): Promise<Array<{ id: string; is_public: number; usage_count: number; like_count: number; favorite_count: number }>> {
+  try {
+    const safeIds = [...new Set(ids.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))];
+    if (safeIds.length <= 0) return [];
+
+    const placeholders = safeIds.map(() => '?').join(', ');
+    const result = await queryFromD1(
+      `SELECT id, is_public, usage_count, like_count, favorite_count FROM data_cards WHERE id IN (${placeholders})`,
+      safeIds
+    ) as any;
+
+    if (result.success && result.result && result.result[0]?.results) {
+      return result.result[0].results as Array<{ id: string; is_public: number; usage_count: number; like_count: number; favorite_count: number }>;
+    }
+    return [];
+  } catch (error) {
+    console.error("批量读取数据卡统计失败:", error);
+    return [];
+  }
+}
+
 // 检查数据卡是否被封禁
 export function isDataCardBanned(card: any): boolean {
   return card && card.is_public === -1;

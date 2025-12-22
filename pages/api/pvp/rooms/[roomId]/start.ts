@@ -14,6 +14,7 @@ import {
   upsertPvpRoomHand,
 } from '@/lib/d1';
 import { dealSnapshots } from '@/lib/pvp/logic';
+import { autoChooseBotsForRound } from '@/lib/pvp/bot/auto';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpCardRef, PvpRoomRules, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
@@ -299,6 +300,13 @@ async function startHandler(req: Request): Promise<Response> {
   const casToChoosing = await updatePvpRoomCas(roomId, dealingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
   if (!casToChoosing) {
     return json({ success: true, roundId, warning: '发牌完成，但房间状态更新失败，请刷新' });
+  }
+
+  // Bot 自动出牌（不影响开局成败，失败则忽略）
+  try {
+    await autoChooseBotsForRound(roomId, roundId);
+  } catch {
+    // ignore
   }
 
   return json({ success: true, roundId, nextVersion: dealingVersion + 1 });

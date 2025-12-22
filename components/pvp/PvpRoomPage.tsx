@@ -104,6 +104,7 @@ type PvpRoomPlayerView = {
   prefix?: string | null;
   seat?: number | null;
   badges?: UserBadge[];
+  isBot?: boolean;
 };
 
 export function PvpRoomPage() {
@@ -228,6 +229,7 @@ export function PvpRoomPage() {
   const userIdsForSummary = useMemo(
     () =>
       players
+        .filter((p: any) => !p?.isBot)
         .map((p: any) => (typeof p?.userId === 'number' ? p.userId : null))
         .filter((id: any): id is number => typeof id === 'number' && Number.isFinite(id)),
     [players]
@@ -651,6 +653,31 @@ export function PvpRoomPage() {
     onError: (e) => setError(e instanceof Error ? e.message : '踢人失败'),
   });
 
+  const addBotMutation = useMutation({
+    mutationFn: async () => {
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/bots/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version }),
+      });
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) {
+        const payload = (data || {}) as ApiErrorPayload;
+        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+          status: res.status,
+          code: payload.code,
+          traceId: payload.traceId,
+          detail: payload.detail,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => setError(e instanceof Error ? e.message : '添加机器人失败'),
+  });
+
   const cardKey = (c: CardRef): string => (c.kind === 'data_card' ? `data_card:${c.id}` : `preset:${c.filename}`);
 
   const clearSelected = () => {
@@ -958,9 +985,13 @@ export function PvpRoomPage() {
                                 {p.userId === room.hostUserId ? (
                                   <span className="px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 text-xs">房主</span>
                                 ) : null}
+                                {p.isBot ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs">机器人</span>
+                                ) : null}
                               </div>
                               <div className="mt-1 text-xs text-gray-600">
                                 {(() => {
+                                  if (p.isBot) return '战绩：机器人不记录';
                                   const s = pvpSummaryByUserId.get(p.userId);
                                   if (!s) return '战绩：暂无';
                                   return `战绩：${s.wins}胜 ${s.losses}负 ${s.draws}平（${s.completedMatches}场，胜率 ${s.winRate}%）`;
@@ -1028,6 +1059,19 @@ export function PvpRoomPage() {
                 {isHost && (phase === 'waiting' || phase === 'submitting' || phase === 'choosing') && (
                   <div className="p-3 rounded-md bg-white border mt-3">
                     <div className="font-semibold text-sm mb-2">房主设置</div>
+                    {(phase === 'waiting' || phase === 'submitting') && (
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <button
+                          className="px-3 py-2 rounded-lg text-sm text-white bg-gradient-to-r from-slate-600 to-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={() => addBotMutation.mutate()}
+                          disabled={addBotMutation.isPending || !rules || players.length >= (rules?.participants ?? 0)}
+                          title="添加机器人（自动提交卡组）"
+                        >
+                          {addBotMutation.isPending ? '添加中…' : '添加机器人'}
+                        </button>
+                        <div className="text-xs text-gray-500">机器人不显示战绩，会自动提交并自动出牌。</div>
+                      </div>
+                    )}
                     {(phase === 'waiting' || phase === 'submitting') && (
                       <>
                         <div className="flex gap-2">

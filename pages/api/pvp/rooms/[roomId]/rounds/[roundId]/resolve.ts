@@ -18,6 +18,7 @@ import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { autoChooseBotsForRound } from '@/lib/pvp/bot/auto';
 import type { PvpHandState, PvpRoomRules, PvpSnapshotRef } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
@@ -417,6 +418,11 @@ async function resolveHandler(req: Request): Promise<Response> {
   if (rules.bestOf.enabled && round.round_index < rules.bestOf.maxRounds) {
     const nextRoundId = await createPvpRound({ roomId, matchId, roundIndex: round.round_index + 1, status: 'pending' });
     await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
+    try {
+      if (nextRoundId) await autoChooseBotsForRound(roomId, nextRoundId);
+    } catch {
+      // ignore
+    }
     return json({ success: true, roundResolved: true, result: JSON.parse(resultJson), nextRoundId });
   }
 
