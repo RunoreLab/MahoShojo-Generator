@@ -203,6 +203,7 @@ export function PvpRoomPage() {
   const rules: PvpRoomRules | null = room?.rules || null;
   const phase: string = room?.phase || 'unknown';
   const version: number = room?.version ?? 0;
+  const lastActivityAt: string | null = typeof room?.lastActivityAt === 'string' ? room.lastActivityAt : null;
   const players = useMemo<PvpRoomPlayerView[]>(() => (Array.isArray(roomQuery.data?.players) ? (roomQuery.data.players as PvpRoomPlayerView[]) : []), [roomQuery.data?.players]);
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
 
@@ -439,7 +440,7 @@ export function PvpRoomPage() {
   };
 
   const resolveMutation = useMutation({
-    mutationFn: async (payload?: { customProvider?: UserAIProviderConfig | null }) => {
+    mutationFn: async (payload?: { customProvider?: UserAIProviderConfig | null; force?: boolean }) => {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
       const authHeader = await authStorage.getAuthHeader();
       if (!authHeader) throw new Error('未登录');
@@ -450,6 +451,7 @@ export function PvpRoomPage() {
         headers: { 'Content-Type': 'application/json', Authorization: authHeader },
         body: JSON.stringify({
           expectedVersion: version,
+          ...(payload?.force ? { force: true } : {}),
           ...(customProvider ? { customProvider } : {}),
         }),
       });
@@ -469,7 +471,10 @@ export function PvpRoomPage() {
       startCooldown();
       void roomQuery.refetch();
     },
-    onError: (e) => setError(e instanceof Error ? e.message : '结算失败'),
+    onError: (e: any) => {
+      if (e?.code === 'ROOM_RESOLVING' || e?.code === 'ROUND_RESOLVING') return;
+      setError(e instanceof Error ? e.message : '结算失败');
+    },
   });
 
   const passwordMutation = useMutation({
@@ -526,7 +531,7 @@ export function PvpRoomPage() {
     userProviderConfig?.providerId && userProviderConfig.providerId !== 'system' && !userProviderConfig.apiKey?.trim()
   );
 
-  const handleResolve = () => {
+  const handleResolve = (options?: { force?: boolean }) => {
     if (isCooldown) {
       setError(`冷却中，请等待 ${remainingTime} 秒后再生成战报。`);
       return;
@@ -535,7 +540,7 @@ export function PvpRoomPage() {
       setError('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
       return;
     }
-    resolveMutation.mutate({ customProvider: userProviderConfig });
+    resolveMutation.mutate({ customProvider: userProviderConfig, ...(options?.force ? { force: true } : {}) });
   };
 
   const kickMutation = useMutation({
@@ -820,6 +825,11 @@ export function PvpRoomPage() {
                       <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">阶段：{phase}</span>
                     </div>
                     <div className="mt-2 text-gray-700">版本：{version}</div>
+                    {lastActivityAt ? (
+                      <div className="mt-1 text-xs text-gray-600">
+                        最后活动：{new Date(lastActivityAt).toLocaleString()}
+                      </div>
+                    ) : null}
                     {rules && (
                       <div className="mt-2 text-xs text-gray-600 whitespace-pre-wrap">
                         规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 发牌 {rules.dealPerPlayer} / 去重 {String(rules.dedupe)} / 模式 {rules.mode}
@@ -898,6 +908,46 @@ export function PvpRoomPage() {
                     </button>
                   </div>
                 </div>
+
+                {phase === 'resolving' && (
+                  <div className="p-4 rounded-xl border border-amber-200 bg-amber-50 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex h-4 w-4 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+                          <div className="font-semibold text-amber-900">正在结算中…</div>
+                        </div>
+                        <div className="text-xs text-amber-800 mt-1">
+                          页面会自动轮询刷新；如果长时间停留在此状态，可手动刷新。
+                        </div>
+                        {lastActivityAt ? (
+                          <div className="text-xs text-amber-800 mt-1">
+                            最后活动：{new Date(lastActivityAt).toLocaleString()}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm"
+                          onClick={() => void roomQuery.refetch()}
+                          disabled={roomQuery.isFetching}
+                        >
+                          {roomQuery.isFetching ? '刷新中…' : '刷新'}
+                        </button>
+                        {isHost ? (
+                          <button
+                            className="px-3 py-2 rounded-lg text-sm text-white bg-gradient-to-r from-amber-500 to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => handleResolve({ force: true })}
+                            disabled={resolveMutation.isPending || isCooldown || isCustomProviderMissingKey}
+                            title="仅房主可用：当结算请求意外中断时用于强制重试"
+                          >
+                            {resolveMutation.isPending ? '重试中…' : '强制重试'}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {isHost && (phase === 'waiting' || phase === 'submitting') && (
                   <div className="p-3 rounded-md bg-white border mt-3">

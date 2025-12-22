@@ -168,6 +168,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
       phase: room.phase,
       version: room.version,
       expiresAt: room.expires_at,
+      lastActivityAt: room.last_activity_at,
       currentMatchId,
       rules,
     },

@@ -22,7 +22,7 @@ import type { PvpHandState, PvpRoomRules, PvpSnapshotRef } from '@/lib/pvp/types
 
 export const runtime = 'edge';
 
-type ResolveBody = { expectedVersion?: number; customProvider?: unknown };
+type ResolveBody = { expectedVersion?: number; customProvider?: unknown; force?: boolean };
 
 type PvpPickedSnapshot = NonNullable<Awaited<ReturnType<typeof getPvpCardSnapshotById>>>;
 
@@ -112,6 +112,13 @@ async function resolveHandler(req: Request): Promise<Response> {
   if (room.phase !== 'choosing' && room.phase !== 'resolving') {
     return json({ error: '当前阶段不允许结算', code: 'PHASE_FORBIDDEN' }, { status: 409 });
   }
+  const force = (body.data as ResolveBody).force === true;
+  if (force && auth.user.id !== room.host_user_id) {
+    return json({ error: '只有房主可以强制重试结算', code: 'FORCE_FORBIDDEN' }, { status: 403 });
+  }
+  if (room.phase === 'resolving' && !force) {
+    return json({ error: '正在结算中，请稍后刷新', code: 'ROOM_RESOLVING' }, { status: 409 });
+  }
 
   const rules = parseRules(room.rules_json);
   if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
@@ -130,6 +137,9 @@ async function resolveHandler(req: Request): Promise<Response> {
   // 幂等：回合已完成则直接返回结果
   if (round.status === 'completed' && round.result_json) {
     return json({ success: true, alreadyResolved: true, result: JSON.parse(round.result_json) });
+  }
+  if (round.status === 'resolving' && !force) {
+    return json({ error: '正在结算中，请稍后刷新', code: 'ROUND_RESOLVING' }, { status: 409 });
   }
   if (round.status !== 'pending' && round.status !== 'resolving') {
     return json({ error: '回合不可结算', code: 'ROUND_FORBIDDEN' }, { status: 409 });
