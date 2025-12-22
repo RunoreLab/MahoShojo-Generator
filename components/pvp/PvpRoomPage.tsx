@@ -327,6 +327,7 @@ export function PvpRoomPage() {
   const choices = roomQuery.data?.choices;
   const latestRound = roomQuery.data?.latestRound;
   const latestRoundResult = roomQuery.data?.latestRoundResult;
+  const confirmations = roomQuery.data?.confirmations as { roundId: string; confirmedHumans: number; totalHumans: number; hasConfirmedMe: boolean } | null | undefined;
   const score = roomQuery.data?.score;
 
   const rulesDraftError = useMemo(() => {
@@ -680,6 +681,32 @@ export function PvpRoomPage() {
     },
     onSuccess: () => void roomQuery.refetch(),
     onError: (e) => setError(e instanceof Error ? e.message : '重开失败'),
+  });
+
+  const confirmMutation = useMutation({
+    mutationFn: async () => {
+      if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version }),
+      });
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) {
+        const payload = (data || {}) as ApiErrorPayload;
+        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+          status: res.status,
+          code: payload.code,
+          traceId: payload.traceId,
+          detail: payload.detail,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => setError(e instanceof Error ? e.message : '确认失败'),
   });
 
   const isCustomProviderMissingKey = Boolean(
@@ -1624,6 +1651,37 @@ export function PvpRoomPage() {
                     </div>
                   </div>
                 )}
+
+                {phase === 'reviewing' && latestRound ? (
+                  <div className="p-3 rounded-md bg-white border mt-4 text-sm">
+                    <div className="font-semibold mb-1">等待全员确认</div>
+                    <div className="text-gray-700">
+                      {confirmations ? (
+                        <>玩家已确认：{confirmations.confirmedHumans}/{confirmations.totalHumans}</>
+                      ) : (
+                        '正在统计确认人数…'
+                      )}
+                    </div>
+                    <button
+                      className="generate-button mt-3 w-full"
+                      style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+                      onClick={() => confirmMutation.mutate()}
+                      disabled={confirmMutation.isPending || Boolean(confirmations?.hasConfirmedMe)}
+                      title={confirmations?.hasConfirmedMe ? '你已确认' : '确认已阅读本轮战报，推进下一回合/结束'}
+                    >
+                      {confirmations?.hasConfirmedMe ? '已确认' : confirmMutation.isPending ? '确认中…' : '确认已阅读（推进）'}
+                    </button>
+                    <div className="text-xs text-gray-500 mt-2">
+                      提示：所有玩家确认后才会进入下一回合或结束对局。
+                    </div>
+                  </div>
+                ) : null}
+
+                {phase === 'advancing' ? (
+                  <div className="p-3 rounded-md bg-blue-50 text-blue-800 text-sm mt-4">
+                    正在推进下一回合/结算对局结果，请稍候…
+                  </div>
+                ) : null}
 
                 {phase === 'finished' && (
                   <div className="p-3 rounded-md bg-green-50 text-green-800 text-sm mt-4">

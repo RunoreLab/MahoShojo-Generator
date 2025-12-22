@@ -33,7 +33,7 @@ async function leaveHandler(req: Request): Promise<Response> {
 
   const now = new Date().toISOString();
   const isHostLeaving = room.host_user_id === auth.user.id;
-  const isInMatch = room.phase === 'choosing' || room.phase === 'resolving';
+  const isInMatch = room.phase === 'choosing' || room.phase === 'reviewing' || room.phase === 'advancing' || room.phase === 'resolving';
 
   const patch =
     isHostLeaving

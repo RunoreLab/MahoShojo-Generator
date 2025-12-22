@@ -11,6 +11,7 @@
 - 流程：创建房间 → 加入 → 提交卡组 → 房主发牌 → 同时出牌 → 自动/手动结算（生成战报）→（可选）多轮直到 `maxRounds`
 - 结算调用：复用现有非流式端点 `POST /api/generate-battle-story`（并显式关闭 arena_history / current_state 的读写）
 - 多局制配置：大厅创建房间可启用/设置；房间内（房主）可在 `waiting/submitting` 阶段调整规则
+- 结算推进策略：生成战报后进入 `reviewing`，只有全员“确认已阅读”后才推进下一回合或结束
 
 ## 1. 关键工程决策
 

@@ -62,6 +62,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
   if ('error' in parsed) return json({ error: parsed.error }, { status: 500 });
   const rules = parsed.internal.rules;
   const bots = parsed.internal.bots;
+  const postRoundRaw = (parsed.internal.raw as any)?._postRound;
 
   const players = await getPvpRoomPlayers(roomId);
   const isPlayer = players.some((p) => p.user_id === auth.user.id);
@@ -119,6 +120,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
   const latestRound = currentMatchId ? await getLatestPvpRoundByMatch(currentMatchId) : null;
   let choicesState: any = null;
   let latestRoundResult: any = null;
+  let confirmations: any = null;
 
   if (latestRound) {
     const choices = await getPvpRoundChoices(latestRound.id);
@@ -146,6 +148,25 @@ async function getRoomHandler(req: Request): Promise<Response> {
       } catch {
         latestRoundResult = null;
       }
+    }
+  }
+
+  // 回合结算后的“阅读确认”机制：仅暴露计数与自身是否已确认
+  if (postRoundRaw && latestRound) {
+    const roundId = typeof (postRoundRaw as any).roundId === 'string' ? String((postRoundRaw as any).roundId) : '';
+    const confirmedUserIds = Array.isArray((postRoundRaw as any).confirmedUserIds)
+      ? (postRoundRaw as any).confirmedUserIds.filter((x: any) => typeof x === 'number' && Number.isFinite(x)).map((x: number) => Math.floor(x))
+      : [];
+    if (roundId && roundId === latestRound.id) {
+      const confirmedSet = new Set<number>(confirmedUserIds);
+      const hasConfirmedMe = confirmedSet.has(auth.user.id);
+      const confirmedHumans = players.filter((p) => confirmedSet.has(p.user_id)).length;
+      confirmations = {
+        roundId,
+        confirmedHumans,
+        totalHumans: players.length,
+        hasConfirmedMe,
+      };
     }
   }
 
@@ -224,6 +245,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
     latestRound: latestRound ? { id: latestRound.id, index: latestRound.round_index, status: latestRound.status } : null,
     choices: choicesState,
     latestRoundResult,
+    confirmations,
     score,
   });
 }

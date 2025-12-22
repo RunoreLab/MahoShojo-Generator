@@ -1,20 +1,16 @@
 import {
-  createPvpRound,
   getPvpCardSnapshotById,
   getPvpRoomById,
   getPvpRoomHands,
   getPvpRoomPlayers,
   getPvpRoundById,
   getPvpRoundChoices,
-  getPvpRoundsByMatch,
   updatePvpRoomCas,
-  updatePvpMatch,
   updatePvpRound,
   upsertPvpRoomHand,
 } from '@/lib/d1';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
-import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
@@ -114,7 +110,7 @@ async function resolveHandler(req: Request): Promise<Response> {
   if (expectedVersion === null) return json({ error: '缺少 expectedVersion' }, { status: 400 });
   if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
 
-  if (room.phase !== 'choosing' && room.phase !== 'resolving') {
+  if (room.phase !== 'choosing' && room.phase !== 'resolving' && room.phase !== 'reviewing') {
     return json({ error: '当前阶段不允许结算', code: 'PHASE_FORBIDDEN' }, { status: 409 });
   }
   const force = (body.data as ResolveBody).force === true;
@@ -130,7 +126,6 @@ async function resolveHandler(req: Request): Promise<Response> {
   const internal = internalParsed.internal;
   const rules = internal.rules;
   const bots = internal.bots;
-  const recordMatch = bots.length <= 0;
 
   const allowNonHostControl = rules.allowNonHostControl === true;
   if (!allowNonHostControl && auth.user.id !== room.host_user_id) {
@@ -165,6 +160,9 @@ async function resolveHandler(req: Request): Promise<Response> {
   // 幂等：回合已完成则直接返回结果
   if (round.status === 'completed' && round.result_json) {
     return json({ success: true, alreadyResolved: true, result: JSON.parse(round.result_json) });
+  }
+  if (room.phase === 'reviewing') {
+    return json({ error: '回合已结算，正在等待全员确认后推进', code: 'WAITING_CONFIRMATION' }, { status: 409 });
   }
   if (round.status === 'resolving' && !force) {
     return json({ error: '正在结算中，请稍后刷新', code: 'ROUND_RESOLVING' }, { status: 409 });
@@ -488,82 +486,27 @@ async function resolveHandler(req: Request): Promise<Response> {
     }
   }
 
-  // 多局制：到达 maxRounds 才结算整场胜负，否则继续下一轮
-  if (rules.bestOf.enabled && round.round_index < rules.bestOf.maxRounds) {
-    const nextRoundId = await createPvpRound({ roomId, matchId, roundIndex: round.round_index + 1, status: 'pending' });
-    // Bot 为下一轮预先出牌（失败则忽略，不阻塞流程）
-    if (nextRoundId) {
-      try {
-        for (const b of internal.bots) {
-          if (!b.hand?.cards?.length) continue;
-          const snapshotIds = b.hand.cards.map((c: any) => (c && c.kind === 'snapshot' ? c.id : null)).filter(Boolean) as string[];
-          const snapshots = [];
-          for (const id of snapshotIds) {
-            const snap = await getPvpCardSnapshotById(id);
-            if (snap) snapshots.push(snap);
-          }
-          const pickedId =
-            (await pickBotChoiceSnapshotId({
-              bot: { strategyId: b.strategyId },
-              snapshots: snapshots.map((s) => ({ id: s.id, name: s.name, data_json: s.data_json, ref_json: s.ref_json })),
-            })) ?? (snapshotIds[0] ?? null);
-          if (pickedId) {
-            b.choicesByRoundId = { ...(b.choicesByRoundId ?? {}), [nextRoundId]: pickedId };
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    await updatePvpRoomCas(roomId, resolvingVersion, {
-      phase: 'choosing',
-      ...(internal.bots.length > 0 ? { rules_json: stringifyPvpRoomInternalState(internal) } : {}),
-      last_activity_at: new Date().toISOString(),
-    });
-    return json({ success: true, roundResolved: true, result: JSON.parse(resultJson), nextRoundId });
-  }
-
-  // 若启用 bestOf，计算整场胜负（最多 wins），平局则 draw
-  let matchWinnerUserId: number | null = null;
-  if (recordMatch && rules.bestOf.enabled) {
-    const rounds = await getPvpRoundsByMatch(matchId);
-    const winCounts = new Map<number, number>();
-    for (const p of sortedPlayers) winCounts.set(p.user_id, 0);
-    for (const r of rounds) {
-      if (!r.winner_user_id) continue;
-      if (!winCounts.has(r.winner_user_id)) continue;
-      winCounts.set(r.winner_user_id, (winCounts.get(r.winner_user_id) || 0) + 1);
-    }
-
-    let maxWins = 0;
-    for (const wins of winCounts.values()) maxWins = Math.max(maxWins, wins);
-    const top = [...winCounts.entries()].filter(([, wins]) => wins === maxWins).map(([userId]) => userId);
-    matchWinnerUserId = top.length === 1 ? top[0]! : null;
-  }
-
-  const endedAt = new Date().toISOString();
-  const matchResultJson = JSON.stringify({
-    matchWinnerUserId: rules.bestOf.enabled ? matchWinnerUserId : resolvedWinnerUserId,
-    finalRoundIndex: round.round_index,
-    bestOf: rules.bestOf,
-  });
-  if (recordMatch) {
-    await updatePvpMatch(matchId, {
-      status: 'completed',
-      endedAt,
-      winnerUserId: rules.bestOf.enabled ? matchWinnerUserId : resolvedWinnerUserId,
-      resultJson: matchResultJson,
-    });
-  }
+  // 等待全员确认后再推进下一回合/结束（避免战报刚生成就被刷新覆盖）
+  const maxRounds = rules.bestOf.enabled ? rules.bestOf.maxRounds : 1;
+  (internal.raw as any)._postRound = {
+    roundId,
+    matchId,
+    roundIndex: round.round_index,
+    maxRounds,
+    bestOfEnabled: rules.bestOf.enabled,
+    resolvedWinnerUserId,
+    confirmedUserIds: [],
+    confirmedBotIds: internal.bots.map((b) => b.id),
+    createdAt: new Date().toISOString(),
+  };
 
   await updatePvpRoomCas(roomId, resolvingVersion, {
-    phase: 'finished',
-    ...(internal.bots.length > 0 ? { rules_json: stringifyPvpRoomInternalState(internal) } : {}),
+    phase: 'reviewing',
+    rules_json: stringifyPvpRoomInternalState(internal),
     last_activity_at: new Date().toISOString(),
   });
 
-  return json({ success: true, roundResolved: true, result: JSON.parse(resultJson), matchWinnerUserId });
+  return json({ success: true, roundResolved: true, result: JSON.parse(resultJson), waitingConfirmation: true });
 }
 
 export default withPvpErrorBoundary(resolveHandler);
