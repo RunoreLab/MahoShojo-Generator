@@ -14,14 +14,20 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const participantCount = Number.isFinite(participants) ? Math.floor(participants) : DEFAULT_PVP_RULES.participants;
   if (participantCount < 2 || participantCount > 6) return { error: '人数超出范围（2-6）' };
 
-  const cardsPerPlayer = intInRange(raw.cardsPerPlayer, DEFAULT_PVP_RULES.cardsPerPlayer, 1, 50);
-  if (cardsPerPlayer < 1 || cardsPerPlayer > 50) return { error: '每人提交数量超出范围（1-50）' };
+  const cardsPerPlayer = intInRange(raw.cardsPerPlayer, DEFAULT_PVP_RULES.cardsPerPlayer, 0, 50);
+  if (cardsPerPlayer < 0 || cardsPerPlayer > 50) return { error: '每人提交数量超出范围（0-50）' };
 
   const dealPerPlayer = intInRange(raw.dealPerPlayer, DEFAULT_PVP_RULES.dealPerPlayer, 1, 50);
   if (dealPerPlayer < 1 || dealPerPlayer > 50) return { error: '每人初始手牌数量超出范围（1-50）' };
 
   const dealWhenEmpty = intInRange(raw.dealWhenEmpty, DEFAULT_PVP_RULES.dealWhenEmpty, 1, 50);
   if (dealWhenEmpty < 1 || dealWhenEmpty > 50) return { error: '手牌为空时补发数量超出范围（1-50）' };
+
+  const drawSourceRaw = raw.drawSource ?? DEFAULT_PVP_RULES.drawSource;
+  const drawSource =
+    drawSourceRaw === 'public' || drawSourceRaw === 'preset' || drawSourceRaw === 'preset+public'
+      ? drawSourceRaw
+      : DEFAULT_PVP_RULES.drawSource;
 
   const recycleUsedCards =
     typeof raw.recycleUsedCards === 'boolean' ? raw.recycleUsedCards : DEFAULT_PVP_RULES.recycleUsedCards;
@@ -55,6 +61,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     cardsPerPlayer,
     dealPerPlayer,
     dealWhenEmpty,
+    drawSource,
     recycleUsedCards,
     dedupe,
     showAllSubmissions,

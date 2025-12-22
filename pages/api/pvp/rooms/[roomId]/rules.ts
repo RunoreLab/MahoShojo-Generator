@@ -100,7 +100,10 @@ async function rulesHandler(req: Request): Promise<Response> {
 
   internal.rules = { ...nextRules };
   internal.raw = mergedRaw;
-  const nextPhase = participantCount >= nextRules.participants ? 'submitting' : 'waiting';
+  const nextPhase =
+    participantCount >= nextRules.participants
+      ? (nextRules.cardsPerPlayer > 0 ? 'submitting' : 'waiting')
+      : 'waiting';
 
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     phase: nextPhase,

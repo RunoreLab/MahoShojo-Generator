@@ -488,7 +488,7 @@ export function PvpRoomPage() {
     if (participants < 2 || participants > 6) return '人数需要在 2-6 之间';
 
     const cardsPerPlayer = Number.isFinite(rulesDraft.cardsPerPlayer) ? Math.floor(rulesDraft.cardsPerPlayer) : 0;
-    if (cardsPerPlayer < 1 || cardsPerPlayer > 50) return '每人提交数量需要在 1-50 之间';
+    if (cardsPerPlayer < 0 || cardsPerPlayer > 50) return '每人提交数量需要在 0-50 之间';
 
     const dealPerPlayer = Number.isFinite(rulesDraft.dealPerPlayer) ? Math.floor(rulesDraft.dealPerPlayer) : 0;
     if (dealPerPlayer < 1 || dealPerPlayer > 50) return '每人初始手牌数量需要在 1-50 之间';
@@ -1383,7 +1383,7 @@ export function PvpRoomPage() {
                     ) : null}
                     {rules && (
                       <div className="mt-2 text-xs text-gray-600 whitespace-pre-wrap">
-                        规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 初始手牌 {rules.dealPerPlayer} / 空手补发 {rules.dealWhenEmpty} / 复用弃牌 {String(rules.recycleUsedCards)} / 去重 {String(rules.dedupe)} / 展示提交 {String(rules.showAllSubmissions)} / 洗混 {String(rules.shuffleDecks)} / 模式 {rules.mode}
+                        规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 初始手牌 {rules.dealPerPlayer} / 空手补发 {rules.dealWhenEmpty} / 抽取来源 {rules.drawSource ?? 'public'} / 复用弃牌 {String(rules.recycleUsedCards)} / 去重 {String(rules.dedupe)} / 展示提交 {String(rules.showAllSubmissions)} / 洗混 {String(rules.shuffleDecks)} / 模式 {rules.mode}
                       </div>
                     )}
                     {rules?.bestOf?.enabled && latestRound ? (
@@ -1575,7 +1575,7 @@ export function PvpRoomPage() {
                             <input
                               className="border rounded px-2 py-1"
                               type="number"
-                              min={1}
+                              min={0}
                               max={50}
                               value={rulesDraft.cardsPerPlayer}
                               onChange={(e) => setRulesDraft((r) => (r ? { ...r, cardsPerPlayer: Number(e.target.value) } : r))}
@@ -1605,6 +1605,22 @@ export function PvpRoomPage() {
                               onChange={(e) => setRulesDraft((r) => (r ? { ...r, dealWhenEmpty: Number(e.target.value) } : r))}
                               disabled={rulesMutation.isPending}
                             />
+                          </label>
+                          <label className="flex flex-col gap-1 col-span-2">
+                            <span>抽取来源（提交牌池用尽后）</span>
+                            <select
+                              className="border rounded px-2 py-1"
+                              value={rulesDraft.drawSource ?? 'public'}
+                              onChange={(e) =>
+                                setRulesDraft((r) => (r ? { ...r, drawSource: e.target.value as 'public' | 'preset' | 'preset+public' } : r))
+                              }
+                              disabled={rulesMutation.isPending}
+                            >
+                              <option value="public">公开库（默认）</option>
+                              <option value="preset">预设</option>
+                              <option value="preset+public">预设 + 公开库</option>
+                            </select>
+                            <div className="text-xs text-gray-500">每人提交=0 时：开局直接按“手牌为空时补发”发牌。</div>
                           </label>
                           <label className="flex items-center gap-2 col-span-1">
                             <input
@@ -1746,6 +1762,28 @@ export function PvpRoomPage() {
                         </div>
                       </div>
                     ) : null}
+
+                    {phase === 'waiting' && rules && rules.cardsPerPlayer === 0 && (
+                      <div className="mt-3 p-3 rounded-md border bg-purple-50">
+                        <div className="text-sm font-semibold text-purple-900">本局无需提交卡组</div>
+                        <div className="text-xs text-purple-800 mt-1">
+                          开局将按“手牌为空时补发”发牌；抽取来源：
+                          {rules.drawSource === 'preset'
+                            ? '预设'
+                            : rules.drawSource === 'preset+public'
+                              ? '预设 + 公开库'
+                              : '公开库'}
+                        </div>
+                        <button
+                          className="generate-button w-full mt-2"
+                          style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}
+                          disabled={startMutation.isPending || players.length < rules.participants}
+                          onClick={() => startMutation.mutate()}
+                        >
+                          {startMutation.isPending ? '发牌中…' : '开始对局（发牌）'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1917,7 +1955,7 @@ export function PvpRoomPage() {
                         <button
                           className="generate-button w-full mt-3"
                           style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}
-                          disabled={startMutation.isPending || submittedParticipantCount < rules.participants}
+                          disabled={startMutation.isPending || (rules.cardsPerPlayer > 0 && submittedParticipantCount < rules.participants)}
                           onClick={() => startMutation.mutate()}
                         >
                           {startMutation.isPending ? '发牌中…' : '开始对局（发牌）'}

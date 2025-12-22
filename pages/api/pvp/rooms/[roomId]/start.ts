@@ -18,6 +18,9 @@ import {
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
+import { getRequestOrigin } from '@/lib/pvp/origin';
+import { loadPresetCard } from '@/lib/pvp/preset';
+import { BUNDLED_PRESET_FILENAMES } from '@/lib/pvp/preset-bundled';
 import { shuffleInPlace } from '@/lib/pvp/random';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
@@ -55,12 +58,6 @@ async function startHandler(req: Request): Promise<Response> {
   if (room.host_user_id !== auth.user.id) return json({ error: '仅房主可开始对局' }, { status: 403 });
   if (room.status !== 'open') return json({ error: '房间已关闭' }, { status: 410 });
 
-  if (room.phase !== 'submitting') {
-    // 幂等：若已发牌则直接返回
-    if (room.phase === 'choosing') return json({ success: true, alreadyStarted: true });
-    return json({ error: '当前阶段不允许开始对局', code: 'PHASE_FORBIDDEN' }, { status: 409 });
-  }
-
   const expectedVersion = Number.isFinite(body.data.expectedVersion) ? Math.floor(body.data.expectedVersion as number) : null;
   if (expectedVersion === null) return json({ error: '缺少 expectedVersion' }, { status: 400 });
   if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
@@ -70,10 +67,23 @@ async function startHandler(req: Request): Promise<Response> {
   const internal = internalParsed.internal;
   const rules = internal.rules;
   const bots = internal.bots;
+  const requireSubmissions = rules.cardsPerPlayer > 0;
   const recordMatch = bots.length <= 0;
   const scenarioSelection = parsePvpScenarioSelection((internal.raw as any)?._scenario);
   if (rules.mode === 'scenario' && !scenarioSelection) {
     return json({ error: '当前为情景模式，但尚未选择情景', code: 'SCENARIO_MISSING' }, { status: 409 });
+  }
+
+  // 幂等：若已发牌则直接返回
+  if (room.phase === 'choosing') return json({ success: true, alreadyStarted: true });
+
+  // cardsPerPlayer=0：跳过提交阶段，允许 waiting 直接开始发牌
+  const allowedToStart =
+    requireSubmissions
+      ? room.phase === 'submitting'
+      : (room.phase === 'waiting' || room.phase === 'submitting');
+  if (!allowedToStart) {
+    return json({ error: '当前阶段不允许开始对局', code: 'PHASE_FORBIDDEN' }, { status: 409 });
   }
 
   const players = await getPvpRoomPlayers(roomId);
@@ -97,22 +107,24 @@ async function startHandler(req: Request): Promise<Response> {
   ].sort((a, b) => a.seat - b.seat);
   if (participants.length !== rules.participants) return json({ error: '房间参与者数量与规则不一致' }, { status: 500 });
 
-  const submissions = await getPvpRoomSubmissions(roomId);
+  const submissions = requireSubmissions ? await getPvpRoomSubmissions(roomId) : [];
   const submissionMap = new Map<number, PvpSubmissionPayload>();
-  for (const row of submissions) {
-    const parsed = parseSubmission(row.submission_json);
-    if (!parsed) return json({ error: '提交数据损坏，请重新提交' }, { status: 409 });
-    submissionMap.set(row.user_id, parsed);
-  }
+  if (requireSubmissions) {
+    for (const row of submissions) {
+      const parsed = parseSubmission(row.submission_json);
+      if (!parsed) return json({ error: '提交数据损坏，请重新提交' }, { status: 409 });
+      submissionMap.set(row.user_id, parsed);
+    }
 
-  for (const p of sortedPlayers) {
-    const sub = submissionMap.get(p.user_id);
-    if (!sub) return json({ error: '仍有玩家未提交卡组' }, { status: 409 });
-    if (sub.cards.length !== rules.cardsPerPlayer) return json({ error: '提交数量与房间规则不一致，请重新提交' }, { status: 409 });
-  }
-  for (const b of bots) {
-    if (!b.submission || !Array.isArray(b.submission.cards) || b.submission.cards.length !== rules.cardsPerPlayer) {
-      return json({ error: '机器人提交异常，请移除机器人后重新添加', code: 'BOT_SUBMISSION_INVALID' }, { status: 409 });
+    for (const p of sortedPlayers) {
+      const sub = submissionMap.get(p.user_id);
+      if (!sub) return json({ error: '仍有玩家未提交卡组' }, { status: 409 });
+      if (sub.cards.length !== rules.cardsPerPlayer) return json({ error: '提交数量与房间规则不一致，请重新提交' }, { status: 409 });
+    }
+    for (const b of bots) {
+      if (!b.submission || !Array.isArray(b.submission.cards) || b.submission.cards.length !== rules.cardsPerPlayer) {
+        return json({ error: '机器人提交异常，请移除机器人后重新添加', code: 'BOT_SUBMISSION_INVALID' }, { status: 409 });
+      }
     }
   }
 
@@ -136,6 +148,7 @@ async function startHandler(req: Request): Promise<Response> {
   if (!casToDealing) return json({ error: '开始失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
   const dealingVersion = expectedVersion + 1;
 
+  const rollbackPhase = requireSubmissions ? ('submitting' as const) : ('waiting' as const);
   const abortAndRollback = async (reason: string, extra?: Record<string, unknown>): Promise<boolean> => {
     const now = new Date().toISOString();
 
@@ -150,7 +163,7 @@ async function startHandler(req: Request): Promise<Response> {
     }
 
     const patch = {
-      phase: 'submitting' as const,
+      phase: rollbackPhase,
       current_match_id: null,
       last_activity_at: now,
     };
@@ -202,26 +215,50 @@ async function startHandler(req: Request): Promise<Response> {
   }
 
   const submittedDataCardIds = new Set<string>();
-  for (const row of submissions) {
-    const parsed = parseSubmission(row.submission_json);
-    if (!parsed) continue;
-    for (const c of parsed.cards) {
-      if (c?.ref?.kind === 'data_card' && typeof (c.ref as any)?.id === 'string') {
-        const id = String((c.ref as any).id).trim();
-        if (id) submittedDataCardIds.add(id);
+  const submittedPresetFilenames = new Set<string>();
+  if (requireSubmissions) {
+    for (const row of submissions) {
+      const parsed = parseSubmission(row.submission_json);
+      if (!parsed) continue;
+      for (const c of parsed.cards) {
+        if (c?.ref?.kind === 'data_card' && typeof (c.ref as any)?.id === 'string') {
+          const id = String((c.ref as any).id).trim();
+          if (id) submittedDataCardIds.add(id);
+        }
+        if (c?.ref?.kind === 'preset' && typeof (c.ref as any)?.filename === 'string') {
+          const filename = String((c.ref as any).filename).trim();
+          if (filename) submittedPresetFilenames.add(filename);
+        }
       }
     }
-  }
-  for (const b of bots) {
-    for (const c of b.submission?.cards ?? []) {
-      if (c?.ref?.kind === 'data_card' && typeof (c.ref as any)?.id === 'string') {
-        const id = String((c.ref as any).id).trim();
-        if (id) submittedDataCardIds.add(id);
+    for (const b of bots) {
+      for (const c of b.submission?.cards ?? []) {
+        if (c?.ref?.kind === 'data_card' && typeof (c.ref as any)?.id === 'string') {
+          const id = String((c.ref as any).id).trim();
+          if (id) submittedDataCardIds.add(id);
+        }
+        if (c?.ref?.kind === 'preset' && typeof (c.ref as any)?.filename === 'string') {
+          const filename = String((c.ref as any).filename).trim();
+          if (filename) submittedPresetFilenames.add(filename);
+        }
       }
     }
   }
 
   const publicDrawnDataCardIds = new Set<string>();
+  const presetDrawnFilenames = new Set<string>();
+
+  const buildPresetFilenameVariants = (filename: string): string[] => {
+    const raw = typeof filename === 'string' ? filename.trim() : '';
+    if (!raw) return [];
+    const lower = raw.toLowerCase();
+    if (lower.endsWith('.json')) return [raw, raw.slice(0, -5)];
+    return [raw, `${raw}.json`];
+  };
+  const isPresetExcluded = (candidate: string, exclude: Set<string>): boolean => {
+    const variants = buildPresetFilenameVariants(candidate);
+    return variants.some((v) => exclude.has(v));
+  };
 
   const drawPublicSnapshot = async (ownerUserId: number): Promise<{ kind: 'snapshot'; id: string } | null> => {
     const excludeIds = [...new Set([...submittedDataCardIds, ...publicDrawnDataCardIds])];
@@ -259,15 +296,162 @@ async function startHandler(req: Request): Promise<Response> {
     return { kind: 'snapshot', id: snapshotId };
   };
 
-  const fillHandWithPublic = async (ownerUserId: number, hand: PvpHandState, targetSize: number): Promise<PvpHandState> => {
+  const origin = getRequestOrigin(req);
+
+  const drawPresetSnapshot = async (ownerUserId: number): Promise<{ kind: 'snapshot'; id: string } | null> => {
+    const exclude = new Set<string>();
+    for (const f of submittedPresetFilenames) for (const v of buildPresetFilenameVariants(f)) exclude.add(v);
+    for (const f of presetDrawnFilenames) for (const v of buildPresetFilenameVariants(f)) exclude.add(v);
+
+    const candidates = BUNDLED_PRESET_FILENAMES.filter((f) => !isPresetExcluded(f, exclude));
+    if (candidates.length <= 0) return null;
+
+    const picked = candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+    if (!picked) return null;
+
+    let preset: Awaited<ReturnType<typeof loadPresetCard>>;
+    try {
+      preset = await loadPresetCard(origin, picked);
+    } catch {
+      return null;
+    }
+
+    const snapshotId = await createPvpCardSnapshot({
+      roomId,
+      ownerUserId,
+      refJson: JSON.stringify({
+        kind: 'preset',
+        filename: picked,
+        drawnFromPreset: true,
+        sourceIsPublic: true,
+        sourceAuthor: null,
+      }),
+      cardType: preset.type,
+      name: preset.name || '预设卡牌',
+      dataJson: preset.dataJson,
+      sourceUpdatedAt: null,
+    });
+    if (!snapshotId) return null;
+
+    presetDrawnFilenames.add(picked);
+    return { kind: 'snapshot', id: snapshotId };
+  };
+
+  const drawFallbackSnapshot = async (ownerUserId: number): Promise<{ kind: 'snapshot'; id: string } | null> => {
+    if (rules.drawSource === 'preset') return await drawPresetSnapshot(ownerUserId);
+    if (rules.drawSource === 'preset+public') return (await drawPresetSnapshot(ownerUserId)) ?? (await drawPublicSnapshot(ownerUserId));
+    return await drawPublicSnapshot(ownerUserId);
+  };
+
+  const fillHandWithFallback = async (ownerUserId: number, hand: PvpHandState, targetSize: number): Promise<PvpHandState> => {
     const cards = [...(Array.isArray(hand.cards) ? hand.cards : [])];
     while (cards.length < targetSize) {
-      const next = await drawPublicSnapshot(ownerUserId);
+      const next = await drawFallbackSnapshot(ownerUserId);
       if (!next) break;
       cards.push(next);
     }
     return { ...hand, cards };
   };
+
+  if (!requireSubmissions) {
+    const botById = new Map(internal.bots.map((b) => [b.id, b]));
+
+    const desired = Math.max(1, Math.floor(rules.dealWhenEmpty));
+    for (const participant of participants) {
+      const ownerUserId = participant.kind === 'human' ? participant.userId : auth.user.id;
+      const baseHand: PvpHandState = { cards: [], discarded: [], drawPile: [] };
+      const filled = await fillHandWithFallback(ownerUserId, baseHand, desired);
+      if (!Array.isArray(filled.cards) || filled.cards.length < desired) {
+        const rolledBack = await abortAndRollback('initial-deal-insufficient', { desired, got: filled.cards?.length ?? 0 });
+        if (!rolledBack) {
+          return json({ error: '发牌失败：可用卡牌不足，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+        }
+        return json({ error: '发牌失败：可用卡牌不足，请调整抽取来源或规则后重试', code: 'INITIAL_DEAL_FAILED' }, { status: 409 });
+      }
+
+      if (participant.kind === 'human') {
+        const ok = await upsertPvpRoomHand(roomId, participant.userId, JSON.stringify(filled));
+        if (!ok) {
+          const rolledBack = await abortAndRollback('hand-write-failed', { userId: participant.userId });
+          if (!rolledBack) {
+            return json({ error: '写入手牌失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+          }
+          return json({ error: '写入手牌失败' }, { status: 500 });
+        }
+        continue;
+      }
+
+      const bot = botById.get(participant.botId);
+      if (bot) bot.hand = filled;
+    }
+
+    (internal.raw as any)._drawPile = [];
+    (internal.raw as any)._usedPile = [];
+    (internal.raw as any)._submittedDataCardIds = [];
+    (internal.raw as any)._submittedPresetFilenames = [];
+    (internal.raw as any)._publicDrawnCardIds = [...publicDrawnDataCardIds];
+    (internal.raw as any)._presetDrawnFilenames = [...presetDrawnFilenames];
+
+    const roundId = await createPvpRound({
+      roomId,
+      matchId,
+      roundIndex: 1,
+      status: 'pending',
+      publicSnapshotJson: JSON.stringify({
+        dealPerPlayer: rules.dealPerPlayer,
+        cardsPerPlayer: rules.cardsPerPlayer,
+        dealWhenEmpty: rules.dealWhenEmpty,
+        drawSource: rules.drawSource,
+        recycleUsedCards: rules.recycleUsedCards,
+        dedupe: rules.dedupe,
+        hiddenCount: 0,
+        mode: rules.mode,
+        bestOf: rules.bestOf,
+        showAllSubmissions: rules.showAllSubmissions,
+        shuffleDecks: rules.shuffleDecks,
+      }),
+    });
+    if (!roundId) {
+      const rolledBack = await abortAndRollback('round-create-failed');
+      if (!rolledBack) {
+        return json({ error: '创建回合失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+      }
+      return json({ error: '创建回合失败' }, { status: 500 });
+    }
+
+    // Bot 自动出牌：为本回合预先选择（失败则不阻塞开局）
+    try {
+      for (const b of internal.bots) {
+        if (!b.hand?.cards?.length) continue;
+        const snapshotIds = b.hand.cards.map((c: any) => (c && c.kind === 'snapshot' ? c.id : null)).filter(Boolean) as string[];
+        const snapshots = [];
+        for (const id of snapshotIds) {
+          const snap = await getPvpCardSnapshotById(id);
+          if (snap) snapshots.push(snap);
+        }
+        const picked = await pickBotChoiceSnapshotId({
+          bot: { strategyId: b.strategyId },
+          snapshots: snapshots.map((s) => ({ id: s.id, name: s.name, data_json: s.data_json, ref_json: s.ref_json })),
+        });
+        if (picked) {
+          b.choicesByRoundId = { ...(b.choicesByRoundId ?? {}), [roundId]: picked };
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    const casToChoosing = await updatePvpRoomCas(roomId, dealingVersion, {
+      phase: 'choosing',
+      rules_json: stringifyPvpRoomInternalState(internal),
+      last_activity_at: new Date().toISOString(),
+    });
+    if (!casToChoosing) {
+      return json({ success: true, roundId, warning: '发牌完成，但房间状态更新失败，请刷新' });
+    }
+
+    return json({ success: true, roundId, nextVersion: dealingVersion + 1 });
+  }
 
   if (rules.shuffleDecks !== true) {
     const botById = new Map(internal.bots.map((b) => [b.id, b]));
@@ -338,8 +522,8 @@ async function startHandler(req: Request): Promise<Response> {
       const baseHand: PvpHandState = { cards: dealt, discarded: [], drawPile: [] };
       const filled =
         participant.kind === 'human'
-          ? await fillHandWithPublic(participant.userId, baseHand, rules.dealPerPlayer)
-          : await fillHandWithPublic(auth.user.id, baseHand, rules.dealPerPlayer);
+          ? await fillHandWithFallback(participant.userId, baseHand, rules.dealPerPlayer)
+          : await fillHandWithFallback(auth.user.id, baseHand, rules.dealPerPlayer);
       hands.push(filled);
     }
 
@@ -365,7 +549,9 @@ async function startHandler(req: Request): Promise<Response> {
     (internal.raw as any)._drawPile = drawPile;
     (internal.raw as any)._usedPile = [];
     (internal.raw as any)._submittedDataCardIds = [...submittedDataCardIds];
+    (internal.raw as any)._submittedPresetFilenames = [...submittedPresetFilenames];
     (internal.raw as any)._publicDrawnCardIds = [...publicDrawnDataCardIds];
+    (internal.raw as any)._presetDrawnFilenames = [...presetDrawnFilenames];
 
     const roundId = await createPvpRound({
       roomId,
@@ -376,6 +562,7 @@ async function startHandler(req: Request): Promise<Response> {
         dealPerPlayer: rules.dealPerPlayer,
         cardsPerPlayer: rules.cardsPerPlayer,
         dealWhenEmpty: rules.dealWhenEmpty,
+        drawSource: rules.drawSource,
         recycleUsedCards: rules.recycleUsedCards,
         dedupe: rules.dedupe,
         hiddenCount: drawPile.length,
@@ -546,8 +733,8 @@ async function startHandler(req: Request): Promise<Response> {
     const baseHand = hands[i]!;
     const filled =
       participant.kind === 'human'
-        ? await fillHandWithPublic(participant.userId, baseHand, rules.dealPerPlayer)
-        : await fillHandWithPublic(auth.user.id, baseHand, rules.dealPerPlayer);
+        ? await fillHandWithFallback(participant.userId, baseHand, rules.dealPerPlayer)
+        : await fillHandWithFallback(auth.user.id, baseHand, rules.dealPerPlayer);
     if (participant.kind === 'human') {
       const ok = await upsertPvpRoomHand(roomId, participant.userId, JSON.stringify(filled));
       if (!ok) {
@@ -567,7 +754,9 @@ async function startHandler(req: Request): Promise<Response> {
   (internal.raw as any)._drawPile = drawPile;
   (internal.raw as any)._usedPile = [];
   (internal.raw as any)._submittedDataCardIds = [...submittedDataCardIds];
+  (internal.raw as any)._submittedPresetFilenames = [...submittedPresetFilenames];
   (internal.raw as any)._publicDrawnCardIds = [...publicDrawnDataCardIds];
+  (internal.raw as any)._presetDrawnFilenames = [...presetDrawnFilenames];
 
   const roundId = await createPvpRound({
     roomId,
@@ -578,6 +767,7 @@ async function startHandler(req: Request): Promise<Response> {
       dealPerPlayer: rules.dealPerPlayer,
       cardsPerPlayer: rules.cardsPerPlayer,
       dealWhenEmpty: rules.dealWhenEmpty,
+      drawSource: rules.drawSource,
       recycleUsedCards: rules.recycleUsedCards,
       dedupe: rules.dedupe,
       hiddenCount,

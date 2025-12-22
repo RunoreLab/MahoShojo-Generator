@@ -83,7 +83,7 @@ export function PvpLobbyPage() {
     if (participants < 2 || participants > 6) return '人数需要在 2-6 之间。';
 
     const cardsPerPlayer = Number.isFinite(rules.cardsPerPlayer) ? Math.floor(rules.cardsPerPlayer) : 0;
-    if (cardsPerPlayer < 1 || cardsPerPlayer > 50) return '每人提交数量需要在 1-50 之间。';
+    if (cardsPerPlayer < 0 || cardsPerPlayer > 50) return '每人提交数量需要在 0-50 之间。';
 
     const dealPerPlayer = Number.isFinite(rules.dealPerPlayer) ? Math.floor(rules.dealPerPlayer) : 0;
     if (dealPerPlayer < 1 || dealPerPlayer > 50) return '每人初始手牌数量需要在 1-50 之间。';
@@ -297,7 +297,7 @@ export function PvpLobbyPage() {
                 <div className="p-4 rounded-xl bg-white border text-sm">
                   <h2 className="font-semibold mb-2 text-gray-900">创建房间</h2>
                   <div className="text-xs text-gray-600 mb-3">
-                    提示：提交数与初始手牌数可任意设置；若卡牌不足，会按“未发放的提交卡 → 已使用卡（可选）→ 公开库”补足。
+                    提示：提交数与初始手牌数可任意设置；若卡牌不足，会按“未发放的提交卡 → 已使用卡（可选）→ 抽取来源”补足。每人提交=0 时跳过提交阶段，开局按“手牌为空时补发”发牌。
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="flex flex-col gap-1 col-span-2">
@@ -316,7 +316,7 @@ export function PvpLobbyPage() {
                       <input
                         className="border rounded px-2 py-1"
                         type="number"
-                        min={1}
+                        min={0}
                         max={50}
                         value={rules.cardsPerPlayer}
                         onChange={(e) => updateRules({ cardsPerPlayer: Number(e.target.value) })}
@@ -343,6 +343,21 @@ export function PvpLobbyPage() {
                         value={rules.dealWhenEmpty}
                         onChange={(e) => updateRules({ dealWhenEmpty: Number(e.target.value) })}
                       />
+                    </label>
+                    <label className="flex flex-col gap-1 col-span-2">
+                      <span className="text-gray-800">抽取来源（提交牌池用尽后）</span>
+                      <select
+                        className="border rounded px-2 py-1"
+                        value={rules.drawSource ?? 'public'}
+                        onChange={(e) => updateRules({ drawSource: e.target.value as 'public' | 'preset' | 'preset+public' })}
+                      >
+                        <option value="public">公开库（默认）</option>
+                        <option value="preset">预设</option>
+                        <option value="preset+public">预设 + 公开库</option>
+                      </select>
+                      <div className="text-xs text-gray-500">
+                        每人提交=0 时：开局直接按“手牌为空时补发”发牌。
+                      </div>
                     </label>
                     <label className="flex items-center gap-2 col-span-1 text-gray-800">
                       <input

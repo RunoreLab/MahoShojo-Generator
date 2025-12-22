@@ -25,6 +25,8 @@ export type PvpMode = 'daily' | 'classic' | 'kizuna' | 'scenario';
 export type PvpWinCondition = 'mostWinsAfterMaxRounds';
 export type PvpTieBreaker = 'draw';
 
+export type PvpDrawSource = 'public' | 'preset' | 'preset+public';
+
 export interface PvpBestOfRules {
   enabled: boolean;
   maxRounds: number;
@@ -37,6 +39,7 @@ export interface PvpRoomRules {
   cardsPerPlayer: number; // 每人提交数量
   dealPerPlayer: number;  // 每人初始手牌数量
   dealWhenEmpty: number; // 当手牌为空时补发数量
+  drawSource: PvpDrawSource; // 提交牌池用尽后的抽取来源（0 提交时也用于开局发牌）
   recycleUsedCards: boolean; // 已使用的卡牌是否可被重新发放
   dedupe: boolean;
   /**

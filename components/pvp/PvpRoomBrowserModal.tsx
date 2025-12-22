@@ -350,6 +350,7 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
                       <div>每人提交：{room.rules?.cardsPerPlayer ?? '—'}</div>
                       <div>初始手牌：{room.rules?.dealPerPlayer ?? '—'}</div>
                       <div>手牌为空补发：{room.rules?.dealWhenEmpty ?? '—'}</div>
+                      <div>抽取来源：{room.rules?.drawSource ?? 'public'}</div>
                       <div>去重：{room.rules?.dedupe ? '开启' : '关闭'}</div>
                       <div>洗牌合池：{room.rules?.shuffleDecks ? '开启' : '关闭'}</div>
                     </div>

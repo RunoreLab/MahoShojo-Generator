@@ -107,6 +107,8 @@ export const clearPvpRoomRuntimeFromRulesJson = (rulesJson: string): string => {
     delete raw._usedPile;
     delete raw._publicDrawnCardIds;
     delete raw._submittedDataCardIds;
+    delete raw._presetDrawnFilenames;
+    delete raw._submittedPresetFilenames;
 
     return JSON.stringify(raw);
   } catch {

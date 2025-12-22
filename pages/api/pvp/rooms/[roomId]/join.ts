@@ -76,7 +76,10 @@ async function joinHandler(req: Request): Promise<Response> {
 
   const now = new Date().toISOString();
   const nextPlayers = await getPvpRoomPlayers(roomId);
-  const shouldAdvance = room.phase === 'waiting' && (nextPlayers.length + bots.length) >= rules.participants;
+  const shouldAdvance =
+    room.phase === 'waiting' &&
+    rules.cardsPerPlayer > 0 &&
+    (nextPlayers.length + bots.length) >= rules.participants;
   const casOk = await updatePvpRoomCas(roomId, expectedVersion, {
     ...(shouldAdvance ? { phase: 'submitting' } : {}),
     last_activity_at: now,
