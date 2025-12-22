@@ -1170,7 +1170,7 @@ export function PvpRoomPage() {
                           <button
                             className="generate-button mt-3 w-full"
                             style={{ backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #d97706)' }}
-                            onClick={handleResolve}
+                            onClick={() => handleResolve()}
                             disabled={resolveMutation.isPending || isCooldown || isCustomProviderMissingKey}
                           >
                             {resolveMutation.isPending
