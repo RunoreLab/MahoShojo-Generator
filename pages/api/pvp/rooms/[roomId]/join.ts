@@ -37,9 +37,6 @@ async function joinHandler(req: Request): Promise<Response> {
   const room = await getPvpRoomById(roomId);
   if (!room) return json({ error: '房间不存在' }, { status: 404 });
   if (room.status !== 'open' || room.phase === 'closed') return json({ error: '房间已关闭' }, { status: 410 });
-  if (room.phase !== 'waiting' && room.phase !== 'submitting') {
-    return json({ error: '房间已进入对局阶段，无法加入' }, { status: 409 });
-  }
 
   if (room.expires_at) {
     const expired = Date.now() > Date.parse(room.expires_at);
@@ -49,17 +46,23 @@ async function joinHandler(req: Request): Promise<Response> {
     }
   }
 
-  const expectedVersion = Number.isFinite(body.data.expectedVersion)
-    ? Math.floor(body.data.expectedVersion as number)
-    : room.version;
-  if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
-
   const rules = parseRules(room.rules_json);
   if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
 
   const players = await getPvpRoomPlayers(roomId);
   const alreadyJoined = players.some((p) => p.user_id === auth.user.id);
   if (alreadyJoined) return json({ success: true, alreadyJoined: true });
+
+  // 注意：刷新页面时，已在房间内的玩家需要能“重新加入”（幂等）。
+  // 因此阶段限制应当只针对新增玩家，不应阻止已在房间内的玩家进入。
+  if (room.phase !== 'waiting' && room.phase !== 'submitting') {
+    return json({ error: '房间已进入对局阶段，无法加入' }, { status: 409 });
+  }
+
+  const expectedVersion = Number.isFinite(body.data.expectedVersion)
+    ? Math.floor(body.data.expectedVersion as number)
+    : room.version;
+  if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
 
   if (players.length >= rules.participants) return json({ error: '房间已满' }, { status: 409 });
 
