@@ -1,6 +1,7 @@
 // components/BattleDataModal.tsx
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import DataCard from './DataCard';
 import SortSelector from './SortSelector';
 import DataCardDetailsModal from './DataCardDetailsModal';
@@ -749,9 +750,9 @@ export default function BattleDataModal({
     return null;
   }
 
-  return (
+  const modal = (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg mx-4 p-6 max-w-7xl w-full h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
+      <div className="bg-white rounded-lg p-6 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">×</button>
 	        <h2 className="text-xl font-bold mb-4 pr-8">{titleOverride || (isPvpHandTab ? '我的手牌' : `选择${typeLabel}数据卡`)}</h2>
 
@@ -1036,11 +1037,11 @@ export default function BattleDataModal({
               </button>
             </div>
           }
-        </div>
-      </div>
+	    </div>
+	  </div>
 
-      {/* 详情模态框 */}
-      {selectedCard && (
+	  {/* 详情模态框 */}
+	  {selectedCard && (
         <DataCardDetailsModal
           isOpen={showDetailsModal}
           onClose={() => {
@@ -1062,7 +1063,12 @@ export default function BattleDataModal({
             updatedAt: selectedCard.updated_at
           }}
         />
-      )}
+	  )}
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modal, document.body);
+  }
+  return modal;
 }
