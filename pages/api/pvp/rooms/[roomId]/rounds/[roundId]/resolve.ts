@@ -549,6 +549,7 @@ async function resolveHandler(req: Request): Promise<Response> {
     resolvedWinnerUserId,
     confirmedUserIds: [],
     confirmedBotIds: internal.bots.map((b) => b.id),
+    confirmedAtByUserId: {},
     createdAt: new Date().toISOString(),
   };
 

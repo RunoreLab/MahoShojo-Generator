@@ -7,6 +7,7 @@ import {
   getPvpRoomPlayers,
   getPvpRoundById,
   getPvpRoundsByMatch,
+  getPvpMatchById,
   getRandomPublicCardExcluding,
   updatePvpMatch,
   updatePvpRoomCas,
@@ -35,6 +36,9 @@ type PostRoundState = {
   resolvedWinnerUserId: number | null;
   confirmedUserIds: number[];
   confirmedBotIds: string[];
+  confirmedAtByUserId: Record<string, string>;
+  createdAt: string | null;
+  updatedAt: string | null;
 };
 
 const parsePostRoundState = (raw: unknown): PostRoundState | null => {
@@ -52,6 +56,17 @@ const parsePostRoundState = (raw: unknown): PostRoundState | null => {
   const confirmedBotIds = Array.isArray(obj.confirmedBotIds)
     ? obj.confirmedBotIds.filter((x: any) => typeof x === 'string' && x.trim()).map((x: string) => x.trim())
     : [];
+  const confirmedAtByUserId: Record<string, string> = {};
+  const confirmedAtRaw = obj.confirmedAtByUserId;
+  if (confirmedAtRaw && typeof confirmedAtRaw === 'object') {
+    for (const [k, v] of Object.entries(confirmedAtRaw as Record<string, unknown>)) {
+      const key = typeof k === 'string' ? k.trim() : '';
+      const value = typeof v === 'string' ? v.trim() : '';
+      if (key && value) confirmedAtByUserId[key] = value;
+    }
+  }
+  const createdAt = typeof obj.createdAt === 'string' ? obj.createdAt : null;
+  const updatedAt = typeof obj.updatedAt === 'string' ? obj.updatedAt : null;
 
   if (!roundId || !matchId) return null;
   if (roundIndex <= 0) return null;
@@ -66,6 +81,9 @@ const parsePostRoundState = (raw: unknown): PostRoundState | null => {
     resolvedWinnerUserId,
     confirmedUserIds,
     confirmedBotIds,
+    confirmedAtByUserId,
+    createdAt,
+    updatedAt,
   };
 };
 
@@ -124,7 +142,6 @@ async function confirmHandler(req: Request): Promise<Response> {
   const internal = internalParsed.internal;
   const rules = internal.rules;
   const bots = internal.bots;
-  const recordMatch = bots.length <= 0;
 
   const players = await getPvpRoomPlayers(roomId);
   if (!players.some((p) => p.user_id === auth.user.id)) return json({ error: '你不在该房间中' }, { status: 403 });
@@ -142,6 +159,9 @@ async function confirmHandler(req: Request): Promise<Response> {
 
   const confirmedUserIdSet = new Set<number>(postRound.confirmedUserIds);
   confirmedUserIdSet.add(auth.user.id);
+  const nowIso = new Date().toISOString();
+  const nextConfirmedAtByUserId: Record<string, string> = { ...(postRound.confirmedAtByUserId ?? {}) };
+  nextConfirmedAtByUserId[String(auth.user.id)] = nowIso;
 
   const confirmedHumanCount = playerUserIds.filter((id) => confirmedUserIdSet.has(id)).length;
   const allHumansConfirmed = confirmedHumanCount >= players.length && players.length > 0;
@@ -165,13 +185,15 @@ async function confirmHandler(req: Request): Promise<Response> {
     ...postRound,
     confirmedUserIds: [...confirmedUserIdSet],
     confirmedBotIds: [...confirmedBotIdsSet],
+    confirmedAtByUserId: nextConfirmedAtByUserId,
+    updatedAt: nowIso,
   };
 
   const phaseAfterConfirm = allConfirmed ? 'advancing' : 'reviewing';
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     phase: phaseAfterConfirm,
     rules_json: stringifyPvpRoomInternalState(internal),
-    last_activity_at: new Date().toISOString(),
+    last_activity_at: nowIso,
   });
   if (!ok) return json({ error: '确认失败（版本冲突）', code: 'VERSION_CONFLICT' }, { status: 409 });
 
@@ -468,6 +490,7 @@ async function confirmHandler(req: Request): Promise<Response> {
   }
 
   // 最后一回合：结束整场对战
+  const recordMatch = Boolean(await getPvpMatchById(postRound.matchId));
   let matchWinnerUserId: number | null = null;
   if (postRound.bestOfEnabled && recordMatch) {
     const rounds = await getPvpRoundsByMatch(postRound.matchId);

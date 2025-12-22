@@ -341,6 +341,16 @@ export async function getPvpRoomSubmissions(roomId: string): Promise<PvpRoomSubm
   }
 }
 
+export async function deletePvpRoomSubmission(roomId: string, userId: number): Promise<boolean> {
+  try {
+    const result = await queryFromD1('DELETE FROM pvp_room_submissions WHERE room_id = ? AND user_id = ?', [roomId, userId]) as any;
+    return Boolean(result?.success);
+  } catch (error) {
+    console.error('删除 pvp_room_submissions 失败:', error);
+    return false;
+  }
+}
+
 export interface PvpEligibleDataCardRow {
   id: string;
   user_id: number;
@@ -419,6 +429,16 @@ export async function upsertPvpRoomHand(roomId: string, userId: number, handJson
     return Boolean(result.success);
   } catch (error) {
     console.error('写入 pvp_room_hands 失败:', error);
+    return false;
+  }
+}
+
+export async function deletePvpRoomHand(roomId: string, userId: number): Promise<boolean> {
+  try {
+    const result = await queryFromD1('DELETE FROM pvp_room_hands WHERE room_id = ? AND user_id = ?', [roomId, userId]) as any;
+    return Boolean(result?.success);
+  } catch (error) {
+    console.error('删除 pvp_room_hands 失败:', error);
     return false;
   }
 }

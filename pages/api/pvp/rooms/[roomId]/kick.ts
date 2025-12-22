@@ -1,10 +1,69 @@
-import { getPvpRoomById, getPvpRoomPlayers, removePvpRoomPlayer, updatePvpMatch, updatePvpRoomCas } from '@/lib/d1';
+import {
+  deletePvpRoomHand,
+  deletePvpRoomSubmission,
+  generateUUID,
+  getLatestPvpRoundByMatch,
+  getPvpRoomById,
+  getPvpRoomHands,
+  getPvpRoomPlayers,
+  getPvpRoomSubmissions,
+  getPvpRoundChoices,
+  removePvpRoomPlayer,
+  updatePvpRoomCas,
+} from '@/lib/d1';
+import { pickBotStrategyId } from '@/lib/pvp/bot/strategies';
+import { buildBotSubmissionPayload } from '@/lib/pvp/bot/submission';
+import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import type { PvpHandState, PvpSnapshotRef, PvpSubmissionPayload } from '@/lib/pvp/types';
+import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export const runtime = 'edge';
 
 type KickBody = { expectedVersion?: number; userId?: number };
+
+const parseSubmission = (raw: string): PvpSubmissionPayload | null => {
+  try {
+    const parsed = JSON.parse(raw) as PvpSubmissionPayload;
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as any).cards)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const parseHand = (raw: string): PvpHandState | null => {
+  try {
+    const parsed = JSON.parse(raw) as PvpHandState;
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as any).cards) || !Array.isArray((parsed as any).discarded)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const parseChoiceSnapshotId = (raw: string): string | null => {
+  try {
+    const parsed = JSON.parse(raw) as PvpSnapshotRef;
+    if (!parsed || typeof parsed !== 'object' || (parsed as any).kind !== 'snapshot') return null;
+    const id = typeof (parsed as any).id === 'string' ? String((parsed as any).id).trim() : '';
+    return id || null;
+  } catch {
+    return null;
+  }
+};
+
+const buildUniqueBotName = (base: string, used: Set<string>): string => {
+  const trimmed = base.trim() || '托管AI';
+  if (!used.has(trimmed)) return trimmed;
+  for (let i = 2; i <= 99; i++) {
+    const candidate = `${trimmed}#${i}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${trimmed}#${Date.now().toString(36).slice(-4)}`;
+};
 
 async function kickHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
@@ -32,33 +91,99 @@ async function kickHandler(req: Request): Promise<Response> {
   if (targetId === auth.user.id) return json({ error: '不能踢自己' }, { status: 400 });
 
   const players = await getPvpRoomPlayers(roomId);
-  if (!players.some((p) => p.user_id === targetId)) return json({ error: '该用户不在房间中' }, { status: 404 });
+  const targetPlayer = players.find((p) => p.user_id === targetId) ?? null;
+  if (!targetPlayer) return json({ error: '该用户不在房间中' }, { status: 404 });
 
-  await removePvpRoomPlayer(roomId, targetId);
   const now = new Date().toISOString();
-
-  const isInMatch = room.phase === 'choosing' || room.phase === 'reviewing' || room.phase === 'advancing' || room.phase === 'resolving' || room.phase === 'dealing';
-  const patch = isInMatch
-    ? { status: 'closed' as const, phase: 'aborted' as const }
-    : { phase: 'waiting' as const };
-
-  const ok = await updatePvpRoomCas(roomId, expectedVersion, { ...patch, last_activity_at: now });
-  if (!ok) return json({ error: '踢人成功，但状态更新失败，请刷新', code: 'UPDATE_FAILED' }, { status: 409 });
-
-  if (room.current_match_id && isInMatch) {
-    await updatePvpMatch(room.current_match_id, {
-      status: 'aborted',
-      endedAt: now,
-      winnerUserId: null,
-      resultJson: JSON.stringify({
-        reason: 'kicked',
-        kickedUserId: targetId,
-        byUserId: auth.user.id,
-      }),
-    });
+  const canReplaceWithBot = room.phase === 'submitting' || room.phase === 'choosing' || room.phase === 'reviewing';
+  const isBusyPhase = room.phase === 'dealing' || room.phase === 'advancing' || room.phase === 'resolving';
+  if (isBusyPhase) {
+    return json({ error: '房间正在推进/结算中，请稍后再踢出', code: 'PHASE_BUSY' }, { status: 409 });
   }
 
-  return json({ success: true });
+  if (canReplaceWithBot) {
+    const seat = typeof targetPlayer.seat === 'number' ? Math.floor(targetPlayer.seat) : null;
+    if (seat === null || seat < 0) return json({ error: '座位异常，无法托管', code: 'SEAT_INVALID' }, { status: 500 });
+
+    const parsed = parsePvpRoomInternalState(room.rules_json);
+    if ('error' in parsed) return json({ error: parsed.error }, { status: 500 });
+    const internal = parsed.internal;
+    const rules = internal.rules;
+
+    if (internal.bots.some((b) => b.seat === seat)) {
+      return json({ error: '座位冲突：该座位已存在机器人', code: 'SEAT_CONFLICT' }, { status: 409 });
+    }
+
+    const usedNames = new Set<string>([
+      ...players.filter((p) => p.user_id !== targetId).map((p) => (typeof p.username === 'string' ? p.username.trim() : '')).filter(Boolean),
+      ...internal.bots.map((b) => b.name),
+    ]);
+    const baseName = `托管·${(targetPlayer.username || '').trim() || `用户${targetId}`}`;
+    const botName = buildUniqueBotName(baseName, usedNames);
+    const botId = `bot_${generateUUID()}`;
+    const strategyId = pickBotStrategyId(Math.random);
+
+    const submissions = await getPvpRoomSubmissions(roomId);
+    const existingSub = submissions.find((s) => s.user_id === targetId)?.submission_json ?? null;
+    const parsedSub = existingSub ? parseSubmission(existingSub) : null;
+    let submission: PvpSubmissionPayload = parsedSub && parsedSub.cards.length === rules.cardsPerPlayer
+      ? parsedSub
+      : { cards: [], hasPrivateCard: false };
+
+    if (rules.cardsPerPlayer > 0 && submission.cards.length !== rules.cardsPerPlayer) {
+      const origin = getRequestOrigin(req);
+      const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
+      const built = await buildBotSubmissionPayload({ rules, origin, forwardHeaders: subrequestAuthHeaders });
+      if (built.cards.length !== rules.cardsPerPlayer) {
+        return json({ error: '托管失败：无法构建机器人卡组（候选不足）', code: 'BOT_DECK_FAILED' }, { status: 409 });
+      }
+      submission = built;
+    }
+
+    const hands = await getPvpRoomHands(roomId);
+    const handRow = hands.find((h) => h.user_id === targetId);
+    const hand = handRow ? parseHand(handRow.hand_json) : null;
+
+    const choicesByRoundId: Record<string, string> = {};
+    if (room.phase === 'choosing' && room.current_match_id) {
+      const latestRound = await getLatestPvpRoundByMatch(room.current_match_id);
+      if (latestRound && latestRound.status === 'pending') {
+        const choiceRows = await getPvpRoundChoices(latestRound.id);
+        const targetChoice = choiceRows.find((c) => c.user_id === targetId)?.choice_ref_json ?? null;
+        const snapshotId = targetChoice ? parseChoiceSnapshotId(targetChoice) : null;
+        if (snapshotId) choicesByRoundId[latestRound.id] = snapshotId;
+      }
+    }
+
+    internal.bots.push({
+      id: botId,
+      name: botName,
+      seat,
+      strategyId,
+      submission,
+      ...(hand ? { hand } : {}),
+      ...(Object.keys(choicesByRoundId).length > 0 ? { choicesByRoundId } : {}),
+    });
+
+    const ok = await updatePvpRoomCas(roomId, expectedVersion, {
+      rules_json: stringifyPvpRoomInternalState(internal),
+      last_activity_at: now,
+    });
+    if (!ok) return json({ error: '踢出失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
+
+    await removePvpRoomPlayer(roomId, targetId);
+    await deletePvpRoomSubmission(roomId, targetId);
+    await deletePvpRoomHand(roomId, targetId);
+
+    return json({ success: true, replacedByBot: { botId, botName, seat }, nextVersion: expectedVersion + 1 });
+  }
+
+  const remaining = players.filter((p) => p.user_id !== targetId);
+  const ok = await updatePvpRoomCas(roomId, expectedVersion, { phase: remaining.length <= 0 ? 'closed' : 'waiting', last_activity_at: now, ...(remaining.length <= 0 ? { status: 'closed' as const } : {}) });
+  if (!ok) return json({ error: '踢出失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
+  await removePvpRoomPlayer(roomId, targetId);
+
+  return json({ success: true, nextVersion: expectedVersion + 1 });
 }
 
 export default withPvpErrorBoundary(kickHandler);
