@@ -1,17 +1,23 @@
 import {
   createPvpRound,
+  createPvpCardSnapshot,
   getPvpCardSnapshotById,
   getPvpRoomById,
+  getPvpRoomHands,
   getPvpRoomPlayers,
   getPvpRoundById,
   getPvpRoundsByMatch,
+  getRandomPublicCardExcluding,
   updatePvpMatch,
   updatePvpRoomCas,
+  upsertPvpRoomHand,
 } from '@/lib/d1';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
 
@@ -58,6 +64,32 @@ const parsePostRoundState = (raw: unknown): PostRoundState | null => {
     confirmedUserIds,
     confirmedBotIds,
   };
+};
+
+const parseHand = (raw: string): PvpHandState | null => {
+  try {
+    const parsed = JSON.parse(raw) as PvpHandState;
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as any).cards) || !Array.isArray((parsed as any).discarded)) return null;
+    return {
+      cards: (parsed as any).cards as PvpSnapshotRef[],
+      discarded: (parsed as any).discarded as PvpSnapshotRef[],
+      drawPile: Array.isArray((parsed as any).drawPile) ? ((parsed as any).drawPile as PvpSnapshotRef[]) : [],
+    };
+  } catch {
+    return null;
+  }
+};
+
+const normalizeSnapshotRefArray = (raw: unknown): PvpSnapshotRef[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((c) => (c && typeof c === 'object' && (c as any).kind === 'snapshot' && typeof (c as any).id === 'string' ? ({ kind: 'snapshot', id: String((c as any).id) } as PvpSnapshotRef) : null))
+    .filter(Boolean) as PvpSnapshotRef[];
+};
+
+const normalizeStringArray = (raw: unknown): string[] => {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.filter((x) => typeof x === 'string').map((x) => x.trim()).filter(Boolean))];
 };
 
 async function confirmHandler(req: Request): Promise<Response> {
@@ -156,6 +188,166 @@ async function confirmHandler(req: Request): Promise<Response> {
   const isLastRound = postRound.bestOfEnabled ? postRound.roundIndex >= postRound.maxRounds : true;
 
   if (!isLastRound) {
+    const handsRows = await getPvpRoomHands(roomId);
+    const handsByUserId = new Map<number, PvpHandState>();
+    for (const row of handsRows) {
+      const userId = typeof (row as any)?.user_id === 'number' ? (row as any).user_id : null;
+      if (userId === null) continue;
+      const parsed = parseHand((row as any).hand_json);
+      if (!parsed) continue;
+      handsByUserId.set(userId, parsed);
+    }
+
+    const dealWhenEmpty = Math.max(1, Math.floor(rules.dealWhenEmpty));
+    let drawPile = normalizeSnapshotRefArray((internal.raw as any)?._drawPile);
+    let usedPile = normalizeSnapshotRefArray((internal.raw as any)?._usedPile);
+    const submittedDataCardIds = normalizeStringArray((internal.raw as any)?._submittedDataCardIds);
+    const publicDrawnDataCardIds = new Set<string>(normalizeStringArray((internal.raw as any)?._publicDrawnCardIds));
+    const excludePublicDataCardIds = new Set<string>([...submittedDataCardIds, ...publicDrawnDataCardIds]);
+
+    const dirtyUserIds = new Set<number>();
+
+    const removeFromAllDiscards = (snapshotId: string) => {
+      if (!snapshotId) return;
+      for (const [userId, hand] of handsByUserId.entries()) {
+        const before = Array.isArray(hand.discarded) ? hand.discarded.length : 0;
+        const nextDiscarded = (Array.isArray(hand.discarded) ? hand.discarded : []).filter((c) => c?.kind === 'snapshot' && c.id !== snapshotId);
+        if (nextDiscarded.length !== before) {
+          handsByUserId.set(userId, { ...hand, discarded: nextDiscarded });
+          dirtyUserIds.add(userId);
+        }
+      }
+      for (const b of internal.bots) {
+        if (!b.hand?.discarded?.length) continue;
+        const before = b.hand.discarded.length;
+        b.hand.discarded = b.hand.discarded.filter((c: any) => c?.kind === 'snapshot' && c.id !== snapshotId);
+        if (b.hand.discarded.length !== before) {
+          // bot hand is in rules_json，不需要额外标记
+        }
+      }
+    };
+
+    const drawPublicSnapshot = async (ownerUserId: number): Promise<PvpSnapshotRef | null> => {
+      const row = await getRandomPublicCardExcluding('character', [...excludePublicDataCardIds]);
+      if (!row || typeof row.id !== 'string' || !row.id.trim()) return null;
+      const dataCardId = String(row.id).trim();
+      if (excludePublicDataCardIds.has(dataCardId)) return null;
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(String(row.data ?? '{}'));
+      } catch {
+        return null;
+      }
+
+      const snapshotId = await createPvpCardSnapshot({
+        roomId,
+        ownerUserId,
+        refJson: JSON.stringify({
+          kind: 'data_card',
+          id: dataCardId,
+          updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+          drawnFromPublic: true,
+          sourceIsPublic: true,
+          sourceAuthor: typeof row.username === 'string' ? row.username : null,
+        }),
+        cardType: inferPvpCombatantTypeFromJson(parsed),
+        name: typeof row.name === 'string' && row.name.trim() ? row.name.trim() : '公开库卡牌',
+        dataJson: JSON.stringify(parsed),
+        sourceUpdatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+      });
+      if (!snapshotId) return null;
+
+      excludePublicDataCardIds.add(dataCardId);
+      publicDrawnDataCardIds.add(dataCardId);
+      return { kind: 'snapshot', id: snapshotId };
+    };
+
+    const dealToHand = async (ownerUserId: number, hand: PvpHandState): Promise<PvpHandState> => {
+      const nextCards: PvpSnapshotRef[] = [];
+      let need = dealWhenEmpty;
+
+      if (need > 0 && drawPile.length > 0) {
+        const take = Math.min(need, drawPile.length);
+        nextCards.push(...drawPile.slice(0, take));
+        drawPile = drawPile.slice(take);
+        need -= take;
+      }
+
+      if (need > 0 && rules.recycleUsedCards === true && usedPile.length > 0) {
+        const take = Math.min(need, usedPile.length);
+        const picked = usedPile.slice(0, take);
+        usedPile = usedPile.slice(take);
+        for (const c of picked) removeFromAllDiscards(c.id);
+        nextCards.push(...picked);
+        need -= take;
+      }
+
+      while (need > 0) {
+        const snap = await drawPublicSnapshot(ownerUserId);
+        if (!snap) break;
+        nextCards.push(snap);
+        need -= 1;
+      }
+
+      if (nextCards.length <= 0) return hand;
+      return { ...hand, cards: [...(Array.isArray(hand.cards) ? hand.cards : []), ...nextCards] };
+    };
+
+    // 先给所有“空手牌”的玩家补牌（按座位顺序）
+    const sortedPlayers = [...players].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
+    for (const p of sortedPlayers) {
+      const userId = p.user_id;
+      const hand = handsByUserId.get(userId);
+      if (!hand) continue;
+      if (Array.isArray(hand.cards) && hand.cards.length > 0) continue;
+      const next = await dealToHand(userId, hand);
+      handsByUserId.set(userId, next);
+      dirtyUserIds.add(userId);
+    }
+
+    for (const b of internal.bots) {
+      if (!b.hand) continue;
+      if (Array.isArray(b.hand.cards) && b.hand.cards.length > 0) continue;
+      b.hand = await dealToHand(room.host_user_id, b.hand);
+    }
+
+    // 若仍有人空手，则不推进（避免下一回合无法出牌）
+    const anyEmptyHuman = sortedPlayers.some((p) => {
+      const hand = handsByUserId.get(p.user_id);
+      return hand ? !(Array.isArray(hand.cards) && hand.cards.length > 0) : false;
+    });
+    const anyEmptyBot = internal.bots.some((b) => b.hand ? !(Array.isArray(b.hand.cards) && b.hand.cards.length > 0) : false);
+    if (anyEmptyHuman || anyEmptyBot) {
+      await updatePvpRoomCas(roomId, advancingVersion, {
+        phase: 'reviewing',
+        rules_json: stringifyPvpRoomInternalState(internal),
+        last_activity_at: new Date().toISOString(),
+      });
+      return json({ error: '补牌失败：可用卡牌不足，请调整房间规则后重试', code: 'DEAL_WHEN_EMPTY_FAILED' }, { status: 409 });
+    }
+
+    // 持久化手牌与牌堆/公开库去重记录
+    for (const p of sortedPlayers) {
+      const userId = p.user_id;
+      const hand = handsByUserId.get(userId);
+      if (!hand) continue;
+      if (!dirtyUserIds.has(userId)) continue;
+      const ok = await upsertPvpRoomHand(roomId, userId, JSON.stringify(hand));
+      if (!ok) {
+        await updatePvpRoomCas(roomId, advancingVersion, {
+          phase: 'reviewing',
+          rules_json: stringifyPvpRoomInternalState(internal),
+          last_activity_at: new Date().toISOString(),
+        });
+        return json({ error: '补牌失败：写入手牌数据失败，请稍后重试', code: 'DEAL_WHEN_EMPTY_WRITE_FAILED' }, { status: 500 });
+      }
+    }
+
+    (internal.raw as any)._drawPile = drawPile;
+    (internal.raw as any)._usedPile = usedPile;
+    (internal.raw as any)._publicDrawnCardIds = [...publicDrawnDataCardIds];
+
     const nextRoundId = await createPvpRound({
       roomId,
       matchId: postRound.matchId,
@@ -255,4 +447,3 @@ async function confirmHandler(req: Request): Promise<Response> {
 }
 
 export default withPvpErrorBoundary(confirmHandler);
-

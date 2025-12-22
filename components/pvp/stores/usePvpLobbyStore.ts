@@ -43,7 +43,14 @@ export const usePvpLobbyStore = create<PvpLobbyStoreState>()(
       name: 'pvp-lobby-storage',
       storage: createJSONStorage(createStorage),
       partialize: (state) => ({ rules: state.rules }),
+      merge: (persisted, current) => {
+        const persistedRules = (persisted as any)?.rules;
+        return {
+          ...current,
+          ...(persisted as any),
+          rules: { ...DEFAULT_PVP_RULES, ...(persistedRules && typeof persistedRules === 'object' ? persistedRules : {}) },
+        } as PvpLobbyStoreState;
+      },
     }
   )
 );
-

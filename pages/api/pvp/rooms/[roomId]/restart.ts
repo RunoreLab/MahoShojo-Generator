@@ -1,5 +1,5 @@
 import { clearPvpRoomRuntimeState, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
-import { clearBotsFromRulesJson, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { clearPvpRoomRuntimeFromRulesJson, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
@@ -41,7 +41,7 @@ async function restartHandler(req: Request): Promise<Response> {
   const cleared = await clearPvpRoomRuntimeState(roomId);
   if (!cleared) return json({ error: '清理对局数据失败' }, { status: 500 });
 
-  const nextRulesJson = clearBotsFromRulesJson(room.rules_json);
+  const nextRulesJson = clearPvpRoomRuntimeFromRulesJson(room.rules_json);
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     status: 'open',
     phase: players.length >= rules.participants ? 'submitting' : 'waiting',
