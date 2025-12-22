@@ -135,6 +135,7 @@ export function PvpRoomPage() {
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
 
   const [roomPasswordDraft, setRoomPasswordDraft] = useState('');
+  const [rulesDraft, setRulesDraft] = useState<PvpRoomRules | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const presetsQuery = usePresetQuery();
@@ -218,6 +219,14 @@ export function PvpRoomPage() {
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
   const allowNonHostControl = rules?.allowNonHostControl === true;
   const canControlResolve = isHost || allowNonHostControl;
+
+  useEffect(() => {
+    if (!roomId) {
+      setRulesDraft(null);
+      return;
+    }
+    if (!rulesDraft && rules) setRulesDraft(rules);
+  }, [roomId, rules, rulesDraft]);
 
   useEffect(() => {
     if (phase !== 'choosing') setShowHandModal(false);
@@ -319,6 +328,37 @@ export function PvpRoomPage() {
   const latestRound = roomQuery.data?.latestRound;
   const latestRoundResult = roomQuery.data?.latestRoundResult;
   const score = roomQuery.data?.score;
+
+  const rulesDraftError = useMemo(() => {
+    if (!rulesDraft) return null;
+    if (rulesDraft.cardsPerPlayer <= rulesDraft.dealPerPlayer) return 'cardsPerPlayer 必须 > dealPerPlayer（保证对手手牌不可被直接推出）';
+    if (rulesDraft.bestOf?.enabled && rulesDraft.dealPerPlayer < rulesDraft.bestOf.maxRounds) {
+      return '启用多局制时，dealPerPlayer 必须 >= maxRounds（保证必定结束）';
+    }
+    return null;
+  }, [rulesDraft]);
+
+  const resetRulesDraftFromRoom = () => {
+    if (rules) setRulesDraft(rules);
+  };
+
+  const saveRulesDraft = async () => {
+    if (!rulesDraft) return;
+    if (rulesDraftError) {
+      setError(`规则不合法：${rulesDraftError}`);
+      return;
+    }
+    setError(null);
+    try {
+      await rulesMutation.mutateAsync({ rules: rulesDraft });
+    } catch (e: any) {
+      if (e?.code === 'NEED_CLEAR_SUBMISSIONS') {
+        const ok = typeof window !== 'undefined' && window.confirm('修改每人提交数量会清空已提交卡组，是否继续？');
+        if (!ok) return;
+        await rulesMutation.mutateAsync({ rules: rulesDraft, clearSubmissions: true });
+      }
+    }
+  };
 
   const refetchUserSummary = userSummaryQuery.refetch;
   const lastSummaryRefreshKeyRef = useRef<string>('');
@@ -586,6 +626,35 @@ export function PvpRoomPage() {
     },
     onSuccess: () => void roomQuery.refetch(),
     onError: (e) => setError(e instanceof Error ? e.message : '更新设置失败'),
+  });
+
+  const rulesMutation = useMutation({
+    mutationFn: async (payload: { rules: PvpRoomRules; clearSubmissions?: boolean }) => {
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/rules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({
+          expectedVersion: version,
+          rules: payload.rules,
+          ...(payload.clearSubmissions ? { clearSubmissions: true } : {}),
+        }),
+      });
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) {
+        const payload = (data || {}) as ApiErrorPayload;
+        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+          status: res.status,
+          code: payload.code,
+          traceId: payload.traceId,
+          detail: payload.detail,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => setError(e instanceof Error ? e.message : '更新规则失败'),
   });
 
   const restartMutation = useMutation({
@@ -971,6 +1040,16 @@ export function PvpRoomPage() {
                         规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 发牌 {rules.dealPerPlayer} / 去重 {String(rules.dedupe)} / 模式 {rules.mode}
                       </div>
                     )}
+                    {rules?.bestOf?.enabled && latestRound ? (
+                      <div className="mt-1 text-xs text-gray-600">
+                        当前回合：{latestRound.index}/{rules.bestOf.maxRounds}
+                      </div>
+                    ) : null}
+                    {phase === 'choosing' ? (
+                      <div className="mt-1 text-xs text-gray-600">
+                        我的手牌：{myHandCards.length} 张；弃牌：{Array.isArray(myHand?.discarded) ? myHand?.discarded.length : 0} 张
+                      </div>
+                    ) : null}
                     {score && (
                       <div className="mt-2 text-xs text-gray-600">
                         赛制：最多 {score.maxRounds} 轮；当前胜场：
@@ -1141,6 +1220,127 @@ export function PvpRoomPage() {
                       </label>
                       <div className="text-xs text-gray-500 mt-1">默认关闭更安全；开启后任意玩家可结算并使用其选择的 AI 设置。</div>
                     </div>
+
+                    {(phase === 'waiting' || phase === 'submitting') && rulesDraft ? (
+                      <div className="mt-4 border-t pt-3">
+                        <div className="font-semibold text-sm mb-2">对战规则</div>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <label className="flex flex-col gap-1 col-span-2">
+                            <span>人数（2-6）</span>
+                            <input
+                              className="border rounded px-2 py-1"
+                              type="number"
+                              min={2}
+                              max={6}
+                              value={rulesDraft.participants}
+                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, participants: Number(e.target.value) } : r))}
+                              disabled={rulesMutation.isPending}
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span>每人提交</span>
+                            <input
+                              className="border rounded px-2 py-1"
+                              type="number"
+                              min={1}
+                              max={10}
+                              value={rulesDraft.cardsPerPlayer}
+                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, cardsPerPlayer: Number(e.target.value) } : r))}
+                              disabled={rulesMutation.isPending}
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span>每人发牌</span>
+                            <input
+                              className="border rounded px-2 py-1"
+                              type="number"
+                              min={1}
+                              max={10}
+                              value={rulesDraft.dealPerPlayer}
+                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, dealPerPlayer: Number(e.target.value) } : r))}
+                              disabled={rulesMutation.isPending}
+                            />
+                          </label>
+                          <label className="flex items-center gap-2 col-span-2">
+                            <input
+                              type="checkbox"
+                              checked={rulesDraft.dedupe}
+                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, dedupe: e.target.checked } : r))}
+                              disabled={rulesMutation.isPending}
+                            />
+                            <span>去重</span>
+                          </label>
+                          <label className="flex flex-col gap-1 col-span-2">
+                            <span>模式</span>
+                            <select
+                              className="border rounded px-2 py-1"
+                              value={rulesDraft.mode}
+                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, mode: e.target.value as any } : r))}
+                              disabled={rulesMutation.isPending}
+                            >
+                              <option value="classic">classic</option>
+                              <option value="kizuna">kizuna</option>
+                              <option value="scenario">scenario</option>
+                            </select>
+                          </label>
+                          <div className="col-span-2 border rounded p-2 bg-gray-50">
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={rulesDraft.bestOf.enabled}
+                                onChange={(e) =>
+                                  setRulesDraft((r) => (r ? { ...r, bestOf: { ...r.bestOf, enabled: e.target.checked } } : r))
+                                }
+                                disabled={rulesMutation.isPending}
+                              />
+                              <span>启用多局制（按轮次累计胜场）</span>
+                            </label>
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              <label className="flex flex-col gap-1">
+                                <span>最多轮次</span>
+                                <input
+                                  className="border rounded px-2 py-1"
+                                  type="number"
+                                  min={1}
+                                  max={10}
+                                  value={rulesDraft.bestOf.maxRounds}
+                                  disabled={!rulesDraft.bestOf.enabled || rulesMutation.isPending}
+                                  onChange={(e) =>
+                                    setRulesDraft((r) => (r ? { ...r, bestOf: { ...r.bestOf, maxRounds: Number(e.target.value) } } : r))
+                                  }
+                                />
+                              </label>
+                              <div className="text-xs text-gray-600 flex items-end pb-1">
+                                {rulesDraft.bestOf.enabled ? '提示：每人发牌需 ≥ 轮次' : '关闭时为单局对战'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-xs text-gray-500 mt-2">提示：修改“每人提交”会清空已提交卡组。</div>
+                        {rulesDraftError ? (
+                          <div className="text-xs text-red-600 mt-2 whitespace-pre-wrap">规则不合法：{rulesDraftError}</div>
+                        ) : null}
+
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            className="generate-button flex-1"
+                            style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+                            onClick={() => void saveRulesDraft()}
+                            disabled={rulesMutation.isPending || Boolean(rulesDraftError)}
+                          >
+                            {rulesMutation.isPending ? '保存中…' : '保存规则'}
+                          </button>
+                          <button
+                            className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm disabled:opacity-50"
+                            onClick={resetRulesDraftFromRoom}
+                            disabled={rulesMutation.isPending || !rules}
+                          >
+                            重置
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 )}
 

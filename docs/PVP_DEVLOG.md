@@ -1,6 +1,6 @@
 # PVP 开发备忘（实现记录）
 
-更新时间：2025-12-21
+更新时间：2025-12-22
 
 > 本文用于记录实现细节、落地偏差与后续 TODO；设计稿请看 `docs/PVP.md`。
 
@@ -10,6 +10,7 @@
 - D1 持久化 + 前端轮询（React Query `refetchInterval=1500ms`）
 - 流程：创建房间 → 加入 → 提交卡组 → 房主发牌 → 同时出牌 → 自动/手动结算（生成战报）→（可选）多轮直到 `maxRounds`
 - 结算调用：复用现有非流式端点 `POST /api/generate-battle-story`（并显式关闭 arena_history / current_state 的读写）
+- 多局制配置：大厅创建房间可启用/设置；房间内（房主）可在 `waiting/submitting` 阶段调整规则
 
 ## 1. 关键工程决策
 
@@ -74,6 +75,7 @@ PVP 可用卡必须满足：
 ### 2.4 API 路由（Edge Runtime）
 - `pages/api/pvp/rooms/index.ts:1` 创建房间
 - `pages/api/pvp/rooms/[roomId]/join.ts:1` 加入房间（`expectedVersion` 可不传）
+- `pages/api/pvp/rooms/[roomId]/rules.ts:1` 房主设置房间规则（仅 `waiting/submitting`；修改提交数可能要求清空已提交卡组）
 - `pages/api/pvp/rooms/[roomId]/password.ts:1` 房主设/清口令
 - `pages/api/pvp/rooms/[roomId]/leave.ts:1` 离开房间
 - `pages/api/pvp/rooms/[roomId]/restart.ts:1` 房主重开（清理对局数据）

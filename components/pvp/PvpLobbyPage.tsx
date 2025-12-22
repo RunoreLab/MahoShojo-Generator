@@ -31,8 +31,11 @@ export function PvpLobbyPage() {
   const [isCreating, setIsCreating] = useState(false);
 
   const isRulesValid = useMemo(() => {
-    return rules.participants >= 2 && rules.participants <= 6 && rules.cardsPerPlayer > rules.dealPerPlayer;
-  }, [rules.participants, rules.cardsPerPlayer, rules.dealPerPlayer]);
+    const baseValid = rules.participants >= 2 && rules.participants <= 6 && rules.cardsPerPlayer > rules.dealPerPlayer;
+    if (!baseValid) return false;
+    if (rules.bestOf?.enabled) return rules.dealPerPlayer >= rules.bestOf.maxRounds;
+    return true;
+  }, [rules.participants, rules.cardsPerPlayer, rules.dealPerPlayer, rules.bestOf?.enabled, rules.bestOf?.maxRounds]);
 
   const handleCreateRoom = async () => {
     setError(null);
@@ -41,7 +44,15 @@ export function PvpLobbyPage() {
       return;
     }
     if (!isRulesValid) {
-      setError('规则不合法：cardsPerPlayer 必须 > dealPerPlayer。');
+      if (rules.cardsPerPlayer <= rules.dealPerPlayer) {
+        setError('规则不合法：cardsPerPlayer 必须 > dealPerPlayer（保证对手手牌不可被直接推出）。');
+        return;
+      }
+      if (rules.bestOf?.enabled && rules.dealPerPlayer < rules.bestOf.maxRounds) {
+        setError('规则不合法：启用多局制时，dealPerPlayer 必须 >= maxRounds（保证必定结束）。');
+        return;
+      }
+      setError('规则不合法，请检查输入。');
       return;
     }
 
@@ -161,6 +172,35 @@ export function PvpLobbyPage() {
                       <option value="scenario">scenario</option>
                     </select>
                   </label>
+                  <div className="col-span-2 border rounded p-2 bg-gray-50">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={rules.bestOf.enabled}
+                        onChange={(e) => setRules((r) => ({ ...r, bestOf: { ...r.bestOf, enabled: e.target.checked } }))}
+                      />
+                      <span>启用多局制（按轮次累计胜场）</span>
+                    </label>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <label className="flex flex-col gap-1">
+                        <span>最多轮次</span>
+                        <input
+                          className="border rounded px-2 py-1"
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={rules.bestOf.maxRounds}
+                          disabled={!rules.bestOf.enabled}
+                          onChange={(e) =>
+                            setRules((r) => ({ ...r, bestOf: { ...r.bestOf, maxRounds: Number(e.target.value) } }))
+                          }
+                        />
+                      </label>
+                      <div className="text-xs text-gray-600 flex items-end pb-1">
+                        {rules.bestOf.enabled ? '提示：每人发牌需 ≥ 轮次（否则无法保证结束）' : '关闭时为单局对战'}
+                      </div>
+                    </div>
+                  </div>
                   <label className="flex flex-col gap-1 col-span-2">
                     <span>房间口令（可选）</span>
                     <input
