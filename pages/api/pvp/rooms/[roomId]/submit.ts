@@ -1,6 +1,7 @@
 import { getPvpEligibleDataCard, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas, upsertPvpRoomSubmission } from '@/lib/d1';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
+import { getRequestOrigin } from '@/lib/pvp/origin';
 import { loadPresetCard } from '@/lib/pvp/preset';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -53,7 +54,7 @@ async function submitHandler(req: Request): Promise<Response> {
   if (!cards) return json({ error: '缺少 cards' }, { status: 400 });
   if (cards.length !== rules.cardsPerPlayer) return json({ error: `需要提交 ${rules.cardsPerPlayer} 张卡` }, { status: 400 });
 
-  const origin = new URL(req.url).origin;
+  const origin = getRequestOrigin(req);
 
   const submittedCards: PvpSubmittedCard[] = [];
   let hasPrivateCard = false;

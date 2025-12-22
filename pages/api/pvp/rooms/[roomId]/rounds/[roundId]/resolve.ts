@@ -15,6 +15,7 @@ import {
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
+import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpRoomRules, PvpSnapshotRef } from '@/lib/pvp/types';
@@ -181,7 +182,7 @@ async function resolveHandler(req: Request): Promise<Response> {
 
   await updatePvpRound(roundId, { status: 'resolving' });
 
-  const origin = new URL(req.url).origin;
+  const origin = getRequestOrigin(req);
   const authHeader = req.headers.get('authorization') || '';
 
   const candidateTokens = picked.map((p) => p.token);

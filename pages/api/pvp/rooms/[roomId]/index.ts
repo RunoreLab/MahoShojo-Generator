@@ -8,10 +8,12 @@ import {
   getLatestPvpRoundByMatch,
   getPvpRoundsByMatch,
   updatePvpRoomCas,
+  getUserEquippedBadges,
 } from '@/lib/d1';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpRoomRules, PvpSubmissionPayload } from '@/lib/pvp/types';
+import type { UserBadge } from '@/types/badge';
 
 export const runtime = 'edge';
 
@@ -70,6 +72,16 @@ async function getRoomHandler(req: Request): Promise<Response> {
   const isPlayer = players.some((p) => p.user_id === auth.user.id);
   if (!isPlayer) return json({ error: '无权访问该房间' }, { status: 403 });
 
+  const badgesByUserId = new Map<number, UserBadge[]>();
+  await Promise.all(
+    players.map(async (p) => {
+      const userId = typeof p?.user_id === 'number' ? p.user_id : null;
+      if (!userId) return;
+      const badges = await getUserEquippedBadges(userId);
+      badgesByUserId.set(userId, Array.isArray(badges) ? badges : []);
+    })
+  );
+
   const submissionsRows = await getPvpRoomSubmissions(roomId);
   const submissions = submissionsRows
     .map((row) => {
@@ -87,8 +99,15 @@ async function getRoomHandler(req: Request): Promise<Response> {
     for (const card of myHand.cards) {
       const snap = await getPvpCardSnapshotById(card.id);
       if (!snap) continue;
+      let ref: any = null;
+      try {
+        ref = snap.ref_json ? JSON.parse(snap.ref_json) : null;
+      } catch {
+        ref = null;
+      }
       myHandCardsDetailed.push({
         snapshotId: snap.id,
+        ref,
         name: snap.name,
         type: snap.card_type,
         dataJson: snap.data_json,
@@ -152,7 +171,13 @@ async function getRoomHandler(req: Request): Promise<Response> {
       currentMatchId,
       rules,
     },
-    players: players.map((p) => ({ userId: p.user_id, username: p.username, prefix: p.prefix, seat: p.seat })),
+    players: players.map((p) => ({
+      userId: p.user_id,
+      username: p.username,
+      prefix: p.prefix,
+      seat: p.seat,
+      badges: badgesByUserId.get(p.user_id) || [],
+    })),
     submissions,
     myHand: myHand ? { cards: myHandCardsDetailed, discarded: myHand.discarded, drawPile: myHand.drawPile } : null,
     latestRound: latestRound ? { id: latestRound.id, index: latestRound.round_index, status: latestRound.status } : null,
