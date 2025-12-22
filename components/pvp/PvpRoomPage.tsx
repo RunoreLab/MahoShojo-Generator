@@ -440,9 +440,21 @@ export function PvpRoomPage() {
 
   const rulesDraftError = useMemo(() => {
     if (!rulesDraft) return null;
-    if (rulesDraft.cardsPerPlayer <= rulesDraft.dealPerPlayer) return 'cardsPerPlayer 必须 > dealPerPlayer（保证对手手牌不可被直接推出）';
-    if (rulesDraft.bestOf?.enabled && rulesDraft.dealPerPlayer < rulesDraft.bestOf.maxRounds) {
-      return '启用多局制时，dealPerPlayer 必须 >= maxRounds（保证必定结束）';
+    const participants = Number.isFinite(rulesDraft.participants) ? Math.floor(rulesDraft.participants) : 0;
+    if (participants < 2 || participants > 6) return '人数需要在 2-6 之间';
+
+    const cardsPerPlayer = Number.isFinite(rulesDraft.cardsPerPlayer) ? Math.floor(rulesDraft.cardsPerPlayer) : 0;
+    if (cardsPerPlayer < 1 || cardsPerPlayer > 50) return '每人提交数量需要在 1-50 之间';
+
+    const dealPerPlayer = Number.isFinite(rulesDraft.dealPerPlayer) ? Math.floor(rulesDraft.dealPerPlayer) : 0;
+    if (dealPerPlayer < 1 || dealPerPlayer > 50) return '每人初始手牌数量需要在 1-50 之间';
+
+    const dealWhenEmpty = Number.isFinite(rulesDraft.dealWhenEmpty) ? Math.floor(rulesDraft.dealWhenEmpty) : 0;
+    if (dealWhenEmpty < 1 || dealWhenEmpty > 50) return '手牌为空时补发数量需要在 1-50 之间';
+
+    if (rulesDraft.bestOf?.enabled) {
+      const maxRounds = Number.isFinite(rulesDraft.bestOf.maxRounds) ? Math.floor(rulesDraft.bestOf.maxRounds) : 0;
+      if (maxRounds < 1 || maxRounds > 10) return '最多轮次需要在 1-10 之间';
     }
     return null;
   }, [rulesDraft]);
@@ -1323,7 +1335,7 @@ export function PvpRoomPage() {
                     ) : null}
                     {rules && (
                       <div className="mt-2 text-xs text-gray-600 whitespace-pre-wrap">
-                        规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 发牌 {rules.dealPerPlayer} / 去重 {String(rules.dedupe)} / 展示提交 {String(rules.showAllSubmissions)} / 洗混 {String(rules.shuffleDecks)} / 模式 {rules.mode}
+                        规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 初始手牌 {rules.dealPerPlayer} / 空手补发 {rules.dealWhenEmpty} / 复用弃牌 {String(rules.recycleUsedCards)} / 去重 {String(rules.dedupe)} / 展示提交 {String(rules.showAllSubmissions)} / 洗混 {String(rules.shuffleDecks)} / 模式 {rules.mode}
                       </div>
                     )}
                     {rules?.bestOf?.enabled && latestRound ? (
@@ -1516,23 +1528,44 @@ export function PvpRoomPage() {
                               className="border rounded px-2 py-1"
                               type="number"
                               min={1}
-                              max={10}
+                              max={50}
                               value={rulesDraft.cardsPerPlayer}
                               onChange={(e) => setRulesDraft((r) => (r ? { ...r, cardsPerPlayer: Number(e.target.value) } : r))}
                               disabled={rulesMutation.isPending}
                             />
                           </label>
                           <label className="flex flex-col gap-1">
-                            <span>每人发牌</span>
+                            <span>初始手牌</span>
                             <input
                               className="border rounded px-2 py-1"
                               type="number"
                               min={1}
-                              max={10}
+                              max={50}
                               value={rulesDraft.dealPerPlayer}
                               onChange={(e) => setRulesDraft((r) => (r ? { ...r, dealPerPlayer: Number(e.target.value) } : r))}
                               disabled={rulesMutation.isPending}
                             />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span>手牌为空时补发</span>
+                            <input
+                              className="border rounded px-2 py-1"
+                              type="number"
+                              min={1}
+                              max={50}
+                              value={rulesDraft.dealWhenEmpty}
+                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, dealWhenEmpty: Number(e.target.value) } : r))}
+                              disabled={rulesMutation.isPending}
+                            />
+                          </label>
+                          <label className="flex items-center gap-2 col-span-1">
+                            <input
+                              type="checkbox"
+                              checked={rulesDraft.recycleUsedCards === true}
+                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, recycleUsedCards: e.target.checked } : r))}
+                              disabled={rulesMutation.isPending}
+                            />
+                            <span>允许重复发放已使用的卡</span>
                           </label>
                           <label className="flex items-center gap-2 col-span-2">
                             <input
@@ -1635,7 +1668,7 @@ export function PvpRoomPage() {
                                 />
                               </label>
                               <div className="text-xs text-gray-600 flex items-end pb-1">
-                                {rulesDraft.bestOf.enabled ? '提示：每人发牌需 ≥ 轮次' : '关闭时为单局对战'}
+                                {rulesDraft.bestOf.enabled ? '提示：多局制下若手牌为空，会按设置自动补牌' : '关闭时为单局对战'}
                               </div>
                             </div>
                           </div>

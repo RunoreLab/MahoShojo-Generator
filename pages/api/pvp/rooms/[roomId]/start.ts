@@ -6,6 +6,7 @@ import {
   generateUUID,
   getPvpCardSnapshotById,
   getPvpEligibleDataCard,
+  getRandomPublicCardExcluding,
   getPvpRoomById,
   getPvpRoomHands,
   getPvpRoomPlayers,
@@ -16,7 +17,8 @@ import {
 } from '@/lib/d1';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
-import { dealSnapshots } from '@/lib/pvp/logic';
+import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
+import { shuffleInPlace } from '@/lib/pvp/random';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -199,11 +201,79 @@ async function startHandler(req: Request): Promise<Response> {
     }
   }
 
+  const submittedDataCardIds = new Set<string>();
+  for (const row of submissions) {
+    const parsed = parseSubmission(row.submission_json);
+    if (!parsed) continue;
+    for (const c of parsed.cards) {
+      if (c?.ref?.kind === 'data_card' && typeof (c.ref as any)?.id === 'string') {
+        const id = String((c.ref as any).id).trim();
+        if (id) submittedDataCardIds.add(id);
+      }
+    }
+  }
+  for (const b of bots) {
+    for (const c of b.submission?.cards ?? []) {
+      if (c?.ref?.kind === 'data_card' && typeof (c.ref as any)?.id === 'string') {
+        const id = String((c.ref as any).id).trim();
+        if (id) submittedDataCardIds.add(id);
+      }
+    }
+  }
+
+  const publicDrawnDataCardIds = new Set<string>();
+
+  const drawPublicSnapshot = async (ownerUserId: number): Promise<{ kind: 'snapshot'; id: string } | null> => {
+    const excludeIds = [...new Set([...submittedDataCardIds, ...publicDrawnDataCardIds])];
+    const row = await getRandomPublicCardExcluding('character', excludeIds);
+    if (!row || typeof row.id !== 'string' || !row.id.trim()) return null;
+    const dataCardId = String(row.id).trim();
+    if (submittedDataCardIds.has(dataCardId) || publicDrawnDataCardIds.has(dataCardId)) return null;
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(String(row.data ?? '{}'));
+    } catch {
+      return null;
+    }
+
+    const snapshotId = await createPvpCardSnapshot({
+      roomId,
+      ownerUserId,
+      refJson: JSON.stringify({
+        kind: 'data_card',
+        id: dataCardId,
+        updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+        drawnFromPublic: true,
+        sourceIsPublic: true,
+        sourceAuthor: typeof row.username === 'string' ? row.username : null,
+      }),
+      cardType: inferPvpCombatantTypeFromJson(parsed),
+      name: typeof row.name === 'string' && row.name.trim() ? row.name.trim() : '公开库卡牌',
+      dataJson: JSON.stringify(parsed),
+      sourceUpdatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+    });
+    if (!snapshotId) return null;
+
+    publicDrawnDataCardIds.add(dataCardId);
+    return { kind: 'snapshot', id: snapshotId };
+  };
+
+  const fillHandWithPublic = async (ownerUserId: number, hand: PvpHandState, targetSize: number): Promise<PvpHandState> => {
+    const cards = [...(Array.isArray(hand.cards) ? hand.cards : [])];
+    while (cards.length < targetSize) {
+      const next = await drawPublicSnapshot(ownerUserId);
+      if (!next) break;
+      cards.push(next);
+    }
+    return { ...hand, cards };
+  };
+
   if (rules.shuffleDecks !== true) {
     const botById = new Map(internal.bots.map((b) => [b.id, b]));
 
     const hands: PvpHandState[] = [];
-    let hiddenCount = 0;
+    const drawPile: Array<{ kind: 'snapshot'; id: string }> = [];
 
     for (const participant of participants) {
       const submittedBy =
@@ -216,26 +286,8 @@ async function startHandler(req: Request): Promise<Response> {
         participant.kind === 'human'
           ? (submissionMap.get(participant.userId)?.cards ?? [])
           : (botById.get(participant.botId)?.submission?.cards ?? []);
-
-      if (submissionCards.length < rules.dealPerPlayer) {
-        const rolledBack = await abortAndRollback('deck-too-small-per-player', {
-          seat: participant.seat,
-          needed: rules.dealPerPlayer,
-          actual: submissionCards.length,
-        });
-        const error = `玩家座位 ${participant.seat} 的提交卡组不足以发牌：需要 ${rules.dealPerPlayer} 张，实际 ${submissionCards.length} 张`;
-        if (!rolledBack) {
-          return json({ error: `${error}（且回滚失败，请房主点击“重开房间”恢复）`, code: 'ROLLBACK_FAILED' }, { status: 409 });
-        }
-        return json({ error, code: 'DECK_TOO_SMALL' }, { status: 409 });
-      }
-
-      hiddenCount += Math.max(0, submissionCards.length - rules.dealPerPlayer);
-
-      const dealtCards = submissionCards.slice(0, rules.dealPerPlayer);
       const snapshotRefs: Array<{ kind: 'snapshot'; id: string }> = [];
-
-      for (const card of dealtCards) {
+      for (const card of submissionCards) {
         if (card.ref.kind === 'data_card') {
           const latest = await getPvpEligibleDataCard(card.ref.id, eligibilityUserId);
           if (!latest) {
@@ -279,7 +331,16 @@ async function startHandler(req: Request): Promise<Response> {
         snapshotRefs.push({ kind: 'snapshot', id: snapshotId });
       }
 
-      hands.push({ cards: snapshotRefs, discarded: [], drawPile: [] });
+      const dealt = snapshotRefs.slice(0, rules.dealPerPlayer);
+      const rest = snapshotRefs.slice(rules.dealPerPlayer);
+      drawPile.push(...rest);
+
+      const baseHand: PvpHandState = { cards: dealt, discarded: [], drawPile: [] };
+      const filled =
+        participant.kind === 'human'
+          ? await fillHandWithPublic(participant.userId, baseHand, rules.dealPerPlayer)
+          : await fillHandWithPublic(auth.user.id, baseHand, rules.dealPerPlayer);
+      hands.push(filled);
     }
 
     for (let i = 0; i < participants.length; i++) {
@@ -301,6 +362,11 @@ async function startHandler(req: Request): Promise<Response> {
       if (bot) bot.hand = hand;
     }
 
+    (internal.raw as any)._drawPile = drawPile;
+    (internal.raw as any)._usedPile = [];
+    (internal.raw as any)._submittedDataCardIds = [...submittedDataCardIds];
+    (internal.raw as any)._publicDrawnCardIds = [...publicDrawnDataCardIds];
+
     const roundId = await createPvpRound({
       roomId,
       matchId,
@@ -309,8 +375,10 @@ async function startHandler(req: Request): Promise<Response> {
       publicSnapshotJson: JSON.stringify({
         dealPerPlayer: rules.dealPerPlayer,
         cardsPerPlayer: rules.cardsPerPlayer,
+        dealWhenEmpty: rules.dealWhenEmpty,
+        recycleUsedCards: rules.recycleUsedCards,
         dedupe: rules.dedupe,
-        hiddenCount,
+        hiddenCount: drawPile.length,
         mode: rules.mode,
         bestOf: rules.bestOf,
         showAllSubmissions: rules.showAllSubmissions,
@@ -410,16 +478,6 @@ async function startHandler(req: Request): Promise<Response> {
     return out;
   })();
 
-  const needed = rules.participants * rules.dealPerPlayer;
-  if (deckCards.length <= needed) {
-    const rolledBack = await abortAndRollback('deck-too-small', { needed, actual: deckCards.length });
-    const error = `卡池不足以保持手牌隐藏：需要 > ${needed} 张，实际 ${deckCards.length} 张`;
-    if (!rolledBack) {
-      return json({ error: `${error}（且回滚失败，请房主点击“重开房间”恢复）`, code: 'ROLLBACK_FAILED' }, { status: 409 });
-    }
-    return json({ error, code: 'DECK_TOO_SMALL' }, { status: 409 });
-  }
-
   // 再校验 data_card 版本与可用性，并生成快照
   const snapshotDeck: Array<{ kind: 'snapshot'; id: string }> = [];
   for (const { eligibilityUserId, submittedBy, card } of deckCards) {
@@ -466,28 +524,32 @@ async function startHandler(req: Request): Promise<Response> {
     snapshotDeck.push({ kind: 'snapshot', id: snapshotId });
   }
 
-  const dealt = dealSnapshots({
-    playerCount: rules.participants,
-    handSize: rules.dealPerPlayer,
-    deck: snapshotDeck,
-    allowDrawPile: false,
-  });
-  if ('error' in dealt) {
-    const rolledBack = await abortAndRollback('deal-failed', { message: dealt.error });
-    if (!rolledBack) {
-      return json({ error: `${dealt.error}（且回滚失败，请房主点击“重开房间”恢复）`, code: 'ROLLBACK_FAILED' }, { status: 409 });
-    }
-    return json({ error: dealt.error, code: 'DEAL_FAILED' }, { status: 409 });
+  shuffleInPlace(snapshotDeck);
+  const hands: PvpHandState[] = Array.from({ length: participants.length }, () => ({
+    cards: [],
+    discarded: [],
+    drawPile: [],
+  }));
+  const desired = Math.max(1, Math.floor(rules.dealPerPlayer));
+  const totalNeeded = participants.length * desired;
+  const totalDealt = Math.min(snapshotDeck.length, totalNeeded);
+  for (let i = 0; i < totalDealt; i++) {
+    const card = snapshotDeck[i]!;
+    hands[i % participants.length]!.cards.push(card);
   }
-
-  const hiddenCount = Math.max(0, snapshotDeck.length - needed);
+  const drawPile = snapshotDeck.slice(totalDealt);
+  const hiddenCount = drawPile.length
 
   const botById = new Map(internal.bots.map((b) => [b.id, b]));
   for (let i = 0; i < participants.length; i++) {
     const participant = participants[i]!;
-    const hand = dealt.hands[i]!;
+    const baseHand = hands[i]!;
+    const filled =
+      participant.kind === 'human'
+        ? await fillHandWithPublic(participant.userId, baseHand, rules.dealPerPlayer)
+        : await fillHandWithPublic(auth.user.id, baseHand, rules.dealPerPlayer);
     if (participant.kind === 'human') {
-      const ok = await upsertPvpRoomHand(roomId, participant.userId, JSON.stringify(hand));
+      const ok = await upsertPvpRoomHand(roomId, participant.userId, JSON.stringify(filled));
       if (!ok) {
         const rolledBack = await abortAndRollback('hand-write-failed', { userId: participant.userId });
         if (!rolledBack) {
@@ -499,8 +561,13 @@ async function startHandler(req: Request): Promise<Response> {
     }
 
     const bot = botById.get(participant.botId);
-    if (bot) bot.hand = hand;
+    if (bot) bot.hand = filled;
   }
+
+  (internal.raw as any)._drawPile = drawPile;
+  (internal.raw as any)._usedPile = [];
+  (internal.raw as any)._submittedDataCardIds = [...submittedDataCardIds];
+  (internal.raw as any)._publicDrawnCardIds = [...publicDrawnDataCardIds];
 
   const roundId = await createPvpRound({
     roomId,
@@ -510,6 +577,8 @@ async function startHandler(req: Request): Promise<Response> {
     publicSnapshotJson: JSON.stringify({
       dealPerPlayer: rules.dealPerPlayer,
       cardsPerPlayer: rules.cardsPerPlayer,
+      dealWhenEmpty: rules.dealWhenEmpty,
+      recycleUsedCards: rules.recycleUsedCards,
       dedupe: rules.dedupe,
       hiddenCount,
       mode: rules.mode,

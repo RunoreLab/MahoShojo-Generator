@@ -36,6 +36,8 @@ export interface PvpRoomRules {
   participants: number; // 2-6（前端与校验层限制）
   cardsPerPlayer: number; // 每人提交数量
   dealPerPlayer: number;  // 每人初始手牌数量
+  dealWhenEmpty: number; // 当手牌为空时补发数量
+  recycleUsedCards: boolean; // 已使用的卡牌是否可被重新发放
   dedupe: boolean;
   /**
    * 是否在房间内向所有人展示“所有玩家提交的卡组详情”。

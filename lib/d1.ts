@@ -42,6 +42,7 @@ export {
   verifyCardOwnership,
   getPublicDataCards,
   getRandomPublicCard,
+  getRandomPublicCardExcluding,
   getDataCardStatsByIds,
   getDataCardById,
   incrementDataCardLike,

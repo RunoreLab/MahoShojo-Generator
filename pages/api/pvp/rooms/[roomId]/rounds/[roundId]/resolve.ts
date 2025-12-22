@@ -500,6 +500,23 @@ async function resolveHandler(req: Request): Promise<Response> {
     }
   }
 
+  // 记录已使用卡牌：用于“可重复发放已使用卡”设置的第二顺位来源
+  const usedPileRaw = (internal.raw as any)?._usedPile;
+  const usedPile: PvpSnapshotRef[] = Array.isArray(usedPileRaw)
+    ? (usedPileRaw as any[])
+        .map((c) => (c && typeof c === 'object' && c.kind === 'snapshot' && typeof c.id === 'string' ? ({ kind: 'snapshot', id: c.id } as PvpSnapshotRef) : null))
+        .filter(Boolean) as PvpSnapshotRef[]
+    : [];
+  const usedSet = new Set<string>(usedPile.map((c) => c.id));
+  for (const p of picked) {
+    const id = p.snapshot.id;
+    if (typeof id !== 'string' || !id) continue;
+    if (usedSet.has(id)) continue;
+    usedSet.add(id);
+    usedPile.push({ kind: 'snapshot', id });
+  }
+  (internal.raw as any)._usedPile = usedPile;
+
   // 等待全员确认后再推进下一回合/结束（避免战报刚生成就被刷新覆盖）
   const maxRounds = rules.bestOf.enabled ? rules.bestOf.maxRounds : 1;
   (internal.raw as any)._postRound = {

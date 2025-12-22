@@ -75,12 +75,27 @@ export function PvpLobbyPage() {
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
-  const isRulesValid = useMemo(() => {
-    const baseValid = rules.participants >= 2 && rules.participants <= 6 && rules.cardsPerPlayer > rules.dealPerPlayer;
-    if (!baseValid) return false;
-    if (rules.bestOf?.enabled) return rules.dealPerPlayer >= rules.bestOf.maxRounds;
-    return true;
-  }, [rules.participants, rules.cardsPerPlayer, rules.dealPerPlayer, rules.bestOf?.enabled, rules.bestOf?.maxRounds]);
+  const rulesError = useMemo((): string | null => {
+    const participants = Number.isFinite(rules.participants) ? Math.floor(rules.participants) : 0;
+    if (participants < 2 || participants > 6) return '人数需要在 2-6 之间。';
+
+    const cardsPerPlayer = Number.isFinite(rules.cardsPerPlayer) ? Math.floor(rules.cardsPerPlayer) : 0;
+    if (cardsPerPlayer < 1 || cardsPerPlayer > 50) return '每人提交数量需要在 1-50 之间。';
+
+    const dealPerPlayer = Number.isFinite(rules.dealPerPlayer) ? Math.floor(rules.dealPerPlayer) : 0;
+    if (dealPerPlayer < 1 || dealPerPlayer > 50) return '每人初始手牌数量需要在 1-50 之间。';
+
+    const dealWhenEmpty = Number.isFinite(rules.dealWhenEmpty) ? Math.floor(rules.dealWhenEmpty) : 0;
+    if (dealWhenEmpty < 1 || dealWhenEmpty > 50) return '手牌为空时补发数量需要在 1-50 之间。';
+
+    if (rules.bestOf?.enabled) {
+      const maxRounds = Number.isFinite(rules.bestOf.maxRounds) ? Math.floor(rules.bestOf.maxRounds) : 0;
+      if (maxRounds < 1 || maxRounds > 10) return '最多轮次需要在 1-10 之间。';
+    }
+    return null;
+  }, [rules.participants, rules.cardsPerPlayer, rules.dealPerPlayer, rules.dealWhenEmpty, rules.bestOf?.enabled, rules.bestOf?.maxRounds]);
+
+  const isRulesValid = !rulesError;
 
   const ensureScenarioSelectedIfNeeded = (): boolean => {
     if (rules.mode !== 'scenario') return true;
@@ -176,15 +191,7 @@ export function PvpLobbyPage() {
     }
     if (!ensureScenarioSelectedIfNeeded()) return;
     if (!isRulesValid) {
-      if (rules.cardsPerPlayer <= rules.dealPerPlayer) {
-        setError('规则不合法：cardsPerPlayer 必须 > dealPerPlayer（保证对手手牌不可被直接推出）。');
-        return;
-      }
-      if (rules.bestOf?.enabled && rules.dealPerPlayer < rules.bestOf.maxRounds) {
-        setError('规则不合法：启用多局制时，dealPerPlayer 必须 >= maxRounds（保证必定结束）。');
-        return;
-      }
-      setError('规则不合法，请检查输入。');
+      setError(`规则不合法：${rulesError || '请检查输入。'}`);
       return;
     }
 
@@ -258,7 +265,7 @@ export function PvpLobbyPage() {
                 <div className="p-4 rounded-xl bg-white border text-sm">
                   <h2 className="font-semibold mb-2 text-gray-900">创建房间</h2>
                   <div className="text-xs text-gray-600 mb-3">
-                    建议：提交数 &gt; 发牌数（否则可推导对手手牌）。
+                    提示：提交数与初始手牌数可任意设置；若卡牌不足，会按“未发放的提交卡 → 已使用卡（可选）→ 公开库”补足。
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="flex flex-col gap-1 col-span-2">
@@ -278,21 +285,40 @@ export function PvpLobbyPage() {
                         className="border rounded px-2 py-1"
                         type="number"
                         min={1}
-                        max={10}
+                        max={50}
                         value={rules.cardsPerPlayer}
                         onChange={(e) => updateRules({ cardsPerPlayer: Number(e.target.value) })}
                       />
                     </label>
                     <label className="flex flex-col gap-1">
-                      <span className="text-gray-800">每人发牌</span>
+                      <span className="text-gray-800">初始手牌</span>
                       <input
                         className="border rounded px-2 py-1"
                         type="number"
                         min={1}
-                        max={10}
+                        max={50}
                         value={rules.dealPerPlayer}
                         onChange={(e) => updateRules({ dealPerPlayer: Number(e.target.value) })}
                       />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-gray-800">手牌为空时补发</span>
+                      <input
+                        className="border rounded px-2 py-1"
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={rules.dealWhenEmpty}
+                        onChange={(e) => updateRules({ dealWhenEmpty: Number(e.target.value) })}
+                      />
+                    </label>
+                    <label className="flex items-center gap-2 col-span-1 text-gray-800">
+                      <input
+                        type="checkbox"
+                        checked={rules.recycleUsedCards === true}
+                        onChange={(e) => updateRules({ recycleUsedCards: e.target.checked })}
+                      />
+                      <span>允许重复发放已使用的卡</span>
                     </label>
                     <label className="flex items-center gap-2 col-span-2 text-gray-800">
                       <input
@@ -371,7 +397,7 @@ export function PvpLobbyPage() {
                           />
                         </label>
                         <div className="text-xs text-gray-600 flex items-end pb-1">
-                          {rules.bestOf.enabled ? '提示：每人发牌需 ≥ 轮次（否则无法保证结束）' : '关闭时为单局对战'}
+                          {rules.bestOf.enabled ? '提示：多局制下若手牌为空，会按设置自动补牌' : '关闭时为单局对战'}
                         </div>
                       </div>
                     </div>
