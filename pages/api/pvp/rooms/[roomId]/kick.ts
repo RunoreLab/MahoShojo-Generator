@@ -37,7 +37,7 @@ async function kickHandler(req: Request): Promise<Response> {
   await removePvpRoomPlayer(roomId, targetId);
   const now = new Date().toISOString();
 
-  const isInMatch = room.phase === 'choosing' || room.phase === 'resolving' || room.phase === 'dealing';
+  const isInMatch = room.phase === 'choosing' || room.phase === 'reviewing' || room.phase === 'advancing' || room.phase === 'resolving' || room.phase === 'dealing';
   const patch = isInMatch
     ? { status: 'closed' as const, phase: 'aborted' as const }
     : { phase: 'waiting' as const };

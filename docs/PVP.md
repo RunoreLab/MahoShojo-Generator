@@ -419,6 +419,7 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - `GET /api/pvp/rooms/:roomId`：拉取房间状态（按身份过滤私密字段）
 - `POST /api/pvp/rooms/:roomId/rounds/:roundId/choose`：提交本轮选择（不对他人暴露）
 - `POST /api/pvp/rooms/:roomId/rounds/:roundId/resolve`：房主或系统触发结算（也可由服务端检测“双方已选”自动触发）
+- `POST /api/pvp/rooms/:roomId/rounds/:roundId/confirm`：确认已阅读本轮战报（全员确认后才推进下一回合或结束）
 
 ### 7.1 请求/响应约定（建议，便于前后端对齐）
 
@@ -456,6 +457,10 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - 仅房主可调用
 - 仅允许在 `waiting/submitting` 阶段修改
 - 修改 `cardsPerPlayer` 时，若房间内已存在提交，通常需要清空提交并要求全员重新提交（否则会出现“提交数与规则不一致”的冲突）
+
+`POST /api/pvp/rooms/:roomId/rounds/:roundId/confirm`（确认已阅读）
+- 用途：避免战报刚生成就立即推进到下一回合/结束，用户来不及阅读
+- 规则：回合结算后房间进入 `reviewing`；只有全员确认后才会推进（下一回合进入 `choosing`，或结束进入 `finished`）
 
 `POST /api/pvp/rooms/:roomId/submit`（提交卡组）
 ```json
