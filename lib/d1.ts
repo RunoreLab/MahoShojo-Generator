@@ -70,6 +70,7 @@ export {
 export {
   createPvpRoom,
   getPvpRoomById,
+  getPvpRoomBrowseRows,
   getPvpRoomPlayers,
   addPvpRoomPlayer,
   removePvpRoomPlayer,
@@ -107,6 +108,7 @@ export {
   type PvpRoomStatus,
   type PvpRoundStatus,
   type PvpRoomRow,
+  type PvpRoomBrowseRow,
   type PvpRoomPlayerRow,
   type PvpRoundRow,
 } from './database/pvp';

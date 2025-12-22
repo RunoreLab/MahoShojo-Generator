@@ -8,6 +8,7 @@
 
 - 2025-12-22：choosing 阶段若手牌尚未发放/同步，出牌区域显示“发牌中…”加载提示（不再无提示/仅提示刷新）。
 - 2025-12-22：房间写入接口发生 `VERSION_CONFLICT` 时，UI 展示 3 秒倒计时并自动刷新重试（减少手动刷新成本）。
+- 2025-12-22：大厅新增“房间浏览器”（搜索/筛选/加入）与“快速匹配”（优先加入无口令 2 人经典房间，否则用默认规则建房）。
 
 ## 0. 当前实现范围（MVP）
 
@@ -17,6 +18,7 @@
 - 结算调用：复用现有非流式端点 `POST /api/generate-battle-story`（并显式关闭 arena_history / current_state 的读写）
 - 多局制配置：大厅创建房间可启用/设置；房间内（房主）可在 `waiting/submitting` 阶段调整规则
 - 结算推进策略：生成战报后进入 `reviewing`，只有全员“确认已阅读”后才推进下一回合或结束
+- 大厅支持房间浏览器（搜索/筛选/浏览可加入房间并加入）与快速匹配（无可加入房间则按默认规则创建）
 - 新增房间规则：
   - `showAllSubmissions`：是否显示所有人提交的卡组详情（默认 true；但在 `submitting` 提交阶段强制隐藏他人详情，仅展示提交进度；开始对局后再按该开关决定是否可查看）
   - `shuffleDecks`：是否合池洗混后发牌（默认 true；关闭时每位玩家仅从自己提交的卡组中按提交顺序抽取手牌）
@@ -84,6 +86,8 @@ PVP 可用卡必须满足：
 
 ### 2.4 API 路由（Edge Runtime）
 - `pages/api/pvp/rooms/index.ts:1` 创建房间
+- `pages/api/pvp/rooms/browse.ts:1` 房间浏览器（查询可加入房间，支持筛选/搜索）
+- `pages/api/pvp/rooms/quick-match.ts:1` 快速匹配（无口令 2 人经典房间优先）
 - `pages/api/pvp/rooms/[roomId]/join.ts:1` 加入房间（`expectedVersion` 可不传）
 - `pages/api/pvp/rooms/[roomId]/rules.ts:1` 房主设置房间规则（仅 `waiting/submitting`；修改提交数可能要求清空已提交卡组）
 - `pages/api/pvp/rooms/[roomId]/password.ts:1` 房主设/清口令
@@ -106,6 +110,7 @@ PVP 可用卡必须满足：
 - `pages/pvp.tsx:1` 大厅
 - `pages/pvp/[roomId].tsx:1` 房间页
 - `components/pvp/PvpLobbyPage.tsx:1`
+- `components/pvp/PvpRoomBrowserModal.tsx:1` 房间浏览器模态框
 - `components/pvp/PvpRoomPage.tsx:1`
 - `pages/me.tsx:1` 个人页（战报记录 / PVP 战绩，提示“可能被清理”）
 
