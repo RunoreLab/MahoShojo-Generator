@@ -373,15 +373,6 @@ export function PvpRoomPage() {
     return map;
   }, [players]);
 
-  const latestWinnerText = useMemo(() => {
-    if (!latestRoundResult) return null;
-    const winnerName = typeof latestRoundResult?.winnerName === 'string' ? latestRoundResult.winnerName : '平局';
-    const winnerSeat = typeof latestRoundResult?.winnerSeat === 'number' ? latestRoundResult.winnerSeat : null;
-    if (winnerSeat === null || winnerName === '平局') return '平局';
-    const playerLabel = playerDisplayBySeat.get(winnerSeat) || '未知玩家';
-    return `座位 ${winnerSeat} · ${playerLabel}（角色：${winnerName}）`;
-  }, [latestRoundResult, playerDisplayBySeat]);
-
   const usernameById = useMemo(() => {
     const map = new Map<number, string>();
     for (const p of players) {
@@ -406,6 +397,15 @@ export function PvpRoomPage() {
   const latestRoundResult = roomQuery.data?.latestRoundResult;
   const confirmations = roomQuery.data?.confirmations as { roundId: string; confirmedHumans: number; totalHumans: number; hasConfirmedMe: boolean } | null | undefined;
   const score = roomQuery.data?.score;
+
+  const latestWinnerText = useMemo(() => {
+    if (!latestRoundResult) return null;
+    const winnerName = typeof latestRoundResult?.winnerName === 'string' ? latestRoundResult.winnerName : '平局';
+    const winnerSeat = typeof latestRoundResult?.winnerSeat === 'number' ? latestRoundResult.winnerSeat : null;
+    if (winnerSeat === null || winnerName === '平局') return '平局';
+    const playerLabel = playerDisplayBySeat.get(winnerSeat) || '未知玩家';
+    return `座位 ${winnerSeat} · ${playerLabel}（角色：${winnerName}）`;
+  }, [latestRoundResult, playerDisplayBySeat]);
 
   const rulesDraftError = useMemo(() => {
     if (!rulesDraft) return null;
