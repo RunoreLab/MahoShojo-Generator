@@ -1,9 +1,19 @@
 import { getBattleReportGenerationByIdLite, getBattleReportGenerationCombatantsByGenerationId, getPvpCardSnapshotById, getPvpEligibleDataCard, getPvpRoomPlayers, getPvpRoundById, getPvpRoundChoices } from '@/lib/d1';
+import { getRequestOrigin } from '@/lib/pvp/origin';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export const runtime = 'edge';
 
 type RegenerateBody = { userGuidance?: unknown };
+
+const isJsonLike = (contentType: string | null, rawText: string): boolean => {
+  const ct = (contentType || '').toLowerCase();
+  if (ct.includes('text/html')) return false;
+  if (ct.includes('application/json') || ct.includes('+json') || ct.includes('text/json')) return true;
+  const trimmed = rawText.trimStart();
+  return trimmed.startsWith('{') || trimmed.startsWith('[');
+};
 
 const getGenerationIdFromUrl = (url: string): string | null => {
   try {
@@ -33,8 +43,9 @@ export default async function handler(req: Request): Promise<Response> {
 
   const userGuidance = typeof body.data.userGuidance === 'string' ? body.data.userGuidance.trim() : '';
 
-  const origin = new URL(req.url).origin;
+  const origin = getRequestOrigin(req);
   const authHeader = req.headers.get('authorization') || '';
+  const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
 
   const mode = typeof record.mode === 'string' && record.mode ? record.mode : 'classic';
   const language = typeof record.language === 'string' && record.language ? record.language : 'zh-CN';
@@ -174,6 +185,7 @@ export default async function handler(req: Request): Promise<Response> {
     headers: {
       'Content-Type': 'application/json',
       ...(authHeader ? { Authorization: authHeader } : {}),
+      ...subrequestAuthHeaders,
     },
     body: JSON.stringify({
       combatants,
@@ -198,11 +210,33 @@ export default async function handler(req: Request): Promise<Response> {
   });
 
   const raw = await res.text();
-  let payload: any = null;
+  if (!isJsonLike(res.headers.get('content-type'), raw)) {
+    const preview = raw.trim().slice(0, 160);
+    const contentType = res.headers.get('content-type') || 'unknown';
+    return json(
+      {
+        error: `生成接口返回的不是 JSON（HTTP ${res.status}，Content-Type: ${contentType}）`,
+        code: 'GENERATION_RESPONSE_NOT_JSON',
+        preview: preview || undefined,
+      },
+      { status: 502 }
+    );
+  }
+
+  let payload: any;
   try {
     payload = JSON.parse(raw);
-  } catch {
-    payload = null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'JSON 解析失败';
+    const preview = raw.trim().slice(0, 160);
+    return json(
+      {
+        error: `生成接口 JSON 解析失败：${message}`,
+        code: 'GENERATION_JSON_PARSE_FAILED',
+        preview: preview || undefined,
+      },
+      { status: 502 }
+    );
   }
 
   if (!res.ok) {

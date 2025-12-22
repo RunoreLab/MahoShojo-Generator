@@ -1,4 +1,5 @@
 import { inferPvpCombatantTypeFromJson } from './logic';
+import { getBundledPresetData } from './preset-bundled';
 import type { PvpCombatantType } from './types';
 
 export interface LoadedPresetCard {
@@ -41,11 +42,21 @@ const isJsonLike = (contentType: string | null, rawText: string): boolean => {
   return trimmed.startsWith('{') || trimmed.startsWith('[');
 };
 
-export const loadPresetCard = async (origin: string, filename: string): Promise<LoadedPresetCard> => {
+export const loadPresetCard = async (origin: string, filename: string, forwardHeaders?: HeadersInit): Promise<LoadedPresetCard> => {
   const safeFilename = normalizePresetFilename(filename);
 
+  const bundled = getBundledPresetData(safeFilename);
+  if (bundled) {
+    const type: PvpCombatantType = inferPvpCombatantTypeFromJson(bundled);
+    const name = getPresetDisplayName(bundled);
+    const dataJson = JSON.stringify(bundled);
+    return { filename: safeFilename, name, type, data: bundled, dataJson };
+  }
+
   const url = new URL(`/presets/${safeFilename}`, origin);
-  const res = await fetch(url.toString(), { method: 'GET', headers: { Accept: 'application/json' } });
+  const headers = new Headers(forwardHeaders);
+  headers.set('Accept', 'application/json');
+  const res = await fetch(url.toString(), { method: 'GET', headers });
 
   const rawText = await res.text();
   if (!res.ok) {

@@ -3,6 +3,7 @@ import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
+import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export const runtime = 'edge';
 
@@ -71,11 +72,13 @@ async function chooseHandler(req: Request): Promise<Response> {
     const choices = await getPvpRoundChoices(roundId);
     if (players.length >= 2 && choices.length >= players.length) {
       const origin = getRequestOrigin(req);
+      const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
       const resolveRes = await fetch(new URL(`/api/pvp/rooms/${roomId}/rounds/${roundId}/resolve`, origin).toString(), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(req.headers.get('authorization') ? { Authorization: req.headers.get('authorization') as string } : {}),
+          ...subrequestAuthHeaders,
         },
         body: JSON.stringify({ expectedVersion }),
       });

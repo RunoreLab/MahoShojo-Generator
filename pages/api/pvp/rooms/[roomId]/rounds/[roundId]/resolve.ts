@@ -19,6 +19,7 @@ import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpRoomRules, PvpSnapshotRef } from '@/lib/pvp/types';
+import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export const runtime = 'edge';
 
@@ -67,6 +68,14 @@ const moveToDiscard = (hand: PvpHandState, snapshotId: string): PvpHandState => 
   const cards = hand.cards.filter((c) => c.kind === 'snapshot' && c.id !== snapshotId);
   const discarded = [...hand.discarded, { kind: 'snapshot', id: snapshotId } as PvpSnapshotRef];
   return { ...hand, cards, discarded };
+};
+
+const isJsonLike = (contentType: string | null, rawText: string): boolean => {
+  const ct = (contentType || '').toLowerCase();
+  if (ct.includes('text/html')) return false;
+  if (ct.includes('application/json') || ct.includes('+json') || ct.includes('text/json')) return true;
+  const trimmed = rawText.trimStart();
+  return trimmed.startsWith('{') || trimmed.startsWith('[');
 };
 
 async function resolveHandler(req: Request): Promise<Response> {
@@ -194,6 +203,7 @@ async function resolveHandler(req: Request): Promise<Response> {
 
   const origin = getRequestOrigin(req);
   const authHeader = req.headers.get('authorization') || '';
+  const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
 
   const candidateTokens = picked.map((p) => p.token);
   const candidateNames = picked.map((p) => p.snapshot.name);
@@ -227,6 +237,7 @@ async function resolveHandler(req: Request): Promise<Response> {
         headers: {
           'Content-Type': 'application/json',
           ...(authHeader ? { Authorization: authHeader } : {}),
+          ...subrequestAuthHeaders,
         },
         body: JSON.stringify({
           combatants: picked.map((p) => ({
@@ -252,23 +263,54 @@ async function resolveHandler(req: Request): Promise<Response> {
         }),
       });
 
+      const raw = await res.text();
+
       if (!res.ok) {
-        const raw = await res.text();
         let generationId: string | null = null;
-        try {
-          const parsed = JSON.parse(raw);
-          generationId = typeof parsed?.generationId === 'string' ? parsed.generationId : null;
-        } catch {
-          generationId = null;
+        let errorMessage: string | null = null;
+        if (isJsonLike(res.headers.get('content-type'), raw)) {
+          try {
+            const parsed = JSON.parse(raw);
+            generationId = typeof parsed?.generationId === 'string' ? parsed.generationId : null;
+            errorMessage = typeof parsed?.error === 'string' ? parsed.error : null;
+          } catch {
+            generationId = null;
+            errorMessage = null;
+          }
         }
+
         if (generationId) {
           await updatePvpRound(roundId, { battleGenerationId: generationId });
         }
-        lastError = raw || '战报生成失败';
+
+        if (!isJsonLike(res.headers.get('content-type'), raw)) {
+          const preview = raw.trim().slice(0, 160);
+          const contentType = res.headers.get('content-type') || 'unknown';
+          lastError = `战报生成接口返回的不是 JSON（HTTP ${res.status}，Content-Type: ${contentType}）${preview ? `\n预览：${preview}` : ''}`;
+          continue;
+        }
+
+        lastError = errorMessage || raw || '战报生成失败';
         continue;
       }
 
-      const data = await res.json();
+      if (!isJsonLike(res.headers.get('content-type'), raw)) {
+        const preview = raw.trim().slice(0, 160);
+        const contentType = res.headers.get('content-type') || 'unknown';
+        lastError = `战报生成接口返回的不是 JSON（Content-Type: ${contentType}）${preview ? `\n预览：${preview}` : ''}`;
+        continue;
+      }
+
+      let data: any;
+      try {
+        data = JSON.parse(raw);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'JSON 解析失败';
+        const preview = raw.trim().slice(0, 160);
+        lastError = `战报生成接口 JSON 解析失败：${message}${preview ? `\n预览：${preview}` : ''}`;
+        continue;
+      }
+
       const generationId = typeof data?.generationId === 'string' ? data.generationId : null;
       if (generationId) {
         await updatePvpRound(roundId, { battleGenerationId: generationId });
