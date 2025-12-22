@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -14,7 +14,6 @@ import { PresetGridPicker } from '@/components/PresetGridPicker';
 import { UserWithTitle } from '@/components/UserTitle';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 import { usePresetQuery } from '@/components/arena/hooks/useArenaData';
-import { PvpHandModal, type PvpHandCardItem } from '@/components/pvp/PvpHandModal';
 import { authStorage } from '@/lib/auth';
 import { useCooldown } from '@/lib/cooldown';
 import { useAuth } from '@/lib/useAuth';
@@ -91,6 +90,14 @@ type CardRef =
     }
   | { kind: 'preset'; filename: string; name: string; description: string; presetType: Preset['type'] };
 
+type PvpHandCardItem = {
+  snapshotId: string;
+  name: string;
+  type?: string | null;
+  dataJson?: string | null;
+  ref?: any;
+};
+
 type PvpRoomPlayerView = {
   userId: number;
   username: string;
@@ -112,6 +119,7 @@ export function PvpRoomPage() {
 
   const [selected, setSelected] = useState<CardRef[]>([]);
   const [acceptPrivateDisclosure, setAcceptPrivateDisclosure] = useState(false);
+  const [showSubmitEditor, setShowSubmitEditor] = useState(false);
   const [showBattleDataModal, setShowBattleDataModal] = useState(false);
   const [showHandModal, setShowHandModal] = useState(false);
   const [isMatching, setIsMatching] = useState<'character' | 'scenario' | null>(null);
@@ -206,9 +214,15 @@ export function PvpRoomPage() {
   const lastActivityAt: string | null = typeof room?.lastActivityAt === 'string' ? room.lastActivityAt : null;
   const players = useMemo<PvpRoomPlayerView[]>(() => (Array.isArray(roomQuery.data?.players) ? (roomQuery.data.players as PvpRoomPlayerView[]) : []), [roomQuery.data?.players]);
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
+  const allowNonHostControl = rules?.allowNonHostControl === true;
+  const canControlResolve = isHost || allowNonHostControl;
 
   useEffect(() => {
     if (phase !== 'choosing') setShowHandModal(false);
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== 'submitting') setShowSubmitEditor(false);
   }, [phase]);
 
   const userIdsForSummary = useMemo(
@@ -279,12 +293,54 @@ export function PvpRoomPage() {
     return map;
   }, [players]);
 
-  const submissions = Array.isArray(roomQuery.data?.submissions) ? roomQuery.data.submissions : [];
+  const usernameById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const p of players) {
+      const userId = typeof p?.userId === 'number' ? p.userId : null;
+      if (!userId) continue;
+      const username = typeof p.username === 'string' && p.username ? p.username : `用户${userId}`;
+      map.set(userId, username);
+    }
+    return map;
+  }, [players]);
+
+  const submissions = useMemo(() => (Array.isArray(roomQuery.data?.submissions) ? roomQuery.data.submissions : []), [roomQuery.data?.submissions]);
+  const mySubmission = useMemo(() => {
+    const myUserId = user?.id;
+    if (!myUserId) return null;
+    return submissions.find((s: any) => typeof s?.userId === 'number' && s.userId === myUserId) ?? null;
+  }, [submissions, user?.id]);
+
   const myHand = roomQuery.data?.myHand as { cards?: any[]; discarded?: any[]; drawPile?: any[] } | null | undefined;
   const choices = roomQuery.data?.choices;
   const latestRound = roomQuery.data?.latestRound;
   const latestRoundResult = roomQuery.data?.latestRoundResult;
   const score = roomQuery.data?.score;
+
+  const refetchUserSummary = userSummaryQuery.refetch;
+  const lastSummaryRefreshKeyRef = useRef<string>('');
+  useEffect(() => {
+    if (!joined || !isAuthenticated) return;
+    if (userIdsForSummary.length <= 0) return;
+
+    const roundStatus = typeof latestRound?.status === 'string' ? latestRound.status : null;
+    const shouldRefresh = roundStatus === 'completed' || phase === 'finished';
+    if (!shouldRefresh) return;
+
+    const key = `${room?.currentMatchId ?? ''}|${latestRound?.id ?? ''}|${roundStatus ?? ''}|${phase}`;
+    if (key === lastSummaryRefreshKeyRef.current) return;
+    lastSummaryRefreshKeyRef.current = key;
+    void refetchUserSummary();
+  }, [
+    joined,
+    isAuthenticated,
+    userIdsForSummary.length,
+    room?.currentMatchId,
+    latestRound?.id,
+    latestRound?.status,
+    phase,
+    refetchUserSummary,
+  ]);
 
   const myHandCards = useMemo<PvpHandCardItem[]>(() => {
     const list = Array.isArray(myHand?.cards) ? myHand?.cards : [];
@@ -374,6 +430,8 @@ export function PvpRoomPage() {
     },
     onSuccess: () => {
       setError(null);
+      setShowSubmitEditor(false);
+      clearSelected();
       void roomQuery.refetch();
     },
     onError: (e) => setError(e instanceof Error ? e.message : '提交失败'),
@@ -500,6 +558,31 @@ export function PvpRoomPage() {
     },
     onSuccess: () => void roomQuery.refetch(),
     onError: (e) => setError(e instanceof Error ? e.message : '更新口令失败'),
+  });
+
+  const permissionsMutation = useMutation({
+    mutationFn: async (allow: boolean) => {
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/permissions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version, allowNonHostControl: allow }),
+      });
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) {
+        const payload = (data || {}) as ApiErrorPayload;
+        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+          status: res.status,
+          code: payload.code,
+          traceId: payload.traceId,
+          detail: payload.detail,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => setError(e instanceof Error ? e.message : '更新设置失败'),
   });
 
   const restartMutation = useMutation({
@@ -918,7 +1001,7 @@ export function PvpRoomPage() {
                           <div className="font-semibold text-amber-900">正在结算中…</div>
                         </div>
                         <div className="text-xs text-amber-800 mt-1">
-                          页面会自动轮询刷新；如果长时间停留在此状态，可手动刷新。
+                          页面会自动轮询刷新；如果长时间未变化，可尝试刷新浏览器页面。
                         </div>
                         {lastActivityAt ? (
                           <div className="text-xs text-amber-800 mt-1">
@@ -926,15 +1009,8 @@ export function PvpRoomPage() {
                           </div>
                         ) : null}
                       </div>
-                      <div className="flex gap-2 shrink-0">
-                        <button
-                          className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm"
-                          onClick={() => void roomQuery.refetch()}
-                          disabled={roomQuery.isFetching}
-                        >
-                          {roomQuery.isFetching ? '刷新中…' : '刷新'}
-                        </button>
-                        {isHost ? (
+                      {isHost ? (
+                        <div className="flex gap-2 shrink-0">
                           <button
                             className="px-3 py-2 rounded-lg text-sm text-white bg-gradient-to-r from-amber-500 to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             onClick={() => handleResolve({ force: true })}
@@ -943,172 +1019,219 @@ export function PvpRoomPage() {
                           >
                             {resolveMutation.isPending ? '重试中…' : '强制重试'}
                           </button>
-                        ) : null}
-                      </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 )}
 
-                {isHost && (phase === 'waiting' || phase === 'submitting') && (
+                {isHost && (phase === 'waiting' || phase === 'submitting' || phase === 'choosing') && (
                   <div className="p-3 rounded-md bg-white border mt-3">
                     <div className="font-semibold text-sm mb-2">房主设置</div>
-                    <div className="flex gap-2">
-                      <input
-                        className="border rounded px-2 py-1 flex-1 text-sm"
-                        placeholder="设置/清空房间口令（留空即清空）"
-                        value={roomPasswordDraft}
-                        onChange={(e) => setRoomPasswordDraft(e.target.value)}
-                      />
-                      <button
-                        className="generate-button"
-                        style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
-                        onClick={() => passwordMutation.mutate(roomPasswordDraft)}
-                        disabled={passwordMutation.isPending}
-                      >
-                        保存
-                      </button>
+                    {(phase === 'waiting' || phase === 'submitting') && (
+                      <>
+                        <div className="flex gap-2">
+                          <input
+                            className="border rounded px-2 py-1 flex-1 text-sm"
+                            placeholder="设置/清空房间口令（留空即清空）"
+                            value={roomPasswordDraft}
+                            onChange={(e) => setRoomPasswordDraft(e.target.value)}
+                          />
+                          <button
+                            className="generate-button"
+                            style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+                            onClick={() => passwordMutation.mutate(roomPasswordDraft)}
+                            disabled={passwordMutation.isPending}
+                          >
+                            保存
+                          </button>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">提示：仅在 waiting/submitting 阶段允许修改口令。</div>
+                      </>
+                    )}
+
+                    <div className={(phase === 'waiting' || phase === 'submitting') ? 'mt-3' : ''}>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={allowNonHostControl}
+                          onChange={(e) => permissionsMutation.mutate(e.target.checked)}
+                          disabled={permissionsMutation.isPending}
+                        />
+                        <span>允许其他玩家调整 AI 设置并结算</span>
+                      </label>
+                      <div className="text-xs text-gray-500 mt-1">默认关闭更安全；开启后任意玩家可结算并使用其选择的 AI 设置。</div>
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">提示：仅在 waiting/submitting 阶段允许修改。</div>
                   </div>
                 )}
 
                 {phase === 'submitting' && rules && (
                   <div className="mt-4">
                     <div className="p-3 rounded-md bg-white border">
-                      <div className="font-semibold text-sm mb-2">提交卡组（需要 {rules.cardsPerPlayer} 张）</div>
-
-                      <div className="text-xs text-gray-600 mb-3">
-                        注意：提交私有卡会让对手可查看完整 JSON（问卷/能力/设定全量）。
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-sm mb-1">提交卡组（需要 {rules.cardsPerPlayer} 张）</div>
+                          <div className="text-xs text-gray-600">
+                            注意：提交私有卡会让对手可查看完整 JSON（问卷/能力/设定全量）。
+                          </div>
+                        </div>
+                        {mySubmission && !showSubmitEditor ? (
+                          <button
+                            className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => {
+                              setError(null);
+                              clearSelected();
+                              setShowSubmitEditor(true);
+                            }}
+                            disabled={submitMutation.isPending}
+                          >
+                            修改提交
+                          </button>
+                        ) : null}
                       </div>
 
-                      <DatabaseSelector
-                        onOpenCharacterModal={() => setShowBattleDataModal(true)}
-                        onRandomMatchCharacter={handleRandomMatchCharacter}
-                        isAuthenticated={isAuthenticated}
-                        isGenerating={submitMutation.isPending}
-                        isMatching={isMatching}
-                        combatantCount={selected.length}
-                        maxCombatants={rules.cardsPerPlayer}
-                      />
-
-                      {presetsQuery.isLoading && <div className="text-sm text-gray-500 mb-4">正在加载预设列表…</div>}
-                      {presetsQuery.error && (
-                        <div className="text-sm text-red-600 mb-4">
-                          无法加载预设列表：{(presetsQuery.error as Error).message}
-                        </div>
-                      )}
-                      {presetsQuery.grouped && (
+                      {!mySubmission || showSubmitEditor ? (
                         <>
-                          <PresetGridPicker
-                            title="选择预设魔法少女"
-                            presets={presetsQuery.grouped.magicalGirl}
-                            currentPage={mgPage}
-                            onPageChange={setMgPage}
-                            disabled={submitMutation.isPending}
-                            maxSelected={rules.cardsPerPlayer}
-                            selectedCountOverride={selected.length}
-                            selectedFilenames={selectedPresetFilenames}
-                            onToggle={handleTogglePreset}
-                          />
-                          <PresetGridPicker
-                            title="选择预设残兽"
-                            presets={presetsQuery.grouped.canshou}
-                            currentPage={canshouPage}
-                            onPageChange={setCanshouPage}
-                            disabled={submitMutation.isPending}
-                            maxSelected={rules.cardsPerPlayer}
-                            selectedCountOverride={selected.length}
-                            selectedFilenames={selectedPresetFilenames}
-                            onToggle={handleTogglePreset}
-                          />
-                        </>
-                      )}
-
-                      {selected.length > 0 && (
-                        <div className="mb-4 p-3 bg-gray-200 rounded-lg">
-                          <div className="flex justify-between items-center m-0 top-0 right-0">
-                            <p className="font-semibold text-sm text-gray-700">
-                              已选卡组 ({selected.length}/{rules.cardsPerPlayer})
-                            </p>
-                            <button
-                              onClick={clearSelected}
-                              disabled={submitMutation.isPending}
-                              className="text-sm text-red-500 hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              清空列表
-                            </button>
+                          <div className="mt-3">
+                            <DatabaseSelector
+                              onOpenCharacterModal={() => setShowBattleDataModal(true)}
+                              onRandomMatchCharacter={handleRandomMatchCharacter}
+                              isAuthenticated={isAuthenticated}
+                              isGenerating={submitMutation.isPending}
+                              isMatching={isMatching}
+                              combatantCount={selected.length}
+                              maxCombatants={rules.cardsPerPlayer}
+                            />
                           </div>
 
-                          <ul className="list-disc list-inside text-sm text-gray-700 mt-2 space-y-2">
-                            {selected.map((c) => {
-                              const key = cardKey(c);
-                              const title = c.kind === 'preset' ? `${c.name}（预设）` : c.name;
-                              const tag =
-                                c.kind === 'preset'
-                                  ? c.presetType === 'canshou'
-                                    ? '(残兽预设)'
-                                    : '(魔法少女预设)'
-                                  : c.isPublic
-                                    ? '(公开数据卡)'
-                                    : '(私有数据卡)';
+                          {presetsQuery.isLoading && <div className="text-sm text-gray-500 mb-4">正在加载预设列表…</div>}
+                          {presetsQuery.error && (
+                            <div className="text-sm text-red-600 mb-4">
+                              无法加载预设列表：{(presetsQuery.error as Error).message}
+                            </div>
+                          )}
+                          {presetsQuery.grouped && (
+                            <>
+                              <PresetGridPicker
+                                title="选择预设魔法少女"
+                                presets={presetsQuery.grouped.magicalGirl}
+                                currentPage={mgPage}
+                                onPageChange={setMgPage}
+                                disabled={submitMutation.isPending}
+                                maxSelected={rules.cardsPerPlayer}
+                                selectedCountOverride={selected.length}
+                                selectedFilenames={selectedPresetFilenames}
+                                onToggle={handleTogglePreset}
+                              />
+                              <PresetGridPicker
+                                title="选择预设残兽"
+                                presets={presetsQuery.grouped.canshou}
+                                currentPage={canshouPage}
+                                onPageChange={setCanshouPage}
+                                disabled={submitMutation.isPending}
+                                maxSelected={rules.cardsPerPlayer}
+                                selectedCountOverride={selected.length}
+                                selectedFilenames={selectedPresetFilenames}
+                                onToggle={handleTogglePreset}
+                              />
+                            </>
+                          )}
 
-                              return (
-                                <li key={key} className="flex justify-between items-start gap-2">
-                                  <div className="flex items-center flex-grow min-w-0">
-                                    <span className="break-words mr-2" title={title}>
-                                      {title}
-                                      <span className="text-xs text-gray-500 ml-1">{tag}</span>
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center flex-shrink-0">
-                                    <button
-                                      onClick={() => openDetails(c)}
-                                      className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300 mr-2"
-                                      disabled={submitMutation.isPending}
-                                    >
-                                      详情
-                                    </button>
-                                    <button
-                                      onClick={() => removeSelected(c)}
-                                      className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${
-                                        submitMutation.isPending ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'
-                                      }`}
-                                      aria-label={`移除 ${title}`}
-                                      disabled={submitMutation.isPending}
-                                    >
-                                      X
-                                    </button>
-                                  </div>
-                                </li>
-                              );
-                            })}
-                          </ul>
+                          {selected.length > 0 && (
+                            <div className="mb-4 p-3 bg-gray-200 rounded-lg">
+                              <div className="flex justify-between items-center m-0 top-0 right-0">
+                                <p className="font-semibold text-sm text-gray-700">
+                                  已选卡组 ({selected.length}/{rules.cardsPerPlayer})
+                                </p>
+                                <button
+                                  onClick={clearSelected}
+                                  disabled={submitMutation.isPending}
+                                  className="text-sm text-red-500 hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  清空列表
+                                </button>
+                              </div>
+
+                              <ul className="list-disc list-inside text-sm text-gray-700 mt-2 space-y-2">
+                                {selected.map((c) => {
+                                  const key = cardKey(c);
+                                  const title = c.kind === 'preset' ? `${c.name}（预设）` : c.name;
+                                  const tag =
+                                    c.kind === 'preset'
+                                      ? c.presetType === 'canshou'
+                                        ? '(残兽预设)'
+                                        : '(魔法少女预设)'
+                                      : c.isPublic
+                                        ? '(公开数据卡)'
+                                        : '(私有数据卡)';
+
+                                  return (
+                                    <li key={key} className="flex justify-between items-start gap-2">
+                                      <div className="flex items-center flex-grow min-w-0">
+                                        <span className="break-words mr-2" title={title}>
+                                          {title}
+                                          <span className="text-xs text-gray-500 ml-1">{tag}</span>
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center flex-shrink-0">
+                                        <button
+                                          onClick={() => openDetails(c)}
+                                          className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300 mr-2"
+                                          disabled={submitMutation.isPending}
+                                        >
+                                          详情
+                                        </button>
+                                        <button
+                                          onClick={() => removeSelected(c)}
+                                          className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${
+                                            submitMutation.isPending ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'
+                                          }`}
+                                          aria-label={`移除 ${title}`}
+                                          disabled={submitMutation.isPending}
+                                        >
+                                          X
+                                        </button>
+                                      </div>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          )}
+
+                          {hasPrivateSelected && (
+                            <label className="flex items-center gap-2 text-sm mb-3">
+                              <input
+                                type="checkbox"
+                                checked={acceptPrivateDisclosure}
+                                onChange={(e) => setAcceptPrivateDisclosure(e.target.checked)}
+                              />
+                              <span>我已知悉：私有卡提交后对手可查看完整 JSON</span>
+                            </label>
+                          )}
+
+                          <button
+                            className="generate-button w-full"
+                            style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                            disabled={
+                              submitMutation.isPending ||
+                              selected.length !== rules.cardsPerPlayer ||
+                              (hasPrivateSelected && !acceptPrivateDisclosure)
+                            }
+                            onClick={() => submitMutation.mutate()}
+                          >
+                            {submitMutation.isPending ? '提交中…' : '提交卡组'}
+                          </button>
+                        </>
+                      ) : (
+                        <div className="mt-3 rounded-md border bg-gray-50 p-3 text-sm text-gray-700">
+                          你已提交 {mySubmission?.cards?.length || 0} 张卡{mySubmission?.hasPrivateCard ? '（含私有）' : ''}，等待其他玩家提交。
                         </div>
                       )}
-
-                      {hasPrivateSelected && (
-                        <label className="flex items-center gap-2 text-sm mb-3">
-                          <input
-                            type="checkbox"
-                            checked={acceptPrivateDisclosure}
-                            onChange={(e) => setAcceptPrivateDisclosure(e.target.checked)}
-                          />
-                          <span>我已知悉：私有卡提交后对手可查看完整 JSON</span>
-                        </label>
-                      )}
-
-                      <button
-                        className="generate-button w-full"
-                        style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
-                        disabled={submitMutation.isPending || selected.length !== rules.cardsPerPlayer || (hasPrivateSelected && !acceptPrivateDisclosure)}
-                        onClick={() => submitMutation.mutate()}
-                      >
-                        {submitMutation.isPending ? '提交中…' : '提交卡组'}
-                      </button>
 
                       {isHost && (
                         <button
-                          className="generate-button w-full mt-2"
+                          className="generate-button w-full mt-3"
                           style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}
                           disabled={startMutation.isPending || submissions.length < rules.participants}
                           onClick={() => startMutation.mutate()}
@@ -1152,61 +1275,59 @@ export function PvpRoomPage() {
                         choices?.hasChosenMe &&
                         (choices?.chosenCount ?? 0) >= (choices?.totalPlayers ?? players.length)
                       ) && (
-                        <>
-                          <details className="mt-3 rounded-md bg-white border">
-                            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">AI 设置（可选）</summary>
-                            <div className="px-3 pb-3">
-                              <AiProviderSelector onConfigChange={setUserProviderConfig} />
-                              <div className="mt-2 text-xs text-gray-600">
-                                使用自带 API Key：冷却 3 秒；使用系统默认：冷却 120 秒。
-                                {isCooldown ? `（剩余 ${remainingTime} 秒）` : ''}
+                        canControlResolve ? (
+                          <>
+                            <details className="mt-3 rounded-md bg-white border">
+                              <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">AI 设置（可选）</summary>
+                              <div className="px-3 pb-3">
+                                <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                                <div className="mt-2 text-xs text-gray-600">
+                                  使用自带 API Key：冷却 3 秒；使用系统默认：冷却 120 秒。
+                                  {isCooldown ? `（剩余 ${remainingTime} 秒）` : ''}
+                                </div>
+                                {isCustomProviderMissingKey && (
+                                  <div className="mt-2 text-xs text-red-600">已选择自定义供应商但 API Key 为空，请补齐或切回系统默认。</div>
+                                )}
                               </div>
-                              {isCustomProviderMissingKey && (
-                                <div className="mt-2 text-xs text-red-600">已选择自定义供应商但 API Key 为空，请补齐或切回系统默认。</div>
-                              )}
-                            </div>
-                          </details>
+                            </details>
 
-                          <button
-                            className="generate-button mt-3 w-full"
-                            style={{ backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #d97706)' }}
-                            onClick={() => handleResolve()}
-                            disabled={resolveMutation.isPending || isCooldown || isCustomProviderMissingKey}
-                          >
-                            {resolveMutation.isPending
-                              ? '结算中…'
-                              : isCooldown
-                                ? `冷却中（${remainingTime}s）`
-                                : '结算（生成战报）'}
-                          </button>
-                        </>
+                            <button
+                              className="generate-button mt-3 w-full"
+                              style={{ backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #d97706)' }}
+                              onClick={() => handleResolve()}
+                              disabled={resolveMutation.isPending || isCooldown || isCustomProviderMissingKey}
+                            >
+                              {resolveMutation.isPending
+                                ? '结算中…'
+                                : isCooldown
+                                  ? `冷却中（${remainingTime}s）`
+                                  : '结算（生成战报）'}
+                            </button>
+                          </>
+                        ) : (
+                          <div className="mt-3 rounded-md border bg-gray-50 p-3 text-sm text-gray-700">
+                            已全员出牌，等待房主结算。
+                          </div>
+                        )
                       )}
                     </div>
                   </div>
                 )}
 
-                <PvpHandModal
+                <BattleDataModal
                   isOpen={showHandModal}
                   onClose={() => setShowHandModal(false)}
-                  cards={myHandCards}
-                  hasChosenMe={Boolean(choices?.hasChosenMe)}
-                  isChoosing={chooseMutation.isPending}
-                  onOpenDetails={(c) => {
-                    const refKind = typeof c?.ref?.kind === 'string' ? c.ref.kind : '';
-                    const author =
-                      refKind === 'preset' ? '预设角色（快照）' : refKind === 'data_card' ? '数据卡（快照）' : 'PVP 快照';
-                    setDetailsCard({
-                      id: String(c.snapshotId),
-                      name: c.name || '未命名',
-                      description: refKind ? `PVP 手牌（${refKind}）` : 'PVP 手牌（快照）',
-                      type: 'character',
-                      data: typeof c.dataJson === 'string' ? c.dataJson : JSON.stringify(c.dataJson ?? {}),
-                      isPublic: true,
-                      author,
-                    });
-                    setShowDetailsModal(true);
+                  onSelectCard={() => {}}
+                  selectedType="character"
+                  initialTab="pvpHand"
+                  visibleTabs={['pvpHand']}
+                  titleOverride="我的手牌"
+                  pvpHandTab={{
+                    cards: myHandCards,
+                    hasChosenMe: Boolean(choices?.hasChosenMe),
+                    isChoosing: chooseMutation.isPending,
+                    onChoose: chooseFromHandModal,
                   }}
-                  onChoose={chooseFromHandModal}
                 />
 
                 {latestRoundResult?.report && (
@@ -1254,7 +1375,7 @@ export function PvpRoomPage() {
                     {submissions.map((s: any) => (
                       <details key={s.userId} className="text-sm">
                         <summary className="cursor-pointer">
-                          {playerLabelById.get(s.userId) || `用户${s.userId}`}：已提交 {s.cards?.length || 0} 张{s.hasPrivateCard ? '（含私有）' : ''}
+                          {usernameById.get(s.userId) || `用户${s.userId}`}：已提交 {s.cards?.length || 0} 张{s.hasPrivateCard ? '（含私有）' : ''}
                         </summary>
                         <div className="mt-2 space-y-2">
                           {(s.cards || []).map((c: any, idx: number) => {
@@ -1270,14 +1391,15 @@ export function PvpRoomPage() {
                                 <button
                                   className="px-2 py-1 rounded border bg-white hover:bg-gray-100 flex-shrink-0"
                                   onClick={() => {
+                                    const username = usernameById.get(s.userId) || `用户${s.userId}`;
                                     setDetailsCard({
                                       id: `pvp:submission:${s.userId}:${idx}`,
                                       name: c.name || '未命名',
-                                      description: `PVP 提交卡（${playerLabelById.get(s.userId) || `用户${s.userId}` }）`,
+                                      description: `PVP 提交卡（${username}）`,
                                       type: 'character',
                                       data: typeof c.dataJson === 'string' ? c.dataJson : JSON.stringify(c.dataJson ?? {}),
                                       isPublic: Boolean(c.source?.isPublic ?? true),
-                                      author: c.source?.authorUsername || (playerLabelById.get(s.userId) || `用户${s.userId}`),
+                                      author: c.source?.authorUsername || username,
                                     });
                                     setShowDetailsModal(true);
                                   }}

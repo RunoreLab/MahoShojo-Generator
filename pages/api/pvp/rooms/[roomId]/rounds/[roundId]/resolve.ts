@@ -132,6 +132,11 @@ async function resolveHandler(req: Request): Promise<Response> {
   const rules = parseRules(room.rules_json);
   if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
 
+  const allowNonHostControl = rules.allowNonHostControl === true;
+  if (!allowNonHostControl && auth.user.id !== room.host_user_id) {
+    return json({ error: '仅房主可结算（房主可在房间设置中允许其他玩家结算）', code: 'RESOLVE_FORBIDDEN' }, { status: 403 });
+  }
+
   const players = await getPvpRoomPlayers(roomId);
   const sortedPlayers = [...players].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
   if (!sortedPlayers.some((p) => p.user_id === auth.user.id)) return json({ error: '你不在该房间中' }, { status: 403 });

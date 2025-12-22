@@ -12,4 +12,5 @@ export const DEFAULT_PVP_RULES: PvpRoomRules = {
     winCondition: 'mostWinsAfterMaxRounds',
     tieBreaker: 'draw',
   },
+  allowNonHostControl: false,
 };
