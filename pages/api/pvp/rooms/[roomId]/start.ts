@@ -4,6 +4,7 @@ import {
   createPvpMatchPlayers,
   createPvpRound,
   generateUUID,
+  getPvpCardSnapshotById,
   getPvpEligibleDataCard,
   getPvpRoomById,
   getPvpRoomHands,
@@ -13,21 +14,14 @@ import {
   updatePvpRoomCas,
   upsertPvpRoomHand,
 } from '@/lib/d1';
+import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
+import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { dealSnapshots } from '@/lib/pvp/logic';
-import { autoChooseBotsForRound } from '@/lib/pvp/bot/auto';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
-import type { PvpCardRef, PvpRoomRules, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
+import type { PvpCardRef, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
-
-const parseRules = (rulesJson: string): PvpRoomRules | null => {
-  try {
-    return JSON.parse(rulesJson) as PvpRoomRules;
-  } catch {
-    return null;
-  }
-};
 
 const parseSubmission = (raw: string): PvpSubmissionPayload | null => {
   try {
@@ -68,19 +62,35 @@ async function startHandler(req: Request): Promise<Response> {
   if (expectedVersion === null) return json({ error: '缺少 expectedVersion' }, { status: 400 });
   if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
 
-  const rules = parseRules(room.rules_json);
-  if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
+  const internalParsed = parsePvpRoomInternalState(room.rules_json);
+  if ('error' in internalParsed) return json({ error: internalParsed.error }, { status: 500 });
+  const internal = internalParsed.internal;
+  const rules = internal.rules;
+  const bots = internal.bots;
+  const recordMatch = bots.length <= 0;
 
   const players = await getPvpRoomPlayers(roomId);
-  if (players.length < rules.participants) return json({ error: '人数不足，无法开始' }, { status: 409 });
+  const totalParticipants = players.length + bots.length;
+  if (totalParticipants < rules.participants) return json({ error: '人数不足，无法开始' }, { status: 409 });
 
   const sortedPlayers = [...players].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
-  if (sortedPlayers.length !== rules.participants) return json({ error: '房间玩家数量与规则不一致' }, { status: 500 });
   if (sortedPlayers.some((p) => typeof p.seat !== 'number')) return json({ error: '房间座位异常' }, { status: 500 });
+  if (bots.some((b) => !Number.isFinite(b.seat))) return json({ error: '机器人座位异常' }, { status: 500 });
+
+  const usedSeats = new Set<number>();
+  for (const p of sortedPlayers) usedSeats.add(p.seat as number);
+  for (const b of bots) {
+    if (usedSeats.has(b.seat)) return json({ error: '座位冲突（机器人与玩家座位重复）', code: 'SEAT_CONFLICT' }, { status: 500 });
+    usedSeats.add(b.seat);
+  }
+
+  const participants = [
+    ...sortedPlayers.map((p) => ({ kind: 'human' as const, seat: p.seat as number, userId: p.user_id, username: p.username ?? null, prefix: p.prefix ?? null, joinedAt: p.joined_at })),
+    ...bots.map((b) => ({ kind: 'bot' as const, seat: b.seat, botId: b.id, name: b.name, strategyId: b.strategyId })),
+  ].sort((a, b) => a.seat - b.seat);
+  if (participants.length !== rules.participants) return json({ error: '房间参与者数量与规则不一致' }, { status: 500 });
 
   const submissions = await getPvpRoomSubmissions(roomId);
-  if (submissions.length < rules.participants) return json({ error: '仍有玩家未提交卡组' }, { status: 409 });
-
   const submissionMap = new Map<number, PvpSubmissionPayload>();
   for (const row of submissions) {
     const parsed = parseSubmission(row.submission_json);
@@ -93,12 +103,20 @@ async function startHandler(req: Request): Promise<Response> {
     if (!sub) return json({ error: '仍有玩家未提交卡组' }, { status: 409 });
     if (sub.cards.length !== rules.cardsPerPlayer) return json({ error: '提交数量与房间规则不一致，请重新提交' }, { status: 409 });
   }
+  for (const b of bots) {
+    if (!b.submission || !Array.isArray(b.submission.cards) || b.submission.cards.length !== rules.cardsPerPlayer) {
+      return json({ error: '机器人提交异常，请移除机器人后重新添加', code: 'BOT_SUBMISSION_INVALID' }, { status: 409 });
+    }
+  }
 
   // 防御：若 submitting 阶段仍存在手牌，说明上一次对局清理不完整
   const existingHandsBeforeStart = await getPvpRoomHands(roomId);
   if (existingHandsBeforeStart.length > 0) {
     return json({ error: '检测到残留手牌数据，请房主先重开房间再开始', code: 'RUNTIME_STATE_DIRTY' }, { status: 409 });
   }
+
+  // 清理 Bot 运行态（手牌/选择），避免上一局残留影响
+  internal.bots = internal.bots.map((b) => ({ ...b, hand: undefined, choicesByRoundId: undefined }));
 
   const matchId = generateUUID();
   const matchStartedAt = new Date().toISOString();
@@ -115,12 +133,14 @@ async function startHandler(req: Request): Promise<Response> {
     const now = new Date().toISOString();
 
     // best-effort：标记对战为 aborted（若对战记录尚未创建则该更新会失败，但不影响回滚）
-    await updatePvpMatch(matchId, {
-      status: 'aborted',
-      endedAt: now,
-      winnerUserId: null,
-      resultJson: JSON.stringify({ reason, ...(extra ?? {}) }),
-    });
+    if (recordMatch) {
+      await updatePvpMatch(matchId, {
+        status: 'aborted',
+        endedAt: now,
+        winnerUserId: null,
+        resultJson: JSON.stringify({ reason, ...(extra ?? {}) }),
+      });
+    }
 
     const patch = {
       phase: 'submitting' as const,
@@ -139,53 +159,83 @@ async function startHandler(req: Request): Promise<Response> {
     return await updatePvpRoomCas(roomId, refreshed.version, patch);
   };
 
-  const matchOk = await createPvpMatch({
-    id: matchId,
-    roomId,
-    rulesJson: room.rules_json,
-    participants: rules.participants,
-    startedAt: matchStartedAt,
-  });
-  if (!matchOk) {
-    const rolledBack = await abortAndRollback('match-create-failed');
-    if (!rolledBack) {
-      return json({ error: '创建对战记录失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+  if (recordMatch) {
+    const matchOk = await createPvpMatch({
+      id: matchId,
+      roomId,
+      rulesJson: room.rules_json,
+      participants: rules.participants,
+      startedAt: matchStartedAt,
+    });
+    if (!matchOk) {
+      const rolledBack = await abortAndRollback('match-create-failed');
+      if (!rolledBack) {
+        return json({ error: '创建对战记录失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+      }
+      return json({ error: '创建对战记录失败' }, { status: 500 });
     }
-    return json({ error: '创建对战记录失败' }, { status: 500 });
-  }
 
-  const matchPlayersOk = await createPvpMatchPlayers(
-    matchId,
-    sortedPlayers.map((p) => ({
-      userId: p.user_id,
-      seat: p.seat ?? 0,
-      username: p.username ?? null,
-      userPrefix: p.prefix ?? null,
-      joinedAt: p.joined_at,
-    }))
-  );
-  if (!matchPlayersOk) {
-    const rolledBack = await abortAndRollback('match-players-create-failed');
-    if (!rolledBack) {
-      return json({ error: '创建对战参与者快照失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+    const matchPlayersOk = await createPvpMatchPlayers(
+      matchId,
+      sortedPlayers.map((p) => ({
+        userId: p.user_id,
+        seat: p.seat ?? 0,
+        username: p.username ?? null,
+        userPrefix: p.prefix ?? null,
+        joinedAt: p.joined_at,
+      }))
+    );
+    if (!matchPlayersOk) {
+      const rolledBack = await abortAndRollback('match-players-create-failed');
+      if (!rolledBack) {
+        return json({ error: '创建对战参与者快照失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+      }
+      return json({ error: '创建对战参与者快照失败' }, { status: 500 });
     }
-    return json({ error: '创建对战参与者快照失败' }, { status: 500 });
   }
 
   // 合并提交卡，按规则去重
-  const allSubmitted: Array<{ ownerUserId: number; card: PvpSubmittedCard }> = [];
+  const allSubmitted: Array<{
+    eligibilityUserId: number;
+    submittedBy: { kind: 'human'; userId: number; username: string | null } | { kind: 'bot'; name: string };
+    card: PvpSubmittedCard;
+  }> = [];
+
   for (const p of sortedPlayers) {
     const sub = submissionMap.get(p.user_id)!;
-    sub.cards.forEach((card) => allSubmitted.push({ ownerUserId: p.user_id, card }));
+    sub.cards.forEach((card) =>
+      allSubmitted.push({
+        eligibilityUserId: p.user_id,
+        submittedBy: { kind: 'human', userId: p.user_id, username: p.username ?? null },
+        card,
+      })
+    );
+  }
+  for (const b of bots) {
+    b.submission.cards.forEach((card) =>
+      allSubmitted.push({
+        eligibilityUserId: auth.user.id, // Bot 仅提交公开/预设，任意用户都可读；这里用房主 id 走统一校验
+        submittedBy: { kind: 'bot', name: b.name },
+        card,
+      })
+    );
   }
 
   const buildKey = (ref: PvpCardRef): string =>
     ref.kind === 'data_card' ? `data_card:${ref.id}` : ref.kind === 'preset' ? `preset:${ref.filename}` : `snapshot:${ref.id}`;
 
-  const deckCards: Array<{ ownerUserId: number; card: PvpSubmittedCard }> = (() => {
+  const deckCards: Array<{
+    eligibilityUserId: number;
+    submittedBy: { kind: 'human'; userId: number; username: string | null } | { kind: 'bot'; name: string };
+    card: PvpSubmittedCard;
+  }> = (() => {
     if (!rules.dedupe) return allSubmitted;
     const seen = new Set<string>();
-    const out: Array<{ ownerUserId: number; card: PvpSubmittedCard }> = [];
+    const out: Array<{
+      eligibilityUserId: number;
+      submittedBy: { kind: 'human'; userId: number; username: string | null } | { kind: 'bot'; name: string };
+      card: PvpSubmittedCard;
+    }> = [];
     for (const item of allSubmitted) {
       const key = buildKey(item.card.ref);
       if (seen.has(key)) continue;
@@ -207,9 +257,9 @@ async function startHandler(req: Request): Promise<Response> {
 
   // 再校验 data_card 版本与可用性，并生成快照
   const snapshotDeck: Array<{ kind: 'snapshot'; id: string }> = [];
-  for (const { ownerUserId, card } of deckCards) {
+  for (const { eligibilityUserId, submittedBy, card } of deckCards) {
     if (card.ref.kind === 'data_card') {
-      const latest = await getPvpEligibleDataCard(card.ref.id, ownerUserId);
+      const latest = await getPvpEligibleDataCard(card.ref.id, eligibilityUserId);
       if (!latest) {
         const rolledBack = await abortAndRollback('card-not-eligible', { cardId: card.ref.id });
         if (!rolledBack) {
@@ -229,8 +279,13 @@ async function startHandler(req: Request): Promise<Response> {
 
     const snapshotId = await createPvpCardSnapshot({
       roomId,
-      ownerUserId,
-      refJson: JSON.stringify(card.ref),
+      ownerUserId: eligibilityUserId,
+      refJson: JSON.stringify({
+        ...card.ref,
+        ...(submittedBy.kind === 'human'
+          ? { submittedByUserId: submittedBy.userId, submittedByUsername: submittedBy.username }
+          : { submittedByBot: true, submittedByBotName: submittedBy.name }),
+      }),
       cardType: card.type,
       name: card.name,
       dataJson: card.dataJson,
@@ -262,17 +317,24 @@ async function startHandler(req: Request): Promise<Response> {
 
   const hiddenCount = Math.max(0, snapshotDeck.length - needed);
 
-  for (let i = 0; i < sortedPlayers.length; i++) {
-    const player = sortedPlayers[i]!;
+  const botById = new Map(internal.bots.map((b) => [b.id, b]));
+  for (let i = 0; i < participants.length; i++) {
+    const participant = participants[i]!;
     const hand = dealt.hands[i]!;
-    const ok = await upsertPvpRoomHand(roomId, player.user_id, JSON.stringify(hand));
-    if (!ok) {
-      const rolledBack = await abortAndRollback('hand-write-failed', { userId: player.user_id });
-      if (!rolledBack) {
-        return json({ error: '写入手牌失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+    if (participant.kind === 'human') {
+      const ok = await upsertPvpRoomHand(roomId, participant.userId, JSON.stringify(hand));
+      if (!ok) {
+        const rolledBack = await abortAndRollback('hand-write-failed', { userId: participant.userId });
+        if (!rolledBack) {
+          return json({ error: '写入手牌失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+        }
+        return json({ error: '写入手牌失败' }, { status: 500 });
       }
-      return json({ error: '写入手牌失败' }, { status: 500 });
+      continue;
     }
+
+    const bot = botById.get(participant.botId);
+    if (bot) bot.hand = hand;
   }
 
   const roundId = await createPvpRound({
@@ -297,16 +359,35 @@ async function startHandler(req: Request): Promise<Response> {
     return json({ error: '创建回合失败' }, { status: 500 });
   }
 
-  const casToChoosing = await updatePvpRoomCas(roomId, dealingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
-  if (!casToChoosing) {
-    return json({ success: true, roundId, warning: '发牌完成，但房间状态更新失败，请刷新' });
-  }
-
-  // Bot 自动出牌（不影响开局成败，失败则忽略）
+  // Bot 自动出牌：为本回合预先选择（失败则不阻塞开局）
   try {
-    await autoChooseBotsForRound(roomId, roundId);
+    for (const b of internal.bots) {
+      if (!b.hand?.cards?.length) continue;
+      const snapshotIds = b.hand.cards.map((c: any) => (c && c.kind === 'snapshot' ? c.id : null)).filter(Boolean) as string[];
+      const snapshots = [];
+      for (const id of snapshotIds) {
+        const snap = await getPvpCardSnapshotById(id);
+        if (snap) snapshots.push(snap);
+      }
+      const picked = await pickBotChoiceSnapshotId({
+        bot: { strategyId: b.strategyId },
+        snapshots: snapshots.map((s) => ({ id: s.id, name: s.name, data_json: s.data_json, ref_json: s.ref_json })),
+      });
+      if (picked) {
+        b.choicesByRoundId = { ...(b.choicesByRoundId ?? {}), [roundId]: picked };
+      }
+    }
   } catch {
     // ignore
+  }
+
+  const casToChoosing = await updatePvpRoomCas(roomId, dealingVersion, {
+    phase: 'choosing',
+    rules_json: stringifyPvpRoomInternalState(internal),
+    last_activity_at: new Date().toISOString(),
+  });
+  if (!casToChoosing) {
+    return json({ success: true, roundId, warning: '发牌完成，但房间状态更新失败，请刷新' });
   }
 
   return json({ success: true, roundId, nextVersion: dealingVersion + 1 });

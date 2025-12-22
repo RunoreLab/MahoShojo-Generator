@@ -2,7 +2,8 @@ import { getPvpRoundById, getPvpRoomById, getPvpRoomHands, getPvpRoomPlayers, ge
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
-import type { PvpHandState, PvpRoomRules, PvpSnapshotRef } from '@/lib/pvp/types';
+import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
+import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export const runtime = 'edge';
@@ -17,14 +18,6 @@ const parseHand = (raw: string): PvpHandState | null => {
     const parsed = JSON.parse(raw) as PvpHandState;
     if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.cards)) return null;
     return parsed;
-  } catch {
-    return null;
-  }
-};
-
-const parseRules = (rulesJson: string): PvpRoomRules | null => {
-  try {
-    return JSON.parse(rulesJson) as PvpRoomRules;
   } catch {
     return null;
   }
@@ -76,12 +69,15 @@ async function chooseHandler(req: Request): Promise<Response> {
 
   // 自动结算：全员都已选则直接触发 resolve（幂等，多请求并发也安全）
   try {
-    const rules = parseRules(room.rules_json);
+    const parsed = parsePvpRoomInternalState(room.rules_json);
+    const rules = 'error' in parsed ? null : parsed.internal.rules;
+    const bots = 'error' in parsed ? [] : parsed.internal.bots;
     const allowNonHostControl = rules?.allowNonHostControl === true;
     const canTriggerResolve = auth.user.id === room.host_user_id || allowNonHostControl;
     const players = await getPvpRoomPlayers(roomId);
     const choices = await getPvpRoundChoices(roundId);
-    const allChosen = players.length >= 2 && choices.length >= players.length;
+    const totalParticipants = players.length + bots.length;
+    const allChosen = totalParticipants >= 2 && choices.length >= players.length;
     if (allChosen && canTriggerResolve) {
       const origin = getRequestOrigin(req);
       const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);

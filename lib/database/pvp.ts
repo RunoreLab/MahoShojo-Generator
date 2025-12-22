@@ -34,7 +34,6 @@ export interface PvpRoomPlayerRow {
   joined_at: string;
   username?: string;
   prefix?: string | null;
-  is_bot?: number;
 }
 
 export type PvpRoundStatus = 'pending' | 'resolving' | 'completed' | 'aborted';
@@ -106,7 +105,7 @@ export async function getPvpRoomById(roomId: string): Promise<PvpRoomRow | null>
 export async function getPvpRoomPlayers(roomId: string): Promise<PvpRoomPlayerRow[]> {
   try {
     const result = await queryFromD1(
-      `SELECT p.*, u.username, u.prefix, u.is_bot
+      `SELECT p.*, u.username, u.prefix
        FROM pvp_room_players p
        JOIN users u ON u.id = p.user_id
        WHERE p.room_id = ?
@@ -121,64 +120,6 @@ export async function getPvpRoomPlayers(roomId: string): Promise<PvpRoomPlayerRo
   } catch (error) {
     console.error('读取 pvp_room_players 失败:', error);
     return [];
-  }
-}
-
-export interface PvpRoomBotRow {
-  room_id: string;
-  user_id: number;
-  strategy_id: string;
-  created_at: string;
-}
-
-export async function upsertPvpRoomBot(roomId: string, userId: number, strategyId: string): Promise<boolean> {
-  try {
-    const now = new Date().toISOString();
-    const safeStrategyId = typeof strategyId === 'string' ? strategyId.trim() : '';
-    if (!safeStrategyId) return false;
-    const result = await queryFromD1(
-      `INSERT INTO pvp_room_bots (room_id, user_id, strategy_id, created_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(room_id, user_id) DO UPDATE SET
-         strategy_id = excluded.strategy_id`,
-      [roomId, userId, safeStrategyId, now]
-    ) as any;
-    return Boolean(result.success);
-  } catch (error) {
-    console.error('写入 pvp_room_bots 失败:', error);
-    return false;
-  }
-}
-
-export async function getPvpRoomBots(roomId: string): Promise<PvpRoomBotRow[]> {
-  try {
-    const result = await queryFromD1(
-      'SELECT * FROM pvp_room_bots WHERE room_id = ? ORDER BY created_at ASC',
-      [roomId]
-    ) as any;
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpRoomBotRow[];
-    }
-    return [];
-  } catch (error) {
-    console.error('读取 pvp_room_bots 失败:', error);
-    return [];
-  }
-}
-
-export async function getPvpRoomBot(roomId: string, userId: number): Promise<PvpRoomBotRow | null> {
-  try {
-    const result = await queryFromD1(
-      'SELECT * FROM pvp_room_bots WHERE room_id = ? AND user_id = ? LIMIT 1',
-      [roomId, userId]
-    ) as any;
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0] as PvpRoomBotRow;
-    }
-    return null;
-  } catch (error) {
-    console.error('读取 pvp_room_bots(room_id,user_id) 失败:', error);
-    return null;
   }
 }
 
@@ -198,7 +139,6 @@ export async function addPvpRoomPlayer(roomId: string, userId: number, seat: num
 
 export async function removePvpRoomPlayer(roomId: string, userId: number): Promise<boolean> {
   try {
-    await queryFromD1('DELETE FROM pvp_room_bots WHERE room_id = ? AND user_id = ?', [roomId, userId]);
     const result = await queryFromD1(
       'DELETE FROM pvp_room_players WHERE room_id = ? AND user_id = ?',
       [roomId, userId]
@@ -763,9 +703,7 @@ export async function getPvpUserSummariesByUserIds(userIds: number[]): Promise<P
         MAX(m.started_at) AS last_played_at
       FROM pvp_match_players mp
       JOIN pvp_matches m ON m.id = mp.match_id
-      JOIN users u ON u.id = mp.user_id
       WHERE mp.user_id IN (${placeholders})
-        AND (u.is_bot IS NULL OR u.is_bot = 0)
       GROUP BY mp.user_id`,
       ids
     ) as any;

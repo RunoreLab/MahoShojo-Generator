@@ -14,12 +14,13 @@ import {
 } from '@/lib/d1';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
+import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
+import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
-import { autoChooseBotsForRound } from '@/lib/pvp/bot/auto';
-import type { PvpHandState, PvpRoomRules, PvpSnapshotRef } from '@/lib/pvp/types';
+import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export const runtime = 'edge';
@@ -29,20 +30,14 @@ type ResolveBody = { expectedVersion?: number; customProvider?: unknown; force?:
 type PvpPickedSnapshot = NonNullable<Awaited<ReturnType<typeof getPvpCardSnapshotById>>>;
 
 type PvpPickedPlayer = {
-  userId: number;
+  userId: number | null;
   seat: number;
   username: string | null;
   prefix: string | null;
   token: string;
   snapshot: PvpPickedSnapshot;
-};
-
-const parseRules = (rulesJson: string): PvpRoomRules | null => {
-  try {
-    return JSON.parse(rulesJson) as PvpRoomRules;
-  } catch {
-    return null;
-  }
+  isBot?: boolean;
+  botId?: string | null;
 };
 
 const parseChoice = (raw: string): PvpSnapshotRef | null => {
@@ -130,8 +125,12 @@ async function resolveHandler(req: Request): Promise<Response> {
     return json({ error: '正在结算中，请稍后刷新', code: 'ROOM_RESOLVING' }, { status: 409 });
   }
 
-  const rules = parseRules(room.rules_json);
-  if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
+  const internalParsed = parsePvpRoomInternalState(room.rules_json);
+  if ('error' in internalParsed) return json({ error: internalParsed.error }, { status: 500 });
+  const internal = internalParsed.internal;
+  const rules = internal.rules;
+  const bots = internal.bots;
+  const recordMatch = bots.length <= 0;
 
   const allowNonHostControl = rules.allowNonHostControl === true;
   if (!allowNonHostControl && auth.user.id !== room.host_user_id) {
@@ -141,8 +140,22 @@ async function resolveHandler(req: Request): Promise<Response> {
   const players = await getPvpRoomPlayers(roomId);
   const sortedPlayers = [...players].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
   if (!sortedPlayers.some((p) => p.user_id === auth.user.id)) return json({ error: '你不在该房间中' }, { status: 403 });
-  if (sortedPlayers.length !== rules.participants) return json({ error: '房间玩家数量与规则不一致' }, { status: 500 });
   if (sortedPlayers.some((p) => typeof p.seat !== 'number')) return json({ error: '房间座位异常' }, { status: 500 });
+  if (bots.some((b) => !Number.isFinite(b.seat))) return json({ error: '机器人座位异常' }, { status: 500 });
+
+  const usedSeats = new Set<number>();
+  for (const p of sortedPlayers) usedSeats.add(p.seat as number);
+  for (const b of bots) {
+    if (usedSeats.has(b.seat)) return json({ error: '座位冲突（机器人与玩家座位重复）', code: 'SEAT_CONFLICT' }, { status: 500 });
+    usedSeats.add(b.seat);
+  }
+
+  const participants = [
+    ...sortedPlayers.map((p) => ({ kind: 'human' as const, seat: p.seat as number, userId: p.user_id, username: p.username ?? null, prefix: p.prefix ?? null })),
+    ...bots.map((b) => ({ kind: 'bot' as const, seat: b.seat, botId: b.id, name: b.name, strategyId: b.strategyId })),
+  ].sort((a, b) => a.seat - b.seat);
+  if (participants.length !== rules.participants) return json({ error: '房间参与者数量与规则不一致' }, { status: 500 });
+  const humanCount = sortedPlayers.length;
 
   const round = await getPvpRoundById(roundId);
   if (!round || round.room_id !== roomId) return json({ error: '回合不存在' }, { status: 404 });
@@ -161,7 +174,7 @@ async function resolveHandler(req: Request): Promise<Response> {
   }
 
   const choices = await getPvpRoundChoices(roundId);
-  if (choices.length < rules.participants) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
+  if (choices.length < humanCount) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
 
   const choiceByUserId = new Map<number, PvpSnapshotRef>();
   for (const row of choices) {
@@ -173,21 +186,66 @@ async function resolveHandler(req: Request): Promise<Response> {
   const missing = sortedPlayers.filter((p) => !choiceByUserId.has(p.user_id));
   if (missing.length > 0) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
 
+  const chooseForBot = async (botId: string): Promise<string | null> => {
+    const bot = internal.bots.find((b) => b.id === botId);
+    if (!bot) return null;
+    const cached = bot.choicesByRoundId?.[roundId];
+    if (cached) return cached;
+    if (!bot.hand?.cards?.length) return null;
+
+    const snapshotIds = bot.hand.cards
+      .map((c: any) => (c && c.kind === 'snapshot' ? c.id : null))
+      .filter(Boolean) as string[];
+    const snapshots = [];
+    for (const id of snapshotIds) {
+      const snap = await getPvpCardSnapshotById(id);
+      if (snap) snapshots.push(snap);
+    }
+    const picked =
+      (await pickBotChoiceSnapshotId({
+        bot: { strategyId: bot.strategyId },
+        snapshots: snapshots.map((s) => ({ id: s.id, name: s.name, data_json: s.data_json, ref_json: s.ref_json })),
+      })) ?? (snapshotIds[0] ?? null);
+
+    if (picked) {
+      bot.choicesByRoundId = { ...(bot.choicesByRoundId ?? {}), [roundId]: picked };
+    }
+    return picked;
+  };
+
   const picked: PvpPickedPlayer[] = [];
-  for (let i = 0; i < sortedPlayers.length; i++) {
-    const player = sortedPlayers[i]!;
-    const seat = player.seat;
-    if (typeof seat !== 'number') return json({ error: '房间座位异常' }, { status: 500 });
-    const choice = choiceByUserId.get(player.user_id)!;
-    const snap = await getPvpCardSnapshotById(choice.id);
+  for (let i = 0; i < participants.length; i++) {
+    const participant = participants[i]!;
+    const token = `P${i + 1}`;
+    if (participant.kind === 'human') {
+      const choice = choiceByUserId.get(participant.userId)!;
+      const snap = await getPvpCardSnapshotById(choice.id);
+      if (!snap) return json({ error: '快照不存在，请重试' }, { status: 409 });
+      picked.push({
+        userId: participant.userId,
+        seat: participant.seat,
+        username: participant.username,
+        prefix: participant.prefix,
+        token,
+        snapshot: snap,
+        isBot: false,
+      });
+      continue;
+    }
+
+    const snapshotId = await chooseForBot(participant.botId);
+    if (!snapshotId) return json({ error: '机器人出牌失败（缺少手牌或策略异常）', code: 'BOT_CHOOSE_FAILED' }, { status: 409 });
+    const snap = await getPvpCardSnapshotById(snapshotId);
     if (!snap) return json({ error: '快照不存在，请重试' }, { status: 409 });
     picked.push({
-      userId: player.user_id,
-      seat,
-      username: player.username ?? null,
-      prefix: player.prefix ?? null,
-      token: `P${i + 1}`,
+      userId: null,
+      seat: participant.seat,
+      username: participant.name,
+      prefix: null,
+      token,
       snapshot: snap,
+      isBot: true,
+      botId: participant.botId,
     });
   }
 
@@ -373,7 +431,8 @@ async function resolveHandler(req: Request): Promise<Response> {
     );
   }
 
-  const resolvedWinnerUserId = isDraw || winnerIndex === null ? null : picked[winnerIndex]!.userId;
+  const winnerUserIdRaw = isDraw || winnerIndex === null ? null : picked[winnerIndex]!.userId;
+  const resolvedWinnerUserId = typeof winnerUserIdRaw === 'number' ? winnerUserIdRaw : null;
   const resolvedWinnerName = isDraw || winnerIndex === null ? '平局' : picked[winnerIndex]!.snapshot.name;
 
   if (report?.officialReport) {
@@ -383,6 +442,9 @@ async function resolveHandler(req: Request): Promise<Response> {
   const resultJson = JSON.stringify({
     winnerUserId: resolvedWinnerUserId,
     winnerName: resolvedWinnerName,
+    winnerSeat: isDraw || winnerIndex === null ? null : picked[winnerIndex]!.seat,
+    winnerToken: isDraw || winnerIndex === null ? null : picked[winnerIndex]!.token,
+    winnerIsBot: isDraw || winnerIndex === null ? null : Boolean(picked[winnerIndex]!.isBot),
     rawWinnerText,
     attempts,
     error: winnerIndex === null && !isDraw ? (lastError || 'winner 不合法，已判平局') : null,
@@ -390,6 +452,8 @@ async function resolveHandler(req: Request): Promise<Response> {
       token: p.token,
       userId: p.userId,
       seat: p.seat,
+      isBot: Boolean(p.isBot),
+      botId: p.botId ?? null,
       snapshotId: p.snapshot.id,
       name: p.snapshot.name,
       type: p.snapshot.card_type,
@@ -407,28 +471,62 @@ async function resolveHandler(req: Request): Promise<Response> {
   // 更新手牌：移除出牌并放入弃牌
   const hands = await getPvpRoomHands(roomId);
   for (const p of picked) {
-    const handRow = hands.find((h) => h.user_id === p.userId);
-    if (!handRow) continue;
-    const parsed = parseHand(handRow.hand_json);
-    if (!parsed) continue;
-    await upsertPvpRoomHand(roomId, p.userId, JSON.stringify(moveToDiscard(parsed, p.snapshot.id)));
+    if (typeof p.userId === 'number') {
+      const handRow = hands.find((h) => h.user_id === p.userId);
+      if (!handRow) continue;
+      const parsed = parseHand(handRow.hand_json);
+      if (!parsed) continue;
+      await upsertPvpRoomHand(roomId, p.userId, JSON.stringify(moveToDiscard(parsed, p.snapshot.id)));
+      continue;
+    }
+
+    if (p.isBot && p.botId) {
+      const bot = internal.bots.find((b) => b.id === p.botId);
+      if (bot?.hand) {
+        bot.hand = moveToDiscard(bot.hand, p.snapshot.id);
+      }
+    }
   }
 
   // 多局制：到达 maxRounds 才结算整场胜负，否则继续下一轮
   if (rules.bestOf.enabled && round.round_index < rules.bestOf.maxRounds) {
     const nextRoundId = await createPvpRound({ roomId, matchId, roundIndex: round.round_index + 1, status: 'pending' });
-    await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
-    try {
-      if (nextRoundId) await autoChooseBotsForRound(roomId, nextRoundId);
-    } catch {
-      // ignore
+    // Bot 为下一轮预先出牌（失败则忽略，不阻塞流程）
+    if (nextRoundId) {
+      try {
+        for (const b of internal.bots) {
+          if (!b.hand?.cards?.length) continue;
+          const snapshotIds = b.hand.cards.map((c: any) => (c && c.kind === 'snapshot' ? c.id : null)).filter(Boolean) as string[];
+          const snapshots = [];
+          for (const id of snapshotIds) {
+            const snap = await getPvpCardSnapshotById(id);
+            if (snap) snapshots.push(snap);
+          }
+          const pickedId =
+            (await pickBotChoiceSnapshotId({
+              bot: { strategyId: b.strategyId },
+              snapshots: snapshots.map((s) => ({ id: s.id, name: s.name, data_json: s.data_json, ref_json: s.ref_json })),
+            })) ?? (snapshotIds[0] ?? null);
+          if (pickedId) {
+            b.choicesByRoundId = { ...(b.choicesByRoundId ?? {}), [nextRoundId]: pickedId };
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
+
+    await updatePvpRoomCas(roomId, resolvingVersion, {
+      phase: 'choosing',
+      ...(internal.bots.length > 0 ? { rules_json: stringifyPvpRoomInternalState(internal) } : {}),
+      last_activity_at: new Date().toISOString(),
+    });
     return json({ success: true, roundResolved: true, result: JSON.parse(resultJson), nextRoundId });
   }
 
   // 若启用 bestOf，计算整场胜负（最多 wins），平局则 draw
   let matchWinnerUserId: number | null = null;
-  if (rules.bestOf.enabled) {
+  if (recordMatch && rules.bestOf.enabled) {
     const rounds = await getPvpRoundsByMatch(matchId);
     const winCounts = new Map<number, number>();
     for (const p of sortedPlayers) winCounts.set(p.user_id, 0);
@@ -450,14 +548,20 @@ async function resolveHandler(req: Request): Promise<Response> {
     finalRoundIndex: round.round_index,
     bestOf: rules.bestOf,
   });
-  await updatePvpMatch(matchId, {
-    status: 'completed',
-    endedAt,
-    winnerUserId: rules.bestOf.enabled ? matchWinnerUserId : resolvedWinnerUserId,
-    resultJson: matchResultJson,
-  });
+  if (recordMatch) {
+    await updatePvpMatch(matchId, {
+      status: 'completed',
+      endedAt,
+      winnerUserId: rules.bestOf.enabled ? matchWinnerUserId : resolvedWinnerUserId,
+      resultJson: matchResultJson,
+    });
+  }
 
-  await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'finished', last_activity_at: new Date().toISOString() });
+  await updatePvpRoomCas(roomId, resolvingVersion, {
+    phase: 'finished',
+    ...(internal.bots.length > 0 ? { rules_json: stringifyPvpRoomInternalState(internal) } : {}),
+    last_activity_at: new Date().toISOString(),
+  });
 
   return json({ success: true, roundResolved: true, result: JSON.parse(resultJson), matchWinnerUserId });
 }

@@ -105,6 +105,7 @@ type PvpRoomPlayerView = {
   seat?: number | null;
   badges?: UserBadge[];
   isBot?: boolean;
+  botId?: string | null;
 };
 
 export function PvpRoomPage() {
@@ -678,6 +679,31 @@ export function PvpRoomPage() {
     onError: (e) => setError(e instanceof Error ? e.message : '添加机器人失败'),
   });
 
+  const removeBotMutation = useMutation({
+    mutationFn: async (botId: string) => {
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/bots/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version, botId }),
+      });
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) {
+        const payload = (data || {}) as ApiErrorPayload;
+        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+          status: res.status,
+          code: payload.code,
+          traceId: payload.traceId,
+          detail: payload.detail,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => setError(e instanceof Error ? e.message : '移除机器人失败'),
+  });
+
   const cardKey = (c: CardRef): string => (c.kind === 'data_card' ? `data_card:${c.id}` : `preset:${c.filename}`);
 
   const clearSelected = () => {
@@ -999,13 +1025,22 @@ export function PvpRoomPage() {
                                 <span className="ml-2 text-gray-500">（记录可能随时清理）</span>
                               </div>
                             </div>
-                            {isHost && p.userId !== room.hostUserId ? (
+                            {isHost && !p.isBot && p.userId !== room.hostUserId ? (
                               <button
                                 className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs disabled:opacity-50"
                                 onClick={() => kickMutation.mutate(p.userId)}
                                 disabled={kickMutation.isPending}
                               >
                                 踢出
+                              </button>
+                            ) : null}
+                            {isHost && p.isBot && p.botId ? (
+                              <button
+                                className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs disabled:opacity-50"
+                                onClick={() => removeBotMutation.mutate(p.botId!)}
+                                disabled={removeBotMutation.isPending}
+                              >
+                                移除
                               </button>
                             ) : null}
                           </div>

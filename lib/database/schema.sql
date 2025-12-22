@@ -37,7 +37,6 @@ CREATE TABLE IF NOT EXISTS users (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   last_login_at DATETIME,
   is_banned TEXT,
-  is_bot INTEGER NOT NULL DEFAULT 0,
   slot_count INTEGER,
   registration_ip TEXT,
   prefix TEXT
@@ -46,7 +45,6 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_auth_key ON users(auth_key);
-CREATE INDEX IF NOT EXISTS idx_users_is_bot ON users(is_bot);
 
 -- 数据卡表
 CREATE TABLE IF NOT EXISTS data_cards (
@@ -312,19 +310,6 @@ CREATE TABLE IF NOT EXISTS pvp_room_players (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pvp_room_players_room_id ON pvp_room_players(room_id);
-
--- PVP 房间机器人（策略/配置）
-CREATE TABLE IF NOT EXISTS pvp_room_bots (
-  room_id TEXT NOT NULL,
-  user_id INTEGER NOT NULL,
-  strategy_id TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  PRIMARY KEY (room_id, user_id),
-  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_pvp_room_bots_room_id ON pvp_room_bots(room_id);
 
 -- PVP 提交
 CREATE TABLE IF NOT EXISTS pvp_room_submissions (

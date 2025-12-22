@@ -10,20 +10,13 @@ import {
   updatePvpRoomCas,
   getUserEquippedBadges,
 } from '@/lib/d1';
+import { botUserIdForClient, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
-import type { PvpHandState, PvpRoomRules, PvpSubmissionPayload } from '@/lib/pvp/types';
+import type { PvpHandState, PvpSubmissionPayload } from '@/lib/pvp/types';
 import type { UserBadge } from '@/types/badge';
 
 export const runtime = 'edge';
-
-const parseRules = (rulesJson: string): PvpRoomRules | null => {
-  try {
-    return JSON.parse(rulesJson) as PvpRoomRules;
-  } catch {
-    return null;
-  }
-};
 
 const parseSubmission = (raw: string): PvpSubmissionPayload | null => {
   try {
@@ -65,8 +58,10 @@ async function getRoomHandler(req: Request): Promise<Response> {
     }
   }
 
-  const rules = parseRules(room.rules_json);
-  if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
+  const parsed = parsePvpRoomInternalState(room.rules_json);
+  if ('error' in parsed) return json({ error: parsed.error }, { status: 500 });
+  const rules = parsed.internal.rules;
+  const bots = parsed.internal.bots;
 
   const players = await getPvpRoomPlayers(roomId);
   const isPlayer = players.some((p) => p.user_id === auth.user.id);
@@ -89,6 +84,11 @@ async function getRoomHandler(req: Request): Promise<Response> {
       return parsed ? { userId: row.user_id, ...parsed } : null;
     })
     .filter(Boolean);
+
+  const botSubmissions = bots.map((b) => ({
+    userId: botUserIdForClient(b.seat),
+    ...b.submission,
+  }));
 
   const hands = await getPvpRoomHands(roomId);
   const myHandRow = hands.find((h) => h.user_id === auth.user.id);
@@ -124,9 +124,12 @@ async function getRoomHandler(req: Request): Promise<Response> {
     const choices = await getPvpRoundChoices(latestRound.id);
     const chosenUserIds = new Set(choices.map((c) => c.user_id));
     const hasChosenMe = chosenUserIds.has(auth.user.id);
-    const chosenCount = chosenUserIds.size;
-    const totalPlayers = players.length;
-    const hasChosenOther = totalPlayers === 2 ? choices.some((c) => c.user_id !== auth.user.id) : null;
+    const botChosen = bots.filter((b) => Boolean(b.choicesByRoundId?.[latestRound.id])).length;
+    const chosenCount = chosenUserIds.size + botChosen;
+    const totalPlayers = players.length + bots.length;
+    const hasChosenOther = totalPlayers === 2
+      ? (bots.length === 1 ? (hasChosenMe ? botChosen > 0 : botChosen > 0) : choices.some((c) => c.user_id !== auth.user.id))
+      : null;
     choicesState = {
       roundId: latestRound.id,
       roundIndex: latestRound.round_index,
@@ -149,14 +152,38 @@ async function getRoomHandler(req: Request): Promise<Response> {
   let score: any = null;
   if (rules.bestOf.enabled && currentMatchId) {
     const rounds = await getPvpRoundsByMatch(currentMatchId);
-    const winsByUserId = players.map((p) => ({
-      userId: p.user_id,
-      wins: rounds.filter((r) => r.winner_user_id === p.user_id).length,
-    }));
-    const myWins = winsByUserId.find((x) => x.userId === auth.user.id)?.wins ?? 0;
-    const otherId = players.length === 2 ? (players.find((p) => p.user_id !== auth.user.id)?.user_id ?? null) : null;
-    const otherWins = otherId ? (winsByUserId.find((x) => x.userId === otherId)?.wins ?? 0) : null;
-    score = { winsByUserId, myWins, ...(otherWins === null ? {} : { otherWins }), maxRounds: rules.bestOf.maxRounds };
+    const seatToUserId = new Map<number, number>();
+    for (const p of players) {
+      if (typeof p.seat === 'number') seatToUserId.set(p.seat, p.user_id);
+    }
+    for (const b of bots) seatToUserId.set(b.seat, botUserIdForClient(b.seat));
+
+    const allPlayerIds = [...new Set([...seatToUserId.values()])];
+    const winsMap = new Map<number, number>();
+    for (const id of allPlayerIds) winsMap.set(id, 0);
+
+    for (const r of rounds) {
+      if (typeof r.winner_user_id === 'number') {
+        winsMap.set(r.winner_user_id, (winsMap.get(r.winner_user_id) || 0) + 1);
+        continue;
+      }
+      if (!r.result_json) continue;
+      try {
+        const result = JSON.parse(r.result_json) as any;
+        const winnerSeat = typeof result?.winnerSeat === 'number' ? result.winnerSeat : null;
+        if (winnerSeat === null) continue;
+        const userId = seatToUserId.get(winnerSeat);
+        if (typeof userId === 'number') {
+          winsMap.set(userId, (winsMap.get(userId) || 0) + 1);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const winsByUserId = allPlayerIds.map((userId) => ({ userId, wins: winsMap.get(userId) || 0 }));
+    const myWins = winsMap.get(auth.user.id) ?? 0;
+    score = { winsByUserId, myWins, maxRounds: rules.bestOf.maxRounds };
   }
 
   return json({
@@ -172,15 +199,27 @@ async function getRoomHandler(req: Request): Promise<Response> {
       currentMatchId,
       rules,
     },
-    players: players.map((p) => ({
-      userId: p.user_id,
-      username: p.username,
-      prefix: p.prefix,
-      seat: p.seat,
-      isBot: Boolean((p as any).is_bot),
-      badges: badgesByUserId.get(p.user_id) || [],
-    })),
-    submissions,
+    players: [
+      ...players.map((p) => ({
+        userId: p.user_id,
+        username: p.username,
+        prefix: p.prefix,
+        seat: p.seat,
+        isBot: false,
+        badges: badgesByUserId.get(p.user_id) || [],
+        botId: null,
+      })),
+      ...bots.map((b) => ({
+        userId: botUserIdForClient(b.seat),
+        username: b.name,
+        prefix: null,
+        seat: b.seat,
+        isBot: true,
+        badges: [],
+        botId: b.id,
+      })),
+    ].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99)),
+    submissions: [...submissions, ...botSubmissions].sort((a: any, b: any) => (a.userId ?? 0) - (b.userId ?? 0)),
     myHand: myHand ? { cards: myHandCardsDetailed, discarded: myHand.discarded, drawPile: myHand.drawPile } : null,
     latestRound: latestRound ? { id: latestRound.id, index: latestRound.round_index, status: latestRound.status } : null,
     choices: choicesState,
