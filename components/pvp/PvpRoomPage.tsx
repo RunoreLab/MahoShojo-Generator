@@ -25,6 +25,7 @@ import { inferTemplate } from '@/lib/data-card-converter';
 import { useAuth } from '@/lib/useAuth';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
+import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
 
 import type { Preset } from '@/pages/api/get-presets';
 import type { UserBadge } from '@/types/badge';
@@ -253,6 +254,7 @@ export function PvpRoomPage() {
   const phase: string = room?.phase || 'unknown';
   const version: number = room?.version ?? 0;
   const lastActivityAt: string | null = typeof room?.lastActivityAt === 'string' ? room.lastActivityAt : null;
+  const canSeeAllSubmissionDetails = canViewOtherSubmissions(phase, rules?.showAllSubmissions === true);
   const players = useMemo<PvpRoomPlayerView[]>(() => (Array.isArray(roomQuery.data?.players) ? (roomQuery.data.players as PvpRoomPlayerView[]) : []), [roomQuery.data?.players]);
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
   const allowNonHostControl = rules?.allowNonHostControl === true;
@@ -1807,7 +1809,7 @@ export function PvpRoomPage() {
                                 checked={acceptPrivateDisclosure}
                                 onChange={(e) => setAcceptPrivateDisclosure(e.target.checked)}
                               />
-                              <span>我已知悉：私有卡提交后对手可查看完整 JSON</span>
+                              <span>我已知悉：提交阶段不会展示他人卡组；开始对局后若房间允许查看全部提交，对手可能可查看完整 JSON（含私有卡）</span>
                             </label>
                           )}
 
@@ -2003,8 +2005,10 @@ export function PvpRoomPage() {
 
                 <div className="p-3 rounded-md bg-white border mt-4">
                   <div className="font-semibold text-sm mb-2">提交情况</div>
-                  {rules?.showAllSubmissions ? (
+                  {canSeeAllSubmissionDetails ? (
                     <div className="text-xs text-gray-600 mb-2">当前房间允许查看所有人的提交详情。</div>
+                  ) : phase === 'submitting' ? (
+                    <div className="text-xs text-gray-600 mb-2">为防止“先提交被针对”，提交阶段仅展示“谁已提交”，不展示他人卡组详情；开始对局后再按房间设置决定是否可查看。</div>
                   ) : (
                     <div className="text-xs text-gray-600 mb-2">房主已关闭“显示所有人提交的卡组”，你只能查看自己的提交详情。</div>
                   )}
@@ -2058,7 +2062,13 @@ export function PvpRoomPage() {
                                 })}
                               </div>
                             ) : s.hasSubmitted ? (
-                              <div className="mt-2 text-xs text-gray-600">该玩家已提交，但详情已被房间设置隐藏。</div>
+                              <div className="mt-2 text-xs text-gray-600">
+                                {phase === 'submitting'
+                                  ? '该玩家已提交，但提交阶段不展示详情。'
+                                  : canSeeAllSubmissionDetails
+                                    ? '该玩家已提交，但提交详情暂不可用，请刷新后重试。'
+                                    : '该玩家已提交，但详情已被房间设置隐藏。'}
+                              </div>
                             ) : null}
                           </details>
                         );

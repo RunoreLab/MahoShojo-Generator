@@ -14,6 +14,7 @@ import { botUserIdForClient, parsePvpRoomInternalState } from '@/lib/pvp/bot/roo
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
 import type { PvpHandState, PvpSubmissionPayload } from '@/lib/pvp/types';
 import type { UserBadge } from '@/types/badge';
 
@@ -132,7 +133,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
 
   const showAllSubmissions = rules.showAllSubmissions === true;
   const myUserId = auth.user.id;
-  const submissions = showAllSubmissions
+  const submissions = canViewOtherSubmissions(room.phase, showAllSubmissions)
     ? [...humanSubmissionsDetailed, ...botSubmissions]
     : (() => {
         const mine = submissionsByUserId.get(myUserId);
