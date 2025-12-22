@@ -411,6 +411,7 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 ### 端点草案
 - `POST /api/pvp/rooms`：创建房间（返回 `roomId`；可选携带房间口令）
 - `POST /api/pvp/rooms/:roomId/join`：加入房间（若启用口令则需 `password`）
+- `POST /api/pvp/rooms/:roomId/rules`：房主更新房间规则（仅 `waiting/submitting`；修改提交数通常需要清空已提交卡组）
 - `POST /api/pvp/rooms/:roomId/password`：房主设置/清空房间口令（可选，MVP 可延后）
 - （建议新增）`POST /api/pvp/rooms/:roomId/leave`：离开房间（触发 aborted / 让房主可踢人/重置）
 - `POST /api/pvp/rooms/:roomId/submit`：提交卡组
@@ -450,6 +451,11 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - 仅房主可调用
 - 仅允许在 `waiting/submitting` 阶段修改（`choosing/resolving` 禁止改，避免恶意锁人）
 - 建议只保存 `hash+salt`，不保存明文
+
+`POST /api/pvp/rooms/:roomId/rules`（更新房间规则）
+- 仅房主可调用
+- 仅允许在 `waiting/submitting` 阶段修改
+- 修改 `cardsPerPlayer` 时，若房间内已存在提交，通常需要清空提交并要求全员重新提交（否则会出现“提交数与规则不一致”的冲突）
 
 `POST /api/pvp/rooms/:roomId/submit`（提交卡组）
 ```json
