@@ -38,6 +38,12 @@ export interface PvpRoomPlayerRow {
   prefix?: string | null;
 }
 
+export type PvpRoomBrowseRow = PvpRoomRow & {
+  host_username: string;
+  host_prefix: string | null;
+  player_count: number;
+};
+
 export type PvpRoundStatus = 'pending' | 'resolving' | 'completed' | 'aborted';
 
 export interface CreatePvpRoomInput {
@@ -121,6 +127,79 @@ export async function getPvpRoomPlayers(roomId: string): Promise<PvpRoomPlayerRo
     return [];
   } catch (error) {
     console.error('读取 pvp_room_players 失败:', error);
+    return [];
+  }
+}
+
+export async function getPvpRoomBrowseRows(input: {
+  query?: string;
+  mode?: string;
+  password?: 'any' | 'yes' | 'no';
+  phase?: 'any' | 'waiting' | 'submitting';
+  limit?: number;
+  offset?: number;
+}): Promise<PvpRoomBrowseRow[]> {
+  try {
+    const where: string[] = [];
+    const params: any[] = [];
+
+    where.push('r.status = ?');
+    params.push('open');
+
+    const phase = input.phase ?? 'any';
+    if (phase === 'waiting' || phase === 'submitting') {
+      where.push('r.phase = ?');
+      params.push(phase);
+    } else {
+      where.push('r.phase IN (?, ?)');
+      params.push('waiting', 'submitting');
+    }
+
+    const nowIso = new Date().toISOString();
+    where.push('(r.expires_at IS NULL OR r.expires_at > ?)');
+    params.push(nowIso);
+
+    const password = input.password ?? 'any';
+    if (password === 'yes') where.push('r.join_code_hash IS NOT NULL');
+    if (password === 'no') where.push('r.join_code_hash IS NULL');
+
+    const q = typeof input.query === 'string' ? input.query.trim() : '';
+    if (q) {
+      where.push('(r.id LIKE ? OR u.username LIKE ?)');
+      const like = `%${q}%`;
+      params.push(like, like);
+    }
+
+    const mode = typeof input.mode === 'string' ? input.mode.trim() : '';
+    if (mode && mode !== 'all') {
+      where.push('r.rules_json LIKE ?');
+      params.push(`%\"mode\":\"${mode}\"%`);
+    }
+
+    const limit = Number.isFinite(input.limit) ? Math.max(1, Math.min(200, Math.floor(input.limit as number))) : 50;
+    const offset = Number.isFinite(input.offset) ? Math.max(0, Math.floor(input.offset as number)) : 0;
+
+    const sql = `
+      SELECT
+        r.*,
+        u.username AS host_username,
+        u.prefix AS host_prefix,
+        COUNT(p.user_id) AS player_count
+      FROM pvp_rooms r
+      JOIN users u ON u.id = r.host_user_id
+      LEFT JOIN pvp_room_players p ON p.room_id = r.id
+      WHERE ${where.join(' AND ')}
+      GROUP BY r.id
+      ORDER BY COALESCE(r.last_activity_at, r.updated_at) DESC
+      LIMIT ? OFFSET ?`;
+
+    const result = await queryFromD1(sql, [...params, limit, offset]) as any;
+    if (result.success && result.result?.[0]?.results) {
+      return result.result[0].results as PvpRoomBrowseRow[];
+    }
+    return [];
+  } catch (error) {
+    console.error('读取 pvp_rooms 浏览列表失败:', error);
     return [];
   }
 }

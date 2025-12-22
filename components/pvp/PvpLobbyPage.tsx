@@ -7,6 +7,7 @@ import { useRouter } from 'next/router';
 import BattleDataModal from '@/components/BattleDataModal';
 import Footer from '@/components/Footer';
 import { PvpHeroBanner } from '@/components/pvp/PvpHeroBanner';
+import { PvpRoomBrowserModal } from '@/components/pvp/PvpRoomBrowserModal';
 import { usePvpLobbyStore } from '@/components/pvp/stores/usePvpLobbyStore';
 import { BattleModeSelector } from '@/components/shared/BattleModeSelector';
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
@@ -70,10 +71,12 @@ export function PvpLobbyPage() {
   const [scenarioSelection, setScenarioSelection] = useState<PvpScenarioSelection | null>(null);
   const [isScenarioMatching, setIsScenarioMatching] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
+  const [showRoomBrowserModal, setShowRoomBrowserModal] = useState(false);
   const [joinRoomId, setJoinRoomId] = useState('');
   const [joinPassword, setJoinPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isQuickMatching, setIsQuickMatching] = useState(false);
 
   const rulesError = useMemo((): string | null => {
     const participants = Number.isFinite(rules.participants) ? Math.floor(rules.participants) : 0;
@@ -232,6 +235,35 @@ export function PvpLobbyPage() {
     }
     if (joinPassword.trim()) saveRoomPassword(roomId, joinPassword);
     await router.push(`/pvp/${roomId}`);
+  };
+
+  const handleQuickMatch = async () => {
+    setError(null);
+    if (!isAuthenticated) {
+      setError('请先登录后再快速匹配。');
+      return;
+    }
+
+    setIsQuickMatching(true);
+    try {
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+
+      const res = await fetch('/api/pvp/rooms/quick-match', {
+        method: 'POST',
+        headers: { Authorization: authHeader },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '快速匹配失败');
+
+      const roomId = typeof data.roomId === 'string' ? data.roomId : '';
+      if (!roomId) throw new Error('快速匹配失败：缺少 roomId');
+      await router.push(`/pvp/${roomId}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '快速匹配失败');
+    } finally {
+      setIsQuickMatching(false);
+    }
   };
 
   return (
@@ -424,6 +456,23 @@ export function PvpLobbyPage() {
 
                 <div className="p-4 rounded-xl bg-white border text-sm">
                   <h2 className="font-semibold mb-2 text-gray-900">加入房间</h2>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <button
+                      onClick={() => setShowRoomBrowserModal(true)}
+                      disabled={!isAuthenticated}
+                      className="px-3 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      房间浏览器
+                    </button>
+                    <button
+                      onClick={() => void handleQuickMatch()}
+                      disabled={!isAuthenticated || isQuickMatching}
+                      className="generate-button"
+                      style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+                    >
+                      {isQuickMatching ? '匹配中…' : '快速匹配'}
+                    </button>
+                  </div>
                   <label className="flex flex-col gap-1 mb-2">
                     <span className="text-gray-800">房间ID / 链接</span>
                     <input
@@ -484,6 +533,13 @@ export function PvpLobbyPage() {
           onSelectCard={(card) => void handleSelectScenarioCard(card)}
           selectedType="scenario"
           titleOverride="选择情景"
+        />
+      )}
+
+      {showRoomBrowserModal && (
+        <PvpRoomBrowserModal
+          isOpen={showRoomBrowserModal}
+          onClose={() => setShowRoomBrowserModal(false)}
         />
       )}
     </>
