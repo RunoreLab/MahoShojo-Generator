@@ -15,11 +15,9 @@ export {
 // 重新导出用户相关功能
 export {
   createUser,
-  createBotUser,
   getUserByUsername,
   getUserByEmail,
   getUserByAuthKey,
-  getUsersBotFlagsByIds,
   verifyUserLogin,
   getUserDataCardCapacity,
   increaseUserSlotCount
@@ -74,9 +72,6 @@ export {
   getPvpRoomPlayers,
   addPvpRoomPlayer,
   removePvpRoomPlayer,
-  upsertPvpRoomBot,
-  getPvpRoomBots,
-  getPvpRoomBot,
   updatePvpRoomCas,
   upsertPvpRoomSubmission,
   getPvpRoomSubmissions,

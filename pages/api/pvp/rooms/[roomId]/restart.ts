@@ -1,19 +1,11 @@
 import { clearPvpRoomRuntimeState, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
+import { clearBotsFromRulesJson, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
-import type { PvpRoomRules } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
 
 type RestartBody = { expectedVersion?: number };
-
-const parseRules = (rulesJson: string): PvpRoomRules | null => {
-  try {
-    return JSON.parse(rulesJson) as PvpRoomRules;
-  } catch {
-    return null;
-  }
-};
 
 async function restartHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
@@ -39,8 +31,9 @@ async function restartHandler(req: Request): Promise<Response> {
     return json({ error: '对局进行中，不能重开（请先结束/离开）', code: 'PHASE_FORBIDDEN' }, { status: 409 });
   }
 
-  const rules = parseRules(room.rules_json);
-  if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
+  const parsed = parsePvpRoomInternalState(room.rules_json);
+  if ('error' in parsed) return json({ error: parsed.error }, { status: 500 });
+  const rules = parsed.internal.rules;
 
   const players = await getPvpRoomPlayers(roomId);
   if (players.length <= 0) return json({ error: '房间玩家异常' }, { status: 500 });
@@ -48,10 +41,12 @@ async function restartHandler(req: Request): Promise<Response> {
   const cleared = await clearPvpRoomRuntimeState(roomId);
   if (!cleared) return json({ error: '清理对局数据失败' }, { status: 500 });
 
+  const nextRulesJson = clearBotsFromRulesJson(room.rules_json);
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     status: 'open',
     phase: players.length >= rules.participants ? 'submitting' : 'waiting',
     current_match_id: null,
+    rules_json: nextRulesJson,
     last_activity_at: new Date().toISOString(),
   });
 

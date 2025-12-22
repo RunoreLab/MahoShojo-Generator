@@ -16,7 +16,10 @@ async function summaryHandler(req: Request): Promise<Response> {
 
   const rawUserIds = (body.data as SummaryBody).userIds;
   const userIds = Array.isArray(rawUserIds)
-    ? rawUserIds.filter((n) => typeof n === 'number' && Number.isFinite(n)).map((n) => Math.floor(n))
+    ? rawUserIds
+        .filter((n) => typeof n === 'number' && Number.isFinite(n))
+        .map((n) => Math.floor(n))
+        .filter((n) => n > 0)
     : [];
 
   if (userIds.length <= 0) return json({ success: true, users: [] });

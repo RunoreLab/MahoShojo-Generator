@@ -28,6 +28,7 @@ async function kickHandler(req: Request): Promise<Response> {
 
   const targetId = Number.isFinite(body.data.userId) ? Math.floor(body.data.userId as number) : null;
   if (!targetId) return json({ error: '缺少 userId' }, { status: 400 });
+  if (targetId <= 0) return json({ error: '不能踢出机器人，请使用“移除机器人”', code: 'BOT_KICK_FORBIDDEN' }, { status: 400 });
   if (targetId === auth.user.id) return json({ error: '不能踢自己' }, { status: 400 });
 
   const players = await getPvpRoomPlayers(roomId);

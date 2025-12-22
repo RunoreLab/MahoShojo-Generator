@@ -1,18 +1,10 @@
 import { addPvpRoomPlayer, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
+import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { constantTimeEqual, hashJoinCode } from '@/lib/pvp/crypto';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
-import type { PvpRoomRules } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
-
-const parseRules = (rulesJson: string): PvpRoomRules | null => {
-  try {
-    return JSON.parse(rulesJson) as PvpRoomRules;
-  } catch {
-    return null;
-  }
-};
 
 const pickSeat = (existingSeats: Array<number | null>, maxPlayers: number): number | null => {
   const used = new Set(existingSeats.filter((s): s is number => typeof s === 'number'));
@@ -46,8 +38,10 @@ async function joinHandler(req: Request): Promise<Response> {
     }
   }
 
-  const rules = parseRules(room.rules_json);
-  if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
+  const internalParsed = parsePvpRoomInternalState(room.rules_json);
+  if ('error' in internalParsed) return json({ error: internalParsed.error }, { status: 500 });
+  const rules = internalParsed.internal.rules;
+  const bots = internalParsed.internal.bots;
 
   const players = await getPvpRoomPlayers(roomId);
   const alreadyJoined = players.some((p) => p.user_id === auth.user.id);
@@ -64,7 +58,7 @@ async function joinHandler(req: Request): Promise<Response> {
     : room.version;
   if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
 
-  if (players.length >= rules.participants) return json({ error: '房间已满' }, { status: 409 });
+  if (players.length + bots.length >= rules.participants) return json({ error: '房间已满' }, { status: 409 });
 
   if (room.join_code_hash) {
     const password = typeof body.data.password === 'string' ? body.data.password.trim() : '';
@@ -76,13 +70,13 @@ async function joinHandler(req: Request): Promise<Response> {
     }
   }
 
-  const seat = pickSeat(players.map((p) => p.seat), rules.participants);
+  const seat = pickSeat([...players.map((p) => p.seat), ...bots.map((b) => b.seat)], rules.participants);
   const ok = await addPvpRoomPlayer(roomId, auth.user.id, seat);
   if (!ok) return json({ error: '加入房间失败' }, { status: 500 });
 
   const now = new Date().toISOString();
   const nextPlayers = await getPvpRoomPlayers(roomId);
-  const shouldAdvance = room.phase === 'waiting' && nextPlayers.length >= rules.participants;
+  const shouldAdvance = room.phase === 'waiting' && (nextPlayers.length + bots.length) >= rules.participants;
   const casOk = await updatePvpRoomCas(roomId, expectedVersion, {
     ...(shouldAdvance ? { phase: 'submitting' } : {}),
     last_activity_at: now,

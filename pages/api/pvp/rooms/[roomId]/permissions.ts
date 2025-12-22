@@ -1,19 +1,11 @@
 import { getPvpRoomById, updatePvpRoomCas } from '@/lib/d1';
+import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
-import type { PvpRoomRules } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
 
 type PermissionsBody = { expectedVersion?: number; allowNonHostControl?: boolean };
-
-const parseRules = (rulesJson: string): PvpRoomRules | null => {
-  try {
-    return JSON.parse(rulesJson) as PvpRoomRules;
-  } catch {
-    return null;
-  }
-};
 
 async function permissionsHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
@@ -39,14 +31,15 @@ async function permissionsHandler(req: Request): Promise<Response> {
     return json({ error: '当前阶段不允许修改设置', code: 'PHASE_FORBIDDEN' }, { status: 409 });
   }
 
-  const rules = parseRules(room.rules_json);
-  if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
+  const parsed = parsePvpRoomInternalState(room.rules_json);
+  if ('error' in parsed) return json({ error: parsed.error }, { status: 500 });
+  const internal = parsed.internal;
 
   const allowNonHostControl = (body.data as PermissionsBody).allowNonHostControl === true;
-  const nextRules: PvpRoomRules = { ...rules, allowNonHostControl };
+  internal.rules = { ...internal.rules, allowNonHostControl };
 
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
-    rules_json: JSON.stringify(nextRules),
+    rules_json: stringifyPvpRoomInternalState(internal),
     last_activity_at: new Date().toISOString(),
   });
 
@@ -55,4 +48,3 @@ async function permissionsHandler(req: Request): Promise<Response> {
 }
 
 export default withPvpErrorBoundary(permissionsHandler);
-

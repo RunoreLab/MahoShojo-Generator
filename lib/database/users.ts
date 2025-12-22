@@ -18,24 +18,6 @@ export async function createUser(username: string, email: string, authKey: strin
   }
 }
 
-// 创建机器人用户（用于 PVP Bot 等系统玩家）
-export async function createBotUser(username: string, email: string, authKey: string): Promise<number | null> {
-  try {
-    const result = await queryFromD1(
-      'INSERT INTO users (username, email, auth_key, is_bot) VALUES (?, ?, ?, 1)',
-      [username, email, authKey]
-    ) as any;
-
-    if (result.success && result.result) {
-      return result.result[0]?.meta?.last_row_id || null;
-    }
-    return null;
-  } catch (error) {
-    console.error("创建机器人用户失败:", error);
-    return null;
-  }
-}
-
 // 根据用户名查找用户
 export async function getUserByUsername(username: string): Promise<any> {
   try {
@@ -87,27 +69,6 @@ export async function getUserByAuthKey(authKey: string): Promise<any> {
   } catch (error) {
     console.error("查找用户失败:", error);
     return null;
-  }
-}
-
-export async function getUsersBotFlagsByIds(userIds: number[]): Promise<Array<{ id: number; is_bot: number }>> {
-  try {
-    const ids = [...new Set(userIds.filter((n) => Number.isFinite(n)).map((n) => Math.floor(n)))].filter((n) => n > 0);
-    if (ids.length <= 0) return [];
-
-    const placeholders = ids.map(() => '?').join(', ');
-    const result = await queryFromD1(
-      `SELECT id, is_bot FROM users WHERE id IN (${placeholders})`,
-      ids
-    ) as any;
-
-    if (result.success && result.result && result.result[0]?.results) {
-      return result.result[0].results as Array<{ id: number; is_bot: number }>;
-    }
-    return [];
-  } catch (error) {
-    console.error("批量读取用户 bot 标记失败:", error);
-    return [];
   }
 }
 
