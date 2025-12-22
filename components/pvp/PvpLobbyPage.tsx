@@ -7,12 +7,12 @@ import { useRouter } from 'next/router';
 import BattleDataModal from '@/components/BattleDataModal';
 import Footer from '@/components/Footer';
 import { PvpHeroBanner } from '@/components/pvp/PvpHeroBanner';
+import { usePvpLobbyStore } from '@/components/pvp/stores/usePvpLobbyStore';
 import { BattleModeSelector } from '@/components/shared/BattleModeSelector';
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { authStorage } from '@/lib/auth';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { useAuth } from '@/lib/useAuth';
-import { DEFAULT_PVP_RULES } from '@/lib/pvp/defaults';
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
 
 const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
@@ -63,7 +63,9 @@ export function PvpLobbyPage() {
   const router = useRouter();
   const { isAuthenticated, loading } = useAuth();
 
-  const [rules, setRules] = useState<PvpRoomRules>(DEFAULT_PVP_RULES);
+  const rules = usePvpLobbyStore((s) => s.rules);
+  const setRules = usePvpLobbyStore((s) => s.setRules);
+  const updateRules = usePvpLobbyStore((s) => s.updateRules);
   const [createPassword, setCreatePassword] = useState('');
   const [scenarioSelection, setScenarioSelection] = useState<PvpScenarioSelection | null>(null);
   const [isScenarioMatching, setIsScenarioMatching] = useState(false);
@@ -267,7 +269,7 @@ export function PvpLobbyPage() {
                         min={2}
                         max={6}
                         value={rules.participants}
-                        onChange={(e) => setRules((r) => ({ ...r, participants: Number(e.target.value) }))}
+                        onChange={(e) => updateRules({ participants: Number(e.target.value) })}
                       />
                     </label>
                     <label className="flex flex-col gap-1">
@@ -278,7 +280,7 @@ export function PvpLobbyPage() {
                         min={1}
                         max={10}
                         value={rules.cardsPerPlayer}
-                        onChange={(e) => setRules((r) => ({ ...r, cardsPerPlayer: Number(e.target.value) }))}
+                        onChange={(e) => updateRules({ cardsPerPlayer: Number(e.target.value) })}
                       />
                     </label>
                     <label className="flex flex-col gap-1">
@@ -289,19 +291,35 @@ export function PvpLobbyPage() {
                         min={1}
                         max={10}
                         value={rules.dealPerPlayer}
-                        onChange={(e) => setRules((r) => ({ ...r, dealPerPlayer: Number(e.target.value) }))}
+                        onChange={(e) => updateRules({ dealPerPlayer: Number(e.target.value) })}
                       />
                     </label>
                     <label className="flex items-center gap-2 col-span-2 text-gray-800">
                       <input
                         type="checkbox"
                         checked={rules.dedupe}
-                        onChange={(e) => setRules((r) => ({ ...r, dedupe: e.target.checked }))}
+                        onChange={(e) => updateRules({ dedupe: e.target.checked })}
                       />
                       <span>去重（建议开启）</span>
                     </label>
+                    <label className="flex items-center gap-2 col-span-2 text-gray-800">
+                      <input
+                        type="checkbox"
+                        checked={rules.showAllSubmissions}
+                        onChange={(e) => updateRules({ showAllSubmissions: e.target.checked })}
+                      />
+                      <span>显示所有人提交的卡组（默认开启）</span>
+                    </label>
+                    <label className="flex items-center gap-2 col-span-2 text-gray-800">
+                      <input
+                        type="checkbox"
+                        checked={rules.shuffleDecks}
+                        onChange={(e) => updateRules({ shuffleDecks: e.target.checked })}
+                      />
+                      <span>洗混卡组后发牌（默认开启）</span>
+                    </label>
                     <div className="col-span-2">
-                      <BattleModeSelector value={rules.mode} onChange={(next) => setRules((r) => ({ ...r, mode: next }))} />
+                      <BattleModeSelector value={rules.mode} onChange={(next) => updateRules({ mode: next })} />
                     </div>
                     {rules.mode === 'scenario' && (
                       <div className="col-span-2 border rounded-lg p-3 bg-white">
@@ -325,7 +343,12 @@ export function PvpLobbyPage() {
                         <input
                           type="checkbox"
                           checked={rules.bestOf.enabled}
-                          onChange={(e) => setRules((r) => ({ ...r, bestOf: { ...r.bestOf, enabled: e.target.checked } }))}
+                          onChange={(e) =>
+                            setRules({
+                              ...rules,
+                              bestOf: { ...rules.bestOf, enabled: e.target.checked },
+                            } satisfies PvpRoomRules)
+                          }
                         />
                         <span>启用多局制（按轮次累计胜场）</span>
                       </label>
@@ -340,7 +363,10 @@ export function PvpLobbyPage() {
                             value={rules.bestOf.maxRounds}
                             disabled={!rules.bestOf.enabled}
                             onChange={(e) =>
-                              setRules((r) => ({ ...r, bestOf: { ...r.bestOf, maxRounds: Number(e.target.value) } }))
+                              setRules({
+                                ...rules,
+                                bestOf: { ...rules.bestOf, maxRounds: Number(e.target.value) },
+                              } satisfies PvpRoomRules)
                             }
                           />
                         </label>

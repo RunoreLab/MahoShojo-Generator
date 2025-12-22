@@ -20,7 +20,7 @@ import { dealSnapshots } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
-import type { PvpCardRef, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
+import type { PvpCardRef, PvpHandState, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
 
 export const runtime = 'edge';
 
@@ -199,6 +199,166 @@ async function startHandler(req: Request): Promise<Response> {
     }
   }
 
+  if (rules.shuffleDecks !== true) {
+    const botById = new Map(internal.bots.map((b) => [b.id, b]));
+
+    const hands: PvpHandState[] = [];
+    let hiddenCount = 0;
+
+    for (const participant of participants) {
+      const submittedBy =
+        participant.kind === 'human'
+          ? { kind: 'human' as const, userId: participant.userId, username: participant.username ?? null }
+          : { kind: 'bot' as const, name: participant.name };
+
+      const eligibilityUserId = participant.kind === 'human' ? participant.userId : auth.user.id;
+      const submissionCards =
+        participant.kind === 'human'
+          ? (submissionMap.get(participant.userId)?.cards ?? [])
+          : (botById.get(participant.botId)?.submission?.cards ?? []);
+
+      if (submissionCards.length < rules.dealPerPlayer) {
+        const rolledBack = await abortAndRollback('deck-too-small-per-player', {
+          seat: participant.seat,
+          needed: rules.dealPerPlayer,
+          actual: submissionCards.length,
+        });
+        const error = `玩家座位 ${participant.seat} 的提交卡组不足以发牌：需要 ${rules.dealPerPlayer} 张，实际 ${submissionCards.length} 张`;
+        if (!rolledBack) {
+          return json({ error: `${error}（且回滚失败，请房主点击“重开房间”恢复）`, code: 'ROLLBACK_FAILED' }, { status: 409 });
+        }
+        return json({ error, code: 'DECK_TOO_SMALL' }, { status: 409 });
+      }
+
+      hiddenCount += Math.max(0, submissionCards.length - rules.dealPerPlayer);
+
+      const dealtCards = submissionCards.slice(0, rules.dealPerPlayer);
+      const snapshotRefs: Array<{ kind: 'snapshot'; id: string }> = [];
+
+      for (const card of dealtCards) {
+        if (card.ref.kind === 'data_card') {
+          const latest = await getPvpEligibleDataCard(card.ref.id, eligibilityUserId);
+          if (!latest) {
+            const rolledBack = await abortAndRollback('card-not-eligible', { cardId: card.ref.id });
+            if (!rolledBack) {
+              return json({ error: '存在不可用的数据卡，请重新提交（且回滚失败，请房主点击“重开房间”恢复）', code: 'ROLLBACK_FAILED' }, { status: 409 });
+            }
+            return json({ error: '存在不可用的数据卡，请重新提交', code: 'CARD_NOT_ELIGIBLE' }, { status: 409 });
+          }
+          const currentUpdatedAt = typeof latest.updated_at === 'string' ? latest.updated_at : null;
+          if (card.ref.updatedAt && currentUpdatedAt && card.ref.updatedAt !== currentUpdatedAt) {
+            const rolledBack = await abortAndRollback('card-version-mismatch', { cardId: card.ref.id });
+            if (!rolledBack) {
+              return json({ error: '数据卡版本已变更，请重新提交（且回滚失败，请房主点击“重开房间”恢复）', code: 'ROLLBACK_FAILED' }, { status: 409 });
+            }
+            return json({ error: '数据卡版本已变更，请重新提交', code: 'CARD_VERSION_MISMATCH', cardId: card.ref.id }, { status: 409 });
+          }
+        }
+
+        const snapshotId = await createPvpCardSnapshot({
+          roomId,
+          ownerUserId: eligibilityUserId,
+          refJson: JSON.stringify({
+            ...card.ref,
+            ...(submittedBy.kind === 'human'
+              ? { submittedByUserId: submittedBy.userId, submittedByUsername: submittedBy.username }
+              : { submittedByBot: true, submittedByBotName: submittedBy.name }),
+          }),
+          cardType: card.type,
+          name: card.name,
+          dataJson: card.dataJson,
+          sourceUpdatedAt: card.ref.kind === 'data_card' ? card.ref.updatedAt : null,
+        });
+        if (!snapshotId) {
+          const rolledBack = await abortAndRollback('snapshot-create-failed');
+          if (!rolledBack) {
+            return json({ error: '生成快照失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+          }
+          return json({ error: '生成快照失败' }, { status: 500 });
+        }
+        snapshotRefs.push({ kind: 'snapshot', id: snapshotId });
+      }
+
+      hands.push({ cards: snapshotRefs, discarded: [], drawPile: [] });
+    }
+
+    for (let i = 0; i < participants.length; i++) {
+      const participant = participants[i]!;
+      const hand = hands[i]!;
+      if (participant.kind === 'human') {
+        const ok = await upsertPvpRoomHand(roomId, participant.userId, JSON.stringify(hand));
+        if (!ok) {
+          const rolledBack = await abortAndRollback('hand-write-failed', { userId: participant.userId });
+          if (!rolledBack) {
+            return json({ error: '写入手牌失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+          }
+          return json({ error: '写入手牌失败' }, { status: 500 });
+        }
+        continue;
+      }
+
+      const bot = botById.get(participant.botId);
+      if (bot) bot.hand = hand;
+    }
+
+    const roundId = await createPvpRound({
+      roomId,
+      matchId,
+      roundIndex: 1,
+      status: 'pending',
+      publicSnapshotJson: JSON.stringify({
+        dealPerPlayer: rules.dealPerPlayer,
+        cardsPerPlayer: rules.cardsPerPlayer,
+        dedupe: rules.dedupe,
+        hiddenCount,
+        mode: rules.mode,
+        bestOf: rules.bestOf,
+        showAllSubmissions: rules.showAllSubmissions,
+        shuffleDecks: rules.shuffleDecks,
+      }),
+    });
+    if (!roundId) {
+      const rolledBack = await abortAndRollback('round-create-failed');
+      if (!rolledBack) {
+        return json({ error: '创建回合失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+      }
+      return json({ error: '创建回合失败' }, { status: 500 });
+    }
+
+    // Bot 自动出牌：为本回合预先选择（失败则不阻塞开局）
+    try {
+      for (const b of internal.bots) {
+        if (!b.hand?.cards?.length) continue;
+        const snapshotIds = b.hand.cards.map((c: any) => (c && c.kind === 'snapshot' ? c.id : null)).filter(Boolean) as string[];
+        const snapshots = [];
+        for (const id of snapshotIds) {
+          const snap = await getPvpCardSnapshotById(id);
+          if (snap) snapshots.push(snap);
+        }
+        const picked = await pickBotChoiceSnapshotId({
+          bot: { strategyId: b.strategyId },
+          snapshots: snapshots.map((s) => ({ id: s.id, name: s.name, data_json: s.data_json, ref_json: s.ref_json })),
+        });
+        if (picked) {
+          b.choicesByRoundId = { ...(b.choicesByRoundId ?? {}), [roundId]: picked };
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    const casToChoosing = await updatePvpRoomCas(roomId, dealingVersion, {
+      phase: 'choosing',
+      rules_json: stringifyPvpRoomInternalState(internal),
+      last_activity_at: new Date().toISOString(),
+    });
+    if (!casToChoosing) {
+      return json({ success: true, roundId, warning: '发牌完成，但房间状态更新失败，请刷新' });
+    }
+
+    return json({ success: true, roundId, nextVersion: dealingVersion + 1 });
+  }
+
   // 合并提交卡，按规则去重
   const allSubmitted: Array<{
     eligibilityUserId: number;
@@ -354,6 +514,8 @@ async function startHandler(req: Request): Promise<Response> {
       hiddenCount,
       mode: rules.mode,
       bestOf: rules.bestOf,
+      showAllSubmissions: rules.showAllSubmissions,
+      shuffleDecks: rules.shuffleDecks,
     }),
   });
   if (!roundId) {

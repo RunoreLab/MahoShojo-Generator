@@ -17,6 +17,11 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
 
   const dedupe = typeof raw.dedupe === 'boolean' ? raw.dedupe : DEFAULT_PVP_RULES.dedupe;
 
+  const showAllSubmissions =
+    typeof raw.showAllSubmissions === 'boolean' ? raw.showAllSubmissions : DEFAULT_PVP_RULES.showAllSubmissions;
+  const shuffleDecks =
+    typeof raw.shuffleDecks === 'boolean' ? raw.shuffleDecks : DEFAULT_PVP_RULES.shuffleDecks;
+
   const mode = raw.mode ?? DEFAULT_PVP_RULES.mode;
   if (mode !== 'daily' && mode !== 'classic' && mode !== 'kizuna' && mode !== 'scenario') {
     return { error: 'mode 必须是 daily/classic/kizuna/scenario' };
@@ -39,6 +44,8 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     cardsPerPlayer,
     dealPerPlayer,
     dedupe,
+    showAllSubmissions,
+    shuffleDecks,
     mode,
     bestOf: { enabled, maxRounds, winCondition, tieBreaker },
     allowNonHostControl,

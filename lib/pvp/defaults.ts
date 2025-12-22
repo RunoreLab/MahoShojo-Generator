@@ -5,6 +5,8 @@ export const DEFAULT_PVP_RULES: PvpRoomRules = {
   cardsPerPlayer: 10,
   dealPerPlayer: 5,
   dedupe: true,
+  showAllSubmissions: true,
+  shuffleDecks: true,
   mode: 'classic',
   bestOf: {
     enabled: true,

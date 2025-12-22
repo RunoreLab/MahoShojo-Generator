@@ -93,10 +93,17 @@ async function getRoomHandler(req: Request): Promise<Response> {
   );
 
   const submissionsRows = await getPvpRoomSubmissions(roomId);
-  const submissions = submissionsRows
-    .map((row) => {
-      const parsed = parseSubmission(row.submission_json);
-      return parsed ? { userId: row.user_id, ...parsed } : null;
+  const submissionsByUserId = new Map<number, PvpSubmissionPayload>();
+  for (const row of submissionsRows) {
+    const parsed = parseSubmission(row.submission_json);
+    if (!parsed) continue;
+    submissionsByUserId.set(row.user_id, parsed);
+  }
+
+  const humanSubmissionsDetailed = players
+    .map((p) => {
+      const payload = submissionsByUserId.get(p.user_id);
+      return payload ? { userId: p.user_id, ...payload } : null;
     })
     .filter(Boolean);
 
@@ -104,6 +111,33 @@ async function getRoomHandler(req: Request): Promise<Response> {
     userId: botUserIdForClient(b.seat),
     ...b.submission,
   }));
+
+  const submissionStatus = [
+    ...players.map((p) => {
+      const sub = submissionsByUserId.get(p.user_id);
+      return {
+        userId: p.user_id,
+        hasSubmitted: Boolean(sub),
+        submittedCount: sub?.cards?.length ?? 0,
+        hasPrivateCard: sub?.hasPrivateCard ?? false,
+      };
+    }),
+    ...bots.map((b) => ({
+      userId: botUserIdForClient(b.seat),
+      hasSubmitted: true,
+      submittedCount: b.submission?.cards?.length ?? 0,
+      hasPrivateCard: b.submission?.hasPrivateCard ?? false,
+    })),
+  ];
+
+  const showAllSubmissions = rules.showAllSubmissions === true;
+  const myUserId = auth.user.id;
+  const submissions = showAllSubmissions
+    ? [...humanSubmissionsDetailed, ...botSubmissions]
+    : (() => {
+        const mine = submissionsByUserId.get(myUserId);
+        return mine ? [{ userId: myUserId, ...mine }] : [];
+      })();
 
   const hands = await getPvpRoomHands(roomId);
   const myHandRow = hands.find((h) => h.user_id === auth.user.id);
@@ -255,7 +289,8 @@ async function getRoomHandler(req: Request): Promise<Response> {
         botId: b.id,
       })),
     ].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99)),
-    submissions: [...submissions, ...botSubmissions].sort((a: any, b: any) => (a.userId ?? 0) - (b.userId ?? 0)),
+    submissions: submissions.sort((a: any, b: any) => (a.userId ?? 0) - (b.userId ?? 0)),
+    submissionStatus: submissionStatus.sort((a, b) => (a.userId ?? 0) - (b.userId ?? 0)),
     myHand: myHand ? { cards: myHandCardsDetailed, discarded: myHand.discarded, drawPile: myHand.drawPile } : null,
     latestRound: latestRound ? { id: latestRound.id, index: latestRound.round_index, status: latestRound.status } : null,
     choices: choicesState,

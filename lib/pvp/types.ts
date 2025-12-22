@@ -37,6 +37,16 @@ export interface PvpRoomRules {
   cardsPerPlayer: number; // 每人提交数量
   dealPerPlayer: number;  // 每人初始手牌数量
   dedupe: boolean;
+  /**
+   * 是否在房间内向所有人展示“所有玩家提交的卡组详情”。
+   * 默认 true；关闭时仅能看到自己的提交详情（仍会展示所有人的提交进度）。
+   */
+  showAllSubmissions: boolean;
+  /**
+   * 是否将所有玩家提交的卡混合为同一牌池并洗牌后发牌。
+   * 默认 true；关闭时每位玩家仅从自己提交的卡组中抽取手牌（按提交顺序）。
+   */
+  shuffleDecks: boolean;
   mode: PvpMode;
   bestOf: PvpBestOfRules;
   /**
