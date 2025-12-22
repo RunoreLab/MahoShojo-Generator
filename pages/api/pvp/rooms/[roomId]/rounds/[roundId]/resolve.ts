@@ -16,6 +16,7 @@ import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
+import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
@@ -127,6 +128,10 @@ async function resolveHandler(req: Request): Promise<Response> {
   const internal = internalParsed.internal;
   const rules = internal.rules;
   const bots = internal.bots;
+  const scenarioSelection = parsePvpScenarioSelection((internal.raw as any)?._scenario);
+  if (rules.mode === 'scenario' && !scenarioSelection) {
+    return json({ error: '当前为情景模式，但尚未选择情景', code: 'SCENARIO_MISSING' }, { status: 409 });
+  }
 
   const allowNonHostControl = rules.allowNonHostControl === true;
   if (!allowNonHostControl && auth.user.id !== room.host_user_id) {
@@ -310,6 +315,14 @@ async function resolveHandler(req: Request): Promise<Response> {
             isPreset: false,
           })),
           mode: rules.mode,
+          ...(rules.mode === 'scenario' && scenarioSelection
+            ? {
+                scenario: scenarioSelection.content,
+                scenarioTitle: getPvpScenarioTitle(scenarioSelection) || undefined,
+                scenarioSourceDataCardId: scenarioSelection.sourceDataCardId || undefined,
+                scenarioSourceDataCardUpdatedAt: scenarioSelection.sourceDataCardUpdatedAt || undefined,
+              }
+            : {}),
           language: 'zh-CN',
           userGuidance: buildGuidance(attempt),
           readArenaHistory: false,

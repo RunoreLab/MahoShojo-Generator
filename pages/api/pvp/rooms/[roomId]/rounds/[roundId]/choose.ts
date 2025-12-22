@@ -1,10 +1,7 @@
-import { getPvpRoundById, getPvpRoomById, getPvpRoomHands, getPvpRoomPlayers, getPvpRoundChoices, upsertPvpRoundChoice } from '@/lib/d1';
-import { getRequestOrigin } from '@/lib/pvp/origin';
+import { getPvpRoundById, getPvpRoomById, getPvpRoomHands, getPvpRoomPlayers, upsertPvpRoundChoice } from '@/lib/d1';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
-import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
-import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export const runtime = 'edge';
 
@@ -67,39 +64,7 @@ async function chooseHandler(req: Request): Promise<Response> {
   const ok = await upsertPvpRoundChoice(roundId, auth.user.id, JSON.stringify(choice));
   if (!ok) return json({ error: '提交选择失败' }, { status: 500 });
 
-  // 自动结算：全员都已选则直接触发 resolve（幂等，多请求并发也安全）
-  try {
-    const parsed = parsePvpRoomInternalState(room.rules_json);
-    const rules = 'error' in parsed ? null : parsed.internal.rules;
-    const bots = 'error' in parsed ? [] : parsed.internal.bots;
-    const allowNonHostControl = rules?.allowNonHostControl === true;
-    const canTriggerResolve = auth.user.id === room.host_user_id || allowNonHostControl;
-    const players = await getPvpRoomPlayers(roomId);
-    const choices = await getPvpRoundChoices(roundId);
-    const totalParticipants = players.length + bots.length;
-    const allChosen = totalParticipants >= 2 && choices.length >= players.length;
-    if (allChosen && canTriggerResolve) {
-      const origin = getRequestOrigin(req);
-      const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
-      const resolveRes = await fetch(new URL(`/api/pvp/rooms/${roomId}/rounds/${roundId}/resolve`, origin).toString(), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(req.headers.get('authorization') ? { Authorization: req.headers.get('authorization') as string } : {}),
-          ...subrequestAuthHeaders,
-        },
-        body: JSON.stringify({ expectedVersion }),
-      });
-      if (resolveRes.ok) {
-        const resolved = await resolveRes.json().catch(() => null);
-        return json({ success: true, resolved });
-      }
-    }
-  } catch {
-    // 自动结算失败不影响出牌成功，交由房主/玩家手动点结算或等待轮询触发
-  }
-
-  return json({ success: true, readyToResolve: true });
+  return json({ success: true });
 }
 
 export default withPvpErrorBoundary(chooseHandler);

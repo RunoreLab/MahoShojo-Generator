@@ -20,7 +20,7 @@ export type PvpCardRef = PvpDataCardRef | PvpPresetRef | PvpSnapshotRef;
 
 export type PvpCombatantType = 'magical-girl' | 'canshou' | 'general-character';
 
-export type PvpMode = 'classic' | 'kizuna' | 'scenario';
+export type PvpMode = 'daily' | 'classic' | 'kizuna' | 'scenario';
 
 export type PvpWinCondition = 'mostWinsAfterMaxRounds';
 export type PvpTieBreaker = 'draw';
@@ -75,3 +75,14 @@ export interface PvpWinnerResolution {
   attempts: number;
   error?: string | null;
 }
+
+export type PvpScenarioSelection = {
+  content: Record<string, unknown>;
+  fileName: string;
+  isNative?: boolean;
+  sourceDataCardId?: string | null;
+  sourceDataCardUpdatedAt?: string | null;
+  sourceDataCardName?: string | null;
+  sourceIsPublic?: boolean | null;
+  sourceAuthor?: string | null;
+};

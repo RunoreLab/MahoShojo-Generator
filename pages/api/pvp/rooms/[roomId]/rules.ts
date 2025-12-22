@@ -7,6 +7,7 @@ import {
 } from '@/lib/d1';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
+import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { parsePvpRules } from '@/lib/pvp/validate';
 
@@ -15,6 +16,14 @@ export const runtime = 'edge';
 type RulesBody = { expectedVersion?: number; rules?: unknown; clearSubmissions?: boolean };
 
 const isObject = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === 'object');
+const sanitizeRulesPatch = (patch: Record<string, unknown>): Record<string, unknown> => {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (key.startsWith('_') && key !== '_scenario') continue;
+    out[key] = value;
+  }
+  return out;
+};
 
 async function rulesHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
@@ -47,8 +56,18 @@ async function rulesHandler(req: Request): Promise<Response> {
   const patchRules = isObject(body.data.rules) ? (body.data.rules as Record<string, unknown>) : null;
   if (!patchRules) return json({ error: '缺少 rules' }, { status: 400 });
 
-  const merged = { ...(internal.raw || {}), ...patchRules };
-  const parsed = parsePvpRules(merged);
+  const safePatch = sanitizeRulesPatch(patchRules);
+  if ('_scenario' in safePatch && safePatch._scenario !== null && safePatch._scenario !== undefined) {
+    const parsedScenario = parsePvpScenarioSelection(safePatch._scenario);
+    if (!parsedScenario) return json({ error: '情景数据无效' }, { status: 400 });
+    safePatch._scenario = parsedScenario as any;
+  }
+  const mergedRaw = { ...(internal.raw || {}), ...safePatch } as Record<string, unknown>;
+  if ('_scenario' in safePatch && safePatch._scenario === null) {
+    delete (mergedRaw as any)._scenario;
+  }
+
+  const parsed = parsePvpRules(mergedRaw);
   if ('error' in parsed) return json({ error: parsed.error }, { status: 400 });
   const nextRules = parsed.rules;
 
@@ -80,6 +99,7 @@ async function rulesHandler(req: Request): Promise<Response> {
   }
 
   internal.rules = { ...nextRules };
+  internal.raw = mergedRaw;
   const nextPhase = participantCount >= nextRules.participants ? 'submitting' : 'waiting';
 
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
@@ -93,4 +113,3 @@ async function rulesHandler(req: Request): Promise<Response> {
 }
 
 export default withPvpErrorBoundary(rulesHandler);
-
