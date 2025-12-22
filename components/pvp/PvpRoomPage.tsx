@@ -14,7 +14,9 @@ import { PresetGridPicker } from '@/components/PresetGridPicker';
 import { UserWithTitle } from '@/components/UserTitle';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 import { usePresetQuery } from '@/components/arena/hooks/useArenaData';
+import { PvpHeroBanner } from '@/components/pvp/PvpHeroBanner';
 import { authStorage } from '@/lib/auth';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { useCooldown } from '@/lib/cooldown';
 import { useAuth } from '@/lib/useAuth';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
@@ -118,6 +120,7 @@ export function PvpRoomPage() {
   const [joinPassword, setJoinPassword] = useState('');
   const [joined, setJoined] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<'id' | 'link' | null>(null);
 
   const [selected, setSelected] = useState<CardRef[]>([]);
   const [acceptPrivateDisclosure, setAcceptPrivateDisclosure] = useState(false);
@@ -219,6 +222,32 @@ export function PvpRoomPage() {
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
   const allowNonHostControl = rules?.allowNonHostControl === true;
   const canControlResolve = isHost || allowNonHostControl;
+
+  const flashCopied = (key: 'id' | 'link') => {
+    setCopiedKey(key);
+    window.setTimeout(() => setCopiedKey(null), 1500);
+  };
+
+  const handleCopyRoomId = async () => {
+    if (!roomId) return;
+    const ok = await copyTextToClipboard(roomId);
+    if (ok) {
+      flashCopied('id');
+      return;
+    }
+    setError('复制失败：当前环境不支持剪贴板。');
+  };
+
+  const handleCopyRoomLink = async () => {
+    if (!roomId || typeof window === 'undefined') return;
+    const link = `${window.location.origin}/pvp/${roomId}`;
+    const ok = await copyTextToClipboard(link);
+    if (ok) {
+      flashCopied('link');
+      return;
+    }
+    setError('复制失败：当前环境不支持剪贴板。');
+  };
 
   useEffect(() => {
     if (!roomId) {
@@ -1004,17 +1033,50 @@ export function PvpRoomPage() {
         <title>PVP 房间 - {roomId || '...'}</title>
       </Head>
       <div className="magic-background-white">
-        <div className="container">
-          <div className="card" style={{ border: '2px solid #ccc', background: '#f9f9f9' }}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">PVP 房间</h1>
-                <div className="text-sm text-gray-600 mt-1 break-all">房间ID：{roomId || '加载中…'}</div>
-              </div>
-              <button onClick={() => window.location.assign('/pvp')} className="text-sm text-blue-600 hover:underline">
-                返回大厅
-              </button>
-            </div>
+        <div className="container !max-w-[1100px]">
+          <div className="card !max-w-none !p-0">
+            <PvpHeroBanner
+              title="PVP 房间"
+              subtitle={
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <div className="text-sm text-gray-700 break-all">
+                    房间ID：<span className="font-mono font-semibold text-gray-900">{roomId || '加载中…'}</span>
+                  </div>
+                  {roomQuery.data ? (
+                    <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">阶段：{phase}</span>
+                  ) : null}
+                </div>
+              }
+              right={
+                <>
+                  <button
+                    type="button"
+                    onClick={handleCopyRoomId}
+                    disabled={!roomId}
+                    className="text-xs px-3 py-1.5 rounded-full bg-white/80 border border-white/60 hover:bg-white disabled:opacity-60"
+                    title="复制房间ID"
+                    aria-label="复制房间ID"
+                  >
+                    {copiedKey === 'id' ? '已复制 ID' : '复制 ID'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyRoomLink}
+                    disabled={!roomId}
+                    className="text-xs px-3 py-1.5 rounded-full bg-white/80 border border-white/60 hover:bg-white disabled:opacity-60"
+                    title="复制房间链接"
+                    aria-label="复制房间链接"
+                  >
+                    {copiedKey === 'link' ? '已复制链接' : '复制链接'}
+                  </button>
+                  <button onClick={() => window.location.assign('/pvp')} className="text-sm text-blue-700 hover:underline">
+                    返回大厅
+                  </button>
+                </>
+              }
+            />
+
+            <div className="p-6">
 
             {!loading && !isAuthenticated && (
               <div className="p-3 rounded-md bg-yellow-100 text-yellow-800 text-sm mt-3">
@@ -1758,6 +1820,7 @@ export function PvpRoomPage() {
               <button onClick={() => window.location.assign('/')} className="footer-link">
                 返回首页
               </button>
+            </div>
             </div>
           </div>
           <Footer />
