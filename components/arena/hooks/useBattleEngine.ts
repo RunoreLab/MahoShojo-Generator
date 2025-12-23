@@ -14,6 +14,7 @@ import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
+import { extractStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import { authStorage } from '@/lib/auth';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
@@ -540,11 +541,36 @@ export const useBattleEngine = () => {
             return;
           }
 
-          setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+          // 流式正文末尾可能包含 HTML 注释 JSON 元数据（用于角色更新的 impacts/currentStateSummary）。
+          // 此处尽量提取并修复解析；失败时回退到仅基于 Markdown 的更新逻辑。
+          let markdownForUi = accumulatedText;
+          let metaOverride:
+            | {
+              report?: { headline?: string; winner?: string };
+              impacts?: Array<{ characterName: string; impact?: string; currentStateSummary?: string }>;
+            }
+            | undefined;
+          try {
+            const extracted = await extractStreamUpdateMeta(accumulatedText);
+            if (extracted?.meta && (extracted.meta.report || (extracted.meta.impacts && extracted.meta.impacts.length > 0))) {
+              metaOverride = {
+                ...(extracted.meta.report ? { report: extracted.meta.report } : {}),
+                ...(extracted.meta.impacts && extracted.meta.impacts.length > 0 ? { impacts: extracted.meta.impacts } : {}),
+              };
+            }
+            if (extracted?.strippedMarkdown) {
+              markdownForUi = extracted.strippedMarkdown;
+            }
+          } catch (metaError) {
+            console.warn('解析流式战报元数据失败，将回退到 Markdown 解析更新', metaError);
+          }
 
-          const trimmedForValidation = accumulatedText.trim();
+          setStreamingMarkdown(sanitizeTextByShieldWords(markdownForUi));
+
+          const trimmedForValidation = markdownForUi.trim();
           const looksLikeCompleteReport =
-            trimmedForValidation.length >= 120 && /^#{2,6}\s*/m.test(trimmedForValidation);
+            trimmedForValidation.length >= 120 &&
+            (/^#{2,6}\s*/m.test(trimmedForValidation) || Boolean(metaOverride?.impacts?.length));
 
           // 与非流式保持一致：生成失败/中断时不进入冷却，并优先展示“生成失败”而不是“角色更新失败”。
           if (!looksLikeCompleteReport) {
@@ -571,7 +597,7 @@ export const useBattleEngine = () => {
           if (settings.writeArenaHistory || settings.writeCurrentState) {
             try {
               await updateFromMarkdown(
-                accumulatedText,
+                markdownForUi,
                 freshCombatants,
                 battleMode,
                 {
@@ -579,7 +605,8 @@ export const useBattleEngine = () => {
                   writeArenaHistory: settings.writeArenaHistory,
                   writeCurrentState: settings.writeCurrentState,
                 },
-                shouldUseScenario ? scenario.content : null
+                shouldUseScenario ? scenario.content : null,
+                metaOverride
               );
             } catch (updateError) {
               const message = updateError instanceof Error ? updateError.message : '发生未知错误，请重试。';

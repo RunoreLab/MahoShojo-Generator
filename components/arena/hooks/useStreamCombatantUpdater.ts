@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { getLogger } from '@/lib/logger';
+import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, CombatantData } from '../types';
 
@@ -205,11 +206,40 @@ export const useStreamCombatantUpdater = () => {
         writeArenaHistory: boolean;
         writeCurrentState: boolean;
       },
-      scenario?: any
+      scenario?: any,
+      metaOverride?: {
+        report?: { headline?: string; winner?: string };
+        impacts?: UpdateCombatantsPayload['impacts'];
+      }
     ) => {
       const parsed = getValidatedMarkdownReport(markdown, mode);
-      if (!parsed) {
-        throw new Error('战报内容不完整，已取消角色更新（请等待战报完整生成后重试）。');
+
+      const fallbackHeadline =
+        (typeof metaOverride?.report?.headline === 'string' ? metaOverride.report.headline.trim() : '') ||
+        extractHeadlineFromMarkdown(markdown) ||
+        '';
+      const fallbackWinner =
+        (typeof metaOverride?.report?.winner === 'string' ? metaOverride.report.winner.trim() : '') ||
+        extractWinnerFromText(markdown) ||
+        '';
+
+      const headline = (parsed?.headline || fallbackHeadline).trim();
+      const winner = (parsed?.winner || fallbackWinner).trim();
+
+      // 写入历战记录时，headline/winner 必须有效，否则服务端会拒绝写入。
+      // 若只写当前状态，则允许使用兜底值继续尝试，避免“能更新但被校验拦住”。
+      if (settings.writeArenaHistory) {
+        if (!headline || headline === '魔法少女速报') {
+          throw new Error('战报标题缺失或无效，已取消角色更新（请等待战报完整生成后重试）。');
+        }
+        if (!winner || winner === '未知') {
+          throw new Error('胜利者信息缺失或无效，已取消角色更新（请等待战报完整生成后重试）。');
+        }
+      } else {
+        // 仅写当前状态时，尽量不要因为标题/胜利者解析失败而直接放弃
+        if (!headline) {
+          // 不强制，留给服务端作为无关字段使用
+        }
       }
 
       const payload: UpdateCombatantsPayload = {
@@ -220,12 +250,13 @@ export const useStreamCombatantUpdater = () => {
           isPreset: c.isPreset,
         })),
         report: {
-          headline: parsed.headline,
+          headline: headline || '魔法少女速报',
           mode: mode,
           officialReport: {
-            winner: parsed.winner,
+            winner: winner || '未知',
           },
         },
+        ...(Array.isArray(metaOverride?.impacts) && metaOverride.impacts.length > 0 ? { impacts: metaOverride.impacts } : {}),
         userGuidance: settings.userGuidance || null,
         scenario: scenario || null,
         writeArenaHistory: settings.writeArenaHistory,
