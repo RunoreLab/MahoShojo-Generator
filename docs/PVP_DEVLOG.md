@@ -169,3 +169,30 @@ ALTER TABLE pvp_room_players ADD COLUMN role TEXT NOT NULL DEFAULT 'player';
 
 ### P3：实时性与更强一致性（成本更高）
 - 将轮询升级为 SSE / Durable Objects（房间级广播），减少延迟与请求量，并提升状态一致性
+
+## 6. 故障排查与修修补补（2025-12-23）
+
+本节记录用户反馈的 PVP 体验问题与对应修复点（以“先止血、再优化”为原则）：
+
+### 6.1 Cloudflare 502 HTML 错误页被直接展示（体验灾难）
+- **现象**：结算时偶发 `Bad gateway Error code 502 Visit cloudflare.com for more information.`，页面显示一大段 HTML 且不消失。
+- **原因**：前端在解析失败时把 `res.text()` 原样塞到 `error` 字段，导致 UI 直接渲染整页 HTML。
+- **修复**：前端对“非 JSON 响应 / HTML 错误页”做识别与摘要，只展示可读的中文错误提示，并在控制台保留日志便于排查。
+
+### 6.2 结算/轮询请求“无限转圈”
+- **现象**：结算超时后一直转圈，缺少明确错误提示。
+- **原因**：缺少前端超时与 Abort 处理，网络/代理链路挂起时 `fetch` 永不返回；同时 resolving/advancing 仅提示“请刷新”。
+- **修复**：关键请求加入超时（房间轮询、结算、确认、退出），并在 resolving/advancing 阶段加入“长时间无更新”的醒目提示与建议动作。
+
+### 6.3 房间卡死且无法退出
+- **现象**：房间进入 `resolving/advancing/dealing` 等阶段时，有时无法退出，甚至卡死。
+- **原因**：`POST /api/pvp/rooms/:roomId/leave` 在 busy 阶段直接拒绝退出，且强依赖 `expectedVersion`，轮询/并发更新时容易触发版本冲突。
+- **修复**：leave 接口改为 best-effort：
+  - 不再强制要求 `expectedVersion`；
+  - busy 阶段允许退出；
+  - 即使 CAS 写入失败也尽力移除成员记录与清理提交/手牌（返回 warning）。
+
+### 6.4 “确认已阅读（推进）按钮消失”
+- **现象**：有时确认按钮不见了，用户不知道该怎么推进。
+- **原因**：观众身份在 reviewing 阶段本就不展示确认按钮，但提示不够显眼；且 reviewing UI 对“回合信息尚未加载”缺少显式说明。
+- **修复**：reviewing 阶段对观众增加明确提示；玩家侧在回合信息未加载完成时也会给出提示，降低“按钮消失”的误判。
