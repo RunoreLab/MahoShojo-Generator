@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { canForcePendingAction, computeLastPendingChooseAction, computeLastPendingConfirmAction, computeLastPendingSubmissionAction } from '@/lib/pvp/pending-action';
+import { canForcePendingAction, computeLastPendingChooseAction, computeLastPendingConfirmAction, computeLastPendingSubmissionAction, computeLastPendingVoteAction } from '@/lib/pvp/pending-action';
 
 describe('pvp: pending-action', () => {
   test('submitting：仅剩 1 人未提交时给出 deadline', () => {
@@ -76,5 +76,22 @@ describe('pvp: pending-action', () => {
     expect(pending.deadlineAt).toBe('2025-12-22T00:02:36.000Z');
     expect(pending.secondsLeft).toBe(26);
   });
-});
 
+  test('voting：仅剩 1 人未投票时给出 deadline', () => {
+    const pending = computeLastPendingVoteAction({
+      nowMs: Date.parse('2025-12-23T00:00:20.000Z'),
+      phaseFallbackAt: '2025-12-23T00:00:00.000Z',
+      voteCreatedAt: '2025-12-23T00:00:00.000Z',
+      eligibleUserIds: [1, 2],
+      votes: [{ userId: 1, votedAt: '2025-12-23T00:00:10.000Z' }],
+    });
+
+    expect(pending).not.toBeNull();
+    if (!pending) return;
+    expect(pending.kind).toBe('vote');
+    expect(pending.pendingUserId).toBe(2);
+    expect(pending.startAt).toBe('2025-12-23T00:00:10.000Z');
+    expect(pending.deadlineAt).toBe('2025-12-23T00:00:40.000Z');
+    expect(pending.secondsLeft).toBe(20);
+  });
+});

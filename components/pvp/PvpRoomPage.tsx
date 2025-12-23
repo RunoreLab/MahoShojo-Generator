@@ -148,6 +148,10 @@ type PvpHandCardItem = {
   ref?: any;
 };
 
+type WinnerVoteChoice =
+  | { kind: 'seat'; seat: number }
+  | { kind: 'draw' };
+
 type PvpRoomPlayerView = {
   userId: number;
   username: string;
@@ -198,6 +202,7 @@ export function PvpRoomPage() {
   const [isScenarioMatching, setIsScenarioMatching] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [winnerVoteDraft, setWinnerVoteDraft] = useState<WinnerVoteChoice | null>(null);
 
   const [versionConflictRetryUntil, setVersionConflictRetryUntil] = useState<number | null>(null);
   const [versionConflictSecondsLeft, setVersionConflictSecondsLeft] = useState(0);
@@ -365,6 +370,8 @@ export function PvpRoomPage() {
     setError('复制失败：当前环境不支持剪贴板。');
   };
 
+  const winnerVote = (roomQuery.data as any)?.winnerVote ?? null;
+
   useEffect(() => {
     if (!roomId) {
       setRulesDraft(null);
@@ -380,6 +387,17 @@ export function PvpRoomPage() {
   useEffect(() => {
     if (phase !== 'submitting') setShowSubmitEditor(false);
   }, [phase]);
+
+  useEffect(() => {
+    if (phase !== 'voting') {
+      setWinnerVoteDraft(null);
+      return;
+    }
+    const myChoice = (winnerVote as any)?.myChoice ?? null;
+    if (myChoice && typeof myChoice === 'object' && (myChoice.kind === 'draw' || myChoice.kind === 'seat')) {
+      setWinnerVoteDraft(myChoice as WinnerVoteChoice);
+    }
+  }, [phase, winnerVote]);
 
   const userIdsForSummary = useMemo(
     () =>
@@ -524,7 +542,7 @@ export function PvpRoomPage() {
   const latestRoundResult = roomQuery.data?.latestRoundResult;
   const confirmations = roomQuery.data?.confirmations as { roundId: string; confirmedHumans: number; totalHumans: number; hasConfirmedMe: boolean } | null | undefined;
   const pendingAction = roomQuery.data?.pendingAction as
-    | { kind: 'submit' | 'choose' | 'confirm'; pendingUserId: number; pendingUsername?: string | null; deadlineAt: string; secondsLeft?: number; canHostForce?: boolean }
+    | { kind: 'submit' | 'choose' | 'confirm' | 'vote'; pendingUserId: number; pendingUsername?: string | null; deadlineAt: string; secondsLeft?: number; canHostForce?: boolean }
     | null
     | undefined;
   const score = roomQuery.data?.score;
@@ -547,9 +565,11 @@ export function PvpRoomPage() {
 
   const latestWinnerText = useMemo(() => {
     if (!latestRoundResult) return null;
-    const winnerName = typeof latestRoundResult?.winnerName === 'string' ? latestRoundResult.winnerName : '平局';
+    const winnerStatus = typeof (latestRoundResult as any)?.winnerStatus === 'string' ? String((latestRoundResult as any).winnerStatus) : null;
+    if (winnerStatus === 'pending_vote') return '待定（投票中）';
+    const winnerName = typeof latestRoundResult?.winnerName === 'string' ? latestRoundResult.winnerName : null;
     const winnerSeat = typeof latestRoundResult?.winnerSeat === 'number' ? latestRoundResult.winnerSeat : null;
-    if (winnerSeat === null || winnerName === '平局') return '平局';
+    if (winnerSeat === null || !winnerName || winnerName === '平局') return '平局';
     const playerLabel = playerDisplayBySeat.get(winnerSeat) || '未知玩家';
     return `座位 ${winnerSeat} · ${playerLabel}（角色：${winnerName}）`;
   }, [latestRoundResult, playerDisplayBySeat]);
@@ -1032,6 +1052,84 @@ export function PvpRoomPage() {
     },
     onSuccess: () => void roomQuery.refetch(),
     onError: (e) => handlePvpRequestError(e, '确认失败'),
+  });
+
+  const startWinnerVoteMutation = useMutation({
+    mutationFn: async () => {
+      if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/vote/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version }),
+      });
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) {
+        const payload = (data || {}) as ApiErrorPayload;
+        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+          status: res.status,
+          code: payload.code,
+          traceId: payload.traceId,
+          detail: payload.detail,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => handlePvpRequestError(e, '发起胜者投票失败'),
+  });
+
+  const submitWinnerVoteMutation = useMutation({
+    mutationFn: async (choice: WinnerVoteChoice) => {
+      if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/vote/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version, choice }),
+      });
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) {
+        const payload = (data || {}) as ApiErrorPayload;
+        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+          status: res.status,
+          code: payload.code,
+          traceId: payload.traceId,
+          detail: payload.detail,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => handlePvpRequestError(e, '投票失败'),
+  });
+
+  const finalizeWinnerVoteMutation = useMutation({
+    mutationFn: async () => {
+      if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/vote/finalize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version }),
+      });
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) {
+        const payload = (data || {}) as ApiErrorPayload;
+        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+          status: res.status,
+          code: payload.code,
+          traceId: payload.traceId,
+          detail: payload.detail,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => handlePvpRequestError(e, '结束投票失败'),
   });
 
   const isCustomProviderMissingKey = Boolean(
@@ -2442,8 +2540,24 @@ export function PvpRoomPage() {
                         setShowImageModal(true);
                       }}
                     />
-                    <div className="text-sm text-gray-700 mt-2">
-                      本轮胜者：<span className="font-semibold">{latestWinnerText || '平局'}</span>
+                    <div className="text-sm text-gray-700 mt-2 flex items-center justify-between gap-2">
+                      <div>
+                        本轮胜者：<span className="font-semibold">{latestWinnerText || '平局'}</span>
+                      </div>
+                      {isHost && phase === 'reviewing' && latestRound ? (
+                        <button
+                          className="px-2 py-1 rounded border bg-white hover:bg-gray-50 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={() => {
+                            const ok = window.confirm('将发起“胜者投票”，并暂停当前回合的阅读确认。继续？');
+                            if (!ok) return;
+                            startWinnerVoteMutation.mutate();
+                          }}
+                          disabled={startWinnerVoteMutation.isPending}
+                          title="当你认为 AI 判定不妥时，可让房间内成员投票决定胜者（平票则平局）"
+                        >
+                          {startWinnerVoteMutation.isPending ? '发起中…' : '发起胜者投票'}
+                        </button>
+                      ) : null}
                     </div>
                     {(rules?.writeArenaHistory || rules?.writeCurrentState) && (
                       <PvpUpdatedCombatantsPanel
@@ -2454,6 +2568,114 @@ export function PvpRoomPage() {
                         }
                       />
                     )}
+                  </div>
+                )}
+
+                {phase === 'voting' && latestRoundResult?.report && winnerVote && (
+                  <div className="p-4 rounded-xl bg-white border mt-4">
+                    <div className="font-semibold text-sm text-gray-900">胜者投票</div>
+                    <div className="text-xs text-gray-600 mt-2">
+                      请根据战报内容选择胜者或平局；得票最高者获胜，若出现平票则判定为平局。
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {Array.isArray((latestRoundResult as any)?.combatants)
+                        ? ((latestRoundResult as any).combatants as any[])
+                            .slice()
+                            .sort((a, b) => (a?.seat ?? 99) - (b?.seat ?? 99))
+                            .map((c: any) => {
+                              const seat = typeof c?.seat === 'number' ? c.seat : null;
+                              const name = typeof c?.name === 'string' ? c.name : '未知参战者';
+                              const playerLabel =
+                                typeof seat === 'number'
+                                  ? (playerDisplayBySeat.get(seat) || (c?.isBot ? '机器人' : '未知玩家'))
+                                  : '未知玩家';
+                              const checked =
+                                winnerVoteDraft?.kind === 'seat' &&
+                                typeof seat === 'number' &&
+                                Number.isFinite(seat) &&
+                                winnerVoteDraft.seat === seat;
+                              return (
+                                <label key={`vote-seat-${String(seat)}`} className="flex items-center gap-2 text-sm text-gray-800">
+                                  <input
+                                    type="radio"
+                                    name="pvp-winner-vote"
+                                    checked={checked}
+                                    disabled={submitWinnerVoteMutation.isPending}
+                                    onChange={() => {
+                                      if (typeof seat !== 'number' || !Number.isFinite(seat)) return;
+                                      setWinnerVoteDraft({ kind: 'seat', seat: Math.floor(seat) });
+                                    }}
+                                  />
+                                  <span>
+                                    座位 {String(seat)} · {playerLabel}（角色：{name}）
+                                  </span>
+                                </label>
+                              );
+                            })
+                        : null}
+                      <label className="flex items-center gap-2 text-sm text-gray-800">
+                        <input
+                          type="radio"
+                          name="pvp-winner-vote"
+                          checked={winnerVoteDraft?.kind === 'draw'}
+                          disabled={submitWinnerVoteMutation.isPending}
+                          onChange={() => setWinnerVoteDraft({ kind: 'draw' })}
+                        />
+                        <span>平局</span>
+                      </label>
+                    </div>
+
+                    {pendingAction?.kind === 'vote' ? (
+                      <div className="text-xs text-amber-700 mt-3">
+                        仅剩最后一位用户未投票：{pendingAction.pendingUsername || `用户${pendingAction.pendingUserId}`}。
+                        {pendingActionSecondsLeft > 0 ? `倒计时 ${pendingActionSecondsLeft}s 后房主可强制结束投票。` : '倒计时结束，房主可强制结束投票。'}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        className="generate-button w-full"
+                        style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
+                        disabled={submitWinnerVoteMutation.isPending || !winnerVoteDraft}
+                        onClick={() => {
+                          if (!winnerVoteDraft) return;
+                          submitWinnerVoteMutation.mutate(winnerVoteDraft);
+                        }}
+                        title={!winnerVoteDraft ? '请先选择一个投票选项' : '提交你的投票（可重复提交覆盖）'}
+                      >
+                        {submitWinnerVoteMutation.isPending ? '提交中…' : winnerVote?.hasVotedMe ? '更新投票' : '提交投票'}
+                      </button>
+                      {isHost && pendingAction?.kind === 'vote' ? (
+                        <button
+                          className="generate-button w-full"
+                          style={{ backgroundColor: '#ef4444', backgroundImage: 'linear-gradient(to right, #ef4444, #dc2626)' }}
+                          disabled={finalizeWinnerVoteMutation.isPending || pendingActionSecondsLeft > 0}
+                          onClick={() => finalizeWinnerVoteMutation.mutate()}
+                          title={pendingActionSecondsLeft > 0 ? '倒计时未结束' : '强制结束投票并按当前票数结算（平票则平局）'}
+                        >
+                          {finalizeWinnerVoteMutation.isPending ? '结束中…' : pendingActionSecondsLeft > 0 ? `强制结束（${pendingActionSecondsLeft}s）` : '强制结束'}
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="text-xs text-gray-600 mt-3">
+                      已投票：{(winnerVote as any)?.tally?.voteCount ?? 0}/{(winnerVote as any)?.tally?.eligibleCount ?? 0}；
+                      平局票：{(winnerVote as any)?.tally?.drawCount ?? 0}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      当前票数：
+                      {(() => {
+                        const counts = (winnerVote as any)?.tally?.countsBySeat;
+                        if (!counts || typeof counts !== 'object') return '暂无';
+                        const items = Object.entries(counts as Record<string, number>)
+                          .map(([seat, count]) => ({ seat: Number(seat), count }))
+                          .filter((x) => Number.isFinite(x.seat))
+                          .sort((a, b) => a.seat - b.seat)
+                          .map((x) => `座位${x.seat}=${x.count}`);
+                        return items.length ? items.join('，') : '暂无';
+                      })()}
+                    </div>
                   </div>
                 )}
 

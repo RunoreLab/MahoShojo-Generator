@@ -48,8 +48,8 @@
   - 你的决策：允许解析出 0 个或多个胜利者；未解析出胜利者视为 0 个胜利者。
   - 强烈建议改成“对 PVP 更可控的三值结论”：  
     - 解析结果只允许 `A` / `B` / `平局` 三种；  
-    - 解析出“两人都像赢家/多赢家”通常意味着模型输出不规范，应视为**无效** → 触发“纠错重试（低温度/更强约束）” → 再失败判平局；  
-    - “0 个胜利者”在 PVP 里建议统一映射为 `平局`（除非你想引入 `void/aborted` 这种“对局无效”状态，见第 5 节建议）。
+    - 解析出“两人都像赢家/多赢家”通常意味着模型输出不规范，应视为**无效** → 触发“纠错重试（低温度/更强约束）” → 再失败则进入**胜者投票**；  
+    - 进入胜者投票后：房间成员可投票选择“某一参战者获胜 / 平局”；得票最高者获胜，若平票则判平局；房主也可在 `reviewing` 主动发起投票复核已解析的胜者。
 
 ---
 
@@ -63,7 +63,7 @@
 - 卡封禁：禁止使用 `is_public = -1` 的卡（表示卡被封禁，与 `review_status` 语义不同）
 - 去重：按（`kind`,`idOrFilename`）去重；`data_card` 额外带 `updatedAt` 做版本校验
 - 对局：默认单局；多局制采用“弃牌制”，默认 `mostWinsAfterMaxRounds`
-- 结算：winner ∈ {A,B,平局}，不在集合则纠错重试→平局
+- 结算：winner ∈ {A,B,平局}；不在集合则纠错重试 → 仍失败触发胜者投票（平票平局）
 
 ---
 
@@ -154,6 +154,9 @@
 - `dealing`：服务端合池/去重/洗牌/发牌（短暂中间态）
 - `choosing`：玩家选择出战卡（私密）
 - `resolving`：生成战报 & 判定胜负（短暂中间态）
+- `voting`：胜者投票（仅在“AI 判定 winner 无法解析”或“房主主动发起复核”时进入）。房间成员对“哪位参战者获胜 / 平局”投票；得票最高者获胜，平票则平局。
+- `reviewing`：阅读确认（战报已生成且胜者已确定后进入）。全员确认后才会推进下一回合或结束，避免战报刚生成就被刷新覆盖。
+- `advancing`：推进中（短暂中间态）：服务端推进下一回合/结算整场结果（例如 BO3/BO5 的最后结算）。
 - `finished`：本局结束（可重开下一局或关闭房间）
 
 ### 状态定义（建议扩展）
@@ -167,7 +170,7 @@
 - 任何会影响公平性的动作（如重新发牌、重开本局）必须只允许房主发起，并且需要全员同意或明确规则（建议 MVP 不提供“重发”）。
 
 ### 建议补齐：超时/退出/无效局（避免房间卡死）
-- **最后一位未操作倒计时 + 房主强制**：当仅剩最后一位真人玩家未操作（`submitting/choosing/reviewing`），前端展示 30s 倒计时；倒计时结束后房主可强制随机提交/出牌/确认（服务端仍做校验）。
+- **最后一位未操作倒计时 + 房主强制**：当仅剩最后一位真人用户未操作（`submitting/choosing/reviewing/voting`），前端展示 30s 倒计时；倒计时结束后房主可强制随机提交/出牌/确认，或强制结束投票（服务端仍做校验）。
 - **退出/踢出 → 托管机器人接管**：真人玩家在对局中途退出或被房主踢出后，自动用机器人接管其座位，继承其提交/手牌/当轮出牌状态继续游戏（忙碌阶段如 `dealing/resolving/advancing` 建议先限制操作，避免一致性问题）。
 - `aborted`（或 `void`）结局仍保留作为兜底：房主关闭、风控拦截、AI 连续失败等，统一进入“本局无效/直接判负/判平局”的策略。
 - D1 没有后台定时任务时，可在 `GET room` 时做“懒清理”：若 `now > expires_at` 则将房间置 `closed` 并返回提示。
@@ -186,7 +189,7 @@
 - `id`：TEXT（roomId）
 - `host_user_id`：INTEGER
 - `status`：TEXT（open/closed）
-- `phase`：TEXT（waiting/submitting/choosing/resolving/finished）
+- `phase`：TEXT（waiting/submitting/dealing/choosing/resolving/voting/reviewing/advancing/finished/aborted/closed）
 - `rules_json`：TEXT（卡数、BO、去重策略、是否展示提交详情、是否洗混卡组、是否情景模式等）
 - `version`：INTEGER（乐观锁，每次写入 +1）
 - `created_at` / `updated_at`
@@ -415,8 +418,8 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - `POST /api/pvp/rooms/:roomId/join`：加入房间（若启用口令则需 `password`）
 - `POST /api/pvp/rooms/:roomId/rules`：房主更新房间规则（仅 `waiting/submitting`；修改提交数通常需要清空已提交卡组）
 - `POST /api/pvp/rooms/:roomId/password`：房主设置/清空房间口令（可选，MVP 可延后）
-- `POST /api/pvp/rooms/:roomId/leave`：离开房间（房主离开会关闭房间；非房主在 `submitting/choosing/reviewing` 离开会触发“托管机器人接管”）
-- `POST /api/pvp/rooms/:roomId/kick`：房主踢人（`submitting/choosing/reviewing` 默认同样走“托管机器人接管”）
+- `POST /api/pvp/rooms/:roomId/leave`：离开房间（房主离开会关闭房间；非房主在 `submitting/choosing/voting/reviewing` 离开会触发“托管机器人接管”）
+- `POST /api/pvp/rooms/:roomId/kick`：房主踢人（`submitting/choosing/voting/reviewing` 默认同样走“托管机器人接管”）
 - `POST /api/pvp/rooms/:roomId/role`：切换身份（`player/spectator`；默认入房为观众；仅 `waiting/submitting` 可切换）
 - `POST /api/pvp/rooms/:roomId/force`：房主强制随机操作（最后一位未操作玩家的 `submit/choose/confirm`）
 - `POST /api/pvp/rooms/:roomId/submit`：提交卡组
@@ -424,6 +427,9 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - `GET /api/pvp/rooms/:roomId`：拉取房间状态（按身份过滤私密字段）
 - `POST /api/pvp/rooms/:roomId/rounds/:roundId/choose`：提交本轮选择（不对他人暴露）
 - `POST /api/pvp/rooms/:roomId/rounds/:roundId/resolve`：房主或系统触发结算（也可由服务端检测“双方已选”自动触发）
+- `POST /api/pvp/rooms/:roomId/rounds/:roundId/vote/start`：房主发起胜者投票（复核 AI 判定；进入 `voting` 并暂停阅读确认）
+- `POST /api/pvp/rooms/:roomId/rounds/:roundId/vote/submit`：房间成员提交投票（可覆盖；全员投票后自动结束并进入 `reviewing`）
+- `POST /api/pvp/rooms/:roomId/rounds/:roundId/vote/finalize`：房主强制结束投票（仅“最后一人未投票且倒计时结束”时可用；平票则平局）
 - `POST /api/pvp/rooms/:roomId/rounds/:roundId/confirm`：确认已阅读本轮战报（全员确认后才推进下一回合或结束）
 - `POST /api/pvp/rooms/:roomId/permissions`：房主设置：允许非房主结算 / 开启观战
 

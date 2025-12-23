@@ -6,6 +6,7 @@ export type PvpRoomPhase =
   | 'submitting'
   | 'dealing'
   | 'choosing'
+  | 'voting'
   | 'reviewing'
   | 'resolving'
   | 'advancing'

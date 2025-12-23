@@ -16,7 +16,8 @@ import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
-import { canForcePendingAction, computeLastPendingChooseAction, computeLastPendingConfirmAction, computeLastPendingSubmissionAction } from '@/lib/pvp/pending-action';
+import { canForcePendingAction, computeLastPendingChooseAction, computeLastPendingConfirmAction, computeLastPendingSubmissionAction, computeLastPendingVoteAction } from '@/lib/pvp/pending-action';
+import { parsePvpWinnerVoteState, tallyPvpWinnerVotes } from '@/lib/pvp/winner-vote';
 import type { PvpHandState, PvpSubmissionPayload } from '@/lib/pvp/types';
 import type { UserBadge } from '@/types/badge';
 
@@ -233,6 +234,63 @@ async function getRoomHandler(req: Request): Promise<Response> {
     }
   }
 
+  // 胜者投票（winner vote）：当判定失败或房主发起复核时，进入 voting 阶段
+  let winnerVote: any = null;
+  const voteState = parsePvpWinnerVoteState((parsed.internal.raw as any)?._winnerVote);
+  if (voteState && latestRound && voteState.roundId === latestRound.id) {
+    const currentMemberIds = new Set<number>(members.map((m) => m.user_id));
+    const eligibleUserIds = voteState.eligibleUserIds.filter((id) => currentMemberIds.has(id));
+    const hasVotedMe = Boolean(voteState.votesByUserId?.[String(auth.user.id)]);
+    const myBallot = voteState.votesByUserId?.[String(auth.user.id)] ?? null;
+    const myChoice = myBallot?.choice ?? null;
+
+    const combatants = Array.isArray(latestRoundResult?.combatants) ? (latestRoundResult.combatants as any[]) : [];
+    const validSeats = combatants
+      .map((c) => (typeof c?.seat === 'number' && Number.isFinite(c.seat) ? Math.floor(c.seat) : null))
+      .filter((seat): seat is number => typeof seat === 'number' && seat >= 0);
+
+    const tally = tallyPvpWinnerVotes({
+      eligibleUserIds,
+      votesByUserId: voteState.votesByUserId ?? {},
+      validSeats,
+    });
+
+    winnerVote = {
+      roundId: voteState.roundId,
+      matchId: voteState.matchId,
+      createdAt: voteState.createdAt,
+      createdByUserId: voteState.createdByUserId,
+      reason: voteState.reason,
+      eligibleCount: tally.eligibleCount,
+      voteCount: tally.voteCount,
+      hasVotedMe,
+      myChoice,
+      tally,
+    };
+
+    if (room.phase === 'voting') {
+      const votes = Object.entries(voteState.votesByUserId ?? {}).map(([userId, ballot]) => ({
+        userId: Number.isFinite(Number(userId)) ? Math.floor(Number(userId)) : -1,
+        votedAt: ballot?.votedAt ?? '',
+      }));
+      const pending = computeLastPendingVoteAction({
+        nowMs: serverNowMs,
+        phaseFallbackAt: room.last_activity_at ?? room.updated_at,
+        voteCreatedAt: voteState.createdAt,
+        eligibleUserIds,
+        votes,
+      });
+      if (pending) {
+        const pendingUsername = members.find((m) => m.user_id === pending.pendingUserId)?.username ?? null;
+        pendingAction = {
+          ...pending,
+          pendingUsername,
+          canHostForce: auth.user.id === room.host_user_id && canForcePendingAction(pending, serverNowMs),
+        };
+      }
+    }
+  }
+
   // 回合结算后的“阅读确认”机制：仅暴露计数与自身是否已确认
   if (isPlayer && postRoundRaw && latestRound) {
     const roundId = typeof (postRoundRaw as any).roundId === 'string' ? String((postRoundRaw as any).roundId) : '';
@@ -391,8 +449,9 @@ async function getRoomHandler(req: Request): Promise<Response> {
     latestRound: latestRound ? { id: latestRound.id, index: latestRound.round_index, status: latestRound.status } : null,
     choices: choicesState,
     latestRoundResult,
+    winnerVote,
     confirmations: isPlayer ? confirmations : null,
-    pendingAction: isPlayer ? pendingAction : null,
+    pendingAction: (isPlayer || room.phase === 'voting') ? pendingAction : null,
     score,
   });
 }

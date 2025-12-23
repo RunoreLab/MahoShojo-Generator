@@ -1,4 +1,4 @@
-export type PvpPendingActionKind = 'submit' | 'choose' | 'confirm';
+export type PvpPendingActionKind = 'submit' | 'choose' | 'confirm' | 'vote';
 
 export type PvpPendingAction = {
   kind: PvpPendingActionKind;
@@ -106,9 +106,38 @@ export function computeLastPendingConfirmAction(input: {
   return buildPendingAction('confirm', pending[0]!, input.nowMs, startAtMs);
 }
 
+export function computeLastPendingVoteAction(input: {
+  nowMs: number;
+  phaseFallbackAt: string | null | undefined;
+  voteCreatedAt: string | null | undefined;
+  eligibleUserIds: number[];
+  votes: Array<{ userId: number; votedAt: string }>;
+}): PvpPendingAction | null {
+  const eligibleSet = new Set(input.eligibleUserIds.map((id) => Math.floor(id)).filter((id) => Number.isFinite(id) && id > 0));
+  if (eligibleSet.size <= 0) return null;
+
+  const votedByUserId = new Map<number, number>();
+  for (const row of input.votes) {
+    const userId = typeof row.userId === 'number' && Number.isFinite(row.userId) ? Math.floor(row.userId) : null;
+    if (!userId || !eligibleSet.has(userId)) continue;
+    const ms = parseIsoToMs(row.votedAt);
+    if (ms === null) continue;
+    votedByUserId.set(userId, ms);
+  }
+
+  const pending = [...eligibleSet].filter((userId) => !votedByUserId.has(userId));
+  if (pending.length !== 1) return null;
+
+  const fallbackMs =
+    parseIsoToMs(input.voteCreatedAt) ??
+    parseIsoToMs(input.phaseFallbackAt) ??
+    input.nowMs;
+  const startAtMs = maxFinite([...votedByUserId.values()]) ?? fallbackMs;
+  return buildPendingAction('vote', pending[0]!, input.nowMs, startAtMs);
+}
+
 export const canForcePendingAction = (pending: PvpPendingAction, nowMs: number): boolean => {
   const deadlineMs = parseIsoToMs(pending.deadlineAt);
   if (deadlineMs === null) return false;
   return nowMs >= deadlineMs;
 };
-

@@ -103,6 +103,7 @@ export const clearPvpRoomRuntimeFromRulesJson = (rulesJson: string): string => {
 
     delete raw._bots;
     delete raw._postRound;
+    delete raw._winnerVote;
     delete raw._drawPile;
     delete raw._usedPile;
     delete raw._publicDrawnCardIds;
