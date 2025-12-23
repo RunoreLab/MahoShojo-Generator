@@ -37,6 +37,7 @@ async function roomsHandler(req: Request): Promise<Response> {
     hostUserId: auth.user.id,
     rulesJson: JSON.stringify({
       ...rules,
+      allowSpectators: true,
       ...(rules.mode === 'scenario' && scenarioSelection ? { _scenario: scenarioSelection } : {}),
     }),
     joinCodeHash,

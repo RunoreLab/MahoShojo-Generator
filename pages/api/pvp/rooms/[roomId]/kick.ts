@@ -5,6 +5,7 @@ import {
   getLatestPvpRoundByMatch,
   getPvpRoomById,
   getPvpRoomHands,
+  getPvpRoomMembers,
   getPvpRoomPlayers,
   getPvpRoomSubmissions,
   getPvpRoundChoices,
@@ -90,13 +91,25 @@ async function kickHandler(req: Request): Promise<Response> {
   if (targetId <= 0) return json({ error: '不能踢出机器人，请使用“移除机器人”', code: 'BOT_KICK_FORBIDDEN' }, { status: 400 });
   if (targetId === auth.user.id) return json({ error: '不能踢自己' }, { status: 400 });
 
+  const members = await getPvpRoomMembers(roomId);
+  const targetMember = members.find((p) => p.user_id === targetId) ?? null;
+  if (!targetMember) return json({ error: '该用户不在房间中' }, { status: 404 });
+
   const players = await getPvpRoomPlayers(roomId);
   const targetPlayer = players.find((p) => p.user_id === targetId) ?? null;
-  if (!targetPlayer) return json({ error: '该用户不在房间中' }, { status: 404 });
 
   const now = new Date().toISOString();
   const canReplaceWithBot = room.phase === 'submitting' || room.phase === 'choosing' || room.phase === 'reviewing';
   const isBusyPhase = room.phase === 'dealing' || room.phase === 'advancing' || room.phase === 'resolving';
+
+  if (!targetPlayer) {
+    const ok = await updatePvpRoomCas(roomId, expectedVersion, { last_activity_at: now });
+    if (!ok) return json({ error: '踢出失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
+    await removePvpRoomPlayer(roomId, targetId);
+    await deletePvpRoomSubmission(roomId, targetId);
+    await deletePvpRoomHand(roomId, targetId);
+    return json({ success: true, kicked: { userId: targetId, role: targetMember.role }, nextVersion: expectedVersion + 1 });
+  }
   if (isBusyPhase) {
     return json({ error: '房间正在推进/结算中，请稍后再踢出', code: 'PHASE_BUSY' }, { status: 409 });
   }

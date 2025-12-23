@@ -13,6 +13,8 @@ export type PvpRoomPhase =
   | 'aborted'
   | 'closed';
 
+export type PvpRoomMemberRole = 'player' | 'spectator';
+
 export interface PvpRoomRow {
   id: string;
   host_user_id: number;
@@ -32,6 +34,7 @@ export interface PvpRoomRow {
 export interface PvpRoomPlayerRow {
   room_id: string;
   user_id: number;
+  role: PvpRoomMemberRole;
   seat: number | null;
   joined_at: string;
   username?: string;
@@ -116,7 +119,7 @@ export async function getPvpRoomPlayers(roomId: string): Promise<PvpRoomPlayerRo
       `SELECT p.*, u.username, u.prefix
        FROM pvp_room_players p
        JOIN users u ON u.id = p.user_id
-       WHERE p.room_id = ?
+       WHERE p.room_id = ? AND p.role = 'player'
        ORDER BY p.seat ASC, p.joined_at ASC`,
       [roomId]
     ) as any;
@@ -187,7 +190,7 @@ export async function getPvpRoomBrowseRows(input: {
         COUNT(p.user_id) AS player_count
       FROM pvp_rooms r
       JOIN users u ON u.id = r.host_user_id
-      LEFT JOIN pvp_room_players p ON p.room_id = r.id
+      LEFT JOIN pvp_room_players p ON p.room_id = r.id AND p.role = 'player'
       WHERE ${where.join(' AND ')}
       GROUP BY r.id
       ORDER BY COALESCE(r.last_activity_at, r.updated_at) DESC
@@ -204,16 +207,63 @@ export async function getPvpRoomBrowseRows(input: {
   }
 }
 
-export async function addPvpRoomPlayer(roomId: string, userId: number, seat: number | null): Promise<boolean> {
+export async function getPvpRoomMembers(roomId: string): Promise<PvpRoomPlayerRow[]> {
+  try {
+    const result = await queryFromD1(
+      `SELECT p.*, u.username, u.prefix
+       FROM pvp_room_players p
+       JOIN users u ON u.id = p.user_id
+       WHERE p.room_id = ?
+       ORDER BY
+         CASE WHEN p.role = 'player' THEN 0 ELSE 1 END ASC,
+         p.seat ASC,
+         p.joined_at ASC`,
+      [roomId]
+    ) as any;
+
+    if (result.success && result.result?.[0]?.results) {
+      return result.result[0].results as PvpRoomPlayerRow[];
+    }
+    return [];
+  } catch (error) {
+    console.error('读取 pvp_room_players(含观众) 失败:', error);
+    return [];
+  }
+}
+
+export async function addPvpRoomPlayer(
+  roomId: string,
+  userId: number,
+  seat: number | null,
+  role: PvpRoomMemberRole = 'player'
+): Promise<boolean> {
   try {
     const now = new Date().toISOString();
     const result = await queryFromD1(
-      'INSERT OR IGNORE INTO pvp_room_players (room_id, user_id, seat, joined_at) VALUES (?, ?, ?, ?)',
-      [roomId, userId, seat, now]
+      'INSERT OR IGNORE INTO pvp_room_players (room_id, user_id, role, seat, joined_at) VALUES (?, ?, ?, ?, ?)',
+      [roomId, userId, role, seat, now]
     ) as any;
     return Boolean(result.success);
   } catch (error) {
     console.error('写入 pvp_room_players 失败:', error);
+    return false;
+  }
+}
+
+export async function updatePvpRoomMember(input: {
+  roomId: string;
+  userId: number;
+  role: PvpRoomMemberRole;
+  seat: number | null;
+}): Promise<boolean> {
+  try {
+    const result = await queryFromD1(
+      'UPDATE pvp_room_players SET role = ?, seat = ? WHERE room_id = ? AND user_id = ?',
+      [input.role, input.seat, input.roomId, input.userId]
+    ) as any;
+    return Boolean(result.success && result.result?.[0]?.meta?.changes > 0);
+  } catch (error) {
+    console.error('更新 pvp_room_players 失败:', error);
     return false;
   }
 }

@@ -5,7 +5,7 @@ import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp
 
 export const runtime = 'edge';
 
-type PermissionsBody = { expectedVersion?: number; allowNonHostControl?: boolean };
+type PermissionsBody = { expectedVersion?: number; allowNonHostControl?: boolean; allowSpectators?: boolean };
 
 async function permissionsHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
@@ -36,7 +36,10 @@ async function permissionsHandler(req: Request): Promise<Response> {
   const internal = parsed.internal;
 
   const allowNonHostControl = (body.data as PermissionsBody).allowNonHostControl === true;
-  internal.rules = { ...internal.rules, allowNonHostControl };
+  const allowSpectators = typeof (body.data as PermissionsBody).allowSpectators === 'boolean'
+    ? (body.data as PermissionsBody).allowSpectators
+    : internal.rules.allowSpectators;
+  internal.rules = { ...internal.rules, allowNonHostControl, allowSpectators };
 
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     rules_json: stringifyPvpRoomInternalState(internal),
@@ -44,7 +47,7 @@ async function permissionsHandler(req: Request): Promise<Response> {
   });
 
   if (!ok) return json({ error: '更新失败', code: 'UPDATE_FAILED' }, { status: 409 });
-  return json({ success: true, allowNonHostControl });
+  return json({ success: true, allowNonHostControl, allowSpectators });
 }
 
 export default withPvpErrorBoundary(permissionsHandler);

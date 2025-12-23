@@ -30,6 +30,22 @@ describe('pvp: parsePvpRules', () => {
     expect(parsed.rules.drawSource).toBe(DEFAULT_PVP_RULES.drawSource);
   });
 
+  test('默认值包含 allowSpectators（默认开启观战）', () => {
+    const parsed = parsePvpRules({});
+    expect('error' in parsed).toBe(false);
+    if ('error' in parsed) return;
+
+    expect(parsed.rules.allowSpectators).toBe(true);
+  });
+
+  test('可显式关闭 allowSpectators', () => {
+    const parsed = parsePvpRules({ allowSpectators: false });
+    expect('error' in parsed).toBe(false);
+    if ('error' in parsed) return;
+
+    expect(parsed.rules.allowSpectators).toBe(false);
+  });
+
   test('可显式关闭 showAllSubmissions/shuffleDecks', () => {
     const parsed = parsePvpRules({ showAllSubmissions: false, shuffleDecks: false });
     expect('error' in parsed).toBe(false);

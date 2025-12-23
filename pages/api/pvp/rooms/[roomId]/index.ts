@@ -2,6 +2,7 @@ import {
   getPvpCardSnapshotById,
   getPvpRoomById,
   getPvpRoomHands,
+  getPvpRoomMembers,
   getPvpRoomPlayers,
   getPvpRoomSubmissions,
   getPvpRoundChoices,
@@ -83,13 +84,17 @@ async function getRoomHandler(req: Request): Promise<Response> {
       }
     : null;
 
+  const members = await getPvpRoomMembers(roomId);
+  const myMember = members.find((p) => p.user_id === auth.user.id) ?? null;
+  if (!myMember) return json({ error: '无权访问该房间' }, { status: 403 });
+  const viewerRole = myMember.role === 'spectator' ? 'spectator' : 'player';
+
   const players = await getPvpRoomPlayers(roomId);
-  const isPlayer = players.some((p) => p.user_id === auth.user.id);
-  if (!isPlayer) return json({ error: '无权访问该房间' }, { status: 403 });
+  const isPlayer = viewerRole === 'player';
 
   const badgesByUserId = new Map<number, UserBadge[]>();
   await Promise.all(
-    players.map(async (p) => {
+    members.map(async (p) => {
       const userId = typeof p?.user_id === 'number' ? p.user_id : null;
       if (!userId) return;
       const badges = await getUserEquippedBadges(userId);
@@ -137,16 +142,18 @@ async function getRoomHandler(req: Request): Promise<Response> {
 
   const showAllSubmissions = rules.showAllSubmissions === true;
   const myUserId = auth.user.id;
-  const submissions = canViewOtherSubmissions(room.phase, showAllSubmissions)
+  const canSeeAllSubmissionDetails = isPlayer && canViewOtherSubmissions(room.phase, showAllSubmissions);
+  const submissions = canSeeAllSubmissionDetails
     ? [...humanSubmissionsDetailed, ...botSubmissions]
     : (() => {
+        if (!isPlayer) return [];
         const mine = submissionsByUserId.get(myUserId);
         return mine ? [{ userId: myUserId, ...mine }] : [];
       })();
 
-  const hands = await getPvpRoomHands(roomId);
-  const myHandRow = hands.find((h) => h.user_id === auth.user.id);
-  const myHand = myHandRow ? parseHand(myHandRow.hand_json) : null;
+  const hands = isPlayer ? await getPvpRoomHands(roomId) : [];
+  const myHandRow = isPlayer ? hands.find((h) => h.user_id === auth.user.id) : undefined;
+  const myHand = isPlayer && myHandRow ? parseHand(myHandRow.hand_json) : null;
 
   const myHandCardsDetailed = [];
   if (myHand && Array.isArray(myHand.cards)) {
@@ -180,24 +187,27 @@ async function getRoomHandler(req: Request): Promise<Response> {
     const choices = await getPvpRoundChoices(latestRound.id);
     const playerUserIds = new Set<number>(players.map((p) => p.user_id));
     const chosenUserIds = new Set(choices.filter((c) => playerUserIds.has(c.user_id)).map((c) => c.user_id));
-    const hasChosenMe = playerUserIds.has(auth.user.id) ? chosenUserIds.has(auth.user.id) : false;
+    const hasChosenMe = isPlayer && playerUserIds.has(auth.user.id) ? chosenUserIds.has(auth.user.id) : false;
     const botChosen = bots.filter((b) => Boolean(b.choicesByRoundId?.[latestRound.id])).length;
     const chosenCount = chosenUserIds.size + botChosen;
     const totalPlayers = players.length + bots.length;
-    const hasChosenOther = totalPlayers === 2
-      ? (bots.length === 1 ? (hasChosenMe ? botChosen > 0 : botChosen > 0) : choices.some((c) => c.user_id !== auth.user.id))
-      : null;
+    const hasChosenOther =
+      !isPlayer
+        ? null
+        : totalPlayers === 2
+          ? (bots.length === 1 ? botChosen > 0 : choices.some((c) => c.user_id !== auth.user.id))
+          : null;
     choicesState = {
       roundId: latestRound.id,
       roundIndex: latestRound.round_index,
       status: latestRound.status,
-      hasChosenMe,
+      ...(isPlayer ? { hasChosenMe } : {}),
       ...(hasChosenOther === null ? {} : { hasChosenOther }),
       chosenCount,
       totalPlayers,
     };
 
-    if (room.phase === 'choosing') {
+    if (isPlayer && room.phase === 'choosing') {
       const pending = computeLastPendingChooseAction({
         nowMs: serverNowMs,
         phaseFallbackAt: latestRound.created_at ?? room.last_activity_at ?? room.updated_at,
@@ -224,7 +234,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
   }
 
   // 回合结算后的“阅读确认”机制：仅暴露计数与自身是否已确认
-  if (postRoundRaw && latestRound) {
+  if (isPlayer && postRoundRaw && latestRound) {
     const roundId = typeof (postRoundRaw as any).roundId === 'string' ? String((postRoundRaw as any).roundId) : '';
     const confirmedUserIds = Array.isArray((postRoundRaw as any).confirmedUserIds)
       ? (postRoundRaw as any).confirmedUserIds.filter((x: any) => typeof x === 'number' && Number.isFinite(x)).map((x: number) => Math.floor(x))
@@ -265,7 +275,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
     }
   }
 
-  if (!pendingAction && room.phase === 'submitting' && rules.cardsPerPlayer > 0) {
+  if (isPlayer && !pendingAction && room.phase === 'submitting' && rules.cardsPerPlayer > 0) {
     const pending = computeLastPendingSubmissionAction({
       nowMs: serverNowMs,
       phaseFallbackAt: room.last_activity_at ?? room.updated_at,
@@ -322,6 +332,18 @@ async function getRoomHandler(req: Request): Promise<Response> {
   return json({
     success: true,
     serverNow: serverNowIso,
+    viewer: {
+      role: viewerRole,
+      canSwitchToPlayer:
+        viewerRole === 'spectator' &&
+        (room.phase === 'waiting' || room.phase === 'submitting') &&
+        (players.length + bots.length) < rules.participants,
+      canSwitchToSpectator:
+        viewerRole === 'player' &&
+        auth.user.id !== room.host_user_id &&
+        rules.allowSpectators !== false &&
+        (room.phase === 'waiting' || room.phase === 'submitting'),
+    },
     room: {
       id: room.id,
       hostUserId: room.host_user_id,
@@ -354,14 +376,23 @@ async function getRoomHandler(req: Request): Promise<Response> {
         botId: b.id,
       })),
     ].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99)),
+    spectators: members
+      .filter((m) => m.role === 'spectator')
+      .map((m) => ({
+        userId: m.user_id,
+        username: m.username,
+        prefix: m.prefix,
+        badges: badgesByUserId.get(m.user_id) || [],
+      }))
+      .sort((a, b) => (a.userId ?? 0) - (b.userId ?? 0)),
     submissions: submissions.sort((a: any, b: any) => (a.userId ?? 0) - (b.userId ?? 0)),
     submissionStatus: submissionStatus.sort((a, b) => (a.userId ?? 0) - (b.userId ?? 0)),
     myHand: myHand ? { cards: myHandCardsDetailed, discarded: myHand.discarded, drawPile: myHand.drawPile } : null,
     latestRound: latestRound ? { id: latestRound.id, index: latestRound.round_index, status: latestRound.status } : null,
     choices: choicesState,
     latestRoundResult,
-    confirmations,
-    pendingAction,
+    confirmations: isPlayer ? confirmations : null,
+    pendingAction: isPlayer ? pendingAction : null,
     score,
   });
 }

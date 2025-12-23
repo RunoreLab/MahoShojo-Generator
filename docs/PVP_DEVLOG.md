@@ -1,11 +1,12 @@
 # PVP 开发备忘（实现记录）
 
-更新时间：2025-12-22
+更新时间：2025-12-23
 
 > 本文用于记录实现细节、落地偏差与后续 TODO；设计稿请看 `docs/PVP.md`。
 
 ## 0.1 变更记录（最近）
 
+- 2025-12-23：新增观战模式：房主可开关观战（默认开启）；用户进入开启观战的房间默认成为观众，可在 `waiting/submitting` 且有空位时切换为玩家；玩家也可在 `waiting/submitting` 切回观众（非房主）。观众视角不返回手牌/提交详情/出牌选择等私密信息（`POST /api/pvp/rooms/:roomId/role`、`POST /api/pvp/rooms/:roomId/permissions`、`GET /api/pvp/rooms/:roomId`）。
 - 2025-12-22：当仅剩最后一位真人玩家未操作（提交/出牌/确认）时，房间页展示 30s 倒计时；倒计时结束后房主可强制随机提交/出牌/确认（`POST /api/pvp/rooms/:roomId/force`）。
 - 2025-12-22：真人玩家在 `submitting/choosing/reviewing` 阶段退出或被房主踢出时，不再直接 `aborted`；将自动用“托管机器人”接管该座位，继承其提交/手牌/当轮出牌状态继续游戏（`dealing/resolving/advancing` 为忙碌阶段，暂不允许踢出/退出）。
 - 2025-12-22：choosing 阶段若手牌尚未发放/同步，出牌区域显示“发牌中…”加载提示（不再无提示/仅提示刷新）。
@@ -74,6 +75,7 @@ PVP 可用卡必须满足：
 ### 2.1 D1 Schema
 - `lib/database/schema.sql:1`（已追加 `pvp_*` 表）
   - 机器人不新增表/列：仅作为房间内的临时设置写入 `pvp_rooms.rules_json`（服务端私有字段）
+  - 观战模式：`pvp_room_players.role = player/spectator`；房间规则增加 `allowSpectators`（默认 true）
 
 ### 2.2 数据库访问层
 - `lib/database/pvp.ts:1`
@@ -101,7 +103,8 @@ PVP 可用卡必须满足：
 - `pages/api/pvp/rooms/[roomId]/bots/remove.ts:1` 房主移除机器人
 - `pages/api/pvp/rooms/[roomId]/submit.ts:1` 提交卡组
 - `pages/api/pvp/rooms/[roomId]/start.ts:1` 房主发牌并创建首轮
-- `pages/api/pvp/rooms/[roomId]/permissions.ts:1` 房主设置：是否允许其他玩家调整 AI 设置并结算
+- `pages/api/pvp/rooms/[roomId]/permissions.ts:1` 房主设置：是否允许其他玩家调整 AI 设置并结算 / 是否开启观战
+- `pages/api/pvp/rooms/[roomId]/role.ts:1` 切换身份（player/spectator）
 - `pages/api/pvp/rooms/[roomId]/index.ts:1` 拉取房间状态（按身份过滤手牌）
 - `pages/api/pvp/rooms/[roomId]/rounds/[roundId]/choose.ts:1` 出牌
 - `pages/api/pvp/rooms/[roomId]/rounds/[roundId]/resolve.ts:1` 结算回合（生成战报，幂等；默认仅房主可结算）
@@ -131,11 +134,15 @@ PVP 可用卡必须满足：
 ### 3.2 D1 表迁移
 `lib/database/schema.sql` 只是“目标结构”，线上 D1 需要实际执行建表语句（具体方式取决于你当前的 wrangler / 管理脚本流程）。
 
+观战模式新增字段（需迁移）：
+```sql
+ALTER TABLE pvp_room_players ADD COLUMN role TEXT NOT NULL DEFAULT 'player';
+```
+
 ## 4. 已知限制 / TODO
 
 - 已支持“全员都已选则自动结算（幂等）”：当房主结算/或房主允许其他玩家结算时，出牌接口会尝试自动触发结算；仍保留手动结算按钮作为兜底
 - 目前“中途托管机器人接管”不会阻止对战记录落库：若开局时无机器人（已创建 `pvp_matches`），后续托管发生后仍会按原逻辑写入结束状态；若你希望“发生托管即不计入战绩”，建议在 `pvp_matches.result_json` 追加 `hasBotTakeover=true` 并在统计侧过滤
-- 暂未做观战视角
 - 已串联“战报生成记录 ↔ PVP”：`resolve` 会把 `POST /api/generate-battle-story` 返回的 `generationId` 写入 `pvp_rounds.battle_generation_id`；同时生成端点支持 `pvpContext` 并写入 `battle_report_generations.pvp_*` 字段（注意：线上 D1 仍需执行迁移）
 - 暂未提供“对战历史/复盘/排行”的独立页面与 API（虽然 `pvp_matches` / `pvp_rounds` 已可持久化承载）
 - 暂未做“阶段超时/自动中止”的规则与 UI（目前仅有 `expires_at` 的房间过期懒清理）
@@ -150,7 +157,7 @@ PVP 可用卡必须满足：
 - **迁移落地流程**：把 `lib/database/schema.sql` 的新增列/索引在实际 D1 环境执行，并补一份“上线迁移 checklist”（避免“代码已写但线上缺列”）
 
 ### P2：玩法与体验增强（可并行推进）
-- **观战视角**：允许只读访问 `finished`（或 `aborted`）后的公开区与战报，不暴露任何手牌/选择
+- **观战增强**：支持“无需加入房间成员即可只读观战”（公开房间）/ 观众数量上限与踢出策略 / 更细粒度的脱敏字段清单与回归测试
 - **阶段超时与中止规则**：`submitting/choosing/resolving` 超时策略 + 懒清理/房主一键结束
 - **Scenario 模式**：明确情景来源与公开范围，透传 `scenario`（及来源信息）给战报生成端点
 

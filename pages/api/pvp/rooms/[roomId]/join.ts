@@ -1,4 +1,4 @@
-import { addPvpRoomPlayer, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
+import { addPvpRoomPlayer, getPvpRoomById, getPvpRoomMembers, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { constantTimeEqual, hashJoinCode } from '@/lib/pvp/crypto';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
@@ -43,13 +43,16 @@ async function joinHandler(req: Request): Promise<Response> {
   const rules = internalParsed.internal.rules;
   const bots = internalParsed.internal.bots;
 
-  const players = await getPvpRoomPlayers(roomId);
-  const alreadyJoined = players.some((p) => p.user_id === auth.user.id);
+  const members = await getPvpRoomMembers(roomId);
+  const alreadyJoined = members.some((p) => p.user_id === auth.user.id);
   if (alreadyJoined) return json({ success: true, alreadyJoined: true });
 
-  // 注意：刷新页面时，已在房间内的玩家需要能“重新加入”（幂等）。
-  // 因此阶段限制应当只针对新增玩家，不应阻止已在房间内的玩家进入。
-  if (room.phase !== 'waiting' && room.phase !== 'submitting') {
+  const allowSpectators = rules.allowSpectators !== false;
+  const joinAs: 'player' | 'spectator' = allowSpectators ? 'spectator' : 'player';
+
+  // 注意：刷新页面时，已在房间内的成员需要能“重新加入”（幂等）。
+  // 因此阶段限制应当只针对新增“玩家”，不应阻止“观众”加入。
+  if (joinAs === 'player' && room.phase !== 'waiting' && room.phase !== 'submitting') {
     return json({ error: '房间已进入对局阶段，无法加入' }, { status: 409 });
   }
 
@@ -58,7 +61,8 @@ async function joinHandler(req: Request): Promise<Response> {
     : room.version;
   if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
 
-  if (players.length + bots.length >= rules.participants) return json({ error: '房间已满' }, { status: 409 });
+  const players = await getPvpRoomPlayers(roomId);
+  if (joinAs === 'player' && players.length + bots.length >= rules.participants) return json({ error: '房间已满' }, { status: 409 });
 
   if (room.join_code_hash) {
     const password = typeof body.data.password === 'string' ? body.data.password.trim() : '';
@@ -70,13 +74,16 @@ async function joinHandler(req: Request): Promise<Response> {
     }
   }
 
-  const seat = pickSeat([...players.map((p) => p.seat), ...bots.map((b) => b.seat)], rules.participants);
-  const ok = await addPvpRoomPlayer(roomId, auth.user.id, seat);
+  const seat = joinAs === 'player'
+    ? pickSeat([...players.map((p) => p.seat), ...bots.map((b) => b.seat)], rules.participants)
+    : null;
+  const ok = await addPvpRoomPlayer(roomId, auth.user.id, seat, joinAs);
   if (!ok) return json({ error: '加入房间失败' }, { status: 500 });
 
   const now = new Date().toISOString();
-  const nextPlayers = await getPvpRoomPlayers(roomId);
+  const nextPlayers = joinAs === 'player' ? await getPvpRoomPlayers(roomId) : players;
   const shouldAdvance =
+    joinAs === 'player' &&
     room.phase === 'waiting' &&
     rules.cardsPerPlayer > 0 &&
     (nextPlayers.length + bots.length) >= rules.participants;
@@ -85,7 +92,7 @@ async function joinHandler(req: Request): Promise<Response> {
     last_activity_at: now,
   });
 
-  return json({ success: true, advanced: shouldAdvance, casOk });
+  return json({ success: true, role: joinAs, advanced: shouldAdvance, casOk });
 }
 
 export default withPvpErrorBoundary(joinHandler);
