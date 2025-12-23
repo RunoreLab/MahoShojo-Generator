@@ -129,12 +129,10 @@ export interface PvpWinnerResolution {
 }
 
 export type PvpScenarioSelection = {
-  content: Record<string, unknown>;
-  fileName: string;
-  isNative?: boolean;
-  sourceDataCardId?: string | null;
-  sourceDataCardUpdatedAt?: string | null;
-  sourceDataCardName?: string | null;
-  sourceIsPublic?: boolean | null;
-  sourceAuthor?: string | null;
+  kind: 'data_card';
+  id: string;
+  updatedAt: string | null;
+  name: string | null;
+  isPublic: boolean | null;
+  author: string | null;
 };

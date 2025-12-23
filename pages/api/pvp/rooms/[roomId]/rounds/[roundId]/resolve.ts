@@ -1,5 +1,6 @@
 import {
   getPvpCardSnapshotById,
+  getPvpEligibleScenarioDataCard,
   getPvpRoomById,
   getPvpRoomHands,
   getPvpRoomMembers,
@@ -75,6 +76,17 @@ const isJsonLike = (contentType: string | null, rawText: string): boolean => {
   return trimmed.startsWith('{') || trimmed.startsWith('[');
 };
 
+const stripPrivateKeys = (value: any): any => {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(stripPrivateKeys);
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    if (key.startsWith('_')) continue;
+    out[key] = stripPrivateKeys(value[key]);
+  }
+  return out;
+};
+
 async function resolveHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
 
@@ -134,6 +146,34 @@ async function resolveHandler(req: Request): Promise<Response> {
   const scenarioSelection = parsePvpScenarioSelection((internal.raw as any)?._scenario);
   if (rules.mode === 'scenario' && !scenarioSelection) {
     return json({ error: '当前为情景模式，但尚未选择情景', code: 'SCENARIO_MISSING' }, { status: 409 });
+  }
+
+  let scenarioPayload: Record<string, unknown> | null = null;
+  let scenarioSourceDataCardId: string | null = null;
+  let scenarioSourceDataCardUpdatedAt: string | null = null;
+  if (rules.mode === 'scenario' && scenarioSelection) {
+    const row = await getPvpEligibleScenarioDataCard(scenarioSelection.id, room.host_user_id);
+    if (!row) {
+      return json({ error: '所选情景已不可用（可能未通过审查/已被封禁/已删除），请房主重新选择情景', code: 'SCENARIO_NOT_ELIGIBLE' }, { status: 409 });
+    }
+    const expectedUpdatedAt = typeof scenarioSelection.updatedAt === 'string' ? scenarioSelection.updatedAt : null;
+    const actualUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
+    if (expectedUpdatedAt && actualUpdatedAt && expectedUpdatedAt !== actualUpdatedAt) {
+      return json({ error: '情景数据卡版本已变更，请房主重新选择情景后再结算', code: 'SCENARIO_VERSION_MISMATCH', expected: expectedUpdatedAt, actual: actualUpdatedAt }, { status: 409 });
+    }
+
+    scenarioSourceDataCardId = row.id;
+    scenarioSourceDataCardUpdatedAt = actualUpdatedAt;
+
+    try {
+      const parsedScenario = JSON.parse(row.data);
+      if (!parsedScenario || typeof parsedScenario !== 'object' || Array.isArray(parsedScenario)) {
+        return json({ error: '情景数据卡内容损坏（不是有效 JSON 对象）', code: 'SCENARIO_JSON_INVALID' }, { status: 500 });
+      }
+      scenarioPayload = stripPrivateKeys(parsedScenario) as Record<string, unknown>;
+    } catch {
+      return json({ error: '情景数据卡内容损坏（不是有效 JSON）', code: 'SCENARIO_JSON_INVALID' }, { status: 500 });
+    }
   }
 
   const allowNonHostControl = rules.allowNonHostControl === true;
@@ -320,12 +360,12 @@ async function resolveHandler(req: Request): Promise<Response> {
           })),
           selectedLevel: rules.selectedLevel,
           mode: rules.mode,
-          ...(rules.mode === 'scenario' && scenarioSelection
+          ...(rules.mode === 'scenario' && scenarioPayload
             ? {
-                scenario: scenarioSelection.content,
-                scenarioTitle: getPvpScenarioTitle(scenarioSelection) || undefined,
-                scenarioSourceDataCardId: scenarioSelection.sourceDataCardId || undefined,
-                scenarioSourceDataCardUpdatedAt: scenarioSelection.sourceDataCardUpdatedAt || undefined,
+                scenario: scenarioPayload,
+                scenarioTitle: (scenarioSelection ? getPvpScenarioTitle(scenarioSelection) : null) || undefined,
+                scenarioSourceDataCardId: scenarioSourceDataCardId || undefined,
+                scenarioSourceDataCardUpdatedAt: scenarioSourceDataCardUpdatedAt || undefined,
               }
             : {}),
           ...(rules.language?.trim() ? { language: rules.language.trim() } : {}),

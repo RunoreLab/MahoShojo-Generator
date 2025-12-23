@@ -5,44 +5,49 @@ const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(v
 export const parsePvpScenarioSelection = (raw: unknown): PvpScenarioSelection | null => {
   if (!isRecord(raw)) return null;
 
-  const contentRaw = raw.content;
-  if (!isRecord(contentRaw)) return null;
+  const kindRaw = typeof raw.kind === 'string' ? raw.kind.trim() : '';
+  if (kindRaw && kindRaw !== 'data_card') return null;
 
-  const fileNameRaw = typeof raw.fileName === 'string' ? raw.fileName.trim() : '';
-  const fallbackTitle = typeof contentRaw.title === 'string' ? contentRaw.title.trim() : '';
-  const fileName = fileNameRaw || (fallbackTitle ? `${fallbackTitle}.json` : '');
-  if (!fileName) return null;
-  if (fileName.length > 256) return null;
+  const id =
+    (typeof raw.id === 'string' ? raw.id.trim() : '') ||
+    (typeof raw.sourceDataCardId === 'string' ? raw.sourceDataCardId.trim() : '');
+  if (!id) return null;
+  if (id.length > 128) return null;
 
-  const sourceDataCardId = typeof raw.sourceDataCardId === 'string' ? raw.sourceDataCardId.trim() : '';
-  const sourceDataCardUpdatedAt = typeof raw.sourceDataCardUpdatedAt === 'string' ? raw.sourceDataCardUpdatedAt.trim() : '';
-  const sourceDataCardName = typeof raw.sourceDataCardName === 'string' ? raw.sourceDataCardName.trim() : '';
-  const sourceIsPublic =
-    typeof raw.sourceIsPublic === 'boolean'
-      ? raw.sourceIsPublic
-      : (typeof raw.sourceIsPublic === 'number' ? raw.sourceIsPublic === 1 : null);
-  const sourceAuthor = typeof raw.sourceAuthor === 'string' ? raw.sourceAuthor.trim() : '';
+  const updatedAtRaw =
+    (typeof raw.updatedAt === 'string' ? raw.updatedAt.trim() : '') ||
+    (typeof raw.sourceDataCardUpdatedAt === 'string' ? raw.sourceDataCardUpdatedAt.trim() : '');
+  const updatedAt = updatedAtRaw || null;
 
-  const isNative = typeof raw.isNative === 'boolean' ? raw.isNative : undefined;
+  const nameRaw =
+    (typeof raw.name === 'string' ? raw.name.trim() : '') ||
+    (typeof raw.sourceDataCardName === 'string' ? raw.sourceDataCardName.trim() : '');
+  const name = nameRaw || null;
+
+  const isPublicRaw = raw.isPublic ?? raw.sourceIsPublic;
+  const isPublic =
+    typeof isPublicRaw === 'boolean'
+      ? isPublicRaw
+      : (typeof isPublicRaw === 'number' ? isPublicRaw === 1 : null);
+
+  const authorRaw =
+    (typeof raw.author === 'string' ? raw.author.trim() : '') ||
+    (typeof raw.sourceAuthor === 'string' ? raw.sourceAuthor.trim() : '');
+  const author = authorRaw || null;
 
   return {
-    content: contentRaw,
-    fileName,
-    ...(isNative !== undefined ? { isNative } : {}),
-    ...(sourceDataCardId ? { sourceDataCardId } : {}),
-    ...(sourceDataCardUpdatedAt ? { sourceDataCardUpdatedAt } : {}),
-    ...(sourceDataCardName ? { sourceDataCardName } : {}),
-    ...(sourceIsPublic === null ? {} : { sourceIsPublic }),
-    ...(sourceAuthor ? { sourceAuthor } : {}),
+    kind: 'data_card',
+    id,
+    updatedAt,
+    name,
+    isPublic,
+    author,
   };
 };
 
 export const getPvpScenarioTitle = (selection: PvpScenarioSelection): string | null => {
-  if (selection.sourceDataCardName) return selection.sourceDataCardName;
-  const title = typeof selection.content.title === 'string' ? selection.content.title.trim() : '';
-  if (title) return title;
-  const fileName = selection.fileName.trim();
-  if (!fileName) return null;
-  return fileName.replace(/\.json$/i, '');
+  const name = typeof selection.name === 'string' ? selection.name.trim() : '';
+  if (name) return name;
+  const id = typeof selection.id === 'string' ? selection.id.trim() : '';
+  return id || null;
 };
-

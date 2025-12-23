@@ -75,14 +75,12 @@ async function getRoomHandler(req: Request): Promise<Response> {
   const scenarioSelection = parsePvpScenarioSelection((parsed.internal.raw as any)?._scenario);
   const scenario = scenarioSelection
     ? {
-        fileName: scenarioSelection.fileName,
-        isNative: scenarioSelection.isNative ?? false,
         title: getPvpScenarioTitle(scenarioSelection),
-        sourceDataCardId: scenarioSelection.sourceDataCardId ?? null,
-        sourceDataCardUpdatedAt: scenarioSelection.sourceDataCardUpdatedAt ?? null,
-        sourceDataCardName: scenarioSelection.sourceDataCardName ?? null,
-        sourceIsPublic: typeof scenarioSelection.sourceIsPublic === 'boolean' ? scenarioSelection.sourceIsPublic : null,
-        sourceAuthor: scenarioSelection.sourceAuthor ?? null,
+        sourceDataCardId: scenarioSelection.id,
+        sourceDataCardUpdatedAt: scenarioSelection.updatedAt,
+        sourceDataCardName: scenarioSelection.name,
+        sourceIsPublic: scenarioSelection.isPublic,
+        sourceAuthor: scenarioSelection.author,
       }
     : null;
 

@@ -1,4 +1,4 @@
-import { createPvpRoom } from '@/lib/d1';
+import { createPvpRoom, getPvpEligibleScenarioDataCard } from '@/lib/d1';
 import { PVP_ROOM_TTL_MS } from '@/lib/pvp/constants';
 import { generateSaltHex, hashJoinCode } from '@/lib/pvp/crypto';
 import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
@@ -28,6 +28,28 @@ async function roomsHandler(req: Request): Promise<Response> {
     return json({ error: '情景模式必须选择一个情景' }, { status: 400 });
   }
 
+  let normalizedScenario: PvpScenarioSelection | null = null;
+  if (rules.mode === 'scenario' && scenarioSelection) {
+    const row = await getPvpEligibleScenarioDataCard(scenarioSelection.id, auth.user.id);
+    if (!row) {
+      return json({ error: '情景数据卡不存在/不可用/无权访问，或未通过审查/已被封禁', code: 'SCENARIO_NOT_ELIGIBLE' }, { status: 403 });
+    }
+    const expectedUpdatedAt = typeof scenarioSelection.updatedAt === 'string' ? scenarioSelection.updatedAt : null;
+    const actualUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
+    if (expectedUpdatedAt && actualUpdatedAt && expectedUpdatedAt !== actualUpdatedAt) {
+      return json({ error: '情景数据卡版本已变更，请重新选择后创建房间', code: 'SCENARIO_VERSION_MISMATCH', expected: expectedUpdatedAt, actual: actualUpdatedAt }, { status: 409 });
+    }
+
+    normalizedScenario = {
+      kind: 'data_card',
+      id: row.id,
+      updatedAt: actualUpdatedAt,
+      name: typeof row.name === 'string' ? row.name : null,
+      isPublic: Number(row.is_public) === 1,
+      author: typeof row.username === 'string' ? row.username : null,
+    };
+  }
+
   const password = typeof body.data.password === 'string' ? body.data.password.trim() : '';
   const joinCodeSalt = password ? generateSaltHex() : null;
   const joinCodeHash = password && joinCodeSalt ? await hashJoinCode(password, joinCodeSalt) : null;
@@ -38,7 +60,7 @@ async function roomsHandler(req: Request): Promise<Response> {
     rulesJson: JSON.stringify({
       ...rules,
       allowSpectators: true,
-      ...(rules.mode === 'scenario' && scenarioSelection ? { _scenario: scenarioSelection } : {}),
+      ...(rules.mode === 'scenario' && normalizedScenario ? { _scenario: normalizedScenario } : {}),
     }),
     joinCodeHash,
     joinCodeSalt,
