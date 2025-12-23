@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "items": [
+    { "id": "sparkle", "label": "闪光", "src": "/emotes/pvp/sparkle.svg" },
+    { "id": "heart", "label": "爱心", "src": "/emotes/pvp/heart.svg" },
+    { "id": "cry", "label": "哭哭", "src": "/emotes/pvp/cry.svg" },
+    { "id": "idea", "label": "灵感", "src": "/emotes/pvp/idea.svg" },
+    { "id": "thumb", "label": "点赞", "src": "/emotes/pvp/thumb.svg" }
+  ]
+}

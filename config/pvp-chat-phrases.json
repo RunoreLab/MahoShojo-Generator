@@ -1,0 +1,131 @@
+{
+  "version": 1,
+  "patterns": [
+    {
+      "id": "status",
+      "label": "状态说明",
+      "template": "{subject}{state}",
+      "slots": [
+        { "key": "subject", "label": "对象", "optionsKey": "subject" },
+        { "key": "state", "label": "状态", "optionsKey": "state" }
+      ]
+    },
+    {
+      "id": "request",
+      "label": "请求/建议",
+      "template": "{request}{object}",
+      "slots": [
+        { "key": "request", "label": "语气", "optionsKey": "request" },
+        { "key": "object", "label": "内容", "optionsKey": "object" }
+      ]
+    },
+    {
+      "id": "praise",
+      "label": "夸奖/感谢",
+      "template": "{praise}{target}",
+      "slots": [
+        { "key": "praise", "label": "语气", "optionsKey": "praise" },
+        { "key": "target", "label": "对象", "optionsKey": "target" }
+      ]
+    },
+    {
+      "id": "apology",
+      "label": "道歉/解释",
+      "template": "{apology}{reason}",
+      "slots": [
+        { "key": "apology", "label": "语气", "optionsKey": "apology" },
+        { "key": "reason", "label": "原因", "optionsKey": "reason" }
+      ]
+    },
+    {
+      "id": "debug",
+      "label": "问题反馈",
+      "template": "{issue}{detail}",
+      "slots": [
+        { "key": "issue", "label": "开头", "optionsKey": "issue" },
+        { "key": "detail", "label": "内容", "optionsKey": "detail" }
+      ]
+    }
+  ],
+  "options": {
+    "subject": [
+      { "id": "me", "text": "我" },
+      { "id": "you", "text": "你" },
+      { "id": "room", "text": "房间" },
+      { "id": "network", "text": "网络" },
+      { "id": "ui", "text": "界面" },
+      { "id": "choice", "text": "选牌" },
+      { "id": "play", "text": "出牌" },
+      { "id": "thisRound", "text": "这一回合" },
+      { "id": "thisGame", "text": "这局" }
+    ],
+    "state": [
+      { "id": "ready", "text": "准备好了" },
+      { "id": "thinking", "text": "还在想" },
+      { "id": "slow", "text": "有点慢" },
+      { "id": "lag", "text": "卡了" },
+      { "id": "disconnect", "text": "掉线了" },
+      { "id": "reconnect", "text": "正在重连" },
+      { "id": "ok", "text": "没问题了" },
+      { "id": "wait", "text": "请稍等" }
+    ],
+    "request": [
+      { "id": "please", "text": "请" },
+      { "id": "can", "text": "能否" },
+      { "id": "suggest", "text": "建议" },
+      { "id": "hope", "text": "希望" }
+    ],
+    "object": [
+      { "id": "waitASecond", "text": "稍等一下" },
+      { "id": "slowDown", "text": "慢一点" },
+      { "id": "speedUp", "text": "快一点" },
+      { "id": "continue", "text": "继续" },
+      { "id": "pause", "text": "先暂停一下" },
+      { "id": "retry", "text": "我重试一下" },
+      { "id": "reconnect", "text": "我重连一下" },
+      { "id": "rechoose", "text": "重新选牌" },
+      { "id": "reviewRules", "text": "确认一下规则" },
+      { "id": "finishThis", "text": "先把这一回合打完" }
+    ],
+    "praise": [
+      { "id": "thanks", "text": "谢谢！" },
+      { "id": "nice", "text": "漂亮！" },
+      { "id": "great", "text": "太强了！" },
+      { "id": "goodJob", "text": "干得好！" },
+      { "id": "gg", "text": "GG！" }
+    ],
+    "target": [
+      { "id": "you", "text": "你" },
+      { "id": "thisMove", "text": "这一手" },
+      { "id": "thisCard", "text": "这张牌" },
+      { "id": "thisRound", "text": "这一回合" },
+      { "id": "yourChoice", "text": "你的选择" }
+    ],
+    "apology": [
+      { "id": "sorry", "text": "抱歉，" },
+      { "id": "oops", "text": "不好意思，" },
+      { "id": "myBad", "text": "我失误了，" }
+    ],
+    "reason": [
+      { "id": "misclick", "text": "手滑了" },
+      { "id": "stuck", "text": "卡住了" },
+      { "id": "wrongPick", "text": "选错了" },
+      { "id": "slowOp", "text": "操作慢了" },
+      { "id": "networkIssue", "text": "网络不稳定" }
+    ],
+    "issue": [
+      { "id": "iMeet", "text": "我遇到" },
+      { "id": "maybe", "text": "可能有" },
+      { "id": "seems", "text": "看起来像" },
+      { "id": "looksLike", "text": "似乎是" }
+    ],
+    "detail": [
+      { "id": "cardLoadFail", "text": "卡牌加载失败" },
+      { "id": "uiMissing", "text": "界面不显示" },
+      { "id": "buttonNoResponse", "text": "按钮没反应" },
+      { "id": "roomNotSync", "text": "房间状态不同步" },
+      { "id": "reportStuck", "text": "战报生成卡住" },
+      { "id": "choiceNotSaved", "text": "出牌选择没保存" }
+    ]
+  }
+}

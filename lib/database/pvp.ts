@@ -1035,3 +1035,120 @@ export async function getPvpMatchById(matchId: string): Promise<PvpMatchRow | nu
     return null;
   }
 }
+
+export interface PvpRoomChatMessageRow {
+  id: number;
+  room_id: string;
+  sender_user_id: number;
+  sender_role: PvpRoomMemberRole;
+  sender_username: string;
+  sender_prefix: string | null;
+  content_json: string;
+  rendered_text: string | null;
+  sticker_id: string | null;
+  emoji_text: string | null;
+  created_at: string;
+}
+
+export async function getPvpRoomChatMessages(input: {
+  roomId: string;
+  limit?: number;
+  afterId?: number | null;
+}): Promise<PvpRoomChatMessageRow[]> {
+  const limit = Number.isFinite(input.limit) ? Math.max(1, Math.min(100, Math.floor(input.limit as number))) : 50;
+  const afterId = Number.isFinite(input.afterId) ? Math.max(0, Math.floor(input.afterId as number)) : null;
+
+  try {
+    if (afterId !== null && afterId > 0) {
+      const result = await queryFromD1(
+        `SELECT * FROM pvp_room_chat_messages
+         WHERE room_id = ? AND id > ?
+         ORDER BY id ASC
+         LIMIT ?`,
+        [input.roomId, afterId, limit]
+      ) as any;
+      if (result.success && result.result?.[0]?.results) return result.result[0].results as PvpRoomChatMessageRow[];
+      return [];
+    }
+
+    const result = await queryFromD1(
+      `SELECT * FROM pvp_room_chat_messages
+       WHERE room_id = ?
+       ORDER BY id DESC
+       LIMIT ?`,
+      [input.roomId, limit]
+    ) as any;
+    if (result.success && result.result?.[0]?.results) {
+      const rows = result.result[0].results as PvpRoomChatMessageRow[];
+      return rows.slice().reverse();
+    }
+    return [];
+  } catch (error) {
+    console.error('读取 pvp_room_chat_messages 失败:', error);
+    return [];
+  }
+}
+
+export async function getLatestPvpRoomChatMessageBySender(input: {
+  roomId: string;
+  userId: number;
+}): Promise<{ id: number; created_at: string } | null> {
+  try {
+    const result = await queryFromD1(
+      `SELECT id, created_at
+       FROM pvp_room_chat_messages
+       WHERE room_id = ? AND sender_user_id = ?
+       ORDER BY id DESC
+       LIMIT 1`,
+      [input.roomId, input.userId]
+    ) as any;
+    if (result.success && result.result?.[0]?.results?.length > 0) {
+      return result.result[0].results[0] as { id: number; created_at: string };
+    }
+    return null;
+  } catch (error) {
+    console.error('读取 pvp_room_chat_messages(最新发送) 失败:', error);
+    return null;
+  }
+}
+
+export async function createPvpRoomChatMessage(input: {
+  roomId: string;
+  senderUserId: number;
+  senderRole: PvpRoomMemberRole;
+  senderUsername: string;
+  senderPrefix?: string | null;
+  contentJson: string;
+  renderedText?: string | null;
+  stickerId?: string | null;
+  emojiText?: string | null;
+}): Promise<number | null> {
+  try {
+    const now = new Date().toISOString();
+    const result = await queryFromD1(
+      `INSERT INTO pvp_room_chat_messages (
+        room_id, sender_user_id, sender_role, sender_username, sender_prefix,
+        content_json, rendered_text, sticker_id, emoji_text, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.roomId,
+        input.senderUserId,
+        input.senderRole,
+        input.senderUsername,
+        input.senderPrefix ?? null,
+        input.contentJson,
+        input.renderedText ?? null,
+        input.stickerId ?? null,
+        input.emojiText ?? null,
+        now,
+      ]
+    ) as any;
+    if (result.success && result.result) {
+      return result.result[0]?.meta?.last_row_id ?? null;
+    }
+    return null;
+  } catch (error) {
+    console.error('写入 pvp_room_chat_messages 失败:', error);
+    return null;
+  }
+}

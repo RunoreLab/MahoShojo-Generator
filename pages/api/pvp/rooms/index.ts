@@ -60,6 +60,7 @@ async function roomsHandler(req: Request): Promise<Response> {
     rulesJson: JSON.stringify({
       ...rules,
       allowSpectators: true,
+      allowSpectatorChat: false,
       ...(rules.mode === 'scenario' && normalizedScenario ? { _scenario: normalizedScenario } : {}),
     }),
     joinCodeHash,

@@ -361,6 +361,27 @@ CREATE TABLE IF NOT EXISTS pvp_room_players (
 
 CREATE INDEX IF NOT EXISTS idx_pvp_room_players_room_id ON pvp_room_players(room_id);
 
+-- PVP 房间聊天（仅允许预设文字组合 + 表情包/emoji）
+CREATE TABLE IF NOT EXISTS pvp_room_chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  room_id TEXT NOT NULL,
+  sender_user_id INTEGER NOT NULL,
+  sender_role TEXT NOT NULL, -- player / spectator
+  sender_username TEXT NOT NULL,
+  sender_prefix TEXT,
+  content_json TEXT NOT NULL,
+  rendered_text TEXT,
+  sticker_id TEXT,
+  emoji_text TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (room_id) REFERENCES pvp_rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (sender_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pvp_room_chat_messages_room_id_id ON pvp_room_chat_messages(room_id, id);
+CREATE INDEX IF NOT EXISTS idx_pvp_room_chat_messages_room_id_created_at ON pvp_room_chat_messages(room_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_pvp_room_chat_messages_room_id_sender_user_id_id ON pvp_room_chat_messages(room_id, sender_user_id, id);
+
 -- PVP 提交
 CREATE TABLE IF NOT EXISTS pvp_room_submissions (
   room_id TEXT NOT NULL,

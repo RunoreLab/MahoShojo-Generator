@@ -161,6 +161,9 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const allowSpectators =
     typeof raw.allowSpectators === 'boolean' ? raw.allowSpectators : DEFAULT_PVP_RULES.allowSpectators;
 
+  const allowSpectatorChat =
+    typeof raw.allowSpectatorChat === 'boolean' ? raw.allowSpectatorChat : DEFAULT_PVP_RULES.allowSpectatorChat;
+
   const readArenaHistory =
     typeof raw.readArenaHistory === 'boolean' ? raw.readArenaHistory : DEFAULT_PVP_RULES.readArenaHistory;
   const readArenaHistoryLimit = intInRange(
@@ -209,6 +212,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     bestOf: { enabled, maxRounds, winCondition, tieBreaker },
     allowNonHostControl,
     allowSpectators,
+    allowSpectatorChat,
 
     readArenaHistory,
     readArenaHistoryLimit,
