@@ -292,6 +292,7 @@ async function resolveHandler(req: Request): Promise<Response> {
   };
 
   let report: any | null = null;
+  let updatedCombatants: any[] | null = null;
   let rawWinnerText: string | null = null;
   let attempts = 0;
   let winnerIndex: number | null = null;
@@ -315,6 +316,7 @@ async function resolveHandler(req: Request): Promise<Response> {
             isNative: false,
             isPreset: false,
           })),
+          selectedLevel: rules.selectedLevel,
           mode: rules.mode,
           ...(rules.mode === 'scenario' && scenarioSelection
             ? {
@@ -324,13 +326,18 @@ async function resolveHandler(req: Request): Promise<Response> {
                 scenarioSourceDataCardUpdatedAt: scenarioSelection.sourceDataCardUpdatedAt || undefined,
               }
             : {}),
-          language: 'zh-CN',
-          userGuidance: buildGuidance(attempt),
-          readArenaHistory: false,
-          writeArenaHistory: false,
-          readCurrentState: false,
-          writeCurrentState: false,
-          useArenaHistory: false,
+          ...(rules.language?.trim() ? { language: rules.language.trim() } : {}),
+          ...(rules.storyLength ? { storyLength: rules.storyLength } : {}),
+          internalGuidance: buildGuidance(attempt),
+          ...(rules.userGuidance?.trim() ? { userGuidance: rules.userGuidance.trim() } : {}),
+          readArenaHistory: rules.readArenaHistory,
+          ...(rules.readArenaHistory
+            ? { arenaHistoryReadLimit: rules.isArenaHistoryUnlimited ? null : rules.readArenaHistoryLimit }
+            : {}),
+          writeArenaHistory: rules.writeArenaHistory,
+          readCurrentState: rules.readCurrentState,
+          writeCurrentState: rules.writeCurrentState,
+          adjudicationEvents: rules.adjudicationEvents,
           ...(customProvider ? { customProvider } : {}),
           pvpContext: {
             roomId,
@@ -413,6 +420,14 @@ async function resolveHandler(req: Request): Promise<Response> {
         await updatePvpRound(roundId, { battleGenerationId: generationId });
       }
       report = data?.report ?? null;
+      updatedCombatants = Array.isArray(data?.updatedCombatants) ? data.updatedCombatants : null;
+      const adjudicationResults = Array.isArray(data?.adjudicationResults) ? data.adjudicationResults : null;
+      if (report && adjudicationResults) {
+        report.adjudicationResults = adjudicationResults;
+      }
+      if (report && rules.mode === 'scenario' && scenarioSelection) {
+        report.scenario = getPvpScenarioTitle(scenarioSelection) || undefined;
+      }
       rawWinnerText = report?.officialReport?.winner ?? null;
       const byToken = normalizeWinnerFromCandidates(rawWinnerText, candidateTokens);
       if (byToken.kind === 'draw') {
@@ -492,6 +507,7 @@ async function resolveHandler(req: Request): Promise<Response> {
       type: p.snapshot.card_type,
     })),
     report,
+    updatedCombatants: updatedCombatants ?? [],
   });
 
   await updatePvpRound(roundId, {

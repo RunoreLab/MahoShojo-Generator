@@ -128,6 +128,7 @@ export const formatCurrentStateForPrompt = (state: CharacterCurrentState | undef
 export const createPromptBuilder = (
     questions: string[],
     userGuidance: string | null,
+    internalGuidance: string | null,
     worldviewWarning: boolean,
     language: string,
     selectedLevel: string | undefined,
@@ -208,6 +209,10 @@ export const createPromptBuilder = (
             return `${prefix}- ${res.description} >> 结果:【${res.outcome}】(${res.details})`;
         }).join('\n');
         finalPrompt += `\n\n`;
+    }
+
+    if (internalGuidance) {
+        finalPrompt += `## 【系统裁判规则】\n${internalGuidance.trim()}\n\n`;
     }
 
     if (mode === 'scenario' && scenario) {

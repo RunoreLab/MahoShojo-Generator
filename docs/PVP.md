@@ -447,7 +447,18 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
     "showAllSubmissions": true,
     "shuffleDecks": true,
     "mode": "classic",
-    "bestOf": { "enabled": false, "maxRounds": 3, "winCondition": "mostWinsAfterMaxRounds", "tieBreaker": "draw" }
+    "bestOf": { "enabled": false, "maxRounds": 3, "winCondition": "mostWinsAfterMaxRounds", "tieBreaker": "draw" },
+    "readArenaHistory": false,
+    "readArenaHistoryLimit": 3,
+    "isArenaHistoryUnlimited": false,
+    "writeArenaHistory": false,
+    "readCurrentState": false,
+    "writeCurrentState": false,
+    "selectedLevel": "",
+    "userGuidance": "",
+    "storyLength": "default",
+    "language": "",
+    "adjudicationEvents": []
   },
   "password": "可选，房间口令明文，仅用于一次性设置"
 }

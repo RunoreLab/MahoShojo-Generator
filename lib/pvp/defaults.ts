@@ -19,4 +19,17 @@ export const DEFAULT_PVP_RULES: PvpRoomRules = {
   },
   allowNonHostControl: false,
   allowSpectators: true,
+
+  // 与竞技场对齐：默认“全关或无”，由房主在房间内统一设置并贯穿对局。
+  readArenaHistory: false,
+  readArenaHistoryLimit: 3,
+  isArenaHistoryUnlimited: false,
+  writeArenaHistory: false,
+  readCurrentState: false,
+  writeCurrentState: false,
+  selectedLevel: '',
+  userGuidance: '',
+  storyLength: 'default',
+  language: '',
+  adjudicationEvents: [],
 };

@@ -6,6 +6,7 @@
 
 ## 0.1 变更记录（最近）
 
+- 2025-12-23：PVP 房间新增“对局生成设置”（与竞技场对齐）：资料读写策略、等级、故事引导、随机判定器、期望字数、生成语言；默认全关/不指定；房主在 `waiting/submitting` 保存后对局内固定。结算端将 PVP 系统裁判提示词改为 `internalGuidance` 注入，不再混入 `userGuidance`；开启资料写入时房间页仅**只读展示**“历战记录/当前状态”的更新摘要（不提供下载/保存/替换）。
 - 2025-12-23：新增观战模式：房主可开关观战（默认开启）；用户进入开启观战的房间默认成为观众，可在 `waiting/submitting` 且有空位时切换为玩家；玩家也可在 `waiting/submitting` 切回观众（非房主）。观众视角不返回手牌/提交详情/出牌选择等私密信息（`POST /api/pvp/rooms/:roomId/role`、`POST /api/pvp/rooms/:roomId/permissions`、`GET /api/pvp/rooms/:roomId`）。
 - 2025-12-22：当仅剩最后一位真人玩家未操作（提交/出牌/确认）时，房间页展示 30s 倒计时；倒计时结束后房主可强制随机提交/出牌/确认（`POST /api/pvp/rooms/:roomId/force`）。
 - 2025-12-22：真人玩家在 `submitting/choosing/reviewing` 阶段退出或被房主踢出时，不再直接 `aborted`；将自动用“托管机器人”接管该座位，继承其提交/手牌/当轮出牌状态继续游戏（`dealing/resolving/advancing` 为忙碌阶段，暂不允许踢出/退出）。
@@ -19,7 +20,7 @@
 - 2-6 人房间（同局同时出牌）
 - D1 持久化 + 前端轮询（React Query `refetchInterval=1500ms`）
 - 流程：创建房间 → 加入 →（可选）提交卡组 → 房主发牌 → 同时出牌 → 自动/手动结算（生成战报）→（可选）多轮直到 `maxRounds`
-- 结算调用：复用现有非流式端点 `POST /api/generate-battle-story`（并显式关闭 arena_history / current_state 的读写）
+- 结算调用：复用现有非流式端点 `POST /api/generate-battle-story`（按房间“对局生成设置”透传：资料读写、等级、引导、判定器、期望字数、语言；默认全关/不指定）
 - 多局制配置：大厅创建房间可启用/设置；房间内（房主）可在 `waiting/submitting` 阶段调整规则
 - 结算推进策略：生成战报后进入 `reviewing`，只有全员“确认已阅读”后才推进下一回合或结束
 - 大厅支持房间浏览器（搜索/筛选/浏览可加入房间并加入）与快速匹配（无可加入房间则按默认规则创建）
@@ -144,9 +145,10 @@ ALTER TABLE pvp_room_players ADD COLUMN role TEXT NOT NULL DEFAULT 'player';
 - 已支持“全员都已选则自动结算（幂等）”：当房主结算/或房主允许其他玩家结算时，出牌接口会尝试自动触发结算；仍保留手动结算按钮作为兜底
 - 目前“中途托管机器人接管”不会阻止对战记录落库：若开局时无机器人（已创建 `pvp_matches`），后续托管发生后仍会按原逻辑写入结束状态；若你希望“发生托管即不计入战绩”，建议在 `pvp_matches.result_json` 追加 `hasBotTakeover=true` 并在统计侧过滤
 - 已串联“战报生成记录 ↔ PVP”：`resolve` 会把 `POST /api/generate-battle-story` 返回的 `generationId` 写入 `pvp_rounds.battle_generation_id`；同时生成端点支持 `pvpContext` 并写入 `battle_report_generations.pvp_*` 字段（注意：线上 D1 仍需执行迁移）
+- 注意：PVP 场景即使开启“资料写入”也不会更新全局战斗统计（避免污染竞技场统计口径）
 - 暂未提供“对战历史/复盘/排行”的独立页面与 API（虽然 `pvp_matches` / `pvp_rounds` 已可持久化承载）
 - 暂未做“阶段超时/自动中止”的规则与 UI（目前仅有 `expires_at` 的房间过期懒清理）
-- `scenario` 模式尚未引入“情景选择/抽取与透传”，当前仅透传 `mode` 给战报生成端点（体验与规则需进一步定义）
+- `scenario` 模式已支持房间内选择/透传情景；后续可继续增强情景来源、公开范围与复盘稳定性（例如强制快照情景来源）
 - 目前 UI 的“卡选择器”是最小可用版本（列表 + 选择），后续可复用现有卡牌组件做更美观的卡片式选择
 
 ## 5. 后续开发建议（优先级）
