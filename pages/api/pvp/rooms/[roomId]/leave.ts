@@ -79,13 +79,13 @@ async function leaveHandler(req: Request): Promise<Response> {
   const room = await getPvpRoomById(roomId);
   if (!room) return json({ error: '房间不存在' }, { status: 404 });
 
-  const expectedVersion = Number.isFinite(body.data.expectedVersion) ? Math.floor(body.data.expectedVersion as number) : null;
-  if (expectedVersion === null) return json({ error: '缺少 expectedVersion' }, { status: 400 });
-  if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
+  // 离开房间属于“尽力而为”的操作：不强制要求前端携带最新 version，避免用户在轮询/网络抖动时无法退出。
+  // 仍使用 CAS 写入以减少并发覆盖风险，但以服务端读取到的 room.version 为准。
+  const expectedVersion = room.version;
 
   const members = await getPvpRoomMembers(roomId);
   const leavingMember = members.find((p) => p.user_id === auth.user.id) ?? null;
-  if (!leavingMember) return json({ error: '你不在该房间中' }, { status: 403 });
+  if (!leavingMember) return json({ success: true, notInRoom: true });
 
   const players = await getPvpRoomPlayers(roomId);
   const leavingPlayer = players.find((p) => p.user_id === auth.user.id) ?? null;
@@ -97,15 +97,24 @@ async function leaveHandler(req: Request): Promise<Response> {
 
   if (!leavingPlayer) {
     const ok = await updatePvpRoomCas(roomId, expectedVersion, { last_activity_at: now });
-    if (!ok) return json({ error: '离开房间失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
     await removePvpRoomPlayer(roomId, auth.user.id);
     await deletePvpRoomSubmission(roomId, auth.user.id);
     await deletePvpRoomHand(roomId, auth.user.id);
-    return json({ success: true, role: leavingMember.role });
+    return json({ success: true, role: leavingMember.role, ...(ok ? {} : { warning: '状态更新失败（可能存在并发），但已尽力退出' }) });
   }
 
   if (isBusyPhase) {
-    return json({ error: '房间正在推进/结算中，请稍后再退出', code: 'PHASE_BUSY' }, { status: 409 });
+    const patch = isHostLeaving ? { status: 'closed' as const, phase: 'closed' as const } : {};
+    const ok = await updatePvpRoomCas(roomId, expectedVersion, { ...patch, last_activity_at: now });
+    await removePvpRoomPlayer(roomId, auth.user.id);
+    await deletePvpRoomSubmission(roomId, auth.user.id);
+    await deletePvpRoomHand(roomId, auth.user.id);
+    return json({
+      success: true,
+      leftDuringBusyPhase: true,
+      ...(isHostLeaving ? { closed: true } : {}),
+      ...(ok ? {} : { warning: '状态更新失败（可能存在并发），但已尽力退出' }),
+    });
   }
 
   if (!isHostLeaving && canReplaceWithBot) {
@@ -176,7 +185,13 @@ async function leaveHandler(req: Request): Promise<Response> {
       rules_json: stringifyPvpRoomInternalState(internal),
       last_activity_at: now,
     });
-    if (!ok) return json({ error: '托管失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
+    if (!ok) {
+      // 托管写入失败时，仍允许用户退出，避免“无法退出房间”的体验灾难。
+      await removePvpRoomPlayer(roomId, auth.user.id);
+      await deletePvpRoomSubmission(roomId, auth.user.id);
+      await deletePvpRoomHand(roomId, auth.user.id);
+      return json({ success: true, replacedByBotFailed: true, warning: '托管机器人写入失败（可能存在并发），已退出但座位未托管' });
+    }
 
     await removePvpRoomPlayer(roomId, auth.user.id);
     await deletePvpRoomSubmission(roomId, auth.user.id);
@@ -195,7 +210,12 @@ async function leaveHandler(req: Request): Promise<Response> {
         : { phase: 'waiting' as const };
 
   const ok = await updatePvpRoomCas(roomId, expectedVersion, { ...patch, last_activity_at: now });
-  if (!ok) return json({ error: '离开房间时状态更新失败', code: 'UPDATE_FAILED' }, { status: 409 });
+  if (!ok) {
+    await removePvpRoomPlayer(roomId, auth.user.id);
+    await deletePvpRoomSubmission(roomId, auth.user.id);
+    await deletePvpRoomHand(roomId, auth.user.id);
+    return json({ success: true, warning: '离开房间时状态更新失败（可能存在并发），已退出但房间状态可能需要刷新' });
+  }
 
   await removePvpRoomPlayer(roomId, auth.user.id);
 

@@ -92,14 +92,69 @@ class PvpApiError extends Error {
   }
 }
 
+const looksLikeHtml = (rawText: string, contentType: string | null): boolean => {
+  const ct = (contentType || '').toLowerCase();
+  if (ct.includes('text/html')) return true;
+  const head = rawText.trimStart().slice(0, 200).toLowerCase();
+  return head.startsWith('<!doctype html') || head.startsWith('<html') || head.startsWith('<head') || head.startsWith('<body');
+};
+
+const inferCloudflareGatewayMessage = (status: number, rawText: string): string | null => {
+  const text = rawText.toLowerCase();
+  if (!text.includes('cloudflare')) return null;
+  const codeMatch = rawText.match(/Error code\\s+(\\d{3})/i);
+  const code = codeMatch ? Number(codeMatch[1]) : status;
+  if (!Number.isFinite(code) || code < 500) return null;
+  return `网关错误（HTTP ${code}）。这通常表示 Cloudflare 到源站/边缘函数的请求失败或超时，请稍后重试；若持续发生请截图并附上发生时间。`;
+};
+
+const summarizeNonJsonResponse = (res: Response, rawText: string): { error: string; code: string; detail?: string } => {
+  const status = res.status;
+  const cf = inferCloudflareGatewayMessage(status, rawText);
+  if (cf) return { error: cf, code: 'CLOUDFLARE_GATEWAY_ERROR' };
+  if (looksLikeHtml(rawText, res.headers.get('content-type'))) {
+    return {
+      error: `服务器返回了 HTML 错误页（HTTP ${status}）。请稍后重试或刷新页面。`,
+      code: 'HTML_ERROR_RESPONSE',
+    };
+  }
+  const trimmed = rawText.trim();
+  const preview = trimmed.length > 240 ? `${trimmed.slice(0, 240)}…` : trimmed;
+  return {
+    error: preview ? `请求失败（HTTP ${status}）：${preview}` : `请求失败（HTTP ${status}）`,
+    code: 'NON_JSON_RESPONSE',
+  };
+};
+
+const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit, timeoutMs: number): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(input, { ...init, signal: controller.signal });
+    return res;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+};
+
 const readJsonOrText = async (res: Response): Promise<{ data: any; rawText: string }> => {
   const rawText = await res.text();
   if (!rawText) return { data: {}, rawText: '' };
-  try {
-    return { data: JSON.parse(rawText), rawText };
-  } catch {
-    return { data: { error: rawText }, rawText };
+  const contentType = res.headers.get('content-type');
+  const trimmed = rawText.trimStart();
+  const shouldTryJson =
+    (contentType || '').toLowerCase().includes('application/json') ||
+    (contentType || '').toLowerCase().includes('+json') ||
+    trimmed.startsWith('{') ||
+    trimmed.startsWith('[');
+  if (shouldTryJson) {
+    try {
+      return { data: JSON.parse(rawText), rawText };
+    } catch {
+      // fall through
+    }
   }
+  return { data: summarizeNonJsonResponse(res, rawText), rawText };
 };
 
 const formatApiErrorMessage = (payload: ApiErrorPayload, status: number): string => {
@@ -210,7 +265,17 @@ export function PvpRoomPage() {
 
   const handlePvpRequestError = (e: unknown, fallback: string) => {
     const err = e as any;
-    const message = e instanceof Error ? e.message : fallback;
+    const rawMessage = e instanceof Error ? e.message : fallback;
+    const message = rawMessage.length > 1200 ? `${rawMessage.slice(0, 1200)}…（已截断，详见控制台）` : rawMessage;
+    if (rawMessage.length > 1200) {
+      console.error('[pvp] 错误信息过长（已在 UI 截断）：', rawMessage);
+    }
+
+    if (err?.name === 'AbortError') {
+      clearVersionConflictRetry();
+      setError('请求超时，请检查网络后重试；若多次出现请刷新页面或稍后再试。');
+      return;
+    }
 
     if (err?.code === 'VERSION_CONFLICT') {
       scheduleVersionConflictRetry(message);
@@ -295,7 +360,7 @@ export function PvpRoomPage() {
     queryFn: async () => {
       const authHeader = await authStorage.getAuthHeader();
       if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}`, { headers: { Authorization: authHeader } });
+      const res = await fetchWithTimeout(`/api/pvp/rooms/${roomId}`, { headers: { Authorization: authHeader } }, 8000);
       const { data } = await readJsonOrText(res);
       if (!res.ok) {
         const payload = (data || {}) as ApiErrorPayload;
@@ -332,6 +397,21 @@ export function PvpRoomPage() {
   const allowNonHostControl = rules?.allowNonHostControl === true;
   const allowSpectators = rules?.allowSpectators !== false;
   const canControlResolve = isHost || allowNonHostControl;
+
+  const [nowTickMs, setNowTickMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (phase !== 'resolving' && phase !== 'advancing') return;
+    const intervalId = window.setInterval(() => setNowTickMs(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, [phase]);
+
+  const lastActivityAgeSeconds = useMemo(() => {
+    if (!lastActivityAt) return null;
+    const ms = nowTickMs - Date.parse(lastActivityAt);
+    if (!Number.isFinite(ms)) return null;
+    return Math.max(0, Math.floor(ms / 1000));
+  }, [lastActivityAt, nowTickMs]);
 
   const flashCopied = (key: 'id' | 'link') => {
     setCopiedKey(key);
@@ -695,11 +775,15 @@ export function PvpRoomPage() {
     mutationFn: async () => {
       const authHeader = await authStorage.getAuthHeader();
       if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/leave`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ expectedVersion: version }),
-      });
+      const res = await fetchWithTimeout(
+        `/api/pvp/rooms/${roomId}/leave`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          body: JSON.stringify({}),
+        },
+        15000,
+      );
       const { data } = await readJsonOrText(res);
       if (!res.ok) {
         const payload = (data || {}) as ApiErrorPayload;
@@ -715,6 +799,7 @@ export function PvpRoomPage() {
     onSuccess: async () => {
       await router.push('/pvp');
     },
+    onError: (e) => handlePvpRequestError(e, '退出失败'),
   });
 
   const roleMutation = useMutation({
@@ -859,15 +944,19 @@ export function PvpRoomPage() {
       if (!authHeader) throw new Error('未登录');
 
       const customProvider = buildCustomProviderPayload(payload?.customProvider ?? null);
-      const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({
-          expectedVersion: version,
-          ...(payload?.force ? { force: true } : {}),
-          ...(customProvider ? { customProvider } : {}),
-        }),
-      });
+      const res = await fetchWithTimeout(
+        `/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          body: JSON.stringify({
+            expectedVersion: version,
+            ...(payload?.force ? { force: true } : {}),
+            ...(customProvider ? { customProvider } : {}),
+          }),
+        },
+        90000,
+      );
       const { data } = await readJsonOrText(res);
       if (!res.ok) {
         const payload = (data || {}) as ApiErrorPayload;
@@ -1030,11 +1119,15 @@ export function PvpRoomPage() {
       if (!latestRound?.id) throw new Error('当前回合不存在，请刷新');
       const authHeader = await authStorage.getAuthHeader();
       if (!authHeader) throw new Error('未登录');
-      const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ expectedVersion: version }),
-      });
+      const res = await fetchWithTimeout(
+        `/api/pvp/rooms/${roomId}/rounds/${latestRound.id}/confirm`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          body: JSON.stringify({ expectedVersion: version }),
+        },
+        15000,
+      );
       const { data } = await readJsonOrText(res);
       if (!res.ok) {
         const payload = (data || {}) as ApiErrorPayload;
@@ -1604,6 +1697,29 @@ export function PvpRoomPage() {
               <div className="text-sm text-gray-700 mt-3">加载房间中…</div>
             )}
 
+            {roomQuery.isError && joined && !roomQuery.data && (
+              <div className="p-3 rounded-md bg-red-100 text-red-800 text-sm mt-3">
+                <div className="whitespace-pre-wrap">
+                  {roomQuery.error instanceof Error ? roomQuery.error.message : '加载房间失败，请稍后重试。'}
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <button className="px-3 py-1.5 rounded border bg-white hover:bg-gray-50 text-sm" onClick={() => roomQuery.refetch()}>
+                    重试
+                  </button>
+                  <button
+                    className="px-3 py-1.5 rounded border bg-white hover:bg-gray-50 text-sm disabled:opacity-50"
+                    onClick={() => leaveMutation.mutate()}
+                    disabled={leaveMutation.isPending}
+                  >
+                    尝试退出房间
+                  </button>
+                  <button className="px-3 py-1.5 rounded border bg-white hover:bg-gray-50 text-sm" onClick={() => router.push('/pvp')}>
+                    返回大厅
+                  </button>
+                </div>
+              </div>
+            )}
+
             {roomQuery.data && (
               <>
                 <div className="mt-5 grid grid-cols-1 gap-4">
@@ -1786,6 +1902,11 @@ export function PvpRoomPage() {
                         <div className="text-xs text-amber-800 mt-1">
                           页面会自动轮询刷新；如果长时间未变化，可尝试刷新浏览器页面。
                         </div>
+                        {typeof lastActivityAgeSeconds === 'number' && lastActivityAgeSeconds >= 90 ? (
+                          <div className="text-xs text-amber-900 mt-2">
+                            警告：已 {lastActivityAgeSeconds}s 未更新，结算可能已超时或服务暂不可用。建议刷新；房主可点“强制重试”；也可以先退出房间。
+                          </div>
+                        ) : null}
                         {lastActivityAt ? (
                           <div className="text-xs text-amber-800 mt-1">
                             最后活动：{new Date(lastActivityAt).toLocaleString()}
@@ -2696,7 +2817,7 @@ export function PvpRoomPage() {
                   </div>
                 )}
 
-                {phase === 'reviewing' && latestRound && !isSpectator ? (
+                {phase === 'reviewing' && !isSpectator ? (
                   <div className="p-3 rounded-md bg-white border mt-4 text-sm">
                     <div className="font-semibold mb-1">等待全员确认</div>
                     <div className="text-gray-700">
@@ -2706,6 +2827,9 @@ export function PvpRoomPage() {
                         '正在统计确认人数…'
                       )}
                     </div>
+                    {!latestRound ? (
+                      <div className="text-xs text-gray-600 mt-2">提示：回合信息尚未加载完成，请稍候或刷新页面。</div>
+                    ) : null}
                     {pendingAction?.kind === 'confirm' ? (
                       <div className="text-xs text-amber-700 mt-2">
                         仅剩最后一位玩家未确认：{pendingAction.pendingUsername || `用户${pendingAction.pendingUserId}`}。
@@ -2740,13 +2864,20 @@ export function PvpRoomPage() {
                   <div className="p-3 rounded-md bg-white border mt-4 text-sm">
                     <div className="font-semibold mb-1">观战中：等待玩家确认</div>
                     <div className="text-gray-700">战报已生成，等待玩家确认后将推进下一回合/结束对局。</div>
-                    <div className="text-xs text-gray-500 mt-2">提示：只有玩家需要点击“确认已阅读”。</div>
+                    <div className="text-xs text-amber-700 mt-2">
+                      提示：你当前是“观众”，不会显示“确认已阅读”按钮；且该阶段无法切换为玩家（需要等下一局/让房主重开）。
+                    </div>
                   </div>
                 ) : null}
 
                 {phase === 'advancing' ? (
                   <div className="p-3 rounded-md bg-blue-50 text-blue-800 text-sm mt-4">
                     正在推进下一回合/结算对局结果，请稍候…
+                    {typeof lastActivityAgeSeconds === 'number' && lastActivityAgeSeconds >= 45 ? (
+                      <div className="text-xs text-blue-900 mt-2">
+                        已 {lastActivityAgeSeconds}s 未更新，推进可能卡住了。建议刷新页面；如果仍无变化，可先退出房间再重新进入。
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
