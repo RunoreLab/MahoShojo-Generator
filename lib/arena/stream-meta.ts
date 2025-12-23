@@ -107,8 +107,11 @@ const sanitizeMeta = (meta: StreamUpdateMeta): NormalizedStreamUpdateMeta => {
   const out: NormalizedStreamUpdateMeta = { ...(meta as any) };
 
   if (out.report) {
-    const headline = typeof out.report.headline === 'string' ? out.report.headline.trim() : undefined;
-    const winner = typeof out.report.winner === 'string' ? out.report.winner.trim() : undefined;
+    const report = out.report as Record<string, unknown>;
+    const headlineRaw = report.headline;
+    const winnerRaw = report.winner;
+    const headline = typeof headlineRaw === 'string' ? headlineRaw.trim() : undefined;
+    const winner = typeof winnerRaw === 'string' ? winnerRaw.trim() : undefined;
     out.report = {
       ...(headline ? { headline } : {}),
       ...(winner ? { winner } : {}),
