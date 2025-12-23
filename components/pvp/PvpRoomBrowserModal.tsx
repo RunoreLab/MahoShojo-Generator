@@ -50,6 +50,7 @@ const formatPhase = (phase: string): string => {
   if (phase === 'submitting') return '提交中';
   if (phase === 'dealing') return '发牌中';
   if (phase === 'choosing') return '选牌中';
+  if (phase === 'voting') return '胜者投票';
   if (phase === 'reviewing') return '阅读确认';
   if (phase === 'resolving') return '结算中';
   if (phase === 'advancing') return '推进中';

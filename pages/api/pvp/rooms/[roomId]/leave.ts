@@ -92,7 +92,7 @@ async function leaveHandler(req: Request): Promise<Response> {
 
   const now = new Date().toISOString();
   const isHostLeaving = room.host_user_id === auth.user.id;
-  const canReplaceWithBot = room.phase === 'submitting' || room.phase === 'choosing' || room.phase === 'reviewing';
+  const canReplaceWithBot = room.phase === 'submitting' || room.phase === 'choosing' || room.phase === 'voting' || room.phase === 'reviewing';
   const isBusyPhase = room.phase === 'dealing' || room.phase === 'advancing' || room.phase === 'resolving';
 
   if (!leavingPlayer) {

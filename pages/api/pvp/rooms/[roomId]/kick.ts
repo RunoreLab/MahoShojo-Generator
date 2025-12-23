@@ -99,7 +99,7 @@ async function kickHandler(req: Request): Promise<Response> {
   const targetPlayer = players.find((p) => p.user_id === targetId) ?? null;
 
   const now = new Date().toISOString();
-  const canReplaceWithBot = room.phase === 'submitting' || room.phase === 'choosing' || room.phase === 'reviewing';
+  const canReplaceWithBot = room.phase === 'submitting' || room.phase === 'choosing' || room.phase === 'voting' || room.phase === 'reviewing';
   const isBusyPhase = room.phase === 'dealing' || room.phase === 'advancing' || room.phase === 'resolving';
 
   if (!targetPlayer) {

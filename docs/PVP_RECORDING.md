@@ -23,6 +23,7 @@
 
 - PVP 房间与对局状态使用 D1 表 `pvp_rooms` / `pvp_room_players` / `pvp_room_submissions` / `pvp_room_hands` / `pvp_room_card_snapshots` / `pvp_rounds` / `pvp_round_choices`，并引入 `pvp_matches` / `pvp_match_players` 持久化整场对战。
 - PVP 结算由 `POST /api/pvp/rooms/:roomId/rounds/:roundId/resolve` 触发，内部调用 `POST /api/generate-battle-story` 生成战报。
+- 若回合进入“胜者投票”（`voting`），最终胜者会在投票结束时写回 `pvp_rounds.result_json` 与 `pvp_rounds.winner_*`（战报正文不变，仅更新 `officialReport.winner` 与胜者字段）。
 - `pvp_rounds.battle_generation_id` 已串联：生成端点返回 `generationId`，PVP resolve 会写回（成功/失败场景都会 best-effort 记录）。
 
 ### 1.2 战报生成记录（battle_report_generations）

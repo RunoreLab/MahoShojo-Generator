@@ -27,7 +27,7 @@ async function restartHandler(req: Request): Promise<Response> {
   if (expectedVersion === null) return json({ error: '缺少 expectedVersion' }, { status: 400 });
   if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
 
-  if (room.phase === 'choosing' || room.phase === 'reviewing' || room.phase === 'advancing' || room.phase === 'resolving' || room.phase === 'dealing') {
+  if (room.phase === 'choosing' || room.phase === 'voting' || room.phase === 'reviewing' || room.phase === 'advancing' || room.phase === 'resolving' || room.phase === 'dealing') {
     return json({ error: '对局进行中，不能重开（请先结束/离开）', code: 'PHASE_FORBIDDEN' }, { status: 409 });
   }
 

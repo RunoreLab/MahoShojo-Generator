@@ -2,6 +2,7 @@ import {
   getPvpCardSnapshotById,
   getPvpRoomById,
   getPvpRoomHands,
+  getPvpRoomMembers,
   getPvpRoomPlayers,
   getPvpRoundById,
   getPvpRoundChoices,
@@ -20,6 +21,7 @@ import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenar
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { buildPvpSensitiveArrestWarrantReport } from '@/lib/pvp/arrest-warrant';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
+import { createPvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export const runtime = 'edge';
@@ -480,22 +482,33 @@ async function resolveHandler(req: Request): Promise<Response> {
   }
 
   const winnerUserIdRaw = isDraw || winnerIndex === null ? null : picked[winnerIndex]!.userId;
-  const resolvedWinnerUserId = typeof winnerUserIdRaw === 'number' ? winnerUserIdRaw : null;
-  const resolvedWinnerName = isDraw || winnerIndex === null ? '平局' : picked[winnerIndex]!.snapshot.name;
+  const shouldStartWinnerVote = !isDraw && winnerIndex === null;
+  const resolvedWinnerUserId = shouldStartWinnerVote ? null : (typeof winnerUserIdRaw === 'number' ? winnerUserIdRaw : null);
+  const resolvedWinnerName = shouldStartWinnerVote ? null : (isDraw || winnerIndex === null ? '平局' : picked[winnerIndex]!.snapshot.name);
+  const officialWinnerName = shouldStartWinnerVote ? '待定（投票中）' : (resolvedWinnerName ?? '平局');
 
   if (report?.officialReport) {
-    report.officialReport.winner = resolvedWinnerName;
+    report.officialReport.winner = officialWinnerName;
   }
 
   const resultJson = JSON.stringify({
     winnerUserId: resolvedWinnerUserId,
     winnerName: resolvedWinnerName,
-    winnerSeat: isDraw || winnerIndex === null ? null : picked[winnerIndex]!.seat,
-    winnerToken: isDraw || winnerIndex === null ? null : picked[winnerIndex]!.token,
-    winnerIsBot: isDraw || winnerIndex === null ? null : Boolean(picked[winnerIndex]!.isBot),
+    winnerSeat: shouldStartWinnerVote ? null : (isDraw || winnerIndex === null ? null : picked[winnerIndex]!.seat),
+    winnerToken: shouldStartWinnerVote ? null : (isDraw || winnerIndex === null ? null : picked[winnerIndex]!.token),
+    winnerIsBot: shouldStartWinnerVote ? null : (isDraw || winnerIndex === null ? null : Boolean(picked[winnerIndex]!.isBot)),
+    winnerStatus: shouldStartWinnerVote ? 'pending_vote' : 'final',
+    winnerVote: shouldStartWinnerVote
+      ? {
+          status: 'open',
+          reason: 'auto_invalid',
+          createdAt: new Date().toISOString(),
+          createdByUserId: auth.user.id,
+        }
+      : null,
     rawWinnerText,
     attempts,
-    error: winnerIndex === null && !isDraw ? (lastError || 'winner 不合法，已判平局') : null,
+    error: winnerIndex === null && !isDraw ? (lastError || 'winner 不合法，已触发胜者投票') : null,
     combatants: picked.map((p) => ({
       token: p.token,
       userId: p.userId,
@@ -553,6 +566,31 @@ async function resolveHandler(req: Request): Promise<Response> {
     usedPile.push({ kind: 'snapshot', id });
   }
   (internal.raw as any)._usedPile = usedPile;
+
+  if (shouldStartWinnerVote) {
+    const members = await getPvpRoomMembers(roomId);
+    const eligibleUserIds = members
+      .map((m) => (typeof m?.user_id === 'number' && Number.isFinite(m.user_id) ? Math.floor(m.user_id) : null))
+      .filter((id): id is number => typeof id === 'number' && id > 0);
+
+    (internal.raw as any)._winnerVote = createPvpWinnerVoteState({
+      roundId,
+      matchId,
+      createdAt: new Date().toISOString(),
+      createdByUserId: auth.user.id,
+      reason: 'auto_invalid',
+      eligibleUserIds,
+    });
+    delete (internal.raw as any)._postRound;
+
+    await updatePvpRoomCas(roomId, resolvingVersion, {
+      phase: 'voting',
+      rules_json: stringifyPvpRoomInternalState(internal),
+      last_activity_at: new Date().toISOString(),
+    });
+
+    return json({ success: true, roundResolved: true, result: JSON.parse(resultJson), waitingVote: true });
+  }
 
   // 等待全员确认后再推进下一回合/结束（避免战报刚生成就被刷新覆盖）
   const maxRounds = rules.bestOf.enabled ? rules.bestOf.maxRounds : 1;
