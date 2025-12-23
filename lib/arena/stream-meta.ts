@@ -69,17 +69,21 @@ const normalizeJsonishText = (input: string): string => {
 const findLastHtmlCommentWithMarker = (
   markdown: string
 ): { start: number; end: number; inner: string; marker: string } | null => {
-  let searchEnd = markdown.lastIndexOf('-->');
+  const MAX_TAIL_CHARS = 120_000;
+  const tailStart = Math.max(0, markdown.length - MAX_TAIL_CHARS);
+  const haystack = tailStart > 0 ? markdown.slice(tailStart) : markdown;
+
+  let searchEnd = haystack.lastIndexOf('-->');
   while (searchEnd !== -1) {
-    const start = markdown.lastIndexOf('<!--', searchEnd);
+    const start = haystack.lastIndexOf('<!--', searchEnd);
     if (start === -1) return null;
     const end = searchEnd + 3;
-    const inner = markdown.slice(start + 4, searchEnd);
+    const inner = haystack.slice(start + 4, searchEnd);
     const marker = META_MARKERS.find((m) => inner.toLowerCase().includes(m.toLowerCase()));
     if (marker) {
-      return { start, end, inner, marker };
+      return { start: start + tailStart, end: end + tailStart, inner, marker };
     }
-    searchEnd = markdown.lastIndexOf('-->', start - 1);
+    searchEnd = haystack.lastIndexOf('-->', start - 1);
   }
   return null;
 };

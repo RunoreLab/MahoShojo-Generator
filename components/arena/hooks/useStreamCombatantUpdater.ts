@@ -43,6 +43,14 @@ const normalizeNameToken = (name: string): string => {
     .toLowerCase();
 };
 
+const truncateByCodePoints = (text: string, maxChars: number): string => {
+  const safeMax = Math.max(0, Math.floor(maxChars));
+  if (safeMax <= 0) return '';
+  const arr = Array.from(text);
+  if (arr.length <= safeMax) return text;
+  return `${arr.slice(0, safeMax).join('')}…`;
+};
+
 const matchRosterName = (candidate: string, rosterNames: string[]): string | null => {
   const c = normalizeNameToken(candidate);
   if (!c) return null;
@@ -50,8 +58,13 @@ const matchRosterName = (candidate: string, rosterNames: string[]): string | nul
   const exact = rosterNames.find((n) => normalizeNameToken(n) === c);
   if (exact) return exact;
 
-  const includes = rosterNames.find((n) => normalizeNameToken(n).includes(c) || c.includes(normalizeNameToken(n)));
-  return includes ?? null;
+  const includesHits = rosterNames.filter((n) => {
+    const token = normalizeNameToken(n);
+    return token.includes(c) || c.includes(token);
+  });
+
+  if (includesHits.length === 1) return includesHits[0];
+  return null;
 };
 
 const normalizeImpactsForRoster = (
@@ -70,9 +83,11 @@ const normalizeImpactsForRoster = (
     const matched = rawName ? matchRosterName(rawName, rosterNames) : null;
     if (!matched || byName.has(matched)) continue;
 
-    const impact = typeof raw?.impact === 'string' ? raw.impact.trim() : undefined;
+    const impact = typeof raw?.impact === 'string' ? truncateByCodePoints(raw.impact.trim(), 2000) : undefined;
     const currentStateSummary =
-      typeof raw?.currentStateSummary === 'string' ? raw.currentStateSummary.trim() : undefined;
+      typeof raw?.currentStateSummary === 'string'
+        ? truncateByCodePoints(raw.currentStateSummary.trim(), 2000)
+        : undefined;
 
     // 不在前端伪造内容：缺失字段就留空，交给服务端默认值/跳过写入策略处理。
     byName.set(matched, {
