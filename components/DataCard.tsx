@@ -65,6 +65,7 @@ export default function DataCard({
   favoriteCount = 0,
   author,
   isOwner = false,
+  isSelected = false,
   onDownload,
   onLike,
   onEditInfo,
@@ -225,12 +226,18 @@ export default function DataCard({
     ? 'bg-white border-gray-200 hover:border-green-400'
     : 'bg-white border-gray-200 hover:border-pink-400';
 
+  const selectedStyle = isSelected
+    ? (type === 'scenario'
+      ? 'ring-2 ring-green-400 bg-green-50 border-green-400'
+      : 'ring-2 ring-pink-500 bg-pink-50 border-pink-400')
+    : '';
+
   const textColor = 'text-gray-800';
   const subTextColor = 'text-gray-600';
 
   return (
     <div
-      className={`flex flex-col relative p-4 rounded-lg border-2 transition-all duration-200 h-full ${bgColor}`}
+      className={`flex flex-col relative p-4 rounded-lg border-2 transition-all duration-200 h-full ${bgColor} ${selectedStyle}`}
     >
       {/* 主要内容区域 */}
       <div className="flex-1">

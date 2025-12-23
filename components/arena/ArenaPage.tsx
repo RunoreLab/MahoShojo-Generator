@@ -26,7 +26,7 @@ import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
 import { ArenaStatistics } from './components/ArenaStatistics';
 import { useBattleStore } from './stores/useBattleStore';
-import { BattleStoreState, CombatantData } from './types';
+import { BattleStoreState, CombatantData, MAX_COMBATANTS } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
 import { usePresetQuery, useLanguagesQuery, useStatsQuery } from './hooks/useArenaData';
 
@@ -39,6 +39,7 @@ export function ArenaPage() {
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
 
   const combatants = useBattleStore((state: BattleStoreState) => state.combatants);
+  const scenario = useBattleStore((state: BattleStoreState) => state.scenario);
   const battleMode = useBattleStore((state: BattleStoreState) => state.battleMode);
   const isGenerating = useBattleStore((state: BattleStoreState) => state.isGenerating);
   const isMatching = useBattleStore((state: BattleStoreState) => state.isMatching);
@@ -58,6 +59,20 @@ export function ArenaPage() {
     }
     return map;
   }, [presetGrouped]);
+
+  const selectedCharacterDataCardIds = useMemo(() => {
+    const out: string[] = [];
+    combatants.forEach((c) => {
+      if ('sourceDataCardId' in c && typeof c.sourceDataCardId === 'string' && c.sourceDataCardId) {
+        out.push(c.sourceDataCardId);
+      }
+    });
+    return out;
+  }, [combatants]);
+
+  const selectedScenarioDataCardIds = useMemo(() => {
+    return typeof scenario?.sourceDataCardId === 'string' && scenario.sourceDataCardId ? [scenario.sourceDataCardId] : [];
+  }, [scenario?.sourceDataCardId]);
 
   const handleOpenCharacterDataModal = () => {
     setDataModalType('character');
@@ -207,11 +222,12 @@ export function ArenaPage() {
       <BattleDataModal
         isOpen={showBattleDataModal}
         onClose={() => setShowBattleDataModal(false)}
-        onSelectCard={(card) => {
-          handleSelectDataCard(card);
-          setShowBattleDataModal(false);
-        }}
+        onSelectCard={(card) => void handleSelectDataCard(card)}
         selectedType={dataModalType}
+        selectionMode={dataModalType === 'character' ? 'multi' : 'single'}
+        selectedCardIds={dataModalType === 'character' ? selectedCharacterDataCardIds : selectedScenarioDataCardIds}
+        selectedCountOverride={dataModalType === 'character' ? combatants.length : undefined}
+        maxSelected={dataModalType === 'character' ? MAX_COMBATANTS : undefined}
       />
 
       {selectedCombatant && (
