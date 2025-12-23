@@ -8,6 +8,7 @@ import {
   updatePvpRoomMember,
 } from '@/lib/d1';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
@@ -76,7 +77,7 @@ async function roleHandler(req: Request): Promise<Response> {
     const currentPlayers = await getPvpRoomPlayers(roomId);
     const shouldRollbackToWaiting =
       room.phase === 'submitting' &&
-      rules.cardsPerPlayer > 0 &&
+      requiresPvpSubmissionPhase(rules) &&
       (currentPlayers.length + bots.length) < rules.participants;
 
     const casOk = await updatePvpRoomCas(roomId, expectedVersion, {
@@ -100,7 +101,7 @@ async function roleHandler(req: Request): Promise<Response> {
 
   const shouldAdvance =
     room.phase === 'waiting' &&
-    rules.cardsPerPlayer > 0 &&
+    requiresPvpSubmissionPhase(rules) &&
     (players.length + 1 + bots.length) >= rules.participants;
 
   const casOk = await updatePvpRoomCas(roomId, expectedVersion, {
@@ -113,4 +114,3 @@ async function roleHandler(req: Request): Promise<Response> {
 }
 
 export default withPvpErrorBoundary(roleHandler);
-

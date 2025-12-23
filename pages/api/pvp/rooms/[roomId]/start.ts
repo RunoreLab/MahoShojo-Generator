@@ -18,7 +18,7 @@ import {
 } from '@/lib/d1';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
-import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
+import { inferPvpCombatantTypeFromJson, requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { loadPresetCard } from '@/lib/pvp/preset';
 import { BUNDLED_PRESET_FILENAMES } from '@/lib/pvp/preset-bundled';
@@ -70,7 +70,8 @@ async function startHandler(req: Request): Promise<Response> {
   const internal = internalParsed.internal;
   const rules = internal.rules;
   const bots = internal.bots;
-  const requireSubmissions = rules.cardsPerPlayer > 0;
+  const requireSubmissions = requiresPvpSubmissionPhase(rules);
+  const hostOnlyDeck = rules.submissionMode === 'hostOnly';
   const recordMatch = bots.length <= 0;
   const scenarioSelection = parsePvpScenarioSelection((internal.raw as any)?._scenario);
   if (rules.mode === 'scenario' && !scenarioSelection) {
@@ -208,14 +209,20 @@ async function startHandler(req: Request): Promise<Response> {
       submissionMap.set(row.user_id, parsed);
     }
 
-    for (const p of sortedPlayers) {
-      const sub = submissionMap.get(p.user_id);
-      if (!sub) return json({ error: '仍有玩家未提交卡组' }, { status: 409 });
-      if (sub.cards.length !== rules.cardsPerPlayer) return json({ error: '提交数量与房间规则不一致，请重新提交' }, { status: 409 });
-    }
-    for (const b of bots) {
-      if (!b.submission || !Array.isArray(b.submission.cards) || b.submission.cards.length !== rules.cardsPerPlayer) {
-        return json({ error: '机器人提交异常，请移除机器人后重新添加', code: 'BOT_SUBMISSION_INVALID' }, { status: 409 });
+    if (hostOnlyDeck) {
+      const hostSub = submissionMap.get(room.host_user_id);
+      if (!hostSub) return json({ error: '房主尚未提交牌堆' }, { status: 409 });
+      if (!Array.isArray(hostSub.cards) || hostSub.cards.length <= 0) return json({ error: '房主提交的牌堆为空' }, { status: 409 });
+    } else {
+      for (const p of sortedPlayers) {
+        const sub = submissionMap.get(p.user_id);
+        if (!sub) return json({ error: '仍有玩家未提交卡组' }, { status: 409 });
+        if (sub.cards.length !== rules.cardsPerPlayer) return json({ error: '提交数量与房间规则不一致，请重新提交' }, { status: 409 });
+      }
+      for (const b of bots) {
+        if (!b.submission || !Array.isArray(b.submission.cards) || b.submission.cards.length !== rules.cardsPerPlayer) {
+          return json({ error: '机器人提交异常，请移除机器人后重新添加', code: 'BOT_SUBMISSION_INVALID' }, { status: 409 });
+        }
       }
     }
   }
@@ -348,10 +355,9 @@ async function startHandler(req: Request): Promise<Response> {
   const submittedDataCardIds = new Set<string>();
   const submittedPresetFilenames = new Set<string>();
   if (requireSubmissions) {
-    for (const row of submissions) {
-      const parsed = parseSubmission(row.submission_json);
-      if (!parsed) continue;
-      for (const c of parsed.cards) {
+    if (hostOnlyDeck) {
+      const host = submissionMap.get(room.host_user_id);
+      for (const c of host?.cards ?? []) {
         if (c?.ref?.kind === 'data_card' && typeof (c.ref as any)?.id === 'string') {
           const id = String((c.ref as any).id).trim();
           if (id) submittedDataCardIds.add(id);
@@ -361,16 +367,31 @@ async function startHandler(req: Request): Promise<Response> {
           if (filename) submittedPresetFilenames.add(filename);
         }
       }
-    }
-    for (const b of bots) {
-      for (const c of b.submission?.cards ?? []) {
-        if (c?.ref?.kind === 'data_card' && typeof (c.ref as any)?.id === 'string') {
-          const id = String((c.ref as any).id).trim();
-          if (id) submittedDataCardIds.add(id);
+    } else {
+      for (const row of submissions) {
+        const parsed = parseSubmission(row.submission_json);
+        if (!parsed) continue;
+        for (const c of parsed.cards) {
+          if (c?.ref?.kind === 'data_card' && typeof (c.ref as any)?.id === 'string') {
+            const id = String((c.ref as any).id).trim();
+            if (id) submittedDataCardIds.add(id);
+          }
+          if (c?.ref?.kind === 'preset' && typeof (c.ref as any)?.filename === 'string') {
+            const filename = String((c.ref as any).filename).trim();
+            if (filename) submittedPresetFilenames.add(filename);
+          }
         }
-        if (c?.ref?.kind === 'preset' && typeof (c.ref as any)?.filename === 'string') {
-          const filename = String((c.ref as any).filename).trim();
-          if (filename) submittedPresetFilenames.add(filename);
+      }
+      for (const b of bots) {
+        for (const c of b.submission?.cards ?? []) {
+          if (c?.ref?.kind === 'data_card' && typeof (c.ref as any)?.id === 'string') {
+            const id = String((c.ref as any).id).trim();
+            if (id) submittedDataCardIds.add(id);
+          }
+          if (c?.ref?.kind === 'preset' && typeof (c.ref as any)?.filename === 'string') {
+            const filename = String((c.ref as any).filename).trim();
+            if (filename) submittedPresetFilenames.add(filename);
+          }
         }
       }
     }
@@ -584,7 +605,7 @@ async function startHandler(req: Request): Promise<Response> {
     return json({ success: true, roundId, nextVersion: dealingVersion + 1 });
   }
 
-  if (rules.shuffleDecks !== true) {
+  if (rules.shuffleDecks !== true && !hostOnlyDeck) {
     const botById = new Map(internal.bots.map((b) => [b.id, b]));
 
     const hands: PvpHandState[] = [];
@@ -752,24 +773,38 @@ async function startHandler(req: Request): Promise<Response> {
     card: PvpSubmittedCard;
   }> = [];
 
-  for (const p of sortedPlayers) {
-    const sub = submissionMap.get(p.user_id)!;
-    sub.cards.forEach((card) =>
+  if (hostOnlyDeck) {
+    const hostId = room.host_user_id;
+    const hostPlayer = sortedPlayers.find((p) => p.user_id === hostId) ?? null;
+    const hostUsername = hostPlayer ? (hostPlayer.username ?? null) : null;
+    const sub = submissionMap.get(hostId);
+    (sub?.cards ?? []).forEach((card) =>
       allSubmitted.push({
-        eligibilityUserId: p.user_id,
-        submittedBy: { kind: 'human', userId: p.user_id, username: p.username ?? null },
+        eligibilityUserId: hostId,
+        submittedBy: { kind: 'human', userId: hostId, username: hostUsername },
         card,
       })
     );
-  }
-  for (const b of bots) {
-    b.submission.cards.forEach((card) =>
-      allSubmitted.push({
-        eligibilityUserId: auth.user.id, // Bot 仅提交公开/预设，任意用户都可读；这里用房主 id 走统一校验
-        submittedBy: { kind: 'bot', name: b.name },
-        card,
-      })
-    );
+  } else {
+    for (const p of sortedPlayers) {
+      const sub = submissionMap.get(p.user_id)!;
+      sub.cards.forEach((card) =>
+        allSubmitted.push({
+          eligibilityUserId: p.user_id,
+          submittedBy: { kind: 'human', userId: p.user_id, username: p.username ?? null },
+          card,
+        })
+      );
+    }
+    for (const b of bots) {
+      b.submission.cards.forEach((card) =>
+        allSubmitted.push({
+          eligibilityUserId: auth.user.id, // Bot 仅提交公开/预设，任意用户都可读；这里用房主 id 走统一校验
+          submittedBy: { kind: 'bot', name: b.name },
+          card,
+        })
+      );
+    }
   }
 
   const buildKey = (ref: PvpCardRef): string =>

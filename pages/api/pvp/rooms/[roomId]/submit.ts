@@ -53,7 +53,15 @@ async function submitHandler(req: Request): Promise<Response> {
 
   const cards = Array.isArray(body.data.cards) ? body.data.cards : null;
   if (!cards) return json({ error: '缺少 cards' }, { status: 400 });
-  if (cards.length !== rules.cardsPerPlayer) return json({ error: `需要提交 ${rules.cardsPerPlayer} 张卡` }, { status: 400 });
+  if (rules.submissionMode === 'hostOnly') {
+    if (auth.user.id !== room.host_user_id) {
+      return json({ error: '当前房间为“仅房主提交牌堆”模式，只有房主可以提交', code: 'HOST_ONLY_DECK' }, { status: 403 });
+    }
+    if (cards.length <= 0) return json({ error: '房主提交的牌堆至少需要 1 张卡' }, { status: 400 });
+    if (cards.length > 500) return json({ error: '提交卡牌过多（最多 500 张）', code: 'TOO_MANY_CARDS' }, { status: 413 });
+  } else {
+    if (cards.length !== rules.cardsPerPlayer) return json({ error: `需要提交 ${rules.cardsPerPlayer} 张卡` }, { status: 400 });
+  }
 
   const origin = getRequestOrigin(req);
   const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);

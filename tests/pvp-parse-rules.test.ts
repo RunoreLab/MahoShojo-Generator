@@ -1,9 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import { DEFAULT_PVP_RULES } from '@/lib/pvp/defaults';
+import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { parsePvpRules } from '@/lib/pvp/validate';
 
 describe('pvp: parsePvpRules', () => {
+  test('默认值包含 submissionMode（默认 perPlayer）', () => {
+    const parsed = parsePvpRules({});
+    expect('error' in parsed).toBe(false);
+    if ('error' in parsed) return;
+    expect(parsed.rules.submissionMode).toBe('perPlayer');
+  });
+
   test('默认值包含 showAllSubmissions/shuffleDecks', () => {
     const parsed = parsePvpRules({});
     expect('error' in parsed).toBe(false);
@@ -65,6 +73,22 @@ describe('pvp: parsePvpRules', () => {
     expect('error' in parsed).toBe(false);
     if ('error' in parsed) return;
     expect(parsed.rules.cardsPerPlayer).toBe(0);
+  });
+
+  test('submissionMode=hostOnly 时强制 cardsPerPlayer=0（不再由“每人提交数量”驱动提交阶段）', () => {
+    const parsed = parsePvpRules({ submissionMode: 'hostOnly', cardsPerPlayer: 10 });
+    expect('error' in parsed).toBe(false);
+    if ('error' in parsed) return;
+    expect(parsed.rules.submissionMode).toBe('hostOnly');
+    expect(parsed.rules.cardsPerPlayer).toBe(0);
+    expect(requiresPvpSubmissionPhase(parsed.rules)).toBe(true);
+  });
+
+  test('非法 submissionMode 回退到默认', () => {
+    const parsed = parsePvpRules({ submissionMode: 'nope' });
+    expect('error' in parsed).toBe(false);
+    if ('error' in parsed) return;
+    expect(parsed.rules.submissionMode).toBe(DEFAULT_PVP_RULES.submissionMode);
   });
 
   test('允许设置 drawSource', () => {

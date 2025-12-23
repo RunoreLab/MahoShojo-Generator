@@ -10,6 +10,7 @@ import {
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { PVP_ROOM_TTL_MS } from '@/lib/pvp/constants';
 import { DEFAULT_PVP_RULES } from '@/lib/pvp/defaults';
+import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
 export const runtime = 'edge';
@@ -72,7 +73,10 @@ async function quickMatchHandler(req: Request): Promise<Response> {
 
     const now = new Date().toISOString();
     const nextPlayers = await getPvpRoomPlayers(room.id);
-    const shouldAdvance = room.phase === 'waiting' && (nextPlayers.length + bots.length) >= maxPlayers;
+    const shouldAdvance =
+      room.phase === 'waiting' &&
+      requiresPvpSubmissionPhase(rules) &&
+      (nextPlayers.length + bots.length) >= maxPlayers;
     await updatePvpRoomCas(room.id, room.version, {
       ...(shouldAdvance ? { phase: 'submitting' } : {}),
       last_activity_at: now,

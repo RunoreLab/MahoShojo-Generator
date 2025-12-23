@@ -1,6 +1,7 @@
 import { addPvpRoomPlayer, getPvpRoomById, getPvpRoomMembers, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { constantTimeEqual, hashJoinCode } from '@/lib/pvp/crypto';
+import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
@@ -85,7 +86,7 @@ async function joinHandler(req: Request): Promise<Response> {
   const shouldAdvance =
     joinAs === 'player' &&
     room.phase === 'waiting' &&
-    rules.cardsPerPlayer > 0 &&
+    requiresPvpSubmissionPhase(rules) &&
     (nextPlayers.length + bots.length) >= rules.participants;
   const casOk = await updatePvpRoomCas(roomId, expectedVersion, {
     ...(shouldAdvance ? { phase: 'submitting' } : {}),

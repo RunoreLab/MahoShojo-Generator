@@ -110,6 +110,12 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const participantCount = Number.isFinite(participants) ? Math.floor(participants) : DEFAULT_PVP_RULES.participants;
   if (participantCount < 2 || participantCount > 6) return { error: '人数超出范围（2-6）' };
 
+  const submissionModeRaw = raw.submissionMode ?? DEFAULT_PVP_RULES.submissionMode;
+  const submissionMode =
+    submissionModeRaw === 'perPlayer' || submissionModeRaw === 'hostOnly'
+      ? submissionModeRaw
+      : DEFAULT_PVP_RULES.submissionMode;
+
   const cardsPerPlayer = intInRange(raw.cardsPerPlayer, DEFAULT_PVP_RULES.cardsPerPlayer, 0, 50);
   if (cardsPerPlayer < 0 || cardsPerPlayer > 50) return { error: '每人提交数量超出范围（0-50）' };
 
@@ -190,7 +196,8 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
 
   const rules: PvpRoomRules = {
     participants: participantCount,
-    cardsPerPlayer,
+    submissionMode,
+    cardsPerPlayer: submissionMode === 'hostOnly' ? 0 : cardsPerPlayer,
     dealPerPlayer,
     dealWhenEmpty,
     drawSource,

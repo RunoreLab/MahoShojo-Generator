@@ -83,8 +83,10 @@ export function PvpLobbyPage() {
     const participants = Number.isFinite(rules.participants) ? Math.floor(rules.participants) : 0;
     if (participants < 2 || participants > 6) return '人数需要在 2-6 之间。';
 
-    const cardsPerPlayer = Number.isFinite(rules.cardsPerPlayer) ? Math.floor(rules.cardsPerPlayer) : 0;
-    if (cardsPerPlayer < 0 || cardsPerPlayer > 50) return '每人提交数量需要在 0-50 之间。';
+    if (rules.submissionMode !== 'hostOnly') {
+      const cardsPerPlayer = Number.isFinite(rules.cardsPerPlayer) ? Math.floor(rules.cardsPerPlayer) : 0;
+      if (cardsPerPlayer < 0 || cardsPerPlayer > 50) return '每人提交数量需要在 0-50 之间。';
+    }
 
     const dealPerPlayer = Number.isFinite(rules.dealPerPlayer) ? Math.floor(rules.dealPerPlayer) : 0;
     if (dealPerPlayer < 1 || dealPerPlayer > 50) return '每人初始手牌数量需要在 1-50 之间。';
@@ -97,7 +99,7 @@ export function PvpLobbyPage() {
       if (maxRounds < 1 || maxRounds > 10) return '最多轮次需要在 1-10 之间。';
     }
     return null;
-  }, [rules.participants, rules.cardsPerPlayer, rules.dealPerPlayer, rules.dealWhenEmpty, rules.bestOf?.enabled, rules.bestOf?.maxRounds]);
+  }, [rules.participants, rules.cardsPerPlayer, rules.dealPerPlayer, rules.dealWhenEmpty, rules.bestOf?.enabled, rules.bestOf?.maxRounds, rules.submissionMode]);
 
   const isRulesValid = !rulesError;
 
@@ -298,7 +300,7 @@ export function PvpLobbyPage() {
                 <div className="p-4 rounded-xl bg-white border text-sm">
                   <h2 className="font-semibold mb-2 text-gray-900">创建房间</h2>
                   <div className="text-xs text-gray-600 mb-3">
-                    提示：提交数与初始手牌数可任意设置；若卡牌不足，会按“未发放的提交卡 → 已使用卡（可选）→ 抽取来源”补足。每人提交=0 时跳过提交阶段，开局按“手牌为空时补发”发牌。
+                    提示：支持“每人提交（固定数量）”与“仅房主提交牌堆（任意数量）”。若卡牌不足，会按“未发放的提交卡 → 已使用卡（可选）→ 抽取来源”补足；每人提交=0 时跳过提交阶段，开局按“手牌为空时补发”发牌。
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="flex flex-col gap-1 col-span-2">
@@ -312,17 +314,41 @@ export function PvpLobbyPage() {
                         onChange={(e) => updateRules({ participants: Number(e.target.value) })}
                       />
                     </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-gray-800">每人提交</span>
-                      <input
+                    <label className="flex flex-col gap-1 col-span-2">
+                      <span className="text-gray-800">卡组提交模式</span>
+                      <select
                         className="border rounded px-2 py-1"
-                        type="number"
-                        min={0}
-                        max={50}
-                        value={rules.cardsPerPlayer}
-                        onChange={(e) => updateRules({ cardsPerPlayer: Number(e.target.value) })}
-                      />
+                        value={rules.submissionMode}
+                        onChange={(e) => {
+                          const next = e.target.value === 'hostOnly' ? 'hostOnly' : 'perPlayer';
+                          updateRules(next === 'hostOnly'
+                            ? { submissionMode: 'hostOnly', cardsPerPlayer: 0, shuffleDecks: true }
+                            : { submissionMode: 'perPlayer' }
+                          );
+                        }}
+                      >
+                        <option value="perPlayer">每人提交（固定数量）</option>
+                        <option value="hostOnly">仅房主提交牌堆（任意数量）</option>
+                      </select>
+                      {rules.submissionMode === 'hostOnly' ? (
+                        <div className="text-xs text-gray-500">该模式下仅房主提交卡牌，提交内容作为公共牌堆供所有玩家抽取。</div>
+                      ) : (
+                        <div className="text-xs text-gray-500">每位玩家都需要提交固定张数；提交阶段会隐藏他人详情，避免被针对。</div>
+                      )}
                     </label>
+                    {rules.submissionMode !== 'hostOnly' && (
+                      <label className="flex flex-col gap-1">
+                        <span className="text-gray-800">每人提交</span>
+                        <input
+                          className="border rounded px-2 py-1"
+                          type="number"
+                          min={0}
+                          max={50}
+                          value={rules.cardsPerPlayer}
+                          onChange={(e) => updateRules({ cardsPerPlayer: Number(e.target.value) })}
+                        />
+                      </label>
+                    )}
                     <label className="flex flex-col gap-1">
                       <span className="text-gray-800">初始手牌</span>
                       <input
@@ -357,7 +383,9 @@ export function PvpLobbyPage() {
                         <option value="preset+public">预设 + 公开库</option>
                       </select>
                       <div className="text-xs text-gray-500">
-                        每人提交=0 时：开局直接按“手牌为空时补发”发牌。
+                        {rules.submissionMode === 'hostOnly'
+                          ? '仅房主提交牌堆时：房主提交内容会作为公共牌堆供所有参与者抽取。'
+                          : '每人提交=0 时：开局直接按“手牌为空时补发”发牌。'}
                       </div>
                     </label>
                     <label className="flex items-center gap-2 col-span-1 text-gray-800">
@@ -389,8 +417,9 @@ export function PvpLobbyPage() {
                         type="checkbox"
                         checked={rules.shuffleDecks}
                         onChange={(e) => updateRules({ shuffleDecks: e.target.checked })}
+                        disabled={rules.submissionMode === 'hostOnly'}
                       />
-                      <span>洗混卡组后发牌（默认开启）</span>
+                      <span>洗混卡组后发牌（默认开启）{rules.submissionMode === 'hostOnly' ? '（房主牌堆模式下固定开启）' : ''}</span>
                     </label>
                     <div className="col-span-2">
                       <BattleModeSelector value={rules.mode} onChange={(next) => updateRules({ mode: next })} />

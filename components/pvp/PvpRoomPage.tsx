@@ -521,9 +521,10 @@ export function PvpRoomPage() {
     if (!rules) return;
     if (!canStartNow) return;
     if (willShrinkParticipants) {
+      const needSubmission = rules.submissionMode === 'hostOnly' || rules.cardsPerPlayer > 0;
       const actionText =
-        phase === 'waiting' && rules.cardsPerPlayer > 0
-          ? '进入“提交卡组”阶段'
+        phase === 'waiting' && needSubmission
+          ? (rules.submissionMode === 'hostOnly' ? '进入“房主提交牌堆”阶段' : '进入“提交卡组”阶段')
           : '立即开始发牌';
       const ok = window.confirm(`房间未满员：将把人数从 ${rules.participants} 缩减为 ${totalParticipants}，并${actionText}。继续？`);
       if (!ok) return;
@@ -579,8 +580,10 @@ export function PvpRoomPage() {
     const participants = Number.isFinite(rulesDraft.participants) ? Math.floor(rulesDraft.participants) : 0;
     if (participants < 2 || participants > 6) return '人数需要在 2-6 之间';
 
-    const cardsPerPlayer = Number.isFinite(rulesDraft.cardsPerPlayer) ? Math.floor(rulesDraft.cardsPerPlayer) : 0;
-    if (cardsPerPlayer < 0 || cardsPerPlayer > 50) return '每人提交数量需要在 0-50 之间';
+    if (rulesDraft.submissionMode !== 'hostOnly') {
+      const cardsPerPlayer = Number.isFinite(rulesDraft.cardsPerPlayer) ? Math.floor(rulesDraft.cardsPerPlayer) : 0;
+      if (cardsPerPlayer < 0 || cardsPerPlayer > 50) return '每人提交数量需要在 0-50 之间';
+    }
 
     const dealPerPlayer = Number.isFinite(rulesDraft.dealPerPlayer) ? Math.floor(rulesDraft.dealPerPlayer) : 0;
     if (dealPerPlayer < 1 || dealPerPlayer > 50) return '每人初始手牌数量需要在 1-50 之间';
@@ -639,7 +642,7 @@ export function PvpRoomPage() {
       await rulesMutation.mutateAsync({ rules: rulesDraft });
     } catch (e: any) {
       if (e?.code === 'NEED_CLEAR_SUBMISSIONS') {
-        const ok = typeof window !== 'undefined' && window.confirm('修改每人提交数量会清空已提交卡组，是否继续？');
+        const ok = typeof window !== 'undefined' && window.confirm('修改卡组提交模式/每人提交数量会清空已提交卡组，是否继续？');
         if (!ok) return;
         await rulesMutation.mutateAsync({ rules: rulesDraft, clearSubmissions: true });
       }
@@ -753,7 +756,12 @@ export function PvpRoomPage() {
   const submitMutation = useMutation({
     mutationFn: async () => {
       if (!rules) throw new Error('规则未加载');
-      if (selected.length !== rules.cardsPerPlayer) throw new Error(`需要选择 ${rules.cardsPerPlayer} 张卡`);
+      if (rules.submissionMode === 'hostOnly') {
+        if (!isHost) throw new Error('仅房主可提交牌堆');
+        if (selected.length <= 0) throw new Error('房主提交的牌堆至少需要 1 张卡');
+      } else {
+        if (selected.length !== rules.cardsPerPlayer) throw new Error(`需要选择 ${rules.cardsPerPlayer} 张卡`);
+      }
       if (hasPrivateSelected && !acceptPrivateDisclosure) throw new Error('包含私有卡时必须勾选披露确认');
 
       const authHeader = await authStorage.getAuthHeader();
@@ -1447,7 +1455,7 @@ export function PvpRoomPage() {
         setError('已选择过该数据卡。');
         return prev;
       }
-      if (prev.length >= rules.cardsPerPlayer) {
+      if (rules.submissionMode !== 'hostOnly' && prev.length >= rules.cardsPerPlayer) {
         setError(`已达到上限：最多选择 ${rules.cardsPerPlayer} 张卡。`);
         return prev;
       }
@@ -1477,7 +1485,7 @@ export function PvpRoomPage() {
       setError('规则未加载，暂时无法随机匹配。');
       return;
     }
-    if (selected.length >= rules.cardsPerPlayer) {
+    if (rules.submissionMode !== 'hostOnly' && selected.length >= rules.cardsPerPlayer) {
       setError(`已达到上限：最多选择 ${rules.cardsPerPlayer} 张卡。`);
       return;
     }
@@ -1531,7 +1539,7 @@ export function PvpRoomPage() {
         setError(null);
         return prev.filter((c) => !(c.kind === 'preset' && c.filename === preset.filename));
       }
-      if (prev.length >= rules.cardsPerPlayer) {
+      if (rules.submissionMode !== 'hostOnly' && prev.length >= rules.cardsPerPlayer) {
         setError(`已达到上限：最多选择 ${rules.cardsPerPlayer} 张卡。`);
         return prev;
       }
@@ -1674,7 +1682,7 @@ export function PvpRoomPage() {
                     ) : null}
                     {rules && (
                       <div className="mt-2 text-xs text-gray-600 whitespace-pre-wrap">
-                        规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 初始手牌 {rules.dealPerPlayer} / 空手补发 {rules.dealWhenEmpty} / 抽取来源 {rules.drawSource ?? 'public'} / 复用弃牌 {String(rules.recycleUsedCards)} / 去重 {String(rules.dedupe)} / 展示提交 {String(rules.showAllSubmissions)} / 洗混 {String(rules.shuffleDecks)} / 模式 {rules.mode}
+                        规则：人数 {rules.participants} / 提交{rules.submissionMode === 'hostOnly' ? '（房主牌堆）' : ` ${rules.cardsPerPlayer}`} / 初始手牌 {rules.dealPerPlayer} / 空手补发 {rules.dealWhenEmpty} / 抽取来源 {rules.drawSource ?? 'public'} / 复用弃牌 {String(rules.recycleUsedCards)} / 去重 {String(rules.dedupe)} / 展示提交 {String(rules.showAllSubmissions)} / 洗混 {String(rules.shuffleDecks)} / 模式 {rules.mode}
                       </div>
                     )}
                     {rules && (
@@ -1845,11 +1853,11 @@ export function PvpRoomPage() {
                           className="px-3 py-2 rounded-lg text-sm text-white bg-gradient-to-r from-slate-600 to-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
                           onClick={() => addBotMutation.mutate()}
                           disabled={addBotMutation.isPending || !rules || players.length >= (rules?.participants ?? 0)}
-                          title="添加机器人（自动提交卡组）"
+                          title={rules?.submissionMode === 'hostOnly' ? '添加机器人（自动出牌）' : '添加机器人（自动提交卡组）'}
                         >
                           {addBotMutation.isPending ? '添加中…' : '添加机器人'}
                         </button>
-                        <div className="text-xs text-gray-500">机器人不显示战绩，会自动提交并自动出牌。</div>
+                        <div className="text-xs text-gray-500">机器人不显示战绩，会自动出牌；在“每人提交”模式下也会自动提交卡组。</div>
                       </div>
                     )}
                     {(phase === 'waiting' || phase === 'submitting') && (
@@ -1916,18 +1924,45 @@ export function PvpRoomPage() {
                               disabled={rulesMutation.isPending}
                             />
                           </label>
-                          <label className="flex flex-col gap-1">
-                            <span>每人提交</span>
-                            <input
+                          <label className="flex flex-col gap-1 col-span-2">
+                            <span>卡组提交模式</span>
+                            <select
                               className="border rounded px-2 py-1"
-                              type="number"
-                              min={0}
-                              max={50}
-                              value={rulesDraft.cardsPerPlayer}
-                              onChange={(e) => setRulesDraft((r) => (r ? { ...r, cardsPerPlayer: Number(e.target.value) } : r))}
+                              value={rulesDraft.submissionMode}
+                              onChange={(e) => {
+                                const next = e.target.value === 'hostOnly' ? 'hostOnly' : 'perPlayer';
+                                setRulesDraft((r) => {
+                                  if (!r) return r;
+                                  return next === 'hostOnly'
+                                    ? { ...r, submissionMode: 'hostOnly', cardsPerPlayer: 0, shuffleDecks: true }
+                                    : { ...r, submissionMode: 'perPlayer' };
+                                });
+                              }}
                               disabled={rulesMutation.isPending}
-                            />
+                            >
+                              <option value="perPlayer">每人提交（固定数量）</option>
+                              <option value="hostOnly">仅房主提交牌堆（任意数量）</option>
+                            </select>
+                            <div className="text-xs text-gray-500">
+                              {rulesDraft.submissionMode === 'hostOnly'
+                                ? '该模式下仅房主提交卡牌（任意张）作为公共牌堆，其他玩家无需提交。'
+                                : '每位玩家都需提交固定张数；提交阶段会隐藏他人详情，避免被针对。'}
+                            </div>
                           </label>
+                          {rulesDraft.submissionMode !== 'hostOnly' && (
+                            <label className="flex flex-col gap-1">
+                              <span>每人提交</span>
+                              <input
+                                className="border rounded px-2 py-1"
+                                type="number"
+                                min={0}
+                                max={50}
+                                value={rulesDraft.cardsPerPlayer}
+                                onChange={(e) => setRulesDraft((r) => (r ? { ...r, cardsPerPlayer: Number(e.target.value) } : r))}
+                                disabled={rulesMutation.isPending}
+                              />
+                            </label>
+                          )}
                           <label className="flex flex-col gap-1">
                             <span>初始手牌</span>
                             <input
@@ -1966,7 +2001,11 @@ export function PvpRoomPage() {
                               <option value="preset">预设</option>
                               <option value="preset+public">预设 + 公开库</option>
                             </select>
-                            <div className="text-xs text-gray-500">每人提交=0 时：开局直接按“手牌为空时补发”发牌。</div>
+                            <div className="text-xs text-gray-500">
+                              {rulesDraft.submissionMode === 'hostOnly'
+                                ? '仅房主提交牌堆时：房主提交内容会作为公共牌堆供所有参与者抽取。'
+                                : '每人提交=0 时：开局直接按“手牌为空时补发”发牌。'}
+                            </div>
                           </label>
                           <label className="flex items-center gap-2 col-span-1">
                             <input
@@ -2000,9 +2039,9 @@ export function PvpRoomPage() {
                               type="checkbox"
                               checked={rulesDraft.shuffleDecks}
                               onChange={(e) => setRulesDraft((r) => (r ? { ...r, shuffleDecks: e.target.checked } : r))}
-                              disabled={rulesMutation.isPending}
+                              disabled={rulesMutation.isPending || rulesDraft.submissionMode === 'hostOnly'}
                             />
-                            <span>洗混卡组后发牌（关闭则按各自提交发牌）</span>
+                            <span>洗混卡组后发牌（关闭则按各自提交发牌）{rulesDraft.submissionMode === 'hostOnly' ? '（房主牌堆模式下固定开启）' : ''}</span>
                           </label>
                           <div className="col-span-2">
                             <BattleModeSelector
@@ -2143,7 +2182,7 @@ export function PvpRoomPage() {
                           </div>
                         </div>
 
-                        <div className="text-xs text-gray-500 mt-2">提示：修改“每人提交”会清空已提交卡组。</div>
+                        <div className="text-xs text-gray-500 mt-2">提示：修改“卡组提交模式/每人提交”会清空已提交卡组。</div>
                         {rulesDraftError ? (
                           <div className="text-xs text-red-600 mt-2 whitespace-pre-wrap">规则不合法：{rulesDraftError}</div>
                         ) : null}
@@ -2168,7 +2207,7 @@ export function PvpRoomPage() {
                       </div>
                     ) : null}
 
-                    {phase === 'waiting' && rules && rules.cardsPerPlayer === 0 && (
+                    {phase === 'waiting' && rules && rules.submissionMode !== 'hostOnly' && rules.cardsPerPlayer === 0 && (
                       <div className="mt-3 p-3 rounded-md border bg-purple-50">
                         <div className="text-sm font-semibold text-purple-900">本局无需提交卡组</div>
                         <div className="text-xs text-purple-800 mt-1">
@@ -2190,11 +2229,11 @@ export function PvpRoomPage() {
                       </div>
                     )}
 
-                    {phase === 'waiting' && rules && rules.cardsPerPlayer > 0 && isHost && canStartNow && totalParticipants < rules.participants && (
+                    {phase === 'waiting' && rules && (rules.submissionMode === 'hostOnly' || rules.cardsPerPlayer > 0) && isHost && canStartNow && totalParticipants < rules.participants && (
                       <div className="mt-3 p-3 rounded-md border bg-amber-50">
                         <div className="text-sm font-semibold text-amber-900">房间未满员，也可以提前开局</div>
                         <div className="text-xs text-amber-800 mt-1">
-                          继续将自动把房间人数从 {rules.participants} 缩减为 {totalParticipants}，并进入提交卡组阶段。
+                          继续将自动把房间人数从 {rules.participants} 缩减为 {totalParticipants}，并进入{rules.submissionMode === 'hostOnly' ? '房主提交牌堆' : '提交卡组'}阶段。
                         </div>
                         <button
                           className="generate-button w-full mt-2"
@@ -2202,7 +2241,7 @@ export function PvpRoomPage() {
                           disabled={startMutation.isPending}
                           onClick={handleStartClick}
                         >
-                          {startMutation.isPending ? '开始中…' : '提前开局（锁定人数并进入提交）'}
+                          {startMutation.isPending ? '开始中…' : `提前开局（锁定人数并进入${rules.submissionMode === 'hostOnly' ? '房主提交' : '提交'}）`}
                         </button>
                       </div>
                     )}
@@ -2214,7 +2253,9 @@ export function PvpRoomPage() {
                     <div className="p-3 rounded-md bg-white border">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="font-semibold text-sm mb-1">提交卡组（需要 {rules.cardsPerPlayer} 张）</div>
+                          <div className="font-semibold text-sm mb-1">
+                            {rules.submissionMode === 'hostOnly' ? '房主提交牌堆（任意张）' : `提交卡组（需要 ${rules.cardsPerPlayer} 张）`}
+                          </div>
                           <div className="text-xs text-gray-600">
                             注意：提交私有卡会让对手可查看完整 JSON（问卷/能力/设定全量）。
                           </div>
@@ -2224,8 +2265,20 @@ export function PvpRoomPage() {
                               {pendingActionSecondsLeft > 0 ? `倒计时 ${pendingActionSecondsLeft}s 后房主可强制随机提交。` : '倒计时结束，房主可强制随机提交。'}
                             </div>
                           ) : null}
+                          {rules.submissionMode === 'hostOnly' && !isHost ? (
+                            <div className="text-xs text-gray-600 mt-2">
+                              {(() => {
+                                const hostId = room?.hostUserId;
+                                const status = typeof hostId === 'number' ? submissionStatusByUserId.get(hostId) : null;
+                                if (!hostId || !status) return '等待房主提交牌堆…';
+                                return status.hasSubmitted
+                                  ? `房主已提交牌堆：${status.submittedCount} 张${status.hasPrivateCard ? '（含私有）' : ''}，请等待房主开始对局（发牌）。`
+                                  : '等待房主提交牌堆…';
+                              })()}
+                            </div>
+                          ) : null}
                         </div>
-                        {mySubmission && !showSubmitEditor ? (
+                        {mySubmission && !showSubmitEditor && (rules.submissionMode !== 'hostOnly' || isHost) ? (
                           <button
                             className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                             onClick={() => {
@@ -2240,7 +2293,7 @@ export function PvpRoomPage() {
                         ) : null}
                       </div>
 
-                      {!mySubmission || showSubmitEditor ? (
+                      {rules.submissionMode === 'hostOnly' && !isHost ? null : (!mySubmission || showSubmitEditor) ? (
                         <>
                           <div className="mt-3">
                             <DatabaseSelector
@@ -2250,7 +2303,7 @@ export function PvpRoomPage() {
                               isGenerating={submitMutation.isPending}
                               isMatching={isMatching}
                               combatantCount={selected.length}
-                              maxCombatants={rules.cardsPerPlayer}
+                              maxCombatants={rules.submissionMode === 'hostOnly' ? 9999 : rules.cardsPerPlayer}
                             />
                           </div>
 
@@ -2268,7 +2321,7 @@ export function PvpRoomPage() {
                                 currentPage={mgPage}
                                 onPageChange={setMgPage}
                                 disabled={submitMutation.isPending}
-                                maxSelected={rules.cardsPerPlayer}
+                                maxSelected={rules.submissionMode === 'hostOnly' ? 9999 : rules.cardsPerPlayer}
                                 selectedCountOverride={selected.length}
                                 selectedFilenames={selectedPresetFilenames}
                                 onToggle={handleTogglePreset}
@@ -2279,7 +2332,7 @@ export function PvpRoomPage() {
                                 currentPage={canshouPage}
                                 onPageChange={setCanshouPage}
                                 disabled={submitMutation.isPending}
-                                maxSelected={rules.cardsPerPlayer}
+                                maxSelected={rules.submissionMode === 'hostOnly' ? 9999 : rules.cardsPerPlayer}
                                 selectedCountOverride={selected.length}
                                 selectedFilenames={selectedPresetFilenames}
                                 onToggle={handleTogglePreset}
@@ -2291,7 +2344,7 @@ export function PvpRoomPage() {
                             <div className="mb-4 p-3 bg-gray-200 rounded-lg">
                               <div className="flex justify-between items-center m-0 top-0 right-0">
                                 <p className="font-semibold text-sm text-gray-700">
-                                  已选卡组 ({selected.length}/{rules.cardsPerPlayer})
+                                  {rules.submissionMode === 'hostOnly' ? `已选牌堆（${selected.length}）` : `已选卡组 (${selected.length}/${rules.cardsPerPlayer})`}
                                 </p>
                                 <button
                                   onClick={clearSelected}
@@ -2365,17 +2418,19 @@ export function PvpRoomPage() {
                             style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
                             disabled={
                               submitMutation.isPending ||
-                              selected.length !== rules.cardsPerPlayer ||
+                              (rules.submissionMode === 'hostOnly' ? (selected.length <= 0 || !isHost) : selected.length !== rules.cardsPerPlayer) ||
                               (hasPrivateSelected && !acceptPrivateDisclosure)
                             }
                             onClick={() => submitMutation.mutate()}
                           >
-                            {submitMutation.isPending ? '提交中…' : '提交卡组'}
+                            {submitMutation.isPending ? '提交中…' : (rules.submissionMode === 'hostOnly' ? '提交牌堆' : '提交卡组')}
                           </button>
                         </>
                       ) : (
                         <div className="mt-3 rounded-md border bg-gray-50 p-3 text-sm text-gray-700">
-                          你已提交 {mySubmission?.cards?.length || 0} 张卡{mySubmission?.hasPrivateCard ? '（含私有）' : ''}，等待其他玩家提交。
+                          {rules.submissionMode === 'hostOnly'
+                            ? `你已提交牌堆：${mySubmission?.cards?.length || 0} 张卡${mySubmission?.hasPrivateCard ? '（含私有）' : ''}。`
+                            : `你已提交 ${mySubmission?.cards?.length || 0} 张卡${mySubmission?.hasPrivateCard ? '（含私有）' : ''}，等待其他玩家提交。`}
                         </div>
                       )}
 
@@ -2395,7 +2450,7 @@ export function PvpRoomPage() {
                         <button
                           className="generate-button w-full mt-3"
                           style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}
-                          disabled={startMutation.isPending || !canStartNow || (rules.cardsPerPlayer > 0 && submittedParticipantCount < totalParticipants)}
+                          disabled={startMutation.isPending || !canStartNow || ((rules.submissionMode === 'hostOnly' || rules.cardsPerPlayer > 0) && submittedParticipantCount < totalParticipants)}
                           onClick={handleStartClick}
                         >
                           {startMutation.isPending ? '发牌中…' : '开始对局（发牌）'}
@@ -2790,9 +2845,13 @@ export function PvpRoomPage() {
                         const userId = s.userId as number;
                         const username = usernameById.get(userId) || `用户${userId}`;
                         const detailed = submissions.find((x: any) => typeof x?.userId === 'number' && x.userId === userId) as any | null;
-                        const summaryText = s.hasSubmitted
-                          ? `已提交 ${s.submittedCount} 张${s.hasPrivateCard ? '（含私有）' : ''}`
-                          : '未提交';
+                        const hostOnly = rules?.submissionMode === 'hostOnly';
+                        const isRequired = hostOnly ? userId === room?.hostUserId : true;
+                        const summaryText = !isRequired
+                          ? '无需提交'
+                          : s.hasSubmitted
+                            ? `已提交 ${s.submittedCount} 张${s.hasPrivateCard ? '（含私有）' : ''}`
+                            : '未提交';
 
                         return (
                           <details key={userId} className="text-sm">
@@ -2868,7 +2927,7 @@ export function PvpRoomPage() {
         selectionMode="multi"
         selectedCardIds={selected.filter((c) => c.kind === 'data_card').map((c) => c.id)}
         selectedCountOverride={selected.length}
-        maxSelected={rules?.cardsPerPlayer}
+        maxSelected={rules?.submissionMode === 'hostOnly' ? 9999 : rules?.cardsPerPlayer}
         onToggleCard={handleToggleDataCardFromModal}
       />
 

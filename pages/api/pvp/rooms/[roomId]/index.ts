@@ -18,6 +18,7 @@ import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
 import { canForcePendingAction, computeLastPendingChooseAction, computeLastPendingConfirmAction, computeLastPendingSubmissionAction, computeLastPendingVoteAction } from '@/lib/pvp/pending-action';
 import { parsePvpWinnerVoteState, tallyPvpWinnerVotes } from '@/lib/pvp/winner-vote';
+import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import type { PvpHandState, PvpSubmissionPayload } from '@/lib/pvp/types';
 import type { UserBadge } from '@/types/badge';
 
@@ -123,14 +124,18 @@ async function getRoomHandler(req: Request): Promise<Response> {
     ...b.submission,
   }));
 
+  const hostOnly = rules.submissionMode === 'hostOnly';
+  const needsSubmission = requiresPvpSubmissionPhase(rules);
   const submissionStatus = [
     ...players.map((p) => {
       const sub = submissionsByUserId.get(p.user_id);
+      const isRequired = needsSubmission && (!hostOnly || p.user_id === room.host_user_id);
       return {
         userId: p.user_id,
-        hasSubmitted: Boolean(sub),
+        hasSubmitted: isRequired ? Boolean(sub) : true,
         submittedCount: sub?.cards?.length ?? 0,
         hasPrivateCard: sub?.hasPrivateCard ?? false,
+        isRequired,
       };
     }),
     ...bots.map((b) => ({
@@ -138,6 +143,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
       hasSubmitted: true,
       submittedCount: b.submission?.cards?.length ?? 0,
       hasPrivateCard: b.submission?.hasPrivateCard ?? false,
+      isRequired: false,
     })),
   ];
 
@@ -333,7 +339,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
     }
   }
 
-  if (isPlayer && !pendingAction && room.phase === 'submitting' && rules.cardsPerPlayer > 0) {
+  if (isPlayer && !pendingAction && room.phase === 'submitting' && rules.cardsPerPlayer > 0 && rules.submissionMode !== 'hostOnly') {
     const pending = computeLastPendingSubmissionAction({
       nowMs: serverNowMs,
       phaseFallbackAt: room.last_activity_at ?? room.updated_at,

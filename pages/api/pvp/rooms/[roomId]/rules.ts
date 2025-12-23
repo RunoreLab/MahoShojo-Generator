@@ -6,6 +6,7 @@ import {
   updatePvpRoomCas,
 } from '@/lib/d1';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -85,12 +86,15 @@ async function rulesHandler(req: Request): Promise<Response> {
 
   const before = internal.rules;
   const changedCardsPerPlayer = before.cardsPerPlayer !== nextRules.cardsPerPlayer;
+  const changedSubmissionMode = before.submissionMode !== nextRules.submissionMode;
 
   const shouldClear = Boolean(body.data.clearSubmissions);
-  if (room.phase === 'submitting' && changedCardsPerPlayer) {
+  const willInvalidateSubmissions = changedCardsPerPlayer || changedSubmissionMode;
+  if (room.phase === 'submitting' && willInvalidateSubmissions) {
     const subs = await getPvpRoomSubmissions(roomId);
     if (subs.length > 0 && !shouldClear) {
-      return json({ error: '修改每人提交数量会清空已提交卡组，请确认后再保存', code: 'NEED_CLEAR_SUBMISSIONS' }, { status: 409 });
+      const hint = changedSubmissionMode ? '修改提交模式会清空已提交卡组' : '修改每人提交数量会清空已提交卡组';
+      return json({ error: `${hint}，请确认后再保存`, code: 'NEED_CLEAR_SUBMISSIONS' }, { status: 409 });
     }
     if (subs.length > 0 && shouldClear) {
       const cleared = await clearPvpRoomRuntimeState(roomId);
@@ -102,7 +106,7 @@ async function rulesHandler(req: Request): Promise<Response> {
   internal.raw = mergedRaw;
   const nextPhase =
     participantCount >= nextRules.participants
-      ? (nextRules.cardsPerPlayer > 0 ? 'submitting' : 'waiting')
+      ? (requiresPvpSubmissionPhase(nextRules) ? 'submitting' : 'waiting')
       : 'waiting';
 
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
@@ -112,7 +116,7 @@ async function rulesHandler(req: Request): Promise<Response> {
   });
 
   if (!ok) return json({ error: '更新失败', code: 'UPDATE_FAILED' }, { status: 409 });
-  return json({ success: true, phase: nextPhase, rules: nextRules, cleared: shouldClear && changedCardsPerPlayer });
+  return json({ success: true, phase: nextPhase, rules: nextRules, cleared: shouldClear && willInvalidateSubmissions });
 }
 
 export default withPvpErrorBoundary(rulesHandler);
