@@ -3,7 +3,7 @@ import { pickBotBaseName, buildBotUsername } from '@/lib/pvp/bot/names';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { buildBotSubmissionPayload } from '@/lib/pvp/bot/submission';
 import { pickBotStrategyId } from '@/lib/pvp/bot/strategies';
-import { buildCardRefKey } from '@/lib/pvp/logic';
+import { buildCardRefKey, requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -148,7 +148,7 @@ async function addBotHandler(req: Request): Promise<Response> {
   const totalAfter = players.length + internal.bots.length;
   const shouldAdvance =
     room.phase === 'waiting' &&
-    internal.rules.cardsPerPlayer > 0 &&
+    requiresPvpSubmissionPhase(internal.rules) &&
     totalAfter >= internal.rules.participants;
 
   const now = new Date().toISOString();
@@ -169,4 +169,3 @@ async function addBotHandler(req: Request): Promise<Response> {
 }
 
 export default withPvpErrorBoundary(addBotHandler);
-

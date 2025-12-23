@@ -69,6 +69,9 @@ async function forceHandler(req: Request): Promise<Response> {
     const internalParsed = parsePvpRoomInternalState(room.rules_json);
     if ('error' in internalParsed) return json({ error: internalParsed.error }, { status: 500 });
     const rules = internalParsed.internal.rules;
+    if (rules.submissionMode === 'hostOnly') {
+      return json({ error: '当前房间为“仅房主提交牌堆”模式，不支持强制提交', code: 'SUBMISSION_HOST_ONLY' }, { status: 409 });
+    }
     if (rules.cardsPerPlayer <= 0) return json({ error: '当前房间无需提交卡组', code: 'SUBMISSION_SKIPPED' }, { status: 409 });
 
     const submissions = await getPvpRoomSubmissions(roomId);
@@ -206,4 +209,3 @@ async function forceHandler(req: Request): Promise<Response> {
 }
 
 export default withPvpErrorBoundary(forceHandler);
-

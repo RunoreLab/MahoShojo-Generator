@@ -1,13 +1,17 @@
 import { inferTemplate } from '@/lib/data-card-converter';
 
 import { shuffleInPlace } from './random';
-import type { PvpCardRef, PvpCombatantType, PvpHandState, PvpSnapshotRef } from './types';
+import type { PvpCardRef, PvpCombatantType, PvpHandState, PvpRoomRules, PvpSnapshotRef } from './types';
 
 export const inferPvpCombatantTypeFromJson = (data: unknown): PvpCombatantType => {
   const template = inferTemplate(data);
   if (template === 'magical-girl') return 'magical-girl';
   if (template === 'canshou') return 'canshou';
   return 'general-character';
+};
+
+export const requiresPvpSubmissionPhase = (rules: Pick<PvpRoomRules, 'submissionMode' | 'cardsPerPlayer'>): boolean => {
+  return rules.submissionMode === 'hostOnly' || Math.floor(rules.cardsPerPlayer) > 0;
 };
 
 export const buildCardRefKey = (ref: PvpCardRef): string => {

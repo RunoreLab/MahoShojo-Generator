@@ -31,6 +31,8 @@ export type PvpDrawSource = 'public' | 'preset' | 'preset+public';
 
 export type PvpStoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 
+export type PvpSubmissionMode = 'perPlayer' | 'hostOnly';
+
 export interface PvpBestOfRules {
   enabled: boolean;
   maxRounds: number;
@@ -40,6 +42,12 @@ export interface PvpBestOfRules {
 
 export interface PvpRoomRules {
   participants: number; // 2-6（前端与校验层限制）
+  /**
+   * 提交模式：
+   * - perPlayer：每位参与者都需提交 cardsPerPlayer 张卡（cardsPerPlayer=0 表示跳过提交阶段）
+   * - hostOnly：仅房主提交任意张卡牌作为公共牌堆，其他玩家无需提交
+   */
+  submissionMode: PvpSubmissionMode;
   cardsPerPlayer: number; // 每人提交数量
   dealPerPlayer: number;  // 每人初始手牌数量
   dealWhenEmpty: number; // 当手牌为空时补发数量

@@ -1,5 +1,6 @@
 import { clearPvpRoomRuntimeState, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
 import { clearPvpRoomRuntimeFromRulesJson, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
@@ -44,7 +45,7 @@ async function restartHandler(req: Request): Promise<Response> {
   const nextRulesJson = clearPvpRoomRuntimeFromRulesJson(room.rules_json);
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     status: 'open',
-    phase: players.length >= rules.participants ? (rules.cardsPerPlayer > 0 ? 'submitting' : 'waiting') : 'waiting',
+    phase: players.length >= rules.participants ? (requiresPvpSubmissionPhase(rules) ? 'submitting' : 'waiting') : 'waiting',
     current_match_id: null,
     rules_json: nextRulesJson,
     last_activity_at: new Date().toISOString(),

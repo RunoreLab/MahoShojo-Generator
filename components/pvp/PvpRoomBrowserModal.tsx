@@ -435,7 +435,12 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
                   <summary className="cursor-pointer text-xs text-gray-600 select-none">查看规则与详情</summary>
                   <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-700">
                     <div className="p-3 rounded-lg bg-gray-50 border">
-                      <div>每人提交：{room.rules?.cardsPerPlayer ?? '—'}</div>
+                      <div>
+                        提交模式：
+                        {room.rules?.submissionMode === 'hostOnly'
+                          ? '仅房主提交牌堆'
+                          : `每人提交 ${room.rules?.cardsPerPlayer ?? '—'} 张`}
+                      </div>
                       <div>初始手牌：{room.rules?.dealPerPlayer ?? '—'}</div>
                       <div>手牌为空补发：{room.rules?.dealWhenEmpty ?? '—'}</div>
                       <div>抽取来源：{room.rules?.drawSource ?? 'public'}</div>

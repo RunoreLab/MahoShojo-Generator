@@ -1,5 +1,6 @@
 import { getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
@@ -44,7 +45,10 @@ async function removeBotHandler(req: Request): Promise<Response> {
 
   const players = await getPvpRoomPlayers(roomId);
   const total = players.length + internal.bots.length;
-  const nextPhase = total >= internal.rules.participants ? 'submitting' : 'waiting';
+  const nextPhase =
+    total >= internal.rules.participants
+      ? (requiresPvpSubmissionPhase(internal.rules) ? 'submitting' : 'waiting')
+      : 'waiting';
 
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     rules_json: stringifyPvpRoomInternalState(internal),
@@ -57,4 +61,3 @@ async function removeBotHandler(req: Request): Promise<Response> {
 }
 
 export default withPvpErrorBoundary(removeBotHandler);
-
