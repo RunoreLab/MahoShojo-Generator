@@ -568,9 +568,10 @@ export const useBattleEngine = () => {
           setStreamingMarkdown(sanitizeTextByShieldWords(markdownForUi));
 
           const trimmedForValidation = markdownForUi.trim();
-          const looksLikeCompleteReport =
-            trimmedForValidation.length >= 120 &&
-            (/^#{2,6}\s*/m.test(trimmedForValidation) || Boolean(metaOverride?.impacts?.length));
+          const hasMetaImpacts = Boolean(metaOverride?.impacts?.length);
+          const looksLikeCompleteReport = hasMetaImpacts
+            ? trimmedForValidation.length > 0
+            : trimmedForValidation.length >= 120 && /^#{2,6}\s*/m.test(trimmedForValidation);
 
           // 与非流式保持一致：生成失败/中断时不进入冷却，并优先展示“生成失败”而不是“角色更新失败”。
           if (!looksLikeCompleteReport) {

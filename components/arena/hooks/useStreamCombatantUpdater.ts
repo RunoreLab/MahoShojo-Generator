@@ -28,6 +28,73 @@ interface UpdateCombatantsPayload {
   writeCurrentState?: boolean;
 }
 
+const normalizeRosterNames = (combatants: CombatantData[]): string[] => {
+  const names = combatants
+    .map((c) => (c?.data?.codename || c?.data?.name || '').toString().trim())
+    .filter(Boolean);
+  return Array.from(new Set(names));
+};
+
+const normalizeNameToken = (name: string): string => {
+  return name
+    .trim()
+    .replace(/^[“”"'「」『』《》【】\[\]（）()]+|[“”"'「」『』《》【】\[\]（）()]+$/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+};
+
+const matchRosterName = (candidate: string, rosterNames: string[]): string | null => {
+  const c = normalizeNameToken(candidate);
+  if (!c) return null;
+
+  const exact = rosterNames.find((n) => normalizeNameToken(n) === c);
+  if (exact) return exact;
+
+  const includes = rosterNames.find((n) => normalizeNameToken(n).includes(c) || c.includes(normalizeNameToken(n)));
+  return includes ?? null;
+};
+
+const normalizeImpactsForRoster = (
+  impacts: UpdateCombatantsPayload['impacts'] | undefined,
+  combatants: CombatantData[],
+  settings: { writeArenaHistory: boolean; writeCurrentState: boolean }
+): UpdateCombatantsPayload['impacts'] | undefined => {
+  if (!Array.isArray(impacts) || impacts.length === 0) return undefined;
+
+  const rosterNames = normalizeRosterNames(combatants);
+  if (rosterNames.length === 0) return undefined;
+
+  const byName = new Map<string, { characterName: string; impact?: string; currentStateSummary?: string }>();
+  for (const raw of impacts) {
+    const rawName = typeof raw?.characterName === 'string' ? raw.characterName.trim() : '';
+    const matched = rawName ? matchRosterName(rawName, rosterNames) : null;
+    if (!matched || byName.has(matched)) continue;
+
+    const impact = typeof raw?.impact === 'string' ? raw.impact.trim() : undefined;
+    const currentStateSummary =
+      typeof raw?.currentStateSummary === 'string' ? raw.currentStateSummary.trim() : undefined;
+
+    // 不在前端伪造内容：缺失字段就留空，交给服务端默认值/跳过写入策略处理。
+    byName.set(matched, {
+      characterName: matched,
+      ...(settings.writeArenaHistory && impact ? { impact } : {}),
+      ...(settings.writeCurrentState && currentStateSummary ? { currentStateSummary } : {}),
+    });
+  }
+
+  const normalized = Array.from(byName.values());
+  const missing = rosterNames.filter((n) => !byName.has(n));
+  if (missing.length > 0) {
+    log.warn('流式元数据 impacts 覆盖不完整，将仅对已匹配角色尝试更新', {
+      missing,
+      receivedCount: impacts.length,
+      normalizedCount: normalized.length,
+    });
+  }
+
+  return normalized.length > 0 ? normalized : undefined;
+};
+
 /**
  * 从流式生成的 Markdown 中提取战报信息
  *
@@ -226,6 +293,8 @@ export const useStreamCombatantUpdater = () => {
       const headline = (parsed?.headline || fallbackHeadline).trim();
       const winner = (parsed?.winner || fallbackWinner).trim();
 
+      const impactsOverride = normalizeImpactsForRoster(metaOverride?.impacts, combatants, settings);
+
       // 写入历战记录时，headline/winner 必须有效，否则服务端会拒绝写入。
       // 若只写当前状态，则允许使用兜底值继续尝试，避免“能更新但被校验拦住”。
       if (settings.writeArenaHistory) {
@@ -256,7 +325,7 @@ export const useStreamCombatantUpdater = () => {
             winner: winner || '未知',
           },
         },
-        ...(Array.isArray(metaOverride?.impacts) && metaOverride.impacts.length > 0 ? { impacts: metaOverride.impacts } : {}),
+        ...(Array.isArray(impactsOverride) && impactsOverride.length > 0 ? { impacts: impactsOverride } : {}),
         userGuidance: settings.userGuidance || null,
         scenario: scenario || null,
         writeArenaHistory: settings.writeArenaHistory,
