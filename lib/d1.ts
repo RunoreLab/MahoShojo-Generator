@@ -131,6 +131,9 @@ export {
   createPvpMatchPlayers,
   updatePvpMatch,
   getPvpMatchById,
+  getPvpRoomChatMessages,
+  getLatestPvpRoomChatMessageBySender,
+  createPvpRoomChatMessage,
   getPvpMatchesByUserId,
   getPvpUserSummariesByUserIds,
   type PvpMatchPlayerRow,
@@ -144,6 +147,7 @@ export {
   type PvpRoomRow,
   type PvpRoomBrowseRow,
   type PvpRoomPlayerRow,
+  type PvpRoomChatMessageRow,
   type PvpRoundRow,
 } from './database/pvp';
 

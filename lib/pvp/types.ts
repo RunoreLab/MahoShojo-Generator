@@ -76,6 +76,11 @@ export interface PvpRoomRules {
    * 兼容旧房间：若缺失则视为 true。
    */
   allowSpectators?: boolean;
+  /**
+   * 是否允许观众聊天（默认 false，仅玩家可聊天）。
+   * 兼容旧房间：若缺失则视为 false。
+   */
+  allowSpectatorChat?: boolean;
 
   /** 资料读写策略（与竞技场对齐；默认全关）。 */
   readArenaHistory: boolean;

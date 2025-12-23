@@ -736,3 +736,17 @@ WHERE
 ### 14.4 “确认已阅读（推进）按钮消失”
 - 常见原因：你当前是“观众”，观众不会显示确认按钮；且 reviewing 阶段无法切换为玩家。
 - 建议：确认房间信息里“我的身份”；需要参与请在 `waiting/submitting` 阶段先切换为玩家，或等待下一局/让房主重开。
+
+---
+
+## 15. 房间内聊天（安全版，已落地）
+
+目标：提供房间内交流能力，同时避免自由输入带来的不和谐内容与提示词注入风险。
+
+实现要点：
+- **权限**：默认仅玩家可发送；房主可在房间内开启“允许观众聊天”（规则字段 `allowSpectatorChat`）。
+- **内容约束**：仅允许发送
+  - 预设“建言”文字组合（见 `config/pvp-chat-phrases.json`），以及
+  - 表情包（见 `config/pvp-chat-emotes.json`，资源位于 `public/emotes/pvp/`）或通用 emoji（如 `☺️`、`😢`）。
+- **接口**：`GET/POST /api/pvp/rooms/:roomId/chat`（轮询拉取）。
+- **数据库**：新增表 `pvp_room_chat_messages`（见 `lib/database/schema.sql`）。

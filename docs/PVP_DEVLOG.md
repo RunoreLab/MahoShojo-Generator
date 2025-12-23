@@ -6,6 +6,7 @@
 
 ## 0.1 变更记录（最近）
 
+- 2025-12-23：新增“房间内聊天”（安全版）：房主可设置是否允许观众聊天（默认仅玩家可发送）；聊天消息仅允许使用**预设“建言”文字组合**（配置文件 `config/pvp-chat-phrases.json`）与**表情包/emoji**（表情包配置 `config/pvp-chat-emotes.json`，占位素材位于 `public/emotes/pvp/`），不支持自由输入文本以避免不和谐内容；对应 API：`GET/POST /api/pvp/rooms/:roomId/chat`；数据库新增表 `pvp_room_chat_messages`（见 `lib/database/schema.sql`）。
 - 2025-12-23：新增“仅房主提交牌堆”模式：房主可选择让卡组由房主统一提交（任意张卡牌作为公共牌堆供所有玩家抽取），其他玩家无需提交卡牌；该模式下不再需要设置“每人提交数量”，提交阶段仅等待房主完成提交。
 - 2025-12-23：重构“房间浏览器”UI/UX（参考 `BattleDataModal` 风格）：修复顶部按钮挤压导致标题竖排的问题；将搜索/筛选区收敛为清晰的卡片面板；房间列表改为栅格布局并统一按钮尺寸；支持 `Esc` 关闭与搜索框自动聚焦；房间口令可自动读取会话缓存，减少重复输入。
 - 2025-12-23：新增“胜者投票”机制：当回合结算生成战报后，若无法从 `officialReport.winner` 解析出**胜者或平局**（即 winner 不在候选集合内且不为“平局”），房间将进入 `voting` 阶段，所有房间成员可对“哪位参战者获胜 / 平局”进行投票；得票最高者获胜，若出现平票则判平局。投票以房间运行时私有字段 `pvp_rooms.rules_json._winnerVote` 存储并轮询展示；投票结束后恢复到 `reviewing`（阅读确认）阶段并进入原有推进流程。房主也可在 `reviewing` 主动发起投票以复核 AI 判定（`POST /api/pvp/rooms/:roomId/rounds/:roundId/vote/start|submit|finalize`）。

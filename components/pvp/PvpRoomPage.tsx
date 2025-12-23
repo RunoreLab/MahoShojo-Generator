@@ -14,6 +14,7 @@ import { PresetGridPicker } from '@/components/PresetGridPicker';
 import { UserWithTitle } from '@/components/UserTitle';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 import { useLanguagesQuery, usePresetQuery } from '@/components/arena/hooks/useArenaData';
+import { PvpChatPanel } from '@/components/pvp/PvpChatPanel';
 import { PvpHeroBanner } from '@/components/pvp/PvpHeroBanner';
 import { PvpScoreboard } from '@/components/pvp/PvpScoreboard';
 import { PvpUpdatedCombatantsPanel } from '@/components/pvp/PvpUpdatedCombatantsPanel';
@@ -396,6 +397,7 @@ export function PvpRoomPage() {
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
   const allowNonHostControl = rules?.allowNonHostControl === true;
   const allowSpectators = rules?.allowSpectators !== false;
+  const allowSpectatorChat = rules?.allowSpectatorChat === true;
   const canControlResolve = isHost || allowNonHostControl;
 
   const [nowTickMs, setNowTickMs] = useState<number>(() => Date.now());
@@ -1005,7 +1007,7 @@ export function PvpRoomPage() {
   });
 
   const permissionsMutation = useMutation({
-    mutationFn: async (payload: { allowNonHostControl?: boolean; allowSpectators?: boolean }) => {
+    mutationFn: async (payload: { allowNonHostControl?: boolean; allowSpectators?: boolean; allowSpectatorChat?: boolean }) => {
       const authHeader = await authStorage.getAuthHeader();
       if (!authHeader) throw new Error('未登录');
       const res = await fetch(`/api/pvp/rooms/${roomId}/permissions`, {
@@ -1891,6 +1893,13 @@ export function PvpRoomPage() {
                   </div>
                 </div>
 
+                <PvpChatPanel
+                  roomId={roomId}
+                  viewerRole={isSpectator ? 'spectator' : 'player'}
+                  allowSpectatorChat={allowSpectatorChat}
+                  disabled={!joined || !roomId}
+                />
+
                 {phase === 'resolving' && (
                   <div className="p-4 rounded-xl border border-amber-200 bg-amber-50 text-sm">
                     <div className="flex items-start justify-between gap-3">
@@ -1991,6 +2000,19 @@ export function PvpRoomPage() {
                         <span>开启观战（新进房间默认观众）</span>
                       </label>
                       <div className="text-xs text-gray-500 mt-1">关闭后：非玩家将无法进入房间；已在房间内的观众不会被自动踢出。</div>
+                    </div>
+
+                    <div className={(phase === 'waiting' || phase === 'submitting') ? 'mt-3' : ''}>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={allowSpectatorChat}
+                          onChange={(e) => permissionsMutation.mutate({ allowSpectatorChat: e.target.checked })}
+                          disabled={permissionsMutation.isPending || !allowSpectators}
+                        />
+                        <span>允许观众聊天（默认仅玩家）</span>
+                      </label>
+                      <div className="text-xs text-gray-500 mt-1">聊天仅支持预设文字组合与表情；关闭后观众仍可阅读但不可发送。</div>
                     </div>
 
                     {(phase === 'waiting' || phase === 'submitting') && rulesDraft ? (
