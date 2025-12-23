@@ -1,6 +1,6 @@
 # PVP 对战功能设计草案（房间制卡组对战）
 
-更新时间：2025-12-22  
+更新时间：2025-12-23  
 适用项目：Next.js（Edge Runtime）+ Cloudflare D1 + Tailwind 4 + Vercel AI SDK 1.x
 
 ## 1. 背景与目标
