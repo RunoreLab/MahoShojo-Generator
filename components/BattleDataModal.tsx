@@ -6,10 +6,11 @@ import DataCard from './DataCard';
 import SortSelector from './SortSelector';
 import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
-import { dataCardApi, favoritesApi } from '@/lib/auth';
+import { dataCardApi, favoritesApi, deckApi } from '@/lib/auth';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { ChevronDown, Filter } from 'lucide-react';
+import DecksModal from './DecksModal';
 
 interface BattleDataModalProps {
   isOpen: boolean;
@@ -117,6 +118,7 @@ export default function BattleDataModal({
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<BattleDataTab>('public');
+  const [showDecksModal, setShowDecksModal] = useState(false);
   // 记录用户是否主动切换过 Tab，防止排序等状态变动时被意外重置
   const hasUserSelectedTabRef = React.useRef(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -486,6 +488,7 @@ export default function BattleDataModal({
   const selectedCount = typeof selectedCountOverride === 'number' ? selectedCountOverride : selectedIdSet.size;
   const atLimit = selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 && selectedCount >= maxSelected;
   const canToggle = selectionMode === 'multi' && typeof onToggleCard === 'function';
+  const canImportDeck = isAuthenticated && selectionMode === 'multi' && selectedType === 'character' && (typeof onToggleCard === 'function' || typeof onSelectCard === 'function');
 
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {
@@ -572,6 +575,78 @@ export default function BattleDataModal({
       if (selectionMode === 'single') isSingleSelectingRef.current = false;
     }
   };
+
+  const handleImportDeck = useCallback(async (deckId: string) => {
+    if (!deckId) return;
+    if (selectionMode !== 'multi') return;
+
+    try {
+      const detail = await deckApi.getDeckCards(deckId);
+      const entries = Array.isArray(detail?.cards) ? detail.cards : [];
+
+      let remaining = typeof maxSelected === 'number' && maxSelected > 0 ? Math.max(0, maxSelected - selectedCount) : Number.POSITIVE_INFINITY;
+      const nextSelectedIds = new Set(selectedIdSet);
+
+      for (const entry of entries) {
+        if (remaining <= 0) break;
+        if (!entry?.isAccessible || !entry?.card) continue;
+
+        const card = entry.card;
+        if (card.type !== selectedType) continue;
+
+        const cardId = typeof card?.id === 'string' ? card.id : '';
+        if (!cardId || nextSelectedIds.has(cardId)) continue;
+
+        try {
+          const cardData = JSON.parse(card.data);
+          const payload = {
+            ...cardData,
+            _cardId: card.id,
+            _cardName: card.name,
+            _cardDescription: card.description || '',
+            _isPublic: card.is_public,
+            _updatedAt: card.updated_at,
+            _createdAt: card.created_at,
+            _author: card.username || '未知',
+            _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
+            _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
+            _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
+          };
+
+          if (canToggle) {
+            onToggleCard?.(payload, true);
+          } else {
+            onSelectCard?.(payload);
+          }
+
+          nextSelectedIds.add(cardId);
+          remaining -= 1;
+
+          if (card.is_public && !isCardUsed(cardId)) {
+            void (async () => {
+              try {
+                const response = await fetch('/api/data-card-stats', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ cardId, type: 'usage' })
+                });
+                if (response.ok) {
+                  const result = await response.json();
+                  if (result.success) addUsedCard(cardId);
+                }
+              } catch (error) {
+                console.error('增加使用次数失败:', error);
+              }
+            })();
+          }
+        } catch (error) {
+          console.error('解析数据卡失败:', error);
+        }
+      }
+    } catch (error) {
+      console.error('导入卡组失败:', error);
+    }
+  }, [canToggle, maxSelected, onSelectCard, onToggleCard, selectedCount, selectedIdSet, selectedType, selectionMode]);
 
   const handleDownloadCard = useCallback((card: any) => {
     try {
@@ -901,7 +976,8 @@ export default function BattleDataModal({
           </div>
 
           {/* 标签页切换 */}
-          <div className="flex gap-2 mb-4">
+          <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
+            <div className="flex gap-2">
             {effectiveTabs.includes('pvpHand') && (
               <button
                 onClick={() => {
@@ -951,6 +1027,16 @@ export default function BattleDataModal({
                 className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'favorites' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
               >
                 我的收藏 ({favoriteCards.length})
+              </button>
+            )}
+            </div>
+
+            {canImportDeck && (
+              <button
+                onClick={() => setShowDecksModal(true)}
+                className="px-4 py-2 rounded text-sm font-medium bg-purple-600 text-white hover:bg-purple-700"
+              >
+                卡组导入
               </button>
             )}
           </div>
@@ -1062,7 +1148,13 @@ export default function BattleDataModal({
 	                  );
 	                })}
 	              </div>
-	            )}
+      )}
+
+      <DecksModal
+        isOpen={showDecksModal}
+        onClose={() => setShowDecksModal(false)}
+        onImportDeck={(deckId) => void handleImportDeck(deckId)}
+      />
 	          </div>
 
           {/* 分页与底部 */}

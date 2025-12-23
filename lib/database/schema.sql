@@ -104,6 +104,55 @@ CREATE TABLE IF NOT EXISTS favorites (
 
 CREATE INDEX idx_favorites_data_card_id ON favorites(data_card_id);
 
+-- 卡组表
+-- 用于保存用户创建的卡组（可包含多个数据卡引用）
+-- is_public: 0=私有, 1=公开, -1=管理员封禁（与 data_cards 约定一致）
+CREATE TABLE IF NOT EXISTS decks (
+  id TEXT PRIMARY KEY NOT NULL,           -- UUID 字符串作为主键
+  user_id INTEGER NOT NULL,               -- 卡组所有者
+  name TEXT NOT NULL,                     -- 卡组名称
+  description TEXT,                       -- 描述（可选）
+  is_public BOOLEAN NOT NULL DEFAULT 0,   -- 0=私有, 1=公开, -1=封禁
+  like_count INTEGER DEFAULT 0,
+  favorite_count INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_decks_user_id ON decks(user_id);
+CREATE INDEX IF NOT EXISTS idx_decks_is_public ON decks(is_public);
+CREATE INDEX IF NOT EXISTS idx_decks_like_count ON decks(like_count);
+CREATE INDEX IF NOT EXISTS idx_decks_favorite_count ON decks(favorite_count);
+
+-- 卡组-数据卡关联表
+-- 注意：不对 data_cards 建立外键约束，以便在数据卡被硬删除后仍保留占位信息并允许卡组所有者一键清理
+CREATE TABLE IF NOT EXISTS deck_cards (
+  deck_id TEXT NOT NULL,
+  data_card_id TEXT NOT NULL,
+  card_name_snapshot TEXT,               -- 加入卡组时的名称快照（用于卡片不可访问/被删除时显示）
+  card_type_snapshot TEXT,               -- 'character' | 'scenario' 快照（用于不可访问时提示）
+  sort_order INTEGER NOT NULL DEFAULT 0, -- 卡组内排序
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (deck_id, data_card_id),
+  FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_deck_cards_deck_id ON deck_cards(deck_id);
+CREATE INDEX IF NOT EXISTS idx_deck_cards_sort_order ON deck_cards(deck_id, sort_order);
+
+-- 卡组收藏表（仅允许收藏公开卡组）
+CREATE TABLE IF NOT EXISTS deck_favorites (
+  user_id INTEGER NOT NULL,
+  deck_id TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, deck_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_deck_favorites_deck_id ON deck_favorites(deck_id);
+
 -- 兑换码表（用完即删除，无需记录历史）
 CREATE TABLE IF NOT EXISTS redemption_codes (
   code TEXT PRIMARY KEY NOT NULL,           -- 兑换码
