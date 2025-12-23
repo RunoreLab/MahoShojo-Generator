@@ -20,7 +20,13 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    await incrementDeckLike(deckId);
+    const ok = await incrementDeckLike(deckId);
+    if (!ok) {
+      return new Response(JSON.stringify({ success: false, error: '点赞失败（卡组不存在或不可点赞）' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
@@ -34,4 +40,3 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
-

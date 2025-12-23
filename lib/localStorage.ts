@@ -1,11 +1,17 @@
 // localStorage utilities for tracking likes and usage
 const STORAGE_KEYS = {
   LIKED_CARDS: 'mahoshojo_liked_cards',
+  LIKED_DECKS: 'mahoshojo_liked_decks',
   USED_CARDS: 'mahoshojo_used_cards'
 };
 
 export interface CardInteraction {
   cardId: string;
+  timestamp: number;
+}
+
+export interface DeckInteraction {
+  deckId: string;
   timestamp: number;
 }
 
@@ -43,6 +49,22 @@ export function getUsedCards(): Set<string> {
   return new Set();
 }
 
+export function getLikedDecks(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.LIKED_DECKS);
+    if (stored) {
+      const interactions: DeckInteraction[] = JSON.parse(stored);
+      return new Set(interactions.map(item => item.deckId));
+    }
+  } catch (error) {
+    console.error('Error reading liked decks from localStorage:', error);
+  }
+
+  return new Set();
+}
+
 // Add a card to liked list
 export function addLikedCard(cardId: string): boolean {
   if (typeof window === 'undefined') return false;
@@ -65,6 +87,31 @@ export function addLikedCard(cardId: string): boolean {
     return true;
   } catch (error) {
     console.error('Error adding liked card to localStorage:', error);
+    return false;
+  }
+}
+
+export function addLikedDeck(deckId: string): boolean {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const likedDecks = getLikedDecks();
+    if (likedDecks.has(deckId)) {
+      return false;
+    }
+
+    const stored = localStorage.getItem(STORAGE_KEYS.LIKED_DECKS);
+    const interactions: DeckInteraction[] = stored ? JSON.parse(stored) : [];
+
+    interactions.push({
+      deckId,
+      timestamp: Date.now()
+    });
+
+    localStorage.setItem(STORAGE_KEYS.LIKED_DECKS, JSON.stringify(interactions));
+    return true;
+  } catch (error) {
+    console.error('Error adding liked deck to localStorage:', error);
     return false;
   }
 }
@@ -99,6 +146,11 @@ export function addUsedCard(cardId: string): boolean {
 export function isCardLiked(cardId: string): boolean {
   const likedCards = getLikedCards();
   return likedCards.has(cardId);
+}
+
+export function isDeckLiked(deckId: string): boolean {
+  const likedDecks = getLikedDecks();
+  return likedDecks.has(deckId);
 }
 
 // Check if a card is used

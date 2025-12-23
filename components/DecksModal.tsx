@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { deckApi, deckFavoritesApi, deckStatsApi, dataCardApi } from '@/lib/auth';
+import { addLikedDeck, getLikedDecks } from '@/lib/localStorage';
 
 type DeckTab = 'my' | 'public' | 'favorites';
 
@@ -43,6 +44,7 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
   const [activeTab, setActiveTab] = useState<DeckTab>('my');
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [likedDeckIds, setLikedDeckIds] = useState<Set<string>>(new Set());
 
   const [myDecks, setMyDecks] = useState<DeckRow[]>([]);
   const [publicDecks, setPublicDecks] = useState<DeckRow[]>([]);
@@ -339,11 +341,32 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
 
   const likeDeck = useCallback(
     async (deckId: string) => {
+      const success = addLikedDeck(deckId);
+      if (!success) {
+        setLikedDeckIds((prev) => {
+          if (prev.has(deckId)) return prev;
+          const next = new Set(prev);
+          next.add(deckId);
+          return next;
+        });
+        return;
+      }
+
+      setLikedDeckIds((prev) => {
+        const next = new Set(prev);
+        next.add(deckId);
+        return next;
+      });
       setPublicDecks((prev) => prev.map((d) => (d.id === deckId ? { ...d, like_count: (d.like_count || 0) + 1 } : d)));
       try {
-        await deckStatsApi.like(deckId);
+        const ok = await deckStatsApi.like(deckId);
+        if (!ok) {
+          throw new Error('like deck failed');
+        }
       } catch {
-        // ignore
+        setPublicDecks((prev) =>
+          prev.map((d) => (d.id === deckId ? { ...d, like_count: Math.max(0, (d.like_count || 0) - 1) } : d))
+        );
       }
     },
     []
@@ -354,6 +377,7 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
     setLoading(true);
     void (async () => {
       try {
+        setLikedDeckIds(getLikedDecks());
         await Promise.all([refreshMyDecks(), refreshFavorites(), loadPublicDecks(true)]);
       } finally {
         setLoading(false);
@@ -738,9 +762,14 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                           <div className="flex items-center gap-2 mt-4 flex-wrap">
                             <button
                               onClick={() => void likeDeck(d.id)}
-                              className="px-3 py-1 text-sm bg-pink-600 text-white rounded-md hover:bg-pink-700"
+                              disabled={likedDeckIds.has(d.id)}
+                              className={`px-3 py-1 text-sm rounded-md ${
+                                likedDeckIds.has(d.id)
+                                  ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                  : 'bg-pink-600 text-white hover:bg-pink-700'
+                              }`}
                             >
-                              点赞 +1
+                              {likedDeckIds.has(d.id) ? '已点赞' : '点赞 +1'}
                             </button>
                             <button
                               onClick={() => void toggleFavorite(d)}

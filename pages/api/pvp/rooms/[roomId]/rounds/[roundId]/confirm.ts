@@ -19,6 +19,7 @@ import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { loadPresetCard } from '@/lib/pvp/preset';
 import { BUNDLED_PRESET_FILENAMES } from '@/lib/pvp/preset-bundled';
+import { getPvpFallbackDrawOrder } from '@/lib/pvp/drawSource';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
@@ -345,9 +346,11 @@ async function confirmHandler(req: Request): Promise<Response> {
     };
 
     const drawFallbackSnapshot = async (ownerUserId: number): Promise<PvpSnapshotRef | null> => {
-      if (rules.drawSource === 'preset') return await drawPresetSnapshot(ownerUserId);
-      if (rules.drawSource === 'preset+public') return (await drawPresetSnapshot(ownerUserId)) ?? (await drawPublicSnapshot(ownerUserId));
-      return await drawPublicSnapshot(ownerUserId);
+      for (const kind of getPvpFallbackDrawOrder(rules.drawSource)) {
+        const snap = kind === 'preset' ? await drawPresetSnapshot(ownerUserId) : await drawPublicSnapshot(ownerUserId);
+        if (snap) return snap;
+      }
+      return null;
     };
 
     const dealToHand = async (ownerUserId: number, hand: PvpHandState): Promise<PvpHandState> => {
