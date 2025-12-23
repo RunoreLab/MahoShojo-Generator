@@ -88,6 +88,7 @@ async function handler(req: NextRequest): Promise<Response> {
             scenarioSourceDataCardId,
             scenarioSourceDataCardUpdatedAt,
             pvpContext,
+            internalGuidance,
         } = body;
 
         snapshotMode = typeof mode === 'string' ? mode : 'classic';
@@ -112,6 +113,18 @@ async function handler(req: NextRequest): Promise<Response> {
         snapshotPvpMatchId = parsedPvpContext?.matchId ?? null;
         snapshotPvpRoundId = parsedPvpContext?.roundId ?? null;
         const isPvpRequest = Boolean(snapshotPvpMatchId && snapshotPvpRoundId);
+
+        const resolvedInternalGuidance = (() => {
+            if (!isPvpRequest) return null;
+            if (internalGuidance === null || internalGuidance === undefined) return null;
+            if (typeof internalGuidance !== 'string') return null;
+            const trimmed = internalGuidance.trim();
+            if (!trimmed) return null;
+            if (trimmed.length > 2000) {
+                return trimmed.slice(0, 2000);
+            }
+            return trimmed;
+        })();
 
         const writeFailedRecordIfNeeded = async (payload: { statusCode: number; message: string; stage: string }): Promise<Response> => {
             if (!isPvpRequest) {
@@ -284,6 +297,9 @@ async function handler(req: NextRequest): Promise<Response> {
         if (finalUserGuidance) {
             inputsToCheck.push({ type: 'userGuidance', content: finalUserGuidance, isNative: false });
         }
+        if (resolvedInternalGuidance) {
+            inputsToCheck.push({ type: 'userGuidance', content: resolvedInternalGuidance, isNative: false });
+        }
         // 检查情景模式下的情景文件内容
         if (scenario) {
             const isNative = await verifySignature(scenario);
@@ -410,6 +426,7 @@ async function handler(req: NextRequest): Promise<Response> {
             promptBuilder: createPromptBuilder(
                 questionnaire.questions,
                 finalUserGuidance,
+                resolvedInternalGuidance,
                 needsWorldviewWarning,
                 language,
                 selectedLevel,
@@ -447,7 +464,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
         // 异步更新数据库统计，不阻塞响应
         // 仅在写入历战记录时更新统计，避免污染数据
-        if (resolvedWriteArenaHistory) {
+        if (resolvedWriteArenaHistory && !isPvpRequest) {
             const updateStatsPromise = updateBattleStats(report.officialReport.winner, combatants);
             const executionContext = (req as any).context;
             if (executionContext?.waitUntil) {

@@ -241,6 +241,7 @@ async function handler(req: NextRequest): Promise<Response> {
             promptBuilder: createPromptBuilder(
                 questionnaire.questions,
                 finalUserGuidance,
+                null,
                 needsWorldviewWarning,
                 language,
                 selectedLevel,

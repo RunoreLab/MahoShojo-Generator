@@ -13,15 +13,20 @@ import Footer from '@/components/Footer';
 import { PresetGridPicker } from '@/components/PresetGridPicker';
 import { UserWithTitle } from '@/components/UserTitle';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
-import { usePresetQuery } from '@/components/arena/hooks/useArenaData';
+import { useLanguagesQuery, usePresetQuery } from '@/components/arena/hooks/useArenaData';
 import { PvpHeroBanner } from '@/components/pvp/PvpHeroBanner';
 import { PvpScoreboard } from '@/components/pvp/PvpScoreboard';
+import { PvpUpdatedCombatantsPanel } from '@/components/pvp/PvpUpdatedCombatantsPanel';
+import { AdjudicatorSettingsPanel } from '@/components/shared/AdjudicatorSettingsPanel';
+import { ArenaDataSettingsPanel } from '@/components/shared/ArenaDataSettingsPanel';
 import { BattleModeSelector } from '@/components/shared/BattleModeSelector';
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
+import { StoryOptionsPanel } from '@/components/shared/StoryOptionsPanel';
 import { authStorage } from '@/lib/auth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useCooldown } from '@/lib/cooldown';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { config as appConfig } from '@/lib/config';
 import { useAuth } from '@/lib/useAuth';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
@@ -62,6 +67,17 @@ const verifyOrigin = async (payload: any): Promise<boolean> => {
   if (!response.ok) return false;
   const { isValid } = await response.json();
   return Boolean(isValid);
+};
+
+const clonePvpRoomRules = (rules: PvpRoomRules): PvpRoomRules => {
+  try {
+    return JSON.parse(JSON.stringify(rules)) as PvpRoomRules;
+  } catch {
+    return {
+      ...rules,
+      adjudicationEvents: Array.isArray((rules as any).adjudicationEvents) ? ([...(rules as any).adjudicationEvents] as any) : [],
+    };
+  }
 };
 
 type ApiErrorPayload = {
@@ -228,6 +244,7 @@ export function PvpRoomPage() {
   }, [versionConflictRetryUntil]);
 
   const presetsQuery = usePresetQuery();
+  const languagesQuery = useLanguagesQuery();
 
   const joinMutation = useMutation({
     mutationFn: async (payload: { password?: string }) => {
@@ -353,7 +370,7 @@ export function PvpRoomPage() {
       setRulesDraft(null);
       return;
     }
-    if (!rulesDraft && rules) setRulesDraft(rules);
+    if (!rulesDraft && rules) setRulesDraft(clonePvpRoomRules(rules));
   }, [roomId, rules, rulesDraft]);
 
   useEffect(() => {
@@ -538,11 +555,40 @@ export function PvpRoomPage() {
       const maxRounds = Number.isFinite(rulesDraft.bestOf.maxRounds) ? Math.floor(rulesDraft.bestOf.maxRounds) : 0;
       if (maxRounds < 1 || maxRounds > 10) return '最多轮次需要在 1-10 之间';
     }
+
+    const userGuidance = typeof (rulesDraft as any).userGuidance === 'string' ? String((rulesDraft as any).userGuidance).trim() : '';
+    if (userGuidance.length > 50) return '故事引导不应超过 50 字';
+
+    const readArenaHistory = (rulesDraft as any).readArenaHistory === true;
+    const isArenaHistoryUnlimited = (rulesDraft as any).isArenaHistoryUnlimited === true;
+    const readArenaHistoryLimit = Number.isFinite((rulesDraft as any).readArenaHistoryLimit)
+      ? Math.floor(Number((rulesDraft as any).readArenaHistoryLimit))
+      : 0;
+    if (readArenaHistory && !isArenaHistoryUnlimited && (readArenaHistoryLimit < 1 || readArenaHistoryLimit > 999)) {
+      return '历战记录读取条数需要在 1-999 之间';
+    }
+
+    const selectedLevel = typeof (rulesDraft as any).selectedLevel === 'string' ? String((rulesDraft as any).selectedLevel).trim() : '';
+    if (selectedLevel && !['种级', '芽级', '叶级', '蕾级', '花级'].includes(selectedLevel)) {
+      return '等级不合法（需为 种级/芽级/叶级/蕾级/花级 或留空）';
+    }
+
+    const storyLength = typeof (rulesDraft as any).storyLength === 'string' ? String((rulesDraft as any).storyLength).trim() : 'default';
+    if (!['default', 'short', 'standard', 'detailed', 'long'].includes(storyLength)) {
+      return '期望字数设置不合法';
+    }
+
+    const language = typeof (rulesDraft as any).language === 'string' ? String((rulesDraft as any).language).trim() : '';
+    if (language.length > 32) return '生成语言不合法（过长）';
+
+    const adjudicationEvents = Array.isArray((rulesDraft as any).adjudicationEvents) ? (rulesDraft as any).adjudicationEvents : [];
+    if (adjudicationEvents.length > 50) return '随机判定器事件过多（最多 50 条根事件）';
+
     return null;
   }, [rulesDraft]);
 
   const resetRulesDraftFromRoom = () => {
-    if (rules) setRulesDraft(rules);
+    if (rules) setRulesDraft(clonePvpRoomRules(rules));
   };
 
   const saveRulesDraft = async () => {
@@ -1516,6 +1562,11 @@ export function PvpRoomPage() {
                         规则：人数 {rules.participants} / 提交 {rules.cardsPerPlayer} / 初始手牌 {rules.dealPerPlayer} / 空手补发 {rules.dealWhenEmpty} / 抽取来源 {rules.drawSource ?? 'public'} / 复用弃牌 {String(rules.recycleUsedCards)} / 去重 {String(rules.dedupe)} / 展示提交 {String(rules.showAllSubmissions)} / 洗混 {String(rules.shuffleDecks)} / 模式 {rules.mode}
                       </div>
                     )}
+                    {rules && (
+                      <div className="mt-1 text-xs text-gray-600 whitespace-pre-wrap">
+                        生成设置：历战 读 {String(rules.readArenaHistory)} / 写 {String(rules.writeArenaHistory)}；状态 读 {String(rules.readCurrentState)} / 写 {String(rules.writeCurrentState)}；等级 {rules.selectedLevel || '默认'}；引导 {rules.userGuidance?.trim() ? `“${rules.userGuidance.trim()}”` : '无'}；字数 {rules.storyLength || 'default'}；语言 {rules.language?.trim() || '默认'}
+                      </div>
+                    )}
                     {rules?.bestOf?.enabled && latestRound ? (
                       <div className="mt-1 text-xs text-gray-600">
                         当前回合：{latestRound.index}/{rules.bestOf.maxRounds}
@@ -1918,6 +1969,65 @@ export function PvpRoomPage() {
                           </div>
                         </div>
 
+                        <div className="mt-4 border-t pt-3">
+                          <div className="font-semibold text-sm mb-1">对局生成设置（全员一致）</div>
+                          <div className="text-xs text-gray-600">
+                            这些设置由房主统一保存，并在本房间的整个对局中保持一致；开始对局后不可修改。
+                          </div>
+
+                          <div className="mt-3">
+                            <ArenaDataSettingsPanel
+                              value={{
+                                readArenaHistory: rulesDraft.readArenaHistory,
+                                readArenaHistoryLimit: rulesDraft.readArenaHistoryLimit,
+                                isArenaHistoryUnlimited: rulesDraft.isArenaHistoryUnlimited,
+                                writeArenaHistory: rulesDraft.writeArenaHistory,
+                                readCurrentState: rulesDraft.readCurrentState,
+                                writeCurrentState: rulesDraft.writeCurrentState,
+                              }}
+                              onChange={(patch) => setRulesDraft((r) => (r ? { ...r, ...patch } : r))}
+                              disabled={rulesMutation.isPending}
+                              combatantCountForEstimate={rulesDraft.participants}
+                              footerNote={
+                                <p className="text-xs text-gray-500 mt-2">
+                                  提示：在 PVP 中开启“写入”只会生成可展示的更新摘要，不会自动保存/覆盖任何角色数据卡。
+                                </p>
+                              }
+                            />
+                          </div>
+
+                          <div className="mt-3">
+                            <StoryOptionsPanel
+                              battleMode={rulesDraft.mode}
+                              isGenerating={rulesMutation.isPending}
+                              enableUserGuidance={appConfig.ENABLE_ARENA_USER_GUIDANCE}
+                              languages={languagesQuery.data}
+                              allowEmptyLanguage={true}
+                              selectedLevel={rulesDraft.selectedLevel}
+                              onSelectedLevelChange={(value) => setRulesDraft((r) => (r ? { ...r, selectedLevel: value } : r))}
+                              userGuidance={rulesDraft.userGuidance}
+                              onUserGuidanceChange={(value) => setRulesDraft((r) => (r ? { ...r, userGuidance: value } : r))}
+                              afterUserGuidance={
+                                <div className="text-xs text-gray-500 mt-1">
+                                  说明：PVP 还会自动附加“裁判规则”提示词来约束 winner 输出，该部分不会显示在战报的“故事引导”区块中。
+                                </div>
+                              }
+                              storyLength={rulesDraft.storyLength as any}
+                              onStoryLengthChange={(value) => setRulesDraft((r) => (r ? { ...r, storyLength: value as any } : r))}
+                              selectedLanguage={rulesDraft.language}
+                              onSelectedLanguageChange={(value) => setRulesDraft((r) => (r ? { ...r, language: value } : r))}
+                            />
+                          </div>
+
+                          <div className="mt-3">
+                            <AdjudicatorSettingsPanel
+                              events={Array.isArray(rulesDraft.adjudicationEvents) ? rulesDraft.adjudicationEvents : []}
+                              onEventsChange={(events) => setRulesDraft((r) => (r ? { ...r, adjudicationEvents: events } : r))}
+                              disabled={rulesMutation.isPending}
+                            />
+                          </div>
+                        </div>
+
                         <div className="text-xs text-gray-500 mt-2">提示：修改“每人提交”会清空已提交卡组。</div>
                         {rulesDraftError ? (
                           <div className="text-xs text-red-600 mt-2 whitespace-pre-wrap">规则不合法：{rulesDraftError}</div>
@@ -1930,7 +2040,7 @@ export function PvpRoomPage() {
                             onClick={() => void saveRulesDraft()}
                             disabled={rulesMutation.isPending || Boolean(rulesDraftError)}
                           >
-                            {rulesMutation.isPending ? '保存中…' : '保存规则'}
+                            {rulesMutation.isPending ? '保存中…' : '保存设置'}
                           </button>
                           <button
                             className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm disabled:opacity-50"
@@ -2301,6 +2411,15 @@ export function PvpRoomPage() {
                     <div className="text-sm text-gray-700 mt-2">
                       本轮胜者：<span className="font-semibold">{latestWinnerText || '平局'}</span>
                     </div>
+                    {(rules?.writeArenaHistory || rules?.writeCurrentState) && (
+                      <PvpUpdatedCombatantsPanel
+                        updatedCombatants={
+                          Array.isArray((latestRoundResult as any)?.updatedCombatants)
+                            ? ((latestRoundResult as any).updatedCombatants as any[])
+                            : []
+                        }
+                      />
+                    )}
                   </div>
                 )}
 

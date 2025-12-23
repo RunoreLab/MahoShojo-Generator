@@ -1,3 +1,5 @@
+import type { AdjudicatorEvent } from '@/types/arena';
+
 export type PvpCardKind = 'data_card' | 'preset' | 'snapshot';
 
 export interface PvpDataCardRef {
@@ -26,6 +28,8 @@ export type PvpWinCondition = 'mostWinsAfterMaxRounds';
 export type PvpTieBreaker = 'draw';
 
 export type PvpDrawSource = 'public' | 'preset' | 'preset+public';
+
+export type PvpStoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 
 export interface PvpBestOfRules {
   enabled: boolean;
@@ -64,6 +68,26 @@ export interface PvpRoomRules {
    * 兼容旧房间：若缺失则视为 true。
    */
   allowSpectators?: boolean;
+
+  /** 资料读写策略（与竞技场对齐；默认全关）。 */
+  readArenaHistory: boolean;
+  readArenaHistoryLimit: number;
+  isArenaHistoryUnlimited: boolean;
+  writeArenaHistory: boolean;
+  readCurrentState: boolean;
+  writeCurrentState: boolean;
+
+  /** 故事生成设置（与竞技场对齐；默认不指定/留空）。 */
+  selectedLevel: string;
+  userGuidance: string;
+  storyLength: PvpStoryLengthOption;
+  /**
+   * 生成语言：留空表示“不指定”，由生成端使用默认值（当前为 zh-CN）。
+   */
+  language: string;
+
+  /** 随机判定器（与竞技场对齐；默认空数组）。 */
+  adjudicationEvents: AdjudicatorEvent[];
 }
 
 export interface PvpSubmittedCard {
