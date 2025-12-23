@@ -91,10 +91,10 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
       )}
 
       {generationMode === 'stream' ? (
-        streamingMarkdown ? (
+        isGenerating || streamingMarkdown !== null ? (
           <div className="mt-6">
             <StreamingBattleReportCard
-              content={streamingMarkdown}
+              content={streamingMarkdown ?? ''}
               onSaveImage={onSaveImage}
               mode={battleMode}
               scenarioName={battleMode === 'scenario' ? scenario.fileName ?? undefined : undefined}

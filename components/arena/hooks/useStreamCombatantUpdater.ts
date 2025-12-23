@@ -37,8 +37,9 @@ const parseMarkdownReport = (markdown: string, mode: string): { headline: string
     const normalized = markdown.replace(/\r\n/g, '\n');
     const lines = normalized.split('\n');
 
-    // 提取第一个一级标题作为 headline（兼容 "#标题" / "# 标题"）
-    const headlineMatch = normalized.match(/^#\s*(.+)$/m);
+    // 提取第一个标题作为 headline（兼容 "#标题" / "# 标题" / "## 标题"）
+    // 说明：流式输出偶尔会出现标题层级偏移（例如误输出为 ##），这里做容错以提升可用性。
+    const headlineMatch = normalized.match(/^#{1,3}\s*(.+)$/m);
     const headline = headlineMatch?.[1]?.trim() || '魔法少女速报';
 
     const stripMarkdown = (text: string): string =>
@@ -104,9 +105,9 @@ const getValidatedMarkdownReport = (
   mode: string
 ): { headline: string; winner: string } | null => {
   const trimmed = markdown.trim();
-  if (!trimmed || trimmed === '#') return null;
+  if (!trimmed) return null;
   if (trimmed.length < 120) return null;
-  if (!/^#{2,6}\s+/m.test(markdown)) return null;
+  if (!/^#{2,6}\s*/m.test(markdown)) return null;
 
   const parsed = parseMarkdownReport(markdown, mode);
   if (!parsed) return null;
