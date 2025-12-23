@@ -396,7 +396,8 @@ export const createStreamPromptBuilder = (
     // 流式生成的关键：要求输出 Markdown 格式的战报
     finalPrompt += `\n\n【输出格式】\n请以 Markdown 格式输出战报，请严格按照格式输出，不要携带任何其他内容：\n` +
         `- 输出第 1 行必须从第 1 个字符开始就是 "# "（不要有任何前置空格、不要多输出额外的 # 号）。\n` +
-        `- 不要输出 JSON/YAML/代码块，也不要输出任何字段名（例如 winner/impact/currentStateSummary）。\n\n` +
+        `- 正文部分不要输出 JSON/YAML/代码块，也不要输出任何字段名（例如 winner/impact/currentStateSummary）。\n` +
+        `  （仅允许在最后一行的 HTML 注释元数据中出现 JSON 与字段名，供系统解析更新用。）\n\n` +
         `# 故事 / 战报标题\n` +
         `随后紧跟故事或者战报的正文，用段落呈现，保持流畅性和可读性\n` +
         `## 胜利者\n` +
@@ -424,14 +425,15 @@ export const createStreamPromptBuilder = (
             `要求：\n` +
             `- 注释必须以 "<!-- MAHOSHOJO_ARENA_META " 开头，以 " -->" 结尾。\n` +
             `- JSON 必须是一个对象，包含 version=1 以及 impacts 数组。\n` +
+            `- JSON 中请额外包含 report 对象：report.headline 与 report.winner（与正文标题/胜利者保持一致），用于兜底解析。\n` +
             `- impacts 必须覆盖每一位参战角色；每个元素字段要求：${requiredFields}。\n` +
             `- 除注释外不要输出任何额外文本。\n\n` +
             `示例（仅示例，不要照抄名字）：\n` +
-            `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\",\"currentStateSummary\":\"……\"}]} -->`;
+            `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"},\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\",\"currentStateSummary\":\"……\"}]} -->`;
     } else {
         finalPrompt += `\n\n【角色更新元数据（可选）】\n` +
             `如果你愿意提高角色更新成功率，可以在全文最后一行追加一段 HTML 注释（不会显示给用户），内容为 JSON：\n` +
-            `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\"}]} -->\n` +
+            `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"},\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\"}]} -->\n` +
             `除注释外不要输出任何额外文本。`;
     }
 

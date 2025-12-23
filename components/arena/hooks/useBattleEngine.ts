@@ -570,7 +570,7 @@ export const useBattleEngine = () => {
           const trimmedForValidation = markdownForUi.trim();
           const hasMetaImpacts = Boolean(metaOverride?.impacts?.length);
           const looksLikeCompleteReport = hasMetaImpacts
-            ? trimmedForValidation.length > 0
+            ? true
             : trimmedForValidation.length >= 120 && /^#{2,6}\s*/m.test(trimmedForValidation);
 
           // 与非流式保持一致：生成失败/中断时不进入冷却，并优先展示“生成失败”而不是“角色更新失败”。
@@ -591,6 +591,10 @@ export const useBattleEngine = () => {
               }
             }
             return;
+          }
+
+          if (hasMetaImpacts && !trimmedForValidation) {
+            setError('⚠️ 战报正文为空，但检测到角色更新元数据，已尝试继续更新角色数据。');
           }
 
           startCooldown();
