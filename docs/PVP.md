@@ -287,6 +287,7 @@ CREATE INDEX IF NOT EXISTS idx_pvp_rooms_updated_at ON pvp_rooms(updated_at);
 CREATE TABLE IF NOT EXISTS pvp_room_players (
   room_id TEXT NOT NULL,
   user_id INTEGER NOT NULL,
+  role TEXT NOT NULL DEFAULT 'player', -- player / spectator
   seat INTEGER,
   joined_at TEXT NOT NULL,
   PRIMARY KEY (room_id, user_id)
@@ -399,7 +400,7 @@ CREATE INDEX IF NOT EXISTS idx_pvp_round_choices_round_id ON pvp_round_choices(r
 - 未登录：不可创建/加入/查看房间详情（可选：允许只读观战，但 MVP 建议不开放）
 - 房间玩家：可看公开区；仅自己可看手牌与自己选择
 - 房主：拥有 `start/close/kick` 等管理权（MVP 最少需要 `start`）
-- 观战者（后续）：可看公开区与战报，但不可看任何手牌/选择
+- 观战者：可看公开区与战报，但不可看任何手牌/选择；不可提交/出牌/确认；在 `waiting/submitting` 且有空位时可切换为玩家（玩家也可切回观众）
 
 ---
 
@@ -416,6 +417,7 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - `POST /api/pvp/rooms/:roomId/password`：房主设置/清空房间口令（可选，MVP 可延后）
 - `POST /api/pvp/rooms/:roomId/leave`：离开房间（房主离开会关闭房间；非房主在 `submitting/choosing/reviewing` 离开会触发“托管机器人接管”）
 - `POST /api/pvp/rooms/:roomId/kick`：房主踢人（`submitting/choosing/reviewing` 默认同样走“托管机器人接管”）
+- `POST /api/pvp/rooms/:roomId/role`：切换身份（`player/spectator`；默认入房为观众；仅 `waiting/submitting` 可切换）
 - `POST /api/pvp/rooms/:roomId/force`：房主强制随机操作（最后一位未操作玩家的 `submit/choose/confirm`）
 - `POST /api/pvp/rooms/:roomId/submit`：提交卡组
 - `POST /api/pvp/rooms/:roomId/start`：房主开始（锁定提交 → 发牌 → 进入 choosing）
@@ -423,6 +425,7 @@ MVP 建议“必须登录才能玩”，以降低刷房/恶意占位成本。
 - `POST /api/pvp/rooms/:roomId/rounds/:roundId/choose`：提交本轮选择（不对他人暴露）
 - `POST /api/pvp/rooms/:roomId/rounds/:roundId/resolve`：房主或系统触发结算（也可由服务端检测“双方已选”自动触发）
 - `POST /api/pvp/rooms/:roomId/rounds/:roundId/confirm`：确认已阅读本轮战报（全员确认后才推进下一回合或结束）
+- `POST /api/pvp/rooms/:roomId/permissions`：房主设置：允许非房主结算 / 开启观战
 
 ### 7.1 请求/响应约定（建议，便于前后端对齐）
 

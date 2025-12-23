@@ -302,6 +302,7 @@ CREATE INDEX IF NOT EXISTS idx_pvp_rooms_current_match_id ON pvp_rooms(current_m
 CREATE TABLE IF NOT EXISTS pvp_room_players (
   room_id TEXT NOT NULL,
   user_id INTEGER NOT NULL,
+  role TEXT NOT NULL DEFAULT 'player', -- player / spectator
   seat INTEGER,
   joined_at TEXT NOT NULL,
   PRIMARY KEY (room_id, user_id),

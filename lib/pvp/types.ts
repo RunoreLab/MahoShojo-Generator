@@ -59,6 +59,11 @@ export interface PvpRoomRules {
    * 兼容旧房间：若缺失则视为 false。
    */
   allowNonHostControl?: boolean;
+  /**
+   * 是否开启观战（默认 true）。
+   * 兼容旧房间：若缺失则视为 true。
+   */
+  allowSpectators?: boolean;
 }
 
 export interface PvpSubmittedCard {

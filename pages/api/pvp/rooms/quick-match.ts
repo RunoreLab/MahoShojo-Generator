@@ -1,4 +1,12 @@
-import { addPvpRoomPlayer, createPvpRoom, getPvpRoomBrowseRows, getPvpRoomPlayers, updatePvpRoomCas } from '@/lib/d1';
+import {
+  addPvpRoomPlayer,
+  createPvpRoom,
+  getPvpRoomBrowseRows,
+  getPvpRoomMembers,
+  getPvpRoomPlayers,
+  updatePvpRoomCas,
+  updatePvpRoomMember,
+} from '@/lib/d1';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { PVP_ROOM_TTL_MS } from '@/lib/pvp/constants';
 import { DEFAULT_PVP_RULES } from '@/lib/pvp/defaults';
@@ -44,15 +52,23 @@ async function quickMatchHandler(req: Request): Promise<Response> {
     const humans = Number.isFinite(room.player_count) ? Math.max(0, Math.floor(room.player_count)) : 0;
     if (humans + bots.length >= maxPlayers) continue;
 
-    const players = await getPvpRoomPlayers(room.id);
-    const alreadyJoined = players.some((p) => p.user_id === auth.user.id);
-    if (alreadyJoined) {
+    const members = await getPvpRoomMembers(room.id);
+    const myMember = members.find((p) => p.user_id === auth.user.id) ?? null;
+    if (myMember && myMember.role === 'player') {
       return json({ success: true, roomId: room.id, joinedExisting: true, created: false, alreadyJoined: true });
     }
 
+    const players = await getPvpRoomPlayers(room.id);
+
     const seat = pickSeat([...players.map((p) => p.seat), ...bots.map((b) => b.seat)], maxPlayers);
-    const ok = await addPvpRoomPlayer(room.id, auth.user.id, seat);
-    if (!ok) continue;
+    if (seat === null) continue;
+    if (myMember && myMember.role === 'spectator') {
+      const updated = await updatePvpRoomMember({ roomId: room.id, userId: auth.user.id, role: 'player', seat });
+      if (!updated) continue;
+    } else {
+      const ok = await addPvpRoomPlayer(room.id, auth.user.id, seat);
+      if (!ok) continue;
+    }
 
     const now = new Date().toISOString();
     const nextPlayers = await getPvpRoomPlayers(room.id);
@@ -79,4 +95,3 @@ async function quickMatchHandler(req: Request): Promise<Response> {
 }
 
 export default withPvpErrorBoundary(quickMatchHandler);
-

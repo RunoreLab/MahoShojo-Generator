@@ -142,6 +142,13 @@ type PvpRoomPlayerView = {
   botId?: string | null;
 };
 
+type PvpRoomSpectatorView = {
+  userId: number;
+  username: string;
+  prefix?: string | null;
+  badges?: UserBadge[];
+};
+
 export function PvpRoomPage() {
   const router = useRouter();
   const { user, isAuthenticated, loading } = useAuth();
@@ -298,10 +305,21 @@ export function PvpRoomPage() {
   const phase: string = room?.phase || 'unknown';
   const version: number = room?.version ?? 0;
   const lastActivityAt: string | null = typeof room?.lastActivityAt === 'string' ? room.lastActivityAt : null;
-  const canSeeAllSubmissionDetails = canViewOtherSubmissions(phase, rules?.showAllSubmissions === true);
+  const viewer = (roomQuery.data as any)?.viewer ?? null;
+  const viewerRole: 'player' | 'spectator' = viewer?.role === 'spectator' ? 'spectator' : 'player';
+  const isSpectator = viewerRole === 'spectator';
+  const canSwitchToPlayer = viewer?.canSwitchToPlayer === true;
+  const canSwitchToSpectator = viewer?.canSwitchToSpectator === true;
+
+  const canSeeAllSubmissionDetails = !isSpectator && canViewOtherSubmissions(phase, rules?.showAllSubmissions === true);
   const players = useMemo<PvpRoomPlayerView[]>(() => (Array.isArray(roomQuery.data?.players) ? (roomQuery.data.players as PvpRoomPlayerView[]) : []), [roomQuery.data?.players]);
+  const spectators = useMemo<PvpRoomSpectatorView[]>(
+    () => (Array.isArray((roomQuery.data as any)?.spectators) ? (((roomQuery.data as any).spectators) as PvpRoomSpectatorView[]) : []),
+    [roomQuery.data]
+  );
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
   const allowNonHostControl = rules?.allowNonHostControl === true;
+  const allowSpectators = rules?.allowSpectators !== false;
   const canControlResolve = isHost || allowNonHostControl;
 
   const flashCopied = (key: 'id' | 'link') => {
@@ -583,8 +601,8 @@ export function PvpRoomPage() {
       .filter((c) => Boolean(c.snapshotId));
   }, [myHand?.cards]);
 
-  const isHandDealing = phase === 'choosing' && myHand === null;
-  const canOpenHand = !isHandDealing && myHandCards.length > 0;
+  const isHandDealing = !isSpectator && phase === 'choosing' && myHand === null;
+  const canOpenHand = !isSpectator && !isHandDealing && myHandCards.length > 0;
 
   const hasPrivateSelected = useMemo(() => selected.some((c) => c.kind === 'data_card' && c.isPublic === false), [selected]);
   const selectedPresetFilenames = useMemo(
@@ -622,6 +640,31 @@ export function PvpRoomPage() {
     onSuccess: async () => {
       await router.push('/pvp');
     },
+  });
+
+  const roleMutation = useMutation({
+    mutationFn: async (role: 'player' | 'spectator') => {
+      const authHeader = await authStorage.getAuthHeader();
+      if (!authHeader) throw new Error('未登录');
+      const res = await fetch(`/api/pvp/rooms/${roomId}/role`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({ expectedVersion: version, role }),
+      });
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) {
+        const payload = (data || {}) as ApiErrorPayload;
+        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+          status: res.status,
+          code: payload.code,
+          traceId: payload.traceId,
+          detail: payload.detail,
+        });
+      }
+      return data;
+    },
+    onSuccess: () => void roomQuery.refetch(),
+    onError: (e) => handlePvpRequestError(e, '切换身份失败'),
   });
 
   const submitMutation = useMutation({
@@ -793,13 +836,13 @@ export function PvpRoomPage() {
   });
 
   const permissionsMutation = useMutation({
-    mutationFn: async (allow: boolean) => {
+    mutationFn: async (payload: { allowNonHostControl?: boolean; allowSpectators?: boolean }) => {
       const authHeader = await authStorage.getAuthHeader();
       if (!authHeader) throw new Error('未登录');
       const res = await fetch(`/api/pvp/rooms/${roomId}/permissions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ expectedVersion: version, allowNonHostControl: allow }),
+        body: JSON.stringify({ expectedVersion: version, ...payload }),
       });
       const { data } = await readJsonOrText(res);
       if (!res.ok) {
@@ -1437,6 +1480,32 @@ export function PvpRoomPage() {
                       <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">阶段：{phase}</span>
                     </div>
                     <div className="mt-2 text-gray-700">版本：{version}</div>
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <div className="text-gray-700">我的身份：{isSpectator ? '观众' : '玩家'}</div>
+                      {!isHost ? (
+                        isSpectator ? (
+                          <button
+                            className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => roleMutation.mutate('player')}
+                            disabled={!canSwitchToPlayer || roleMutation.isPending}
+                            title={!canSwitchToPlayer ? '房间已满或当前阶段不允许' : '加入为玩家'}
+                          >
+                            {roleMutation.isPending ? '切换中…' : '成为玩家'}
+                          </button>
+                        ) : (
+                          <button
+                            className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => roleMutation.mutate('spectator')}
+                            disabled={!canSwitchToSpectator || roleMutation.isPending}
+                            title={!canSwitchToSpectator ? '当前阶段不允许或房主不可切换' : '转为观众'}
+                          >
+                            {roleMutation.isPending ? '切换中…' : '转为观众'}
+                          </button>
+                        )
+                      ) : (
+                        <span className="text-xs text-gray-500">房主固定为玩家</span>
+                      )}
+                    </div>
                     {lastActivityAt ? (
                       <div className="mt-1 text-xs text-gray-600">
                         最后活动：{new Date(lastActivityAt).toLocaleString()}
@@ -1452,7 +1521,7 @@ export function PvpRoomPage() {
                         当前回合：{latestRound.index}/{rules.bestOf.maxRounds}
                       </div>
                     ) : null}
-                    {phase === 'choosing' ? (
+                    {phase === 'choosing' && !isSpectator ? (
                       <div className="mt-1 text-xs text-gray-600">
                         我的手牌：{myHandCards.length} 张；弃牌：{Array.isArray(myHand?.discarded) ? myHand?.discarded.length : 0} 张
                       </div>
@@ -1464,7 +1533,9 @@ export function PvpRoomPage() {
                   <div className="p-4 rounded-xl bg-white border text-sm">
                     <div className="flex items-center justify-between gap-3">
                       <div className="font-semibold text-gray-900">玩家</div>
-                      <div className="text-xs text-gray-500">共 {players.length} 人</div>
+                      <div className="text-xs text-gray-500">
+                        {players.length} / {rules?.participants ?? players.length} 玩家；{spectators.length} 观众
+                      </div>
                     </div>
                     <div className="mt-3 space-y-2">
                       {players.map((p) => (
@@ -1520,6 +1591,41 @@ export function PvpRoomPage() {
                         </div>
                       ))}
                     </div>
+                    {spectators.length > 0 ? (
+                      <div className="mt-4 border-t pt-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="font-semibold text-gray-900">观众</div>
+                          <div className="text-xs text-gray-500">共 {spectators.length} 人</div>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          {spectators.map((s) => (
+                            <div key={s.userId} className="rounded-lg border bg-gray-50 p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <UserWithTitle
+                                    username={s.username || `用户${s.userId}`}
+                                    prefix={s.prefix}
+                                    badges={Array.isArray(s.badges) ? s.badges : []}
+                                    showBadges={true}
+                                    usernameClassName="font-semibold text-gray-900"
+                                    titleClassName="text-xs"
+                                  />
+                                </div>
+                                {isHost && s.userId !== room.hostUserId ? (
+                                  <button
+                                    className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs disabled:opacity-50"
+                                    onClick={() => kickMutation.mutate(s.userId)}
+                                    disabled={kickMutation.isPending}
+                                  >
+                                    踢出
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     <button
                       className="generate-button mt-3 w-full"
                       style={{ backgroundColor: '#ef4444', backgroundImage: 'linear-gradient(to right, #ef4444, #dc2626)' }}
@@ -1607,12 +1713,25 @@ export function PvpRoomPage() {
                         <input
                           type="checkbox"
                           checked={allowNonHostControl}
-                          onChange={(e) => permissionsMutation.mutate(e.target.checked)}
+                          onChange={(e) => permissionsMutation.mutate({ allowNonHostControl: e.target.checked })}
                           disabled={permissionsMutation.isPending}
                         />
                         <span>允许其他玩家调整 AI 设置并结算</span>
                       </label>
                       <div className="text-xs text-gray-500 mt-1">默认关闭更安全；开启后任意玩家可结算并使用其选择的 AI 设置。</div>
+                    </div>
+
+                    <div className={(phase === 'waiting' || phase === 'submitting') ? 'mt-3' : ''}>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={allowSpectators}
+                          onChange={(e) => permissionsMutation.mutate({ allowSpectators: e.target.checked })}
+                          disabled={permissionsMutation.isPending}
+                        />
+                        <span>开启观战（新进房间默认观众）</span>
+                      </label>
+                      <div className="text-xs text-gray-500 mt-1">关闭后：非玩家将无法进入房间；已在房间内的观众不会被自动踢出。</div>
                     </div>
 
                     {(phase === 'waiting' || phase === 'submitting') && rulesDraft ? (
@@ -1848,7 +1967,7 @@ export function PvpRoomPage() {
                   </div>
                 )}
 
-                {phase === 'submitting' && rules && (
+                {phase === 'submitting' && rules && !isSpectator && (
                   <div className="mt-4">
                     <div className="p-3 rounded-md bg-white border">
                       <div className="flex items-start justify-between gap-3">
@@ -2044,7 +2163,7 @@ export function PvpRoomPage() {
                   </div>
                 )}
 
-                {phase === 'choosing' && (
+                {phase === 'choosing' && !isSpectator && (
                   <div className="mt-4">
                     <div className="p-4 rounded-xl bg-white border">
                       <div className="flex items-start justify-between gap-3">
@@ -2141,6 +2260,18 @@ export function PvpRoomPage() {
                   </div>
                 )}
 
+                {phase === 'choosing' && isSpectator && (
+                  <div className="mt-4">
+                    <div className="p-4 rounded-xl bg-white border">
+                      <div className="font-semibold text-sm text-gray-900">观战中</div>
+                      <div className="text-sm text-gray-700 mt-2">
+                        已选人数：{choices?.chosenCount ?? 0} / {choices?.totalPlayers ?? players.length}
+                      </div>
+                      <div className="text-xs text-gray-600 mt-2">提示：观战视角不会展示任何玩家手牌或出牌选择。</div>
+                    </div>
+                  </div>
+                )}
+
                 <BattleDataModal
                   isOpen={showHandModal}
                   onClose={() => setShowHandModal(false)}
@@ -2173,7 +2304,7 @@ export function PvpRoomPage() {
                   </div>
                 )}
 
-                {phase === 'reviewing' && latestRound ? (
+                {phase === 'reviewing' && latestRound && !isSpectator ? (
                   <div className="p-3 rounded-md bg-white border mt-4 text-sm">
                     <div className="font-semibold mb-1">等待全员确认</div>
                     <div className="text-gray-700">
@@ -2212,6 +2343,12 @@ export function PvpRoomPage() {
                     <div className="text-xs text-gray-500 mt-2">
                       提示：所有玩家确认后才会进入下一回合或结束对局。
                     </div>
+                  </div>
+                ) : phase === 'reviewing' && isSpectator ? (
+                  <div className="p-3 rounded-md bg-white border mt-4 text-sm">
+                    <div className="font-semibold mb-1">观战中：等待玩家确认</div>
+                    <div className="text-gray-700">战报已生成，等待玩家确认后将推进下一回合/结束对局。</div>
+                    <div className="text-xs text-gray-500 mt-2">提示：只有玩家需要点击“确认已阅读”。</div>
                   </div>
                 ) : null}
 

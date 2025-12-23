@@ -5,6 +5,7 @@ import {
   getLatestPvpRoundByMatch,
   getPvpRoomById,
   getPvpRoomHands,
+  getPvpRoomMembers,
   getPvpRoomPlayers,
   getPvpRoomSubmissions,
   getPvpRoundChoices,
@@ -82,16 +83,26 @@ async function leaveHandler(req: Request): Promise<Response> {
   if (expectedVersion === null) return json({ error: '缺少 expectedVersion' }, { status: 400 });
   if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
 
+  const members = await getPvpRoomMembers(roomId);
+  const leavingMember = members.find((p) => p.user_id === auth.user.id) ?? null;
+  if (!leavingMember) return json({ error: '你不在该房间中' }, { status: 403 });
+
   const players = await getPvpRoomPlayers(roomId);
   const leavingPlayer = players.find((p) => p.user_id === auth.user.id) ?? null;
-  if (!leavingPlayer) {
-    return json({ error: '你不在该房间中' }, { status: 403 });
-  }
 
   const now = new Date().toISOString();
   const isHostLeaving = room.host_user_id === auth.user.id;
   const canReplaceWithBot = room.phase === 'submitting' || room.phase === 'choosing' || room.phase === 'reviewing';
   const isBusyPhase = room.phase === 'dealing' || room.phase === 'advancing' || room.phase === 'resolving';
+
+  if (!leavingPlayer) {
+    const ok = await updatePvpRoomCas(roomId, expectedVersion, { last_activity_at: now });
+    if (!ok) return json({ error: '离开房间失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
+    await removePvpRoomPlayer(roomId, auth.user.id);
+    await deletePvpRoomSubmission(roomId, auth.user.id);
+    await deletePvpRoomHand(roomId, auth.user.id);
+    return json({ success: true, role: leavingMember.role });
+  }
 
   if (isBusyPhase) {
     return json({ error: '房间正在推进/结算中，请稍后再退出', code: 'PHASE_BUSY' }, { status: 409 });

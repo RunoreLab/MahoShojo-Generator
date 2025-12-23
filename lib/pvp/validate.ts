@@ -56,6 +56,9 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const allowNonHostControl =
     typeof raw.allowNonHostControl === 'boolean' ? raw.allowNonHostControl : DEFAULT_PVP_RULES.allowNonHostControl;
 
+  const allowSpectators =
+    typeof raw.allowSpectators === 'boolean' ? raw.allowSpectators : DEFAULT_PVP_RULES.allowSpectators;
+
   const rules: PvpRoomRules = {
     participants: participantCount,
     cardsPerPlayer,
@@ -69,6 +72,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     mode,
     bestOf: { enabled, maxRounds, winCondition, tieBreaker },
     allowNonHostControl,
+    allowSpectators,
   };
 
   return { rules };
