@@ -37,7 +37,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 }) => {
     const cardRef = useRef<HTMLDivElement>(null);
     const [isSavingImage, setIsSavingImage] = useState(false);
-    const headlineMatch = content.match(/^\s*#\s*(.*)(?:\r?\n|$)/);
+    const headlineMatch = content.match(/^\s*#{1,3}\s*(.*)(?:\r?\n|$)/);
     const headline = headlineMatch ? headlineMatch[1].trim() : '';
     const markdownBody = headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content;
 
@@ -71,7 +71,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
         const insertMetaAfterTitle = (raw: string): string => {
             if (!metaBlock) return raw;
-            const match = raw.match(/^\s*#\s*.*(?:\r?\n|$)/);
+            const match = raw.match(/^\s*#{1,3}\s*.*(?:\r?\n|$)/);
             if (!match) {
                 return `# 战斗战报\n${metaBlock}\n${raw}`.trim();
             }
@@ -116,7 +116,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             if (buttonsContainer) buttonsContainer.style.display = 'none';
             if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-            const titleMatch = content.match(/^#\s*(.+)$/m);
+            const titleMatch = content.match(/^#{1,3}\s*(.+)$/m);
             const title = titleMatch ? titleMatch[1] : '战斗战报';
             const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
             const filename = `魔法少女速报_${sanitizedTitle}.png`;
@@ -164,7 +164,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
         const link = document.createElement('a');
         link.href = url;
 
-        const titleMatch = exportMarkdown.match(/^#\s*(.+)$/m);
+        const titleMatch = exportMarkdown.match(/^#{1,3}\s*(.+)$/m);
         const title = titleMatch ? titleMatch[1] : '战斗战报';
         const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
 

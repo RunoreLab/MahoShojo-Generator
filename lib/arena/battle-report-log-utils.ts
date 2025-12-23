@@ -73,7 +73,7 @@ export function extractHeadlineFromMarkdown(markdown: string | null | undefined)
   const lines = markdown.split(/\r?\n/).map((l) => l.trim());
   for (const line of lines) {
     if (!line) continue;
-    const m = line.match(/^#{1,3}\s+(.+)$/);
+    const m = line.match(/^#{1,3}\s*(.+)$/);
     if (m?.[1]) return m[1].trim();
     // 非标题时，取第一行作为兜底
     return line.slice(0, 120);
