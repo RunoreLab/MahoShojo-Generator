@@ -495,6 +495,23 @@ export function PvpRoomPage() {
     () => submissionStatusBySeat.filter((s) => s.hasSubmitted).length,
     [submissionStatusBySeat],
   );
+
+  const totalParticipants = players.length;
+  const canStartNow = totalParticipants >= 2;
+  const willShrinkParticipants = Boolean(rules && canStartNow && totalParticipants < rules.participants);
+  const handleStartClick = () => {
+    if (!rules) return;
+    if (!canStartNow) return;
+    if (willShrinkParticipants) {
+      const actionText =
+        phase === 'waiting' && rules.cardsPerPlayer > 0
+          ? '进入“提交卡组”阶段'
+          : '立即开始发牌';
+      const ok = window.confirm(`房间未满员：将把人数从 ${rules.participants} 缩减为 ${totalParticipants}，并${actionText}。继续？`);
+      if (!ok) return;
+    }
+    startMutation.mutate();
+  };
   const mySubmission = useMemo(() => {
     const myUserId = user?.id;
     if (!myUserId) return null;
@@ -2067,10 +2084,27 @@ export function PvpRoomPage() {
                         <button
                           className="generate-button w-full mt-2"
                           style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}
-                          disabled={startMutation.isPending || players.length < rules.participants}
-                          onClick={() => startMutation.mutate()}
+                          disabled={startMutation.isPending || !canStartNow}
+                          onClick={handleStartClick}
                         >
                           {startMutation.isPending ? '发牌中…' : '开始对局（发牌）'}
+                        </button>
+                      </div>
+                    )}
+
+                    {phase === 'waiting' && rules && rules.cardsPerPlayer > 0 && isHost && canStartNow && totalParticipants < rules.participants && (
+                      <div className="mt-3 p-3 rounded-md border bg-amber-50">
+                        <div className="text-sm font-semibold text-amber-900">房间未满员，也可以提前开局</div>
+                        <div className="text-xs text-amber-800 mt-1">
+                          继续将自动把房间人数从 {rules.participants} 缩减为 {totalParticipants}，并进入提交卡组阶段。
+                        </div>
+                        <button
+                          className="generate-button w-full mt-2"
+                          style={{ backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #d97706)' }}
+                          disabled={startMutation.isPending}
+                          onClick={handleStartClick}
+                        >
+                          {startMutation.isPending ? '开始中…' : '提前开局（锁定人数并进入提交）'}
                         </button>
                       </div>
                     )}
@@ -2263,8 +2297,8 @@ export function PvpRoomPage() {
                         <button
                           className="generate-button w-full mt-3"
                           style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}
-                          disabled={startMutation.isPending || (rules.cardsPerPlayer > 0 && submittedParticipantCount < rules.participants)}
-                          onClick={() => startMutation.mutate()}
+                          disabled={startMutation.isPending || !canStartNow || (rules.cardsPerPlayer > 0 && submittedParticipantCount < totalParticipants)}
+                          onClick={handleStartClick}
                         >
                           {startMutation.isPending ? '发牌中…' : '开始对局（发牌）'}
                         </button>

@@ -6,6 +6,7 @@
 
 ## 0.1 变更记录（最近）
 
+- 2025-12-23：支持“未满员提前开局”：当房间参与者数量 ≥2 且未达到规则人数时，房主可在 `waiting` 直接点击“提前开局”，系统会自动将 `rules.participants` 从目标人数缩减为当前人数，并对玩家/机器人座位进行压缩整理（确保 `seat < participants`），随后进入 `submitting`（若 `cardsPerPlayer>0`）或继续走发牌开局流程（`cardsPerPlayer=0`）。发牌接口 `POST /api/pvp/rooms/:roomId/start` 已内置该逻辑。
 - 2025-12-23：PVP 房间新增“对局生成设置”（与竞技场对齐）：资料读写策略、等级、故事引导、随机判定器、期望字数、生成语言；默认全关/不指定；房主在 `waiting/submitting` 保存后对局内固定。结算端将 PVP 系统裁判提示词改为 `internalGuidance` 注入，不再混入 `userGuidance`；开启资料写入时房间页仅**只读展示**“历战记录/当前状态”的更新摘要（不提供下载/保存/替换）。
 - 2025-12-23：新增观战模式：房主可开关观战（默认开启）；用户进入开启观战的房间默认成为观众，可在 `waiting/submitting` 且有空位时切换为玩家；玩家也可在 `waiting/submitting` 切回观众（非房主）。观众视角不返回手牌/提交详情/出牌选择等私密信息（`POST /api/pvp/rooms/:roomId/role`、`POST /api/pvp/rooms/:roomId/permissions`、`GET /api/pvp/rooms/:roomId`）。
 - 2025-12-22：当仅剩最后一位真人玩家未操作（提交/出牌/确认）时，房间页展示 30s 倒计时；倒计时结束后房主可强制随机提交/出牌/确认（`POST /api/pvp/rooms/:roomId/force`）。

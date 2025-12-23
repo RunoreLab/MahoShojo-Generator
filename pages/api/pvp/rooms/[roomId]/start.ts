@@ -12,6 +12,7 @@ import {
   getPvpRoomPlayers,
   getPvpRoomSubmissions,
   updatePvpMatch,
+  updatePvpRoomMember,
   updatePvpRoomCas,
   upsertPvpRoomHand,
 } from '@/lib/d1';
@@ -24,6 +25,7 @@ import { BUNDLED_PRESET_FILENAMES } from '@/lib/pvp/preset-bundled';
 import { shuffleInPlace } from '@/lib/pvp/random';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
+import { compactPvpSeats } from '@/lib/pvp/seat-compaction';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpCardRef, PvpHandState, PvpSubmissionPayload, PvpSubmittedCard } from '@/lib/pvp/types';
 
@@ -58,6 +60,7 @@ async function startHandler(req: Request): Promise<Response> {
   if (room.host_user_id !== auth.user.id) return json({ error: '仅房主可开始对局' }, { status: 403 });
   if (room.status !== 'open') return json({ error: '房间已关闭' }, { status: 410 });
 
+  const originalRulesJson = room.rules_json;
   const expectedVersion = Number.isFinite(body.data.expectedVersion) ? Math.floor(body.data.expectedVersion as number) : null;
   if (expectedVersion === null) return json({ error: '缺少 expectedVersion' }, { status: 400 });
   if (expectedVersion !== room.version) return json({ error: '版本冲突，请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
@@ -78,6 +81,85 @@ async function startHandler(req: Request): Promise<Response> {
   if (room.phase === 'choosing') return json({ success: true, alreadyStarted: true });
 
   // cardsPerPlayer=0：跳过提交阶段，允许 waiting 直接开始发牌
+  const players = await getPvpRoomPlayers(roomId);
+  const totalParticipants = players.length + bots.length;
+  if (totalParticipants < 2) return json({ error: '至少需要 2 名参与者才能开始' }, { status: 409 });
+
+  const earlyStart = totalParticipants < rules.participants;
+  const originalParticipants = rules.participants;
+  const desiredParticipants = earlyStart ? totalParticipants : rules.participants;
+
+  const seatCompaction = earlyStart
+    ? compactPvpSeats({
+      humans: players.map((p) => ({ userId: p.user_id, seat: p.seat ?? -1 })),
+      bots: bots.map((b) => ({ botId: b.id, seat: b.seat })),
+    })
+    : null;
+  if (seatCompaction && 'error' in seatCompaction) return json({ error: seatCompaction.error }, { status: 500 });
+
+  const newSeatByHumanUserId = new Map<number, number>();
+  const newSeatByBotId = new Map<string, number>();
+  if (seatCompaction && !('error' in seatCompaction)) {
+    for (const h of seatCompaction.humans) newSeatByHumanUserId.set(h.userId, h.newSeat);
+    for (const b of seatCompaction.bots) newSeatByBotId.set(b.botId, b.newSeat);
+  }
+
+  // cardsPerPlayer>0 且仍处于 waiting：允许房主“未满员提前开局”，将人数缩到当前人数并推进到 submitting
+  if (requireSubmissions && room.phase === 'waiting') {
+    if (!earlyStart) return json({ error: '当前阶段不允许开始对局', code: 'PHASE_FORBIDDEN' }, { status: 409 });
+
+    // 清理 Bot 运行态（手牌/选择），避免残留影响后续流程
+    internal.bots = internal.bots.map((b) => ({ ...b, hand: undefined, choicesByRoundId: undefined }));
+    internal.rules.participants = desiredParticipants;
+    internal.bots = internal.bots.map((b) => ({ ...b, seat: newSeatByBotId.get(b.id) ?? b.seat }));
+    const nextRulesJson = stringifyPvpRoomInternalState(internal);
+
+    const now = new Date().toISOString();
+    const advancedOk = await updatePvpRoomCas(roomId, expectedVersion, {
+      phase: 'submitting',
+      rules_json: nextRulesJson,
+      last_activity_at: now,
+    });
+    if (!advancedOk) return json({ error: '开始失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
+    const advancedVersion = expectedVersion + 1;
+
+    // 提前开局时同步整理玩家 seat，保证 seat < participants（否则后续规则保存/座位分配会异常）
+    if (seatCompaction && !('error' in seatCompaction)) {
+      const seatUpdateFailures: Array<{ userId: number; from: number; to: number }> = [];
+      const seatUpdated: Array<{ userId: number; originalSeat: number }> = [];
+
+      for (const h of seatCompaction.humans) {
+        if (h.seat === h.newSeat) continue;
+        const ok = await updatePvpRoomMember({ roomId, userId: h.userId, role: 'player', seat: h.newSeat });
+        if (!ok) {
+          seatUpdateFailures.push({ userId: h.userId, from: h.seat, to: h.newSeat });
+          break;
+        }
+        seatUpdated.push({ userId: h.userId, originalSeat: h.seat });
+      }
+
+      if (seatUpdateFailures.length > 0) {
+        for (const u of seatUpdated) {
+          await updatePvpRoomMember({ roomId, userId: u.userId, role: 'player', seat: u.originalSeat });
+        }
+        await updatePvpRoomCas(roomId, advancedVersion, {
+          phase: 'waiting',
+          rules_json: originalRulesJson,
+          last_activity_at: new Date().toISOString(),
+        });
+        return json({ error: '开始失败：座位整理失败，请稍后重试', code: 'SEAT_UPDATE_FAILED' }, { status: 409 });
+      }
+    }
+
+    return json({
+      success: true,
+      advanced: true,
+      nextPhase: 'submitting',
+      nextVersion: advancedVersion,
+      earlyStart: { from: originalParticipants, to: desiredParticipants },
+    });
+  }
+
   const allowedToStart =
     requireSubmissions
       ? room.phase === 'submitting'
@@ -86,26 +168,36 @@ async function startHandler(req: Request): Promise<Response> {
     return json({ error: '当前阶段不允许开始对局', code: 'PHASE_FORBIDDEN' }, { status: 409 });
   }
 
-  const players = await getPvpRoomPlayers(roomId);
-  const totalParticipants = players.length + bots.length;
-  if (totalParticipants < rules.participants) return json({ error: '人数不足，无法开始' }, { status: 409 });
-
   const sortedPlayers = [...players].sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
   if (sortedPlayers.some((p) => typeof p.seat !== 'number')) return json({ error: '房间座位异常' }, { status: 500 });
   if (bots.some((b) => !Number.isFinite(b.seat))) return json({ error: '机器人座位异常' }, { status: 500 });
 
   const usedSeats = new Set<number>();
-  for (const p of sortedPlayers) usedSeats.add(p.seat as number);
+  for (const p of sortedPlayers) usedSeats.add(seatCompaction ? (newSeatByHumanUserId.get(p.user_id) ?? (p.seat as number)) : (p.seat as number));
   for (const b of bots) {
-    if (usedSeats.has(b.seat)) return json({ error: '座位冲突（机器人与玩家座位重复）', code: 'SEAT_CONFLICT' }, { status: 500 });
-    usedSeats.add(b.seat);
+    const effectiveSeat = seatCompaction ? (newSeatByBotId.get(b.id) ?? b.seat) : b.seat;
+    if (usedSeats.has(effectiveSeat)) return json({ error: '座位冲突（机器人与玩家座位重复）', code: 'SEAT_CONFLICT' }, { status: 500 });
+    usedSeats.add(effectiveSeat);
   }
 
   const participants = [
-    ...sortedPlayers.map((p) => ({ kind: 'human' as const, seat: p.seat as number, userId: p.user_id, username: p.username ?? null, prefix: p.prefix ?? null, joinedAt: p.joined_at })),
-    ...bots.map((b) => ({ kind: 'bot' as const, seat: b.seat, botId: b.id, name: b.name, strategyId: b.strategyId })),
+    ...sortedPlayers.map((p) => ({
+      kind: 'human' as const,
+      seat: seatCompaction ? (newSeatByHumanUserId.get(p.user_id) ?? (p.seat as number)) : (p.seat as number),
+      userId: p.user_id,
+      username: p.username ?? null,
+      prefix: p.prefix ?? null,
+      joinedAt: p.joined_at,
+    })),
+    ...bots.map((b) => ({
+      kind: 'bot' as const,
+      seat: seatCompaction ? (newSeatByBotId.get(b.id) ?? b.seat) : b.seat,
+      botId: b.id,
+      name: b.name,
+      strategyId: b.strategyId,
+    })),
   ].sort((a, b) => a.seat - b.seat);
-  if (participants.length !== rules.participants) return json({ error: '房间参与者数量与规则不一致' }, { status: 500 });
+  if (participants.length !== desiredParticipants) return json({ error: '房间参与者数量与规则不一致' }, { status: 500 });
 
   const submissions = requireSubmissions ? await getPvpRoomSubmissions(roomId) : [];
   const submissionMap = new Map<number, PvpSubmissionPayload>();
@@ -136,6 +228,14 @@ async function startHandler(req: Request): Promise<Response> {
 
   // 清理 Bot 运行态（手牌/选择），避免上一局残留影响
   internal.bots = internal.bots.map((b) => ({ ...b, hand: undefined, choicesByRoundId: undefined }));
+  if (earlyStart) {
+    internal.rules.participants = desiredParticipants;
+    internal.bots = internal.bots.map((b) => ({
+      ...b,
+      seat: newSeatByBotId.get(b.id) ?? b.seat,
+    }));
+  }
+  const rulesJsonForStart = earlyStart ? stringifyPvpRoomInternalState(internal) : originalRulesJson;
 
   const matchId = generateUUID();
   const matchStartedAt = new Date().toISOString();
@@ -144,11 +244,13 @@ async function startHandler(req: Request): Promise<Response> {
     phase: 'dealing',
     current_match_id: matchId,
     last_activity_at: matchStartedAt,
+    ...(earlyStart ? { rules_json: rulesJsonForStart } : {}),
   });
   if (!casToDealing) return json({ error: '开始失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
   const dealingVersion = expectedVersion + 1;
 
   const rollbackPhase = requireSubmissions ? ('submitting' as const) : ('waiting' as const);
+  const rollbackRulesJson = originalRulesJson;
   const abortAndRollback = async (reason: string, extra?: Record<string, unknown>): Promise<boolean> => {
     const now = new Date().toISOString();
 
@@ -166,6 +268,7 @@ async function startHandler(req: Request): Promise<Response> {
       phase: rollbackPhase,
       current_match_id: null,
       last_activity_at: now,
+      ...(earlyStart ? { rules_json: rollbackRulesJson } : {}),
     };
 
     const ok = await updatePvpRoomCas(roomId, dealingVersion, patch);
@@ -179,11 +282,39 @@ async function startHandler(req: Request): Promise<Response> {
     return await updatePvpRoomCas(roomId, refreshed.version, patch);
   };
 
+  if (seatCompaction && !('error' in seatCompaction)) {
+    const seatUpdateFailures: Array<{ userId: number; from: number; to: number }> = [];
+    const seatUpdated: Array<{ userId: number; originalSeat: number }> = [];
+
+    for (const h of seatCompaction.humans) {
+      if (h.seat === h.newSeat) continue;
+      const ok = await updatePvpRoomMember({ roomId, userId: h.userId, role: 'player', seat: h.newSeat });
+      if (!ok) {
+        seatUpdateFailures.push({ userId: h.userId, from: h.seat, to: h.newSeat });
+        break;
+      }
+      seatUpdated.push({ userId: h.userId, originalSeat: h.seat });
+    }
+
+    if (seatUpdateFailures.length > 0) {
+      // best-effort：回滚已更新的 seat
+      for (const u of seatUpdated) {
+        await updatePvpRoomMember({ roomId, userId: u.userId, role: 'player', seat: u.originalSeat });
+      }
+
+      const rolledBack = await abortAndRollback('seat-update-failed', { failures: seatUpdateFailures });
+      if (!rolledBack) {
+        return json({ error: '开始失败：座位整理失败，且房间状态回滚失败，请房主点击“重开房间”恢复', code: 'ROLLBACK_FAILED' }, { status: 409 });
+      }
+      return json({ error: '开始失败：座位整理失败，请稍后重试', code: 'SEAT_UPDATE_FAILED' }, { status: 409 });
+    }
+  }
+
   if (recordMatch) {
     const matchOk = await createPvpMatch({
       id: matchId,
       roomId,
-      rulesJson: room.rules_json,
+      rulesJson: rulesJsonForStart,
       participants: rules.participants,
       startedAt: matchStartedAt,
     });
@@ -199,7 +330,7 @@ async function startHandler(req: Request): Promise<Response> {
       matchId,
       sortedPlayers.map((p) => ({
         userId: p.user_id,
-        seat: p.seat ?? 0,
+        seat: seatCompaction ? (newSeatByHumanUserId.get(p.user_id) ?? (p.seat ?? 0)) : (p.seat ?? 0),
         username: p.username ?? null,
         userPrefix: p.prefix ?? null,
         joinedAt: p.joined_at,
