@@ -45,7 +45,6 @@ const sensitiveWordsConfig = {
     "5rer5aaH",
     "6IKb5Lqk",
     "5Lqk6YWN",
-    "5oCn5YWz57O7",
     "5oCn5rS75Yqo",
     "6Imy5oOF",
     "6Imy5Zu+",
