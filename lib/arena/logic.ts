@@ -275,6 +275,7 @@ export const createStreamPromptBuilder = (
     readArenaHistory: boolean,
     historyReadLimit: number | null,
     readCurrentState: boolean,
+    writeArenaHistory: boolean,
     writeCurrentState: boolean,
     adjudicationResults: AdjudicationResult[] | null,
     storyLength: string | undefined
@@ -406,6 +407,33 @@ export const createStreamPromptBuilder = (
         `- 使用三级标题(###)标注内部小标题\n` +
         `- 使用引用块(>)来强调点评或特殊说明\n` +
         `- 使用列表来展示判定记录或关键信息`;
+
+    // 如果用户开启了“写入历战记录/当前状态”，则要求模型在文末追加一段 HTML 注释元数据，
+    // 供客户端在流式完成后提取 impacts/currentStateSummary，从而最大化“流式生成后自动更新角色”的成功率。
+    if (writeArenaHistory || writeCurrentState) {
+        const requiresImpact = writeArenaHistory;
+        const requiresCurrentState = writeCurrentState;
+        const requiredFields = [
+            'characterName（必须）',
+            ...(requiresImpact ? ['impact（必须）'] : []),
+            ...(requiresCurrentState ? ['currentStateSummary（必须）'] : []),
+        ].join('、');
+
+        finalPrompt += `\n\n【角色更新元数据（务必输出）】\n` +
+            `在全文最后一行，追加一段 HTML 注释（不会显示给用户），内容必须包含一段 JSON，用于角色更新。\n` +
+            `要求：\n` +
+            `- 注释必须以 "<!-- MAHOSHOJO_ARENA_META " 开头，以 " -->" 结尾。\n` +
+            `- JSON 必须是一个对象，包含 version=1 以及 impacts 数组。\n` +
+            `- impacts 必须覆盖每一位参战角色；每个元素字段要求：${requiredFields}。\n` +
+            `- 除注释外不要输出任何额外文本。\n\n` +
+            `示例（仅示例，不要照抄名字）：\n` +
+            `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\",\"currentStateSummary\":\"……\"}]} -->`;
+    } else {
+        finalPrompt += `\n\n【角色更新元数据（可选）】\n` +
+            `如果你愿意提高角色更新成功率，可以在全文最后一行追加一段 HTML 注释（不会显示给用户），内容为 JSON：\n` +
+            `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\"}]} -->\n` +
+            `除注释外不要输出任何额外文本。`;
+    }
 
     return finalPrompt;
 };

@@ -310,6 +310,7 @@ async function handler(req: NextRequest): Promise<Response> {
             resolvedReadArenaHistory,
             resolvedHistoryReadLimit,
             resolvedReadCurrentState,
+            resolvedWriteArenaHistory,
             resolvedWriteCurrentState,
             adjudicationResults,
             storyLength,
