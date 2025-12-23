@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { LayoutList } from 'lucide-react';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import Footer from '@/components/Footer';
@@ -475,8 +476,10 @@ export function PvpLobbyPage() {
                     <button
                       onClick={() => setShowRoomBrowserModal(true)}
                       disabled={!isAuthenticated}
-                      className="px-3 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-lg border border-purple-200 bg-purple-50 text-purple-800 hover:bg-purple-100 hover:border-purple-300 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="浏览可加入的房间（搜索/筛选/加入）"
                     >
+                      <LayoutList className="w-4 h-4" />
                       房间浏览器
                     </button>
                     <button

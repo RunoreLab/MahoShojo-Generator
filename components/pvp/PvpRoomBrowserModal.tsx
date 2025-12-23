@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/router';
+import { RefreshCcw, Zap, X } from 'lucide-react';
 
 import { authStorage } from '@/lib/auth';
 import type { PvpRoomRules } from '@/lib/pvp/types';
@@ -35,6 +36,11 @@ const saveRoomPassword = (roomId: string, password: string) => {
   const trimmed = password.trim();
   if (!trimmed) return;
   sessionStorage.setItem(`${PASSWORD_CACHE_PREFIX}${roomId}`, trimmed);
+};
+
+const loadRoomPassword = (roomId: string): string => {
+  if (typeof window === 'undefined') return '';
+  return sessionStorage.getItem(`${PASSWORD_CACHE_PREFIX}${roomId}`) || '';
 };
 
 const formatMode = (mode: string): string => {
@@ -78,12 +84,14 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
   const router = useRouter();
   const abortRef = useRef<AbortController | null>(null);
   const refreshTimerRef = useRef<number | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const [rooms, setRooms] = useState<BrowseRoom[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isQuickMatching, setIsQuickMatching] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
 
   const [q, setQ] = useState('');
   const [mode, setMode] = useState<'all' | 'classic' | 'scenario' | 'daily' | 'kizuna'>('all');
@@ -123,6 +131,7 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || '加载房间列表失败');
       setRooms(Array.isArray(data?.rooms) ? (data.rooms as BrowseRoom[]) : []);
+      setLastFetchedAt(Date.now());
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       setError(e instanceof Error ? e.message : '加载房间列表失败');
@@ -135,6 +144,26 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
     if (!isOpen) return;
     void fetchRooms();
   }, [isOpen, fetchRooms]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const t = window.setTimeout(() => searchInputRef.current?.focus(), 50);
+    return () => window.clearTimeout(t);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -152,6 +181,26 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
     const t = window.setTimeout(() => void fetchRooms(), 300);
     return () => window.clearTimeout(t);
   }, [isOpen, q, mode, phase, password, includeFull, fetchRooms]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!rooms.length) return;
+    setJoinPasswords((prev) => {
+      let changed = false;
+      const next: Record<string, string> = { ...prev };
+      for (const room of rooms) {
+        if (!room?.roomId) continue;
+        if (!room.hasPassword) continue;
+        if (typeof next[room.roomId] === 'string' && next[room.roomId].trim()) continue;
+        const cached = loadRoomPassword(room.roomId);
+        if (cached && cached !== next[room.roomId]) {
+          next[room.roomId] = cached;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [isOpen, rooms]);
 
   const joinRoom = useCallback(
     async (room: BrowseRoom) => {
@@ -212,76 +261,105 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
 
   if (!isOpen) return null;
 
+  const lastFetchedLabel = lastFetchedAt ? formatTimeAgo(new Date(lastFetchedAt).toISOString()) : '—';
+
   const modal = (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg p-6 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">
-          ×
+        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10">
+          <X className="w-6 h-6" />
         </button>
 
-        <div className="flex items-start gap-3 pr-8 mb-3">
-          <div className="flex-1">
+        <div className="flex flex-wrap items-start gap-2 pr-8 mb-4">
+          <div className="flex-1 min-w-[220px]">
             <h2 className="text-xl font-bold">房间浏览器</h2>
             <div className="text-xs text-gray-600 mt-1">
-              可搜索房主/房间ID，筛选模式与口令，并快速加入有空位的房间（5 秒自动刷新）。
+              可搜索房主/房间ID，筛选模式与口令，并快速加入有空位的房间（自动刷新：5 秒）。
             </div>
           </div>
-          <button
-            onClick={() => void fetchRooms()}
-            className="px-3 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
-            disabled={isLoading}
-          >
-            {isLoading ? '刷新中…' : '刷新'}
-          </button>
-          <button
-            onClick={() => void quickMatch()}
-            className="generate-button"
-            style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
-            disabled={isQuickMatching}
-          >
-            {isQuickMatching ? '匹配中…' : '快速匹配'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void fetchRooms()}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-60"
+              disabled={isLoading}
+            >
+              <RefreshCcw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              {isLoading ? '刷新中…' : '刷新'}
+            </button>
+            <button
+              onClick={() => void quickMatch()}
+              className="generate-button w-auto mb-0 px-4 py-2 text-sm inline-flex items-center gap-2"
+              style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+              disabled={isQuickMatching}
+            >
+              <Zap className="w-4 h-4" />
+              {isQuickMatching ? '匹配中…' : '快速匹配'}
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 items-center mb-3">
-          <input
-            className="border rounded px-3 py-2 text-sm flex-1 min-w-[260px]"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="搜索：房主 / 房间ID"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <select className="border rounded px-2 py-2 text-sm" value={mode} onChange={(e) => setMode(e.target.value as any)}>
-            <option value="all">全部模式</option>
-            <option value="classic">经典</option>
-            <option value="scenario">情景</option>
-            <option value="daily">每日</option>
-            <option value="kizuna">羁绊</option>
-          </select>
-          <select className="border rounded px-2 py-2 text-sm" value={phase} onChange={(e) => setPhase(e.target.value as any)}>
-            <option value="any">任意阶段</option>
-            <option value="waiting">等待加入</option>
-            <option value="submitting">提交中</option>
-          </select>
-          <select
-            className="border rounded px-2 py-2 text-sm"
-            value={password}
-            onChange={(e) => setPassword(e.target.value as any)}
-          >
-            <option value="any">口令：不限</option>
-            <option value="no">口令：无</option>
-            <option value="yes">口令：有</option>
-          </select>
-          <label className="flex items-center gap-2 text-sm text-gray-700 px-2">
-            <input type="checkbox" checked={includeFull} onChange={(e) => setIncludeFull(e.target.checked)} />
-            显示不可加入
-          </label>
-          <label className="flex items-center gap-2 text-sm text-gray-700 px-2">
-            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
-            自动刷新
-          </label>
+        <div className="p-3 rounded-xl bg-gray-50 border mb-3 space-y-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex-1 min-w-[260px]">
+              <input
+                ref={searchInputRef}
+                className="w-full input-field px-3 py-2 text-sm"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="搜索：房主 / 房间ID"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </div>
+            <select
+              className="border rounded-lg px-3 py-2 text-sm bg-white"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as any)}
+            >
+              <option value="all">全部模式</option>
+              <option value="classic">经典</option>
+              <option value="scenario">情景</option>
+              <option value="daily">每日</option>
+              <option value="kizuna">羁绊</option>
+            </select>
+            <select
+              className="border rounded-lg px-3 py-2 text-sm bg-white"
+              value={phase}
+              onChange={(e) => setPhase(e.target.value as any)}
+            >
+              <option value="any">任意阶段</option>
+              <option value="waiting">等待加入</option>
+              <option value="submitting">提交中</option>
+            </select>
+            <select
+              className="border rounded-lg px-3 py-2 text-sm bg-white"
+              value={password}
+              onChange={(e) => setPassword(e.target.value as any)}
+            >
+              <option value="any">口令：不限</option>
+              <option value="no">口令：无</option>
+              <option value="yes">口令：有</option>
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-3 items-center">
+            <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={includeFull}
+                onChange={(e) => setIncludeFull(e.target.checked)}
+                className="accent-purple-600"
+              />
+              显示不可加入
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} className="accent-purple-600" />
+              自动刷新
+            </label>
+            <div className="text-xs text-gray-500 ml-auto">
+              {isLoading ? '正在加载…' : `共 ${rooms.length} 个房间`} · 更新：{lastFetchedLabel}
+            </div>
+          </div>
         </div>
 
         {error && <div className="p-3 rounded-md bg-red-100 text-red-800 text-sm mb-3 whitespace-pre-wrap">{error}</div>}
@@ -298,13 +376,18 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
             const isBusy = joinBusyRoomId === room.roomId;
 
             return (
-              <div key={room.roomId} className={`border rounded-xl p-4 bg-white ${room.joinable ? '' : 'opacity-70'}`}>
-                <div className="flex flex-wrap items-center gap-2 justify-between">
-                  <div className="min-w-[240px]">
+              <div
+                key={room.roomId}
+                className={`border rounded-xl p-4 bg-white ${room.joinable ? 'shadow-sm' : 'opacity-70'} ${room.joinable ? 'border-emerald-200' : ''}`}
+              >
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4 items-start">
+                  <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs px-2 py-1 rounded bg-purple-100 text-purple-800">{modeLabel}</span>
                       <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">{phaseLabel}</span>
-                      <span className={`text-xs px-2 py-1 rounded ${room.hasPassword ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                      <span
+                        className={`text-xs px-2 py-1 rounded ${room.hasPassword ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}
+                      >
                         {passwordHint}
                       </span>
                       <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-800">人数 {seatText}</span>
@@ -312,28 +395,31 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
                         <span className="text-xs px-2 py-1 rounded bg-pink-100 text-pink-800">情景：{room.scenarioTitle}</span>
                       )}
                     </div>
-                    <div className="text-sm text-gray-900 mt-2">
+                    <div className="text-sm text-gray-900 mt-2 truncate">
                       房主：{room.host.prefix ? `${room.host.prefix} ` : ''}
                       {room.host.username}
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">
+                    <div className="text-xs text-gray-500 mt-1 break-all">
                       房间ID：<span className="font-mono">{room.roomId}</span> · 活跃：{activityText}
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2 items-stretch min-w-[260px]">
+                  <div className="flex flex-col gap-2">
                     {room.hasPassword && (
-                      <input
-                        className="border rounded px-2 py-2 text-sm"
-                        value={joinPasswords[room.roomId] || ''}
-                        onChange={(e) => setJoinPasswords((prev) => ({ ...prev, [room.roomId]: e.target.value }))}
-                        placeholder="输入房间口令后加入"
-                      />
+                      <div className="space-y-1">
+                        <div className="text-xs text-gray-600">房间口令</div>
+                        <input
+                          className="w-full input-field px-3 py-2 text-sm"
+                          value={joinPasswords[room.roomId] || ''}
+                          onChange={(e) => setJoinPasswords((prev) => ({ ...prev, [room.roomId]: e.target.value }))}
+                          placeholder="输入口令后加入"
+                        />
+                      </div>
                     )}
                     <button
                       onClick={() => void joinRoom(room)}
                       disabled={!room.joinable || isBusy}
-                      className="generate-button"
+                      className="generate-button w-full mb-0 py-2 text-sm"
                       style={{
                         backgroundColor: room.joinable ? '#22c55e' : '#94a3b8',
                         backgroundImage: room.joinable ? 'linear-gradient(to right, #22c55e, #16a34a)' : 'none',
@@ -341,13 +427,14 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
                     >
                       {isBusy ? '加入中…' : room.joinable ? '加入房间' : '不可加入'}
                     </button>
+                    {room.hasPassword && !room.joinable && <div className="text-xs text-gray-500">提示：满员或房间已进入不可加入阶段。</div>}
                   </div>
                 </div>
 
                 <details className="mt-3">
                   <summary className="cursor-pointer text-xs text-gray-600 select-none">查看规则与详情</summary>
                   <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-700">
-                    <div className="p-2 rounded bg-gray-50 border">
+                    <div className="p-3 rounded-lg bg-gray-50 border">
                       <div>每人提交：{room.rules?.cardsPerPlayer ?? '—'}</div>
                       <div>初始手牌：{room.rules?.dealPerPlayer ?? '—'}</div>
                       <div>手牌为空补发：{room.rules?.dealWhenEmpty ?? '—'}</div>
@@ -355,7 +442,7 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
                       <div>去重：{room.rules?.dedupe ? '开启' : '关闭'}</div>
                       <div>洗牌合池：{room.rules?.shuffleDecks ? '开启' : '关闭'}</div>
                     </div>
-                    <div className="p-2 rounded bg-gray-50 border">
+                    <div className="p-3 rounded-lg bg-gray-50 border">
                       <div>多局制：{room.rules?.bestOf?.enabled ? `开启（最多 ${room.rules.bestOf.maxRounds} 轮）` : '关闭'}</div>
                       <div>展示全部提交：{room.rules?.showAllSubmissions ? '开启' : '关闭'}</div>
                       <div>允许非房主结算：{room.rules?.allowNonHostControl ? '开启' : '关闭'}</div>
