@@ -57,6 +57,34 @@ export {
   getUserFavoriteIds
 } from './database/favorites';
 
+// 重新导出卡组相关功能
+export {
+  countUserDecks,
+  createDeck,
+  getUserDecks,
+  getPublicDecks,
+  getDeckById,
+  updateDeck,
+  deleteDeck,
+  incrementDeckLike,
+  isDeckBanned,
+  getDeckStatus,
+} from './database/decks';
+
+export {
+  getDeckCardsWithAccess,
+  addCardsToDeck,
+  removeCardsFromDeck,
+  pruneDeckInaccessibleCards,
+} from './database/deck-cards';
+
+export {
+  addDeckFavorite,
+  removeDeckFavorite,
+  getUserDeckFavorites,
+  getUserDeckFavoriteIds
+} from './database/deck-favorites';
+
 // 重新导出竞技场相关功能
 export {
   getOrCreateCharacter,
