@@ -54,6 +54,10 @@ export interface ExtractedStreamMeta {
   strippedMarkdown: string;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
 const normalizeJsonishText = (input: string): string => {
   return (
     input
@@ -110,17 +114,21 @@ const extractBestJsonCandidate = (commentInner: string): string => {
 const sanitizeMeta = (meta: StreamUpdateMeta): NormalizedStreamUpdateMeta => {
   const out: NormalizedStreamUpdateMeta = { ...(meta as any) };
 
-  if (out.report) {
-    const report = out.report as Record<string, unknown>;
-    const headlineRaw = report.headline;
-    const winnerRaw = report.winner;
-    const headline = typeof headlineRaw === 'string' ? headlineRaw.trim() : undefined;
-    const winner = typeof winnerRaw === 'string' ? winnerRaw.trim() : undefined;
-    out.report = {
-      ...(headline ? { headline } : {}),
-      ...(winner ? { winner } : {}),
-    };
-    if (Object.keys(out.report).length === 0) delete out.report;
+  if (out.report != null) {
+    if (!isRecord(out.report)) {
+      delete out.report;
+    } else {
+      const headlineRaw = out.report.headline;
+      const winnerRaw = out.report.winner;
+      const headline = typeof headlineRaw === 'string' ? headlineRaw.trim() : undefined;
+      const winner = typeof winnerRaw === 'string' ? winnerRaw.trim() : undefined;
+      const normalizedReport: NonNullable<StreamUpdateMeta['report']> = {
+        ...(headline ? { headline } : {}),
+        ...(winner ? { winner } : {}),
+      };
+      if (Object.keys(normalizedReport).length === 0) delete out.report;
+      else out.report = normalizedReport;
+    }
   }
 
   if (Array.isArray(out.impacts)) {
