@@ -109,6 +109,7 @@ export {
   getPvpRoomSubmissions,
   deletePvpRoomSubmission,
   getPvpEligibleDataCard,
+  getPvpEligibleScenarioDataCard,
   clearPvpRoomMatchState,
   clearPvpRoomRuntimeState,
   upsertPvpRoomHand,

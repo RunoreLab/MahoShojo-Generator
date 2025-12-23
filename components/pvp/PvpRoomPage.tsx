@@ -58,17 +58,6 @@ const removePrivateKeys = (obj: any): any => {
   return cleaned;
 };
 
-const verifyOrigin = async (payload: any): Promise<boolean> => {
-  const response = await fetch('/api/verify-origin', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) return false;
-  const { isValid } = await response.json();
-  return Boolean(isValid);
-};
-
 const clonePvpRoomRules = (rules: PvpRoomRules): PvpRoomRules => {
   try {
     return JSON.parse(JSON.stringify(rules)) as PvpRoomRules;
@@ -1154,21 +1143,24 @@ export function PvpRoomPage() {
       setError('❌ 请选择“情景”类型的数据卡。');
       return;
     }
-    const isNative = await verifyOrigin(cleaned);
-    const fileBase = typeof cardData?._cardName === 'string' ? cardData._cardName : (typeof cleaned?.title === 'string' ? cleaned.title : '情景');
-    const fileName = `${String(fileBase).trim() || '情景'}.json`;
+    const cardId = typeof cardData?._cardId === 'string' ? cardData._cardId.trim() : '';
+    if (!cardId) {
+      setError('❌ PVP 情景仅允许使用在线数据库中的情景数据卡。');
+      return;
+    }
+    const name = typeof cardData?._cardName === 'string'
+      ? cardData._cardName.trim()
+      : (typeof cleaned?.title === 'string' ? cleaned.title.trim() : '');
     setScenarioDraft({
-      content: cleaned,
-      fileName,
-      isNative,
-      sourceDataCardId: typeof cardData?._cardId === 'string' ? cardData._cardId : undefined,
-      sourceDataCardUpdatedAt: typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : undefined,
-      sourceDataCardName: typeof cardData?._cardName === 'string' ? cardData._cardName : undefined,
-      sourceIsPublic: typeof cardData?._isPublic === 'boolean'
+      kind: 'data_card',
+      id: cardId,
+      updatedAt: typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : null,
+      name: name || null,
+      isPublic: typeof cardData?._isPublic === 'boolean'
         ? cardData._isPublic
-        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : undefined),
-      sourceAuthor: typeof cardData?._author === 'string' ? cardData._author : undefined,
-    });
+        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : null),
+      author: typeof cardData?._author === 'string' ? cardData._author : null,
+    } satisfies PvpScenarioSelection);
     setError(null);
   };
 
@@ -1201,34 +1193,6 @@ export function PvpRoomPage() {
     } finally {
       setIsScenarioMatching(false);
     }
-  };
-
-  const handleScenarioUpload = async (file: File) => {
-    if (!isHost) throw new Error('仅房主可设置房间情景。');
-    const text = await file.text();
-    const json = JSON.parse(text);
-    if (!json || typeof json !== 'object' || Array.isArray(json)) {
-      throw new Error('情景文件内容必须是一个 JSON 对象');
-    }
-    if (typeof (json as any).title !== 'string' || !(json as any).title.trim()) {
-      throw new Error('情景文件缺少 title');
-    }
-    const isNative = await verifyOrigin(json);
-    setScenarioDraft({ content: json as any, fileName: file.name, isNative });
-    setError(null);
-  };
-
-  const handleScenarioPaste = async (text: string) => {
-    if (!isHost) throw new Error('仅房主可设置房间情景。');
-    const json = JSON.parse(text);
-    if (!json || typeof json !== 'object' || Array.isArray(json)) {
-      throw new Error('情景文本必须是一个 JSON 对象');
-    }
-    const title = typeof (json as any).title === 'string' ? (json as any).title.trim() : '';
-    if (!title) throw new Error('情景文本缺少 title');
-    const isNative = await verifyOrigin(json);
-    setScenarioDraft({ content: json as any, fileName: `${title}.json`, isNative });
-    setError(null);
   };
 
   const handleResolve = (options?: { force?: boolean }) => {
@@ -2058,15 +2022,13 @@ export function PvpRoomPage() {
                               <ScenarioPickerPanel
                                 onOpenScenarioModal={() => setShowScenarioModal(true)}
                                 onRandomMatchScenario={handleRandomMatchScenario}
-                                onScenarioUpload={handleScenarioUpload}
-                                onScenarioPaste={handleScenarioPaste}
+                                enableLocalInput={false}
                                 onActionError={(e) => handlePvpRequestError(e, '操作失败')}
                                 isAuthenticated={isAuthenticated}
                                 isGenerating={rulesMutation.isPending || scenarioMutation.isPending}
                                 isMatchingBlocked={isScenarioMatching}
                                 isMatchingScenario={isScenarioMatching}
-                                scenarioFileName={scenarioDraft?.fileName ?? (typeof roomScenario?.fileName === 'string' ? roomScenario.fileName : null)}
-                                isScenarioNative={scenarioDraft?.isNative === true || roomScenario?.isNative === true}
+                                scenarioFileName={scenarioDraft?.name ?? (typeof roomScenario?.title === 'string' ? roomScenario.title : null)}
                               />
                               <div className="flex gap-2">
                                 <button

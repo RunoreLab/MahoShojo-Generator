@@ -1,5 +1,6 @@
 import {
   clearPvpRoomRuntimeState,
+  getPvpEligibleScenarioDataCard,
   getPvpRoomById,
   getPvpRoomPlayers,
   getPvpRoomSubmissions,
@@ -61,7 +62,23 @@ async function rulesHandler(req: Request): Promise<Response> {
   if ('_scenario' in safePatch && safePatch._scenario !== null && safePatch._scenario !== undefined) {
     const parsedScenario = parsePvpScenarioSelection(safePatch._scenario);
     if (!parsedScenario) return json({ error: '情景数据无效' }, { status: 400 });
-    safePatch._scenario = parsedScenario as any;
+    const row = await getPvpEligibleScenarioDataCard(parsedScenario.id, auth.user.id);
+    if (!row) {
+      return json({ error: '情景数据卡不存在/不可用/无权访问，或未通过审查/已被封禁', code: 'SCENARIO_NOT_ELIGIBLE' }, { status: 403 });
+    }
+    const expectedUpdatedAt = typeof parsedScenario.updatedAt === 'string' ? parsedScenario.updatedAt : null;
+    const actualUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
+    if (expectedUpdatedAt && actualUpdatedAt && expectedUpdatedAt !== actualUpdatedAt) {
+      return json({ error: '情景数据卡版本已变更，请重新选择后保存', code: 'SCENARIO_VERSION_MISMATCH', expected: expectedUpdatedAt, actual: actualUpdatedAt }, { status: 409 });
+    }
+    safePatch._scenario = {
+      kind: 'data_card',
+      id: row.id,
+      updatedAt: actualUpdatedAt,
+      name: typeof row.name === 'string' ? row.name : null,
+      isPublic: Number(row.is_public) === 1,
+      author: typeof row.username === 'string' ? row.username : null,
+    } as any;
   }
   const mergedRaw = { ...(internal.raw || {}), ...safePatch } as Record<string, unknown>;
   if ('_scenario' in safePatch && safePatch._scenario === null) {

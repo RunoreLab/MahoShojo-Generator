@@ -449,6 +449,45 @@ export async function getPvpEligibleDataCard(cardId: string, requestUserId: numb
   }
 }
 
+/**
+ * PVP 情景专用：只允许使用“已通过审查”且“未封禁”的情景数据卡。
+ * - 仅允许 dc.type='scenario'
+ * - 仅允许 review_status='approved'
+ * - 禁止 is_public=-1（封禁）
+ * - 允许房主私有卡（dc.user_id=requestUserId）或已公开卡（dc.is_public=1）
+ * - 禁止作者账号已被封禁
+ */
+export async function getPvpEligibleScenarioDataCard(cardId: string, requestUserId: number): Promise<PvpEligibleDataCardRow | null> {
+  try {
+    const result = await queryFromD1(
+      `SELECT
+        dc.*,
+        u.username,
+        u.prefix,
+        u.is_banned AS author_is_banned
+      FROM data_cards dc
+      JOIN users u ON u.id = dc.user_id
+      WHERE
+        dc.id = ?
+        AND dc.type = 'scenario'
+        AND dc.deleted_at IS NULL
+        AND dc.is_public != -1
+        AND dc.review_status = 'approved'
+        AND (dc.user_id = ? OR dc.is_public = 1)
+        AND (u.is_banned IS NULL OR u.is_banned = '')`,
+      [cardId, requestUserId]
+    ) as any;
+
+    if (result.success && result.result?.[0]?.results?.length > 0) {
+      return result.result[0].results[0] as PvpEligibleDataCardRow;
+    }
+    return null;
+  } catch (error) {
+    console.error('读取 PVP 可用 scenario data_card 失败:', error);
+    return null;
+  }
+}
+
 export async function clearPvpRoomMatchState(roomId: string): Promise<boolean> {
   try {
     await queryFromD1('DELETE FROM pvp_room_hands WHERE room_id = ?', [roomId]);

@@ -50,17 +50,6 @@ const removePrivateKeys = (obj: any): any => {
   return cleaned;
 };
 
-const verifyOrigin = async (payload: any): Promise<boolean> => {
-  const response = await fetch('/api/verify-origin', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) return false;
-  const { isValid } = await response.json();
-  return Boolean(isValid);
-};
-
 export function PvpLobbyPage() {
   const router = useRouter();
   const { isAuthenticated, loading } = useAuth();
@@ -106,7 +95,7 @@ export function PvpLobbyPage() {
   const ensureScenarioSelectedIfNeeded = (): boolean => {
     if (rules.mode !== 'scenario') return true;
     if (!scenarioSelection) {
-      setError('情景模式必须选择一个情景（可从在线情景库选择 / 随机匹配 / 上传 / 粘贴）。');
+      setError('情景模式必须选择一个在线情景（可从在线情景库选择 / 随机匹配）。');
       return false;
     }
     return true;
@@ -118,21 +107,24 @@ export function PvpLobbyPage() {
       setError('❌ 请选择“情景”类型的数据卡。');
       return;
     }
-    const isNative = await verifyOrigin(cleaned);
-    const fileBase = typeof cardData?._cardName === 'string' ? cardData._cardName : (typeof cleaned?.title === 'string' ? cleaned.title : '情景');
-    const fileName = `${String(fileBase).trim() || '情景'}.json`;
+    const cardId = typeof cardData?._cardId === 'string' ? cardData._cardId.trim() : '';
+    if (!cardId) {
+      setError('❌ PVP 情景仅允许使用在线数据库中的情景数据卡。');
+      return;
+    }
+    const name = typeof cardData?._cardName === 'string'
+      ? cardData._cardName.trim()
+      : (typeof cleaned?.title === 'string' ? cleaned.title.trim() : '');
     setScenarioSelection({
-      content: cleaned,
-      fileName,
-      isNative,
-      sourceDataCardId: typeof cardData?._cardId === 'string' ? cardData._cardId : undefined,
-      sourceDataCardUpdatedAt: typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : undefined,
-      sourceDataCardName: typeof cardData?._cardName === 'string' ? cardData._cardName : undefined,
-      sourceIsPublic: typeof cardData?._isPublic === 'boolean'
+      kind: 'data_card',
+      id: cardId,
+      updatedAt: typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : null,
+      name: name || null,
+      isPublic: typeof cardData?._isPublic === 'boolean'
         ? cardData._isPublic
-        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : undefined),
-      sourceAuthor: typeof cardData?._author === 'string' ? cardData._author : undefined,
-    });
+        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : null),
+      author: typeof cardData?._author === 'string' ? cardData._author : null,
+    } satisfies PvpScenarioSelection);
     setError(null);
   };
 
@@ -161,32 +153,6 @@ export function PvpLobbyPage() {
     } finally {
       setIsScenarioMatching(false);
     }
-  };
-
-  const handleScenarioUpload = async (file: File) => {
-    const text = await file.text();
-    const json = JSON.parse(text);
-    if (!json || typeof json !== 'object' || Array.isArray(json)) {
-      throw new Error('情景文件内容必须是一个 JSON 对象');
-    }
-    if (typeof (json as any).title !== 'string' || !(json as any).title.trim()) {
-      throw new Error('情景文件缺少 title');
-    }
-    const isNative = await verifyOrigin(json);
-    setScenarioSelection({ content: json as any, fileName: file.name, isNative });
-    setError(null);
-  };
-
-  const handleScenarioPaste = async (text: string) => {
-    const json = JSON.parse(text);
-    if (!json || typeof json !== 'object' || Array.isArray(json)) {
-      throw new Error('情景文本必须是一个 JSON 对象');
-    }
-    const title = typeof (json as any).title === 'string' ? (json as any).title.trim() : '';
-    if (!title) throw new Error('情景文本缺少 title');
-    const isNative = await verifyOrigin(json);
-    setScenarioSelection({ content: json as any, fileName: `${title}.json`, isNative });
-    setError(null);
   };
 
   const handleCreateRoom = async () => {
@@ -429,15 +395,13 @@ export function PvpLobbyPage() {
                         <ScenarioPickerPanel
                           onOpenScenarioModal={() => setShowScenarioModal(true)}
                           onRandomMatchScenario={handleRandomMatchScenario}
-                          onScenarioUpload={handleScenarioUpload}
-                          onScenarioPaste={handleScenarioPaste}
+                          enableLocalInput={false}
                           onActionError={(e) => setError(`❌ ${e.message}`)}
                           isAuthenticated={isAuthenticated}
                           isGenerating={isCreating}
                           isMatchingBlocked={isScenarioMatching}
                           isMatchingScenario={isScenarioMatching}
-                          scenarioFileName={scenarioSelection?.fileName ?? null}
-                          isScenarioNative={scenarioSelection?.isNative === true}
+                          scenarioFileName={scenarioSelection?.name ?? null}
                         />
                       </div>
                     )}
