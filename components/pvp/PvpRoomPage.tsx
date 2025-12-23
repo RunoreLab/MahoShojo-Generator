@@ -37,6 +37,8 @@ import type { Preset } from '@/pages/api/get-presets';
 import type { UserBadge } from '@/types/badge';
 
 const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
+const RESOLVE_REQUEST_TIMEOUT_MS = 120_000;
+const RESOLVE_STALE_WARNING_SECONDS = Math.floor(RESOLVE_REQUEST_TIMEOUT_MS / 1000);
 
 const getCachedPassword = (roomId: string): string => {
   if (typeof window === 'undefined') return '';
@@ -274,7 +276,7 @@ export function PvpRoomPage() {
 
     if (err?.name === 'AbortError') {
       clearVersionConflictRetry();
-      setError('请求超时，请检查网络后重试；若多次出现请刷新页面或稍后再试。');
+      setError(`${fallback}：请求超时，请检查网络后重试；若多次出现请刷新页面或稍后再试。`);
       return;
     }
 
@@ -957,7 +959,7 @@ export function PvpRoomPage() {
             ...(customProvider ? { customProvider } : {}),
           }),
         },
-        90000,
+        RESOLVE_REQUEST_TIMEOUT_MS,
       );
       const { data } = await readJsonOrText(res);
       if (!res.ok) {
@@ -976,7 +978,10 @@ export function PvpRoomPage() {
       void roomQuery.refetch();
     },
     onError: (e: any) => {
-      if (e?.code === 'ROOM_RESOLVING' || e?.code === 'ROUND_RESOLVING') return;
+      if (e?.code === 'ROOM_RESOLVING' || e?.code === 'ROUND_RESOLVING') {
+        void roomQuery.refetch();
+        return;
+      }
       handlePvpRequestError(e, '结算失败');
     },
   });
@@ -1911,7 +1916,7 @@ export function PvpRoomPage() {
                         <div className="text-xs text-amber-800 mt-1">
                           页面会自动轮询刷新；如果长时间未变化，可尝试刷新浏览器页面。
                         </div>
-                        {typeof lastActivityAgeSeconds === 'number' && lastActivityAgeSeconds >= 90 ? (
+                        {typeof lastActivityAgeSeconds === 'number' && lastActivityAgeSeconds >= RESOLVE_STALE_WARNING_SECONDS ? (
                           <div className="text-xs text-amber-900 mt-2">
                             警告：已 {lastActivityAgeSeconds}s 未更新，结算可能已超时或服务暂不可用。建议刷新；房主可点“强制重试”；也可以先退出房间。
                           </div>
