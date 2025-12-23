@@ -14,12 +14,17 @@ import { ChevronDown, Filter } from 'lucide-react';
 interface BattleDataModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectCard: (card: any) => void;
+  onSelectCard?: (card: any) => void;
+  onToggleCard?: (card: any, nextSelected: boolean) => void;
   selectedType: 'character' | 'scenario';
   initialTab?: BattleDataTab;
   visibleTabs?: BattleDataTab[];
   titleOverride?: string;
   pvpHandTab?: PvpHandTabProps;
+  selectionMode?: 'single' | 'multi';
+  selectedCardIds?: string[];
+  selectedCountOverride?: number;
+  maxSelected?: number;
 }
 
 type BattleDataTab = 'my' | 'public' | 'favorites' | 'pvpHand';
@@ -90,15 +95,22 @@ export default function BattleDataModal({
   isOpen,
   onClose,
   onSelectCard,
+  onToggleCard,
   selectedType,
   initialTab,
   visibleTabs,
   titleOverride,
-  pvpHandTab
+  pvpHandTab,
+  selectionMode = 'single',
+  selectedCardIds,
+  selectedCountOverride,
+  maxSelected,
 }: BattleDataModalProps) {
   const { isAuthenticated } = useAuth();
   const isComposingSearchRef = useRef(false);
   const publicFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const selectingCardIdsRef = useRef<Set<string>>(new Set());
+  const isSingleSelectingRef = useRef(false);
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
   const [publicDataCards, setPublicDataCards] = useState<any[]>([]);
   const [favoriteCards, setFavoriteCards] = useState<any[]>([]);
@@ -113,7 +125,6 @@ export default function BattleDataModal({
   const [sortBy, setSortBy] = useState<'likes' | 'usage' | 'favorites' | 'created_at'>('created_at');
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [isSelecting, setIsSelecting] = useState(false); // 防止重复点击
   const cardsPerPage = 12;
 
   // 【新增】高级筛选的状态
@@ -429,7 +440,6 @@ export default function BattleDataModal({
     setSearchQuery('');
     setFilters(initialFilters); // 清空高级筛选
     setActiveFilters(initialFilters);
-    setIsSelecting(false); // 重置选择状态
 
     const fallbackTab: BattleDataTab = effectiveTabs[0] ?? 'public';
     const canUseInitialTab = Boolean(initialTab && effectiveTabs.includes(initialTab));
@@ -472,45 +482,38 @@ export default function BattleDataModal({
     }
   }, [selectedType]);
 
+  const selectedIdSet = useMemo(() => new Set((selectedCardIds || []).filter((x): x is string => typeof x === 'string' && Boolean(x))), [selectedCardIds]);
+  const selectedCount = typeof selectedCountOverride === 'number' ? selectedCountOverride : selectedIdSet.size;
+  const atLimit = selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 && selectedCount >= maxSelected;
+  const canToggle = selectionMode === 'multi' && typeof onToggleCard === 'function';
+
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {
-    // 防止重复点击
-    if (isSelecting) {
-      return;
-    }
+    const cardId = typeof card?.id === 'string' ? card.id : '';
+    if (!cardId) return;
 
-    setIsSelecting(true);
+    if (selectionMode === 'single' && isSingleSelectingRef.current) return;
+    if (selectingCardIdsRef.current.has(cardId)) return;
+    selectingCardIdsRef.current.add(cardId);
+    if (selectionMode === 'single') isSingleSelectingRef.current = true;
+
     try {
-      // 解析数据卡的JSON内容
-      const cardData = JSON.parse(card.data);
+      const isSelected = selectedIdSet.has(cardId);
+      const nextSelected = !isSelected;
 
-      // 如果是公开卡片且未使用过，增加使用次数
-      if (card.is_public && !isCardUsed(card.id)) {
-        try {
-          const response = await fetch('/api/data-card-stats', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              cardId: card.id,
-              type: 'usage'
-            })
-          });
-
-          if (response.ok) {
-            const result = await response.json();
-            if (result.success) {
-              // 添加到本地存储
-              addUsedCard(card.id);
-            }
-          }
-        } catch (error) {
-          console.error('增加使用次数失败:', error);
+      if (selectionMode === 'multi') {
+        if (!nextSelected && !canToggle) {
+          return;
+        }
+        if (nextSelected && atLimit) {
+          return;
         }
       }
 
-      onSelectCard({
+      // 解析数据卡的JSON内容
+      const cardData = JSON.parse(card.data);
+
+      const payload = {
         ...cardData,
         _cardId: card.id,
         _cardName: card.name,
@@ -522,12 +525,51 @@ export default function BattleDataModal({
         _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
         _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
         _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
-      });
-      onClose();
+      };
+
+      if (selectionMode === 'multi') {
+        if (canToggle) {
+          onToggleCard?.(payload, nextSelected);
+        } else if (nextSelected) {
+          onSelectCard?.(payload);
+        }
+      } else {
+        onSelectCard?.(payload);
+        onClose();
+      }
+
+      // 如果是公开卡片且未使用过，增加使用次数（仅在「加入」时触发）
+      if (nextSelected && card.is_public && !isCardUsed(card.id)) {
+        void (async () => {
+          try {
+            const response = await fetch('/api/data-card-stats', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                cardId: card.id,
+                type: 'usage'
+              })
+            });
+
+            if (response.ok) {
+              const result = await response.json();
+              if (result.success) {
+                // 添加到本地存储
+                addUsedCard(card.id);
+              }
+            }
+          } catch (error) {
+            console.error('增加使用次数失败:', error);
+          }
+        })();
+      }
     } catch (error) {
       console.error('解析数据卡失败:', error);
     } finally {
-      setIsSelecting(false);
+      selectingCardIdsRef.current.delete(cardId);
+      if (selectionMode === 'single') isSingleSelectingRef.current = false;
     }
   };
 
@@ -754,7 +796,16 @@ export default function BattleDataModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg p-6 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">×</button>
-	        <h2 className="text-xl font-bold mb-4 pr-8">{titleOverride || (isPvpHandTab ? '我的手牌' : `选择${typeLabel}数据卡`)}</h2>
+	        <h2 className="text-xl font-bold pr-8">{titleOverride || (isPvpHandTab ? '我的手牌' : `选择${typeLabel}数据卡`)}</h2>
+          {selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 ? (
+            <div className="mt-1 mb-4 text-sm text-gray-600">
+              已选 {selectedCount}/{maxSelected}
+              {canToggle ? '（再次点击已选卡可取消）' : ''}
+              {atLimit ? '，已达到上限' : ''}
+            </div>
+          ) : (
+            <div className="mb-4" />
+          )}
 
         <div className="flex-1 min-h-0 overflow-y-auto">
           {/* 筛选和排序区域 */}
@@ -974,9 +1025,18 @@ export default function BattleDataModal({
 	                {displayCards.map((card: any) => {
 	                  const isFavorited = favoriteIds.has(card.id);
 	                  const enableFavorite = isAuthenticated && activeTab !== 'my';
+                    const isSelected = selectedIdSet.has(card.id);
+                    const itemDisabled = selectionMode === 'multi' && !isSelected && atLimit;
 
 	                  return (
-	                    <div key={card.id} className="cursor-pointer h-full" onClick={() => handleSelectCard(card)}>
+	                    <div
+                        key={card.id}
+                        className={`h-full ${itemDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        onClick={() => {
+                          if (itemDisabled) return;
+                          void handleSelectCard(card);
+                        }}
+                      >
 	                      <DataCard
 	                        id={card.id}
 	                        name={card.name}
@@ -984,6 +1044,7 @@ export default function BattleDataModal({
 	                        type={card.type}
 	                        roleType={card.roleType}
 	                        isPublic={card.is_public}
+                          isSelected={isSelected}
 	                        reviewStatus={card.review_status}
 	                        usageCount={card.usage_count}
 	                        likeCount={card.like_count}

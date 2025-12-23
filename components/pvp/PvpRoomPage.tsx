@@ -1252,6 +1252,22 @@ export function PvpRoomPage() {
     });
   };
 
+  const handleToggleDataCardFromModal = (cardData: any, nextSelected: boolean) => {
+    if (nextSelected) {
+      handleSelectDataCardFromModal(cardData);
+      return;
+    }
+
+    const id = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+    if (!id) {
+      setError('取消选择失败：缺少数据卡 ID。');
+      return;
+    }
+
+    setSelected((prev) => prev.filter((c) => !(c.kind === 'data_card' && c.id === id)));
+    setError(null);
+  };
+
   const handleRandomMatchCharacter = async () => {
     if (!rules) {
       setError('规则未加载，暂时无法随机匹配。');
@@ -2337,6 +2353,11 @@ export function PvpRoomPage() {
         onClose={() => setShowBattleDataModal(false)}
         onSelectCard={handleSelectDataCardFromModal}
         selectedType="character"
+        selectionMode="multi"
+        selectedCardIds={selected.filter((c) => c.kind === 'data_card').map((c) => c.id)}
+        selectedCountOverride={selected.length}
+        maxSelected={rules?.cardsPerPlayer}
+        onToggleCard={handleToggleDataCardFromModal}
       />
 
       {showScenarioModal && (
