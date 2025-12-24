@@ -1,5 +1,6 @@
 import phrasesConfigRaw from '@/config/pvp-chat-phrases.json';
 import emotesConfigRaw from '@/config/pvp-chat-emotes.json';
+import quickMessagesConfigRaw from '@/config/pvp-chat-quick-messages.json';
 
 type PhraseOption = { id: string; text: string };
 type PhraseSlot = { key: string; label: string; optionsKey: string };
@@ -16,6 +17,11 @@ export type PvpChatEmotesConfig = {
   items: { id: string; label: string; src: string }[];
 };
 
+export type PvpChatQuickMessagesConfig = {
+  version: number;
+  items: { id: string; text: string }[];
+};
+
 export type PvpChatPhraseSelection = {
   patternId: string;
   selections: Record<string, string>;
@@ -23,12 +29,14 @@ export type PvpChatPhraseSelection = {
 
 export type PvpChatSendBody = {
   phrase?: PvpChatPhraseSelection | null;
+  quickTextId?: string | null;
   stickerId?: string | null;
   emoji?: string | null;
 };
 
 export type PvpChatNormalizedMessage = {
   phrase: PvpChatPhraseSelection | null;
+  quickTextId: string | null;
   stickerId: string | null;
   emoji: string | null;
   renderedText: string | null;
@@ -104,8 +112,27 @@ export const getPvpChatEmotesConfig = (): PvpChatEmotesConfig => {
   return { version, items };
 };
 
+export const getPvpChatQuickMessagesConfig = (): PvpChatQuickMessagesConfig => {
+  const raw: any = quickMessagesConfigRaw as any;
+  const version = asSafeNumber(raw?.version, 1);
+  const itemsRaw = Array.isArray(raw?.items) ? raw.items : [];
+  const items = itemsRaw
+    .map((it: any) => {
+      if (!it || typeof it !== 'object') return null;
+      const id = asTrimmedString(it.id);
+      const text = typeof it.text === 'string' ? it.text.trim() : '';
+      if (!id) return null;
+      const safeText = text.slice(0, 64);
+      if (!safeText) return null;
+      return { id, text: safeText };
+    })
+    .filter(Boolean) as { id: string; text: string }[];
+  return { version, items };
+};
+
 const PHRASES = getPvpChatPhrasesConfig();
 const EMOTES = getPvpChatEmotesConfig();
+const QUICK_MESSAGES = getPvpChatQuickMessagesConfig();
 
 const buildOptionsIndex = (): Record<string, Map<string, PhraseOption>> => {
   const idx: Record<string, Map<string, PhraseOption>> = {};
@@ -118,6 +145,7 @@ const buildOptionsIndex = (): Record<string, Map<string, PhraseOption>> => {
 const OPTIONS_INDEX = buildOptionsIndex();
 const PATTERN_INDEX = new Map(PHRASES.patterns.map((p) => [p.id, p]));
 const EMOTE_IDS = new Set(EMOTES.items.map((e) => e.id));
+const QUICK_TEXT_BY_ID = new Map(QUICK_MESSAGES.items.map((x) => [x.id, x.text]));
 
 const renderTemplate = (template: string, values: Record<string, string>): string | null => {
   const rendered = template.replace(/\{(\w+)\}/g, (_, key: string) => {
@@ -186,18 +214,29 @@ export const normalizePvpChatSendBody = (raw: unknown): PvpChatSendBody => {
     }
   }
 
+  const quickTextId = asTrimmedString(obj.quickTextId) || null;
   const stickerId = asTrimmedString(obj.stickerId) || null;
   const emoji = asTrimmedString(obj.emoji) || null;
 
-  return { phrase, stickerId, emoji };
+  return { phrase, quickTextId, stickerId, emoji };
 };
 
 export const validateAndBuildPvpChatMessage = (body: PvpChatSendBody): { ok: true; value: PvpChatNormalizedMessage } | { ok: false; error: string; code: string } => {
   const phrase = body.phrase ?? null;
+  const quickTextIdRaw = body.quickTextId ? body.quickTextId.trim() : '';
   const stickerId = body.stickerId ? body.stickerId.trim() : '';
   const emoji = body.emoji ? body.emoji.trim() : '';
 
-  const renderedText = phrase ? renderPvpChatPhrase(phrase) : null;
+  if (phrase && quickTextIdRaw) {
+    return { ok: false, error: '不能同时发送句式与快捷消息', code: 'TEXT_CONFLICT' };
+  }
+
+  const quickText = quickTextIdRaw ? (QUICK_TEXT_BY_ID.get(quickTextIdRaw) ?? null) : null;
+  if (quickTextIdRaw && !quickText) {
+    return { ok: false, error: '快捷消息不合法', code: 'INVALID_QUICK_TEXT' };
+  }
+
+  const renderedText = phrase ? renderPvpChatPhrase(phrase) : quickText ? quickText.trim().slice(0, 120) : null;
   if (phrase && !renderedText) {
     return { ok: false, error: '文字组合不合法，请重新选择', code: 'INVALID_PHRASE' };
   }
@@ -217,10 +256,12 @@ export const validateAndBuildPvpChatMessage = (body: PvpChatSendBody): { ok: tru
   }
 
   const content: any = {
-    v: 1,
+    v: 2,
     phrasesVersion: PHRASES.version,
     emotesVersion: EMOTES.version,
+    quickMessagesVersion: QUICK_MESSAGES.version,
     phrase: phrase ? { patternId: phrase.patternId, selections: phrase.selections } : null,
+    quickTextId: quickText ? quickTextIdRaw : null,
     stickerId: normalizedSticker,
     emoji: normalizedEmoji,
     renderedText,
@@ -230,6 +271,7 @@ export const validateAndBuildPvpChatMessage = (body: PvpChatSendBody): { ok: tru
     ok: true,
     value: {
       phrase,
+      quickTextId: quickText ? quickTextIdRaw : null,
       stickerId: normalizedSticker,
       emoji: normalizedEmoji,
       renderedText,
@@ -237,4 +279,3 @@ export const validateAndBuildPvpChatMessage = (body: PvpChatSendBody): { ok: tru
     },
   };
 };
-

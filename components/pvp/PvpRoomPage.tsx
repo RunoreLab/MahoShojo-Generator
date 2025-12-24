@@ -1948,6 +1948,7 @@ export function PvpRoomPage() {
                   roomId={roomId}
                   viewerRole={isSpectator ? 'spectator' : 'player'}
                   allowSpectatorChat={allowSpectatorChat}
+                  members={[...players, ...spectators]}
                   disabled={!joined || !roomId}
                 />
 

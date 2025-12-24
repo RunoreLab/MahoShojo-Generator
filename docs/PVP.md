@@ -1,6 +1,6 @@
 # PVP 对战功能设计草案（房间制卡组对战）
 
-更新时间：2025-12-23  
+更新时间：2025-12-24  
 适用项目：Next.js（Edge Runtime）+ Cloudflare D1 + Tailwind 4 + Vercel AI SDK 1.x
 
 ## 1. 背景与目标
@@ -749,8 +749,12 @@ WHERE
 
 实现要点：
 - **权限**：默认仅玩家可发送；房主可在房间内开启“允许观众聊天”（规则字段 `allowSpectatorChat`）。
-- **内容约束**：仅允许发送
-  - 预设“建言”文字组合（见 `config/pvp-chat-phrases.json`），以及
+- **内容约束**：仅允许发送以下“白名单内容”（不支持自由输入文本）
+  - 预设“建言”文字组合（见 `config/pvp-chat-phrases.json`），或
+  - 固定快捷消息（见 `config/pvp-chat-quick-messages.json`，用于“好/对不起/同意/不同意”等），以及
   - 表情包（见 `config/pvp-chat-emotes.json`，资源位于 `public/emotes/pvp/`）或通用 emoji（如 `☺️`、`😢`）。
+- **组合规则**：允许单独发送任一类内容；也允许“文字 + 表情包/emoji”的组合；但不允许同时发送“句式文字 + 快捷消息”（避免冲突）。
+- **表情包格式**：表情包资源以 `public/` 静态路径加载，支持 `svg/png/jpg/jpeg/webp/gif` 等常见图片格式（由 `config/pvp-chat-emotes.json` 的 `src` 决定）。
+- **展示一致性**：聊天消息与计分板的用户展示与玩家列表对齐（可显示已佩戴徽章）。
 - **接口**：`GET/POST /api/pvp/rooms/:roomId/chat`（轮询拉取）。
 - **数据库**：新增表 `pvp_room_chat_messages`（见 `lib/database/schema.sql`）。

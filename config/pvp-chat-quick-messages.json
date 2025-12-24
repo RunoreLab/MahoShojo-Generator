@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "items": [
+    { "id": "ok", "text": "好" },
+    { "id": "fine", "text": "行" },
+    { "id": "gotIt", "text": "收到" },
+    { "id": "wait", "text": "等等" },
+    { "id": "hurry", "text": "快一点" },
+    { "id": "pause", "text": "先停一下" },
+    { "id": "agree", "text": "同意" },
+    { "id": "disagree", "text": "不同意" },
+    { "id": "yes", "text": "是" },
+    { "id": "no", "text": "不是" },
+    { "id": "sorry", "text": "对不起" },
+    { "id": "thanks", "text": "谢谢" },
+    { "id": "gg", "text": "GG" }
+  ]
+}

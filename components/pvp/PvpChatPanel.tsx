@@ -5,10 +5,14 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 
 import emotesConfigRaw from '@/config/pvp-chat-emotes.json';
 import phrasesConfigRaw from '@/config/pvp-chat-phrases.json';
+import quickMessagesConfigRaw from '@/config/pvp-chat-quick-messages.json';
+import { UserWithTitle } from '@/components/UserTitle';
 import { authStorage } from '@/lib/auth';
 import { isSafeEmojiString } from '@/lib/pvp/chat';
+import type { UserBadge } from '@/types/badge';
 
 type ViewerRole = 'player' | 'spectator';
+type TextMode = 'none' | 'phrase' | 'quick';
 
 type ChatMessage = {
   id: number;
@@ -23,10 +27,12 @@ type ChatResponse = { success: true; messages: ChatMessage[] } | { error: string
 
 type PhrasePattern = (typeof phrasesConfigRaw)['patterns'][number];
 type PhraseOption = { id: string; text: string };
+type QuickMessage = (typeof quickMessagesConfigRaw)['items'][number];
 
 const EMOTES = emotesConfigRaw.items;
 const PATTERNS = phrasesConfigRaw.patterns;
 const OPTIONS = phrasesConfigRaw.options as Record<string, PhraseOption[]>;
+const QUICK_MESSAGES = quickMessagesConfigRaw.items as QuickMessage[];
 
 const buildOptionsIndex = (): Record<string, Map<string, PhraseOption>> => {
   const idx: Record<string, Map<string, PhraseOption>> = {};
@@ -38,6 +44,7 @@ const buildOptionsIndex = (): Record<string, Map<string, PhraseOption>> => {
 
 const OPTIONS_INDEX = buildOptionsIndex();
 const EMOTE_BY_ID = new Map(EMOTES.map((e) => [e.id, e]));
+const QUICK_TEXT_BY_ID = new Map(QUICK_MESSAGES.map((m) => [m.id, m.text]));
 
 const buildDefaultSelections = (pattern: PhrasePattern | undefined): Record<string, string> => {
   const selections: Record<string, string> = {};
@@ -66,10 +73,13 @@ export function PvpChatPanel(props: {
   roomId: string;
   viewerRole: ViewerRole;
   allowSpectatorChat: boolean;
+  members?: { userId: number; username: string; prefix?: string | null; badges?: UserBadge[] }[];
   disabled?: boolean;
 }) {
+  const [textMode, setTextMode] = useState<TextMode>('none');
   const [patternId, setPatternId] = useState(PATTERNS[0]?.id ?? '');
   const [selections, setSelections] = useState<Record<string, string>>({});
+  const [selectedQuickId, setSelectedQuickId] = useState<string | null>(null);
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
   const [emojiInput, setEmojiInput] = useState('');
 
@@ -79,7 +89,17 @@ export function PvpChatPanel(props: {
   const stickToBottomRef = useRef(true);
 
   const pattern = useMemo(() => PATTERNS.find((p) => p.id === patternId), [patternId]);
-  const previewText = useMemo(() => renderPreview(pattern, selections), [pattern, selections]);
+  const phrasePreviewText = useMemo(() => renderPreview(pattern, selections), [pattern, selections]);
+  const quickPreviewText = useMemo(() => (selectedQuickId ? QUICK_TEXT_BY_ID.get(selectedQuickId) ?? '' : ''), [selectedQuickId]);
+
+  const membersById = useMemo(() => {
+    const map = new Map<number, { userId: number; username: string; prefix?: string | null; badges?: UserBadge[] }>();
+    for (const m of props.members ?? []) {
+      if (!m || typeof m.userId !== 'number') continue;
+      map.set(m.userId, m);
+    }
+    return map;
+  }, [props.members]);
 
   const canSend = props.viewerRole === 'player' || props.allowSpectatorChat;
   const emojiOk = !emojiInput.trim() || isSafeEmojiString(emojiInput);
@@ -138,15 +158,15 @@ export function PvpChatPanel(props: {
 
       const emoji = emojiInput.trim() || null;
       const phrase =
-        pattern && Object.keys(selections).length > 0
-          ? { patternId: pattern.id, selections }
-          : null;
+        textMode === 'phrase' && pattern && Object.keys(selections).length > 0 ? { patternId: pattern.id, selections } : null;
+      const quickTextId = textMode === 'quick' ? selectedQuickId : null;
 
       const res = await fetch(`/api/pvp/rooms/${props.roomId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: authHeader },
         body: JSON.stringify({
           phrase,
+          quickTextId,
           stickerId: selectedStickerId,
           emoji,
         }),
@@ -161,6 +181,7 @@ export function PvpChatPanel(props: {
     onSuccess: async () => {
       setEmojiInput('');
       setSelectedStickerId(null);
+      setSelectedQuickId(null);
       await chatQuery.refetch();
       const el = listRef.current;
       if (el) el.scrollTop = el.scrollHeight;
@@ -169,13 +190,15 @@ export function PvpChatPanel(props: {
   });
 
   const disabledReason = props.disabled === true ? '聊天暂不可用' : !canSend ? '房主已关闭观众聊天' : null;
+  const hasText = textMode === 'phrase' ? Boolean(phrasePreviewText) : textMode === 'quick' ? Boolean(selectedQuickId && quickPreviewText) : false;
+  const hasAnyContent = hasText || Boolean(selectedStickerId) || Boolean(emojiInput.trim());
 
   return (
     <div className="p-4 rounded-xl bg-white border text-sm">
       <div className="flex items-center justify-between gap-3">
         <div className="font-semibold text-gray-900">房间聊天</div>
         <div className="text-xs text-gray-500">
-          仅支持预设文字组合与表情
+          支持预设文字/快捷消息与表情
         </div>
       </div>
 
@@ -199,9 +222,21 @@ export function PvpChatPanel(props: {
           (chatQuery.data ?? []).map((m) => (
             <div key={m.id} className="text-xs text-gray-800">
               <div className="flex items-baseline gap-2">
-                <span className="font-semibold">
-                  {m.sender.prefix ? `${m.sender.prefix}${m.sender.username}` : m.sender.username}
-                </span>
+                {(() => {
+                  const known = membersById.get(m.sender.userId);
+                  const username = (known?.username || m.sender.username || '').trim() || `用户${m.sender.userId}`;
+                  const badges = Array.isArray(known?.badges) ? known!.badges! : [];
+                  return (
+                    <UserWithTitle
+                      username={username}
+                      prefix={known?.prefix ?? m.sender.prefix}
+                      badges={badges}
+                      showBadges={true}
+                      usernameClassName="font-semibold"
+                      titleClassName="text-xs"
+                    />
+                  );
+                })()}
                 <span className="text-[11px] text-gray-500">
                   {m.sender.role === 'spectator' ? '观众' : '玩家'} · {new Date(m.createdAt).toLocaleTimeString()}
                 </span>
@@ -223,6 +258,29 @@ export function PvpChatPanel(props: {
       </div>
 
       <div className="mt-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs text-gray-600">文字内容</div>
+          <div className="inline-flex rounded-lg border bg-white overflow-hidden">
+            {(['none', 'phrase', 'quick'] as const).map((mode) => {
+              const label = mode === 'none' ? '关闭' : mode === 'phrase' ? '句式' : '快捷';
+              const active = textMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  className={active ? 'px-3 py-1 text-xs bg-blue-50 text-blue-700' : 'px-3 py-1 text-xs hover:bg-gray-50'}
+                  onClick={() => setTextMode(mode)}
+                  disabled={!canSend || sendMutation.isPending}
+                  title={mode === 'none' ? '本次不发送文字' : mode === 'phrase' ? '使用句式组合发送文字' : '发送固定快捷消息'}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {textMode === 'phrase' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           <label className="flex flex-col gap-1">
             <span className="text-xs text-gray-600">句式</span>
@@ -243,12 +301,13 @@ export function PvpChatPanel(props: {
           <div className="flex flex-col gap-1">
             <span className="text-xs text-gray-600">预览</span>
             <div className="border rounded px-2 py-1 bg-gray-50 text-sm min-h-[34px]">
-              {previewText || <span className="text-gray-400">请选择组合</span>}
+              {phrasePreviewText || <span className="text-gray-400">请选择组合</span>}
             </div>
           </div>
         </div>
+        ) : null}
 
-        {pattern ? (
+        {textMode === 'phrase' && pattern ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {pattern.slots.map((slot) => {
               const list = OPTIONS[slot.optionsKey] ?? [];
@@ -270,6 +329,46 @@ export function PvpChatPanel(props: {
                 </label>
               );
             })}
+          </div>
+        ) : null}
+
+        {textMode === 'quick' ? (
+          <div className="rounded-lg border bg-gray-50 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs text-gray-600">快捷消息（点击选择/取消）</div>
+              <button
+                type="button"
+                className="text-xs text-blue-700 hover:underline disabled:opacity-50"
+                onClick={() => setSelectedQuickId(null)}
+                disabled={!canSend || sendMutation.isPending}
+              >
+                清空快捷
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {QUICK_MESSAGES.map((q) => {
+                const selected = selectedQuickId === q.id;
+                return (
+                  <button
+                    type="button"
+                    key={q.id}
+                    onClick={() => setSelectedQuickId((cur) => (cur === q.id ? null : q.id))}
+                    disabled={!canSend || sendMutation.isPending}
+                    className={
+                      selected
+                        ? 'border rounded-full px-3 py-1 bg-blue-50 border-blue-400 text-xs text-blue-800'
+                        : 'border rounded-full px-3 py-1 bg-white hover:bg-gray-50 text-xs text-gray-800'
+                    }
+                    title={q.id}
+                  >
+                    {q.text}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-2 text-xs text-gray-600">
+              预览：{quickPreviewText ? <span className="text-gray-900 font-semibold">{quickPreviewText}</span> : <span className="text-gray-400">未选择</span>}
+            </div>
           </div>
         ) : null}
 
@@ -327,7 +426,7 @@ export function PvpChatPanel(props: {
             className="generate-button"
             style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
             onClick={() => sendMutation.mutate()}
-            disabled={!canSend || sendMutation.isPending || (!previewText && !selectedStickerId && !emojiInput.trim()) || !emojiOk}
+            disabled={!canSend || sendMutation.isPending || !hasAnyContent || !emojiOk}
           >
             {sendMutation.isPending ? '发送中…' : '发送'}
           </button>
