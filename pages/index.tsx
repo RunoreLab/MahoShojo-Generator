@@ -48,7 +48,7 @@ const logoConfigs: LogoConfig[] = [
   },
   {
     id: 'battle-arena',
-    src: '/arena-story-white.svg',
+    src: '/arena-white.svg',
     width: 280,
     height: 80,
     alt: '魔法少女竞技场',
@@ -58,12 +58,12 @@ const logoConfigs: LogoConfig[] = [
   },
   {
     id: 'pvp-arena',
-    src: '/arena-card-white.svg',
+    src: '/arena-card-white.webp',
     width: 280,
     height: 80,
     alt: 'PVP 卡牌对决',
     href: '/pvp',
-    className: 'battle-arena',
+    className: 'card-duel',
     color: 'white'
   },
   {
