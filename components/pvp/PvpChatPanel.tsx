@@ -305,7 +305,7 @@ export function PvpChatPanel(props: {
                   <img
                     src={EMOTE_BY_ID.get(m.stickerId)?.src ?? ''}
                     alt={EMOTE_BY_ID.get(m.stickerId)?.label ?? m.stickerId}
-                    className="h-10 w-10 rounded bg-white border object-contain"
+                    className="h-14 w-14 sm:h-16 sm:w-16 rounded bg-white border object-contain"
                   />
                 ) : null}
                 {m.emoji ? <span className="text-lg leading-none">{m.emoji}</span> : null}
@@ -505,7 +505,7 @@ export function PvpChatPanel(props: {
                 }
                 title={e.label}
               >
-                <img src={e.src} alt={e.label} className="h-10 w-10 rounded object-contain" />
+                <img src={e.src} alt={e.label} className="h-12 w-12 sm:h-14 sm:w-14 rounded object-contain" />
               </button>
             );
           })}
