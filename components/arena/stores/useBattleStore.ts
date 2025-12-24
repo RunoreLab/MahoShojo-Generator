@@ -54,6 +54,8 @@ export const useBattleStore = create<BattleStoreState>()(
       streamingMarkdown: null,
       streamReporterInfo: null,
       streamUserGuidance: null,
+      streamAiUsage: null,
+      streamNarrativeHistoryReadCount: null,
       storyLength: 'default',
       selectedLevel: '',
       selectedLanguage: 'zh-CN',
@@ -76,6 +78,8 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamingMarkdown: (markdown) => set({ streamingMarkdown: markdown }),
       setStreamReporterInfo: (info) => set({ streamReporterInfo: info }),
       setStreamUserGuidance: (guidance) => set({ streamUserGuidance: guidance }),
+      setStreamAiUsage: (usage) => set({ streamAiUsage: usage }),
+      setStreamNarrativeHistoryReadCount: (count) => set({ streamNarrativeHistoryReadCount: count }),
       setStoryLength: (storyLength) => set({ storyLength }),
       setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
@@ -127,6 +131,8 @@ export const useBattleStore = create<BattleStoreState>()(
           isStreaming: false,
           streamReporterInfo: null,
           streamUserGuidance: null,
+          streamAiUsage: null,
+          streamNarrativeHistoryReadCount: null,
         }),
 
       updateCombatantTeam: (filename, teamId) =>

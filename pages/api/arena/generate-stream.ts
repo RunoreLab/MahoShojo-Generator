@@ -159,6 +159,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const narrativeHistoryForPrompt: NarrativeHistoryEntry[] | null = resolvedReadNarrativeHistory
             ? normalizeNarrativeHistoryForPrompt(narrativeHistory)
             : null;
+        const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 
         let customProviderOverride: AIProvider | null = null;
         let customProviderId: string | null = null;
@@ -401,6 +402,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const streamResult = await generateWithStreamAI(generationConfig, aiOptions);
         const streamResponse = streamResult.response;
         const usagePromise = streamResult.usagePromise;
+        const resolvedUsagePromise = (async () => normalizeUsage(await usagePromise?.catch(() => null)))();
 
         log.info('✅ 流式响应已生成，准备返回');
 
@@ -482,7 +484,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
             const recordPromise = (async () => {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
-                const usage = normalizeUsage(await usagePromise?.catch(() => null));
+                const usage = await resolvedUsagePromise;
 
                 const shieldResult = applyShieldWords(outputPreview);
                 const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
@@ -628,6 +630,45 @@ async function handler(req: NextRequest): Promise<Response> {
                     const { done, value } = await reader.read();
                     if (done) {
                         appendText(decoder.decode());
+
+                        // 在流式末尾追加一段系统 telemetry 注释，用于前端展示 token 与叙事历史读取条数。
+                        const usageForTelemetry = await Promise.race([
+                            resolvedUsagePromise,
+                            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+                        ]);
+                        const shouldIncludeTelemetry =
+                            (usageForTelemetry != null &&
+                                (typeof usageForTelemetry.promptTokens === 'number' ||
+                                    typeof usageForTelemetry.completionTokens === 'number' ||
+                                    typeof usageForTelemetry.reasoningTokens === 'number')) ||
+                            typeof narrativeHistoryReadCount === 'number';
+
+                        if (shouldIncludeTelemetry) {
+                            const telemetryPayload = {
+                                version: 1,
+                                ...(usageForTelemetry
+                                    ? {
+                                        usage: {
+                                            promptTokens: usageForTelemetry.promptTokens ?? null,
+                                            reasoningTokens: usageForTelemetry.reasoningTokens ?? null,
+                                            completionTokens: usageForTelemetry.completionTokens ?? null,
+                                            totalTokens: usageForTelemetry.totalTokens ?? null,
+                                            cachedTokens: usageForTelemetry.cachedTokens ?? null,
+                                        },
+                                    }
+                                    : {}),
+                                ...(typeof narrativeHistoryReadCount === 'number'
+                                    ? { narrativeHistoryReadCount }
+                                    : {}),
+                            };
+
+                            const telemetryComment = `\n\n<!-- MAHOSHOJO_TELEMETRY_META ${JSON.stringify(telemetryPayload)} -->\n`;
+                            const encoded = new TextEncoder().encode(telemetryComment);
+                            outputBytes += encoded.byteLength;
+                            appendText(telemetryComment);
+                            controller.enqueue(encoded);
+                        }
+
                         await finalizeOnce('completed');
                         controller.close();
                         return;

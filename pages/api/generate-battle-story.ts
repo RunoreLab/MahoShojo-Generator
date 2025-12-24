@@ -490,6 +490,8 @@ async function handler(req: NextRequest): Promise<Response> {
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
         const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
         const aiResult = await generateWithAI<BattleReportResult, { combatants: any[] }>({ combatants }, generationConfig, aiOptions);
+        const usage = normalizeUsage(aiTelemetry.usage);
+        const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 
         // 组合成完整的前端报告对象
         const impactsFromAI = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
@@ -502,6 +504,13 @@ async function handler(req: NextRequest): Promise<Response> {
             userGuidance: finalUserGuidance || undefined,
             mode: mode,
         } as NewsReport;
+
+        if (usage) {
+            report.aiUsage = usage;
+        }
+        if (typeof narrativeHistoryReadCount === 'number') {
+            report.narrativeHistoryReadCount = narrativeHistoryReadCount;
+        }
 
         // 异步更新数据库统计，不阻塞响应
         // 仅在写入历战记录时更新统计，避免污染数据
@@ -548,7 +557,6 @@ async function handler(req: NextRequest): Promise<Response> {
             ? await quickCheck(outputPreview)
             : { hasSensitiveWords: false };
 
-        const usage = normalizeUsage(aiTelemetry.usage);
         const inputJson = JSON.stringify({
             combatants,
             userGuidance: finalUserGuidance,

@@ -14,7 +14,7 @@ import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
-import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
+import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 
@@ -223,6 +223,8 @@ export const useBattleEngine = () => {
   const setStreamingMarkdown = useBattleSelector((state) => state.setStreamingMarkdown);
   const setStreamReporterInfo = useBattleSelector((state) => state.setStreamReporterInfo);
   const setStreamUserGuidance = useBattleSelector((state) => state.setStreamUserGuidance);
+  const setStreamAiUsage = useBattleSelector((state) => state.setStreamAiUsage);
+  const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
@@ -296,6 +298,8 @@ export const useBattleEngine = () => {
     setAdjudicationResults(null);
     setStreamReporterInfo(null);
     setStreamUserGuidance(null);
+    setStreamAiUsage(null);
+    setStreamNarrativeHistoryReadCount(null);
 
     try {
       await handleResolveRandomPlaceholders();
@@ -619,10 +623,25 @@ export const useBattleEngine = () => {
             }
             | undefined;
           try {
+            // 先移除并提取系统追加的 telemetry 注释（token/叙事历史读取条数），避免影响后续更新元数据解析。
+            const telemetryExtracted = await extractStreamTelemetryMeta(accumulatedText);
+            if (telemetryExtracted?.meta) {
+              const usage = telemetryExtracted.meta.usage ?? null;
+              const narrativeCount =
+                typeof telemetryExtracted.meta.narrativeHistoryReadCount === 'number'
+                  ? telemetryExtracted.meta.narrativeHistoryReadCount
+                  : null;
+              setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
+              setStreamNarrativeHistoryReadCount(narrativeCount);
+            }
+            if (telemetryExtracted?.strippedMarkdown) {
+              markdownForUi = telemetryExtracted.strippedMarkdown;
+            }
+
             const allowStreamMeta = settings.writeArenaHistory || settings.writeCurrentState;
 
             if (allowStreamMeta) {
-              const extracted = await extractStreamUpdateMeta(accumulatedText);
+              const extracted = await extractStreamUpdateMeta(markdownForUi);
               if (extracted?.meta && (extracted.meta.report || (extracted.meta.impacts && extracted.meta.impacts.length > 0))) {
                 metaOverride = {
                   ...(extracted.meta.report ? { report: extracted.meta.report } : {}),
@@ -634,7 +653,7 @@ export const useBattleEngine = () => {
               }
             } else {
               // 未开启任何写入：仍然移除潜在的元数据注释，避免用户看到“系统专用内容”
-              const stripped = stripStreamUpdateMetaComment(accumulatedText);
+              const stripped = stripStreamUpdateMetaComment(markdownForUi);
               if (stripped?.strippedMarkdown) {
                 markdownForUi = stripped.strippedMarkdown;
               }
@@ -775,6 +794,8 @@ export const useBattleEngine = () => {
     setStreamingMarkdown,
     setStreamReporterInfo,
     setStreamUserGuidance,
+    setStreamAiUsage,
+    setStreamNarrativeHistoryReadCount,
     setCombatants,
     handleResolveRandomPlaceholders,
     redirectToArrested,
