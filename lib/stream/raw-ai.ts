@@ -323,5 +323,5 @@ export async function generateWithStreamAI(
     }
 
     log.error(`所有提供商都失败了: ${lastError}`);
-    throw new Error(`$失败: ${lastError}`);
+    throw new Error(`失败: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }

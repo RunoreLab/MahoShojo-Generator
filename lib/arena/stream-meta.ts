@@ -54,6 +54,12 @@ export interface ExtractedStreamMeta {
   strippedMarkdown: string;
 }
 
+export interface StrippedStreamMetaComment {
+  rawComment: string;
+  strippedMarkdown: string;
+  marker: string;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
@@ -91,6 +97,18 @@ const findLastHtmlCommentWithMarker = (
   }
   return null;
 };
+
+export function stripStreamUpdateMetaComment(markdown: string): StrippedStreamMetaComment | null {
+  if (typeof markdown !== 'string' || !markdown.trim()) return null;
+  const hit = findLastHtmlCommentWithMarker(markdown);
+  if (!hit) return null;
+  const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
+  return {
+    rawComment: markdown.slice(hit.start, hit.end),
+    strippedMarkdown,
+    marker: hit.marker,
+  };
+}
 
 const extractBestJsonCandidate = (commentInner: string): string => {
   const text = normalizeJsonishText(commentInner).trim();

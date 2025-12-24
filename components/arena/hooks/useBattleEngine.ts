@@ -14,7 +14,7 @@ import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
-import { extractStreamUpdateMeta } from '@/lib/arena/stream-meta';
+import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { authStorage } from '@/lib/auth';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
@@ -541,6 +541,10 @@ export const useBattleEngine = () => {
             return;
           }
 
+          // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
+          accumulatedText += decoder.decode();
+          setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+
           // 流式正文末尾可能包含 HTML 注释 JSON 元数据（用于角色更新的 impacts/currentStateSummary）。
           // 此处尽量提取并修复解析；失败时回退到仅基于 Markdown 的更新逻辑。
           let markdownForUi = accumulatedText;
@@ -551,15 +555,25 @@ export const useBattleEngine = () => {
             }
             | undefined;
           try {
-            const extracted = await extractStreamUpdateMeta(accumulatedText);
-            if (extracted?.meta && (extracted.meta.report || (extracted.meta.impacts && extracted.meta.impacts.length > 0))) {
-              metaOverride = {
-                ...(extracted.meta.report ? { report: extracted.meta.report } : {}),
-                ...(extracted.meta.impacts && extracted.meta.impacts.length > 0 ? { impacts: extracted.meta.impacts } : {}),
-              };
-            }
-            if (extracted?.strippedMarkdown) {
-              markdownForUi = extracted.strippedMarkdown;
+            const allowStreamMeta = settings.writeArenaHistory || settings.writeCurrentState;
+
+            if (allowStreamMeta) {
+              const extracted = await extractStreamUpdateMeta(accumulatedText);
+              if (extracted?.meta && (extracted.meta.report || (extracted.meta.impacts && extracted.meta.impacts.length > 0))) {
+                metaOverride = {
+                  ...(extracted.meta.report ? { report: extracted.meta.report } : {}),
+                  ...(extracted.meta.impacts && extracted.meta.impacts.length > 0 ? { impacts: extracted.meta.impacts } : {}),
+                };
+              }
+              if (extracted?.strippedMarkdown) {
+                markdownForUi = extracted.strippedMarkdown;
+              }
+            } else {
+              // 未开启任何写入：仍然移除潜在的元数据注释，避免用户看到“系统专用内容”
+              const stripped = stripStreamUpdateMetaComment(accumulatedText);
+              if (stripped?.strippedMarkdown) {
+                markdownForUi = stripped.strippedMarkdown;
+              }
             }
           } catch (metaError) {
             console.warn('解析流式战报元数据失败，将回退到 Markdown 解析更新', metaError);
@@ -568,7 +582,8 @@ export const useBattleEngine = () => {
           setStreamingMarkdown(sanitizeTextByShieldWords(markdownForUi));
 
           const trimmedForValidation = markdownForUi.trim();
-          const hasMetaImpacts = Boolean(metaOverride?.impacts?.length);
+          const allowStreamMeta = settings.writeArenaHistory || settings.writeCurrentState;
+          const hasMetaImpacts = allowStreamMeta && Boolean(metaOverride?.impacts?.length);
           const looksLikeCompleteReport = hasMetaImpacts
             ? true
             : trimmedForValidation.length >= 120 && /^#{2,6}\s*/m.test(trimmedForValidation);
