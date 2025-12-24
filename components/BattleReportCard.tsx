@@ -24,6 +24,20 @@ export interface NewsReport {
     winner: string;
     conclusion: string;
   };
+  /** AI 生成相关的 token 统计（用于战报页展示，可能为空）。 */
+  aiUsage?: {
+    promptTokens?: number | null;
+    reasoningTokens?: number | null;
+    completionTokens?: number | null;
+    totalTokens?: number | null;
+    cachedTokens?: number | null;
+    [key: string]: unknown;
+  };
+  /**
+   * 读取叙事历史条数：仅在开启 readNarrativeHistory 时由后端写入（未开启则不返回）。
+   * 可能为 0（已开启但本地无可用条目）。
+   */
+  narrativeHistoryReadCount?: number;
   // 可选的用户引导信息字段
   userGuidance?: string;
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
@@ -42,6 +56,13 @@ interface BattleReportCardProps {
 const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const bodyContent = liveBody ?? report.article.body;
+  const aiUsage = report.aiUsage;
+  const hasAnyTokenNumber =
+    aiUsage != null &&
+    [aiUsage.promptTokens, aiUsage.reasoningTokens, aiUsage.completionTokens].some(
+      (value) => typeof value === 'number' && Number.isFinite(value)
+    );
+  const shouldShowNarrativeReadCount = typeof report.narrativeHistoryReadCount === 'number';
 
   const getModeDisplay = (mode: string) => {
     switch (mode) {
@@ -60,6 +81,11 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
 
   const modeDisplay = mode ? getModeDisplay(mode) : null;
   const showScenarioTitle = mode === 'scenario' && report.scenario;
+
+  const formatToken = (value: unknown): string => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+    return value.toLocaleString();
+  };
 
   // 处理保存为图片的功能
   const handleSaveImage = async () => {
@@ -246,6 +272,18 @@ ${adjudicationMarkdown}
             <p className="text-sm text-gray-300">
               来源 | {report.reporterInfo.publication}
             </p>
+            {(hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
+              <p className="text-xs text-gray-400 mt-1">
+                {hasAnyTokenNumber && (
+                  <>
+                    tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}
+                    {formatToken(aiUsage?.completionTokens)}
+                  </>
+                )}
+                {hasAnyTokenNumber && shouldShowNarrativeReadCount ? ' · ' : ''}
+                {shouldShowNarrativeReadCount && <>叙事历史读取：{report.narrativeHistoryReadCount} 条</>}
+              </p>
+            )}
           </div>
           {/* 显示战斗模式 */}
           {modeDisplay && (

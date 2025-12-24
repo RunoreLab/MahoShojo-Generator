@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
+import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 
 describe('arena stream meta', () => {
   test('extracts valid meta comment and strips it from markdown', async () => {
@@ -113,5 +113,39 @@ describe('arena stream meta', () => {
     expect(stripped).not.toBeNull();
     expect(stripped!.strippedMarkdown.includes('MAHOSHOJO_ARENA_META')).toBe(false);
     expect(stripped!.strippedMarkdown.includes('正文')).toBe(true);
+  });
+
+  test('extracts telemetry meta (usage + narrativeHistoryReadCount) and strips it', async () => {
+    const md = [
+      '# 标题',
+      '',
+      '正文',
+      '',
+      '<!-- MAHOSHOJO_TELEMETRY_META {"version":1,"usage":{"promptTokens":12,"reasoningTokens":3,"completionTokens":9},"narrativeHistoryReadCount":2} -->',
+    ].join('\n');
+
+    const extracted = await extractStreamTelemetryMeta(md);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.meta.usage?.promptTokens).toBe(12);
+    expect(extracted!.meta.usage?.reasoningTokens).toBe(3);
+    expect(extracted!.meta.usage?.completionTokens).toBe(9);
+    expect(extracted!.meta.narrativeHistoryReadCount).toBe(2);
+    expect(extracted!.strippedMarkdown.includes('MAHOSHOJO_TELEMETRY_META')).toBe(false);
+  });
+
+  test('extractStreamUpdateMeta ignores telemetry comment after update meta', async () => {
+    const md = [
+      '# 标题',
+      '',
+      '正文',
+      '',
+      '<!-- MAHOSHOJO_ARENA_META {"version":1,"impacts":[{"characterName":"A","impact":"OK"}]} -->',
+      '',
+      '<!-- MAHOSHOJO_TELEMETRY_META {"version":1,"usage":{"promptTokens":1}} -->',
+    ].join('\n');
+
+    const extracted = await extractStreamUpdateMeta(md);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.meta.impacts?.[0]?.characterName).toBe('A');
   });
 });

@@ -6,6 +6,7 @@ const META_MARKERS = [
   'MAHOSHOJO_ARENA_META',
   'MAHOSHOJO_META',
   'MAHOSHOJO_STREAM_META',
+  'MAHOSHOJO_TELEMETRY_META',
 ] as const;
 
 export const StreamUpdateMetaSchema = z
@@ -38,6 +39,25 @@ export const StreamUpdateMetaSchema = z
 
 export type StreamUpdateMeta = z.infer<typeof StreamUpdateMetaSchema>;
 
+export const StreamTelemetryMetaSchema = z
+  .object({
+    version: z.number().int().min(1).optional(),
+    usage: z
+      .object({
+        promptTokens: z.number().int().nonnegative().nullable().optional(),
+        completionTokens: z.number().int().nonnegative().nullable().optional(),
+        reasoningTokens: z.number().int().nonnegative().nullable().optional(),
+        totalTokens: z.number().int().nonnegative().nullable().optional(),
+        cachedTokens: z.number().int().nonnegative().nullable().optional(),
+      })
+      .passthrough()
+      .optional(),
+    narrativeHistoryReadCount: z.number().int().nonnegative().optional(),
+  })
+  .passthrough();
+
+export type StreamTelemetryMeta = z.infer<typeof StreamTelemetryMetaSchema>;
+
 export interface StreamUpdateImpact {
   characterName: string;
   impact?: string;
@@ -50,6 +70,25 @@ export type NormalizedStreamUpdateMeta = Omit<StreamUpdateMeta, 'impacts'> & {
 
 export interface ExtractedStreamMeta {
   meta: NormalizedStreamUpdateMeta;
+  rawComment: string;
+  strippedMarkdown: string;
+}
+
+export interface NormalizedStreamTelemetryMeta {
+  usage?: {
+    promptTokens?: number | null;
+    completionTokens?: number | null;
+    reasoningTokens?: number | null;
+    totalTokens?: number | null;
+    cachedTokens?: number | null;
+    [key: string]: unknown;
+  };
+  narrativeHistoryReadCount?: number;
+  [key: string]: unknown;
+}
+
+export interface ExtractedStreamTelemetryMeta {
+  meta: NormalizedStreamTelemetryMeta;
   rawComment: string;
   strippedMarkdown: string;
 }
@@ -77,7 +116,8 @@ const normalizeJsonishText = (input: string): string => {
 };
 
 const findLastHtmlCommentWithMarker = (
-  markdown: string
+  markdown: string,
+  markers: readonly string[] = META_MARKERS
 ): { start: number; end: number; inner: string; marker: string } | null => {
   const MAX_TAIL_CHARS = 120_000;
   const tailStart = Math.max(0, markdown.length - MAX_TAIL_CHARS);
@@ -89,7 +129,7 @@ const findLastHtmlCommentWithMarker = (
     if (start === -1) return null;
     const end = searchEnd + 3;
     const inner = haystack.slice(start + 4, searchEnd);
-    const marker = META_MARKERS.find((m) => inner.toLowerCase().includes(m.toLowerCase()));
+    const marker = markers.find((m) => inner.toLowerCase().includes(m.toLowerCase()));
     if (marker) {
       return { start: start + tailStart, end: end + tailStart, inner, marker };
     }
@@ -186,7 +226,11 @@ const sanitizeMeta = (meta: StreamUpdateMeta): NormalizedStreamUpdateMeta => {
 export async function extractStreamUpdateMeta(markdown: string): Promise<ExtractedStreamMeta | null> {
   if (typeof markdown !== 'string' || !markdown.trim()) return null;
 
-  const hit = findLastHtmlCommentWithMarker(markdown);
+  const hit = findLastHtmlCommentWithMarker(markdown, [
+    'MAHOSHOJO_ARENA_META',
+    'MAHOSHOJO_META',
+    'MAHOSHOJO_STREAM_META',
+  ]);
   if (!hit) return null;
 
   const candidate = extractBestJsonCandidate(hit.inner);
@@ -209,6 +253,63 @@ export async function extractStreamUpdateMeta(markdown: string): Promise<Extract
   });
 
   const sanitized = sanitizeMeta(meta as StreamUpdateMeta);
+  const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
+
+  return {
+    meta: sanitized,
+    rawComment: markdown.slice(hit.start, hit.end),
+    strippedMarkdown,
+  };
+}
+
+const sanitizeTelemetryMeta = (meta: StreamTelemetryMeta): NormalizedStreamTelemetryMeta => {
+  const out: NormalizedStreamTelemetryMeta = { ...(meta as any) };
+  if (out.usage != null && !isRecord(out.usage)) {
+    delete out.usage;
+  }
+
+  if (out.usage && isRecord(out.usage)) {
+    const readNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : null);
+    const usageRecord = out.usage as Record<string, unknown>;
+    const normalizedUsage = {
+      ...(readNumber(usageRecord.promptTokens) !== null ? { promptTokens: readNumber(usageRecord.promptTokens) } : {}),
+      ...(readNumber(usageRecord.reasoningTokens) !== null ? { reasoningTokens: readNumber(usageRecord.reasoningTokens) } : {}),
+      ...(readNumber(usageRecord.completionTokens) !== null ? { completionTokens: readNumber(usageRecord.completionTokens) } : {}),
+      ...(readNumber(usageRecord.totalTokens) !== null ? { totalTokens: readNumber(usageRecord.totalTokens) } : {}),
+      ...(readNumber(usageRecord.cachedTokens) !== null ? { cachedTokens: readNumber(usageRecord.cachedTokens) } : {}),
+    };
+    out.usage = normalizedUsage;
+    if (Object.keys(normalizedUsage).length === 0) delete out.usage;
+  }
+
+  if (typeof out.narrativeHistoryReadCount === 'number') {
+    const fixed = Number.isFinite(out.narrativeHistoryReadCount) ? Math.max(0, Math.floor(out.narrativeHistoryReadCount)) : null;
+    if (fixed === null) delete out.narrativeHistoryReadCount;
+    else out.narrativeHistoryReadCount = fixed;
+  }
+
+  return out;
+};
+
+export async function extractStreamTelemetryMeta(markdown: string): Promise<ExtractedStreamTelemetryMeta | null> {
+  if (typeof markdown !== 'string' || !markdown.trim()) return null;
+
+  const hit = findLastHtmlCommentWithMarker(markdown, ['MAHOSHOJO_TELEMETRY_META']);
+  if (!hit) return null;
+
+  const candidate = extractBestJsonCandidate(hit.inner);
+  if (!candidate) return null;
+
+  const meta = await repairNormalizeValidate({
+    input: candidate,
+    schema: StreamTelemetryMetaSchema,
+    unwrapCandidates: ['meta', 'data', 'payload', 'result', 'value'],
+    textFieldCandidates: ['json', 'text', 'raw', 'content', 'body'],
+    coerce: { wrapSingleToArray: true, emptyStringToUndefined: true },
+    as: 'object',
+  });
+
+  const sanitized = sanitizeTelemetryMeta(meta as StreamTelemetryMeta);
   const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
 
   return {
