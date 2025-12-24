@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff } from 'lucide-react';
+import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award } from 'lucide-react';
 
 /**
  * @fileoverview 后台管理系统的统一入口和数据仪表盘。
@@ -89,10 +89,10 @@ const AdminHomePage: React.FC = () => {
 
     fetchStats();
 
-    // 为了让“服务器时间”与当日统计更接近实时，这里定时刷新一次（避免频繁请求）
+    // 为了让"服务器时间"与当日统计更接近实时，这里定时刷新一次（避免频繁请求）
     const timer = setInterval(fetchStats, 60_000);
     return () => clearInterval(timer);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const formatPercent = (rate: number) => `${(Math.max(0, Math.min(1, rate)) * 100).toFixed(1)}%`;
   const formatServerTime = (iso: string | null) => {
@@ -215,6 +215,18 @@ const AdminHomePage: React.FC = () => {
                   </div>
                   <p className="text-gray-600 text-sm">
                     浏览、筛选、检索并导出战报生成记录，快速跳转到相关用户与角色卡的管理页面。
+                  </p>
+                </a>
+              </Link>
+
+              <Link href="/admin/badge-management" legacyBehavior>
+                <a className="admin-card bg-amber-50 border-amber-200 hover:border-amber-400">
+                  <div className="flex items-center text-amber-700 mb-3">
+                    <Award className="w-8 h-8" />
+                    <h2 className="text-xl font-semibold ml-3">徽章管理</h2>
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    创建、编辑和删除徽章，为用户授予或撤销徽章，设计徽章样式和属性。
                   </p>
                 </a>
               </Link>
