@@ -8,6 +8,7 @@ import { RefreshCcw, Zap, X } from 'lucide-react';
 import { authStorage } from '@/lib/auth';
 import type { PvpRoomRules } from '@/lib/pvp/types';
 import { describePvpRoomCardRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
+import { formatPvpDisplayName } from '@/lib/pvp/displayName';
 
 type BrowseRoom = {
   roomId: string;
@@ -397,8 +398,7 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
                       )}
                     </div>
                     <div className="text-sm text-gray-900 mt-2 truncate">
-                      房主：{room.host.prefix ? `${room.host.prefix} ` : ''}
-                      {room.host.username}
+                      房主：{formatPvpDisplayName({ userId: room.host.userId, username: room.host.username, isBot: false })}
                     </div>
                     <div className="text-xs text-gray-500 mt-1 break-all">
                       房间ID：<span className="font-mono">{room.roomId}</span> · 活跃：{activityText}

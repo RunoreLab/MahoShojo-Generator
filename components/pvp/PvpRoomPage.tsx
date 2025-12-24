@@ -33,6 +33,7 @@ import { config as appConfig } from '@/lib/config';
 import { useAuth } from '@/lib/useAuth';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
+import { formatPvpDisplayName } from '@/lib/pvp/displayName';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
 import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
@@ -541,13 +542,7 @@ export function PvpRoomPage() {
     for (const p of players) {
       const seat = typeof p?.seat === 'number' ? p.seat : null;
       if (seat === null) continue;
-      const userId = typeof p?.userId === 'number' ? p.userId : null;
-      const prefix = typeof p.prefix === 'string' && p.prefix ? `${p.prefix} ` : '';
-      const username =
-        typeof p.username === 'string' && p.username
-          ? p.username
-          : (typeof userId === 'number' ? `用户${userId}` : '未知玩家');
-      map.set(seat, `${prefix}${username}${p.isBot ? '（机器人）' : ''}`);
+      map.set(seat, formatPvpDisplayName({ userId: p?.userId ?? null, username: p?.username ?? null, isBot: p?.isBot ?? null }));
     }
     return map;
   }, [players]);

@@ -1,6 +1,7 @@
 'use client';
 
 import { UserWithTitle } from '@/components/UserTitle';
+import { formatPvpDisplayName } from '@/lib/pvp/displayName';
 import type { UserBadge } from '@/types/badge';
 
 type ScoreEntry = { userId: number; wins: number };
@@ -17,12 +18,6 @@ type PvpPlayerLite = {
 type PvpScoreboardProps = {
   score: PvpScore | null | undefined;
   players: PvpPlayerLite[];
-};
-
-const buildDisplayName = (p: PvpPlayerLite): string => {
-  const prefix = typeof p.prefix === 'string' && p.prefix ? `${p.prefix} ` : '';
-  const username = typeof p.username === 'string' && p.username ? p.username : `用户${p.userId}`;
-  return `${prefix}${username}${p.isBot ? '（机器人）' : ''}`;
 };
 
 export function PvpScoreboard({ score, players }: PvpScoreboardProps) {
@@ -72,7 +67,7 @@ export function PvpScoreboard({ score, players }: PvpScoreboardProps) {
                   </span>
                   {p ? (
                     <UserWithTitle
-                      username={buildDisplayName(p)}
+                      username={formatPvpDisplayName({ userId: p.userId, username: p.username, isBot: p.isBot })}
                       prefix={p.prefix}
                       badges={Array.isArray(p.badges) ? p.badges : []}
                       showBadges={true}
