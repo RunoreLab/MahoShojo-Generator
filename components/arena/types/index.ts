@@ -124,6 +124,7 @@ export interface BattleStoreState {
   addCombatant: (combatant: Combatant) => void;
   removeCombatant: (identifier: string) => void;
   setCombatants: (combatants: Combatant[]) => void;
+  moveCombatant: (fromIndex: number, toIndex: number) => void;
   clearCombatants: () => void;
   updateCombatantTeam: (filename: string, teamId: number) => void;
 

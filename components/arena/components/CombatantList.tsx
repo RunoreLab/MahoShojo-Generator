@@ -22,6 +22,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
   const combatants = useBattleSelector((state) => state.combatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const removeCombatant = useBattleSelector((state) => state.removeCombatant);
+  const moveCombatant = useBattleSelector((state) => state.moveCombatant);
   const { handleAddRandomPlaceholder, handleTeamChange, handleClearRoster } = useBattleActions();
   const [copiedStatus, setCopiedStatus] = useState<Record<string, boolean>>({});
 
@@ -83,7 +84,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
       </div>
 
       <ul className="list-disc list-inside text-sm text-gray-600 mt-2 space-y-2">
-        {combatants.map((combatant) => {
+        {combatants.map((combatant, index) => {
           const isPlaceholder = 'id' in combatant;
           const key = isPlaceholder ? combatant.id : combatant.filename;
           const data = isPlaceholder ? null : (combatant as CombatantData);
@@ -93,9 +94,33 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
               ? '(随机魔法少女)'
               : '(随机残兽)'
             : `(${COMBATANT_TYPE_LABELS[data!.type]})`;
+          const canMoveUp = index > 0;
+          const canMoveDown = index < combatants.length - 1;
 
           return (
             <li key={key} className="flex justify-between items-start group gap-2">
+              <div className="flex flex-col gap-1 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => moveCombatant(index, index - 1)}
+                  disabled={isGenerating || !canMoveUp}
+                  className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label={`上移 ${displayName}`}
+                  title="上移"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moveCombatant(index, index + 1)}
+                  disabled={isGenerating || !canMoveDown}
+                  className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label={`下移 ${displayName}`}
+                  title="下移"
+                >
+                  ↓
+                </button>
+              </div>
               <div className="flex items-center flex-grow min-w-0">
                 <span className="break-words mr-2" title={displayName}>
                   {displayName}
