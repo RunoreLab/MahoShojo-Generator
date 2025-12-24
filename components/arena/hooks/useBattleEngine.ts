@@ -326,14 +326,14 @@ export const useBattleEngine = () => {
       const arenaHistoryReadLimit = settings.readArenaHistory ? numericLimit ?? null : undefined;
       const narrativeHistoryForRequest = settings.readNarrativeHistory
         ? [...useNarrativeHistoryStore.getState().entries]
-            .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
-            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-            .map((entry) => ({
-              title: entry.title,
-              content: entry.content,
-              createdAt: entry.createdAt,
-              updatedAt: entry.updatedAt,
-            }))
+          .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
+          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+          .map((entry) => ({
+            title: entry.title,
+            content: entry.content,
+            createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt,
+          }))
         : undefined;
 
       const requestBody: Record<string, unknown> = {
@@ -463,59 +463,61 @@ export const useBattleEngine = () => {
 
           if (!response.ok) {
             const text = await response.text();
+            let json: any = null;
             try {
-              const json = JSON.parse(text);
-              if (json.shouldRedirect) {
-                redirectToArrested(json.reason || '使用危险符文');
-                return;
-              }
-              throw new Error(json.message || json.error || text);
+              json = JSON.parse(text);
             } catch {
               throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
             }
+
+            if (json.shouldRedirect) {
+              redirectToArrested(json.reason || '使用危险符文');
+              return;
+            }
+            throw new Error(json.message || json.error || text);
           }
 
-	          reader = response.body?.getReader() ?? null;
-	          if (!reader) {
-	            throw new Error('无法读取响应流，请使用最新版本的现代浏览器。');
-	          }
+          reader = response.body?.getReader() ?? null;
+          if (!reader) {
+            throw new Error('无法读取响应流，请使用最新版本的现代浏览器。');
+          }
 
-	          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
-	          if (metaHeader) {
-	            try {
-	              const parsed = JSON.parse(decodeURIComponent(metaHeader));
-	              const reporterInfo = parsed?.reporterInfo;
-	              if (reporterInfo && typeof reporterInfo === 'object') {
-	                const name = typeof reporterInfo.name === 'string' ? reporterInfo.name : '';
-	                const publication = typeof reporterInfo.publication === 'string' ? reporterInfo.publication : '';
-	                if (name && publication) {
-	                  setStreamReporterInfo({ name: sanitizeTextByShieldWords(name), publication: sanitizeTextByShieldWords(publication) });
-	                }
-	              }
+          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
+          if (metaHeader) {
+            try {
+              const parsed = JSON.parse(decodeURIComponent(metaHeader));
+              const reporterInfo = parsed?.reporterInfo;
+              if (reporterInfo && typeof reporterInfo === 'object') {
+                const name = typeof reporterInfo.name === 'string' ? reporterInfo.name : '';
+                const publication = typeof reporterInfo.publication === 'string' ? reporterInfo.publication : '';
+                if (name && publication) {
+                  setStreamReporterInfo({ name: sanitizeTextByShieldWords(name), publication: sanitizeTextByShieldWords(publication) });
+                }
+              }
 
-	              const userGuidance = typeof parsed?.userGuidance === 'string' ? parsed.userGuidance.trim() : '';
-	              if (userGuidance) {
-	                setStreamUserGuidance(sanitizeTextByShieldWords(userGuidance));
-	              }
+              const userGuidance = typeof parsed?.userGuidance === 'string' ? parsed.userGuidance.trim() : '';
+              if (userGuidance) {
+                setStreamUserGuidance(sanitizeTextByShieldWords(userGuidance));
+              }
 
-	              const adjudicationResults = Array.isArray(parsed?.adjudicationResults) ? parsed.adjudicationResults : null;
-	              if (adjudicationResults && adjudicationResults.length > 0) {
-	                setAdjudicationResults(adjudicationResults);
-	              }
-	            } catch (metaError) {
-	              // 元信息解析失败不影响正文流式展示
-	              console.warn('解析流式战报元信息失败，将继续渲染正文', metaError);
-	            }
-	          } else {
-	            const snapshotGuidance = settings.userGuidance.trim();
-	            if (snapshotGuidance) {
-	              setStreamUserGuidance(sanitizeTextByShieldWords(snapshotGuidance));
-	            }
-	          }
+              const adjudicationResults = Array.isArray(parsed?.adjudicationResults) ? parsed.adjudicationResults : null;
+              if (adjudicationResults && adjudicationResults.length > 0) {
+                setAdjudicationResults(adjudicationResults);
+              }
+            } catch (metaError) {
+              // 元信息解析失败不影响正文流式展示
+              console.warn('解析流式战报元信息失败，将继续渲染正文', metaError);
+            }
+          } else {
+            const snapshotGuidance = settings.userGuidance.trim();
+            if (snapshotGuidance) {
+              setStreamUserGuidance(sanitizeTextByShieldWords(snapshotGuidance));
+            }
+          }
 
-	          const decoder = new TextDecoder();
-	          let accumulatedText = '';
-	          let shouldAbort = false;
+          const decoder = new TextDecoder();
+          let accumulatedText = '';
+          let shouldAbort = false;
           const streamBackupItems = buildBattleBackupItems(
             freshCombatants,
             shouldUseScenario ? scenario.content : null,
@@ -658,7 +660,7 @@ export const useBattleEngine = () => {
             } else {
               // 尝试判断内容是否是一段纯文本报错（通常比较短，且不包含 Markdown 标题符）
               const isLikelyErrorMessage = trimmedForValidation.length < 300 && !trimmedForValidation.includes('# ');
-              
+
               if (isLikelyErrorMessage) {
                 // 直接显示服务端返回的错误文字
                 setError(`✨ 生成失败，服务端返回信息：${trimmedForValidation}`);
@@ -720,19 +722,20 @@ export const useBattleEngine = () => {
         headers: requestHeaders,
         body: JSON.stringify(requestBody),
       });
-
       if (!response.ok) {
         const text = await response.text();
+        let json: any = null;
         try {
-          const json = JSON.parse(text);
-          if (json.shouldRedirect) {
-            redirectToArrested(json.reason || '使用危险符文');
-            return;
-          }
-          throw new Error(json.message || json.error || text);
+          json = JSON.parse(text);
         } catch {
-          throw new Error('服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+          throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
         }
+
+        if (json.shouldRedirect) {
+          redirectToArrested(json.reason || '使用危险符文');
+          return;
+        }
+        throw new Error(json.message || json.error || text);
       }
 
       const result: BattleApiResponse = await response.json();
@@ -749,7 +752,7 @@ export const useBattleEngine = () => {
       setIsGenerating(false);
       setIsStreaming(false);
     }
-	  }, [
+  }, [
     isCooldown,
     remainingTime,
     battleMode,
@@ -777,7 +780,7 @@ export const useBattleEngine = () => {
     redirectToArrested,
     startCooldown,
     updateFromMarkdown,
-	  ]);
+  ]);
 
   const handleRedoUpdates = useCallback(async () => {
     if (isCooldown) {
@@ -849,16 +852,18 @@ export const useBattleEngine = () => {
 
       if (!response.ok) {
         const text = await response.text();
+        let json: any = null;
         try {
-          const json = JSON.parse(text);
-          if (json.shouldRedirect) {
-            redirectToArrested(json.reason || '使用危险符文');
-            return;
-          }
-          throw new Error(json.message || json.error || text);
+          json = JSON.parse(text);
         } catch {
           throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
         }
+
+        if (json.shouldRedirect) {
+          redirectToArrested(json.reason || '使用危险符文');
+          return;
+        }
+        throw new Error(json.message || json.error || text);
       }
 
       const result = await response.json();
