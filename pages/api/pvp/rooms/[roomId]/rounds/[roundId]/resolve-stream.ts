@@ -142,6 +142,10 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   const rules = internal.rules;
   const bots = internal.bots;
 
+  if (rules.generationMode !== 'stream') {
+    return json({ error: '该房间未开启流式生成', code: 'STREAM_DISABLED' }, { status: 409 });
+  }
+
   const scenarioSelection = parsePvpScenarioSelection((internal.raw as any)?._scenario);
   let scenarioPayload: Record<string, unknown> | null = null;
   let scenarioSourceDataCardId: string | null = null;
@@ -150,10 +154,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     if (!scenarioSelection) {
       return json({ error: '情景模式必须先设置房间情景', code: 'SCENARIO_REQUIRED' }, { status: 409 });
     }
-    const row = await getPvpEligibleScenarioDataCard({
-      requestUserId: auth.user.id,
-      selection: scenarioSelection,
-    });
+    const row = await getPvpEligibleScenarioDataCard(scenarioSelection.id, room.host_user_id);
     if (!row) return json({ error: '情景不可用：可能已被删除/封禁/无权限', code: 'SCENARIO_NOT_FOUND' }, { status: 409 });
     const actualUpdatedAt = row.updated_at ? new Date(row.updated_at).toISOString() : null;
     const expectedUpdatedAt = scenarioSelection.updatedAt ? new Date(scenarioSelection.updatedAt).toISOString() : null;
