@@ -7,6 +7,7 @@ import { RefreshCcw, Zap, X } from 'lucide-react';
 
 import { authStorage } from '@/lib/auth';
 import type { PvpRoomRules } from '@/lib/pvp/types';
+import { describePvpRoomCardRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 
 type BrowseRoom = {
   roomId: string;
@@ -446,6 +447,11 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
                       <div>抽取来源：{room.rules?.drawSource ?? 'public'}</div>
                       <div>去重：{room.rules?.dedupe ? '开启' : '关闭'}</div>
                       <div>洗牌合池：{room.rules?.shuffleDecks ? '开启' : '关闭'}</div>
+                      {room.rules ? (
+                        <div>卡牌范围：{describePvpRoomCardRange(normalizePvpRoomCardRange(room.rules as PvpRoomRules))}</div>
+                      ) : (
+                        <div>卡牌范围：—</div>
+                      )}
                     </div>
                     <div className="p-3 rounded-lg bg-gray-50 border">
                       <div>多局制：{room.rules?.bestOf?.enabled ? `开启（最多 ${room.rules.bestOf.maxRounds} 轮）` : '关闭'}</div>

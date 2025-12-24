@@ -410,6 +410,9 @@ export interface PvpEligibleDataCardRow {
   description: string | null;
   data: string;
   is_public: number;
+  usage_count?: number | null;
+  like_count?: number | null;
+  favorite_count?: number | null;
   review_status: string | null;
   created_at: string | null;
   updated_at: string | null;

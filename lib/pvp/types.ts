@@ -40,6 +40,26 @@ export interface PvpBestOfRules {
   tieBreaker: PvpTieBreaker;
 }
 
+export interface PvpRoomCardRange {
+  /**
+   * 允许使用的角色类型（默认全开）。
+   * - magical-girl：魔法少女
+   * - canshou：残兽
+   * - general-character：通用角色
+   */
+  allowedCombatantTypes: PvpCombatantType[];
+  /**
+   * 数据卡统计范围（仅对 data_card 生效；preset 不具备数据库统计字段）。
+   * - null 表示不限制
+   */
+  minLikeCount: number | null;
+  maxLikeCount: number | null;
+  minUsageCount: number | null;
+  maxUsageCount: number | null;
+  minFavoriteCount: number | null;
+  maxFavoriteCount: number | null;
+}
+
 export interface PvpRoomRules {
   participants: number; // 2-6（前端与校验层限制）
   /**
@@ -64,6 +84,11 @@ export interface PvpRoomRules {
    * 默认 true；关闭时每位玩家仅从自己提交的卡组中抽取手牌（按提交顺序）。
    */
   shuffleDecks: boolean;
+  /**
+   * 允许提交/抽取的卡牌范围（房间内统一）。
+   * 兼容旧房间：若缺失则使用默认值（全开+不限制）。
+   */
+  cardRange?: PvpRoomCardRange;
   mode: PvpMode;
   bestOf: PvpBestOfRules;
   /**

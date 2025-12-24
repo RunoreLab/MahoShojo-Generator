@@ -6,12 +6,17 @@ import {
   getPvpRoomSubmissions,
   updatePvpRoomCas,
 } from '@/lib/d1';
+import { buildBotSubmissionPayload } from '@/lib/pvp/bot/submission';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
-import { requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
+import { normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
+import { buildCardRefKey, requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
+import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { parsePvpRules } from '@/lib/pvp/validate';
+import type { PvpSubmissionPayload } from '@/lib/pvp/types';
+import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export const runtime = 'edge';
 
@@ -25,6 +30,22 @@ const sanitizeRulesPatch = (patch: Record<string, unknown>): Record<string, unkn
     out[key] = value;
   }
   return out;
+};
+
+const parseSubmission = (raw: string): PvpSubmissionPayload | null => {
+  try {
+    const parsed = JSON.parse(raw) as PvpSubmissionPayload;
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.cards)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const sameCardRange = (a: unknown, b: unknown): boolean => {
+  const na = normalizePvpRoomCardRange({ cardRange: a as any });
+  const nb = normalizePvpRoomCardRange({ cardRange: b as any });
+  return JSON.stringify(na) === JSON.stringify(nb);
 };
 
 async function rulesHandler(req: Request): Promise<Response> {
@@ -104,18 +125,55 @@ async function rulesHandler(req: Request): Promise<Response> {
   const before = internal.rules;
   const changedCardsPerPlayer = before.cardsPerPlayer !== nextRules.cardsPerPlayer;
   const changedSubmissionMode = before.submissionMode !== nextRules.submissionMode;
+  const changedCardRange = !sameCardRange(before.cardRange, nextRules.cardRange);
 
   const shouldClear = Boolean(body.data.clearSubmissions);
-  const willInvalidateSubmissions = changedCardsPerPlayer || changedSubmissionMode;
+  const willInvalidateSubmissions = changedCardsPerPlayer || changedSubmissionMode || changedCardRange;
   if (room.phase === 'submitting' && willInvalidateSubmissions) {
     const subs = await getPvpRoomSubmissions(roomId);
     if (subs.length > 0 && !shouldClear) {
-      const hint = changedSubmissionMode ? '修改提交模式会清空已提交卡组' : '修改每人提交数量会清空已提交卡组';
+      const hint = changedSubmissionMode
+        ? '修改提交模式会清空已提交卡组'
+        : changedCardsPerPlayer
+          ? '修改每人提交数量会清空已提交卡组'
+          : '修改卡牌范围会清空已提交卡组';
       return json({ error: `${hint}，请确认后再保存`, code: 'NEED_CLEAR_SUBMISSIONS' }, { status: 409 });
     }
     if (subs.length > 0 && shouldClear) {
       const cleared = await clearPvpRoomRuntimeState(roomId);
       if (!cleared) return json({ error: '清理已提交卡组失败，请稍后重试', code: 'CLEAR_FAILED' }, { status: 500 });
+    }
+  }
+
+  // 若“卡牌范围”变更，重建现有 Bot 的提交卡组，避免出现“Bot 仍持有旧范围卡牌”的不一致。
+  if (changedCardRange && internal.bots.length > 0 && nextRules.submissionMode !== 'hostOnly' && nextRules.cardsPerPlayer > 0) {
+    const origin = getRequestOrigin(req);
+    const forwardHeaders = buildSubrequestAuthHeaders(req);
+    const existingSubmissions = await getPvpRoomSubmissions(roomId);
+    const excludeRefKeys = new Set<string>();
+
+    for (const row of existingSubmissions) {
+      const parsed = parseSubmission(row.submission_json);
+      if (!parsed) continue;
+      for (const c of parsed.cards) {
+        excludeRefKeys.add(buildCardRefKey(c.ref));
+      }
+    }
+
+    for (const bot of internal.bots) {
+      const submission = await buildBotSubmissionPayload({
+        rules: nextRules,
+        origin,
+        forwardHeaders,
+        excludeRefKeys,
+      });
+
+      if (submission.cards.length !== nextRules.cardsPerPlayer) {
+        return json({ error: '机器人卡组重建失败：当前卡牌范围过窄或候选不足，请放宽范围或移除机器人', code: 'BOT_REBUILD_FAILED' }, { status: 409 });
+      }
+
+      bot.submission = submission;
+      for (const c of submission.cards) excludeRefKeys.add(buildCardRefKey(c.ref));
     }
   }
 

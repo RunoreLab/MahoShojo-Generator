@@ -19,6 +19,7 @@ import {
 } from '@/lib/d1';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { isPvpCombatantTypeAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 import { inferPvpCombatantTypeFromJson, requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { loadPresetCard } from '@/lib/pvp/preset';
@@ -71,6 +72,7 @@ async function startHandler(req: Request): Promise<Response> {
   if ('error' in internalParsed) return json({ error: internalParsed.error }, { status: 500 });
   const internal = internalParsed.internal;
   const rules = internal.rules;
+  const cardRange = normalizePvpRoomCardRange(rules);
   const bots = internal.bots;
   const requireSubmissions = requiresPvpSubmissionPhase(rules);
   const hostOnlyDeck = rules.submissionMode === 'hostOnly';
@@ -426,39 +428,62 @@ async function startHandler(req: Request): Promise<Response> {
   };
 
   const drawPublicSnapshot = async (ownerUserId: number): Promise<{ kind: 'snapshot'; id: string } | null> => {
-    const excludeIds = [...new Set([...submittedDataCardIds, ...publicDrawnDataCardIds])];
-    const row = await getRandomPublicCardExcluding('character', excludeIds);
-    if (!row || typeof row.id !== 'string' || !row.id.trim()) return null;
-    const dataCardId = String(row.id).trim();
-    if (submittedDataCardIds.has(dataCardId) || publicDrawnDataCardIds.has(dataCardId)) return null;
+    const statsOptions = {
+      minLikeCount: cardRange.minLikeCount,
+      maxLikeCount: cardRange.maxLikeCount,
+      minUsageCount: cardRange.minUsageCount,
+      maxUsageCount: cardRange.maxUsageCount,
+      minFavoriteCount: cardRange.minFavoriteCount,
+      maxFavoriteCount: cardRange.maxFavoriteCount,
+    };
 
-    let parsed: any;
-    try {
-      parsed = JSON.parse(String(row.data ?? '{}'));
-    } catch {
-      return null;
+    for (let attempt = 0; attempt < 25; attempt++) {
+      const excludeIds = [...new Set([...submittedDataCardIds, ...publicDrawnDataCardIds])];
+      const row = await getRandomPublicCardExcluding('character', excludeIds, statsOptions);
+      if (!row || typeof row.id !== 'string' || !row.id.trim()) return null;
+      const dataCardId = String(row.id).trim();
+      if (submittedDataCardIds.has(dataCardId) || publicDrawnDataCardIds.has(dataCardId)) continue;
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(String(row.data ?? '{}'));
+      } catch {
+        publicDrawnDataCardIds.add(dataCardId);
+        continue;
+      }
+
+      const combatantType = inferPvpCombatantTypeFromJson(parsed);
+      if (!isPvpCombatantTypeAllowedByRange(combatantType, cardRange)) {
+        publicDrawnDataCardIds.add(dataCardId);
+        continue;
+      }
+
+      const snapshotId = await createPvpCardSnapshot({
+        roomId,
+        ownerUserId,
+        refJson: JSON.stringify({
+          kind: 'data_card',
+          id: dataCardId,
+          updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+          drawnFromPublic: true,
+          sourceIsPublic: true,
+          sourceAuthor: typeof row.username === 'string' ? row.username : null,
+        }),
+        cardType: combatantType,
+        name: typeof row.name === 'string' && row.name.trim() ? row.name.trim() : '公开库卡牌',
+        dataJson: JSON.stringify(parsed),
+        sourceUpdatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+      });
+      if (!snapshotId) {
+        publicDrawnDataCardIds.add(dataCardId);
+        continue;
+      }
+
+      publicDrawnDataCardIds.add(dataCardId);
+      return { kind: 'snapshot', id: snapshotId };
     }
 
-    const snapshotId = await createPvpCardSnapshot({
-      roomId,
-      ownerUserId,
-      refJson: JSON.stringify({
-        kind: 'data_card',
-        id: dataCardId,
-        updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
-        drawnFromPublic: true,
-        sourceIsPublic: true,
-        sourceAuthor: typeof row.username === 'string' ? row.username : null,
-      }),
-      cardType: inferPvpCombatantTypeFromJson(parsed),
-      name: typeof row.name === 'string' && row.name.trim() ? row.name.trim() : '公开库卡牌',
-      dataJson: JSON.stringify(parsed),
-      sourceUpdatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
-    });
-    if (!snapshotId) return null;
-
-    publicDrawnDataCardIds.add(dataCardId);
-    return { kind: 'snapshot', id: snapshotId };
+    return null;
   };
 
   const origin = getRequestOrigin(req);
@@ -467,39 +492,67 @@ async function startHandler(req: Request): Promise<Response> {
     const exclude = new Set<string>();
     for (const f of submittedPresetFilenames) for (const v of buildPresetFilenameVariants(f)) exclude.add(v);
     for (const f of presetDrawnFilenames) for (const v of buildPresetFilenameVariants(f)) exclude.add(v);
+    const excludePreset = (filename: string) => {
+      for (const v of buildPresetFilenameVariants(filename)) exclude.add(v);
+    };
 
-    const candidates = BUNDLED_PRESET_FILENAMES.filter((f) => !isPresetExcluded(f, exclude));
-    if (candidates.length <= 0) return null;
+    const allowMagicalGirl = cardRange.allowedCombatantTypes.includes('magical-girl');
+    const allowCanshou = cardRange.allowedCombatantTypes.includes('canshou');
 
-    const picked = candidates[Math.floor(Math.random() * candidates.length)] ?? null;
-    if (!picked) return null;
+    for (let attempt = 0; attempt < 25; attempt++) {
+      const candidates = BUNDLED_PRESET_FILENAMES
+        .filter((f) => !isPresetExcluded(f, exclude))
+        .filter((f) => {
+          const normalized = typeof f === 'string' ? f.trim() : '';
+          const upper = normalized.toUpperCase();
+          if (!allowMagicalGirl && upper.startsWith('M')) return false;
+          if (!allowCanshou && upper.startsWith('C')) return false;
+          return true;
+        });
 
-    let preset: Awaited<ReturnType<typeof loadPresetCard>>;
-    try {
-      preset = await loadPresetCard(origin, picked);
-    } catch {
-      return null;
+      if (candidates.length <= 0) return null;
+
+      const picked = candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+      if (!picked) return null;
+
+      let preset: Awaited<ReturnType<typeof loadPresetCard>>;
+      try {
+        preset = await loadPresetCard(origin, picked);
+      } catch {
+        excludePreset(picked);
+        continue;
+      }
+
+      if (!isPvpCombatantTypeAllowedByRange(preset.type, cardRange)) {
+        excludePreset(picked);
+        continue;
+      }
+
+      const snapshotId = await createPvpCardSnapshot({
+        roomId,
+        ownerUserId,
+        refJson: JSON.stringify({
+          kind: 'preset',
+          filename: picked,
+          drawnFromPreset: true,
+          sourceIsPublic: true,
+          sourceAuthor: null,
+        }),
+        cardType: preset.type,
+        name: preset.name || '预设卡牌',
+        dataJson: preset.dataJson,
+        sourceUpdatedAt: null,
+      });
+      if (!snapshotId) {
+        excludePreset(picked);
+        continue;
+      }
+
+      presetDrawnFilenames.add(picked);
+      return { kind: 'snapshot', id: snapshotId };
     }
 
-    const snapshotId = await createPvpCardSnapshot({
-      roomId,
-      ownerUserId,
-      refJson: JSON.stringify({
-        kind: 'preset',
-        filename: picked,
-        drawnFromPreset: true,
-        sourceIsPublic: true,
-        sourceAuthor: null,
-      }),
-      cardType: preset.type,
-      name: preset.name || '预设卡牌',
-      dataJson: preset.dataJson,
-      sourceUpdatedAt: null,
-    });
-    if (!snapshotId) return null;
-
-    presetDrawnFilenames.add(picked);
-    return { kind: 'snapshot', id: snapshotId };
+    return null;
   };
 
   const drawFallbackSnapshot = async (ownerUserId: number): Promise<{ kind: 'snapshot'; id: string } | null> => {

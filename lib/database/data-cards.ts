@@ -565,14 +565,56 @@ export async function getPublicDataCards(
  * @returns {Promise<any | null>} 返回一个随机的数据卡对象，如果没有符合条件的则返回 null。
  */
 export async function getRandomPublicCard(
-  type: 'character' | 'scenario'
+  type: 'character' | 'scenario',
+  options?: {
+    minLikeCount?: number | null;
+    maxLikeCount?: number | null;
+    minUsageCount?: number | null;
+    maxUsageCount?: number | null;
+    minFavoriteCount?: number | null;
+    maxFavoriteCount?: number | null;
+  }
 ): Promise<any | null> {
   try {
     // D1 数据库支持 RANDOM() 函数，这使得随机选择非常高效。
-    const result = await queryFromD1(
-      "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' AND dc.deleted_at IS NULL ORDER BY RANDOM() LIMIT 1",
-      [type]
-    ) as any;
+    const params: any[] = [type];
+    let sql =
+      "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' AND dc.deleted_at IS NULL";
+
+    const minLike = options?.minLikeCount;
+    const maxLike = options?.maxLikeCount;
+    const minUsage = options?.minUsageCount;
+    const maxUsage = options?.maxUsageCount;
+    const minFav = options?.minFavoriteCount;
+    const maxFav = options?.maxFavoriteCount;
+    if (typeof minLike === 'number' && Number.isFinite(minLike)) {
+      sql += ' AND dc.like_count >= ?';
+      params.push(Math.max(0, Math.floor(minLike)));
+    }
+    if (typeof maxLike === 'number' && Number.isFinite(maxLike)) {
+      sql += ' AND dc.like_count <= ?';
+      params.push(Math.max(0, Math.floor(maxLike)));
+    }
+    if (typeof minUsage === 'number' && Number.isFinite(minUsage)) {
+      sql += ' AND dc.usage_count >= ?';
+      params.push(Math.max(0, Math.floor(minUsage)));
+    }
+    if (typeof maxUsage === 'number' && Number.isFinite(maxUsage)) {
+      sql += ' AND dc.usage_count <= ?';
+      params.push(Math.max(0, Math.floor(maxUsage)));
+    }
+    if (typeof minFav === 'number' && Number.isFinite(minFav)) {
+      sql += ' AND dc.favorite_count >= ?';
+      params.push(Math.max(0, Math.floor(minFav)));
+    }
+    if (typeof maxFav === 'number' && Number.isFinite(maxFav)) {
+      sql += ' AND dc.favorite_count <= ?';
+      params.push(Math.max(0, Math.floor(maxFav)));
+    }
+
+    sql += ' ORDER BY RANDOM() LIMIT 1';
+
+    const result = await queryFromD1(sql, params) as any;
     
     // 检查查询是否成功，以及是否真的返回了结果
     if (result.success && result.result && result.result[0]?.results?.length > 0) {
@@ -594,13 +636,52 @@ export async function getRandomPublicCard(
  */
 export async function getRandomPublicCardExcluding(
   type: 'character' | 'scenario',
-  excludeIds: string[]
+  excludeIds: string[],
+  options?: {
+    minLikeCount?: number | null;
+    maxLikeCount?: number | null;
+    minUsageCount?: number | null;
+    maxUsageCount?: number | null;
+    minFavoriteCount?: number | null;
+    maxFavoriteCount?: number | null;
+  }
 ): Promise<any | null> {
   try {
     const safeExcludeIds = [...new Set((excludeIds || []).filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))].slice(0, 800);
     const params: any[] = [type];
     let sql =
       "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' AND dc.deleted_at IS NULL";
+
+    const minLike = options?.minLikeCount;
+    const maxLike = options?.maxLikeCount;
+    const minUsage = options?.minUsageCount;
+    const maxUsage = options?.maxUsageCount;
+    const minFav = options?.minFavoriteCount;
+    const maxFav = options?.maxFavoriteCount;
+    if (typeof minLike === 'number' && Number.isFinite(minLike)) {
+      sql += ' AND dc.like_count >= ?';
+      params.push(Math.max(0, Math.floor(minLike)));
+    }
+    if (typeof maxLike === 'number' && Number.isFinite(maxLike)) {
+      sql += ' AND dc.like_count <= ?';
+      params.push(Math.max(0, Math.floor(maxLike)));
+    }
+    if (typeof minUsage === 'number' && Number.isFinite(minUsage)) {
+      sql += ' AND dc.usage_count >= ?';
+      params.push(Math.max(0, Math.floor(minUsage)));
+    }
+    if (typeof maxUsage === 'number' && Number.isFinite(maxUsage)) {
+      sql += ' AND dc.usage_count <= ?';
+      params.push(Math.max(0, Math.floor(maxUsage)));
+    }
+    if (typeof minFav === 'number' && Number.isFinite(minFav)) {
+      sql += ' AND dc.favorite_count >= ?';
+      params.push(Math.max(0, Math.floor(minFav)));
+    }
+    if (typeof maxFav === 'number' && Number.isFinite(maxFav)) {
+      sql += ' AND dc.favorite_count <= ?';
+      params.push(Math.max(0, Math.floor(maxFav)));
+    }
 
     if (safeExcludeIds.length > 0) {
       const placeholders = safeExcludeIds.map(() => '?').join(', ');
