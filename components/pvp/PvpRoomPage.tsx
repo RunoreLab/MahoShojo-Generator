@@ -35,6 +35,7 @@ import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/cus
 import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 import { formatPvpDisplayName } from '@/lib/pvp/displayName';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
+import { buildPvpScenarioRulesPatch } from '@/lib/pvp/rules-patch';
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
 import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
 
@@ -1177,7 +1178,7 @@ export function PvpRoomPage() {
         headers: { 'Content-Type': 'application/json', Authorization: authHeader },
         body: JSON.stringify({
           expectedVersion: version,
-          rules: { _scenario: payload.selection ?? null },
+          rules: buildPvpScenarioRulesPatch({ mode: rulesDraft?.mode, selection: payload.selection ?? null }),
         }),
       });
       const { data } = await readJsonOrText(res);
@@ -2469,7 +2470,7 @@ export function PvpRoomPage() {
                                   清空情景
                                 </button>
                                 <div className="text-xs text-gray-600 flex items-center">
-                                  提示：修改模式为 scenario 后，记得保存一份情景。
+                                  提示：保存情景会同时确保房间模式为“情景”；其他规则仍需点击下方“保存设置”。
                                 </div>
                               </div>
                             </div>
