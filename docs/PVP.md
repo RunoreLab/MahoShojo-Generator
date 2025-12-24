@@ -751,7 +751,7 @@ WHERE
 - **权限**：默认仅玩家可发送；房主可在房间内开启“允许观众聊天”（规则字段 `allowSpectatorChat`）。
 - **内容约束**：仅允许发送以下“白名单内容”（不支持自由输入文本）
   - 预设“建言”文字组合（见 `config/pvp-chat-phrases.json`），或
-  - 固定快捷消息（见 `config/pvp-chat-quick-messages.json`，用于“好/对不起/同意/不同意”等），以及
+  - 固定快捷消息（见 `config/pvp-chat-quick-messages.json`，按“同意/反对/致歉/催促”等分组展示，并支持“最近常用”），以及
   - 表情包（见 `config/pvp-chat-emotes.json`，资源位于 `public/emotes/pvp/`）或通用 emoji（如 `☺️`、`😢`）。
 - **组合规则**：允许单独发送任一类内容；也允许“文字 + 表情包/emoji”的组合；但不允许同时发送“句式文字 + 快捷消息”（避免冲突）。
 - **表情包格式**：表情包资源以 `public/` 静态路径加载，支持 `svg/png/jpg/jpeg/webp/gif` 等常见图片格式（由 `config/pvp-chat-emotes.json` 的 `src` 决定）。

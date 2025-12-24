@@ -115,18 +115,40 @@ export const getPvpChatEmotesConfig = (): PvpChatEmotesConfig => {
 export const getPvpChatQuickMessagesConfig = (): PvpChatQuickMessagesConfig => {
   const raw: any = quickMessagesConfigRaw as any;
   const version = asSafeNumber(raw?.version, 1);
-  const itemsRaw = Array.isArray(raw?.items) ? raw.items : [];
-  const items = itemsRaw
-    .map((it: any) => {
-      if (!it || typeof it !== 'object') return null;
-      const id = asTrimmedString(it.id);
-      const text = typeof it.text === 'string' ? it.text.trim() : '';
-      if (!id) return null;
-      const safeText = text.slice(0, 64);
-      if (!safeText) return null;
-      return { id, text: safeText };
-    })
-    .filter(Boolean) as { id: string; text: string }[];
+  const seen = new Set<string>();
+
+  const sanitizeItem = (it: any): { id: string; text: string } | null => {
+    if (!it || typeof it !== 'object') return null;
+    const id = asTrimmedString(it.id);
+    const text = typeof it.text === 'string' ? it.text.trim() : '';
+    if (!id) return null;
+    const safeText = text.slice(0, 64);
+    if (!safeText) return null;
+    if (seen.has(id)) return null;
+    seen.add(id);
+    return { id, text: safeText };
+  };
+
+  const items: { id: string; text: string }[] = [];
+
+  const itemsRaw = Array.isArray(raw?.items) ? raw.items : null;
+  if (itemsRaw) {
+    for (const it of itemsRaw) {
+      const item = sanitizeItem(it);
+      if (item) items.push(item);
+    }
+    return { version, items };
+  }
+
+  const groupsRaw = Array.isArray(raw?.groups) ? raw.groups : [];
+  for (const g of groupsRaw) {
+    const groupItemsRaw = Array.isArray(g?.items) ? g.items : [];
+    for (const it of groupItemsRaw) {
+      const item = sanitizeItem(it);
+      if (item) items.push(item);
+    }
+  }
+
   return { version, items };
 };
 
