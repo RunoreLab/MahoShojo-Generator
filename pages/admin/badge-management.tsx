@@ -231,7 +231,7 @@ export default function BadgeManagement() {
                     <div className="border rounded-lg p-6 bg-gray-50 grid grid-cols-2 gap-4">
                       <div>
                         <h3 className="text-sm font-medium text-gray-700 mb-3">预览</h3>
-                        <div className="flex gap-2">
+                        <div className="flex items-center gap-2">
                           <Badge badge={selectedBadge} size="sm" />
                           <Badge badge={selectedBadge} size="md" />
                           <Badge badge={selectedBadge} size="lg" />
