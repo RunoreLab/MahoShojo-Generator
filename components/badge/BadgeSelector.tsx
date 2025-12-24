@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Badge from './Badge';
 import type { UserBadge } from '@/types/badge';
 import { Check } from 'lucide-react';
@@ -9,23 +9,44 @@ interface BadgeSelectorProps {
   maxEquipped?: number;
 }
 
+const arraysEqual = (a: string[], b: string[]) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+};
+
 /**
  * 徽章选择器组件
- * 允许用户选择佩戴的徽章（最多5个）
+ * 允许用户选择佩戴的徽章（数量由 maxEquipped 控制）
  */
 export default function BadgeSelector({
   userBadges,
   onSave,
   maxEquipped = 1
 }: BadgeSelectorProps) {
-  // 初始化已选择的徽章（按显示顺序排序）
-  const [selected, setSelected] = useState<string[]>(
-    userBadges
+  const equippedFromServer = useMemo(() => {
+    return userBadges
       .filter(ub => ub.isEquipped)
       .sort((a, b) => a.displayOrder - b.displayOrder)
       .map(ub => ub.badgeId)
-  );
+      .slice(0, maxEquipped);
+  }, [userBadges, maxEquipped]);
+
+  const [selected, setSelected] = useState<string[]>(equippedFromServer);
   const [saving, setSaving] = useState(false);
+
+  const hasChanges = useMemo(() => {
+    return !arraysEqual(selected, equippedFromServer);
+  }, [selected, equippedFromServer]);
+
+  // 当服务端数据刷新（如保存后重新加载）时，同步选择状态
+  useEffect(() => {
+    if (!hasChanges && !saving) {
+      setSelected(equippedFromServer);
+    }
+  }, [equippedFromServer, hasChanges, saving]);
 
   /**
    * 切换徽章选择状态
@@ -34,10 +55,19 @@ export default function BadgeSelector({
     if (selected.includes(badgeId)) {
       // 取消选择
       setSelected(selected.filter(id => id !== badgeId));
-    } else if (selected.length < maxEquipped) {
-      // 添加选择
-      setSelected([...selected, badgeId]);
+      return;
     }
+
+    // 允许在达到上限时直接切换（badge-manager 目前是 max=1）
+    if (selected.length >= maxEquipped) {
+      if (maxEquipped === 1) {
+        setSelected([badgeId]);
+      }
+      return;
+    }
+
+    // 添加选择
+    setSelected([...selected, badgeId]);
   };
 
   /**
@@ -59,6 +89,21 @@ export default function BadgeSelector({
         已选择 <span className="font-bold text-pink-600">{selected.length}</span> / {maxEquipped} 个徽章
       </div>
 
+      {/* 状态提示 */}
+      <div className="text-xs text-gray-500">
+        {maxEquipped === 1 ? (
+          hasChanges ? (
+            <span className="text-pink-600">已修改，点击“保存设置”后才会生效（可直接点击其它徽章切换）。</span>
+          ) : (
+            <span>已佩戴时，点击其它徽章可直接切换；点击当前徽章可卸下。</span>
+          )
+        ) : hasChanges ? (
+          <span className="text-pink-600">已修改，记得点击“保存设置”使其生效。</span>
+        ) : (
+          <span>当前设置已同步。</span>
+        )}
+      </div>
+
       {/* 徽章网格 */}
       <div>
         {userBadges.map(userBadge => {
@@ -67,7 +112,10 @@ export default function BadgeSelector({
           return (
             <button
               key={userBadge.id}
+              type="button"
               onClick={() => toggleBadge(userBadge.badgeId)}
+              aria-pressed={isSelected}
+              aria-label={`${userBadge.badge.name}${isSelected ? '（已佩戴，点击卸下）' : '（点击佩戴）'}`}
               className={`relative flex w-full align-bottom p-2 my-1 border-2 rounded-lg transition-all text-left ${
                 isSelected
                   ? 'border-pink-500 bg-pink-50'
@@ -114,11 +162,12 @@ export default function BadgeSelector({
       {/* 保存按钮 */}
       {userBadges.length > 0 && (
         <button
+          type="button"
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || !hasChanges}
           className="w-full px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {saving ? '保存中...' : '保存设置'}
+          {saving ? '保存中...' : hasChanges ? '保存设置' : '已是最新设置'}
         </button>
       )}
     </div>
