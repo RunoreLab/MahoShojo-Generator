@@ -24,6 +24,8 @@ type BrowseRoom = {
   lastActivityAt: string | null;
   expiresAt: string | null;
   joinable: boolean;
+  spectatable: boolean;
+  allowSpectators: boolean;
 };
 
 type Props = {
@@ -95,11 +97,13 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
 
+  const [showJoinable, setShowJoinable] = useState(true);
+  const [showSpectatable, setShowSpectatable] = useState(true);
   const [q, setQ] = useState('');
   const [mode, setMode] = useState<'all' | 'classic' | 'scenario' | 'daily' | 'kizuna'>('all');
-  const [phase, setPhase] = useState<'any' | 'waiting' | 'submitting'>('any');
+  const [phase, setPhase] = useState<'any' | 'waiting' | 'submitting' | 'playing' | 'ended'>('any');
   const [password, setPassword] = useState<'any' | 'yes' | 'no'>('any');
-  const [includeFull, setIncludeFull] = useState(false);
+  const [includeUnavailable, setIncludeUnavailable] = useState(false);
 
   const [joinPasswords, setJoinPasswords] = useState<Record<string, string>>({});
   const [joinBusyRoomId, setJoinBusyRoomId] = useState<string | null>(null);
@@ -108,12 +112,11 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
     const params = new URLSearchParams();
     if (q.trim()) params.set('q', q.trim());
     if (mode !== 'all') params.set('mode', mode);
-    if (phase !== 'any') params.set('phase', phase);
     if (password !== 'any') params.set('password', password);
-    if (includeFull) params.set('includeFull', '1');
+    if (includeUnavailable) params.set('includeUnavailable', '1');
     params.set('limit', '80');
     return params.toString();
-  }, [q, mode, phase, password, includeFull]);
+  }, [q, mode, password, includeUnavailable]);
 
   const fetchRooms = useCallback(async () => {
     abortRef.current?.abort();
@@ -182,7 +185,7 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
     if (!isOpen) return;
     const t = window.setTimeout(() => void fetchRooms(), 300);
     return () => window.clearTimeout(t);
-  }, [isOpen, q, mode, phase, password, includeFull, fetchRooms]);
+  }, [isOpen, q, mode, password, includeUnavailable, fetchRooms]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -261,6 +264,36 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
     }
   }, [router]);
 
+  const filteredRooms = useMemo(() => {
+    const wantsJoinable = showJoinable;
+    const wantsSpectatable = showSpectatable;
+    const wantsUnavailable = includeUnavailable;
+    if (!wantsJoinable && !wantsSpectatable && !wantsUnavailable) return [];
+
+    const phaseFilter = phase;
+    const isInPlayingPhase = (p: string): boolean =>
+      p === 'dealing' ||
+      p === 'choosing' ||
+      p === 'voting' ||
+      p === 'reviewing' ||
+      p === 'resolving' ||
+      p === 'advancing';
+
+    return rooms.filter((room) => {
+      const okJoinable = wantsJoinable && room.joinable;
+      const okSpectate = wantsSpectatable && room.spectatable;
+      const okUnavailable = wantsUnavailable && !room.joinable && !room.spectatable;
+      if (!okJoinable && !okSpectate && !okUnavailable) return false;
+
+      if (phaseFilter === 'any') return true;
+      if (phaseFilter === 'waiting') return room.phase === 'waiting';
+      if (phaseFilter === 'submitting') return room.phase === 'submitting';
+      if (phaseFilter === 'playing') return isInPlayingPhase(room.phase);
+      if (phaseFilter === 'ended') return room.phase === 'finished' || room.phase === 'aborted';
+      return true;
+    });
+  }, [rooms, showJoinable, showSpectatable, includeUnavailable, phase]);
+
   if (!isOpen) return null;
 
   const lastFetchedLabel = lastFetchedAt ? formatTimeAgo(new Date(lastFetchedAt).toISOString()) : '—';
@@ -276,7 +309,7 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
           <div className="flex-1 min-w-[220px]">
             <h2 className="text-xl font-bold">房间浏览器</h2>
             <div className="text-xs text-gray-600 mt-1">
-              可搜索房主/房间ID，筛选模式与口令，并快速加入有空位的房间（自动刷新：5 秒）。
+              可搜索房主/房间ID，筛选模式与口令，并按“可观战/可加入”快速查找房间（自动刷新：5 秒）。
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -333,6 +366,8 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
               <option value="any">任意阶段</option>
               <option value="waiting">等待加入</option>
               <option value="submitting">提交中</option>
+              <option value="playing">对局中</option>
+              <option value="ended">已结束</option>
             </select>
             <select
               className="border rounded-lg px-3 py-2 text-sm bg-white"
@@ -346,20 +381,28 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
           </div>
           <div className="flex flex-wrap gap-3 items-center">
             <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={showSpectatable} onChange={(e) => setShowSpectatable(e.target.checked)} className="accent-purple-600" />
+              可观战
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={showJoinable} onChange={(e) => setShowJoinable(e.target.checked)} className="accent-purple-600" />
+              可加入
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-gray-700">
               <input
                 type="checkbox"
-                checked={includeFull}
-                onChange={(e) => setIncludeFull(e.target.checked)}
+                checked={includeUnavailable}
+                onChange={(e) => setIncludeUnavailable(e.target.checked)}
                 className="accent-purple-600"
               />
-              显示不可加入
+              显示无法进入
             </label>
             <label className="inline-flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} className="accent-purple-600" />
               自动刷新
             </label>
             <div className="text-xs text-gray-500 ml-auto">
-              {isLoading ? '正在加载…' : `共 ${rooms.length} 个房间`} · 更新：{lastFetchedLabel}
+              {isLoading ? '正在加载…' : `显示 ${filteredRooms.length} / ${rooms.length} 个房间`} · 更新：{lastFetchedLabel}
             </div>
           </div>
         </div>
@@ -368,25 +411,35 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
 
         <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
           {rooms.length === 0 && !isLoading && <div className="text-center text-gray-500 py-10">暂无可用房间</div>}
+          {rooms.length > 0 && filteredRooms.length === 0 && !isLoading && (
+            <div className="text-center text-gray-500 py-10">暂无符合筛选条件的房间</div>
+          )}
 
-          {rooms.map((room) => {
-            const seatText = `${room.players.total}/${room.players.max}`;
+          {filteredRooms.map((room) => {
+            const seatText = `${room.players.total}/${room.players.max}${room.players.slotsLeft > 0 ? `（空位 ${room.players.slotsLeft}）` : ''}`;
             const passwordHint = room.hasPassword ? '需要口令' : '无口令';
             const phaseLabel = formatPhase(room.phase);
             const modeLabel = formatMode(room.mode);
             const activityText = formatTimeAgo(room.lastActivityAt || room.updatedAt);
             const isBusy = joinBusyRoomId === room.roomId;
+            const canEnter = room.joinable || room.spectatable;
 
             return (
               <div
                 key={room.roomId}
-                className={`border rounded-xl p-4 bg-white ${room.joinable ? 'shadow-sm' : 'opacity-70'} ${room.joinable ? 'border-emerald-200' : ''}`}
+                className={`border rounded-xl p-4 bg-white ${canEnter ? 'shadow-sm' : 'opacity-70'} ${canEnter ? 'border-emerald-200' : ''}`}
               >
                 <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4 items-start">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs px-2 py-1 rounded bg-purple-100 text-purple-800">{modeLabel}</span>
                       <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">{phaseLabel}</span>
+                      <span
+                        className={`text-xs px-2 py-1 rounded ${room.allowSpectators ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-700'}`}
+                        title={room.allowSpectators ? '该房间允许观战，新进入默认观众。' : '该房间关闭观战，仅玩家可进入。'}
+                      >
+                        {room.allowSpectators ? '可观战' : '禁观战'}
+                      </span>
                       <span
                         className={`text-xs px-2 py-1 rounded ${room.hasPassword ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}
                       >
@@ -413,22 +466,24 @@ export function PvpRoomBrowserModal({ isOpen, onClose }: Props) {
                           className="w-full input-field px-3 py-2 text-sm"
                           value={joinPasswords[room.roomId] || ''}
                           onChange={(e) => setJoinPasswords((prev) => ({ ...prev, [room.roomId]: e.target.value }))}
-                          placeholder="输入口令后加入"
+                          placeholder="输入口令后进入"
                         />
                       </div>
                     )}
                     <button
                       onClick={() => void joinRoom(room)}
-                      disabled={!room.joinable || isBusy}
+                      disabled={!canEnter || isBusy}
                       className="generate-button w-full mb-0 py-2 text-sm"
                       style={{
-                        backgroundColor: room.joinable ? '#22c55e' : '#94a3b8',
-                        backgroundImage: room.joinable ? 'linear-gradient(to right, #22c55e, #16a34a)' : 'none',
+                        backgroundColor: canEnter ? '#22c55e' : '#94a3b8',
+                        backgroundImage: canEnter ? 'linear-gradient(to right, #22c55e, #16a34a)' : 'none',
                       }}
                     >
-                      {isBusy ? '加入中…' : room.joinable ? '加入房间' : '不可加入'}
+                      {isBusy ? '进入中…' : canEnter ? '进入房间' : '无法进入'}
                     </button>
-                    {room.hasPassword && !room.joinable && <div className="text-xs text-gray-500">提示：满员或房间已进入不可加入阶段。</div>}
+                    {room.hasPassword && !canEnter && (
+                      <div className="text-xs text-gray-500">提示：该房间不允许观战且已进入对局阶段，无法进入。</div>
+                    )}
                   </div>
                 </div>
 
