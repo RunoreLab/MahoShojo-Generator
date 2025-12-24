@@ -178,7 +178,7 @@ const ScenarioPage: React.FC = () => {
           <div className="card">
             <div className="text-center mb-4">
               <div className="flex justify-center items-center" style={{ marginBottom: '1rem' }}>
-                <img src="/scenario-shadow.svg" width={360} height={40} alt="箱庭物语" />
+                <img src="/scenario-shadow.webp" width={360} height={40} alt="箱庭物语" />
               </div>
               <p className="subtitle mt-2">情景生成器，创建独一无二的舞台，上演属于你的故事</p>
             </div>
