@@ -328,6 +328,7 @@ export const createPromptBuilder = (
 export const createStreamPromptBuilder = (
     questions: string[],
     userGuidance: string | null,
+    internalGuidance: string | null,
     worldviewWarning: boolean,
     language: string,
     selectedLevel: string | undefined,
@@ -339,6 +340,7 @@ export const createStreamPromptBuilder = (
     readCurrentState: boolean,
     writeArenaHistory: boolean,
     writeCurrentState: boolean,
+    forceStreamMeta: boolean,
     adjudicationResults: AdjudicationResult[] | null,
     storyLength: string | undefined,
     narrativeHistory?: NarrativeHistoryEntry[] | null
@@ -417,6 +419,10 @@ export const createStreamPromptBuilder = (
         finalPrompt += `\n\n`;
     }
 
+    if (internalGuidance) {
+        finalPrompt += `## 【系统裁判规则】\n${internalGuidance.trim()}\n\n`;
+    }
+
     if (mode === 'scenario' && scenario) {
         const scenarioForPrompt = { ...scenario };
         delete scenarioForPrompt.signature;
@@ -462,7 +468,7 @@ export const createStreamPromptBuilder = (
     }
 
     // 流式生成的关键：要求输出 Markdown 格式的战报
-    const shouldAllowStreamMeta = writeArenaHistory || writeCurrentState;
+    const shouldAllowStreamMeta = forceStreamMeta || writeArenaHistory || writeCurrentState;
     finalPrompt += `\n\n【输出格式】\n请以 Markdown 格式输出战报，请严格按照格式输出，不要携带任何其他内容：\n` +
         `- 输出第 1 行必须从第 1 个字符开始就是 "# "（不要有任何前置空格、不要多输出额外的 # 号）。\n` +
         `- 正文部分不要输出 JSON/YAML/代码块，也不要输出任何字段名（例如 winner/impact/currentStateSummary）。\n` +
@@ -485,22 +491,34 @@ export const createStreamPromptBuilder = (
     if (shouldAllowStreamMeta) {
         const requiresImpact = writeArenaHistory;
         const requiresCurrentState = writeCurrentState;
-        const requiredFields = [
-            'characterName（必须）',
-            ...(requiresImpact ? ['impact（必须）'] : []),
-            ...(requiresCurrentState ? ['currentStateSummary（必须）'] : []),
-        ].join('、');
 
-        finalPrompt += `\n\n【角色更新元数据（务必输出）】\n` +
-            `在全文最后一行，追加一段 HTML 注释（不会显示给用户），内容必须包含一段 JSON，用于角色更新。\n` +
-            `要求：\n` +
-            `- 注释必须以 "<!-- MAHOSHOJO_ARENA_META " 开头，以 " -->" 结尾。\n` +
-            `- JSON 必须是一个对象，包含 version=1 以及 impacts 数组。\n` +
-            `- JSON 中请额外包含 report 对象：report.headline 与 report.winner（与正文标题/胜利者保持一致），用于兜底解析。\n` +
-            `- impacts 必须覆盖每一位参战角色；每个元素字段要求：${requiredFields}。\n` +
-            `- 除注释外不要输出任何额外文本。\n\n` +
-            `示例（仅示例，不要照抄名字）：\n` +
-            `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"},\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\",\"currentStateSummary\":\"……\"}]} -->`;
+        if (requiresImpact || requiresCurrentState) {
+            const requiredFields = [
+                'characterName（必须）',
+                ...(requiresImpact ? ['impact（必须）'] : []),
+                ...(requiresCurrentState ? ['currentStateSummary（必须）'] : []),
+            ].join('、');
+
+            finalPrompt += `\n\n【角色更新元数据（务必输出）】\n` +
+                `在全文最后一行，追加一段 HTML 注释（不会显示给用户），内容必须包含一段 JSON，用于角色更新。\n` +
+                `要求：\n` +
+                `- 注释必须以 "<!-- MAHOSHOJO_ARENA_META " 开头，以 " -->" 结尾。\n` +
+                `- JSON 必须是一个对象，包含 version=1 以及 impacts 数组。\n` +
+                `- JSON 中请额外包含 report 对象：report.headline 与 report.winner（与正文标题/胜利者保持一致），用于兜底解析。\n` +
+                `- impacts 必须覆盖每一位参战角色；每个元素字段要求：${requiredFields}。\n` +
+                `- 除注释外不要输出任何额外文本。\n\n` +
+                `示例（仅示例，不要照抄名字）：\n` +
+                `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"},\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\",\"currentStateSummary\":\"……\"}]} -->`;
+        } else {
+            finalPrompt += `\n\n【战报元数据（务必输出）】\n` +
+                `在全文最后一行，追加一段 HTML 注释（不会显示给用户），内容必须包含一段 JSON，用于系统兜底解析。\n` +
+                `要求：\n` +
+                `- 注释必须以 "<!-- MAHOSHOJO_ARENA_META " 开头，以 " -->" 结尾。\n` +
+                `- JSON 必须是一个对象，至少包含 version=1 与 report 对象（report.headline 与 report.winner 与正文标题/胜利者保持一致）。\n` +
+                `- 除注释外不要输出任何额外文本。\n\n` +
+                `示例（仅示例，不要照抄名字）：\n` +
+                `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"}} -->`;
+        }
     }
 
     return finalPrompt;

@@ -11,6 +11,7 @@ import BattleReportCard from '@/components/BattleReportCard';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
 import { PresetGridPicker } from '@/components/PresetGridPicker';
+import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 import { UserWithTitle } from '@/components/UserTitle';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 import { useLanguagesQuery, usePresetQuery } from '@/components/arena/hooks/useArenaData';
@@ -23,6 +24,7 @@ import { ArenaDataSettingsPanel } from '@/components/shared/ArenaDataSettingsPan
 import { BattleModeSelector } from '@/components/shared/BattleModeSelector';
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { StoryOptionsPanel } from '@/components/shared/StoryOptionsPanel';
+import { GenerationModeSwitcher } from '@/components/shared/GenerationModeSwitcher';
 import { authStorage } from '@/lib/auth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useCooldown } from '@/lib/cooldown';
@@ -252,6 +254,9 @@ export function PvpRoomPage() {
   const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [winnerVoteDraft, setWinnerVoteDraft] = useState<WinnerVoteChoice | null>(null);
+  const [streamingResolveMarkdown, setStreamingResolveMarkdown] = useState('');
+  const [streamingResolveMeta, setStreamingResolveMeta] = useState<any | null>(null);
+  const [isStreamingResolve, setIsStreamingResolve] = useState(false);
 
   const [versionConflictRetryUntil, setVersionConflictRetryUntil] = useState<number | null>(null);
   const [versionConflictSecondsLeft, setVersionConflictSecondsLeft] = useState(0);
@@ -621,6 +626,12 @@ export function PvpRoomPage() {
     | { kind: 'submit' | 'choose' | 'confirm' | 'vote'; pendingUserId: number; pendingUsername?: string | null; deadlineAt: string; secondsLeft?: number; canHostForce?: boolean }
     | null
     | undefined;
+
+  useEffect(() => {
+    setStreamingResolveMarkdown('');
+    setStreamingResolveMeta(null);
+    setIsStreamingResolve(false);
+  }, [roomId, latestRound?.id]);
   const score = roomQuery.data?.score;
 
   const pendingActionDeadlineAt = typeof pendingAction?.deadlineAt === 'string' ? pendingAction.deadlineAt : null;
@@ -649,6 +660,18 @@ export function PvpRoomPage() {
     const playerLabel = playerDisplayBySeat.get(winnerSeat) || '未知玩家';
     return `座位 ${winnerSeat} · ${playerLabel}（角色：${winnerName}）`;
   }, [latestRoundResult, playerDisplayBySeat]);
+
+  const latestRoundReportMarkdown = useMemo(() => {
+    const raw = typeof (latestRoundResult as any)?.reportMarkdown === 'string' ? String((latestRoundResult as any).reportMarkdown) : '';
+    return raw.trim();
+  }, [latestRoundResult]);
+  const latestRoundStreamMeta = useMemo(() => {
+    const raw = (latestRoundResult as any)?.streamMeta ?? null;
+    return raw && typeof raw === 'object' ? raw : null;
+  }, [latestRoundResult]);
+  const reportContentForUi = (isStreamingResolve ? streamingResolveMarkdown : '') || latestRoundReportMarkdown;
+  const reportMetaForUi = (isStreamingResolve ? streamingResolveMeta : null) || latestRoundStreamMeta;
+  const hasAnyReportForUi = Boolean(reportContentForUi.trim()) || Boolean(latestRoundResult?.report);
 
   const rulesDraftError = useMemo(() => {
     if (!rulesDraft) return null;
@@ -705,6 +728,11 @@ export function PvpRoomPage() {
     const storyLength = typeof (rulesDraft as any).storyLength === 'string' ? String((rulesDraft as any).storyLength).trim() : 'default';
     if (!['default', 'short', 'standard', 'detailed', 'long'].includes(storyLength)) {
       return '期望字数设置不合法';
+    }
+
+    const generationMode = typeof (rulesDraft as any).generationMode === 'string' ? String((rulesDraft as any).generationMode).trim() : 'non-stream';
+    if (!['non-stream', 'stream'].includes(generationMode)) {
+      return '战报生成方式不合法';
     }
 
     const language = typeof (rulesDraft as any).language === 'string' ? String((rulesDraft as any).language).trim() : '';
@@ -964,30 +992,94 @@ export function PvpRoomPage() {
       if (!authHeader) throw new Error('未登录');
 
       const customProvider = buildCustomProviderPayload(payload?.customProvider ?? null);
-      const res = await fetchWithTimeout(
-        `/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-          body: JSON.stringify({
-            expectedVersion: version,
-            ...(payload?.force ? { force: true } : {}),
-            ...(customProvider ? { customProvider } : {}),
-          }),
-        },
-        RESOLVE_REQUEST_TIMEOUT_MS,
-      );
-      const { data } = await readJsonOrText(res);
-      if (!res.ok) {
-        const payload = (data || {}) as ApiErrorPayload;
-        throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
-          status: res.status,
-          code: payload.code,
-          traceId: payload.traceId,
-          detail: payload.detail,
-        });
+      const shouldStream = rules?.generationMode === 'stream';
+
+      if (!shouldStream) {
+        const res = await fetchWithTimeout(
+          `/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+            body: JSON.stringify({
+              expectedVersion: version,
+              ...(payload?.force ? { force: true } : {}),
+              ...(customProvider ? { customProvider } : {}),
+            }),
+          },
+          RESOLVE_REQUEST_TIMEOUT_MS,
+        );
+        const { data } = await readJsonOrText(res);
+        if (!res.ok) {
+          const payload = (data || {}) as ApiErrorPayload;
+          throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+            status: res.status,
+            code: payload.code,
+            traceId: payload.traceId,
+            detail: payload.detail,
+          });
+        }
+        return data;
       }
-      return data;
+
+      setStreamingResolveMarkdown('');
+      setStreamingResolveMeta(null);
+      setIsStreamingResolve(true);
+      try {
+        const res = await fetchWithTimeout(
+          `/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve-stream`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+            body: JSON.stringify({
+              expectedVersion: version,
+              ...(payload?.force ? { force: true } : {}),
+              ...(customProvider ? { customProvider } : {}),
+            }),
+          },
+          RESOLVE_REQUEST_TIMEOUT_MS,
+        );
+
+        // resolve-stream 成功时会返回 text/plain（Markdown stream）；失败则返回 JSON 错误
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        const looksLikeJson = contentType.includes('application/json') || contentType.includes('+json');
+        if (!res.ok || looksLikeJson) {
+          const { data } = await readJsonOrText(res);
+          const payload = (data || {}) as ApiErrorPayload;
+          throw new PvpApiError(formatApiErrorMessage(payload, res.status), {
+            status: res.status,
+            code: payload.code,
+            traceId: payload.traceId,
+            detail: payload.detail,
+          });
+        }
+
+        const metaHeader = res.headers.get('x-mahoshojo-stream-meta');
+        if (metaHeader) {
+          try {
+            setStreamingResolveMeta(JSON.parse(decodeURIComponent(metaHeader)));
+          } catch {
+            setStreamingResolveMeta(null);
+          }
+        }
+
+        if (!res.body) throw new Error('无法读取响应流');
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let accumulated = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          accumulated += decoder.decode(value, { stream: true });
+          setStreamingResolveMarkdown(accumulated);
+        }
+        accumulated += decoder.decode();
+        setStreamingResolveMarkdown(accumulated);
+        return { success: true, streamed: true };
+      } finally {
+        setIsStreamingResolve(false);
+      }
     },
     onSuccess: () => {
       startCooldown();
@@ -1820,7 +1912,7 @@ export function PvpRoomPage() {
                     )}
                     {rules && (
                       <div className="mt-1 text-xs text-gray-600 whitespace-pre-wrap">
-                        生成设置：历战 读 {String(rules.readArenaHistory)} / 写 {String(rules.writeArenaHistory)}；状态 读 {String(rules.readCurrentState)} / 写 {String(rules.writeCurrentState)}；等级 {rules.selectedLevel || '默认'}；引导 {rules.userGuidance?.trim() ? `“${rules.userGuidance.trim()}”` : '无'}；字数 {rules.storyLength || 'default'}；语言 {rules.language?.trim() || '默认'}
+                        生成设置：方式 {rules.generationMode === 'stream' ? '流式' : '非流式'}；历战 读 {String(rules.readArenaHistory)} / 写 {String(rules.writeArenaHistory)}；状态 读 {String(rules.readCurrentState)} / 写 {String(rules.writeCurrentState)}；等级 {rules.selectedLevel || '默认'}；引导 {rules.userGuidance?.trim() ? `“${rules.userGuidance.trim()}”` : '无'}；字数 {rules.storyLength || 'default'}；语言 {rules.language?.trim() || '默认'}
                       </div>
                     )}
                     {rules?.bestOf?.enabled && latestRound ? (
@@ -2449,6 +2541,18 @@ export function PvpRoomPage() {
                           </div>
 
                           <div className="mt-3">
+                            <GenerationModeSwitcher
+                              label="战报生成方式"
+                              value={(rulesDraft.generationMode as any) || 'non-stream'}
+                              disabled={rulesMutation.isPending}
+                              onChange={(mode) => setRulesDraft((r) => (r ? { ...r, generationMode: mode as any } : r))}
+                            />
+                            <div className="text-xs text-gray-500 mt-2">
+                              提示：流式模式会实时输出正文，但胜者解析存在不确定性；若解析失败将自动进入“胜者投票”。
+                            </div>
+                          </div>
+
+                          <div className="mt-3">
                             <StoryOptionsPanel
                               battleMode={rulesDraft.mode}
                               isGenerating={rulesMutation.isPending}
@@ -2842,7 +2946,9 @@ export function PvpRoomPage() {
                                 ? '结算中…'
                                 : isCooldown
                                   ? `冷却中（${remainingTime}s）`
-                                  : '结算（生成战报）'}
+                                  : rules?.generationMode === 'stream'
+                                    ? '结算（流式生成）'
+                                    : '结算（生成战报）'}
                             </button>
                           </>
                         ) : (
@@ -2883,19 +2989,34 @@ export function PvpRoomPage() {
                   }}
                 />
 
-                {latestRoundResult?.report && (
+                {hasAnyReportForUi && (
                   <div className="mt-4">
-                    <BattleReportCard
-                      report={latestRoundResult.report}
-                      mode={rules?.mode as any}
-                      onSaveImage={(imageUrl) => {
-                        setSavedImageUrl(imageUrl);
-                        setShowImageModal(true);
-                      }}
-                    />
+                    {reportContentForUi.trim() ? (
+                      <StreamingBattleReportCard
+                        content={reportContentForUi}
+                        mode={rules?.mode as any}
+                        isStreaming={isStreamingResolve}
+                        reporterInfo={(reportMetaForUi as any)?.reporterInfo ?? null}
+                        userGuidance={(reportMetaForUi as any)?.userGuidance ?? null}
+                        adjudicationResults={(reportMetaForUi as any)?.adjudicationResults ?? null}
+                        onSaveImage={(imageUrl) => {
+                          setSavedImageUrl(imageUrl);
+                          setShowImageModal(true);
+                        }}
+                      />
+                    ) : latestRoundResult?.report ? (
+                      <BattleReportCard
+                        report={latestRoundResult.report}
+                        mode={rules?.mode as any}
+                        onSaveImage={(imageUrl) => {
+                          setSavedImageUrl(imageUrl);
+                          setShowImageModal(true);
+                        }}
+                      />
+                    ) : null}
                     <div className="text-sm text-gray-700 mt-2 flex items-center justify-between gap-2">
                       <div>
-                        本轮胜者：<span className="font-semibold">{latestWinnerText || '平局'}</span>
+                        本轮胜者：<span className="font-semibold">{latestWinnerText || (isStreamingResolve ? '解析中…' : '平局')}</span>
                       </div>
                       {isHost && phase === 'reviewing' && latestRound ? (
                         <button
@@ -2924,7 +3045,7 @@ export function PvpRoomPage() {
                   </div>
                 )}
 
-                {phase === 'voting' && latestRoundResult?.report && winnerVote && (
+                {phase === 'voting' && winnerVote && hasAnyReportForUi && (
                   <div className="p-4 rounded-xl bg-white border mt-4">
                     <div className="font-semibold text-sm text-gray-900">胜者投票</div>
                     <div className="text-xs text-gray-600 mt-2">
