@@ -43,12 +43,15 @@ export default function BadgeIcon({ icon, size = 14, className = '' }: BadgeIcon
   if (icon.type === 'emoji') {
     return (
       <span
-        className={className}
+        className={`inline-flex items-center justify-center shrink-0 ${className}`}
         style={{
-          fontSize: `${size}px`,
+          fontSize: `${size}px`, // 控制 Emoji 图案的大小
+          width: `${size}px`,    // 强制限制宽度
+          height: `${size}px`,   // 强制限制高度
           lineHeight: 1,
-          display: 'inline-block'
         }}
+        role="img"
+        aria-label="badge icon"
       >
         {icon.value}
       </span>
