@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "groups": [
     {
       "id": "agree",
@@ -10,6 +10,8 @@
         { "id": "gotIt", "text": "收到" },
         { "id": "agree", "text": "同意" },
         { "id": "yes", "text": "是" },
+        { "id": "can", "text": "可以" },
+        { "id": "noProblem", "text": "没问题" },
         { "id": "thanks", "text": "谢谢" },
         { "id": "gg", "text": "GG" }
       ]
@@ -19,14 +21,21 @@
       "label": "反对",
       "items": [
         { "id": "disagree", "text": "不同意" },
-        { "id": "no", "text": "不是" }
+        { "id": "no", "text": "不是" },
+        { "id": "dont", "text": "不要" },
+        { "id": "cant", "text": "要不起" },
+        { "id": "forgetIt", "text": "算了" },
+        { "id": "surrender", "text": "投降喵" }
       ]
     },
     {
       "id": "apology",
       "label": "致歉",
       "items": [
-        { "id": "sorry", "text": "对不起" }
+        { "id": "sorry", "text": "对不起" },
+        { "id": "myBad", "text": "我失误了" },
+        { "id": "misclick", "text": "手滑了" },
+        { "id": "slowHands", "text": "操作慢了" }
       ]
     },
     {
@@ -35,7 +44,109 @@
       "items": [
         { "id": "wait", "text": "等等" },
         { "id": "hurry", "text": "快一点" },
-        { "id": "pause", "text": "先停一下" }
+        { "id": "pause", "text": "先停一下" },
+        { "id": "hurryUp", "text": "你快点啊" },
+        { "id": "flowersWilted", "text": "快点，我等的花都谢了" },
+        { "id": "readyWhenYouAre", "text": "我准备好了" }
+      ]
+    },
+    {
+      "id": "status",
+      "label": "状态",
+      "items": [
+        { "id": "nowOk", "text": "现在可以了" },
+        { "id": "shocked", "text": "震惊" },
+        { "id": "sweat", "text": "流汗" },
+        { "id": "angry", "text": "生气" },
+        { "id": "sad", "text": "哭哭" },
+        { "id": "dazed", "text": "呆滞" },
+        { "id": "sleepy", "text": "困困" }
+      ]
+    },
+    {
+      "id": "judgement",
+      "label": "判断",
+      "items": [
+        { "id": "correct", "text": "正确的" },
+        { "id": "wrong", "text": "错误的" },
+        { "id": "thatsIt", "text": "是这样吗" },
+        { "id": "what", "text": "你在说什么啊" },
+        { "id": "youWrong", "text": "你错了😠，能导正这个世界🌏的，只有我😠！" },
+        { "id": "iWrong", "text": "我错了😭😭😭。我🌺🐷👈根本就没有什么正确❌❌❌🥺🥺…！" }
+      ]
+    },
+    {
+      "id": "reaction",
+      "label": "反应",
+      "items": [
+        { "id": "bbzl", "text": "蚌埠住了" },
+        { "id": "howCome", "text": "怎么会这样" },
+        { "id": "bruh", "text": "？？？" },
+        { "id": "wow", "text": "哇哦" },
+        { "id": "scaredToTears", "text": "吓哭了" },
+        { "id": "gua", "text": "呱——" },
+        { "id": "ye", "text": "吔——" },
+        { "id": "aieee", "text": "aieeeeee……" },
+        { "id": "yearrrrt", "text": "yearrrrt！" },
+        { "id": "yay", "text": "好耶" }
+      ]
+    },
+    {
+      "id": "review",
+      "label": "复盘",
+      "items": [
+        { "id": "bravo", "text": "真是精彩" },
+        { "id": "oneMore", "text": "再来一局" },
+        { "id": "noMoreMoves", "text": "我真没招了" }
+      ]
+    },
+    {
+      "id": "other",
+      "label": "其他",
+      "items": [
+        { "id": "magicCheeseSide", "text": "此乃魔法芝士的一个侧面" },
+        { "id": "noteThis", "text": "这必须要记下来了" },
+        { "id": "children", "text": "孩子们" },
+        { "id": "friendship", "text": "战友情" },
+        { "id": "mahoushojo", "text": "魔法少女" },
+        { "id": "use", "text": "使用" },
+        { "id": "mahou", "text": "魔法" },
+        { "id": "canshou", "text": "残兽" },
+        { "id": "likeThis", "text": "是这样的" },
+        { "id": "notLikeThis", "text": "不是这样的" },
+        { "id": "notUsedLikeThis", "text": "不是这么用的！" },
+        { "id": "isUsedLikeThis", "text": "是这么用的！" },
+        { "id": "TooComplex", "text": "太复杂了" },
+        { "id": "simplicityTruth", "text": "简即是真，而繁，即是伪" },
+        { "id": "simplicityIsGood", "text": "简单一点就好" },
+        { "id": "ddzj", "text": "大道至简" },
+        { "id": "simplifyJudgementTruth", "text": "破繁归真！法则裁定！真理之锋！" },
+        { "id": "straightWind", "text": "直击之风！" }
+      ]
+    },
+    {
+      "id": "cute",
+      "label": "卖萌",
+      "items": [
+        { "id": "ciallo", "text": "Ciallo～(∠・ω< )⌒★" },
+        { "id": "hehe", "text": "嘿嘿" },
+        { "id": "lue", "text": "略" },
+        { "id": "cuteMoe", "text": "可爱，卖萌~" },
+        { "id": "hug", "text": "要抱抱" },
+        { "id": "heart", "text": "比心" },
+        { "id": "tt", "text": "贴贴" },
+        { "id": "kiss", "text": "亲亲" },
+        { "id": "handshake", "text": "握握手，握握双手" }
+      ]
+    },
+    {
+      "id": "greet",
+      "label": "问候",
+      "items": [
+        { "id": "hello", "text": "你好～" },
+        { "id": "welcome", "text": "欢迎" },
+        { "id": "niceToMeet", "text": "请多指教" },
+        { "id": "haveFun", "text": "玩得开心" }
       ]
     }
   ]
