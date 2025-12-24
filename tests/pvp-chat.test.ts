@@ -47,5 +47,11 @@ describe('pvp: chat message normalize/validate', () => {
     if (built.ok) return;
     expect(built.code).toBe('TEXT_CONFLICT');
   });
-});
 
+  test('拒绝不存在的快捷消息', () => {
+    const built = validateAndBuildPvpChatMessage({ quickTextId: 'not-exist' });
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.code).toBe('INVALID_QUICK_TEXT');
+  });
+});
