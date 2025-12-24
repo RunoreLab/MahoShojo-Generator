@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { extractStreamUpdateMeta } from '@/lib/arena/stream-meta';
+import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 
 describe('arena stream meta', () => {
   test('extracts valid meta comment and strips it from markdown', async () => {
@@ -99,5 +99,19 @@ describe('arena stream meta', () => {
     const extracted = await extractStreamUpdateMeta(md);
     expect(extracted).toBeNull();
   });
-});
 
+  test('strips marker comment without parsing json', () => {
+    const md = [
+      '# 标题',
+      '',
+      '正文',
+      '',
+      "<!-- MAHOSHOJO_ARENA_META {version:1, impacts:[{name:'A'}],} -->",
+    ].join('\n');
+
+    const stripped = stripStreamUpdateMetaComment(md);
+    expect(stripped).not.toBeNull();
+    expect(stripped!.strippedMarkdown.includes('MAHOSHOJO_ARENA_META')).toBe(false);
+    expect(stripped!.strippedMarkdown.includes('正文')).toBe(true);
+  });
+});

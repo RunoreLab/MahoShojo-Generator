@@ -394,10 +394,13 @@ export const createStreamPromptBuilder = (
     }
 
     // 流式生成的关键：要求输出 Markdown 格式的战报
+    const shouldAllowStreamMeta = writeArenaHistory || writeCurrentState;
     finalPrompt += `\n\n【输出格式】\n请以 Markdown 格式输出战报，请严格按照格式输出，不要携带任何其他内容：\n` +
         `- 输出第 1 行必须从第 1 个字符开始就是 "# "（不要有任何前置空格、不要多输出额外的 # 号）。\n` +
         `- 正文部分不要输出 JSON/YAML/代码块，也不要输出任何字段名（例如 winner/impact/currentStateSummary）。\n` +
-        `  （仅允许在最后一行的 HTML 注释元数据中出现 JSON 与字段名，供系统解析更新用。）\n\n` +
+        (shouldAllowStreamMeta
+            ? `  （仅允许在最后一行的 HTML 注释元数据中出现 JSON 与字段名，供系统解析更新用。）\n\n`
+            : `  （请勿在任何位置追加 HTML 注释元数据；也不要输出任何类似 MAHOSHOJO_ARENA_META 的标记。）\n\n`) +
         `# 故事 / 战报标题\n` +
         `随后紧跟故事或者战报的正文，用段落呈现，保持流畅性和可读性\n` +
         `## 胜利者\n` +
@@ -411,7 +414,7 @@ export const createStreamPromptBuilder = (
 
     // 如果用户开启了“写入历战记录/当前状态”，则要求模型在文末追加一段 HTML 注释元数据，
     // 供客户端在流式完成后提取 impacts/currentStateSummary，从而最大化“流式生成后自动更新角色”的成功率。
-    if (writeArenaHistory || writeCurrentState) {
+    if (shouldAllowStreamMeta) {
         const requiresImpact = writeArenaHistory;
         const requiresCurrentState = writeCurrentState;
         const requiredFields = [
@@ -430,11 +433,6 @@ export const createStreamPromptBuilder = (
             `- 除注释外不要输出任何额外文本。\n\n` +
             `示例（仅示例，不要照抄名字）：\n` +
             `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"},\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\",\"currentStateSummary\":\"……\"}]} -->`;
-    } else {
-        finalPrompt += `\n\n【角色更新元数据（可选）】\n` +
-            `如果你愿意提高角色更新成功率，可以在全文最后一行追加一段 HTML 注释（不会显示给用户），内容为 JSON：\n` +
-            `<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\"……\",\"winner\":\"……\"},\"impacts\":[{\"characterName\":\"角色A\",\"impact\":\"……\"}]} -->\n` +
-            `除注释外不要输出任何额外文本。`;
     }
 
     return finalPrompt;
