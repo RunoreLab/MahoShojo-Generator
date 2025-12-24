@@ -33,6 +33,8 @@ export type PvpStoryLengthOption = 'default' | 'short' | 'standard' | 'detailed'
 
 export type PvpSubmissionMode = 'perPlayer' | 'hostOnly';
 
+export type PvpGenerationMode = 'non-stream' | 'stream';
+
 export interface PvpBestOfRules {
   enabled: boolean;
   maxRounds: number;
@@ -114,6 +116,9 @@ export interface PvpRoomRules {
   writeArenaHistory: boolean;
   readCurrentState: boolean;
   writeCurrentState: boolean;
+
+  /** 战报生成方式（与竞技场对齐；默认非流式）。 */
+  generationMode: PvpGenerationMode;
 
   /** 故事生成设置（与竞技场对齐；默认不指定/留空）。 */
   selectedLevel: string;

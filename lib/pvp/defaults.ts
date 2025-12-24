@@ -38,6 +38,7 @@ export const DEFAULT_PVP_RULES: PvpRoomRules = {
   writeArenaHistory: false,
   readCurrentState: false,
   writeCurrentState: false,
+  generationMode: 'non-stream',
   selectedLevel: '',
   userGuidance: '',
   storyLength: 'default',

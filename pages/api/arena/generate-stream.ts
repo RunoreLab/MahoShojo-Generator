@@ -53,6 +53,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	    let snapshotLanguage: string | null = null;
 	    let snapshotSelectedLevel: string | null = null;
 	    let snapshotStoryLength: string | null = null;
+	    let snapshotPvpRoomId: string | null = null;
+	    let snapshotPvpMatchId: string | null = null;
+	    let snapshotPvpRoundId: string | null = null;
 
 	    try {
 	        const body = await req.json();
@@ -61,6 +64,7 @@ async function handler(req: NextRequest): Promise<Response> {
             selectedLevel,
             mode = 'classic',
             userGuidance,
+            internalGuidance,
             scenario,
             teams,
             language = 'zh-CN',
@@ -78,12 +82,35 @@ async function handler(req: NextRequest): Promise<Response> {
             scenarioTitle,
             scenarioSourceDataCardId,
 	            scenarioSourceDataCardUpdatedAt,
+              pvpContext,
+              forceStreamMeta,
 	        } = body;
 
 	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 	        snapshotLanguage = typeof language === 'string' ? language : null;
 	        snapshotSelectedLevel = typeof selectedLevel === 'string' ? selectedLevel : null;
 	        snapshotStoryLength = typeof storyLength === 'string' ? storyLength : null;
+
+          const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
+              if (!value || typeof value !== 'object') return null;
+              const roomId = typeof (value as any).roomId === 'string' ? (value as any).roomId.trim() : '';
+              const matchId = typeof (value as any).matchId === 'string' ? (value as any).matchId.trim() : '';
+              const roundId = typeof (value as any).roundId === 'string' ? (value as any).roundId.trim() : '';
+              if (!roomId || !matchId || !roundId) return null;
+              if (roomId.length > 128 || matchId.length > 128 || roundId.length > 128) return null;
+              return { roomId, matchId, roundId };
+          };
+          const parsedPvpContext = pvpContext !== undefined ? parsePvpContext(pvpContext) : null;
+          if (pvpContext !== undefined && !parsedPvpContext) {
+              return new Response(JSON.stringify({ error: 'pvpContext 无效' }), { status: 400 });
+          }
+          snapshotPvpRoomId = parsedPvpContext?.roomId ?? null;
+          snapshotPvpMatchId = parsedPvpContext?.matchId ?? null;
+          snapshotPvpRoundId = parsedPvpContext?.roundId ?? null;
+
+          const finalInternalGuidance =
+              typeof internalGuidance === 'string' ? internalGuidance.trim().slice(0, 4000) : null;
+          const shouldForceStreamMeta = forceStreamMeta === true;
 
         const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
             ? readArenaHistory
@@ -294,6 +321,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            language: snapshotLanguage,
 	                            selectedLevel: snapshotSelectedLevel,
 	                            storyLength: snapshotStoryLength,
+	                            pvpRoomId: snapshotPvpRoomId,
+	                            pvpMatchId: snapshotPvpMatchId,
+	                            pvpRoundId: snapshotPvpRoundId,
 	                            readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
 	                            arenaHistoryReadLimit: resolvedReadArenaHistory
 	                                ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
@@ -341,6 +371,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const prompt = createStreamPromptBuilder(
             questionnaire.questions,
             finalUserGuidance,
+            finalInternalGuidance,
             needsWorldviewWarning,
             language,
             selectedLevel,
@@ -352,6 +383,7 @@ async function handler(req: NextRequest): Promise<Response> {
             resolvedReadCurrentState,
             resolvedWriteArenaHistory,
             resolvedWriteCurrentState,
+            shouldForceStreamMeta,
             adjudicationResults,
             storyLength,
             narrativeHistoryForPrompt,
@@ -491,6 +523,9 @@ async function handler(req: NextRequest): Promise<Response> {
                     language: typeof language === 'string' ? language : null,
                     selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
                     storyLength: typeof storyLength === 'string' ? storyLength : null,
+                    pvpRoomId: snapshotPvpRoomId,
+                    pvpMatchId: snapshotPvpMatchId,
+                    pvpRoundId: snapshotPvpRoundId,
                     readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                     arenaHistoryReadLimit: resolvedReadArenaHistory
                         ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
@@ -658,6 +693,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    language: snapshotLanguage,
 	                    selectedLevel: snapshotSelectedLevel,
 	                    storyLength: snapshotStoryLength,
+	                    pvpRoomId: snapshotPvpRoomId,
+	                    pvpMatchId: snapshotPvpMatchId,
+	                    pvpRoundId: snapshotPvpRoundId,
 	                    extraJson: {
 	                        errorMessage,
 	                        stage: 'top-level-catch',

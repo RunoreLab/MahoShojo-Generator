@@ -227,6 +227,11 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const writeCurrentState =
     typeof raw.writeCurrentState === 'boolean' ? raw.writeCurrentState : DEFAULT_PVP_RULES.writeCurrentState;
 
+  const generationModeRaw =
+    typeof (raw as any).generationMode === 'string' ? String((raw as any).generationMode).trim() : DEFAULT_PVP_RULES.generationMode;
+  const generationMode =
+    generationModeRaw === 'stream' || generationModeRaw === 'non-stream' ? (generationModeRaw as any) : DEFAULT_PVP_RULES.generationMode;
+
   const selectedLevelRaw = typeof raw.selectedLevel === 'string' ? raw.selectedLevel : DEFAULT_PVP_RULES.selectedLevel;
   const selectedLevel = allowedLevels.has(selectedLevelRaw.trim()) ? selectedLevelRaw.trim() : DEFAULT_PVP_RULES.selectedLevel;
 
@@ -265,6 +270,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     writeArenaHistory,
     readCurrentState,
     writeCurrentState,
+    generationMode,
     selectedLevel,
     userGuidance,
     storyLength,
