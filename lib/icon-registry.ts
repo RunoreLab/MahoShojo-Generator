@@ -33,7 +33,8 @@ import {
   Gavel,
   HelpCircle,
   GitBranch,
-  Rocket
+  Rocket,
+  Compass
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -71,7 +72,8 @@ export const ICON_REGISTRY: Record<string, LucideIcon> = {
   Gavel,
   HelpCircle,
   GitBranch,
-  Rocket
+  Rocket,
+  Compass
 };
 
 /**
