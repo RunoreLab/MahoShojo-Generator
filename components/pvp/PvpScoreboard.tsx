@@ -1,5 +1,8 @@
 'use client';
 
+import { UserWithTitle } from '@/components/UserTitle';
+import type { UserBadge } from '@/types/badge';
+
 type ScoreEntry = { userId: number; wins: number };
 type PvpScore = { winsByUserId: ScoreEntry[]; maxRounds: number };
 type PvpPlayerLite = {
@@ -8,6 +11,7 @@ type PvpPlayerLite = {
   prefix?: string | null;
   seat?: number | null;
   isBot?: boolean;
+  badges?: UserBadge[];
 };
 
 type PvpScoreboardProps = {
@@ -66,9 +70,18 @@ export function PvpScoreboard({ score, players }: PvpScoreboardProps) {
                   <span className="px-2 py-0.5 rounded-full bg-white border text-xs text-gray-700">
                     座位 {seat ?? '?'}
                   </span>
-                  <span className={`font-semibold ${isTop ? 'text-green-800' : 'text-gray-900'}`}>
-                    {p ? buildDisplayName(p) : `用户${x.userId}`}
-                  </span>
+                  {p ? (
+                    <UserWithTitle
+                      username={buildDisplayName(p)}
+                      prefix={p.prefix}
+                      badges={Array.isArray(p.badges) ? p.badges : []}
+                      showBadges={true}
+                      usernameClassName={`font-semibold ${isTop ? 'text-green-800' : 'text-gray-900'}`}
+                      titleClassName="text-xs"
+                    />
+                  ) : (
+                    <span className={`font-semibold ${isTop ? 'text-green-800' : 'text-gray-900'}`}>用户{x.userId}</span>
+                  )}
                 </div>
                 <div
                   className={`shrink-0 px-3 py-1 rounded-full text-xs font-semibold border ${
@@ -89,4 +102,3 @@ export function PvpScoreboard({ score, players }: PvpScoreboardProps) {
     </div>
   );
 }
-
