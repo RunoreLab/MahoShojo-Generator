@@ -146,7 +146,13 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
     setImportError(null);
     setShowPasteImport(false);
     setPasteText('');
+    setShowCloudImport(false);
     onClose();
+  };
+
+  const handleBackdropClick = () => {
+    if (showCloudImport) return;
+    closeAndReset();
   };
 
   useEffect(() => {
@@ -305,10 +311,20 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
   const handleImportFromCloudCard = async (payload: any) => {
     const cardId = typeof payload?._cardId === 'string' ? payload._cardId : '';
     try {
-      if (payload?.templateId !== 'narrative-history' || payload?.version !== 1 || !Array.isArray(payload?.entries)) {
+      const templateId = typeof payload?.templateId === 'string' ? payload.templateId : typeof payload?.template_id === 'string' ? payload.template_id : '';
+      const versionRaw = payload?.version ?? payload?.data?.version ?? null;
+      const version = typeof versionRaw === 'number' ? versionRaw : typeof versionRaw === 'string' ? Number.parseInt(versionRaw, 10) : null;
+      const entriesCandidate = Array.isArray(payload?.entries)
+        ? payload.entries
+        : Array.isArray(payload?.data?.entries)
+          ? payload.data.entries
+          : null;
+
+      if (templateId !== 'narrative-history' || version !== 1 || !entriesCandidate) {
         throw new Error('这不是可识别的叙事历史数据卡（templateId/version/entries 不匹配）。');
       }
-      await replaceWithImported(payload);
+
+      await replaceWithImported({ templateId: 'narrative-history', version: 1, entries: entriesCandidate });
       setShowCloudImport(false);
       if (cardId) {
         setSaveHint(`已从云端数据卡导入（ID：${cardId}）。`);
@@ -321,7 +337,7 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
   if (!isOpen) return null;
 
   const modal = (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={closeAndReset}>
+    <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" onClick={handleBackdropClick}>
       <div
         className="bg-white rounded-lg shadow-xl p-0 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}

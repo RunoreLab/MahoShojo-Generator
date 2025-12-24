@@ -30,6 +30,16 @@ interface BattleDataModalProps {
 
 type BattleDataTab = 'my' | 'public' | 'favorites' | 'pvpHand';
 
+const parseDataCardPayload = (raw: unknown): any => {
+  if (typeof raw === 'string') {
+    return JSON.parse(raw);
+  }
+  if (raw && typeof raw === 'object') {
+    return raw;
+  }
+  throw new Error('数据卡内容为空或格式不受支持。');
+};
+
 type PvpHandTabCard = {
   snapshotId: string;
   name: string;
@@ -127,6 +137,7 @@ export default function BattleDataModal({
   const [sortBy, setSortBy] = useState<'likes' | 'usage' | 'favorites' | 'created_at'>('created_at');
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectError, setSelectError] = useState<string | null>(null);
   const cardsPerPage = 12;
 
   // 【新增】高级筛选的状态
@@ -440,6 +451,7 @@ export default function BattleDataModal({
 
     setCurrentPage(1);
     setSearchQuery('');
+    setSelectError(null);
     setFilters(initialFilters); // 清空高级筛选
     setActiveFilters(initialFilters);
 
@@ -495,6 +507,8 @@ export default function BattleDataModal({
     const cardId = typeof card?.id === 'string' ? card.id : '';
     if (!cardId) return;
 
+    setSelectError(null);
+
     if (selectionMode === 'single' && isSingleSelectingRef.current) return;
     if (selectingCardIdsRef.current.has(cardId)) return;
     selectingCardIdsRef.current.add(cardId);
@@ -514,7 +528,7 @@ export default function BattleDataModal({
       }
 
       // 解析数据卡的JSON内容
-      const cardData = JSON.parse(card.data);
+      const cardData = parseDataCardPayload(card.data);
 
       const payload = {
         ...cardData,
@@ -570,6 +584,7 @@ export default function BattleDataModal({
       }
     } catch (error) {
       console.error('解析数据卡失败:', error);
+      setSelectError(error instanceof Error ? error.message : '解析数据卡失败，请稍后重试。');
     } finally {
       selectingCardIdsRef.current.delete(cardId);
       if (selectionMode === 'single') isSingleSelectingRef.current = false;
@@ -598,7 +613,7 @@ export default function BattleDataModal({
         if (!cardId || nextSelectedIds.has(cardId)) continue;
 
         try {
-          const cardData = JSON.parse(card.data);
+          const cardData = parseDataCardPayload(card.data);
           const payload = {
             ...cardData,
             _cardId: card.id,
@@ -871,7 +886,12 @@ export default function BattleDataModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg p-6 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">×</button>
-	        <h2 className="text-xl font-bold pr-8">{titleOverride || (isPvpHandTab ? '我的手牌' : `选择${typeLabel}数据卡`)}</h2>
+		        <h2 className="text-xl font-bold pr-8">{titleOverride || (isPvpHandTab ? '我的手牌' : `选择${typeLabel}数据卡`)}</h2>
+          {selectError && (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {selectError}
+            </div>
+          )}
           {selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 ? (
             <div className="mt-1 mb-4 text-sm text-gray-600">
               已选 {selectedCount}/{maxSelected}
