@@ -11,6 +11,15 @@ export const DEFAULT_PVP_RULES: PvpRoomRules = {
   dedupe: true,
   showAllSubmissions: true,
   shuffleDecks: true,
+  cardRange: {
+    allowedCombatantTypes: ['magical-girl', 'canshou', 'general-character'],
+    minLikeCount: null,
+    maxLikeCount: null,
+    minUsageCount: null,
+    maxUsageCount: null,
+    minFavoriteCount: null,
+    maxFavoriteCount: null,
+  },
   mode: 'classic',
   bestOf: {
     enabled: true,

@@ -1,4 +1,5 @@
 import { getRandomPublicCard } from '@/lib/d1';
+import { isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
 import { loadPresetCard } from '@/lib/pvp/preset';
 import { BUNDLED_PRESET_FILENAMES } from '@/lib/pvp/preset-bundled';
@@ -19,7 +20,7 @@ const pickOne = <T>(items: T[], rng: Rng): T | null => {
 };
 
 export async function buildBotSubmissionPayload(options: {
-  rules: Pick<PvpRoomRules, 'cardsPerPlayer'>;
+  rules: Pick<PvpRoomRules, 'cardsPerPlayer' | 'cardRange'>;
   origin: string;
   forwardHeaders?: HeadersInit;
   excludeRefKeys?: Set<string>;
@@ -27,6 +28,7 @@ export async function buildBotSubmissionPayload(options: {
 }): Promise<PvpSubmissionPayload> {
   const rng = options.rng ?? Math.random;
   const needed = Math.max(0, Math.floor(options.rules.cardsPerPlayer));
+  const cardRange = normalizePvpRoomCardRange(options.rules);
 
   const used = new Set<string>();
   for (const key of options.excludeRefKeys ?? []) used.add(key);
@@ -34,7 +36,15 @@ export async function buildBotSubmissionPayload(options: {
   const cards: PvpSubmittedCard[] = [];
 
   const tryAddDataCard = async (allowDuplicateWithRoom: boolean): Promise<boolean> => {
-    const row = await getRandomPublicCard('character');
+    const statsOptions = {
+      minLikeCount: cardRange.minLikeCount,
+      maxLikeCount: cardRange.maxLikeCount,
+      minUsageCount: cardRange.minUsageCount,
+      maxUsageCount: cardRange.maxUsageCount,
+      minFavoriteCount: cardRange.minFavoriteCount,
+      maxFavoriteCount: cardRange.maxFavoriteCount,
+    };
+    const row = await getRandomPublicCard('character', statsOptions);
     if (!row) return false;
 
     const id = typeof row.id === 'string' ? row.id : '';
@@ -55,10 +65,18 @@ export async function buildBotSubmissionPayload(options: {
       return false;
     }
 
+    const type = inferPvpCombatantTypeFromJson(parsed);
+    if (!isPvpCombatantTypeAllowedByRange(type, cardRange)) return false;
+
+    const likeCount = Number.isFinite(row.like_count) ? Number(row.like_count) : null;
+    const usageCount = Number.isFinite(row.usage_count) ? Number(row.usage_count) : null;
+    const favoriteCount = Number.isFinite(row.favorite_count) ? Number(row.favorite_count) : null;
+    if (!isPvpDataCardStatsAllowedByRange({ likeCount, usageCount, favoriteCount }, cardRange)) return false;
+
     cards.push({
       ref,
       name,
-      type: inferPvpCombatantTypeFromJson(parsed),
+      type,
       dataJson,
       source: { isPublic: true, authorUsername },
     });
@@ -79,6 +97,8 @@ export async function buildBotSubmissionPayload(options: {
     } catch {
       return false;
     }
+
+    if (!isPvpCombatantTypeAllowedByRange(preset.type, cardRange)) return false;
 
     cards.push({
       ref,

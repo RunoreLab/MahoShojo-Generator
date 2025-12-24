@@ -1,5 +1,6 @@
 import { getPvpEligibleDataCard, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas, upsertPvpRoomSubmission } from '@/lib/d1';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { loadPresetCard } from '@/lib/pvp/preset';
@@ -47,6 +48,7 @@ async function submitHandler(req: Request): Promise<Response> {
 
   const rules = parseRules(room.rules_json);
   if (!rules) return json({ error: '房间规则损坏' }, { status: 500 });
+  const cardRange = normalizePvpRoomCardRange(rules);
 
   const players = await getPvpRoomPlayers(roomId);
   if (!players.some((p) => p.user_id === auth.user.id)) return json({ error: '你不在该房间中' }, { status: 403 });
@@ -93,6 +95,23 @@ async function submitHandler(req: Request): Promise<Response> {
       }
 
       const type = inferPvpCombatantTypeFromJson(parsedData);
+      if (!isPvpCombatantTypeAllowedByRange(type, cardRange)) {
+        return json(
+          { error: `该房间禁止提交此类型卡牌（${type}）。当前范围：${describePvpRoomCardRange(cardRange)}`, code: 'CARD_TYPE_FORBIDDEN' },
+          { status: 403 }
+        );
+      }
+
+      const likeCount = Number.isFinite((row as any).like_count) ? Number((row as any).like_count) : null;
+      const usageCount = Number.isFinite((row as any).usage_count) ? Number((row as any).usage_count) : null;
+      const favoriteCount = Number.isFinite((row as any).favorite_count) ? Number((row as any).favorite_count) : null;
+      if (!isPvpDataCardStatsAllowedByRange({ likeCount, usageCount, favoriteCount }, cardRange)) {
+        return json(
+          { error: `该房间的卡牌范围限制了此数据卡的统计值。当前范围：${describePvpRoomCardRange(cardRange)}`, code: 'CARD_STATS_FORBIDDEN' },
+          { status: 403 }
+        );
+      }
+
       const isPublic = Number(row.is_public) === 1;
       if (!isPublic) hasPrivateCard = true;
 
@@ -125,6 +144,12 @@ async function submitHandler(req: Request): Promise<Response> {
             ? statusFromMessage
             : 500;
         return json({ error: message, code: 'PRESET_LOAD_FAILED' }, { status });
+      }
+      if (!isPvpCombatantTypeAllowedByRange(preset.type, cardRange)) {
+        return json(
+          { error: `该房间禁止提交此类型预设卡（${preset.type}）。当前范围：${describePvpRoomCardRange(cardRange)}`, code: 'CARD_TYPE_FORBIDDEN' },
+          { status: 403 }
+        );
       }
       submittedCards.push({
         ref: { kind: 'preset', filename } satisfies PvpPresetRef,

@@ -8,6 +8,18 @@ const intInRange = (raw: unknown, fallback: number, min: number, max: number): n
   return Math.min(max, Math.max(min, n));
 };
 
+const intOrNullInRange = (raw: unknown, fallback: number | null, min: number, max: number): number | null => {
+  if (raw === null) return null;
+  if (raw === undefined) return fallback;
+  const candidate =
+    typeof raw === 'string'
+      ? (raw.trim() ? Number(raw) : NaN)
+      : (raw as number);
+  if (!Number.isFinite(candidate)) return fallback;
+  const n = Math.floor(candidate);
+  return Math.min(max, Math.max(min, n));
+};
+
 const isRecord = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === 'object' && !Array.isArray(v));
 
 const safeTrim = (value: unknown, maxLen: number): string => {
@@ -141,6 +153,38 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const shuffleDecks =
     typeof raw.shuffleDecks === 'boolean' ? raw.shuffleDecks : DEFAULT_PVP_RULES.shuffleDecks;
 
+  const defaultCardRange = DEFAULT_PVP_RULES.cardRange!;
+  const cardRangeRaw = isRecord(raw.cardRange) ? raw.cardRange : {};
+  const allowedTypesRaw = Array.isArray((cardRangeRaw as any).allowedCombatantTypes) ? (cardRangeRaw as any).allowedCombatantTypes : null;
+  const allowedSet = new Set(['magical-girl', 'canshou', 'general-character']);
+  const allowedCombatantTypes = (Array.isArray(allowedTypesRaw) ? allowedTypesRaw : defaultCardRange.allowedCombatantTypes)
+    .map((t: any) => (typeof t === 'string' ? t.trim() : ''))
+    .filter((t: string) => allowedSet.has(t));
+  const uniqueAllowedCombatantTypes = [...new Set(allowedCombatantTypes)] as any[];
+  if (uniqueAllowedCombatantTypes.length <= 0) return { error: '卡牌范围不合法：至少需要允许一种角色类型' };
+
+  const minLikeCount = intOrNullInRange((cardRangeRaw as any).minLikeCount, defaultCardRange.minLikeCount, 0, 1_000_000_000);
+  const maxLikeCount = intOrNullInRange((cardRangeRaw as any).maxLikeCount, defaultCardRange.maxLikeCount, 0, 1_000_000_000);
+  if (minLikeCount !== null && maxLikeCount !== null && minLikeCount > maxLikeCount) return { error: '卡牌范围不合法：点赞范围需满足 min<=max' };
+
+  const minUsageCount = intOrNullInRange((cardRangeRaw as any).minUsageCount, defaultCardRange.minUsageCount, 0, 1_000_000_000);
+  const maxUsageCount = intOrNullInRange((cardRangeRaw as any).maxUsageCount, defaultCardRange.maxUsageCount, 0, 1_000_000_000);
+  if (minUsageCount !== null && maxUsageCount !== null && minUsageCount > maxUsageCount) return { error: '卡牌范围不合法：使用量范围需满足 min<=max' };
+
+  const minFavoriteCount = intOrNullInRange((cardRangeRaw as any).minFavoriteCount, defaultCardRange.minFavoriteCount, 0, 1_000_000_000);
+  const maxFavoriteCount = intOrNullInRange((cardRangeRaw as any).maxFavoriteCount, defaultCardRange.maxFavoriteCount, 0, 1_000_000_000);
+  if (minFavoriteCount !== null && maxFavoriteCount !== null && minFavoriteCount > maxFavoriteCount) return { error: '卡牌范围不合法：收藏量范围需满足 min<=max' };
+
+  const cardRange = {
+    allowedCombatantTypes: uniqueAllowedCombatantTypes as any,
+    minLikeCount,
+    maxLikeCount,
+    minUsageCount,
+    maxUsageCount,
+    minFavoriteCount,
+    maxFavoriteCount,
+  };
+
   const mode = raw.mode ?? DEFAULT_PVP_RULES.mode;
   if (mode !== 'daily' && mode !== 'classic' && mode !== 'kizuna' && mode !== 'scenario') {
     return { error: '对战模式不合法（需为 daily/classic/kizuna/scenario）' };
@@ -208,6 +252,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     dedupe,
     showAllSubmissions,
     shuffleDecks,
+    cardRange,
     mode,
     bestOf: { enabled, maxRounds, winCondition, tieBreaker },
     allowNonHostControl,

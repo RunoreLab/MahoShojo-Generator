@@ -38,6 +38,21 @@ describe('pvp: parsePvpRules', () => {
     expect(parsed.rules.drawSource).toBe(DEFAULT_PVP_RULES.drawSource);
   });
 
+  test('默认值包含 cardRange（全开 + 不限）', () => {
+    const parsed = parsePvpRules({});
+    expect('error' in parsed).toBe(false);
+    if ('error' in parsed) return;
+
+    expect(parsed.rules.cardRange).toBeTruthy();
+    expect(parsed.rules.cardRange?.allowedCombatantTypes?.length).toBeGreaterThan(0);
+    expect(parsed.rules.cardRange?.minLikeCount ?? null).toBe(null);
+    expect(parsed.rules.cardRange?.maxLikeCount ?? null).toBe(null);
+    expect(parsed.rules.cardRange?.minUsageCount ?? null).toBe(null);
+    expect(parsed.rules.cardRange?.maxUsageCount ?? null).toBe(null);
+    expect(parsed.rules.cardRange?.minFavoriteCount ?? null).toBe(null);
+    expect(parsed.rules.cardRange?.maxFavoriteCount ?? null).toBe(null);
+  });
+
   test('默认值包含 allowSpectators（默认开启观战）', () => {
     const parsed = parsePvpRules({});
     expect('error' in parsed).toBe(false);
@@ -148,5 +163,15 @@ describe('pvp: parsePvpRules', () => {
     expect(parsed.rules.userGuidance.length).toBeLessThanOrEqual(50);
     expect(parsed.rules.adjudicationEvents.length).toBeLessThanOrEqual(50);
     expect(parsed.rules.readArenaHistoryLimit).toBeLessThanOrEqual(999);
+  });
+
+  test('cardRange 不允许空 allowedCombatantTypes', () => {
+    const parsed = parsePvpRules({ cardRange: { allowedCombatantTypes: [] } });
+    expect('error' in parsed).toBe(true);
+  });
+
+  test('cardRange 范围需满足 min<=max', () => {
+    const parsed = parsePvpRules({ cardRange: { allowedCombatantTypes: ['magical-girl'], minLikeCount: 10, maxLikeCount: 1 } });
+    expect('error' in parsed).toBe(true);
   });
 });

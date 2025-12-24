@@ -23,6 +23,13 @@ export default async function handler(req: Request): Promise<Response> {
     // 从请求 URL 中解析查询参数
     const url = new URL(req.url);
     const type = url.searchParams.get('type') as 'character' | 'scenario' | null;
+    const readNonNegativeInt = (key: string): number | null => {
+      const raw = url.searchParams.get(key);
+      if (raw === null) return null;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return null;
+      return Math.max(0, Math.floor(n));
+    };
 
     // 验证 type 参数是否有效
     if (!type || !['character', 'scenario'].includes(type)) {
@@ -36,7 +43,14 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     // 调用我们刚刚在 data-cards.ts 中创建的函数
-    const card = await getRandomPublicCard(type);
+    const card = await getRandomPublicCard(type, {
+      minLikeCount: readNonNegativeInt('minLikes'),
+      maxLikeCount: readNonNegativeInt('maxLikes'),
+      minUsageCount: readNonNegativeInt('minUsage'),
+      maxUsageCount: readNonNegativeInt('maxUsage'),
+      minFavoriteCount: readNonNegativeInt('minFavorites'),
+      maxFavoriteCount: readNonNegativeInt('maxFavorites'),
+    });
 
     // 如果没有找到任何符合条件的卡片
     if (!card) {

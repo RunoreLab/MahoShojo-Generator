@@ -30,6 +30,8 @@ import { inferTemplate } from '@/lib/data-card-converter';
 import { config as appConfig } from '@/lib/config';
 import { useAuth } from '@/lib/useAuth';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
+import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
 import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
 
@@ -664,6 +666,20 @@ export function PvpRoomPage() {
     const dealWhenEmpty = Number.isFinite(rulesDraft.dealWhenEmpty) ? Math.floor(rulesDraft.dealWhenEmpty) : 0;
     if (dealWhenEmpty < 1 || dealWhenEmpty > 50) return '手牌为空时补发数量需要在 1-50 之间';
 
+    const cardRange = normalizePvpRoomCardRange(rulesDraft);
+    if (!Array.isArray(cardRange.allowedCombatantTypes) || cardRange.allowedCombatantTypes.length <= 0) {
+      return '卡牌范围不合法：至少需要允许一种角色类型';
+    }
+    if (cardRange.minLikeCount !== null && cardRange.maxLikeCount !== null && cardRange.minLikeCount > cardRange.maxLikeCount) {
+      return '卡牌范围不合法：点赞范围需满足 min<=max';
+    }
+    if (cardRange.minUsageCount !== null && cardRange.maxUsageCount !== null && cardRange.minUsageCount > cardRange.maxUsageCount) {
+      return '卡牌范围不合法：使用量范围需满足 min<=max';
+    }
+    if (cardRange.minFavoriteCount !== null && cardRange.maxFavoriteCount !== null && cardRange.minFavoriteCount > cardRange.maxFavoriteCount) {
+      return '卡牌范围不合法：收藏量范围需满足 min<=max';
+    }
+
     if (rulesDraft.bestOf?.enabled) {
       const maxRounds = Number.isFinite(rulesDraft.bestOf.maxRounds) ? Math.floor(rulesDraft.bestOf.maxRounds) : 0;
       if (maxRounds < 1 || maxRounds > 10) return '最多轮次需要在 1-10 之间';
@@ -715,7 +731,7 @@ export function PvpRoomPage() {
       await rulesMutation.mutateAsync({ rules: rulesDraft });
     } catch (e: any) {
       if (e?.code === 'NEED_CLEAR_SUBMISSIONS') {
-        const ok = typeof window !== 'undefined' && window.confirm('修改卡组提交模式/每人提交数量会清空已提交卡组，是否继续？');
+        const ok = typeof window !== 'undefined' && window.confirm('修改提交相关规则/卡牌范围会清空已提交卡组，是否继续？');
         if (!ok) return;
         await rulesMutation.mutateAsync({ rules: rulesDraft, clearSubmissions: true });
       }
@@ -1466,6 +1482,8 @@ export function PvpRoomPage() {
       return;
     }
 
+    const cardRange = normalizePvpRoomCardRange(rules);
+
     const id = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
     if (!id) {
       setError('选择失败：缺少数据卡 ID。');
@@ -1483,6 +1501,9 @@ export function PvpRoomPage() {
     const updatedAt = typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : null;
     const createdAt = typeof cardData?._createdAt === 'string' ? cardData._createdAt : undefined;
     const author = typeof cardData?._author === 'string' ? cardData._author : undefined;
+    const likeCount = typeof cardData?._likeCount === 'number' ? Math.floor(cardData._likeCount) : 0;
+    const favoriteCount = typeof cardData?._favoriteCount === 'number' ? Math.floor(cardData._favoriteCount) : 0;
+    const usageCount = typeof cardData?._usageCount === 'number' ? Math.floor(cardData._usageCount) : 0;
 
     const payload = { ...(cardData || {}) } as Record<string, unknown>;
     delete payload._cardId;
@@ -1496,6 +1517,16 @@ export function PvpRoomPage() {
     delete payload._favoriteCount;
     delete payload._usageCount;
 
+    const combatantType = inferPvpCombatantTypeFromJson(payload);
+    if (!isPvpCombatantTypeAllowedByRange(combatantType, cardRange)) {
+      setError(`该房间禁止选择此类型卡牌（${combatantType}）。当前范围：${describePvpRoomCardRange(cardRange)}`);
+      return;
+    }
+    if (!isPvpDataCardStatsAllowedByRange({ likeCount, usageCount, favoriteCount }, cardRange)) {
+      setError(`该房间的卡牌范围限制了此数据卡的统计值。当前范围：${describePvpRoomCardRange(cardRange)}`);
+      return;
+    }
+
     const dataJson = JSON.stringify(payload);
 
     const next: CardRef = {
@@ -1508,9 +1539,9 @@ export function PvpRoomPage() {
       dataJson,
       author,
       createdAt,
-      likeCount: typeof cardData?._likeCount === 'number' ? cardData._likeCount : undefined,
-      favoriteCount: typeof cardData?._favoriteCount === 'number' ? cardData._favoriteCount : undefined,
-      usageCount: typeof cardData?._usageCount === 'number' ? cardData._usageCount : undefined,
+      likeCount,
+      favoriteCount,
+      usageCount,
     };
 
     setSelected((prev) => {
@@ -1557,7 +1588,16 @@ export function PvpRoomPage() {
     setIsMatching('character');
     setError('正在从数据库中随机匹配一位公开角色…');
     try {
-      const res = await fetch('/api/random-public-card?type=character');
+      const cardRange = normalizePvpRoomCardRange(rules);
+      const params = new URLSearchParams({ type: 'character' });
+      if (typeof cardRange.minLikeCount === 'number') params.set('minLikes', String(cardRange.minLikeCount));
+      if (typeof cardRange.maxLikeCount === 'number') params.set('maxLikes', String(cardRange.maxLikeCount));
+      if (typeof cardRange.minUsageCount === 'number') params.set('minUsage', String(cardRange.minUsageCount));
+      if (typeof cardRange.maxUsageCount === 'number') params.set('maxUsage', String(cardRange.maxUsageCount));
+      if (typeof cardRange.minFavoriteCount === 'number') params.set('minFavorites', String(cardRange.minFavoriteCount));
+      if (typeof cardRange.maxFavoriteCount === 'number') params.set('maxFavorites', String(cardRange.maxFavoriteCount));
+
+      const res = await fetch(`/api/random-public-card?${params.toString()}`);
       const { data } = await readJsonOrText(res);
       if (!res.ok || !data?.success) {
         const payload = (data || {}) as ApiErrorPayload;
@@ -1594,6 +1634,12 @@ export function PvpRoomPage() {
   const handleTogglePreset = (preset: Preset) => {
     if (!rules) {
       setError('规则未加载，暂时无法选择预设。');
+      return;
+    }
+
+    const cardRange = normalizePvpRoomCardRange(rules);
+    if (!isPvpCombatantTypeAllowedByRange(preset.type as any, cardRange)) {
+      setError(`该房间禁止选择此类型预设（${preset.type}）。当前范围：${describePvpRoomCardRange(cardRange)}`);
       return;
     }
 
@@ -2155,6 +2201,147 @@ export function PvpRoomPage() {
                             />
                             <span>洗混卡组后发牌（关闭则按各自提交发牌）{rulesDraft.submissionMode === 'hostOnly' ? '（房主牌堆模式下固定开启）' : ''}</span>
                           </label>
+                          <div className="col-span-2 border rounded p-3 bg-gray-50">
+                            <div className="font-semibold text-sm">提交卡牌范围（房间内统一）</div>
+                            <div className="text-xs text-gray-600 mt-1">
+                              说明：统计范围仅对“数据卡”生效；预设卡不具备点赞/使用/收藏统计，仅受“类型”开关限制。
+                            </div>
+                            {(() => {
+                              const range = normalizePvpRoomCardRange(rulesDraft);
+                              const allowed = new Set(range.allowedCombatantTypes);
+                              const updateAllowed = (type: 'magical-girl' | 'canshou' | 'general-character', enabled: boolean) => {
+                                setRulesDraft((r) => {
+                                  if (!r) return r;
+                                  const current = normalizePvpRoomCardRange(r);
+                                  const next = new Set(current.allowedCombatantTypes);
+                                  if (enabled) next.add(type);
+                                  else next.delete(type);
+                                  return { ...r, cardRange: { ...current, allowedCombatantTypes: [...next] } };
+                                });
+                              };
+                              const updateNumber = (
+                                key:
+                                  | 'minLikeCount'
+                                  | 'maxLikeCount'
+                                  | 'minUsageCount'
+                                  | 'maxUsageCount'
+                                  | 'minFavoriteCount'
+                                  | 'maxFavoriteCount',
+                                rawValue: string,
+                              ) => {
+                                const nextValue = rawValue.trim() === '' ? null : Number(rawValue);
+                                setRulesDraft((r) => {
+                                  if (!r) return r;
+                                  const current = normalizePvpRoomCardRange(r);
+                                  const numeric = nextValue === null ? null : (Number.isFinite(nextValue) ? Math.max(0, Math.floor(nextValue)) : null);
+                                  return { ...r, cardRange: { ...current, [key]: numeric } as any };
+                                });
+                              };
+
+                              return (
+                                <>
+                                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={allowed.has('magical-girl')}
+                                        onChange={(e) => updateAllowed('magical-girl', e.target.checked)}
+                                        disabled={rulesMutation.isPending}
+                                      />
+                                      <span>允许魔法少女</span>
+                                    </label>
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={allowed.has('canshou')}
+                                        onChange={(e) => updateAllowed('canshou', e.target.checked)}
+                                        disabled={rulesMutation.isPending}
+                                      />
+                                      <span>允许残兽</span>
+                                    </label>
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={allowed.has('general-character')}
+                                        onChange={(e) => updateAllowed('general-character', e.target.checked)}
+                                        disabled={rulesMutation.isPending}
+                                      />
+                                      <span>允许通用角色</span>
+                                    </label>
+                                  </div>
+
+                                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                                    <label className="flex flex-col gap-1">
+                                      <span>点赞 ≥</span>
+                                      <input
+                                        className="border rounded px-2 py-1"
+                                        type="number"
+                                        min={0}
+                                        value={range.minLikeCount ?? ''}
+                                        onChange={(e) => updateNumber('minLikeCount', e.target.value)}
+                                        disabled={rulesMutation.isPending}
+                                      />
+                                    </label>
+                                    <label className="flex flex-col gap-1">
+                                      <span>点赞 ≤</span>
+                                      <input
+                                        className="border rounded px-2 py-1"
+                                        type="number"
+                                        min={0}
+                                        value={range.maxLikeCount ?? ''}
+                                        onChange={(e) => updateNumber('maxLikeCount', e.target.value)}
+                                        disabled={rulesMutation.isPending}
+                                      />
+                                    </label>
+                                    <label className="flex flex-col gap-1">
+                                      <span>使用 ≥</span>
+                                      <input
+                                        className="border rounded px-2 py-1"
+                                        type="number"
+                                        min={0}
+                                        value={range.minUsageCount ?? ''}
+                                        onChange={(e) => updateNumber('minUsageCount', e.target.value)}
+                                        disabled={rulesMutation.isPending}
+                                      />
+                                    </label>
+                                    <label className="flex flex-col gap-1">
+                                      <span>使用 ≤</span>
+                                      <input
+                                        className="border rounded px-2 py-1"
+                                        type="number"
+                                        min={0}
+                                        value={range.maxUsageCount ?? ''}
+                                        onChange={(e) => updateNumber('maxUsageCount', e.target.value)}
+                                        disabled={rulesMutation.isPending}
+                                      />
+                                    </label>
+                                    <label className="flex flex-col gap-1">
+                                      <span>收藏 ≥</span>
+                                      <input
+                                        className="border rounded px-2 py-1"
+                                        type="number"
+                                        min={0}
+                                        value={range.minFavoriteCount ?? ''}
+                                        onChange={(e) => updateNumber('minFavoriteCount', e.target.value)}
+                                        disabled={rulesMutation.isPending}
+                                      />
+                                    </label>
+                                    <label className="flex flex-col gap-1">
+                                      <span>收藏 ≤</span>
+                                      <input
+                                        className="border rounded px-2 py-1"
+                                        type="number"
+                                        min={0}
+                                        value={range.maxFavoriteCount ?? ''}
+                                        onChange={(e) => updateNumber('maxFavoriteCount', e.target.value)}
+                                        disabled={rulesMutation.isPending}
+                                      />
+                                    </label>
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
                           <div className="col-span-2">
                             <BattleModeSelector
                               value={rulesDraft.mode as any}
