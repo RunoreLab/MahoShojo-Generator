@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
@@ -147,6 +148,16 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
     setPasteText('');
     onClose();
   };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (typeof document === 'undefined') return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isOpen]);
 
   const handlePick = (entry: NarrativeHistoryEntry) => {
     setActiveId(entry.id);
@@ -309,10 +320,10 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
 
   if (!isOpen) return null;
 
-  return (
+  const modal = (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={closeAndReset}>
       <div
-        className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-lg shadow-xl p-0 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-4 border-b gap-3">
@@ -546,4 +557,9 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
       />
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modal, document.body);
+  }
+  return modal;
 }
