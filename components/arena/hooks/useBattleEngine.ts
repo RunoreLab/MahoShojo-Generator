@@ -16,8 +16,41 @@ import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
 import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { authStorage } from '@/lib/auth';
+import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
+
+const extractTitleFromBattleMarkdown = (markdown: string): string => {
+  const lines = markdown.split(/\r?\n/).map((line) => line.trim());
+  for (const line of lines) {
+    if (!line) continue;
+    const m = line.match(/^#{1,3}\s*(.+)$/);
+    if (m?.[1]) return m[1].trim().slice(0, 120);
+    return line.slice(0, 120);
+  }
+  return '未命名战报';
+};
+
+const appendNarrativeHistoryIfEnabled = async (payload: {
+  enabled: boolean;
+  title: string;
+  contentMarkdown: string;
+}): Promise<void> => {
+  if (!payload.enabled) return;
+  const title = (payload.title ?? '').toString().trim();
+  const content = (payload.contentMarkdown ?? '').toString().trim();
+  if (!content) return;
+
+  const [titleCheck, contentCheck] = await Promise.all([
+    quickCheck(title || '未命名战报'),
+    quickCheck(content),
+  ]);
+
+  useNarrativeHistoryStore.getState().appendEntry({
+    title: (titleCheck.filteredText || title || '未命名战报').trim(),
+    content: (contentCheck.filteredText || content).trim(),
+  });
+};
 
 const buildStreamSensitiveArrestWarrantMarkdown = (reason?: string): string => {
   const safeReason = reason?.trim() ? `（原因：${reason.trim()}）` : '';
@@ -286,6 +319,17 @@ export const useBattleEngine = () => {
 
       const numericLimit = settings.isArenaHistoryUnlimited ? null : Math.max(1, settings.readArenaHistoryLimit);
       const arenaHistoryReadLimit = settings.readArenaHistory ? numericLimit ?? null : undefined;
+      const narrativeHistoryForRequest = settings.readNarrativeHistory
+        ? [...useNarrativeHistoryStore.getState().entries]
+            .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
+            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+            .map((entry) => ({
+              title: entry.title,
+              content: entry.content,
+              createdAt: entry.createdAt,
+              updatedAt: entry.updatedAt,
+            }))
+        : undefined;
 
       const requestBody: Record<string, unknown> = {
         combatants: freshCombatants.map((combatant) => ({
@@ -310,6 +354,9 @@ export const useBattleEngine = () => {
         writeArenaHistory: settings.writeArenaHistory,
         readCurrentState: settings.readCurrentState,
         writeCurrentState: settings.writeCurrentState,
+        readNarrativeHistory: settings.readNarrativeHistory,
+        writeNarrativeHistory: settings.writeNarrativeHistory,
+        narrativeHistory: narrativeHistoryForRequest,
         isDowngrade: false,
         adjudicationEvents,
         storyLength,
@@ -383,6 +430,12 @@ export const useBattleEngine = () => {
           return updated ? { ...combatant, data: updated } : combatant;
         });
         setCombatants(updatedRoster);
+
+        await appendNarrativeHistoryIfEnabled({
+          enabled: settings.writeNarrativeHistory,
+          title: reportWithScenario.headline,
+          contentMarkdown: toBattleReportMarkdown(reportWithScenario),
+        });
 
         return false;
       };
@@ -611,6 +664,12 @@ export const useBattleEngine = () => {
           if (hasMetaImpacts && !trimmedForValidation) {
             setError('⚠️ 战报正文为空，但检测到角色更新元数据，已尝试继续更新角色数据。');
           }
+
+          await appendNarrativeHistoryIfEnabled({
+            enabled: settings.writeNarrativeHistory,
+            title: extractTitleFromBattleMarkdown(markdownForUi),
+            contentMarkdown: markdownForUi,
+          });
 
           startCooldown();
 

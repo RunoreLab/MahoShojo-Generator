@@ -64,6 +64,8 @@ export interface BattleSettings {
   writeArenaHistory: boolean;
   readCurrentState: boolean;
   writeCurrentState: boolean;
+  readNarrativeHistory: boolean;
+  writeNarrativeHistory: boolean;
   userGuidance: string;
 }
 

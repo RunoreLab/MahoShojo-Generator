@@ -6,6 +6,7 @@ import { ArenaDataSettingsPanel } from '@/components/shared/ArenaDataSettingsPan
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, CombatantData } from '../types';
+import { NarrativeHistorySettings } from './NarrativeHistorySettings';
 
 export function BattleSettings() {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
@@ -20,11 +21,14 @@ export function BattleSettings() {
   );
 
   return (
-    <ArenaDataSettingsPanel
-      value={settings}
-      onChange={updateSettings}
-      disabled={isGenerating}
-      combatantCountForEstimate={readableCombatantCount}
-    />
+    <>
+      <ArenaDataSettingsPanel
+        value={settings}
+        onChange={updateSettings}
+        disabled={isGenerating}
+        combatantCountForEstimate={readableCombatantCount}
+      />
+      <NarrativeHistorySettings value={settings} onChange={updateSettings} disabled={isGenerating} />
+    </>
   );
 }

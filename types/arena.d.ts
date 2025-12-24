@@ -113,3 +113,29 @@ export interface AdjudicationResult {
     outcome: string;                    // 最终判定的结果名称
     details: string;                    // 详细的判定过程描述，例如 "掷骰(80) ≤ 成功率(60%)"
 }
+
+// =================================================================
+// 叙事历史（战报正文连续记录）
+// =================================================================
+
+/**
+ * @description 单条叙事历史记录（用于把每次生成的战报正文串起来，供后续续写）。
+ */
+export interface NarrativeHistoryEntry {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
+
+/**
+ * @description 叙事历史数据卡（可上传到云端，占用数据卡槽位）。
+ */
+export interface NarrativeHistoryDataCardV1 {
+  templateId: 'narrative-history';
+  version: 1;
+  title?: string;
+  updatedAt: string; // ISO 8601
+  entries: NarrativeHistoryEntry[];
+}

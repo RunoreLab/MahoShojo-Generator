@@ -7,7 +7,7 @@ interface DataCardProps {
   id: string; // Changed from number to string for UUID
   name: string;
   description: string;
-  type: 'character' | 'scenario';
+  type: 'character' | 'scenario' | 'history';
   roleType?: 'magical-girl' | 'canshou' | 'general';
   isPublic: boolean | number; // 支持 -1 表示封禁
   reviewStatus?: 'pending' | 'approved' | 'rejected'; // 新增：审查状态属性
@@ -38,6 +38,7 @@ interface DataCardProps {
 const typeMap = {
   character: '角色',
   scenario: '情景',
+  history: '叙事历史',
 }
 
 const roleTypeLabelMap: Record<NonNullable<DataCardProps['roleType']>, string> = {
@@ -201,7 +202,9 @@ export default function DataCard({
     if (cardStatus.status !== 'public') return;
     
     try {
-      const shareText = `魔法少女竞技场的【${name}】向你发出了邀请！（ID：${id}）✨\n快来 https://mahoshojo.colanns.me/battle 生成新的故事吧！\n在数据库的搜索框粘贴ID即可加载${typeMap[type]}档案！`;
+      const shareText = type === 'history'
+        ? `魔法少女竞技场的【${name}】向你分享了一份叙事历史！（ID：${id}）✨\n快来 https://mahoshojo.colanns.me/arena 在「叙事历史」中导入此数据卡，即可继续推演剧情！`
+        : `魔法少女竞技场的【${name}】向你发出了邀请！（ID：${id}）✨\n快来 https://mahoshojo.colanns.me/battle 生成新的故事吧！\n在数据库的搜索框粘贴ID即可加载${typeMap[type]}档案！`;
       await navigator.clipboard.writeText(shareText);
       setShareStatus('copied');
       setTimeout(() => setShareStatus('idle'), 2000);
@@ -290,6 +293,11 @@ export default function DataCard({
             {type === 'character' && (
               <span className="text-xs px-2 py-1 bg-pink-100 text-pink-700 rounded">
                 角色
+              </span>
+            )}
+            {type === 'history' && (
+              <span className="text-xs px-2 py-1 bg-emerald-100 text-emerald-700 rounded">
+                叙事历史
               </span>
             )}
             {type === 'character' && roleType && (

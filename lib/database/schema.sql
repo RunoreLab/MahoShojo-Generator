@@ -50,7 +50,7 @@ CREATE INDEX idx_users_auth_key ON users(auth_key);
 CREATE TABLE IF NOT EXISTS data_cards (
   id TEXT PRIMARY KEY NOT NULL,  -- UUID 字符串作为主键
   user_id INTEGER NOT NULL,
-  type TEXT NOT NULL CHECK(type IN ('character', 'scenario')),
+  type TEXT NOT NULL CHECK(type IN ('character', 'scenario', 'history')),
   name TEXT NOT NULL,
   description TEXT,
   data TEXT NOT NULL,

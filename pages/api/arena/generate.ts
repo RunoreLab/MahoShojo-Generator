@@ -9,7 +9,7 @@ import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/c
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
-import { AdjudicationResult } from '@/types/arena';
+import { AdjudicationResult, NarrativeHistoryEntry } from '@/types/arena';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import { NewsReport } from '@/components/BattleReportCard';
 import { getSystemPrompt } from '@/lib/arena/constants';
@@ -70,6 +70,8 @@ async function handler(req: NextRequest): Promise<Response> {
             writeArenaHistory,
             readCurrentState,
             writeCurrentState,
+            readNarrativeHistory,
+            narrativeHistory,
             isDowngrade = false,
             adjudicationEvents,
             storyLength,
@@ -87,6 +89,7 @@ async function handler(req: NextRequest): Promise<Response> {
             : (typeof useArenaHistory === 'boolean' ? useArenaHistory : true);
         const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
         const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
+        const resolvedReadNarrativeHistory = typeof readNarrativeHistory === 'boolean' ? readNarrativeHistory : false;
         const resolvedHistoryReadLimit = resolvedReadArenaHistory
             ? (() => {
                 if (arenaHistoryReadLimit === null) return Infinity;
@@ -102,6 +105,35 @@ async function handler(req: NextRequest): Promise<Response> {
             enableImpactText: resolvedWriteArenaHistory,
             enableCurrentState: resolvedWriteCurrentState
         });
+
+        const normalizeNarrativeHistoryForPrompt = (input: unknown): NarrativeHistoryEntry[] => {
+            if (!Array.isArray(input)) return [];
+            return input
+                .map((entry) => {
+                    if (!entry || typeof entry !== 'object') return null;
+                    const rawTitle = typeof (entry as any).title === 'string' ? (entry as any).title.trim() : '';
+                    const rawContent = typeof (entry as any).content === 'string' ? (entry as any).content.trim() : '';
+                    if (!rawContent) return null;
+                    const createdAt = typeof (entry as any).createdAt === 'string'
+                        ? (entry as any).createdAt
+                        : (typeof (entry as any).created_at === 'string' ? (entry as any).created_at : new Date(0).toISOString());
+                    const updatedAt = typeof (entry as any).updatedAt === 'string'
+                        ? (entry as any).updatedAt
+                        : (typeof (entry as any).updated_at === 'string' ? (entry as any).updated_at : createdAt);
+                    return {
+                        id: typeof (entry as any).id === 'string' ? (entry as any).id : `${createdAt}:${rawTitle}`,
+                        title: rawTitle || '未命名战报',
+                        content: rawContent,
+                        createdAt,
+                        updatedAt,
+                    } satisfies NarrativeHistoryEntry;
+                })
+                .filter((item): item is NarrativeHistoryEntry => Boolean(item));
+        };
+
+        const narrativeHistoryForPrompt: NarrativeHistoryEntry[] | null = resolvedReadNarrativeHistory
+            ? normalizeNarrativeHistoryForPrompt(narrativeHistory)
+            : null;
 
         let customProviderOverride: AIProvider | null = null;
         let customProviderId: string | null = null;
@@ -193,6 +225,14 @@ async function handler(req: NextRequest): Promise<Response> {
         if (finalUserGuidance) {
             inputsToCheck.push({ type: 'userGuidance', content: finalUserGuidance, isNative: false });
         }
+        if (resolvedReadNarrativeHistory && narrativeHistoryForPrompt && narrativeHistoryForPrompt.length > 0) {
+            const narrativeText = narrativeHistoryForPrompt
+                .map((entry) => `# ${entry.title}\n${entry.content}`.trim())
+                .join('\n\n');
+            if (narrativeText) {
+                inputsToCheck.push({ type: 'userGuidance', content: narrativeText, isNative: false });
+            }
+        }
         // 检查情景模式下的情景文件内容
         if (scenario) {
             const isNative = await verifySignature(scenario);
@@ -253,7 +293,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 resolvedReadCurrentState,
                 resolvedWriteCurrentState,
                 adjudicationResults,
-                storyLength
+                storyLength,
+                narrativeHistoryForPrompt
             ),
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,

@@ -9,6 +9,7 @@ import { config } from '@/lib/config';
 
 interface SaveToCloudButtonProps {
   data: any;
+  cardType?: 'character' | 'scenario' | 'history';
   buttonText?: string;
   className?: string;
   style?: React.CSSProperties;
@@ -21,6 +22,7 @@ const isScenarioData = (data: any): boolean => {
 
 export default function SaveToCloudButton({
   data,
+  cardType,
   buttonText = "保存到云端",
   className = "generate-button",
   style = {}
@@ -73,12 +75,16 @@ export default function SaveToCloudButton({
     }
 
     // 根据数据类型生成默认名称和描述
-    const isScenario = isScenarioData(data);
-    const type = isScenario ? 'scenario' : 'character';
-    const defaultName = isScenario
-      ? (data.title || data.name || '')
-      : (data.codename || data.name || '');
-    const defaultDescription = `${type === 'character' ? '角色' : '情景'}数据卡`;
+    const inferredType = isScenarioData(data) ? 'scenario' : 'character';
+    const type = cardType ?? inferredType;
+    const defaultName =
+      type === 'history'
+        ? (data?.title || data?.name || '叙事历史')
+        : type === 'scenario'
+          ? (data?.title || data?.name || '')
+          : (data?.codename || data?.name || '');
+    const defaultDescription =
+      type === 'history' ? '叙事历史数据卡' : `${type === 'character' ? '角色' : '情景'}数据卡`;
 
     setCardName(defaultName);
     setCardDescription(defaultDescription);
@@ -138,7 +144,7 @@ export default function SaveToCloudButton({
       const finalData = { ...data };
       
       // 前端敏感词检查
-      const type = isScenarioData(finalData) ? 'scenario' : 'character';
+      const type = cardType ?? (isScenarioData(finalData) ? 'scenario' : 'character');
       const textToCheck = `${cardName} ${cardDescription} ${JSON.stringify(finalData)}`;
       const sensitiveWordResult = await quickCheck(textToCheck);
 
@@ -226,7 +232,7 @@ export default function SaveToCloudButton({
         isOpen={showReplaceModal}
         onClose={() => setShowReplaceModal(false)}
         cards={userDataCards}
-        targetType={isScenarioData(data) ? 'scenario' : 'character'}
+        targetType={cardType ?? (isScenarioData(data) ? 'scenario' : 'character')}
         onConfirm={handleReplaceConfirm}
         isSaving={isReplacing}
       />
