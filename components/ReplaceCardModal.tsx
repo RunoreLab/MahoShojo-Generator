@@ -5,7 +5,7 @@ interface ReplaceCardModalProps {
   isOpen: boolean;
   onClose: () => void;
   cards: any[];
-  targetType: 'character' | 'scenario';
+  targetType: 'character' | 'scenario' | 'history';
   onConfirm: (cardId: string, opts: { name?: string; description?: string; isPublic?: number }) => Promise<void>;
   isSaving?: boolean;
 }
@@ -71,7 +71,9 @@ export default function ReplaceCardModal({
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-gray-800">{card.name}</span>
-                      <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">{card.type === 'character' ? '角色' : '情景'}</span>
+                      <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                        {card.type === 'character' ? '角色' : card.type === 'scenario' ? '情景' : '叙事历史'}
+                      </span>
                       {card.pending_data && (
                         <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded">更新审核中</span>
                       )}

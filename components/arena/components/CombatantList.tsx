@@ -1,8 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-
-import Link from 'next/link';
+import { useState } from 'react';
 
 import { getCombatantDisplayName } from '../utils/characterValidator';
 import { useBattleStore } from '../stores/useBattleStore';
@@ -26,11 +24,6 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
   const removeCombatant = useBattleSelector((state) => state.removeCombatant);
   const { handleAddRandomPlaceholder, handleTeamChange, handleClearRoster } = useBattleActions();
   const [copiedStatus, setCopiedStatus] = useState<Record<string, boolean>>({});
-
-  const readableCombatants = useMemo(
-    () => combatants.filter((item): item is CombatantData => 'data' in item),
-    [combatants]
-  );
 
   const downloadJson = (combatant: CombatantData) => {
     const jsonData = JSON.stringify(combatant.data, null, 2);
@@ -175,26 +168,6 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
         })}
       </ul>
 
-      {readableCombatants.some((combatant) => combatant.data?.arena_history?.entries?.length > 20) && (
-        <div className="mt-3 text-xs text-gray-500">
-          <p>
-            ⚠️ 注意：
-            {readableCombatants
-              .filter((combatant) => Array.isArray(combatant.data?.arena_history?.entries))
-              .filter((combatant) => combatant.data.arena_history.entries.length > 20)
-              .map(
-                (combatant) =>
-                  `“${combatant.data.codename || combatant.data.name}”(${combatant.data.arena_history.entries.length}条) `
-              )
-              .join('、')}
-            的历战记录已超过 20 条上限，生成故事时将仅选取最重要的部分。
-            <Link href="/sublimation" className="text-blue-600 hover:underline font-semibold">
-              考虑前往「成长升华」
-            </Link>
-            来凝练角色的成长。
-          </p>
-        </div>
-      )}
     </div>
   );
 }

@@ -15,7 +15,7 @@ export default async function handler(req: Request): Promise<Response> {
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get('id'); // 单个数据卡ID
-    const type = url.searchParams.get('type'); // 'character' or 'scenario'
+    const type = url.searchParams.get('type'); // 'character' | 'scenario' | 'history'
     const search = url.searchParams.get('search'); // 搜索关键词
     const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'favorites' | 'created_at' | null; // 排序方式
     const limit = parseInt(url.searchParams.get('limit') || '12');
@@ -59,7 +59,7 @@ export default async function handler(req: Request): Promise<Response> {
     const cards = await getPublicDataCards(
         limit, 
         offset, 
-        type as 'character' | 'scenario' | undefined, 
+        type as 'character' | 'scenario' | 'history' | undefined, 
         search || undefined, 
         sortBy || undefined,
         author || undefined,

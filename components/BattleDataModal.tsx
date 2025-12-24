@@ -17,7 +17,7 @@ interface BattleDataModalProps {
   onClose: () => void;
   onSelectCard?: (card: any) => void;
   onToggleCard?: (card: any, nextSelected: boolean) => void;
-  selectedType: 'character' | 'scenario';
+  selectedType: 'character' | 'scenario' | 'history';
   initialTab?: BattleDataTab;
   visibleTabs?: BattleDataTab[];
   titleOverride?: string;
@@ -342,7 +342,7 @@ export default function BattleDataModal({
   }, []);
 
   const loadFavorites = useCallback(async (
-    typeParam?: 'character' | 'scenario',
+    typeParam?: 'character' | 'scenario' | 'history',
     showLoading: boolean = false,
     sortCriteria?: 'likes' | 'usage' | 'favorites' | 'created_at'
   ) => {
@@ -848,7 +848,7 @@ export default function BattleDataModal({
       : activeTab === 'public'
         ? publicTotalPages
         : null;
-  const typeLabel = selectedType === 'character' ? '角色' : '情景';
+  const typeLabel = selectedType === 'character' ? '角色' : selectedType === 'scenario' ? '情景' : '叙事历史';
   const isFilterActive = useMemo(() => {
     return Boolean(
       activeFilters.author ||

@@ -23,6 +23,8 @@ const defaultSettings: BattleSettings = {
   writeArenaHistory: true,
   readCurrentState: true,
   writeCurrentState: true,
+  readNarrativeHistory: false,
+  writeNarrativeHistory: false,
   userGuidance: '',
 };
 

@@ -35,7 +35,7 @@ export default async function handler(req: Request): Promise<Response> {
   try {
     if (req.method === 'GET') {
       const url = new URL(req.url);
-      const type = url.searchParams.get('type') as 'character' | 'scenario' | null;
+      const type = url.searchParams.get('type') as 'character' | 'scenario' | 'history' | null;
       const idsOnly = url.searchParams.get('idsOnly') === '1';
 
       if (idsOnly) {

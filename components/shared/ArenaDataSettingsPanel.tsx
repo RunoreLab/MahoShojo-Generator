@@ -20,16 +20,7 @@ type Props = {
 };
 
 export function ArenaDataSettingsPanel({ value, onChange, disabled, combatantCountForEstimate = 0, footerNote }: Props) {
-  const numericLimit = value.isArenaHistoryUnlimited ? Infinity : Math.max(1, Number(value.readArenaHistoryLimit) || 1);
-  const estimatedHistoryTotal = value.readArenaHistory
-    ? numericLimit === Infinity
-      ? Infinity
-      : numericLimit * Math.max(0, combatantCountForEstimate)
-    : 0;
-  const shouldWarnHistoryLimit =
-    value.readArenaHistory &&
-    combatantCountForEstimate > 0 &&
-    (numericLimit === Infinity || estimatedHistoryTotal > 20);
+  void combatantCountForEstimate;
 
   return (
     <div className="input-group">
@@ -113,14 +104,7 @@ export function ArenaDataSettingsPanel({ value, onChange, disabled, combatantCou
           <p className="text-[11px] text-gray-500 mt-1">当前状态可记录角色身体状况、物品、人际等实时信息。</p>
         </fieldset>
       </div>
-      {shouldWarnHistoryLimit && (
-        <p className="text-xs text-orange-600 mt-2">
-          ⚠️ 当前设置预计将读取
-          {numericLimit === Infinity ? '无限制数量的' : `约 ${Math.ceil(estimatedHistoryTotal)} 条`}历战记录，超过 20 条可能显著提升生成失败或超时概率。
-        </p>
-      )}
       {footerNote ?? <p className="text-xs text-gray-500 mt-2">偏好会自动保存到浏览器，下次进入竞技场会沿用当前设置。</p>}
     </div>
   );
 }
-

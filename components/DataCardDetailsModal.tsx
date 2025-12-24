@@ -10,7 +10,7 @@ interface DataCardDetailsModalProps {
     id: string;
     name: string;
     description: string;
-    type: 'character' | 'scenario';
+    type: 'character' | 'scenario' | 'history';
     data: string; // JSON字符串
     isPublic: boolean;
     usageCount?: number;
@@ -94,10 +94,20 @@ export default function DataCardDetailsModal({
         {/* 头部 */}
         <div className="flex items-center justify-between p-6 border-b">
           <div className="flex items-start gap-3">
-            <div className={`p-2 mt-1 rounded-lg ${card.type === 'character' ? 'bg-pink-100' : 'bg-purple-100'
-              }`}>
-              <Info className={`w-5 h-5 ${card.type === 'character' ? 'text-pink-600' : 'text-purple-600'
-                }`} />
+            <div
+              className={`p-2 mt-1 rounded-lg ${
+                card.type === 'character' ? 'bg-pink-100' : card.type === 'scenario' ? 'bg-purple-100' : 'bg-emerald-100'
+              }`}
+            >
+              <Info
+                className={`w-5 h-5 ${
+                  card.type === 'character'
+                    ? 'text-pink-600'
+                    : card.type === 'scenario'
+                      ? 'text-purple-600'
+                      : 'text-emerald-700'
+                }`}
+              />
             </div>
             <div>
               <h2 className="text-xl font-bold text-gray-800">
@@ -137,7 +147,7 @@ export default function DataCardDetailsModal({
               </div>
             )}
             <h3 className="font-medium text-gray-700 flex items-center gap-2">
-              <span>详细设定</span>
+              <span>{card.type === 'history' ? '内容' : '详细设定'}</span>
             </h3>
           </div>
 
