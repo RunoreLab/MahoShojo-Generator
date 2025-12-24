@@ -6,11 +6,11 @@
     { "id": "cry", "label": "哭哭", "src": "/emotes/pvp/cry.svg" },
     { "id": "idea", "label": "灵感", "src": "/emotes/pvp/idea.svg" },
     { "id": "thumb", "label": "点赞", "src": "/emotes/pvp/thumb.svg" },
-    { "id": "xuerong-laugh", "label": "雪绒·大笑", "src": "/emotes/pvp/xuerong-laugh.png" },
-    { "id": "xuerong-shy", "label": "雪绒·害羞", "src": "/emotes/pvp/xuerong-shy.png" },
-    { "id": "xuerong-think", "label": "雪绒·思考", "src": "/emotes/pvp/xuerong-think.png" },
-    { "id": "xuerong-surprised", "label": "雪绒·惊讶", "src": "/emotes/pvp/xuerong-surprised.png" },
-    { "id": "xuerong-angry", "label": "雪绒·生气", "src": "/emotes/pvp/xuerong-angry.png" },
-    { "id": "xuerong-question", "label": "雪绒·疑问", "src": "/emotes/pvp/xuerong-question.jpg" }
+    { "id": "xuerong-laugh", "label": "雪绒·大笑", "src": "/emotes/pvp/xuerong-laugh.webp" },
+    { "id": "xuerong-shy", "label": "雪绒·害羞", "src": "/emotes/pvp/xuerong-shy.webp" },
+    { "id": "xuerong-think", "label": "雪绒·思考", "src": "/emotes/pvp/xuerong-think.webp" },
+    { "id": "xuerong-surprised", "label": "雪绒·惊讶", "src": "/emotes/pvp/xuerong-surprised.webp" },
+    { "id": "xuerong-angry", "label": "雪绒·生气", "src": "/emotes/pvp/xuerong-angry.webp" },
+    { "id": "xuerong-question", "label": "雪绒·疑问", "src": "/emotes/pvp/xuerong-question.webp" }
   ]
 }
