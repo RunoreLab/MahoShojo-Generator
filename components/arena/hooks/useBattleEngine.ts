@@ -36,20 +36,25 @@ const appendNarrativeHistoryIfEnabled = async (payload: {
   title: string;
   contentMarkdown: string;
 }): Promise<void> => {
-  if (!payload.enabled) return;
-  const title = (payload.title ?? '').toString().trim();
-  const content = (payload.contentMarkdown ?? '').toString().trim();
-  if (!content) return;
+  try {
+    if (!payload.enabled) return;
+    const title = (payload.title ?? '').toString().trim();
+    const content = (payload.contentMarkdown ?? '').toString().trim();
+    if (!content) return;
 
-  const [titleCheck, contentCheck] = await Promise.all([
-    quickCheck(title || '未命名战报'),
-    quickCheck(content),
-  ]);
+    const [titleCheck, contentCheck] = await Promise.all([
+      quickCheck(title || '未命名战报'),
+      quickCheck(content),
+    ]);
 
-  useNarrativeHistoryStore.getState().appendEntry({
-    title: (titleCheck.filteredText || title || '未命名战报').trim(),
-    content: (contentCheck.filteredText || content).trim(),
-  });
+    useNarrativeHistoryStore.getState().appendEntry({
+      title: (titleCheck.filteredText || title || '未命名战报').trim(),
+      content: (contentCheck.filteredText || content).trim(),
+    });
+  } catch (error) {
+    // 叙事历史是“增强功能”，失败不应影响战报生成主流程（localStorage 配额/浏览器异常等）
+    console.warn('写入叙事历史失败（已忽略）', error);
+  }
 };
 
 const buildStreamSensitiveArrestWarrantMarkdown = (reason?: string): string => {
@@ -431,11 +436,15 @@ export const useBattleEngine = () => {
         });
         setCombatants(updatedRoster);
 
-        await appendNarrativeHistoryIfEnabled({
-          enabled: settings.writeNarrativeHistory,
-          title: reportWithScenario.headline,
-          contentMarkdown: toBattleReportMarkdown(reportWithScenario),
-        });
+        try {
+          await appendNarrativeHistoryIfEnabled({
+            enabled: settings.writeNarrativeHistory,
+            title: reportWithScenario.headline,
+            contentMarkdown: toBattleReportMarkdown(reportWithScenario),
+          });
+        } catch (error) {
+          console.warn('写入叙事历史失败（已忽略）', error);
+        }
 
         return false;
       };
@@ -665,11 +674,15 @@ export const useBattleEngine = () => {
             setError('⚠️ 战报正文为空，但检测到角色更新元数据，已尝试继续更新角色数据。');
           }
 
-          await appendNarrativeHistoryIfEnabled({
-            enabled: settings.writeNarrativeHistory,
-            title: extractTitleFromBattleMarkdown(markdownForUi),
-            contentMarkdown: markdownForUi,
-          });
+          try {
+            await appendNarrativeHistoryIfEnabled({
+              enabled: settings.writeNarrativeHistory,
+              title: extractTitleFromBattleMarkdown(markdownForUi),
+              contentMarkdown: markdownForUi,
+            });
+          } catch (error) {
+            console.warn('写入叙事历史失败（已忽略）', error);
+          }
 
           startCooldown();
 
