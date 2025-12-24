@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { formatDateTime } from '@/lib/constants';
 
 interface ReplaceCardModalProps {
@@ -24,6 +25,16 @@ export default function ReplaceCardModal({
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState<number | undefined>(undefined);
 
+  // 避免弹窗打开时背景滚动，并确保弹层不受页面 stacking context（如 backdrop-filter）影响。
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen]);
+
   useEffect(() => {
     if (!selectedId) return;
     const card = filteredCards.find((c) => c.id === selectedId);
@@ -36,8 +47,12 @@ export default function ReplaceCardModal({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+  const modalContent = (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+      style={{ zIndex: 1000000 }}
+      onClick={onClose}
+    >
       <div
         className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-auto p-6"
         onClick={(e) => e.stopPropagation()}
@@ -150,4 +165,6 @@ export default function ReplaceCardModal({
       </div>
     </div>
   );
+
+  return typeof window !== 'undefined' ? createPortal(modalContent, document.body) : null;
 }
