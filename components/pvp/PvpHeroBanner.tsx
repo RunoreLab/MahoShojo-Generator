@@ -9,12 +9,12 @@ type PvpHeroBannerProps = {
 export function PvpHeroBanner({ title, subtitle, right }: PvpHeroBannerProps) {
   return (
     <div className="relative overflow-hidden border-b border-white/60">
-      <div className="absolute inset-0">
+      <div className="absolute inset-0 overflow-hidden">
         <img
-          src="/arena-card-banner.svg"
+          src="/arena-card-white.webp"
           alt=""
           aria-hidden="true"
-          className="h-full w-full object-cover opacity-80"
+          className="h-full w-3/4 translate-x-1/2 object-cover object-[10%_30%] opacity-100 blur-xs"
         />
       </div>
       <div className="absolute inset-0 bg-gradient-to-r from-white/95 via-white/80 to-white/55" />
