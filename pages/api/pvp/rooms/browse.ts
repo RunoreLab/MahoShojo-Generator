@@ -1,5 +1,6 @@
 import { getPvpRoomBrowseRows } from '@/lib/d1';
 import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { canJoinPvpRoomFromBrowse, canSpectatePvpRoomFromBrowse } from '@/lib/pvp/room-browse';
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpRoomRules } from '@/lib/pvp/types';
@@ -20,6 +21,8 @@ type BrowseRoomItem = {
   lastActivityAt: string | null;
   expiresAt: string | null;
   joinable: boolean;
+  spectatable: boolean;
+  allowSpectators: boolean;
 };
 
 const parseBool = (raw: string | null): boolean | null => {
@@ -41,7 +44,8 @@ async function browseHandler(req: Request): Promise<Response> {
   const mode = url.searchParams.get('mode')?.trim() || 'all';
   const phase = url.searchParams.get('phase')?.trim() || 'any';
   const passwordRaw = url.searchParams.get('password')?.trim() || 'any';
-  const includeFull = parseBool(url.searchParams.get('includeFull')) === true;
+  const includeUnavailable =
+    parseBool(url.searchParams.get('includeUnavailable')) === true || parseBool(url.searchParams.get('includeFull')) === true;
 
   const limitRaw = url.searchParams.get('limit');
   const limit = limitRaw && Number.isFinite(Number(limitRaw)) ? Math.floor(Number(limitRaw)) : 60;
@@ -54,6 +58,7 @@ async function browseHandler(req: Request): Promise<Response> {
     mode: mode || 'all',
     password,
     phase: safePhase,
+    phaseScope: 'open',
     limit,
     offset: 0,
   });
@@ -70,9 +75,12 @@ async function browseHandler(req: Request): Promise<Response> {
     const total = humans + botCount;
     const slotsLeft = maxPlayers - total;
     const hasPassword = Boolean(row.join_code_hash);
-    const joinable = row.status === 'open' && (row.phase === 'waiting' || row.phase === 'submitting') && slotsLeft > 0;
+    const allowSpectators = rules.allowSpectators !== false;
+    const joinable = canJoinPvpRoomFromBrowse({ status: row.status, phase: row.phase, slotsLeft });
+    const spectatable = canSpectatePvpRoomFromBrowse({ status: row.status, phase: row.phase, allowSpectators });
+    const enterable = joinable || spectatable;
 
-    if (!includeFull && !joinable) continue;
+    if (!includeUnavailable && !enterable) continue;
 
     const scenarioSelection = parsePvpScenarioSelection((internalParsed.internal.raw as any)?._scenario);
     const scenarioTitle = scenarioSelection ? getPvpScenarioTitle(scenarioSelection) : null;
@@ -91,6 +99,8 @@ async function browseHandler(req: Request): Promise<Response> {
       lastActivityAt: row.last_activity_at,
       expiresAt: row.expires_at,
       joinable,
+      spectatable,
+      allowSpectators,
     });
   }
 

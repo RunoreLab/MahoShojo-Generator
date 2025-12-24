@@ -140,6 +140,7 @@ export async function getPvpRoomBrowseRows(input: {
   mode?: string;
   password?: 'any' | 'yes' | 'no';
   phase?: 'any' | 'waiting' | 'submitting';
+  phaseScope?: 'joinable' | 'open';
   limit?: number;
   offset?: number;
 }): Promise<PvpRoomBrowseRow[]> {
@@ -150,13 +151,17 @@ export async function getPvpRoomBrowseRows(input: {
     where.push('r.status = ?');
     params.push('open');
 
+    const phaseScope = input.phaseScope ?? 'joinable';
     const phase = input.phase ?? 'any';
     if (phase === 'waiting' || phase === 'submitting') {
       where.push('r.phase = ?');
       params.push(phase);
-    } else {
+    } else if (phaseScope === 'joinable') {
       where.push('r.phase IN (?, ?)');
       params.push('waiting', 'submitting');
+    } else {
+      where.push('r.phase != ?');
+      params.push('closed');
     }
 
     const nowIso = new Date().toISOString();
