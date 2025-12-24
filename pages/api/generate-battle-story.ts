@@ -744,12 +744,12 @@ async function handler(req: NextRequest): Promise<Response> {
 
         return new Response(
             JSON.stringify({
-                error: '生成失败，当前服务器可能正忙，请稍后重试',
+                error: '生成失败',
                 message: errorMessage,
                 ...(generationId ? { generationId } : {}),
             }),
             {
-            status: 500,
+                status: 500,
             }
         );
     }

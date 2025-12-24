@@ -5,6 +5,7 @@ import { createDeepSeek } from "@ai-sdk/deepseek";
 import { config, AIProvider } from "../config";
 import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
+import { extractUpstreamErrorMessage, enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -240,6 +241,10 @@ export async function generateWithStreamAI(
                 }
 
                 const llm = createAIClient(provider);
+
+                // 捕获 onError 回调中的错误，用于后续提取错误信息
+                let capturedError: any = null;
+
                 const result = streamText({
                     model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel),
                     prompt: [
@@ -252,6 +257,7 @@ export async function generateWithStreamAI(
                     maxOutputTokens: generationConfig.maxOutputTokens,
                     maxRetries: 0,
                     onError: ({ error }) => {
+                        capturedError = error;
                         log.error(`流式传输过程中出错: 提供商: ${provider.name} 模型: ${selectedModel}`, { error });
                     },
                 });
@@ -261,7 +267,9 @@ export async function generateWithStreamAI(
                 const firstChunk = await reader.read();
 
                 if (firstChunk.done) {
-                    throw new Error('流意外结束，没有内容生成');
+                    // 使用工具函数提取上游错误信息
+                    const errorMessage = extractUpstreamErrorMessage(capturedError, result);
+                    throw new Error(errorMessage);
                 }
 
                 // 创建一个新的 ReadableStream，将已读取的 chunk 和剩余流合并
@@ -297,8 +305,10 @@ export async function generateWithStreamAI(
                     telemetry: options?.telemetry,
                 };
             } catch (error) {
-                lastError = error;
-                log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error });
+                // 使用工具函数增强错误信息
+                const enhancedError = enhanceErrorWithUpstreamMessage(error);
+                lastError = enhancedError;
+                log.error(`提供商 ${provider.name} 第 ${attempt + 1} 次失败`, { error: enhancedError });
 
                 if (NoObjectGeneratedError.isInstance(error)) {
                     log.debug(`NoObjectGeneratedError 详情: 提供商: ${provider.name}`, {
