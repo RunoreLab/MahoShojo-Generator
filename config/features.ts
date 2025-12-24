@@ -54,7 +54,7 @@ export const featureCategories: FeatureCategory[] = [
       },
       {
         id: 'scenario-generator',
-        src: '/scenario.svg',
+        src: '/scenario.webp',
         width: 350,
         height: 50,
         alt: '自定义情景生成',
