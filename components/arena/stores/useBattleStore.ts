@@ -106,6 +106,18 @@ export const useBattleStore = create<BattleStoreState>()(
         })),
 
       setCombatants: (combatants) => set({ combatants }),
+      moveCombatant: (fromIndex, toIndex) =>
+        set((state) => {
+          const current = state.combatants;
+          if (fromIndex === toIndex) return state;
+          if (fromIndex < 0 || fromIndex >= current.length) return state;
+          if (toIndex < 0 || toIndex >= current.length) return state;
+
+          const next = [...current];
+          const [moved] = next.splice(fromIndex, 1);
+          next.splice(toIndex, 0, moved!);
+          return { combatants: next };
+        }),
       clearCombatants: () =>
         set({
           combatants: [],
