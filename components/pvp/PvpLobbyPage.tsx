@@ -11,6 +11,7 @@ import { PvpHeroBanner } from '@/components/pvp/PvpHeroBanner';
 import { PvpRoomBrowserModal } from '@/components/pvp/PvpRoomBrowserModal';
 import { usePvpLobbyStore } from '@/components/pvp/stores/usePvpLobbyStore';
 import { BattleModeSelector } from '@/components/shared/BattleModeSelector';
+import { GenerationModeSwitcher } from '@/components/shared/GenerationModeSwitcher';
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { authStorage } from '@/lib/auth';
 import { inferTemplate } from '@/lib/data-card-converter';
@@ -389,6 +390,14 @@ export function PvpLobbyPage() {
                     </label>
                     <div className="col-span-2">
                       <BattleModeSelector value={rules.mode} onChange={(next) => updateRules({ mode: next })} />
+                    </div>
+                    <div className="col-span-2 mt-1">
+                      <GenerationModeSwitcher
+                        label="战报生成方式"
+                        value={rules.generationMode === 'stream' ? 'stream' : 'non-stream'}
+                        disabled={isCreating}
+                        onChange={(mode) => updateRules({ generationMode: mode })}
+                      />
                     </div>
                     {rules.mode === 'scenario' && (
                       <div className="col-span-2 border rounded-lg p-3 bg-white">
