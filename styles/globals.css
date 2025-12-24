@@ -382,4 +382,27 @@ body.announcement-visible {
       transform: translateX(0);
     }
   }
+
+  /* 分类功能导航样式 */
+  .feature-category {
+    margin-bottom: 2rem;
+  }
+
+  .feature-grid {
+    display: grid;
+    gap: 1rem;
+  }
+
+  /* 默认单列 */
+  .feature-grid.grid-cols-1 {
+    grid-template-columns: 1fr;
+  }
+
+  /* 响应式2列网格 */
+  @media (min-width: 768px) {
+    .feature-grid.md\:grid-cols-2 {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.5rem;
+    }
+  }
 }
