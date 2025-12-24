@@ -91,6 +91,13 @@ const AnnouncementTicker: React.FC = () => {
     return null;
   }
 
+  const pinnedAnnouncements = announcements.filter((announcement) => announcement.pinned);
+  const firstNonPinnedAnnouncement = announcements.find((announcement) => !announcement.pinned);
+  const tickerAnnouncements = [
+    ...pinnedAnnouncements,
+    ...(firstNonPinnedAnnouncement ? [firstNonPinnedAnnouncement] : []),
+  ];
+
   return (
     <>
       {/* 公告栏主体 */}
@@ -104,13 +111,23 @@ const AnnouncementTicker: React.FC = () => {
           </span>
           <div className="flex-grow whitespace-nowrap overflow-hidden">
             <p className="inline-block animate-scroll-left group-hover:animation-play-state-paused">
-              {announcements[0].pinned && '📌 '}
-              {announcements[0].title}
+              {tickerAnnouncements.map((announcement, index) => (
+                <span key={announcement.id} className="inline-flex items-center">
+                  {announcement.pinned && <span className="mr-1">📌</span>}
+                  {announcement.title}
+                  {index < tickerAnnouncements.length - 1 && (
+                    <span className="mx-6 text-gray-500">·</span>
+                  )}
+                </span>
+              ))}
             </p>
           </div>
         </div>
         <button
-          onClick={handleDismiss}
+          onClick={(event) => {
+            event.stopPropagation();
+            handleDismiss();
+          }}
           className="text-gray-500 hover:text-white text-2xl leading-none px-1 transition-colors duration-200"
           aria-label="关闭公告"
         >
@@ -233,7 +250,7 @@ const AnnouncementTicker: React.FC = () => {
       <style jsx>{`
         @keyframes scroll-left {
           0% {
-            transform: translateX(100%);
+            transform: translateX(100vw);
           }
           100% {
             transform: translateX(-100%);
@@ -262,6 +279,7 @@ const AnnouncementTicker: React.FC = () => {
         
         .animate-scroll-left {
           animation: scroll-left 15s linear infinite;
+          will-change: transform;
         }
         
         .animate-fade-in {
