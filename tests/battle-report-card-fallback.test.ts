@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 
-import { buildBattleReportCardFromStoredData } from '@/lib/arena/battle-report-card-fallback';
+import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
 
-describe('buildBattleReportCardFromStoredData', () => {
-  it('can build a card report without combatant data', () => {
+describe('hydrateBattleReportCardFromGenerationRecord', () => {
+  it('hydrates stream preview and strips telemetry meta', async () => {
     const markdown = `
 # 破晓之战
 
@@ -16,33 +16,62 @@ describe('buildBattleReportCardFromStoredData', () => {
 
 ## 最终结果
 结论：略。
+
+<!-- MAHOSHOJO_TELEMETRY_META {"version":1,"usage":{"promptTokens":1,"completionTokens":2},"narrativeHistoryReadCount":3} -->
 `.trim();
 
-    const report = buildBattleReportCardFromStoredData({
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'stream',
+      endpoint: 'api/arena/generate-stream',
       mode: 'classic',
+      scenarioTitle: null,
       headline: null,
       winner: null,
-      outputMarkdownPreview: markdown,
-      endpoint: 'api/arena/generate-stream',
+      outputPreview: markdown,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
     });
 
-    expect(report.headline).toBe('破晓之战');
-    expect(report.officialReport.winner).toBe('A');
-    expect(report.article.body).toContain('这里是正文第一段');
-    expect(report.reporterInfo.publication).toContain('api/arena/generate-stream');
+    expect(result.report.headline).toBe('破晓之战');
+    expect(result.report.officialReport.winner).toBe('A');
+    expect(result.report.aiUsage?.promptTokens).toBe(1);
+    expect(result.report.narrativeHistoryReadCount).toBe(3);
+    expect(result.liveBody).toContain('这里是正文第一段');
+    expect(result.liveBody).not.toContain('MAHOSHOJO_TELEMETRY_META');
   });
 
-  it('falls back to minimal placeholders when markdown is missing', () => {
-    const report = buildBattleReportCardFromStoredData({
+  it('hydrates non-stream report json when not truncated', async () => {
+    const raw = JSON.stringify({
       headline: '标题',
-      winner: '未知',
-      outputMarkdownPreview: '',
-      endpoint: '',
+      reporterInfo: { name: '记者', publication: '来源' },
+      article: { body: '正文', analysis: '点评' },
+      officialReport: { winner: 'A', conclusion: '结论' },
+      aiUsage: { promptTokens: 10, completionTokens: 20 },
+      narrativeHistoryReadCount: 1,
     });
 
-    expect(report.headline).toBe('标题');
-    expect(report.officialReport.winner).toBe('未知');
-    expect(typeof report.article.body).toBe('string');
+    const result = await hydrateBattleReportCardFromGenerationRecord({
+      generationMode: 'non-stream',
+      endpoint: 'api/arena/generate',
+      mode: 'classic',
+      scenarioTitle: null,
+      headline: null,
+      winner: null,
+      outputPreview: raw,
+      promptTokens: 99,
+      completionTokens: null,
+      totalTokens: null,
+      cachedTokens: null,
+      reasoningTokens: null,
+    });
+
+    expect(result.report.headline).toBe('标题');
+    expect(result.report.officialReport.winner).toBe('A');
+    expect(result.report.article.body).toBe('正文');
+    expect(result.report.aiUsage?.promptTokens).toBe(10);
+    expect(result.report.narrativeHistoryReadCount).toBe(1);
   });
 });
-
