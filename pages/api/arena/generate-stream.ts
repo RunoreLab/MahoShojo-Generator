@@ -32,6 +32,7 @@ import {
     compactExtraJson,
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
+import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
@@ -432,34 +433,15 @@ async function handler(req: NextRequest): Promise<Response> {
         const authHeader = req.headers.get('authorization');
         const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
 
-        const headLimit = 800;
-        const tailLimit = 800;
-        const maxFullChars = headLimit + tailLimit + 16;
-
         let outputBytes = 0;
         let outputChars = 0;
-        let headText = '';
-        let tailText = '';
-        let fullText: string | null = '';
+        const previewCollector = createOutputPreviewCollector();
 
         const decoder = new TextDecoder();
         const appendText = (text: string) => {
             if (!text) return;
             outputChars += text.length;
-
-            if (fullText !== null) {
-                if (fullText.length + text.length <= maxFullChars) {
-                    fullText += text;
-                } else {
-                    fullText = null;
-                }
-            }
-
-            if (headText.length < headLimit) {
-                headText += text.slice(0, headLimit - headText.length);
-            }
-
-            tailText = (tailText + text).slice(-tailLimit);
+            previewCollector.append(text);
         };
 
         let finalized = false;
@@ -479,8 +461,8 @@ async function handler(req: NextRequest): Promise<Response> {
             const normalizedErrorMessage =
               normalizedStatus !== status ? (errorMessage || 'empty output') : errorMessage;
 
-            const previewSource = (fullText !== null ? fullText : `${headText}……${tailText}`) || '';
-            const outputPreview = buildContentPreview(previewSource, { headChars: headLimit, tailChars: tailLimit });
+            const { outputPreview } = previewCollector.finish();
+            const previewSource = outputPreview;
 
             const recordPromise = (async () => {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
