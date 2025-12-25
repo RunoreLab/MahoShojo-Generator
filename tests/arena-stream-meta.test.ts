@@ -185,4 +185,19 @@ describe('arena stream meta', () => {
     expect(await extractStreamUpdateMeta(md)).toBeNull();
     expect(stripStreamUpdateMetaComment(md)).toBeNull();
   });
+
+  test('telemetry meta strips even when json is malformed', async () => {
+    const md = [
+      '# 标题',
+      '',
+      '正文',
+      '',
+      '<!-- MAHOSHOJO_TELEMETRY_META {"version":1,"usage":[ -->',
+    ].join('\n');
+
+    const extracted = await extractStreamTelemetryMeta(md);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.strippedMarkdown.includes('MAHOSHOJO_TELEMETRY_META')).toBe(false);
+    expect(extracted!.strippedMarkdown.includes('正文')).toBe(true);
+  });
 });

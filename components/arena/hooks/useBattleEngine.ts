@@ -634,7 +634,7 @@ export const useBattleEngine = () => {
               setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
               setStreamNarrativeHistoryReadCount(narrativeCount);
             }
-            if (telemetryExtracted?.strippedMarkdown) {
+            if (telemetryExtracted && typeof telemetryExtracted.strippedMarkdown === 'string') {
               markdownForUi = telemetryExtracted.strippedMarkdown;
             }
 
@@ -648,13 +648,13 @@ export const useBattleEngine = () => {
                   ...(extracted.meta.impacts && extracted.meta.impacts.length > 0 ? { impacts: extracted.meta.impacts } : {}),
                 };
               }
-              if (extracted?.strippedMarkdown) {
+              if (extracted && typeof extracted.strippedMarkdown === 'string') {
                 markdownForUi = extracted.strippedMarkdown;
               }
             } else {
               // 未开启任何写入：仍然移除潜在的元数据注释，避免用户看到“系统专用内容”
               const stripped = stripStreamUpdateMetaComment(markdownForUi);
-              if (stripped?.strippedMarkdown) {
+              if (stripped && typeof stripped.strippedMarkdown === 'string') {
                 markdownForUi = stripped.strippedMarkdown;
               }
             }
