@@ -10,10 +10,11 @@ type Props = {
   isOpen: boolean;
   generationId?: string | null;
   report: NewsReport | null;
+  liveBody?: string | null;
   onClose: () => void;
 };
 
-export function BattleReportCardModal({ isOpen, generationId, report, onClose }: Props) {
+export function BattleReportCardModal({ isOpen, generationId, report, liveBody, onClose }: Props) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
 
@@ -47,6 +48,7 @@ export function BattleReportCardModal({ isOpen, generationId, report, onClose }:
           <BattleReportCard
             report={report}
             mode={mode}
+            liveBody={typeof liveBody === 'string' ? liveBody : undefined}
             onSaveImage={(url) => {
               setImageUrl(url);
               setShowImageModal(true);
@@ -65,4 +67,3 @@ export function BattleReportCardModal({ isOpen, generationId, report, onClose }:
     </>
   );
 }
-

@@ -251,6 +251,11 @@ export interface BattleReportGenerationRowLite {
   story_length: string | null;
   headline: string | null;
   winner: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  cached_tokens: number | null;
+  reasoning_tokens: number | null;
   output_preview: string | null;
   output_has_sensitive_words: number | null;
   output_has_shield_words: number | null;
@@ -284,6 +289,11 @@ export async function getBattleReportGenerationByIdLite(
         story_length,
         headline,
         winner,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cached_tokens,
+        reasoning_tokens,
         output_preview,
         output_has_sensitive_words,
         output_has_shield_words,
@@ -334,6 +344,11 @@ export async function getBattleReportGenerationsByUserIdLite(
         story_length,
         headline,
         winner,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cached_tokens,
+        reasoning_tokens,
         output_preview,
         output_has_sensitive_words,
         output_has_shield_words,

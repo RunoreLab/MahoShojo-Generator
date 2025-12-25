@@ -26,7 +26,7 @@ export function MePage() {
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
   const [showMatchDetails, setShowMatchDetails] = useState(false);
 
-  const [generated, setGenerated] = useState<{ report: NewsReport; generationId?: string } | null>(null);
+  const [generated, setGenerated] = useState<{ report: NewsReport; generationId?: string; liveBody?: string } | null>(null);
   const [showCardModal, setShowCardModal] = useState(false);
 
   const regenerateMutation = useMutation({
@@ -40,7 +40,7 @@ export function MePage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || '重新生成失败');
-      return data as { report: NewsReport; generationId?: string };
+      return data as { report: NewsReport; liveBody?: string; generationId?: string };
     },
     onSuccess: (data) => {
       setGenerated(data);
@@ -171,6 +171,7 @@ export function MePage() {
         isOpen={showCardModal}
         generationId={generated?.generationId ?? null}
         report={generated?.report ?? null}
+        liveBody={generated?.liveBody ?? null}
         onClose={() => setShowCardModal(false)}
       />
     </>

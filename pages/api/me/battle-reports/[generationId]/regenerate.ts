@@ -1,5 +1,5 @@
 import { getBattleReportGenerationByIdLite, isUserInPvpMatch } from '@/lib/d1';
-import { buildBattleReportCardFromStoredData } from '@/lib/arena/battle-report-card-fallback';
+import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 
@@ -49,16 +49,21 @@ export default async function handler(req: Request): Promise<Response> {
   if ('response' in body) return body.response;
   const userGuidance = typeof body.data.userGuidance === 'string' ? body.data.userGuidance.trim() : '';
 
-  const report = buildBattleReportCardFromStoredData({
+  const hydrated = await hydrateBattleReportCardFromGenerationRecord({
+    generationMode: record.generation_mode,
+    endpoint: record.endpoint,
     mode: record.mode,
     scenarioTitle: record.scenario_title,
     headline: record.headline,
     winner: record.winner,
-    outputMarkdownPreview: outputPreview,
-    endpoint: record.endpoint,
+    outputPreview: outputPreview,
+    promptTokens: record.prompt_tokens,
+    completionTokens: record.completion_tokens,
+    totalTokens: record.total_tokens,
+    cachedTokens: record.cached_tokens,
+    reasoningTokens: record.reasoning_tokens,
     userGuidance,
   });
 
-  return json({ success: true, report, generationId });
+  return json({ success: true, report: hydrated.report, liveBody: hydrated.liveBody, generationId });
 }
-
