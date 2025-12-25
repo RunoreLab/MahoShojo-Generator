@@ -148,4 +148,41 @@ describe('arena stream meta', () => {
     expect(extracted).not.toBeNull();
     expect(extracted!.meta.impacts?.[0]?.characterName).toBe('A');
   });
+
+  test('extracts loose marker block (---MAHOSHOJO_ARENA_META ...) and strips only the block', async () => {
+    const md = [
+      '# 标题',
+      '',
+      '---MAHOSHOJO_ARENA_META {version:1, impacts:[{name:"A", currentStateSummary:"OK"}]}',
+      '',
+      '正文继续',
+    ].join('\n');
+
+    const extracted = await extractStreamUpdateMeta(md);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.meta.impacts?.[0]?.characterName).toBe('A');
+    expect(extracted!.meta.impacts?.[0]?.currentStateSummary).toBe('OK');
+    expect(extracted!.strippedMarkdown.includes('MAHOSHOJO_ARENA_META')).toBe(false);
+    expect(extracted!.strippedMarkdown.includes('正文继续')).toBe(true);
+  });
+
+  test('accepts <!---MAHOSHOJO_ARENA_META ... --> and python-ish tokens', async () => {
+    const md = [
+      '# 标题',
+      '',
+      "<!---MAHOSHOJO_ARENA_META {'version':1,'report':{'headline':'H'},'impacts':[{'characterName':'A','currentStateSummary':'好','flag':True,'none':None}]} -->",
+    ].join('\n');
+
+    const extracted = await extractStreamUpdateMeta(md);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.meta.report?.headline).toBe('H');
+    expect(extracted!.meta.impacts?.[0]?.characterName).toBe('A');
+    expect(extracted!.meta.impacts?.[0]?.currentStateSummary).toBe('好');
+  });
+
+  test('ignores marker-like line without json', async () => {
+    const md = ['# 标题', '', 'MAHOSHOJO_ARENA_META 只是提到', '', '正文'].join('\n');
+    expect(await extractStreamUpdateMeta(md)).toBeNull();
+    expect(stripStreamUpdateMetaComment(md)).toBeNull();
+  });
 });

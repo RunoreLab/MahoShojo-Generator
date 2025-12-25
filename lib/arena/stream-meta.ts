@@ -103,22 +103,121 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
+const escapeRegExp = (input: string) => input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const normalizeJsonishText = (input: string): string => {
-  return (
-    input
-      // 常见的“中文引号/弯引号”修复：jsonrepair 不会处理它们
-      .replace(/[“”]/g, '"')
-      .replace(/[‘’]/g, "'")
-      // 统一 BOM / 零宽字符
-      .replace(/^\uFEFF/, '')
-      .replace(/[\u200B-\u200D\u2060]/g, '')
-  );
+  const normalized = input
+    // 常见的“中文引号/弯引号”修复：jsonrepair 不会处理它们
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    // 统一 BOM / 零宽字符
+    .replace(/^\uFEFF/, '')
+    .replace(/[\u200B-\u200D\u2060]/g, '');
+
+  // 常见“Python-ish”字面量：True/False/None（仅在字符串外替换）
+  // 注意：这里不做 eval，只做最小必要的词法替换。
+  let out = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i]!;
+    if (quote) {
+      out += ch;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+
+    if (ch === 'T' || ch === 'F' || ch === 'N') {
+      const rest = normalized.slice(i);
+      const match = rest.match(/^(True|False|None)\b/);
+      if (match) {
+        out += match[1] === 'True' ? 'true' : match[1] === 'False' ? 'false' : 'null';
+        i += match[1].length - 1;
+        continue;
+      }
+    }
+
+    out += ch;
+  }
+
+  return out;
+};
+
+type StreamMetaHit = { start: number; end: number; inner: string; marker: string };
+
+const stripPossibleLeadingMarkerNoise = (inner: string) => inner.trimStart().replace(/^[-–—]+\s*/g, '');
+
+const matchMarkerAtStart = (input: string, markers: readonly string[]) => {
+  const head = stripPossibleLeadingMarkerNoise(input).slice(0, 96);
+  for (const marker of markers) {
+    const re = new RegExp(`^${escapeRegExp(marker)}(?=\\s*[:=\\[{]|\\s*$)`, 'i');
+    if (re.test(head)) return marker;
+  }
+  return null;
+};
+
+const findJsonishSpan = (text: string, searchFrom = 0): { start: number; end: number } | null => {
+  const firstObj = text.indexOf('{', searchFrom);
+  const firstArr = text.indexOf('[', searchFrom);
+  const start =
+    firstObj === -1 ? firstArr : firstArr === -1 ? firstObj : Math.min(firstObj, firstArr);
+  if (start === -1) return null;
+
+  const stack: string[] = [text[start] === '{' ? '}' : ']'];
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  for (let i = start + 1; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+
+    if (ch === '{') stack.push('}');
+    else if (ch === '[') stack.push(']');
+    else if (ch === '}' || ch === ']') {
+      if (stack.length > 0 && ch === stack[stack.length - 1]) {
+        stack.pop();
+        if (stack.length === 0) return { start, end: i };
+      }
+    }
+  }
+
+  return null;
 };
 
 const findLastHtmlCommentWithMarker = (
   markdown: string,
   markers: readonly string[] = META_MARKERS
-): { start: number; end: number; inner: string; marker: string } | null => {
+): StreamMetaHit | null => {
   const MAX_TAIL_CHARS = 120_000;
   const tailStart = Math.max(0, markdown.length - MAX_TAIL_CHARS);
   const haystack = tailStart > 0 ? markdown.slice(tailStart) : markdown;
@@ -129,7 +228,7 @@ const findLastHtmlCommentWithMarker = (
     if (start === -1) return null;
     const end = searchEnd + 3;
     const inner = haystack.slice(start + 4, searchEnd);
-    const marker = markers.find((m) => inner.toLowerCase().includes(m.toLowerCase()));
+    const marker = matchMarkerAtStart(inner, markers);
     if (marker) {
       return { start: start + tailStart, end: end + tailStart, inner, marker };
     }
@@ -138,9 +237,52 @@ const findLastHtmlCommentWithMarker = (
   return null;
 };
 
+const findLastLooseMarkerBlock = (
+  markdown: string,
+  markers: readonly string[] = META_MARKERS
+): StreamMetaHit | null => {
+  const MAX_TAIL_CHARS = 120_000;
+  const tailStart = Math.max(0, markdown.length - MAX_TAIL_CHARS);
+  const haystack = tailStart > 0 ? markdown.slice(tailStart) : markdown;
+
+  const markerAlt = markers.map(escapeRegExp).join('|');
+  const re = new RegExp(`(^|\\n)\\s*(?:---+\\s*)?(${markerAlt})(?=\\s*[:=\\[{]|\\s*$)`, 'gim');
+
+  let last: { index: number; marker: string; matchText: string } | null = null;
+  for (const match of haystack.matchAll(re)) {
+    if (typeof match.index !== 'number') continue;
+    const marker = match[2];
+    if (!marker) continue;
+    last = { index: match.index, marker, matchText: match[0] };
+  }
+  if (!last) return null;
+
+  const blockStartInHaystack = last.index + (last.matchText.startsWith('\n') ? 1 : 0);
+  const afterMarkerInHaystack = last.index + last.matchText.length;
+
+  const span = findJsonishSpan(haystack, afterMarkerInHaystack);
+  if (!span) return null;
+
+  const start = blockStartInHaystack + tailStart;
+  const end = span.end + 1 + tailStart;
+  const inner = markdown.slice(start, end);
+  return { start, end, inner, marker: last.marker };
+};
+
+const findLastStreamMetaBlock = (
+  markdown: string,
+  markers: readonly string[] = META_MARKERS
+): StreamMetaHit | null => {
+  const commentHit = findLastHtmlCommentWithMarker(markdown, markers);
+  const looseHit = findLastLooseMarkerBlock(markdown, markers);
+  if (!commentHit) return looseHit;
+  if (!looseHit) return commentHit;
+  return commentHit.start >= looseHit.start ? commentHit : looseHit;
+};
+
 export function stripStreamUpdateMetaComment(markdown: string): StrippedStreamMetaComment | null {
   if (typeof markdown !== 'string' || !markdown.trim()) return null;
-  const hit = findLastHtmlCommentWithMarker(markdown);
+  const hit = findLastStreamMetaBlock(markdown);
   if (!hit) return null;
   const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
   return {
@@ -152,6 +294,10 @@ export function stripStreamUpdateMetaComment(markdown: string): StrippedStreamMe
 
 const extractBestJsonCandidate = (commentInner: string): string => {
   const text = normalizeJsonishText(commentInner).trim();
+
+  // 先用括号配对法，尽量精准定位 JSON 边界，避免“后续正文出现括号”导致截断/误扩张
+  const span = findJsonishSpan(text, 0);
+  if (span) return text.slice(span.start, span.end + 1).trim();
 
   const firstObj = text.indexOf('{');
   const firstArr = text.indexOf('[');
@@ -165,6 +311,9 @@ const extractBestJsonCandidate = (commentInner: string): string => {
   if (start !== -1 && end !== -1 && end > start) {
     return text.slice(start, end + 1).trim();
   }
+
+  // 结尾括号缺失时，尽量只截取从 “{ / [” 开始的部分交给 jsonrepair 补全
+  if (start !== -1) return text.slice(start).trim();
 
   return text;
 };
@@ -226,7 +375,7 @@ const sanitizeMeta = (meta: StreamUpdateMeta): NormalizedStreamUpdateMeta => {
 export async function extractStreamUpdateMeta(markdown: string): Promise<ExtractedStreamMeta | null> {
   if (typeof markdown !== 'string' || !markdown.trim()) return null;
 
-  const hit = findLastHtmlCommentWithMarker(markdown, [
+  const hit = findLastStreamMetaBlock(markdown, [
     'MAHOSHOJO_ARENA_META',
     'MAHOSHOJO_META',
     'MAHOSHOJO_STREAM_META',
@@ -294,7 +443,7 @@ const sanitizeTelemetryMeta = (meta: StreamTelemetryMeta): NormalizedStreamTelem
 export async function extractStreamTelemetryMeta(markdown: string): Promise<ExtractedStreamTelemetryMeta | null> {
   if (typeof markdown !== 'string' || !markdown.trim()) return null;
 
-  const hit = findLastHtmlCommentWithMarker(markdown, ['MAHOSHOJO_TELEMETRY_META']);
+  const hit = findLastStreamMetaBlock(markdown, ['MAHOSHOJO_TELEMETRY_META']);
   if (!hit) return null;
 
   const candidate = extractBestJsonCandidate(hit.inner);
