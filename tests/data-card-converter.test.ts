@@ -104,4 +104,19 @@ describe('data-card-converter', () => {
     const mgNameOnly = { codename: '星辉' };
     expect(inferTemplateId(mgNameOnly)).toBe('魔法少女/心之花/魔法少女（名字生成）');
   });
+
+  it('does not misclassify narrative history cards as scenario', () => {
+    const history = {
+      templateId: 'narrative-history',
+      version: 1,
+      title: '叙事历史',
+      updatedAt: new Date('2025-01-01T00:00:00.000Z').toISOString(),
+      entries: []
+    };
+
+    const result = validateDataCard(history);
+    expect(result.success).toBe(true);
+    expect(result.type).toBe('history');
+    expect(inferTemplate(history)).toBe('unknown');
+  });
 });

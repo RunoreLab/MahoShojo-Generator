@@ -191,7 +191,7 @@ export default function DataCardsModal({
                       onEditData={() => onLoadCard(card)}
                       onDelete={() => onDeleteCard(card.id)}
                       onShare={() => onShareCard?.(card)}
-                      onReplace={() => onReplaceCard?.(card)}
+                      onReplace={card.type === 'history' ? undefined : () => onReplaceCard?.(card)}
                     />
                   );
                 })}
