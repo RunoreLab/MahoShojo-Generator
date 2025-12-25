@@ -27,10 +27,11 @@ import AuthModal from '../components/CharManager/AuthModal';
 import SaveCardModal from '../components/CharManager/SaveCardModal';
 import DataCardsModal from '../components/CharManager/DataCardsModal';
 import RecycleBinModal from '../components/CharManager/RecycleBinModal';
+import NarrativeHistoryCardEditorModal from '../components/CharManager/NarrativeHistoryCardEditorModal';
 import ScenarioEditor from '../components/ScenarioEditor';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { UserBadge } from '@/types/badge';
-import type { CharacterCurrentState, CurrentStateField } from '@/types/arena';
+import type { CharacterCurrentState, CurrentStateField, NarrativeHistoryDataCardV1 } from '@/types/arena';
 import {
     inferTemplate,
     createBlankDataCard,
@@ -277,6 +278,14 @@ const CharacterManagerPage: React.FC = () => {
   const [newCardForm, setNewCardForm] = useState({ name: '', description: '', isPublic: 0 });
   const [saveCardError, setSaveCardError] = useState<string | null>(null);
   const [isSavingCard, setIsSavingCard] = useState(false);
+  const [showHistoryCardEditor, setShowHistoryCardEditor] = useState(false);
+  const [historyCardDraft, setHistoryCardDraft] = useState<NarrativeHistoryDataCardV1 | null>(null);
+  const [historyCardTarget, setHistoryCardTarget] = useState<{
+    id: string;
+    name: string;
+    description: string;
+    isPublic: number;
+  } | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
     const cardsPerPage = 12;
 
@@ -523,6 +532,19 @@ const CharacterManagerPage: React.FC = () => {
     // 加载数据卡
     const handleLoadDataCard = async (card: any) => {
         try {
+            if (card?.type === 'history') {
+                const parsed = JSON.parse(card.data);
+                setHistoryCardDraft(parsed as NarrativeHistoryDataCardV1);
+                setHistoryCardTarget({
+                    id: card.id,
+                    name: card.name,
+                    description: card.description,
+                    isPublic: card.is_public,
+                });
+                setShowHistoryCardEditor(true);
+                setShowDataCardsModal(false);
+                return;
+            }
             // card.data 是一个 JSON 字符串，我们直接将其传递给统一的加载处理函数
             await processJsonData(card.data);
             setShowDataCardsModal(false);
@@ -626,6 +648,34 @@ const CharacterManagerPage: React.FC = () => {
         } catch (error) {
             setMessage({ type: 'error', text: error instanceof Error ? error.message : '替换失败' });
         }
+    };
+
+    const handleReplaceHistoryCard = async (payload: NarrativeHistoryDataCardV1) => {
+        if (!historyCardTarget) {
+            throw new Error('未指定要替换的叙事历史数据卡');
+        }
+
+        const textToCheck = `${historyCardTarget.name} ${historyCardTarget.description} ${JSON.stringify(payload)}`;
+        const sensitiveWordResult = await quickCheck(textToCheck);
+        if (sensitiveWordResult.hasSensitiveWords) {
+            router.push('/arrested');
+            return;
+        }
+
+        const result = await dataCardApi.replaceCard(historyCardTarget.id, {
+            name: historyCardTarget.name,
+            description: historyCardTarget.description,
+            isPublic: historyCardTarget.isPublic,
+            data: payload,
+        });
+
+        if (!result.success) {
+            throw new Error(result.error || '替换失败');
+        }
+
+        setMessage({ type: 'success', text: result.pendingReview ? '更新已提交审核，审核通过后生效' : '叙事历史数据卡已替换' });
+        loadUserDataCards();
+        loadUserBadges();
     };
 
     // 检测是否为情景文件
@@ -860,6 +910,19 @@ const CharacterManagerPage: React.FC = () => {
             // if (!validationResult.success) {
             //     throw new Error(validationResult.error || '无效的文件格式。请确保是有效的角色或情景文件。');
             // }
+
+            if ((data as any)?.templateId === 'narrative-history') {
+                setHistoryCardDraft(data as NarrativeHistoryDataCardV1);
+                setHistoryCardTarget(null);
+                setShowHistoryCardEditor(true);
+                setMessage({
+                    type: validationResult.success ? 'success' : 'info',
+                    text: validationResult.success
+                        ? `成功加载叙事历史：${(data as any).title || '叙事历史'}（${Array.isArray((data as any).entries) ? (data as any).entries.length : 0} 条）`
+                        : `检测到叙事历史数据卡，但格式存在问题：${validationResult.error || '未知错误'}（已进入编辑器，可导出后修复）`
+                });
+                return;
+            }
 
             const isCharacterFile = validationResult.type === 'character' || validationResult.type === 'canshou' || validationResult.type === 'general';
             const isScenarioFile = validationResult.type === 'scenario';
@@ -2112,6 +2175,18 @@ const CharacterManagerPage: React.FC = () => {
             }}
                 recycleCount={recycleBinCards.length}
                 recycleLimit={config.RECYCLE_BIN_LIMIT}
+            />
+
+            < NarrativeHistoryCardEditorModal
+                isOpen={showHistoryCardEditor}
+                onClose={() => {
+                    setShowHistoryCardEditor(false);
+                    setHistoryCardDraft(null);
+                    setHistoryCardTarget(null);
+                }}
+                initialData={historyCardDraft}
+                targetCard={historyCardTarget}
+                onReplaceTarget={historyCardTarget ? handleReplaceHistoryCard : undefined}
             />
 
             {/* 回收站模态框 */}

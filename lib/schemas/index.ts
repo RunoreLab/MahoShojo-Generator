@@ -6,9 +6,10 @@ import {
   type GeneralCharacterData,
   GENERAL_CHARACTER_TEMPLATE_ID
 } from './general-character';
+import { NarrativeHistorySchema, type NarrativeHistoryData } from './narrative-history';
 
-export type DataCardType = 'character' | 'canshou' | 'general' | 'scenario';
-export type DataCardData = CanshouData | MagicalGirlData | GeneralCharacterData | ScenarioData;
+export type DataCardType = 'character' | 'canshou' | 'general' | 'scenario' | 'history';
+export type DataCardData = CanshouData | MagicalGirlData | GeneralCharacterData | ScenarioData | NarrativeHistoryData;
 
 export type TemplateId =
   | typeof GENERAL_CHARACTER_TEMPLATE_ID
@@ -112,7 +113,10 @@ export function isGeneralCharacter(data: unknown): data is GeneralCharacterData 
 export function isScenarioCard(data: unknown): data is ScenarioData {
   if (!data || typeof data !== 'object') return false;
   const record = data as Record<string, unknown>;
-  return typeof record.title === 'string' && record.templateId !== GENERAL_CHARACTER_TEMPLATE_ID;
+  if (typeof record.title !== 'string') return false;
+  if (record.templateId === GENERAL_CHARACTER_TEMPLATE_ID) return false;
+  if (record.templateId === 'narrative-history') return false;
+  return typeof record.elements === 'object' && record.elements !== null;
 }
 
 export interface ValidationResult {
@@ -132,6 +136,16 @@ export function validateDataCard(content: unknown): ValidationResult {
     return {
       success: false,
       error: '无效的文件内容'
+    };
+  }
+
+  // 尝试验证叙事历史格式（需要优先于情景，因为二者都可能带 title）
+  const narrativeHistoryResult = NarrativeHistorySchema.safeParse(content);
+  if (narrativeHistoryResult.success) {
+    return {
+      success: true,
+      data: narrativeHistoryResult.data,
+      type: 'history'
     };
   }
 
@@ -179,6 +193,13 @@ export function validateDataCard(content: unknown): ValidationResult {
   const contentObj = content as any;
   const inferredKind = inferCharacterKind(contentObj);
 
+  if (contentObj?.templateId === 'narrative-history') {
+    return {
+      success: false,
+      error: `叙事历史格式验证失败: ${narrativeHistoryResult.error?.message || '未知错误'}`
+    };
+  }
+
   if (inferredKind === 'general') {
     return {
       success: false,
@@ -210,6 +231,7 @@ export function validateDataCard(content: unknown): ValidationResult {
 
   // 无法判断文件类型，返回所有错误信息
   const errors = [
+    `叙事历史格式: ${narrativeHistoryResult.error?.message || '未知错误'}`,
     `残兽格式: ${canshouResult.error?.message || '未知错误'}`,
     `通用角色格式: ${generalResult.error?.message || '未知错误'}`,
     `魔法少女格式: ${magicalGirlResult.error?.message || '未知错误'}`,
@@ -223,5 +245,12 @@ export function validateDataCard(content: unknown): ValidationResult {
 }
 
 // 导出各个 schema 供其他地方使用
-export { CanshouSchema, MagicalGirlSchema, ScenarioSchema, GeneralCharacterSchema, GENERAL_CHARACTER_TEMPLATE_ID };
-export type { CanshouData, MagicalGirlData, GeneralCharacterData, ScenarioData };
+export {
+  CanshouSchema,
+  MagicalGirlSchema,
+  ScenarioSchema,
+  GeneralCharacterSchema,
+  NarrativeHistorySchema,
+  GENERAL_CHARACTER_TEMPLATE_ID
+};
+export type { CanshouData, MagicalGirlData, GeneralCharacterData, ScenarioData, NarrativeHistoryData };
