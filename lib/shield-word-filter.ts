@@ -1,5 +1,8 @@
 // lib/shield-word-filter.ts
 
+import { pinyin } from 'pinyin-pro';
+import { buildKeepCharsMapping, createWordsSearch, foldFullwidthAscii, keepAsciiWordChar, normalizeLatin, toSimplifiedChinese } from '@/lib/word-filter-utils';
+
 /**
  * 说明：
  * - “屏蔽词”不会触发逮捕；只会在文本中被和谐（默认使用 ❀ 遮罩，或按配置替换为指定文本）。
@@ -122,8 +125,6 @@ const base64Decode = (str: string): string => {
   return '';
 };
 
-const escapeRegExp = (str: string): string => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
 const buildReplaceMap = (config: ShieldWordsConfig): Map<string, string> => {
   const map = new Map<string, string>();
   if (!config.replace) return map;
@@ -139,6 +140,11 @@ const buildReplaceMap = (config: ShieldWordsConfig): Map<string, string> => {
 
 let decodedWordsCache: string[] | null = null;
 let replaceMapCache: Map<string, string> | null = null;
+let simplifiedKeywordCache: string[] | null = null;
+let simplifiedReplaceMapCache: Map<string, string> | null = null;
+let wordsSearchCache: ReturnType<typeof createWordsSearch> | null = null;
+let pinyinSearchCache: ReturnType<typeof createWordsSearch> | null = null;
+let pinyinToSourceCache: Map<string, string> | null = null;
 
 const getDecodedWords = (): string[] => {
   if (decodedWordsCache) return decodedWordsCache;
@@ -156,34 +162,123 @@ const getReplaceMap = (): Map<string, string> => {
   return replaceMapCache;
 };
 
+const getSimplifiedKeywordCache = (): string[] => {
+  if (simplifiedKeywordCache) return simplifiedKeywordCache;
+  simplifiedKeywordCache = getDecodedWords()
+    .map((w) => toSimplifiedChinese(w).toLowerCase())
+    .filter((w) => typeof w === 'string' && w.trim().length > 0);
+  return simplifiedKeywordCache;
+};
+
+const getSimplifiedReplaceMap = (): Map<string, string> => {
+  if (simplifiedReplaceMapCache) return simplifiedReplaceMapCache;
+  const rawReplaceMap = getReplaceMap();
+  const map = new Map<string, string>();
+  for (const [word, replacement] of rawReplaceMap.entries()) {
+    map.set(toSimplifiedChinese(word).toLowerCase(), replacement);
+  }
+  simplifiedReplaceMapCache = map;
+  return simplifiedReplaceMapCache;
+};
+
+const getWordsSearch = (): ReturnType<typeof createWordsSearch> => {
+  if (wordsSearchCache) return wordsSearchCache;
+  wordsSearchCache = createWordsSearch(getSimplifiedKeywordCache());
+  return wordsSearchCache;
+};
+
+const getPinyinSearch = (): { search: ReturnType<typeof createWordsSearch> | null; pinyinToSource: Map<string, string> } => {
+  if (pinyinSearchCache && pinyinToSourceCache) {
+    return { search: pinyinSearchCache, pinyinToSource: pinyinToSourceCache };
+  }
+
+  const pinyinToSource = new Map<string, string>();
+  const pinyinKeywords: string[] = [];
+  for (const word of getDecodedWords()) {
+    const simplified = toSimplifiedChinese(word);
+    const hanCharCount = Array.from(simplified).filter((ch) => /[\u4e00-\u9fa5]/.test(ch)).length;
+    if (hanCharCount < 2) continue;
+
+    let py = '';
+    try {
+      const arr = pinyin(simplified, { toneType: 'none', type: 'array' }) as unknown as string[];
+      py = Array.isArray(arr) ? arr.join('') : String(arr ?? '');
+    } catch {
+      py = '';
+    }
+    const normalized = normalizeLatin(py);
+    if (!normalized) continue;
+    pinyinKeywords.push(normalized);
+    const prev = pinyinToSource.get(normalized);
+    if (!prev || prev.length < word.length) {
+      pinyinToSource.set(normalized, word);
+    }
+  }
+
+  const uniq = Array.from(new Set(pinyinKeywords));
+  pinyinSearchCache = uniq.length > 0 ? createWordsSearch(uniq) : null;
+  pinyinToSourceCache = pinyinToSource;
+  return { search: pinyinSearchCache, pinyinToSource };
+};
+
 export const applyShieldWords = (text: string): ShieldWordFilterResult => {
-  const words = getDecodedWords();
-  const replaceMap = getReplaceMap();
   const maskChar = shieldWordsConfig.mask || '❀';
 
-  let filteredText = text;
+  const simplifiedLower = foldFullwidthAscii(toSimplifiedChinese(text)).toLowerCase();
+  const replaceMap = getSimplifiedReplaceMap();
+  const search = getWordsSearch();
+
   const detectedWords: string[] = [];
+  const replacements: Array<{ start: number; endInclusive: number; replacement: string }> = [];
 
-  for (const word of words) {
-    if (!word) continue;
-    const regex = new RegExp(escapeRegExp(word), 'gi');
-    if (!regex.test(filteredText)) {
-      continue;
+  const exactMatches = search.FindAll(simplifiedLower) as any[];
+  for (const m of exactMatches) {
+    const start = Number(m?.Start);
+    const endInclusive = Number(m?.End);
+    const keyword = String(m?.Keyword ?? '');
+    if (!Number.isFinite(start) || !Number.isFinite(endInclusive) || !keyword) continue;
+    if (start < 0 || endInclusive < start) continue;
+
+    const originalSlice = text.slice(start, endInclusive + 1);
+    if (originalSlice && !detectedWords.includes(originalSlice)) detectedWords.push(originalSlice);
+
+    const mappedReplacement = replaceMap.get(keyword);
+    if (typeof mappedReplacement === 'string') {
+      replacements.push({ start, endInclusive, replacement: mappedReplacement });
+    } else {
+      const maskLen = Math.max(1, Array.from(originalSlice).length);
+      replacements.push({ start, endInclusive, replacement: maskChar.repeat(maskLen) });
     }
+  }
 
-    regex.lastIndex = 0;
-    const replacement = replaceMap.get(word);
-    filteredText = filteredText.replace(regex, (match) => {
-      if (!detectedWords.includes(match)) {
-        detectedWords.push(match);
-      }
-      if (typeof replacement === 'string') {
-        return replacement;
-      }
-      // `match.length` 以 UTF-16 code unit 计数，遇到 emoji/代理对会产生长度偏差；这里按 code point 计数更接近“字符数”。
-      const maskLength = Math.max(1, Array.from(match).length);
-      return maskChar.repeat(maskLength);
-    });
+  // 额外：纯拼音绕过（仅对拉丁字母/数字做抽取；匹配到后统一用遮罩字符替换）
+  const { search: pinyinSearch, pinyinToSource } = getPinyinSearch();
+  if (pinyinSearch) {
+    const { normalized: latinNormalized, indexMap } = buildKeepCharsMapping(foldFullwidthAscii(text), keepAsciiWordChar);
+    const normalized = normalizeLatin(latinNormalized);
+    const matches = pinyinSearch.FindAll(normalized) as any[];
+    for (const m of matches) {
+      const startN = Number(m?.Start);
+      const endN = Number(m?.End);
+      const keywordPinyin = String(m?.Keyword ?? '');
+      if (!Number.isFinite(startN) || !Number.isFinite(endN) || !keywordPinyin) continue;
+      if (endN >= indexMap.length) continue;
+
+      const start = indexMap[startN];
+      const endInclusive = indexMap[endN];
+      const source = pinyinToSource.get(keywordPinyin) ?? keywordPinyin;
+      const originalSlice = text.slice(start, endInclusive + 1);
+      if (source && !detectedWords.includes(`${source}(拼音)`)) detectedWords.push(`${source}(拼音)`);
+      const maskLen = Math.max(1, Array.from(originalSlice).length);
+      replacements.push({ start, endInclusive, replacement: maskChar.repeat(maskLen) });
+    }
+  }
+
+  // 从后往前替换，避免索引偏移
+  const sorted = replacements.sort((a, b) => b.start - a.start || b.endInclusive - a.endInclusive);
+  let filteredText = text;
+  for (const r of sorted) {
+    filteredText = `${filteredText.slice(0, r.start)}${r.replacement}${filteredText.slice(r.endInclusive + 1)}`;
   }
 
   return {
@@ -193,4 +288,3 @@ export const applyShieldWords = (text: string): ShieldWordFilterResult => {
     originalText: text,
   };
 };
-
