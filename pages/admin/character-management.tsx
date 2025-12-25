@@ -7,7 +7,7 @@ import { useRouter } from 'next/router';
 interface DataCard {
   id: string;
   user_id: number;
-  type: 'character' | 'scenario';
+  type: 'character' | 'scenario' | 'history';
   name: string;
   description: string;
   data: string;
@@ -37,7 +37,7 @@ export default function CharacterManagement() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [typeFilter, setTypeFilter] = useState<'all' | 'character' | 'scenario'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'character' | 'scenario' | 'history'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'public' | 'private' | 'banned'>('all');
   const [viewingData, setViewingData] = useState(false);
   const isComposingRef = useRef(false);
@@ -208,9 +208,9 @@ export default function CharacterManagement() {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center justify-center gap-2">
             <Database className="w-8 h-8 text-purple-600" />
-            角色卡管理系统
+            数据卡管理系统
           </h1>
-          <p className="text-gray-600">管理和审核所有用户创建的角色卡和情景卡</p>
+          <p className="text-gray-600">管理和审核所有用户创建的角色卡、情景卡与叙事历史卡</p>
         </div>
 
         {message && (
@@ -273,6 +273,7 @@ export default function CharacterManagement() {
                     <option value="all">所有类型</option>
                     <option value="character">角色卡</option>
                     <option value="scenario">情景卡</option>
+                    <option value="history">叙事历史</option>
                   </select>
 
                   <select
@@ -301,7 +302,7 @@ export default function CharacterManagement() {
                 {loading ? (
                   <div className="text-center py-4 text-gray-500">加载中...</div>
                 ) : cards.length === 0 ? (
-                  <div className="text-center py-4 text-gray-500">没有找到角色卡</div>
+                  <div className="text-center py-4 text-gray-500">没有找到数据卡</div>
                 ) : (
                   cards.map((card) => {
                     const cardStatus = getDataCardStatus(card);
@@ -333,7 +334,7 @@ export default function CharacterManagement() {
                           </div>
                         </div>
                         <div className="text-xs text-gray-500 mb-1">
-                          {card.type === 'character' ? '角色卡' : '情景卡'} | 作者: {card.username}
+                          {card.type === 'character' ? '角色卡' : card.type === 'scenario' ? '情景卡' : '叙事历史'} | 作者: {card.username}
                         </div>
                         <div className="text-xs text-gray-400">
                           ❤️ {card.like_count} | ⭐ {card.favorite_count} | 📥 {card.usage_count}
@@ -369,11 +370,11 @@ export default function CharacterManagement() {
             </div>
           </div>
 
-          {/* 角色卡详情面板 */}
+          {/* 数据卡详情面板 */}
           <div className="lg:col-span-2">
             <div className="bg-white rounded-xl shadow-lg p-6">
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold text-gray-800">角色卡详情</h2>
+                <h2 className="text-xl font-bold text-gray-800">数据卡详情</h2>
                 {selectedCard && editingCard && (
                   <div className="flex gap-2">
                     <button
@@ -407,7 +408,7 @@ export default function CharacterManagement() {
                   {/* 基础信息 */}
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">角色卡ID</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">数据卡ID</label>
                       <div className="flex items-center gap-2">
                         <Hash className="w-4 h-4 text-gray-400" />
                         <input
@@ -422,7 +423,7 @@ export default function CharacterManagement() {
                       <label className="block text-sm font-medium text-gray-700 mb-1">类型</label>
                       <input
                         type="text"
-                        value={selectedCard.type === 'character' ? '角色卡' : '情景卡'}
+                        value={selectedCard.type === 'character' ? '角色卡' : selectedCard.type === 'scenario' ? '情景卡' : '叙事历史'}
                         disabled
                         className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50"
                       />

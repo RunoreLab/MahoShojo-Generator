@@ -13,7 +13,7 @@ interface DataCard {
   name: string;
   description: string;
   data: string; // 确保 data 字段存在
-  type: 'character' | 'scenario';
+  type: 'character' | 'scenario' | 'history';
   is_public: -1 | 0 | 1;
   review_status: 'pending' | 'approved' | 'rejected';
   username: string;
@@ -756,6 +756,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                 <option value="">所有类型</option>
                 <option value="character">角色</option>
                 <option value="scenario">情景</option>
+                <option value="history">叙事历史</option>
               </select>
               <select name="isRecommended" value={filters.isRecommended} onChange={handleFilterChange} className="input-field">
                 <option value="">推荐状态</option>
@@ -847,7 +848,9 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                             </div>
                           )}
                         </td>
-                        <td className="px-6 py-4">{card.type === 'character' ? '角色' : '情景'}</td>
+                        <td className="px-6 py-4">
+                          {card.type === 'character' ? '角色' : card.type === 'scenario' ? '情景' : '叙事历史'}
+                        </td>
                         <td className="px-6 py-4">{getPublicStatusBadge(card.is_public)}</td>
                         <td className="px-6 py-4">
                           <div className="space-y-1">
@@ -864,11 +867,23 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                         </td>
                         <td className="px-6 py-4 text-xs text-gray-500 max-w-xs">
                           {(() => {
-                              const defaultDescriptions = ['角色数据卡', '情景数据卡'];
+                              const defaultDescriptions = ['角色数据卡', '情景数据卡', '叙事历史数据卡'];
                               const normalizedDescription = (displayDescription || '').trim();
                               const isMeaningfulDescription = normalizedDescription && !defaultDescriptions.includes(normalizedDescription);
 
-                              const contentToShow = isMeaningfulDescription ? normalizedDescription : (displayData || '');
+                              const contentToShow = (() => {
+                                if (isMeaningfulDescription) return normalizedDescription;
+                                if (card.type === 'history') {
+                                  try {
+                                    const parsed = displayData ? JSON.parse(displayData) : null;
+                                    const count = Array.isArray(parsed?.entries) ? parsed.entries.length : 0;
+                                    return `叙事历史（${count} 条）`;
+                                  } catch {
+                                    return '叙事历史（解析失败）';
+                                  }
+                                }
+                                return displayData || '';
+                              })();
                               let titleToShow = contentToShow;
                               try {
                                   if (!isMeaningfulDescription && displayData) {
