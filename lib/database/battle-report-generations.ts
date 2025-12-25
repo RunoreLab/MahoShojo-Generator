@@ -252,6 +252,8 @@ export interface BattleReportGenerationRowLite {
   headline: string | null;
   winner: string | null;
   output_preview: string | null;
+  output_has_sensitive_words: number | null;
+  output_has_shield_words: number | null;
   pvp_room_id: string | null;
   pvp_match_id: string | null;
   pvp_round_id: string | null;
@@ -283,6 +285,8 @@ export async function getBattleReportGenerationByIdLite(
         headline,
         winner,
         output_preview,
+        output_has_sensitive_words,
+        output_has_shield_words,
         pvp_room_id,
         pvp_match_id,
         pvp_round_id,
@@ -305,10 +309,12 @@ export async function getBattleReportGenerationByIdLite(
 
 export async function getBattleReportGenerationsByUserIdLite(
   userId: number,
-  limit: number
+  limit: number,
+  offset = 0
 ): Promise<BattleReportGenerationRowLite[]> {
   try {
     const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+    const safeOffset = Math.max(0, Math.floor(offset));
     const result = (await queryFromD1(
       `SELECT
         id,
@@ -329,6 +335,8 @@ export async function getBattleReportGenerationsByUserIdLite(
         headline,
         winner,
         output_preview,
+        output_has_sensitive_words,
+        output_has_shield_words,
         pvp_room_id,
         pvp_match_id,
         pvp_round_id,
@@ -337,8 +345,8 @@ export async function getBattleReportGenerationsByUserIdLite(
       FROM battle_report_generations
       WHERE user_id = ?
       ORDER BY started_at DESC
-      LIMIT ?`,
-      [userId, safeLimit]
+      LIMIT ? OFFSET ?`,
+      [userId, safeLimit, safeOffset]
     )) as any;
 
     if (result.success && result.result?.[0]?.results) {
@@ -348,6 +356,21 @@ export async function getBattleReportGenerationsByUserIdLite(
   } catch (error) {
     console.error('读取 battle_report_generations(user) 失败:', error);
     return [];
+  }
+}
+
+export async function countBattleReportGenerationsByUserId(userId: number): Promise<number> {
+  try {
+    const result = (await queryFromD1(
+      'SELECT COUNT(1) AS total FROM battle_report_generations WHERE user_id = ?',
+      [userId]
+    )) as any;
+    const row = result?.result?.[0]?.results?.[0];
+    const total = typeof row?.total === 'number' ? row.total : Number(row?.total);
+    return Number.isFinite(total) ? Math.max(0, Math.floor(total)) : 0;
+  } catch (error) {
+    console.error('统计 battle_report_generations(user) 失败:', error);
+    return 0;
   }
 }
 

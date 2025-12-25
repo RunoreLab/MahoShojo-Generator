@@ -1,4 +1,4 @@
-import { getBattleReportGenerationByIdLite, getBattleReportGenerationCombatantsByGenerationId, getPvpCardSnapshotById, getPvpEligibleDataCard, getPvpRoomPlayers, getPvpRoundById, getPvpRoundChoices } from '@/lib/d1';
+import { getBattleReportGenerationByIdLite, getBattleReportGenerationCombatantsByGenerationId, getPvpCardSnapshotById, getPvpEligibleDataCard, getPvpRoomPlayers, getPvpRoundById, getPvpRoundChoices, isUserInPvpMatch } from '@/lib/d1';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
@@ -36,7 +36,11 @@ export default async function handler(req: Request): Promise<Response> {
   if (!generationId) return json({ error: '缺少 generationId' }, { status: 400 });
 
   const record = await getBattleReportGenerationByIdLite(generationId);
-  if (!record || record.user_id !== auth.user.id) return json({ error: '记录不存在' }, { status: 404 });
+  if (!record) return json({ error: '记录不存在' }, { status: 404 });
+
+  const isOwner = record.user_id === auth.user.id;
+  const canRegenerateByPvp = record.pvp_match_id ? await isUserInPvpMatch(record.pvp_match_id, auth.user.id) : false;
+  if (!isOwner && !canRegenerateByPvp) return json({ error: '记录不存在' }, { status: 404 });
 
   const body = await readJson<RegenerateBody>(req);
   if ('response' in body) return body.response;

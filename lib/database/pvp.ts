@@ -919,18 +919,20 @@ export async function getPvpUserSummariesByUserIds(userIds: number[]): Promise<P
 
 export async function getPvpMatchesByUserId(
   userId: number,
-  limit: number
+  limit: number,
+  offset = 0
 ): Promise<{ matches: PvpMatchRow[]; players: PvpMatchPlayerRow[] }> {
   try {
     const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+    const safeOffset = Math.max(0, Math.floor(offset));
     const matchesResult = await queryFromD1(
       `SELECT m.*
        FROM pvp_match_players mp
        JOIN pvp_matches m ON m.id = mp.match_id
        WHERE mp.user_id = ?
        ORDER BY m.started_at DESC
-       LIMIT ?`,
-      [userId, safeLimit]
+       LIMIT ? OFFSET ?`,
+      [userId, safeLimit, safeOffset]
     ) as any;
 
     const matches = (matchesResult.success && matchesResult.result?.[0]?.results)
@@ -954,6 +956,51 @@ export async function getPvpMatchesByUserId(
   } catch (error) {
     console.error('读取 PVP 对战列表失败:', error);
     return { matches: [], players: [] };
+  }
+}
+
+export async function countPvpMatchesByUserId(userId: number): Promise<number> {
+  try {
+    const result = (await queryFromD1(
+      'SELECT COUNT(1) AS total FROM pvp_match_players WHERE user_id = ?',
+      [userId]
+    )) as any;
+    const row = result?.result?.[0]?.results?.[0];
+    const total = typeof row?.total === 'number' ? row.total : Number(row?.total);
+    return Number.isFinite(total) ? Math.max(0, Math.floor(total)) : 0;
+  } catch (error) {
+    console.error('统计 pvp_matches(user) 失败:', error);
+    return 0;
+  }
+}
+
+export async function isUserInPvpMatch(matchId: string, userId: number): Promise<boolean> {
+  try {
+    const result = (await queryFromD1(
+      'SELECT 1 AS ok FROM pvp_match_players WHERE match_id = ? AND user_id = ? LIMIT 1',
+      [matchId, userId]
+    )) as any;
+    const row = result?.result?.[0]?.results?.[0];
+    return Boolean(row?.ok === 1 || row?.ok === '1' || row?.ok === true);
+  } catch (error) {
+    console.error('检查 pvp_match_players 失败:', error);
+    return false;
+  }
+}
+
+export async function getPvpMatchPlayersByMatchId(matchId: string): Promise<PvpMatchPlayerRow[]> {
+  try {
+    const result = (await queryFromD1(
+      'SELECT * FROM pvp_match_players WHERE match_id = ? ORDER BY seat ASC',
+      [matchId]
+    )) as any;
+    if (result.success && result.result?.[0]?.results) {
+      return result.result[0].results as PvpMatchPlayerRow[];
+    }
+    return [];
+  } catch (error) {
+    console.error('读取 pvp_match_players(match) 失败:', error);
+    return [];
   }
 }
 
