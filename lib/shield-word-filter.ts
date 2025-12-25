@@ -70,6 +70,7 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '5Y+X57K+',
     '55m95rWK',
     '6IKJ5qOS',
+    '6Imy5Zu+',
     // 使用指定词汇替换
     '5Lit5Zu9',
     '5Lit5Y2O5Lq65rCR5YWx5ZKM5Zu9',
