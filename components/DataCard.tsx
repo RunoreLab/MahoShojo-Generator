@@ -7,7 +7,7 @@ interface DataCardProps {
   id: string; // Changed from number to string for UUID
   name: string;
   description: string;
-  type: 'character' | 'scenario';
+  type: 'character' | 'scenario' | 'history';
   roleType?: 'magical-girl' | 'canshou' | 'general';
   isPublic: boolean | number; // 支持 -1 表示封禁
   reviewStatus?: 'pending' | 'approved' | 'rejected'; // 新增：审查状态属性
@@ -38,6 +38,7 @@ interface DataCardProps {
 const typeMap = {
   character: '角色',
   scenario: '情景',
+  history: '叙事历史',
 }
 
 const roleTypeLabelMap: Record<NonNullable<DataCardProps['roleType']>, string> = {
@@ -65,6 +66,7 @@ export default function DataCard({
   favoriteCount = 0,
   author,
   isOwner = false,
+  isSelected = false,
   onDownload,
   onLike,
   onEditInfo,
@@ -200,7 +202,9 @@ export default function DataCard({
     if (cardStatus.status !== 'public') return;
     
     try {
-      const shareText = `魔法少女竞技场的【${name}】向你发出了邀请！（ID：${id}）✨\n快来 https://mahoshojo.colanns.me/battle 生成新的故事吧！\n在数据库的搜索框粘贴ID即可加载${typeMap[type]}档案！`;
+      const shareText = type === 'history'
+        ? `魔法少女竞技场的【${name}】向你分享了一份叙事历史！（ID：${id}）✨\n快来 https://mahoshojo.colanns.me/arena 在「叙事历史」中导入此数据卡，即可继续推演剧情！`
+        : `魔法少女竞技场的【${name}】向你发出了邀请！（ID：${id}）✨\n快来 https://mahoshojo.colanns.me/battle 生成新的故事吧！\n在数据库的搜索框粘贴ID即可加载${typeMap[type]}档案！`;
       await navigator.clipboard.writeText(shareText);
       setShareStatus('copied');
       setTimeout(() => setShareStatus('idle'), 2000);
@@ -225,12 +229,18 @@ export default function DataCard({
     ? 'bg-white border-gray-200 hover:border-green-400'
     : 'bg-white border-gray-200 hover:border-pink-400';
 
+  const selectedStyle = isSelected
+    ? (type === 'scenario'
+      ? 'ring-2 ring-green-400 bg-green-50 border-green-400'
+      : 'ring-2 ring-pink-500 bg-pink-50 border-pink-400')
+    : '';
+
   const textColor = 'text-gray-800';
   const subTextColor = 'text-gray-600';
 
   return (
     <div
-      className={`flex flex-col relative p-4 rounded-lg border-2 transition-all duration-200 h-full ${bgColor}`}
+      className={`flex flex-col relative p-4 rounded-lg border-2 transition-all duration-200 h-full ${bgColor} ${selectedStyle}`}
     >
       {/* 主要内容区域 */}
       <div className="flex-1">
@@ -283,6 +293,11 @@ export default function DataCard({
             {type === 'character' && (
               <span className="text-xs px-2 py-1 bg-pink-100 text-pink-700 rounded">
                 角色
+              </span>
+            )}
+            {type === 'history' && (
+              <span className="text-xs px-2 py-1 bg-emerald-100 text-emerald-700 rounded">
+                叙事历史
               </span>
             )}
             {type === 'character' && roleType && (

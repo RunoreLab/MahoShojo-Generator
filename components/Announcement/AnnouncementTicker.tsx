@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
 import { interpolateWithQQGroups } from '@/lib/communityGroups';
@@ -19,6 +19,14 @@ const AnnouncementTicker: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
+  const tickerContentRef = useRef<HTMLParagraphElement | null>(null);
+  const [scrollDurationSeconds, setScrollDurationSeconds] = useState(15);
+
+  const tickerAnnouncements = useMemo(() => {
+    const pinnedAnnouncements = announcements.filter((announcement) => announcement.pinned);
+    const firstNonPinnedAnnouncement = announcements.find((announcement) => !announcement.pinned);
+    return [...pinnedAnnouncements, ...(firstNonPinnedAnnouncement ? [firstNonPinnedAnnouncement] : [])];
+  }, [announcements]);
 
 // 组件加载时执行的副作用
   useEffect(() => {
@@ -54,6 +62,26 @@ const AnnouncementTicker: React.FC = () => {
         document.body.classList.remove('announcement-visible');
     };
   }, []); // 空依赖数组确保此 effect 仅在组件挂载时运行一次
+
+  useEffect(() => {
+    if (!isVisible || tickerAnnouncements.length === 0) return;
+
+    const measureAndUpdateDuration = () => {
+      const tickerContent = tickerContentRef.current;
+      if (!tickerContent) return;
+
+      const contentWidth = tickerContent.scrollWidth;
+      const viewportWidth = window.innerWidth;
+      const travelDistance = viewportWidth + contentWidth;
+      const pixelsPerSecond = 60;
+      const duration = Math.max(18, Math.min(75, travelDistance / pixelsPerSecond));
+      setScrollDurationSeconds(duration);
+    };
+
+    measureAndUpdateDuration();
+    window.addEventListener('resize', measureAndUpdateDuration);
+    return () => window.removeEventListener('resize', measureAndUpdateDuration);
+  }, [isVisible, tickerAnnouncements]);
 
   /**
    * 关闭公告栏的处理函数
@@ -95,7 +123,7 @@ const AnnouncementTicker: React.FC = () => {
     <>
       {/* 公告栏主体 */}
       <div
-        className="fixed bottom-0 left-0 right-0 w-full bg-gray-900/90 backdrop-blur-lg text-gray-200 px-4 py-2.5 flex items-center justify-between border-t border-white/10 shadow-lg z-[1000] cursor-pointer transition-all duration-300 hover:bg-gray-900/95 group"
+        className="announcement-ticker fixed bottom-0 left-0 right-0 w-full bg-gray-900/90 backdrop-blur-lg text-gray-200 px-4 py-2.5 flex items-center justify-between border-t border-white/10 shadow-lg z-[1000] cursor-pointer transition-all duration-300 hover:bg-gray-900/95 group"
         onClick={handleOpenModal}
       >
         <div className="flex items-center flex-grow overflow-hidden">
@@ -103,14 +131,28 @@ const AnnouncementTicker: React.FC = () => {
             公告
           </span>
           <div className="flex-grow whitespace-nowrap overflow-hidden">
-            <p className="inline-block animate-scroll-left group-hover:animation-play-state-paused">
-              {announcements[0].pinned && '📌 '}
-              {announcements[0].title}
+            <p
+              ref={tickerContentRef}
+              className="inline-block animate-scroll-left group-hover:animation-play-state-paused"
+              style={{ animationDuration: `${scrollDurationSeconds}s` }}
+            >
+              {tickerAnnouncements.map((announcement, index) => (
+                <span key={announcement.id} className="inline-flex items-center">
+                  {announcement.pinned && <span className="mr-1">📌</span>}
+                  {announcement.title}
+                  {index < tickerAnnouncements.length - 1 && (
+                    <span className="mx-6 text-gray-500">·</span>
+                  )}
+                </span>
+              ))}
             </p>
           </div>
         </div>
         <button
-          onClick={handleDismiss}
+          onClick={(event) => {
+            event.stopPropagation();
+            handleDismiss();
+          }}
           className="text-gray-500 hover:text-white text-2xl leading-none px-1 transition-colors duration-200"
           aria-label="关闭公告"
         >
@@ -233,7 +275,7 @@ const AnnouncementTicker: React.FC = () => {
       <style jsx>{`
         @keyframes scroll-left {
           0% {
-            transform: translateX(100%);
+            transform: translateX(100vw);
           }
           100% {
             transform: translateX(-100%);
@@ -262,6 +304,7 @@ const AnnouncementTicker: React.FC = () => {
         
         .animate-scroll-left {
           animation: scroll-left 15s linear infinite;
+          will-change: transform;
         }
         
         .animate-fade-in {
@@ -277,6 +320,10 @@ const AnnouncementTicker: React.FC = () => {
         }
         
         .group:hover .group-hover\\:animation-play-state-paused {
+          animation-play-state: paused;
+        }
+
+        .announcement-ticker:hover .animate-scroll-left {
           animation-play-state: paused;
         }
       `}</style>

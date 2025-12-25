@@ -1,21 +1,93 @@
 // components/BattleDataModal.tsx
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import DataCard from './DataCard';
 import SortSelector from './SortSelector';
 import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
-import { dataCardApi, favoritesApi } from '@/lib/auth';
+import { dataCardApi, favoritesApi, deckApi } from '@/lib/auth';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { ChevronDown, Filter } from 'lucide-react';
+import DecksModal from './DecksModal';
 
 interface BattleDataModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectCard: (card: any) => void;
-  selectedType: 'character' | 'scenario';
+  onSelectCard?: (card: any) => void;
+  onToggleCard?: (card: any, nextSelected: boolean) => void;
+  selectedType: 'character' | 'scenario' | 'history';
+  initialTab?: BattleDataTab;
+  visibleTabs?: BattleDataTab[];
+  titleOverride?: string;
+  pvpHandTab?: PvpHandTabProps;
+  selectionMode?: 'single' | 'multi';
+  selectedCardIds?: string[];
+  selectedCountOverride?: number;
+  maxSelected?: number;
 }
+
+type BattleDataTab = 'my' | 'public' | 'favorites' | 'pvpHand';
+
+const parseDataCardPayload = (raw: unknown): any => {
+  if (typeof raw === 'string') {
+    return JSON.parse(raw);
+  }
+  if (raw && typeof raw === 'object') {
+    return raw;
+  }
+  throw new Error('数据卡内容为空或格式不受支持。');
+};
+
+type PvpHandTabCard = {
+  snapshotId: string;
+  name: string;
+  type?: string | null;
+  dataJson?: string | null;
+  ref?: any;
+};
+
+type PvpHandTabProps = {
+  cards: PvpHandTabCard[];
+  hasChosenMe: boolean;
+  isChoosing: boolean;
+  onChoose: (snapshotId: string) => void;
+};
+
+const getPvpHandSourceLabel = (ref: any): string => {
+  const kind = typeof ref?.kind === 'string' ? ref.kind : '';
+  if (kind === 'preset') return '预设';
+  if (kind === 'data_card') return '数据卡';
+  return '快照';
+};
+
+const getPvpHandRefHint = (ref: any): string | null => {
+  const kind = typeof ref?.kind === 'string' ? ref.kind : '';
+  if (kind === 'preset') return typeof ref?.filename === 'string' ? ref.filename : null;
+  if (kind === 'data_card') return typeof ref?.id === 'string' ? ref.id : null;
+  return null;
+};
+
+const getPvpHandPreviewText = (dataJson: string | null | undefined): string => {
+  if (!dataJson) return '';
+  try {
+    const parsed = JSON.parse(dataJson);
+    const codename = typeof parsed?.codename === 'string' ? parsed.codename : null;
+    const name = typeof parsed?.name === 'string' ? parsed.name : null;
+    const templateId: unknown = parsed?.templateId || parsed?.template || parsed?.template_id;
+    const templateText = typeof templateId === 'string' ? templateId : null;
+    const parts = [codename, name, templateText].filter((x): x is string => typeof x === 'string' && Boolean(x.trim()));
+    const line = parts.join(' / ').trim();
+    if (line) return line.length > 120 ? `${line.slice(0, 120)}…` : line;
+  } catch {
+    // ignore
+  }
+
+  const collapsed = dataJson.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return '';
+  return collapsed.length > 120 ? `${collapsed.slice(0, 120)}…` : collapsed;
+};
 
 // 【新增】筛选条件的状态接口
 interface Filters {
@@ -34,15 +106,29 @@ export default function BattleDataModal({
   isOpen,
   onClose,
   onSelectCard,
-  selectedType
+  onToggleCard,
+  selectedType,
+  initialTab,
+  visibleTabs,
+  titleOverride,
+  pvpHandTab,
+  selectionMode = 'single',
+  selectedCardIds,
+  selectedCountOverride,
+  maxSelected,
 }: BattleDataModalProps) {
   const { isAuthenticated } = useAuth();
+  const isComposingSearchRef = useRef(false);
+  const publicFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const selectingCardIdsRef = useRef<Set<string>>(new Set());
+  const isSingleSelectingRef = useRef(false);
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
   const [publicDataCards, setPublicDataCards] = useState<any[]>([]);
   const [favoriteCards, setFavoriteCards] = useState<any[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'my' | 'public' | 'favorites'>('public');
+  const [activeTab, setActiveTab] = useState<BattleDataTab>('public');
+  const [showDecksModal, setShowDecksModal] = useState(false);
   // 记录用户是否主动切换过 Tab，防止排序等状态变动时被意外重置
   const hasUserSelectedTabRef = React.useRef(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -51,7 +137,7 @@ export default function BattleDataModal({
   const [sortBy, setSortBy] = useState<'likes' | 'usage' | 'favorites' | 'created_at'>('created_at');
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [isSelecting, setIsSelecting] = useState(false); // 防止重复点击
+  const [selectError, setSelectError] = useState<string | null>(null);
   const cardsPerPage = 12;
 
   // 【新增】高级筛选的状态
@@ -69,6 +155,30 @@ export default function BattleDataModal({
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [activeFilters, setActiveFilters] = useState<Filters>(initialFilters);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  const effectiveTabs = useMemo<BattleDataTab[]>(() => {
+    const candidates = Array.isArray(visibleTabs) && visibleTabs.length > 0
+      ? visibleTabs
+      : ([
+        ...(pvpHandTab ? (['pvpHand'] as const) : []),
+        ...(isAuthenticated ? (['my'] as const) : []),
+        'public' as const,
+        ...(isAuthenticated ? (['favorites'] as const) : []),
+      ] as const);
+
+    const seen = new Set<BattleDataTab>();
+    const out: BattleDataTab[] = [];
+    for (const tab of candidates as BattleDataTab[]) {
+      if ((tab === 'my' || tab === 'favorites') && !isAuthenticated) continue;
+      if (tab === 'pvpHand' && !pvpHandTab) continue;
+      if (seen.has(tab)) continue;
+      seen.add(tab);
+      out.push(tab);
+    }
+    return out.length > 0 ? out : ['public'];
+  }, [visibleTabs, pvpHandTab, isAuthenticated]);
+
+  const isPvpHandTab = activeTab === 'pvpHand';
 
   const inferRoleType = useCallback((card: any): 'magical-girl' | 'canshou' | 'general' | null => {
     if (!card || card.type !== 'character') return null;
@@ -131,9 +241,12 @@ export default function BattleDataModal({
 
   // 通过 ID 获取数据卡并显示在列表中
   const loadCardByIdForDisplay = useCallback(async (cardId: string) => {
+    publicFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    publicFetchAbortControllerRef.current = abortController;
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/public-data-cards?id=${cardId}`);
+      const response = await fetch(`/api/public-data-cards?id=${cardId}`, { signal: abortController.signal });
       if (response.ok) {
         const result = await response.json();
         setPublicDataCards(result.success && result.card ? mapWithRoleType([result.card]) : []);
@@ -141,10 +254,16 @@ export default function BattleDataModal({
         setPublicDataCards([]);
       }
     } catch (error) {
+      if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return;
+      }
       console.error('通过ID获取数据卡失败:', error);
       setPublicDataCards([]);
     } finally {
-      setIsLoading(false);
+      if (publicFetchAbortControllerRef.current === abortController) {
+        publicFetchAbortControllerRef.current = null;
+        setIsLoading(false);
+      }
     }
   }, [mapWithRoleType]);
 
@@ -155,6 +274,9 @@ export default function BattleDataModal({
     currentSearchTerm?: string,
     currentFilters?: Filters
   ) => {
+    publicFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    publicFetchAbortControllerRef.current = abortController;
     try {
       setIsLoading(true);
       const useRoleTypeFilter = Boolean(currentFilters?.roleType && selectedType === 'character');
@@ -180,7 +302,7 @@ export default function BattleDataModal({
         if (currentFilters.recommendedOnly) params.append('recommendedOnly', '1');
       }
 
-      const response = await fetch(`/api/public-data-cards?${params}`);
+      const response = await fetch(`/api/public-data-cards?${params}`, { signal: abortController.signal });
       if (response.ok) {
         const result = await response.json();
         let cards = result.success ? (result.cards || []) : [];
@@ -191,9 +313,15 @@ export default function BattleDataModal({
         setPublicDataCards(cards);
       }
     } catch (error) {
+      if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return;
+      }
       console.error('获取公开数据卡失败:', error);
     } finally {
-      setIsLoading(false);
+      if (publicFetchAbortControllerRef.current === abortController) {
+        publicFetchAbortControllerRef.current = null;
+        setIsLoading(false);
+      }
     }
   }, [selectedType, cardsPerPage, mapWithRoleType]);
 
@@ -225,7 +353,7 @@ export default function BattleDataModal({
   }, []);
 
   const loadFavorites = useCallback(async (
-    typeParam?: 'character' | 'scenario',
+    typeParam?: 'character' | 'scenario' | 'history',
     showLoading: boolean = false,
     sortCriteria?: 'likes' | 'usage' | 'favorites' | 'created_at'
   ) => {
@@ -256,13 +384,25 @@ export default function BattleDataModal({
     }
   }, [isAuthenticated, selectedType, sortFavorites, mapWithRoleType, sortBy]);
 
-  // 防抖功能 - 延迟500ms执行搜索
+  // 防抖功能 - 延迟500ms执行搜索（兼容 IME：组词期不触发，结束后会继续等待并触发）
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery);
-    }, 500);
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    return () => clearTimeout(timer);
+    const schedule = () => {
+      timer = setTimeout(() => {
+        if (isComposingSearchRef.current) {
+          schedule();
+          return;
+        }
+        setDebouncedSearchQuery(searchQuery);
+      }, 500);
+    };
+
+    schedule();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [searchQuery]);
 
   // 当防抖搜索词变化时执行搜索
@@ -283,6 +423,10 @@ export default function BattleDataModal({
       return;
     }
 
+    if (activeTab === 'pvpHand') {
+      return;
+    }
+
     // 检查是否包含 UUID 格式的 ID
     const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
     const match = trimmed.match(uuidRegex);
@@ -294,6 +438,12 @@ export default function BattleDataModal({
     }
   }, [debouncedSearchQuery, isOpen, activeTab, loadUserDataCards, loadCardByIdForDisplay, loadPublicDataCards, sortBy, activeFilters]);
 
+  useEffect(() => {
+    return () => {
+      publicFetchAbortControllerRef.current?.abort();
+    };
+  }, []);
+
 
   // 当模态框打开时加载数据
   useEffect(() => {
@@ -301,35 +451,40 @@ export default function BattleDataModal({
 
     setCurrentPage(1);
     setSearchQuery('');
+    setSelectError(null);
     setFilters(initialFilters); // 清空高级筛选
     setActiveFilters(initialFilters);
-    setIsSelecting(false); // 重置选择状态
 
-    // 仅在用户未主动切换 Tab 时，根据登录状态决定默认标签
-    if (!hasUserSelectedTabRef.current) {
-      if (isAuthenticated) {
-        setActiveTab('my');
-      } else {
-        setActiveTab('public');
+    const fallbackTab: BattleDataTab = effectiveTabs[0] ?? 'public';
+    const canUseInitialTab = Boolean(initialTab && effectiveTabs.includes(initialTab));
+    const desiredDefaultTab: BattleDataTab = isAuthenticated ? 'my' : 'public';
+
+    const nextTab: BattleDataTab = (() => {
+      if (canUseInitialTab) return initialTab as BattleDataTab;
+      if (!hasUserSelectedTabRef.current) {
+        return effectiveTabs.includes(desiredDefaultTab) ? desiredDefaultTab : fallbackTab;
       }
-    } else {
-      // 处理从登录态变为未登录的情况，强制回到公开区
-      if (!isAuthenticated && activeTab !== 'public') {
-        setActiveTab('public');
-      }
-    }
+      if (!isAuthenticated && activeTab !== 'public' && effectiveTabs.includes('public')) return 'public';
+      return effectiveTabs.includes(activeTab) ? activeTab : fallbackTab;
+    })();
+
+    setActiveTab(nextTab);
 
     // 按当前 Tab 触发首屏加载
-    if (isAuthenticated && (activeTab === 'my' || (!hasUserSelectedTabRef.current && activeTab === 'public'))) {
+    if (isAuthenticated && effectiveTabs.includes('my') && (nextTab === 'my' || (!hasUserSelectedTabRef.current && nextTab === 'public'))) {
       loadUserDataCards(undefined, sortBy);
-      loadFavorites(selectedType, false, sortBy);
+      if (effectiveTabs.includes('favorites')) {
+        loadFavorites(selectedType, false, sortBy);
+      }
     }
 
-    if (activeTab === 'favorites') {
+    if (isAuthenticated && effectiveTabs.includes('favorites') && nextTab === 'favorites') {
       loadFavorites(selectedType, true, sortBy);
     }
 
-    loadPublicDataCards(1, sortBy);
+    if (effectiveTabs.includes('public')) {
+      loadPublicDataCards(1, sortBy);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, selectedType, isAuthenticated]);
 
@@ -341,60 +496,172 @@ export default function BattleDataModal({
     }
   }, [selectedType]);
 
+  const selectedIdSet = useMemo(() => new Set((selectedCardIds || []).filter((x): x is string => typeof x === 'string' && Boolean(x))), [selectedCardIds]);
+  const selectedCount = typeof selectedCountOverride === 'number' ? selectedCountOverride : selectedIdSet.size;
+  const atLimit = selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 && selectedCount >= maxSelected;
+  const canToggle = selectionMode === 'multi' && typeof onToggleCard === 'function';
+  const canImportDeck = isAuthenticated && selectionMode === 'multi' && selectedType === 'character' && (typeof onToggleCard === 'function' || typeof onSelectCard === 'function');
+
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {
-    // 防止重复点击
-    if (isSelecting) {
-      return;
-    }
+    const cardId = typeof card?.id === 'string' ? card.id : '';
+    if (!cardId) return;
 
-    setIsSelecting(true);
+    setSelectError(null);
+
+    if (selectionMode === 'single' && isSingleSelectingRef.current) return;
+    if (selectingCardIdsRef.current.has(cardId)) return;
+    selectingCardIdsRef.current.add(cardId);
+    if (selectionMode === 'single') isSingleSelectingRef.current = true;
+
     try {
-      // 解析数据卡的JSON内容
-      const cardData = JSON.parse(card.data);
+      const isSelected = selectedIdSet.has(cardId);
+      const nextSelected = !isSelected;
 
-      // 如果是公开卡片且未使用过，增加使用次数
-      if (card.is_public && !isCardUsed(card.id)) {
-        try {
-          const response = await fetch('/api/data-card-stats', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              cardId: card.id,
-              type: 'usage'
-            })
-          });
-
-          if (response.ok) {
-            const result = await response.json();
-            if (result.success) {
-              // 添加到本地存储
-              addUsedCard(card.id);
-            }
-          }
-        } catch (error) {
-          console.error('增加使用次数失败:', error);
+      if (selectionMode === 'multi') {
+        if (!nextSelected && !canToggle) {
+          return;
+        }
+        if (nextSelected && atLimit) {
+          return;
         }
       }
 
-      onSelectCard({
+      // 解析数据卡的JSON内容
+      const cardData = parseDataCardPayload(card.data);
+
+      const payload = {
         ...cardData,
         _cardId: card.id,
         _cardName: card.name,
+        _cardDescription: card.description || '',
         _isPublic: card.is_public,
         _updatedAt: card.updated_at,
         _createdAt: card.created_at,
-        _author: card.username || '未知'
-      });
-      onClose();
+        _author: card.username || '未知',
+        _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
+        _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
+        _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
+      };
+
+      if (selectionMode === 'multi') {
+        if (canToggle) {
+          onToggleCard?.(payload, nextSelected);
+        } else if (nextSelected) {
+          onSelectCard?.(payload);
+        }
+      } else {
+        onSelectCard?.(payload);
+        onClose();
+      }
+
+      // 如果是公开卡片且未使用过，增加使用次数（仅在「加入」时触发）
+      if (nextSelected && card.is_public && !isCardUsed(card.id)) {
+        void (async () => {
+          try {
+            const response = await fetch('/api/data-card-stats', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                cardId: card.id,
+                type: 'usage'
+              })
+            });
+
+            if (response.ok) {
+              const result = await response.json();
+              if (result.success) {
+                // 添加到本地存储
+                addUsedCard(card.id);
+              }
+            }
+          } catch (error) {
+            console.error('增加使用次数失败:', error);
+          }
+        })();
+      }
     } catch (error) {
       console.error('解析数据卡失败:', error);
+      setSelectError(error instanceof Error ? error.message : '解析数据卡失败，请稍后重试。');
     } finally {
-      setIsSelecting(false);
+      selectingCardIdsRef.current.delete(cardId);
+      if (selectionMode === 'single') isSingleSelectingRef.current = false;
     }
   };
+
+  const handleImportDeck = useCallback(async (deckId: string) => {
+    if (!deckId) return;
+    if (selectionMode !== 'multi') return;
+
+    try {
+      const detail = await deckApi.getDeckCards(deckId);
+      const entries = Array.isArray(detail?.cards) ? detail.cards : [];
+
+      let remaining = typeof maxSelected === 'number' && maxSelected > 0 ? Math.max(0, maxSelected - selectedCount) : Number.POSITIVE_INFINITY;
+      const nextSelectedIds = new Set(selectedIdSet);
+
+      for (const entry of entries) {
+        if (remaining <= 0) break;
+        if (!entry?.isAccessible || !entry?.card) continue;
+
+        const card = entry.card;
+        if (card.type !== selectedType) continue;
+
+        const cardId = typeof card?.id === 'string' ? card.id : '';
+        if (!cardId || nextSelectedIds.has(cardId)) continue;
+
+        try {
+          const cardData = parseDataCardPayload(card.data);
+          const payload = {
+            ...cardData,
+            _cardId: card.id,
+            _cardName: card.name,
+            _cardDescription: card.description || '',
+            _isPublic: card.is_public,
+            _updatedAt: card.updated_at,
+            _createdAt: card.created_at,
+            _author: card.username || '未知',
+            _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
+            _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
+            _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
+          };
+
+          if (canToggle) {
+            onToggleCard?.(payload, true);
+          } else {
+            onSelectCard?.(payload);
+          }
+
+          nextSelectedIds.add(cardId);
+          remaining -= 1;
+
+          if (card.is_public && !isCardUsed(cardId)) {
+            void (async () => {
+              try {
+                const response = await fetch('/api/data-card-stats', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ cardId, type: 'usage' })
+                });
+                if (response.ok) {
+                  const result = await response.json();
+                  if (result.success) addUsedCard(cardId);
+                }
+              } catch (error) {
+                console.error('增加使用次数失败:', error);
+              }
+            })();
+          }
+        } catch (error) {
+          console.error('解析数据卡失败:', error);
+        }
+      }
+    } catch (error) {
+      console.error('导入卡组失败:', error);
+    }
+  }, [canToggle, maxSelected, onSelectCard, onToggleCard, selectedCount, selectedIdSet, selectedType, selectionMode]);
 
   const handleDownloadCard = useCallback((card: any) => {
     try {
@@ -546,6 +813,20 @@ export default function BattleDataModal({
     });
   }, [favoriteCards, debouncedSearchQuery]);
 
+  const filteredPvpHandCards = useMemo<PvpHandTabCard[]>(() => {
+    const cards = Array.isArray(pvpHandTab?.cards) ? pvpHandTab.cards : [];
+    const keyword = debouncedSearchQuery.trim().toLowerCase();
+    if (!keyword) return cards;
+
+    return cards.filter((card) => {
+      const name = (card.name || '').toLowerCase();
+      const type = (typeof card.type === 'string' ? card.type : '').toLowerCase();
+      const source = getPvpHandSourceLabel(card.ref).toLowerCase();
+      const refHint = (getPvpHandRefHint(card.ref) || '').toLowerCase();
+      return `${name} ${type} ${source} ${refHint}`.includes(keyword);
+    });
+  }, [pvpHandTab?.cards, debouncedSearchQuery]);
+
   const favoritesTotalPages = Math.max(1, Math.ceil(filteredFavoriteCards.length / cardsPerPage));
   const paginatedUserCards = useMemo(
     () => userDataCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
@@ -567,7 +848,9 @@ export default function BattleDataModal({
     ? paginatedUserCards
     : activeTab === 'favorites'
       ? paginatedFavoriteCards
-      : publicPaginatedCards;
+      : activeTab === 'public'
+        ? publicPaginatedCards
+        : [];
 
   const publicTotalPages = activeFilters.roleType && selectedType === 'character'
     ? Math.max(1, Math.ceil(publicDataCards.length / cardsPerPage))
@@ -577,8 +860,10 @@ export default function BattleDataModal({
     ? userTotalPages
     : activeTab === 'favorites'
       ? favoritesTotalPages
-      : publicTotalPages;
-  const typeLabel = selectedType === 'character' ? '角色' : '情景';
+      : activeTab === 'public'
+        ? publicTotalPages
+        : null;
+  const typeLabel = selectedType === 'character' ? '角色' : selectedType === 'scenario' ? '情景' : '叙事历史';
   const isFilterActive = useMemo(() => {
     return Boolean(
       activeFilters.author ||
@@ -597,25 +882,56 @@ export default function BattleDataModal({
     return null;
   }
 
-  return (
+  const modal = (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg mx-4 p-6 max-w-7xl w-full h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
+      <div className="bg-white rounded-lg p-6 w-[96vw] max-w-[90rem] h-[85vh] max-h-[90vh] overflow-hidden flex flex-col relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl z-10">×</button>
-        <h2 className="text-xl font-bold mb-4 pr-8">选择{typeLabel}数据卡</h2>
+		        <h2 className="text-xl font-bold pr-8">{titleOverride || (isPvpHandTab ? '我的手牌' : `选择${typeLabel}数据卡`)}</h2>
+          {selectError && (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {selectError}
+            </div>
+          )}
+          {selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 ? (
+            <div className="mt-1 mb-4 text-sm text-gray-600">
+              已选 {selectedCount}/{maxSelected}
+              {canToggle ? '（再次点击已选卡可取消）' : ''}
+              {atLimit ? '，已达到上限' : ''}
+            </div>
+          ) : (
+            <div className="mb-4" />
+          )}
 
         <div className="flex-1 min-h-0 overflow-y-auto">
           {/* 筛选和排序区域 */}
           <div className="mb-2">
             <div className="flex flex-wrap gap-2 mb-2 items-center">
               <div className="flex-1 relative min-w-[250px]">
-                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={`搜索${typeLabel}名称或粘贴分享链接...`} className="w-full input-field pr-10" />
-                {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
-              </div>
-              <SortSelector value={sortBy} onChange={handleSortChange} />
-              <button onClick={() => setShowAdvancedFilters(!showAdvancedFilters)} className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-                <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
-              </button>
-            </div>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onCompositionStart={() => {
+                    isComposingSearchRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+	                    isComposingSearchRef.current = false;
+	                  }}
+	                  placeholder={isPvpHandTab ? '搜索手牌：名称 / 类型 / 来源（预设/数据卡）' : `搜索${typeLabel}名称或粘贴分享链接...`}
+	                  className="w-full input-field pr-10"
+	                />
+	                {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
+	              </div>
+	              {!isPvpHandTab && <SortSelector value={sortBy} onChange={handleSortChange} />}
+	              {!isPvpHandTab && (
+	                <button
+	                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+	                  className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+	                >
+	                  <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+	                </button>
+	              )}
+	            </div>
             {/* 【新增】高级筛选面板 */}
             {showAdvancedFilters && activeTab === 'public' && (
               <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down">
@@ -680,8 +996,21 @@ export default function BattleDataModal({
           </div>
 
           {/* 标签页切换 */}
-          <div className="flex gap-2 mb-4">
-            {isAuthenticated && (
+          <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
+            <div className="flex gap-2">
+            {effectiveTabs.includes('pvpHand') && (
+              <button
+                onClick={() => {
+                  hasUserSelectedTabRef.current = true;
+                  setActiveTab('pvpHand');
+                  setCurrentPage(1);
+                }}
+                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'pvpHand' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+              >
+                手牌 ({pvpHandTab?.cards?.length ?? 0})
+              </button>
+            )}
+            {effectiveTabs.includes('my') && (
               <button
                 onClick={() => {
                   hasUserSelectedTabRef.current = true;
@@ -694,18 +1023,20 @@ export default function BattleDataModal({
                 我的{typeLabel} ({userDataCards.length})
               </button>
             )}
-            <button
-              onClick={() => {
-                hasUserSelectedTabRef.current = true;
-                setActiveTab('public');
-                setCurrentPage(1);
-                loadPublicDataCards(1, sortBy, '', filters);
-              }}
-              className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-            >
-              公开{typeLabel}
-            </button>
-            {isAuthenticated && (
+            {effectiveTabs.includes('public') && (
+              <button
+                onClick={() => {
+                  hasUserSelectedTabRef.current = true;
+                  setActiveTab('public');
+                  setCurrentPage(1);
+                  loadPublicDataCards(1, sortBy, '', filters);
+                }}
+                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+              >
+                公开{typeLabel}
+              </button>
+            )}
+            {effectiveTabs.includes('favorites') && (
               <button
                 onClick={() => {
                   hasUserSelectedTabRef.current = true;
@@ -718,44 +1049,133 @@ export default function BattleDataModal({
                 我的收藏 ({favoriteCards.length})
               </button>
             )}
+            </div>
+
+            {canImportDeck && (
+              <button
+                onClick={() => setShowDecksModal(true)}
+                className="px-4 py-2 rounded text-sm font-medium bg-purple-600 text-white hover:bg-purple-700"
+              >
+                卡组导入
+              </button>
+            )}
           </div>
 
-          {/* 内容区域 */}
-          <div>
-            {isLoading ? <div className="flex justify-center items-center min-h-[40vh]"><div className="text-gray-500">加载中...</div></div>
-              : displayCards.length === 0 ? <div className="text-center text-gray-500 py-8">暂无数据卡</div>
-                : <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {displayCards.map((card: any) => {
-                    const isFavorited = favoriteIds.has(card.id);
-                    const enableFavorite = isAuthenticated && activeTab !== 'my';
+	          {/* 内容区域 */}
+	          <div>
+	            {isPvpHandTab ? (
+	              filteredPvpHandCards.length === 0 ? (
+	                <div className="text-center text-gray-500 py-8">暂无手牌</div>
+	              ) : (
+	                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+	                  {filteredPvpHandCards.map((card) => {
+	                    const sourceLabel = getPvpHandSourceLabel(card.ref);
+	                    const refHint = getPvpHandRefHint(card.ref);
+	                    const type = typeof card.type === 'string' && card.type ? card.type : 'unknown';
+	                    const preview = getPvpHandPreviewText(card.dataJson);
 
-                    return (
-                      <div key={card.id} className="cursor-pointer h-full" onClick={() => handleSelectCard(card)}>
-                        <DataCard
-                          id={card.id}
-                          name={card.name}
-                          description={card.description}
-                          type={card.type}
-                          roleType={card.roleType}
-                          isPublic={card.is_public}
-                          reviewStatus={card.review_status}
-                          usageCount={card.usage_count}
-                          likeCount={card.like_count}
-                          favoriteCount={card.favorite_count}
-                          isFavorited={isFavorited}
-                          canFavorite={enableFavorite}
-                          isRecommended={card.is_recommended === 1}
-                          author={activeTab === 'my' ? '我' : (card.username || '未知')}
-                          onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
-                          onAuthorClick={handleAuthorClick}
-                          onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
-                          onDownload={() => handleDownloadCard(card)}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>}
-          </div>
+	                    const disableChoose = Boolean(pvpHandTab?.isChoosing || pvpHandTab?.hasChosenMe);
+
+	                    return (
+	                      <div key={card.snapshotId} className="rounded-lg border bg-white p-4 flex flex-col">
+	                        <div className="min-w-0">
+	                          <div className="font-semibold text-gray-900 break-words">{card.name || '未命名'}</div>
+	                          <div className="mt-1 flex flex-wrap gap-2 text-xs">
+	                            <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{type}</span>
+	                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{sourceLabel}</span>
+	                            {refHint && <span className="px-2 py-0.5 rounded-full bg-white border text-gray-600">{refHint}</span>}
+	                          </div>
+	                        </div>
+
+	                        {preview ? <div className="mt-3 text-xs text-gray-600 break-words">{preview}</div> : null}
+
+	                        <div className="mt-4 grid grid-cols-2 gap-2">
+	                          <button
+	                            className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm"
+	                            onClick={() => {
+	                              const author = sourceLabel === '预设' ? '预设角色（快照）' : sourceLabel === '数据卡' ? '数据卡（快照）' : 'PVP 快照';
+	                              setSelectedCard({
+	                                id: `pvp:hand:${card.snapshotId}`,
+	                                name: card.name || '未命名',
+	                                description: refHint ? `PVP 手牌（${sourceLabel}快照：${refHint}）` : `PVP 手牌（${sourceLabel}快照）`,
+	                                type: 'character',
+	                                data: typeof card.dataJson === 'string' ? card.dataJson : JSON.stringify(card.dataJson ?? {}),
+	                                is_public: true,
+	                                username: author,
+	                              });
+	                              setShowDetailsModal(true);
+	                            }}
+	                          >
+	                            详情
+	                          </button>
+	                          <button
+	                            className="px-3 py-2 rounded-lg text-sm text-white bg-gradient-to-r from-pink-500 to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+	                            onClick={() => pvpHandTab?.onChoose(card.snapshotId)}
+	                            disabled={disableChoose}
+	                            title={pvpHandTab?.hasChosenMe ? '你已选择过出战卡' : undefined}
+	                          >
+	                            {pvpHandTab?.hasChosenMe ? '已出战' : pvpHandTab?.isChoosing ? '提交中…' : '出战'}
+	                          </button>
+	                        </div>
+	                      </div>
+	                    );
+	                  })}
+	                </div>
+	              )
+	            ) : isLoading ? (
+	              <div className="flex justify-center items-center min-h-[40vh]"><div className="text-gray-500">加载中...</div></div>
+	            ) : displayCards.length === 0 ? (
+	              <div className="text-center text-gray-500 py-8">暂无数据卡</div>
+	            ) : (
+	              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+	                {displayCards.map((card: any) => {
+	                  const isFavorited = favoriteIds.has(card.id);
+	                  const enableFavorite = isAuthenticated && activeTab !== 'my';
+                    const isSelected = selectedIdSet.has(card.id);
+                    const itemDisabled = selectionMode === 'multi' && !isSelected && atLimit;
+
+	                  return (
+	                    <div
+                        key={card.id}
+                        className={`h-full ${itemDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        onClick={() => {
+                          if (itemDisabled) return;
+                          void handleSelectCard(card);
+                        }}
+                      >
+	                      <DataCard
+	                        id={card.id}
+	                        name={card.name}
+	                        description={card.description}
+	                        type={card.type}
+	                        roleType={card.roleType}
+	                        isPublic={card.is_public}
+                          isSelected={isSelected}
+	                        reviewStatus={card.review_status}
+	                        usageCount={card.usage_count}
+	                        likeCount={card.like_count}
+	                        favoriteCount={card.favorite_count}
+	                        isFavorited={isFavorited}
+	                        canFavorite={enableFavorite}
+	                        isRecommended={card.is_recommended === 1}
+	                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
+	                        onViewDetails={() => { setSelectedCard(card); setShowDetailsModal(true); }}
+	                        onAuthorClick={handleAuthorClick}
+	                        onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
+	                        onDownload={() => handleDownloadCard(card)}
+	                      />
+	                    </div>
+	                  );
+	                })}
+	              </div>
+      )}
+
+      <DecksModal
+        isOpen={showDecksModal}
+        onClose={() => setShowDecksModal(false)}
+        onImportDeck={(deckId) => void handleImportDeck(deckId)}
+      />
+	          </div>
 
           {/* 分页与底部 */}
           {(
@@ -790,11 +1210,11 @@ export default function BattleDataModal({
               </button>
             </div>
           }
-        </div>
-      </div>
+	    </div>
+	  </div>
 
-      {/* 详情模态框 */}
-      {selectedCard && (
+	  {/* 详情模态框 */}
+	  {selectedCard && (
         <DataCardDetailsModal
           isOpen={showDetailsModal}
           onClose={() => {
@@ -816,7 +1236,12 @@ export default function BattleDataModal({
             updatedAt: selectedCard.updated_at
           }}
         />
-      )}
+	  )}
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modal, document.body);
+  }
+  return modal;
 }

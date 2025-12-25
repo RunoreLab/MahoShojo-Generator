@@ -13,10 +13,71 @@ import { BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
-import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
+import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
+import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { authStorage } from '@/lib/auth';
+import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
+
+const extractTitleFromBattleMarkdown = (markdown: string): string => {
+  const lines = markdown.split(/\r?\n/).map((line) => line.trim());
+  for (const line of lines) {
+    if (!line) continue;
+    const m = line.match(/^#{1,3}\s*(.+)$/);
+    if (m?.[1]) return m[1].trim().slice(0, 120);
+    return line.slice(0, 120);
+  }
+  return '未命名战报';
+};
+
+const appendNarrativeHistoryIfEnabled = async (payload: {
+  enabled: boolean;
+  title: string;
+  contentMarkdown: string;
+}): Promise<void> => {
+  try {
+    if (!payload.enabled) return;
+    const title = (payload.title ?? '').toString().trim();
+    const content = (payload.contentMarkdown ?? '').toString().trim();
+    if (!content) return;
+
+    const [titleCheck, contentCheck] = await Promise.all([
+      quickCheck(title || '未命名战报'),
+      quickCheck(content),
+    ]);
+
+    useNarrativeHistoryStore.getState().appendEntry({
+      title: (titleCheck.filteredText || title || '未命名战报').trim(),
+      content: (contentCheck.filteredText || content).trim(),
+    });
+  } catch (error) {
+    // 叙事历史是“增强功能”，失败不应影响战报生成主流程（localStorage 配额/浏览器异常等）
+    console.warn('写入叙事历史失败（已忽略）', error);
+  }
+};
+
+const buildStreamSensitiveArrestWarrantMarkdown = (reason?: string): string => {
+  const safeReason = reason?.trim() ? `（原因：${reason.trim()}）` : '';
+  return [
+    '',
+    '',
+    '---',
+    '',
+    '<!-- ' + STREAM_TRUNCATED_BY_SENSITIVE_MARKER + ' -->',
+    '',
+    '## 逮捕令',
+    '',
+    '**批 准 逮 捕**',
+    '',
+    `内容违反调查院规定${safeReason}，系统已自动截断。`,
+    '',
+    '⚠️ **金绿猫眼权杖严正声明** ⚠️',
+    '',
+    '城际网络并非法外之地！',
+    '',
+  ].join('\n');
+};
 
 const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
   ...report,
@@ -162,6 +223,8 @@ export const useBattleEngine = () => {
   const setStreamingMarkdown = useBattleSelector((state) => state.setStreamingMarkdown);
   const setStreamReporterInfo = useBattleSelector((state) => state.setStreamReporterInfo);
   const setStreamUserGuidance = useBattleSelector((state) => state.setStreamUserGuidance);
+  const setStreamAiUsage = useBattleSelector((state) => state.setStreamAiUsage);
+  const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
@@ -235,6 +298,8 @@ export const useBattleEngine = () => {
     setAdjudicationResults(null);
     setStreamReporterInfo(null);
     setStreamUserGuidance(null);
+    setStreamAiUsage(null);
+    setStreamNarrativeHistoryReadCount(null);
 
     try {
       await handleResolveRandomPlaceholders();
@@ -263,6 +328,17 @@ export const useBattleEngine = () => {
 
       const numericLimit = settings.isArenaHistoryUnlimited ? null : Math.max(1, settings.readArenaHistoryLimit);
       const arenaHistoryReadLimit = settings.readArenaHistory ? numericLimit ?? null : undefined;
+      const narrativeHistoryForRequest = settings.readNarrativeHistory
+        ? [...useNarrativeHistoryStore.getState().entries]
+          .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
+          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+          .map((entry) => ({
+            title: entry.title,
+            content: entry.content,
+            createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt,
+          }))
+        : undefined;
 
       const requestBody: Record<string, unknown> = {
         combatants: freshCombatants.map((combatant) => ({
@@ -287,6 +363,9 @@ export const useBattleEngine = () => {
         writeArenaHistory: settings.writeArenaHistory,
         readCurrentState: settings.readCurrentState,
         writeCurrentState: settings.writeCurrentState,
+        readNarrativeHistory: settings.readNarrativeHistory,
+        writeNarrativeHistory: settings.writeNarrativeHistory,
+        narrativeHistory: narrativeHistoryForRequest,
         isDowngrade: false,
         adjudicationEvents,
         storyLength,
@@ -361,6 +440,16 @@ export const useBattleEngine = () => {
         });
         setCombatants(updatedRoster);
 
+        try {
+          await appendNarrativeHistoryIfEnabled({
+            enabled: settings.writeNarrativeHistory,
+            title: reportWithScenario.headline,
+            contentMarkdown: toBattleReportMarkdown(reportWithScenario),
+          });
+        } catch (error) {
+          console.warn('写入叙事历史失败（已忽略）', error);
+        }
+
         return false;
       };
 
@@ -378,59 +467,61 @@ export const useBattleEngine = () => {
 
           if (!response.ok) {
             const text = await response.text();
+            let json: any = null;
             try {
-              const json = JSON.parse(text);
-              if (json.shouldRedirect) {
-                redirectToArrested(json.reason || '使用危险符文');
-                return;
-              }
-              throw new Error(json.message || json.error || text);
+              json = JSON.parse(text);
             } catch {
               throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
             }
+
+            if (json.shouldRedirect) {
+              redirectToArrested(json.reason || '使用危险符文');
+              return;
+            }
+            throw new Error(json.message || json.error || text);
           }
 
-	          reader = response.body?.getReader() ?? null;
-	          if (!reader) {
-	            throw new Error('无法读取响应流，请使用最新版本的现代浏览器。');
-	          }
+          reader = response.body?.getReader() ?? null;
+          if (!reader) {
+            throw new Error('无法读取响应流，请使用最新版本的现代浏览器。');
+          }
 
-	          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
-	          if (metaHeader) {
-	            try {
-	              const parsed = JSON.parse(decodeURIComponent(metaHeader));
-	              const reporterInfo = parsed?.reporterInfo;
-	              if (reporterInfo && typeof reporterInfo === 'object') {
-	                const name = typeof reporterInfo.name === 'string' ? reporterInfo.name : '';
-	                const publication = typeof reporterInfo.publication === 'string' ? reporterInfo.publication : '';
-	                if (name && publication) {
-	                  setStreamReporterInfo({ name: sanitizeTextByShieldWords(name), publication: sanitizeTextByShieldWords(publication) });
-	                }
-	              }
+          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
+          if (metaHeader) {
+            try {
+              const parsed = JSON.parse(decodeURIComponent(metaHeader));
+              const reporterInfo = parsed?.reporterInfo;
+              if (reporterInfo && typeof reporterInfo === 'object') {
+                const name = typeof reporterInfo.name === 'string' ? reporterInfo.name : '';
+                const publication = typeof reporterInfo.publication === 'string' ? reporterInfo.publication : '';
+                if (name && publication) {
+                  setStreamReporterInfo({ name: sanitizeTextByShieldWords(name), publication: sanitizeTextByShieldWords(publication) });
+                }
+              }
 
-	              const userGuidance = typeof parsed?.userGuidance === 'string' ? parsed.userGuidance.trim() : '';
-	              if (userGuidance) {
-	                setStreamUserGuidance(sanitizeTextByShieldWords(userGuidance));
-	              }
+              const userGuidance = typeof parsed?.userGuidance === 'string' ? parsed.userGuidance.trim() : '';
+              if (userGuidance) {
+                setStreamUserGuidance(sanitizeTextByShieldWords(userGuidance));
+              }
 
-	              const adjudicationResults = Array.isArray(parsed?.adjudicationResults) ? parsed.adjudicationResults : null;
-	              if (adjudicationResults && adjudicationResults.length > 0) {
-	                setAdjudicationResults(adjudicationResults);
-	              }
-	            } catch (metaError) {
-	              // 元信息解析失败不影响正文流式展示
-	              console.warn('解析流式战报元信息失败，将继续渲染正文', metaError);
-	            }
-	          } else {
-	            const snapshotGuidance = settings.userGuidance.trim();
-	            if (snapshotGuidance) {
-	              setStreamUserGuidance(sanitizeTextByShieldWords(snapshotGuidance));
-	            }
-	          }
+              const adjudicationResults = Array.isArray(parsed?.adjudicationResults) ? parsed.adjudicationResults : null;
+              if (adjudicationResults && adjudicationResults.length > 0) {
+                setAdjudicationResults(adjudicationResults);
+              }
+            } catch (metaError) {
+              // 元信息解析失败不影响正文流式展示
+              console.warn('解析流式战报元信息失败，将继续渲染正文', metaError);
+            }
+          } else {
+            const snapshotGuidance = settings.userGuidance.trim();
+            if (snapshotGuidance) {
+              setStreamUserGuidance(sanitizeTextByShieldWords(snapshotGuidance));
+            }
+          }
 
-	          const decoder = new TextDecoder();
-	          let accumulatedText = '#';
-	          let shouldAbort = false;
+          const decoder = new TextDecoder();
+          let accumulatedText = '';
+          let shouldAbort = false;
           const streamBackupItems = buildBattleBackupItems(
             freshCombatants,
             shouldUseScenario ? scenario.content : null,
@@ -445,14 +536,15 @@ export const useBattleEngine = () => {
           setStreamingMarkdown(accumulatedText);
           setIsStreaming(true);
 
-          const getIncrementalCheckSlice = (fullText: string): string => {
+          const getIncrementalCheckSlice = (fullText: string): { slice: string; startIndex: number } => {
             if (fullText.length < lastCheckedLength) {
               lastCheckedLength = 0;
             }
-            const start = Math.max(0, lastCheckedLength - 64);
+            const overlap = 256;
+            const start = Math.max(0, lastCheckedLength - overlap);
             const slice = fullText.slice(start);
             lastCheckedLength = fullText.length;
-            return slice;
+            return { slice, startIndex: start };
           };
 
           while (true) {
@@ -467,16 +559,39 @@ export const useBattleEngine = () => {
             const chunk = decoder.decode(value, { stream: true });
             accumulatedText += chunk;
 
-            const sliceToCheck = getIncrementalCheckSlice(accumulatedText);
-            if (
-              await checkSensitivePayload(sliceToCheck, {
-                source: 'output',
-                origin: 'battle-stream',
-                reason: '使用危险符文',
-                backupItems: streamBackupItems,
-                onRedirect: redirectToArrested,
-              })
-            ) {
+            const { slice: sliceToCheck, startIndex: sliceStartIndex } = getIncrementalCheckSlice(accumulatedText);
+            const sensitiveCheck = await quickCheck(sliceToCheck);
+            if (sensitiveCheck.hasSensitiveWords) {
+              if (streamBackupItems.length > 0) {
+                persistArrestedBackup({
+                  triggerSource: 'output',
+                  origin: 'battle-stream',
+                  reason: '使用危险符文',
+                  items: streamBackupItems,
+                });
+              }
+
+              const firstMatch = sensitiveCheck.matchDetails.reduce<null | { startIndex: number }>((picked, item) => {
+                if (!picked) return { startIndex: item.startIndex };
+                return item.startIndex < picked.startIndex ? { startIndex: item.startIndex } : picked;
+              }, null);
+
+              const fallbackMatchIndex = (() => {
+                const candidates = sensitiveCheck.detectedWords
+                  .filter((word) => typeof word === 'string' && word.trim() && !word.includes('变体'))
+                  .map((word) => sliceToCheck.indexOf(word))
+                  .filter((index) => index >= 0);
+                return candidates.length > 0 ? Math.min(...candidates) : 0;
+              })();
+
+              const cutStartInSlice = firstMatch?.startIndex ?? fallbackMatchIndex;
+
+              const cutIndex = Math.max(0, Math.min(accumulatedText.length, sliceStartIndex + cutStartInSlice));
+              accumulatedText = accumulatedText.slice(0, cutIndex);
+              accumulatedText += buildStreamSensitiveArrestWarrantMarkdown('使用危险符文');
+
+              setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+
               shouldAbort = true;
               await reader.cancel().catch(() => undefined);
               break;
@@ -491,25 +606,80 @@ export const useBattleEngine = () => {
 
           if (shouldAbort) {
             setNewsReport(null);
-            setStreamingMarkdown(null);
             return;
           }
 
+          // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
+          accumulatedText += decoder.decode();
           setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
 
-          const trimmedForValidation = accumulatedText.trim();
-          const looksLikeCompleteReport =
-            trimmedForValidation.length >= 120 && /^#{2,6}\s+/m.test(trimmedForValidation) && trimmedForValidation !== '#';
+          // 流式正文末尾可能包含 HTML 注释 JSON 元数据（用于角色更新的 impacts/currentStateSummary）。
+          // 此处尽量提取并修复解析；失败时回退到仅基于 Markdown 的更新逻辑。
+          let markdownForUi = accumulatedText;
+          let metaOverride:
+            | {
+              report?: { headline?: string; winner?: string };
+              impacts?: Array<{ characterName: string; impact?: string; currentStateSummary?: string }>;
+            }
+            | undefined;
+          try {
+            // 先移除并提取系统追加的 telemetry 注释（token/叙事历史读取条数），避免影响后续更新元数据解析。
+            const telemetryExtracted = await extractStreamTelemetryMeta(accumulatedText);
+            if (telemetryExtracted?.meta) {
+              const usage = telemetryExtracted.meta.usage ?? null;
+              const narrativeCount =
+                typeof telemetryExtracted.meta.narrativeHistoryReadCount === 'number'
+                  ? telemetryExtracted.meta.narrativeHistoryReadCount
+                  : null;
+              setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
+              setStreamNarrativeHistoryReadCount(narrativeCount);
+            }
+            if (telemetryExtracted && typeof telemetryExtracted.strippedMarkdown === 'string') {
+              markdownForUi = telemetryExtracted.strippedMarkdown;
+            }
+
+            const allowStreamMeta = settings.writeArenaHistory || settings.writeCurrentState;
+
+            if (allowStreamMeta) {
+              const extracted = await extractStreamUpdateMeta(markdownForUi);
+              if (extracted?.meta && (extracted.meta.report || (extracted.meta.impacts && extracted.meta.impacts.length > 0))) {
+                metaOverride = {
+                  ...(extracted.meta.report ? { report: extracted.meta.report } : {}),
+                  ...(extracted.meta.impacts && extracted.meta.impacts.length > 0 ? { impacts: extracted.meta.impacts } : {}),
+                };
+              }
+              if (extracted && typeof extracted.strippedMarkdown === 'string') {
+                markdownForUi = extracted.strippedMarkdown;
+              }
+            } else {
+              // 未开启任何写入：仍然移除潜在的元数据注释，避免用户看到“系统专用内容”
+              const stripped = stripStreamUpdateMetaComment(markdownForUi);
+              if (stripped && typeof stripped.strippedMarkdown === 'string') {
+                markdownForUi = stripped.strippedMarkdown;
+              }
+            }
+          } catch (metaError) {
+            console.warn('解析流式战报元数据失败，将回退到 Markdown 解析更新', metaError);
+          }
+
+          setStreamingMarkdown(sanitizeTextByShieldWords(markdownForUi));
+
+          const trimmedForValidation = markdownForUi.trim();
+          const allowStreamMeta = settings.writeArenaHistory || settings.writeCurrentState;
+          const hasMetaImpacts = allowStreamMeta && Boolean(metaOverride?.impacts?.length);
+          const looksLikeCompleteReport = hasMetaImpacts
+            ? true
+            : trimmedForValidation.length >= 120 && /^#{2,6}\s*/m.test(trimmedForValidation);
 
           // 与非流式保持一致：生成失败/中断时不进入冷却，并优先展示“生成失败”而不是“角色更新失败”。
           if (!looksLikeCompleteReport) {
-            if (!trimmedForValidation || trimmedForValidation === '#') {
+            if (!trimmedForValidation) {
               setStreamingMarkdown(null);
               setError('✨ 魔法失效了！服务端响应为空，未收到有效内容。');
             } else {
               // 尝试判断内容是否是一段纯文本报错（通常比较短，且不包含 Markdown 标题符）
               const isLikelyErrorMessage = trimmedForValidation.length < 300 && !trimmedForValidation.includes('# ');
-              
+
               if (isLikelyErrorMessage) {
                 // 直接显示服务端返回的错误文字
                 setError(`✨ 生成失败，服务端返回信息：${trimmedForValidation}`);
@@ -521,12 +691,26 @@ export const useBattleEngine = () => {
             return;
           }
 
+          if (hasMetaImpacts && !trimmedForValidation) {
+            setError('⚠️ 战报正文为空，但检测到角色更新元数据，已尝试继续更新角色数据。');
+          }
+
+          try {
+            await appendNarrativeHistoryIfEnabled({
+              enabled: settings.writeNarrativeHistory,
+              title: extractTitleFromBattleMarkdown(markdownForUi),
+              contentMarkdown: markdownForUi,
+            });
+          } catch (error) {
+            console.warn('写入叙事历史失败（已忽略）', error);
+          }
+
           startCooldown();
 
           if (settings.writeArenaHistory || settings.writeCurrentState) {
             try {
               await updateFromMarkdown(
-                accumulatedText,
+                markdownForUi,
                 freshCombatants,
                 battleMode,
                 {
@@ -534,7 +718,8 @@ export const useBattleEngine = () => {
                   writeArenaHistory: settings.writeArenaHistory,
                   writeCurrentState: settings.writeCurrentState,
                 },
-                shouldUseScenario ? scenario.content : null
+                shouldUseScenario ? scenario.content : null,
+                metaOverride
               );
             } catch (updateError) {
               const message = updateError instanceof Error ? updateError.message : '发生未知错误，请重试。';
@@ -556,19 +741,20 @@ export const useBattleEngine = () => {
         headers: requestHeaders,
         body: JSON.stringify(requestBody),
       });
-
       if (!response.ok) {
         const text = await response.text();
+        let json: any = null;
         try {
-          const json = JSON.parse(text);
-          if (json.shouldRedirect) {
-            redirectToArrested(json.reason || '使用危险符文');
-            return;
-          }
-          throw new Error(json.message || json.error || text);
+          json = JSON.parse(text);
         } catch {
-          throw new Error('服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+          throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
         }
+
+        if (json.shouldRedirect) {
+          redirectToArrested(json.reason || '使用危险符文');
+          return;
+        }
+        throw new Error(json.message || json.error || text);
       }
 
       const result: BattleApiResponse = await response.json();
@@ -585,7 +771,7 @@ export const useBattleEngine = () => {
       setIsGenerating(false);
       setIsStreaming(false);
     }
-	  }, [
+  }, [
     isCooldown,
     remainingTime,
     battleMode,
@@ -608,12 +794,14 @@ export const useBattleEngine = () => {
     setStreamingMarkdown,
     setStreamReporterInfo,
     setStreamUserGuidance,
+    setStreamAiUsage,
+    setStreamNarrativeHistoryReadCount,
     setCombatants,
     handleResolveRandomPlaceholders,
     redirectToArrested,
     startCooldown,
     updateFromMarkdown,
-	  ]);
+  ]);
 
   const handleRedoUpdates = useCallback(async () => {
     if (isCooldown) {
@@ -685,16 +873,18 @@ export const useBattleEngine = () => {
 
       if (!response.ok) {
         const text = await response.text();
+        let json: any = null;
         try {
-          const json = JSON.parse(text);
-          if (json.shouldRedirect) {
-            redirectToArrested(json.reason || '使用危险符文');
-            return;
-          }
-          throw new Error(json.message || json.error || text);
+          json = JSON.parse(text);
         } catch {
           throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
         }
+
+        if (json.shouldRedirect) {
+          redirectToArrested(json.reason || '使用危险符文');
+          return;
+        }
+        throw new Error(json.message || json.error || text);
       }
 
       const result = await response.json();

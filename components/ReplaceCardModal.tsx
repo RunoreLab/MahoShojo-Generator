@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { formatDateTime } from '@/lib/constants';
 
 interface ReplaceCardModalProps {
   isOpen: boolean;
   onClose: () => void;
   cards: any[];
-  targetType: 'character' | 'scenario';
+  targetType: 'character' | 'scenario' | 'history';
   onConfirm: (cardId: string, opts: { name?: string; description?: string; isPublic?: number }) => Promise<void>;
   isSaving?: boolean;
 }
@@ -24,6 +25,16 @@ export default function ReplaceCardModal({
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState<number | undefined>(undefined);
 
+  // 避免弹窗打开时背景滚动，并确保弹层不受页面 stacking context（如 backdrop-filter）影响。
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen]);
+
   useEffect(() => {
     if (!selectedId) return;
     const card = filteredCards.find((c) => c.id === selectedId);
@@ -36,8 +47,12 @@ export default function ReplaceCardModal({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+  const modalContent = (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+      style={{ zIndex: 1000000 }}
+      onClick={onClose}
+    >
       <div
         className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-auto p-6"
         onClick={(e) => e.stopPropagation()}
@@ -71,7 +86,9 @@ export default function ReplaceCardModal({
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-gray-800">{card.name}</span>
-                      <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">{card.type === 'character' ? '角色' : '情景'}</span>
+                      <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                        {card.type === 'character' ? '角色' : card.type === 'scenario' ? '情景' : '叙事历史'}
+                      </span>
                       {card.pending_data && (
                         <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded">更新审核中</span>
                       )}
@@ -148,4 +165,6 @@ export default function ReplaceCardModal({
       </div>
     </div>
   );
+
+  return typeof window !== 'undefined' ? createPortal(modalContent, document.body) : null;
 }

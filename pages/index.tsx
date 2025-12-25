@@ -4,86 +4,7 @@ import Link from 'next/link';
 import Footer from '../components/Footer';
 import { useAuth } from '@/lib/useAuth';
 import { UserWithTitle } from '@/components/UserTitle';
-
-interface LogoConfig {
-  id: string;
-  src: string;
-  width: number;
-  height: number;
-  alt: string;
-  href?: string;
-  className?: string;
-  color?: string;
-}
-
-const logoConfigs: LogoConfig[] = [
-  {
-    id: 'magical-generator',
-    src: '/logo-white.svg',
-    width: 250,
-    height: 60,
-    alt: '魔法少女生成器',
-    href: '/name',
-    className: 'magical-generator',
-    color: 'white'
-  },
-  {
-    id: 'fairy-quest',
-    src: '/questionnaire-logo.svg',
-    width: 250,
-    height: 40,
-    alt: '奇妙妖精大调查',
-    href: '/details',
-    className: 'fairy-quest'
-  },
-  {
-    id: 'canshou-generator',
-    src: '/beast-logo-white.svg',
-    width: 280,
-    height: 40,
-    alt: '危险残兽大调查',
-    href: '/canshou',
-    className: 'canshou-generator',
-    color: 'white'
-  },
-  {
-    id: 'battle-arena',
-    src: '/arena-white.svg',
-    width: 280,
-    height: 80,
-    alt: '魔法少女竞技场',
-    href: '/battle',
-    className: 'battle-arena',
-    color: 'white'
-  },
-  {
-    id: 'scenario-generator',
-    src: '/scenario.svg',
-    width: 280,
-    height: 40,
-    alt: '自定义情景生成',
-    href: '/scenario',
-    className: 'scenario-generator'
-  },
-  {
-    id: 'sublimation',
-    src: '/sublimation-white.svg',
-    width: 280,
-    height: 40,
-    alt: '角色成长升华',
-    href: '/sublimation',
-    className: 'sublimation'
-  },
-  {
-    id: 'character-manager',
-    src: '/character-manager-white.svg',
-    width: 280,
-    height: 40,
-    alt: '角色数据管理',
-    href: '/character-manager',
-    className: 'character-manager'
-  }
-];
+import { featureCategories, getAllFeatureImages } from '@/config/features';
 
 export default function Home() {
   const [, setImagesLoaded] = useState(false);
@@ -91,7 +12,7 @@ export default function Home() {
 
   useEffect(() => {
     const preloadImages = async () => {
-      const imageUrls = logoConfigs.map(logo => logo.src);
+      const imageUrls = getAllFeatureImages();
 
       const imagePromises = imageUrls.map(url => {
         return new Promise((resolve, reject) => {
@@ -119,11 +40,11 @@ export default function Home() {
       <Head>
         <title>✨ 魔法少女生成器 ✨</title>
         <meta name="description" content="AI驱动的魔法少女角色生成器，创建独一无二的魔法少女角色" />
-        {logoConfigs.map(logo => (
+        {getAllFeatureImages().map((src, index) => (
           <link
-            key={logo.id}
+            key={index}
             rel="preload"
-            href={logo.src}
+            href={src}
             as="image"
             type="image/svg+xml"
           />
@@ -140,20 +61,25 @@ export default function Home() {
               {loading ? (
                 <span className="text-sm text-gray-600">加载中...</span>
               ) : isAuthenticated ? (
-                <Link
-                  href="/character-manager"
-                  className="inline-flex items-center px-4 py-2 text-sm bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 transition-colors"
-                >
-                  <span>欢迎回来，</span>
-                  <UserWithTitle
-                    username={user?.username || ''}
-                    usernameClassName="text-pink-700 font-semibold"
-                    titleClassName="text-xs"
-                    badges={userBadges}
-                    showBadges={true}
-                  />
-                  <span className="ml-2">点击进入档案馆</span>
-                </Link>
+                <div className="flex flex-col items-center gap-2">
+                  <Link
+                    href="/character-manager"
+                    className="inline-flex items-center px-4 py-2 text-sm bg-pink-100 text-pink-700 rounded-lg hover:bg-pink-200 transition-colors"
+                  >
+                    <span>欢迎回来，</span>
+                    <UserWithTitle
+                      username={user?.username || ''}
+                      usernameClassName="text-pink-700 font-semibold"
+                      titleClassName="text-xs"
+                      badges={userBadges}
+                      showBadges={true}
+                    />
+                    <span className="ml-2">点击进入档案馆</span>
+                  </Link>
+                  <Link href="/me" className="text-sm text-blue-600 hover:underline">
+                    个人页：战报记录 / PVP 战绩（测试版）
+                  </Link>
+                </div>
               ) : (
                 <Link
                   href="/character-manager"
@@ -167,32 +93,41 @@ export default function Home() {
               欢迎来到魔法国度！选择一个项目开始玩耍吧！
             </p>
 
-            {/* 登录/注册按钮 */}
-            {/* <div className='flex justify-center mb-2'>
-              <Link
-                href="/character-manager"
-                className="px-2 py-1 text-sm bg-white-600 text-black hover:text-pink-700 rounded hover:border-pink-700 border-1"
-              >
-                <span className='mr-2'>👤</span>
-                前往账号管理界面
-              </Link>
-            </div> */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              {logoConfigs.filter(logo => logo.href).map((logo) => (
-                <Link key={logo.id} href={logo.href!} className={`feature-button ${logo.className}`}>
-                  <div className="gradient-overlay"></div>
-                  <div className="feature-button-content">
-                    <div className="feature-title-container">
-                      <img
-                        src={logo.src}
-                        width={logo.width}
-                        height={logo.height}
-                        alt={logo.alt}
-                        className="feature-title-svg"
-                      />
-                    </div>
+            {/* 分类功能导航 */}
+            <div className="space-y-8">
+              {featureCategories.map((category) => (
+                <div key={category.id} className="feature-category">
+                  {/* 分类标题 */}
+                  <h2 className="text-center text-lg font-semibold mb-4 text-pink-700">
+                    {category.title}
+                  </h2>
+
+                  {/* 功能按钮网格 */}
+                  <div
+                    className={`feature-grid ${category.columns === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}
+                  >
+                    {category.features.map((feature) => (
+                      <Link
+                        key={feature.id}
+                        href={feature.href}
+                        className={`feature-button ${feature.className}`}
+                      >
+                        <div className="gradient-overlay"></div>
+                        <div className="feature-button-content">
+                          <div className="feature-title-container">
+                            <img
+                              src={feature.src}
+                              width={feature.width}
+                              height={feature.height}
+                              alt={feature.alt}
+                              className="feature-title-svg"
+                            />
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
 

@@ -13,6 +13,7 @@ import {
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { queryFromD1 } from '@/lib/d1';
+import { formatKilobytes, getUtf8ByteLength, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
 
 export const runtime = 'edge';
 
@@ -51,6 +52,17 @@ export default async function handler(req: Request): Promise<Response> {
 
   const userId = user.id;
 
+  const makePayloadTooLargeResponse = (sizeBytes: number) =>
+    new Response(
+      JSON.stringify({
+        error: `数据卡内容过大，最大允许 ${MAX_DATA_CARD_BYTES / 1024}KB，当前大小 ${formatKilobytes(sizeBytes)}KB`
+      }),
+      {
+        status: 413, // Payload Too Large
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+
   switch (req.method) {
     case 'GET':
       // 获取用户的所有数据卡
@@ -84,29 +96,31 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
-        if (type !== 'character' && type !== 'scenario') {
+        if (type !== 'character' && type !== 'scenario' && type !== 'history') {
           return new Response(JSON.stringify({ error: '无效的数据卡类型' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' }
           });
         }
 
-        // 检查数据卡内容大小 (32KB 限制)
-        const dataString = JSON.stringify(data);
-        const dataSize = new TextEncoder().encode(dataString).length;
-        const maxSize = 150 * 1024; // 150KB
-        
-        if (dataSize > maxSize) {
-          return new Response(JSON.stringify({ 
-            error: `数据卡内容过大，最大允许 ${maxSize / 1024}KB，当前大小 ${(dataSize / 1024).toFixed(1)}KB` 
-          }), {
-            status: 413, // Payload Too Large
+        // 检查数据卡内容大小（写入数据库前，按 UTF-8 字节数计）
+        let dataString: string;
+        let dataWithAuthorString: string;
+        try {
+          dataString = JSON.stringify(data);
+          dataWithAuthorString = JSON.stringify({ ...(JSON.parse(dataString) as any), _author: user.username, _authorId: userId });
+        } catch {
+          return new Response(JSON.stringify({ error: 'data 无法序列化为 JSON' }), {
+            status: 400,
             headers: { 'Content-Type': 'application/json' }
           });
         }
 
+        const dataSize = getUtf8ByteLength(dataWithAuthorString);
+        if (dataSize > MAX_DATA_CARD_BYTES) return makePayloadTooLargeResponse(dataSize);
+
         // 敏感词检查
-        const textToCheck = `${name} ${description || ''} ${dataString}`;
+        const textToCheck = `${name} ${description || ''} ${dataWithAuthorString}`;
         const sensitiveWordResult = await quickCheck(textToCheck);
         
         if (sensitiveWordResult.hasSensitiveWords) {
@@ -140,7 +154,7 @@ export default async function handler(req: Request): Promise<Response> {
           type,
           name,
           description || '',
-          dataString,
+          dataWithAuthorString,
           isPublic ?? 0,
           reviewStatus // 传入新的审查状态
         );
@@ -181,8 +195,24 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
+        let dataString: string | null = null;
+        let dataSizeBytes: number | null = null;
+        const dataChanged = data !== undefined;
+        if (dataChanged) {
+          try {
+            dataString = JSON.stringify(data);
+          } catch {
+            return new Response(JSON.stringify({ error: 'data 无法序列化为 JSON' }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json' }
+            });
+          }
+          dataSizeBytes = getUtf8ByteLength(dataString);
+          if (dataSizeBytes > MAX_DATA_CARD_BYTES) return makePayloadTooLargeResponse(dataSizeBytes);
+        }
+
         // 敏感词检查：标题+描述+（可选）数据
-        const textToCheck = `${name || ''} ${description || ''} ${data ? JSON.stringify(data) : ''}`;
+        const textToCheck = `${name || ''} ${description || ''} ${dataString ?? ''}`;
         const sensitiveWordResult = await quickCheck(textToCheck);
         if (sensitiveWordResult.hasSensitiveWords) {
           return new Response(JSON.stringify({ 
@@ -206,7 +236,6 @@ export default async function handler(req: Request): Promise<Response> {
         const isExempt = user.is_review_exempt === 1;
         const isAdmin = user.is_admin === 1;
         const isPendingOrRejected = currentCard.review_status !== 'approved';
-        const dataChanged = data !== undefined;
 
         // 如果不需要审核（pending/rejected 或 豁免 / 管理员），直接更新主表
         if (isPendingOrRejected || isExempt || isAdmin) {
@@ -228,10 +257,9 @@ export default async function handler(req: Request): Promise<Response> {
 
           // 如果带 data，一并更新
           if (dataChanged) {
-            const dataString = JSON.stringify(data);
             await queryFromD1(
               'UPDATE data_cards SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
-              [dataString, id, userId]
+              [dataString!, id, userId]
             );
           }
 
@@ -246,7 +274,7 @@ export default async function handler(req: Request): Promise<Response> {
           const payload = {
             name: name ?? currentCard.name,
             description: description ?? currentCard.description,
-            data: JSON.stringify(data)
+            data: dataString!
           };
           const ok = await upsertDataCardUpdate(id, userId, payload);
           if (!ok) {

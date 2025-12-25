@@ -21,6 +21,12 @@ describe('shield-word-filter', () => {
     expect(result.filteredText).toBe('我来自【国度】。');
   });
 
+  it('replaces traditional variant with replacement text', () => {
+    const result = applyShieldWords('我来自中國。');
+    expect(result.hasShieldWords).toBe(true);
+    expect(result.filteredText).toBe('我来自【国度】。');
+  });
+
   it('masks default shield words with a non-markdown-safe symbol', () => {
     const word = decodeBase64Utf8('5Y+R5oOF'); // 发情
     const result = applyShieldWords(`abc${word}def`);
@@ -35,4 +41,3 @@ describe('shield-word-filter', () => {
     expect(result.filteredText).toBe(text);
   });
 });
-

@@ -1,48 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { snapdom } from '@zumer/snapdom';
-import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState, CurrentStateField } from '@/types/arena';
+import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { GeneralCharacterData } from '@/lib/schemas/general-character';
-
-const formatCurrentStateValue = (field: CurrentStateField) => {
-  if (field.type === 'boolean') {
-    return field.value ? '是' : '否';
-  }
-  if (field.type === 'number') {
-    return typeof field.value === 'number' ? field.value : Number(field.value) || 0;
-  }
-  return String(field.value ?? '');
-};
-
-const renderCurrentStatePanel = (state?: CharacterCurrentState | null) => {
-  if (!state) return null;
-  const hasSummary = Boolean(state.summary && state.summary.trim());
-  const fields = Array.isArray(state.fields) ? state.fields : [];
-  const hasFields = fields.length > 0;
-  if (!hasSummary && !hasFields) return null;
-
-  return (
-    <div className="result-item">
-      <div className="result-label">🧭 当前状态</div>
-      <div className="result-value text-sm space-y-2">
-        {hasSummary && <p className="leading-relaxed">{state.summary}</p>}
-        {hasFields && (
-          <ul className="text-xs space-y-1">
-            {fields.map(field => (
-              <li key={field.id} className="flex justify-between gap-2">
-                <span className="font-semibold text-gray-700">{field.label}</span>
-                <span className="text-gray-900">{formatCurrentStateValue(field)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {state.updated_at && (
-          <p className="text-[10px] text-gray-400">最近更新：{new Date(state.updated_at).toLocaleString()}</p>
-        )}
-      </div>
-    </div>
-  );
-};
+import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { CurrentStatePanel } from '@/components/CurrentStatePanel';
+import { MarkdownBlock } from '@/components/MarkdownBlock';
 
 export interface GeneralCharacterDetails extends GeneralCharacterData {
   arena_history?: ArenaHistory | null;
@@ -209,7 +172,9 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
                 <p className="text-gray-200">
                   <strong>类型:</strong> {entry.type} | <strong>胜者:</strong> {entry.winner || '未知'}
                 </p>
-                <p className="text-gray-100 leading-relaxed" style={{ whiteSpace: 'pre-wrap' }}>{entry.impact || '暂无影响描述'}</p>
+                <div className="mt-1 text-gray-100 leading-relaxed">
+                  <MarkdownBlock content={entry.impact || '暂无影响描述'} variant="dark" />
+                </div>
               </div>
             ))}
           </div>
@@ -240,6 +205,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
           <div className="result-label">角色设定</div>
           <div className="result-value bg-white/95 rounded-xl p-4 shadow-inner text-sm leading-relaxed text-gray-800">
             <ReactMarkdown
+              remarkPlugins={[remarkBattleTable]}
               components={{
                 h1: ({ children }) => <h1 className="text-2xl font-bold my-3 text-indigo-700">{children}</h1>,
                 h2: ({ children }) => <h2 className="text-xl font-semibold my-3 text-indigo-600">{children}</h2>,
@@ -253,6 +219,22 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
                   <blockquote className="border-l-4 border-indigo-300 pl-4 italic text-gray-600 my-3">{children}</blockquote>
                 ),
                 code: ({ children }) => <code className="bg-gray-100 rounded px-1 py-0.5 text-xs text-gray-700">{children}</code>,
+                table: ({ children }) => (
+                  <div className="my-3 overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                    <table className="min-w-full border-collapse text-left text-sm">{children}</table>
+                  </div>
+                ),
+                thead: ({ children }) => <thead className="bg-gray-50">{children}</thead>,
+                tbody: ({ children }) => <tbody className="divide-y divide-gray-200">{children}</tbody>,
+                tr: ({ children }) => <tr className="odd:bg-white even:bg-gray-50/40">{children}</tr>,
+                th: ({ children }) => (
+                  <th className="px-3 py-2 font-semibold text-gray-700 border-b border-gray-200 whitespace-nowrap">{children}</th>
+                ),
+                td: ({ children }) => (
+                  <td className="px-3 py-2 text-gray-800 align-top border-b border-gray-100 whitespace-pre-wrap break-words">
+                    {children}
+                  </td>
+                ),
               }}
             >
               {general?.content?.trim() || '（content 字段为空，建议补充完整的角色设定，包括外观、能力、背景。）'}
@@ -260,7 +242,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
           </div>
         </div>
 
-        {renderCurrentStatePanel(general?.current_state)}
+        <CurrentStatePanel state={general?.current_state} variant="dark" />
 
         {renderHistory()}
 

@@ -249,7 +249,7 @@ export const dataCardApi = {
   },
 
   // 创建数据卡
-  async createCard(type: 'character' | 'scenario', name: string, description: string, data: any, isPublic: number = 0): Promise<{
+  async createCard(type: 'character' | 'scenario' | 'history', name: string, description: string, data: any, isPublic: number = 0): Promise<{
     success: boolean;
     id?: number;
     error?: string;
@@ -432,7 +432,7 @@ export const dataCardApi = {
 };
 
 export const favoritesApi = {
-  async getFavorites(options?: { type?: 'character' | 'scenario'; idsOnly?: boolean }) {
+  async getFavorites(options?: { type?: 'character' | 'scenario' | 'history'; idsOnly?: boolean }) {
     const authHeader = await authStorage.getAuthHeader();
     if (!authHeader) return { success: false, favorites: [] };
 
@@ -489,5 +489,300 @@ export const favoritesApi = {
     });
 
     return response.json();
+  }
+};
+
+export const deckApi = {
+  async getMyDecks(): Promise<{ decks: any[]; capacity?: number; deckCount?: number } | null> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return null;
+
+    try {
+      const response = await fetch('/api/decks', {
+        headers: { Authorization: authHeader }
+      });
+
+      if (!response.ok) return null;
+      return response.json();
+    } catch (error) {
+      console.error('Get my decks error:', error);
+      return null;
+    }
+  },
+
+  async createDeck(payload: { name: string; description?: string; isPublic?: number }): Promise<any | null> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return { success: false, error: '未登录' };
+
+    try {
+      const response = await fetch('/api/decks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return { success: false, error: data?.error || '创建失败' };
+      }
+      return data;
+    } catch (error) {
+      console.error('Create deck error:', error);
+      return { success: false, error: '网络错误' };
+    }
+  },
+
+  async updateDeck(deckId: string, payload: { name?: string; description?: string; isPublic?: number }): Promise<boolean> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return false;
+
+    try {
+      const response = await fetch('/api/decks', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader
+        },
+        body: JSON.stringify({ id: deckId, ...payload })
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('Update deck error:', error);
+      return false;
+    }
+  },
+
+  async deleteDeck(deckId: string): Promise<boolean> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return false;
+
+    try {
+      const response = await fetch(`/api/decks?id=${encodeURIComponent(deckId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: authHeader }
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('Delete deck error:', error);
+      return false;
+    }
+  },
+
+  async getDeckCards(deckId: string): Promise<{ deck: any; cards: any[] } | null> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return null;
+
+    try {
+      const response = await fetch(`/api/deck-cards?deckId=${encodeURIComponent(deckId)}`, {
+        headers: { Authorization: authHeader }
+      });
+
+      if (!response.ok) return null;
+      return response.json();
+    } catch (error) {
+      console.error('Get deck cards error:', error);
+      return null;
+    }
+  },
+
+  async addDeckCards(deckId: string, cardIds: string[]): Promise<any | null> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return { success: false, error: '未登录' };
+
+    try {
+      const response = await fetch('/api/deck-cards', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader
+        },
+        body: JSON.stringify({ deckId, cardIds })
+      });
+      return response.json();
+    } catch (error) {
+      console.error('Add deck cards error:', error);
+      return { success: false, error: '网络错误' };
+    }
+  },
+
+  async removeDeckCards(deckId: string, cardIds: string[]): Promise<boolean> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return false;
+
+    try {
+      const response = await fetch('/api/deck-cards', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader
+        },
+        body: JSON.stringify({ deckId, cardIds })
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('Remove deck cards error:', error);
+      return false;
+    }
+  },
+
+  async pruneInaccessible(deckId: string): Promise<any | null> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return { success: false, error: '未登录' };
+
+    try {
+      const response = await fetch('/api/deck-cards', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader
+        },
+        body: JSON.stringify({ deckId, action: 'pruneInaccessible' })
+      });
+      return response.json();
+    } catch (error) {
+      console.error('Prune deck cards error:', error);
+      return { success: false, error: '网络错误' };
+    }
+  },
+
+  async getPublicDecks(params: { limit: number; offset: number; search?: string; sortBy?: 'likes' | 'favorites' | 'created_at' }): Promise<any[]> {
+    try {
+      const qs = new URLSearchParams();
+      qs.set('limit', String(params.limit));
+      qs.set('offset', String(params.offset));
+      if (params.search) qs.set('search', params.search);
+      if (params.sortBy) qs.set('sortBy', params.sortBy);
+
+      const response = await fetch(`/api/public-decks?${qs.toString()}`);
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data.decks || [];
+    } catch (error) {
+      console.error('Get public decks error:', error);
+      return [];
+    }
+  },
+
+  async getPublicDeckDetail(deckId: string): Promise<{ deck: any; cards: any[] } | null> {
+    try {
+      const response = await fetch(`/api/public-decks?id=${encodeURIComponent(deckId)}`);
+      if (!response.ok) return null;
+      return response.json();
+    } catch (error) {
+      console.error('Get public deck detail error:', error);
+      return null;
+    }
+  },
+
+  async getPublicCharacterCards(search?: string): Promise<any[]> {
+    try {
+      const qs = new URLSearchParams();
+      qs.set('type', 'character');
+      qs.set('limit', '30');
+      qs.set('offset', '0');
+      if (search) qs.set('search', search);
+      const response = await fetch(`/api/public-data-cards?${qs.toString()}`);
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data.cards || [];
+    } catch (error) {
+      console.error('Get public character cards error:', error);
+      return [];
+    }
+  }
+};
+
+export const deckFavoritesApi = {
+  async getFavoriteIds(): Promise<string[]> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return [];
+
+    try {
+      const response = await fetch('/api/deck-favorites?idsOnly=1', {
+        headers: { Authorization: authHeader }
+      });
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data.ids || [];
+    } catch (error) {
+      console.error('Get deck favorite ids error:', error);
+      return [];
+    }
+  },
+
+  async getFavorites(): Promise<any[]> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return [];
+
+    try {
+      const response = await fetch('/api/deck-favorites', {
+        headers: { Authorization: authHeader }
+      });
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data.decks || [];
+    } catch (error) {
+      console.error('Get deck favorites error:', error);
+      return [];
+    }
+  },
+
+  async addFavorite(deckId: string): Promise<boolean> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return false;
+
+    try {
+      const response = await fetch('/api/deck-favorites', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader
+        },
+        body: JSON.stringify({ deckId })
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('Add deck favorite error:', error);
+      return false;
+    }
+  },
+
+  async removeFavorite(deckId: string): Promise<boolean> {
+    const authHeader = await authStorage.getAuthHeader();
+    if (!authHeader) return false;
+
+    try {
+      const response = await fetch('/api/deck-favorites', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader
+        },
+        body: JSON.stringify({ deckId })
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('Remove deck favorite error:', error);
+      return false;
+    }
+  }
+};
+
+export const deckStatsApi = {
+  async like(deckId: string): Promise<boolean> {
+    try {
+      const response = await fetch('/api/deck-stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deckId, type: 'like' })
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('Like deck error:', error);
+      return false;
+    }
   }
 };

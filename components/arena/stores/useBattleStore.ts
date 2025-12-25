@@ -23,6 +23,8 @@ const defaultSettings: BattleSettings = {
   writeArenaHistory: true,
   readCurrentState: true,
   writeCurrentState: true,
+  readNarrativeHistory: false,
+  writeNarrativeHistory: false,
   userGuidance: '',
 };
 
@@ -52,6 +54,8 @@ export const useBattleStore = create<BattleStoreState>()(
       streamingMarkdown: null,
       streamReporterInfo: null,
       streamUserGuidance: null,
+      streamAiUsage: null,
+      streamNarrativeHistoryReadCount: null,
       storyLength: 'default',
       selectedLevel: '',
       selectedLanguage: 'zh-CN',
@@ -74,6 +78,8 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamingMarkdown: (markdown) => set({ streamingMarkdown: markdown }),
       setStreamReporterInfo: (info) => set({ streamReporterInfo: info }),
       setStreamUserGuidance: (guidance) => set({ streamUserGuidance: guidance }),
+      setStreamAiUsage: (usage) => set({ streamAiUsage: usage }),
+      setStreamNarrativeHistoryReadCount: (count) => set({ streamNarrativeHistoryReadCount: count }),
       setStoryLength: (storyLength) => set({ storyLength }),
       setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
@@ -104,6 +110,18 @@ export const useBattleStore = create<BattleStoreState>()(
         })),
 
       setCombatants: (combatants) => set({ combatants }),
+      moveCombatant: (fromIndex, toIndex) =>
+        set((state) => {
+          const current = state.combatants;
+          if (fromIndex === toIndex) return state;
+          if (fromIndex < 0 || fromIndex >= current.length) return state;
+          if (toIndex < 0 || toIndex >= current.length) return state;
+
+          const next = [...current];
+          const [moved] = next.splice(fromIndex, 1);
+          next.splice(toIndex, 0, moved!);
+          return { combatants: next };
+        }),
       clearCombatants: () =>
         set({
           combatants: [],
@@ -113,6 +131,8 @@ export const useBattleStore = create<BattleStoreState>()(
           isStreaming: false,
           streamReporterInfo: null,
           streamUserGuidance: null,
+          streamAiUsage: null,
+          streamNarrativeHistoryReadCount: null,
         }),
 
       updateCombatantTeam: (filename, teamId) =>

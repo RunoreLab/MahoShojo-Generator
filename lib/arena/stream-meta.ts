@@ -1,0 +1,485 @@
+import { z } from 'zod/v3';
+
+import { repairNormalizeValidate } from '@/lib/repair-pipeline';
+
+const META_MARKERS = [
+  'MAHOSHOJO_ARENA_META',
+  'MAHOSHOJO_META',
+  'MAHOSHOJO_STREAM_META',
+  'MAHOSHOJO_TELEMETRY_META',
+] as const;
+
+export const StreamUpdateMetaSchema = z
+  .object({
+    version: z.number().int().min(1).optional(),
+    report: z
+      .object({
+        headline: z.string().optional(),
+        winner: z.string().optional(),
+      })
+      .optional(),
+    impacts: z
+      .array(
+        z
+          .object({
+            characterName: z.string().optional(),
+            name: z.string().optional(),
+            character: z.string().optional(),
+            character_name: z.string().optional(),
+            characterNameZh: z.string().optional(),
+            impact: z.string().optional(),
+            currentStateSummary: z.string().optional(),
+            current_state_summary: z.string().optional(),
+          })
+          .passthrough()
+      )
+      .optional(),
+  })
+  .passthrough();
+
+export type StreamUpdateMeta = z.infer<typeof StreamUpdateMetaSchema>;
+
+export const StreamTelemetryMetaSchema = z
+  .object({
+    version: z.number().int().min(1).optional(),
+    usage: z
+      .object({
+        promptTokens: z.number().int().nonnegative().nullable().optional(),
+        completionTokens: z.number().int().nonnegative().nullable().optional(),
+        reasoningTokens: z.number().int().nonnegative().nullable().optional(),
+        totalTokens: z.number().int().nonnegative().nullable().optional(),
+        cachedTokens: z.number().int().nonnegative().nullable().optional(),
+      })
+      .passthrough()
+      .optional(),
+    narrativeHistoryReadCount: z.number().int().nonnegative().optional(),
+  })
+  .passthrough();
+
+export type StreamTelemetryMeta = z.infer<typeof StreamTelemetryMetaSchema>;
+
+export interface StreamUpdateImpact {
+  characterName: string;
+  impact?: string;
+  currentStateSummary?: string;
+}
+
+export type NormalizedStreamUpdateMeta = Omit<StreamUpdateMeta, 'impacts'> & {
+  impacts?: StreamUpdateImpact[];
+};
+
+export interface ExtractedStreamMeta {
+  meta: NormalizedStreamUpdateMeta;
+  rawComment: string;
+  strippedMarkdown: string;
+}
+
+export interface NormalizedStreamTelemetryMeta {
+  usage?: {
+    promptTokens?: number | null;
+    completionTokens?: number | null;
+    reasoningTokens?: number | null;
+    totalTokens?: number | null;
+    cachedTokens?: number | null;
+    [key: string]: unknown;
+  };
+  narrativeHistoryReadCount?: number;
+  [key: string]: unknown;
+}
+
+export interface ExtractedStreamTelemetryMeta {
+  meta: NormalizedStreamTelemetryMeta;
+  rawComment: string;
+  strippedMarkdown: string;
+}
+
+export interface StrippedStreamMetaComment {
+  rawComment: string;
+  strippedMarkdown: string;
+  marker: string;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const escapeRegExp = (input: string) => input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const normalizeJsonishText = (input: string): string => {
+  const normalized = input
+    // 常见的“中文引号/弯引号”修复：jsonrepair 不会处理它们
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    // 统一 BOM / 零宽字符
+    .replace(/^\uFEFF/, '')
+    .replace(/[\u200B-\u200D\u2060]/g, '');
+
+  // 常见“Python-ish”字面量：True/False/None（仅在字符串外替换）
+  // 注意：这里不做 eval，只做最小必要的词法替换。
+  let out = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i]!;
+    if (quote) {
+      out += ch;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+
+    if (ch === 'T' || ch === 'F' || ch === 'N') {
+      const rest = normalized.slice(i);
+      const match = rest.match(/^(True|False|None)\b/);
+      if (match) {
+        out += match[1] === 'True' ? 'true' : match[1] === 'False' ? 'false' : 'null';
+        i += match[1].length - 1;
+        continue;
+      }
+    }
+
+    out += ch;
+  }
+
+  return out;
+};
+
+type StreamMetaHit = { start: number; end: number; inner: string; marker: string };
+
+const stripPossibleLeadingMarkerNoise = (inner: string) => inner.trimStart().replace(/^[-–—]+\s*/g, '');
+
+const matchMarkerAtStart = (input: string, markers: readonly string[]) => {
+  const head = stripPossibleLeadingMarkerNoise(input).slice(0, 96);
+  for (const marker of markers) {
+    const re = new RegExp(`^${escapeRegExp(marker)}(?=\\s*[:=\\[{]|\\s*$)`, 'i');
+    if (re.test(head)) return marker;
+  }
+  return null;
+};
+
+const findJsonishSpan = (text: string, searchFrom = 0): { start: number; end: number } | null => {
+  const firstObj = text.indexOf('{', searchFrom);
+  const firstArr = text.indexOf('[', searchFrom);
+  const start =
+    firstObj === -1 ? firstArr : firstArr === -1 ? firstObj : Math.min(firstObj, firstArr);
+  if (start === -1) return null;
+
+  const stack: string[] = [text[start] === '{' ? '}' : ']'];
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  for (let i = start + 1; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+
+    if (ch === '{') stack.push('}');
+    else if (ch === '[') stack.push(']');
+    else if (ch === '}' || ch === ']') {
+      if (stack.length > 0 && ch === stack[stack.length - 1]) {
+        stack.pop();
+        if (stack.length === 0) return { start, end: i };
+      }
+    }
+  }
+
+  return null;
+};
+
+const findLastHtmlCommentWithMarker = (
+  markdown: string,
+  markers: readonly string[] = META_MARKERS
+): StreamMetaHit | null => {
+  const MAX_TAIL_CHARS = 120_000;
+  const tailStart = Math.max(0, markdown.length - MAX_TAIL_CHARS);
+  const haystack = tailStart > 0 ? markdown.slice(tailStart) : markdown;
+
+  let searchEnd = haystack.lastIndexOf('-->');
+  while (searchEnd !== -1) {
+    const start = haystack.lastIndexOf('<!--', searchEnd);
+    if (start === -1) return null;
+    const end = searchEnd + 3;
+    const inner = haystack.slice(start + 4, searchEnd);
+    const marker = matchMarkerAtStart(inner, markers);
+    if (marker) {
+      return { start: start + tailStart, end: end + tailStart, inner, marker };
+    }
+    searchEnd = haystack.lastIndexOf('-->', start - 1);
+  }
+  return null;
+};
+
+const findLastLooseMarkerBlock = (
+  markdown: string,
+  markers: readonly string[] = META_MARKERS
+): StreamMetaHit | null => {
+  const MAX_TAIL_CHARS = 120_000;
+  const tailStart = Math.max(0, markdown.length - MAX_TAIL_CHARS);
+  const haystack = tailStart > 0 ? markdown.slice(tailStart) : markdown;
+
+  const markerAlt = markers.map(escapeRegExp).join('|');
+  const re = new RegExp(`(^|\\n)\\s*(?:---+\\s*)?(${markerAlt})(?=\\s*[:=\\[{]|\\s*$)`, 'gim');
+
+  let last: { index: number; marker: string; matchText: string } | null = null;
+  for (const match of haystack.matchAll(re)) {
+    if (typeof match.index !== 'number') continue;
+    const marker = match[2];
+    if (!marker) continue;
+    last = { index: match.index, marker, matchText: match[0] };
+  }
+  if (!last) return null;
+
+  const blockStartInHaystack = last.index + (last.matchText.startsWith('\n') ? 1 : 0);
+  const afterMarkerInHaystack = last.index + last.matchText.length;
+
+  const span = findJsonishSpan(haystack, afterMarkerInHaystack);
+  if (!span) return null;
+
+  const start = blockStartInHaystack + tailStart;
+  const end = span.end + 1 + tailStart;
+  const inner = markdown.slice(start, end);
+  return { start, end, inner, marker: last.marker };
+};
+
+const findLastStreamMetaBlock = (
+  markdown: string,
+  markers: readonly string[] = META_MARKERS
+): StreamMetaHit | null => {
+  const commentHit = findLastHtmlCommentWithMarker(markdown, markers);
+  const looseHit = findLastLooseMarkerBlock(markdown, markers);
+  if (!commentHit) return looseHit;
+  if (!looseHit) return commentHit;
+  return commentHit.start >= looseHit.start ? commentHit : looseHit;
+};
+
+export function stripStreamUpdateMetaComment(markdown: string): StrippedStreamMetaComment | null {
+  if (typeof markdown !== 'string' || !markdown.trim()) return null;
+  const hit = findLastStreamMetaBlock(markdown);
+  if (!hit) return null;
+  const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
+  return {
+    rawComment: markdown.slice(hit.start, hit.end),
+    strippedMarkdown,
+    marker: hit.marker,
+  };
+}
+
+const extractBestJsonCandidate = (commentInner: string): string => {
+  const text = normalizeJsonishText(commentInner).trim();
+
+  // 先用括号配对法，尽量精准定位 JSON 边界，避免“后续正文出现括号”导致截断/误扩张
+  const span = findJsonishSpan(text, 0);
+  if (span) return text.slice(span.start, span.end + 1).trim();
+
+  const firstObj = text.indexOf('{');
+  const firstArr = text.indexOf('[');
+  const start =
+    firstObj === -1 ? firstArr : firstArr === -1 ? firstObj : Math.min(firstObj, firstArr);
+
+  const lastObj = text.lastIndexOf('}');
+  const lastArr = text.lastIndexOf(']');
+  const end = Math.max(lastObj, lastArr);
+
+  if (start !== -1 && end !== -1 && end > start) {
+    return text.slice(start, end + 1).trim();
+  }
+
+  // 结尾括号缺失时，尽量只截取从 “{ / [” 开始的部分交给 jsonrepair 补全
+  if (start !== -1) return text.slice(start).trim();
+
+  return text;
+};
+
+const sanitizeMeta = (meta: StreamUpdateMeta): NormalizedStreamUpdateMeta => {
+  const out: NormalizedStreamUpdateMeta = { ...(meta as any) };
+
+  if (out.report != null) {
+    if (!isRecord(out.report)) {
+      delete out.report;
+    } else {
+      const headlineRaw = out.report.headline;
+      const winnerRaw = out.report.winner;
+      const headline = typeof headlineRaw === 'string' ? headlineRaw.trim() : undefined;
+      const winner = typeof winnerRaw === 'string' ? winnerRaw.trim() : undefined;
+      const normalizedReport: NonNullable<StreamUpdateMeta['report']> = {
+        ...(headline ? { headline } : {}),
+        ...(winner ? { winner } : {}),
+      };
+      if (Object.keys(normalizedReport).length === 0) delete out.report;
+      else out.report = normalizedReport;
+    }
+  }
+
+  if (Array.isArray(out.impacts)) {
+    const byName = new Map<
+      string,
+      StreamUpdateImpact
+    >();
+    for (const item of out.impacts) {
+      const candidateName =
+        (typeof (item as any)?.characterName === 'string' ? (item as any).characterName : '') ||
+        (typeof (item as any)?.character_name === 'string' ? (item as any).character_name : '') ||
+        (typeof (item as any)?.name === 'string' ? (item as any).name : '') ||
+        (typeof (item as any)?.character === 'string' ? (item as any).character : '') ||
+        (typeof (item as any)?.characterNameZh === 'string' ? (item as any).characterNameZh : '');
+      const name = typeof candidateName === 'string' ? candidateName.trim() : '';
+      if (!name || byName.has(name)) continue;
+      const impact = typeof item.impact === 'string' ? item.impact.trim() : undefined;
+      const currentStateSummary =
+        typeof (item as any).currentStateSummary === 'string'
+          ? (item as any).currentStateSummary.trim()
+          : typeof (item as any).current_state_summary === 'string'
+            ? (item as any).current_state_summary.trim()
+            : undefined;
+      byName.set(name, {
+        characterName: name,
+        ...(impact ? { impact } : {}),
+        ...(currentStateSummary ? { currentStateSummary } : {}),
+      });
+    }
+    out.impacts = Array.from(byName.values());
+    if (out.impacts.length === 0) delete out.impacts;
+  }
+
+  return out;
+};
+
+export async function extractStreamUpdateMeta(markdown: string): Promise<ExtractedStreamMeta | null> {
+  if (typeof markdown !== 'string' || !markdown.trim()) return null;
+
+  const hit = findLastStreamMetaBlock(markdown, [
+    'MAHOSHOJO_ARENA_META',
+    'MAHOSHOJO_META',
+    'MAHOSHOJO_STREAM_META',
+  ]);
+  if (!hit) return null;
+
+  const candidate = extractBestJsonCandidate(hit.inner);
+  if (!candidate) return null;
+
+  const meta = await repairNormalizeValidate({
+    input: candidate,
+    schema: StreamUpdateMetaSchema,
+    unwrapCandidates: ['meta', 'data', 'payload', 'result', 'value'],
+    textFieldCandidates: ['json', 'text', 'raw', 'content', 'body'],
+    coerce: { wrapSingleToArray: true, emptyStringToUndefined: true },
+    postProcess: (value) => {
+      // 允许模型直接输出 impacts 数组：[{...}, {...}]
+      if (Array.isArray(value)) {
+        return { version: 1, impacts: value };
+      }
+      return value;
+    },
+    as: 'object',
+  });
+
+  const sanitized = sanitizeMeta(meta as StreamUpdateMeta);
+  const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
+
+  return {
+    meta: sanitized,
+    rawComment: markdown.slice(hit.start, hit.end),
+    strippedMarkdown,
+  };
+}
+
+const sanitizeTelemetryMeta = (meta: StreamTelemetryMeta): NormalizedStreamTelemetryMeta => {
+  const out: NormalizedStreamTelemetryMeta = { ...(meta as any) };
+  if (out.usage != null && !isRecord(out.usage)) {
+    delete out.usage;
+  }
+
+  if (out.usage && isRecord(out.usage)) {
+    const readNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : null);
+    const usageRecord = out.usage as Record<string, unknown>;
+    const normalizedUsage = {
+      ...(readNumber(usageRecord.promptTokens) !== null ? { promptTokens: readNumber(usageRecord.promptTokens) } : {}),
+      ...(readNumber(usageRecord.reasoningTokens) !== null ? { reasoningTokens: readNumber(usageRecord.reasoningTokens) } : {}),
+      ...(readNumber(usageRecord.completionTokens) !== null ? { completionTokens: readNumber(usageRecord.completionTokens) } : {}),
+      ...(readNumber(usageRecord.totalTokens) !== null ? { totalTokens: readNumber(usageRecord.totalTokens) } : {}),
+      ...(readNumber(usageRecord.cachedTokens) !== null ? { cachedTokens: readNumber(usageRecord.cachedTokens) } : {}),
+    };
+    out.usage = normalizedUsage;
+    if (Object.keys(normalizedUsage).length === 0) delete out.usage;
+  }
+
+  if (typeof out.narrativeHistoryReadCount === 'number') {
+    const fixed = Number.isFinite(out.narrativeHistoryReadCount) ? Math.max(0, Math.floor(out.narrativeHistoryReadCount)) : null;
+    if (fixed === null) delete out.narrativeHistoryReadCount;
+    else out.narrativeHistoryReadCount = fixed;
+  }
+
+  return out;
+};
+
+export async function extractStreamTelemetryMeta(markdown: string): Promise<ExtractedStreamTelemetryMeta | null> {
+  if (typeof markdown !== 'string' || !markdown.trim()) return null;
+
+  const hit = findLastStreamMetaBlock(markdown, ['MAHOSHOJO_TELEMETRY_META']);
+  if (!hit) return null;
+
+  const candidate = extractBestJsonCandidate(hit.inner);
+  const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
+  const rawComment = markdown.slice(hit.start, hit.end);
+
+  // telemetry 注释是程序自动追加的：即便 JSON 无法解析，也应优先剥离，避免“系统专用内容”漏出到 UI。
+  if (!candidate) {
+    return {
+      meta: {},
+      rawComment,
+      strippedMarkdown,
+    };
+  }
+
+  try {
+    const meta = await repairNormalizeValidate({
+      input: candidate,
+      schema: StreamTelemetryMetaSchema,
+      unwrapCandidates: ['meta', 'data', 'payload', 'result', 'value'],
+      textFieldCandidates: ['json', 'text', 'raw', 'content', 'body'],
+      coerce: { wrapSingleToArray: true, emptyStringToUndefined: true },
+      as: 'object',
+    });
+
+    const sanitized = sanitizeTelemetryMeta(meta as StreamTelemetryMeta);
+    return {
+      meta: sanitized,
+      rawComment,
+      strippedMarkdown,
+    };
+  } catch {
+    return {
+      meta: {},
+      rawComment,
+      strippedMarkdown,
+    };
+  }
+}

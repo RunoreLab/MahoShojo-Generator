@@ -14,6 +14,8 @@ export const BattleSettingsSchema = z.object({
   writeArenaHistory: z.boolean(),
   readCurrentState: z.boolean(),
   writeCurrentState: z.boolean(),
+  readNarrativeHistory: z.boolean(),
+  writeNarrativeHistory: z.boolean(),
 });
 
 export const StoryPreferencesSchema = z.object({

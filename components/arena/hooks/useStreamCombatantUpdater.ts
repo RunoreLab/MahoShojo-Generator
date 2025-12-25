@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { getLogger } from '@/lib/logger';
+import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, CombatantData } from '../types';
 
@@ -27,6 +28,88 @@ interface UpdateCombatantsPayload {
   writeCurrentState?: boolean;
 }
 
+const normalizeRosterNames = (combatants: CombatantData[]): string[] => {
+  const names = combatants
+    .map((c) => (c?.data?.codename || c?.data?.name || '').toString().trim())
+    .filter(Boolean);
+  return Array.from(new Set(names));
+};
+
+const normalizeNameToken = (name: string): string => {
+  return name
+    .trim()
+    .replace(/^[“”"'「」『』《》【】\[\]（）()]+|[“”"'「」『』《》【】\[\]（）()]+$/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+};
+
+const truncateByCodePoints = (text: string, maxChars: number): string => {
+  const safeMax = Math.max(0, Math.floor(maxChars));
+  if (safeMax <= 0) return '';
+  const arr = Array.from(text);
+  if (arr.length <= safeMax) return text;
+  return `${arr.slice(0, safeMax).join('')}…`;
+};
+
+const matchRosterName = (candidate: string, rosterNames: string[]): string | null => {
+  const c = normalizeNameToken(candidate);
+  if (!c) return null;
+
+  const exact = rosterNames.find((n) => normalizeNameToken(n) === c);
+  if (exact) return exact;
+
+  const includesHits = rosterNames.filter((n) => {
+    const token = normalizeNameToken(n);
+    return token.includes(c) || c.includes(token);
+  });
+
+  if (includesHits.length === 1) return includesHits[0];
+  return null;
+};
+
+const normalizeImpactsForRoster = (
+  impacts: UpdateCombatantsPayload['impacts'] | undefined,
+  combatants: CombatantData[],
+  settings: { writeArenaHistory: boolean; writeCurrentState: boolean }
+): UpdateCombatantsPayload['impacts'] | undefined => {
+  if (!Array.isArray(impacts) || impacts.length === 0) return undefined;
+
+  const rosterNames = normalizeRosterNames(combatants);
+  if (rosterNames.length === 0) return undefined;
+
+  const byName = new Map<string, { characterName: string; impact?: string; currentStateSummary?: string }>();
+  for (const raw of impacts) {
+    const rawName = typeof raw?.characterName === 'string' ? raw.characterName.trim() : '';
+    const matched = rawName ? matchRosterName(rawName, rosterNames) : null;
+    if (!matched || byName.has(matched)) continue;
+
+    const impact = typeof raw?.impact === 'string' ? truncateByCodePoints(raw.impact.trim(), 2000) : undefined;
+    const currentStateSummary =
+      typeof raw?.currentStateSummary === 'string'
+        ? truncateByCodePoints(raw.currentStateSummary.trim(), 2000)
+        : undefined;
+
+    // 不在前端伪造内容：缺失字段就留空，交给服务端默认值/跳过写入策略处理。
+    byName.set(matched, {
+      characterName: matched,
+      ...(settings.writeArenaHistory && impact ? { impact } : {}),
+      ...(settings.writeCurrentState && currentStateSummary ? { currentStateSummary } : {}),
+    });
+  }
+
+  const normalized = Array.from(byName.values());
+  const missing = rosterNames.filter((n) => !byName.has(n));
+  if (missing.length > 0) {
+    log.warn('流式元数据 impacts 覆盖不完整，将仅对已匹配角色尝试更新', {
+      missing,
+      receivedCount: impacts.length,
+      normalizedCount: normalized.length,
+    });
+  }
+
+  return normalized.length > 0 ? normalized : undefined;
+};
+
 /**
  * 从流式生成的 Markdown 中提取战报信息
  *
@@ -37,8 +120,9 @@ const parseMarkdownReport = (markdown: string, mode: string): { headline: string
     const normalized = markdown.replace(/\r\n/g, '\n');
     const lines = normalized.split('\n');
 
-    // 提取第一个一级标题作为 headline（兼容 "#标题" / "# 标题"）
-    const headlineMatch = normalized.match(/^#\s*(.+)$/m);
+    // 提取第一个标题作为 headline（兼容 "#标题" / "# 标题" / "## 标题"）
+    // 说明：流式输出偶尔会出现标题层级偏移（例如误输出为 ##），这里做容错以提升可用性。
+    const headlineMatch = normalized.match(/^#{1,3}\s*(.+)$/m);
     const headline = headlineMatch?.[1]?.trim() || '魔法少女速报';
 
     const stripMarkdown = (text: string): string =>
@@ -104,9 +188,9 @@ const getValidatedMarkdownReport = (
   mode: string
 ): { headline: string; winner: string } | null => {
   const trimmed = markdown.trim();
-  if (!trimmed || trimmed === '#') return null;
+  if (!trimmed) return null;
   if (trimmed.length < 120) return null;
-  if (!/^#{2,6}\s+/m.test(markdown)) return null;
+  if (!/^#{2,6}\s*/m.test(markdown)) return null;
 
   const parsed = parseMarkdownReport(markdown, mode);
   if (!parsed) return null;
@@ -204,11 +288,42 @@ export const useStreamCombatantUpdater = () => {
         writeArenaHistory: boolean;
         writeCurrentState: boolean;
       },
-      scenario?: any
+      scenario?: any,
+      metaOverride?: {
+        report?: { headline?: string; winner?: string };
+        impacts?: UpdateCombatantsPayload['impacts'];
+      }
     ) => {
       const parsed = getValidatedMarkdownReport(markdown, mode);
-      if (!parsed) {
-        throw new Error('战报内容不完整，已取消角色更新（请等待战报完整生成后重试）。');
+
+      const fallbackHeadline =
+        (typeof metaOverride?.report?.headline === 'string' ? metaOverride.report.headline.trim() : '') ||
+        extractHeadlineFromMarkdown(markdown) ||
+        '';
+      const fallbackWinner =
+        (typeof metaOverride?.report?.winner === 'string' ? metaOverride.report.winner.trim() : '') ||
+        extractWinnerFromText(markdown) ||
+        '';
+
+      const headline = (parsed?.headline || fallbackHeadline).trim();
+      const winner = (parsed?.winner || fallbackWinner).trim();
+
+      const impactsOverride = normalizeImpactsForRoster(metaOverride?.impacts, combatants, settings);
+
+      // 写入历战记录时，headline/winner 必须有效，否则服务端会拒绝写入。
+      // 若只写当前状态，则允许使用兜底值继续尝试，避免“能更新但被校验拦住”。
+      if (settings.writeArenaHistory) {
+        if (!headline || headline === '魔法少女速报') {
+          throw new Error('战报标题缺失或无效，已取消角色更新（请等待战报完整生成后重试）。');
+        }
+        if (!winner || winner === '未知') {
+          throw new Error('胜利者信息缺失或无效，已取消角色更新（请等待战报完整生成后重试）。');
+        }
+      } else {
+        // 仅写当前状态时，尽量不要因为标题/胜利者解析失败而直接放弃
+        if (!headline) {
+          // 不强制，留给服务端作为无关字段使用
+        }
       }
 
       const payload: UpdateCombatantsPayload = {
@@ -219,12 +334,13 @@ export const useStreamCombatantUpdater = () => {
           isPreset: c.isPreset,
         })),
         report: {
-          headline: parsed.headline,
+          headline: headline || '魔法少女速报',
           mode: mode,
           officialReport: {
-            winner: parsed.winner,
+            winner: winner || '未知',
           },
         },
+        ...(Array.isArray(impactsOverride) && impactsOverride.length > 0 ? { impacts: impactsOverride } : {}),
         userGuidance: settings.userGuidance || null,
         scenario: scenario || null,
         writeArenaHistory: settings.writeArenaHistory,

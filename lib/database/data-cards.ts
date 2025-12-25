@@ -3,7 +3,7 @@ import { queryFromD1, generateUUID } from './core';
 // 检查公开数据卡是否存在同名
 export async function checkPublicCardNameExists(
   name: string,
-  type: 'character' | 'scenario'
+  type: 'character' | 'scenario' | 'history'
 ): Promise<boolean> {
   try {
     const result = await queryFromD1(
@@ -25,7 +25,7 @@ export async function checkPublicCardNameExists(
 export async function createDataCardWithAuthor(
   userId: number,
   username: string,
-  type: 'character' | 'scenario',
+  type: 'character' | 'scenario' | 'history',
   name: string,
   description: string,
   data: string,
@@ -70,7 +70,7 @@ export async function createDataCardWithAuthor(
 // 创建数据卡（基础版，向后兼容）
 export async function createDataCard(
   userId: number,
-  type: 'character' | 'scenario',
+  type: 'character' | 'scenario' | 'history',
   name: string,
   description: string,
   data: string,
@@ -467,7 +467,7 @@ export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
 export async function getPublicDataCards(
   limit: number = 20,
   offset: number = 0,
-  type?: 'character' | 'scenario',
+  type?: 'character' | 'scenario' | 'history',
   search?: string,
   sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
   author?: string,
@@ -565,14 +565,56 @@ export async function getPublicDataCards(
  * @returns {Promise<any | null>} 返回一个随机的数据卡对象，如果没有符合条件的则返回 null。
  */
 export async function getRandomPublicCard(
-  type: 'character' | 'scenario'
+  type: 'character' | 'scenario' | 'history',
+  options?: {
+    minLikeCount?: number | null;
+    maxLikeCount?: number | null;
+    minUsageCount?: number | null;
+    maxUsageCount?: number | null;
+    minFavoriteCount?: number | null;
+    maxFavoriteCount?: number | null;
+  }
 ): Promise<any | null> {
   try {
     // D1 数据库支持 RANDOM() 函数，这使得随机选择非常高效。
-    const result = await queryFromD1(
-      "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' AND dc.deleted_at IS NULL ORDER BY RANDOM() LIMIT 1",
-      [type]
-    ) as any;
+    const params: any[] = [type];
+    let sql =
+      "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' AND dc.deleted_at IS NULL";
+
+    const minLike = options?.minLikeCount;
+    const maxLike = options?.maxLikeCount;
+    const minUsage = options?.minUsageCount;
+    const maxUsage = options?.maxUsageCount;
+    const minFav = options?.minFavoriteCount;
+    const maxFav = options?.maxFavoriteCount;
+    if (typeof minLike === 'number' && Number.isFinite(minLike)) {
+      sql += ' AND dc.like_count >= ?';
+      params.push(Math.max(0, Math.floor(minLike)));
+    }
+    if (typeof maxLike === 'number' && Number.isFinite(maxLike)) {
+      sql += ' AND dc.like_count <= ?';
+      params.push(Math.max(0, Math.floor(maxLike)));
+    }
+    if (typeof minUsage === 'number' && Number.isFinite(minUsage)) {
+      sql += ' AND dc.usage_count >= ?';
+      params.push(Math.max(0, Math.floor(minUsage)));
+    }
+    if (typeof maxUsage === 'number' && Number.isFinite(maxUsage)) {
+      sql += ' AND dc.usage_count <= ?';
+      params.push(Math.max(0, Math.floor(maxUsage)));
+    }
+    if (typeof minFav === 'number' && Number.isFinite(minFav)) {
+      sql += ' AND dc.favorite_count >= ?';
+      params.push(Math.max(0, Math.floor(minFav)));
+    }
+    if (typeof maxFav === 'number' && Number.isFinite(maxFav)) {
+      sql += ' AND dc.favorite_count <= ?';
+      params.push(Math.max(0, Math.floor(maxFav)));
+    }
+
+    sql += ' ORDER BY RANDOM() LIMIT 1';
+
+    const result = await queryFromD1(sql, params) as any;
     
     // 检查查询是否成功，以及是否真的返回了结果
     if (result.success && result.result && result.result[0]?.results?.length > 0) {
@@ -585,6 +627,99 @@ export async function getRandomPublicCard(
     console.error("获取随机公开数据卡失败:", error);
     // 在发生错误时也返回 null
     return null;
+  }
+}
+
+/**
+ * [新增] 从数据库中随机获取一个公开的数据卡，并排除指定的 id 列表。
+ * 说明：用于需要“抽取不重复公开卡”的场景（如 PVP 补牌）。
+ */
+export async function getRandomPublicCardExcluding(
+  type: 'character' | 'scenario' | 'history',
+  excludeIds: string[],
+  options?: {
+    minLikeCount?: number | null;
+    maxLikeCount?: number | null;
+    minUsageCount?: number | null;
+    maxUsageCount?: number | null;
+    minFavoriteCount?: number | null;
+    maxFavoriteCount?: number | null;
+  }
+): Promise<any | null> {
+  try {
+    const safeExcludeIds = [...new Set((excludeIds || []).filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))].slice(0, 800);
+    const params: any[] = [type];
+    let sql =
+      "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.type = ? AND dc.review_status = 'approved' AND dc.deleted_at IS NULL";
+
+    const minLike = options?.minLikeCount;
+    const maxLike = options?.maxLikeCount;
+    const minUsage = options?.minUsageCount;
+    const maxUsage = options?.maxUsageCount;
+    const minFav = options?.minFavoriteCount;
+    const maxFav = options?.maxFavoriteCount;
+    if (typeof minLike === 'number' && Number.isFinite(minLike)) {
+      sql += ' AND dc.like_count >= ?';
+      params.push(Math.max(0, Math.floor(minLike)));
+    }
+    if (typeof maxLike === 'number' && Number.isFinite(maxLike)) {
+      sql += ' AND dc.like_count <= ?';
+      params.push(Math.max(0, Math.floor(maxLike)));
+    }
+    if (typeof minUsage === 'number' && Number.isFinite(minUsage)) {
+      sql += ' AND dc.usage_count >= ?';
+      params.push(Math.max(0, Math.floor(minUsage)));
+    }
+    if (typeof maxUsage === 'number' && Number.isFinite(maxUsage)) {
+      sql += ' AND dc.usage_count <= ?';
+      params.push(Math.max(0, Math.floor(maxUsage)));
+    }
+    if (typeof minFav === 'number' && Number.isFinite(minFav)) {
+      sql += ' AND dc.favorite_count >= ?';
+      params.push(Math.max(0, Math.floor(minFav)));
+    }
+    if (typeof maxFav === 'number' && Number.isFinite(maxFav)) {
+      sql += ' AND dc.favorite_count <= ?';
+      params.push(Math.max(0, Math.floor(maxFav)));
+    }
+
+    if (safeExcludeIds.length > 0) {
+      const placeholders = safeExcludeIds.map(() => '?').join(', ');
+      sql += ` AND dc.id NOT IN (${placeholders})`;
+      params.push(...safeExcludeIds);
+    }
+
+    sql += ' ORDER BY RANDOM() LIMIT 1';
+
+    const result = await queryFromD1(sql, params) as any;
+    if (result.success && result.result && result.result[0]?.results?.length > 0) {
+      return result.result[0].results[0];
+    }
+    return null;
+  } catch (error) {
+    console.error("获取随机公开数据卡（排除列表）失败:", error);
+    return null;
+  }
+}
+
+export async function getDataCardStatsByIds(ids: string[]): Promise<Array<{ id: string; is_public: number; usage_count: number; like_count: number; favorite_count: number }>> {
+  try {
+    const safeIds = [...new Set(ids.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))];
+    if (safeIds.length <= 0) return [];
+
+    const placeholders = safeIds.map(() => '?').join(', ');
+    const result = await queryFromD1(
+      `SELECT id, is_public, usage_count, like_count, favorite_count FROM data_cards WHERE id IN (${placeholders})`,
+      safeIds
+    ) as any;
+
+    if (result.success && result.result && result.result[0]?.results) {
+      return result.result[0].results as Array<{ id: string; is_public: number; usage_count: number; like_count: number; favorite_count: number }>;
+    }
+    return [];
+  } catch (error) {
+    console.error("批量读取数据卡统计失败:", error);
+    return [];
   }
 }
 

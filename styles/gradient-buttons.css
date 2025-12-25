@@ -54,10 +54,12 @@
 }
 
 .feature-button {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: relative;
   border-radius: 20px;
-  padding: 2rem;
+  padding: 1.5rem;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
   /* 添加回模糊效果，但使用性能更好的方式 */
   backdrop-filter: blur(5px);
@@ -117,6 +119,10 @@
       #9775fa 100%);
 }
 
+.battle-arena {
+  padding: 3em 0 3em 0;
+}
+
 .battle-arena .gradient-overlay {
   background: linear-gradient(45deg,
       #434343 0%,
@@ -142,6 +148,16 @@
       #7DD3C0 50%,
       #8FE5B7 75%,
       #A8E6C1 100%);
+}
+
+.card-duel .gradient-overlay {
+  /* 优化版：柔和的蓝到粉渐变，中间偏白，适合深色前景 */
+  background: linear-gradient(45deg,
+      #dbeafe 0%,
+      #e0f2fe 25%,
+      #fefefe 50%,
+      #fce7f3 75%,
+      #fbcfe8 100%);
 }
 
 .sublimation .gradient-overlay {
@@ -186,7 +202,6 @@
   align-items: center;
   text-align: center;
   border-radius: 16px;
-  padding: 1.5rem;
 }
 
 .feature-title-container {
@@ -196,6 +211,8 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  display: flex;
+  align-items: center;
 }
 
 .magical-generator .feature-title-container {
@@ -269,7 +286,6 @@
 /* 响应式设计 */
 @media (max-width: 600px) {
   .feature-button {
-    padding: 0.5rem;
     /* 移动端减少transform效果 */
     will-change: auto;
   }
@@ -284,11 +300,6 @@
 
   .feature-title-container {
     font-size: 1.25rem;
-  }
-
-  .feature-title-svg {
-    width: 200px;
-    height: auto;
   }
 
   .feature-description {

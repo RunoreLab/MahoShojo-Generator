@@ -41,6 +41,9 @@ export {
   permanentlyDeleteDataCards,
   verifyCardOwnership,
   getPublicDataCards,
+  getRandomPublicCard,
+  getRandomPublicCardExcluding,
+  getDataCardStatsByIds,
   getDataCardById,
   incrementDataCardLike,
   incrementDataCardUsage
@@ -54,6 +57,34 @@ export {
   getUserFavoriteIds
 } from './database/favorites';
 
+// 重新导出卡组相关功能
+export {
+  countUserDecks,
+  createDeck,
+  getUserDecks,
+  getPublicDecks,
+  getDeckById,
+  updateDeck,
+  deleteDeck,
+  incrementDeckLike,
+  isDeckBanned,
+  getDeckStatus,
+} from './database/decks';
+
+export {
+  getDeckCardsWithAccess,
+  addCardsToDeck,
+  removeCardsFromDeck,
+  pruneDeckInaccessibleCards,
+} from './database/deck-cards';
+
+export {
+  addDeckFavorite,
+  removeDeckFavorite,
+  getUserDeckFavorites,
+  getUserDeckFavoriteIds
+} from './database/deck-favorites';
+
 // 重新导出竞技场相关功能
 export {
   getOrCreateCharacter,
@@ -63,18 +94,80 @@ export {
   getRecentBattles
 } from './database/arena';
 
+// 重新导出 PVP 相关功能
+export {
+  createPvpRoom,
+  getPvpRoomById,
+  getPvpRoomBrowseRows,
+  getPvpRoomPlayers,
+  getPvpRoomMembers,
+  addPvpRoomPlayer,
+  removePvpRoomPlayer,
+  updatePvpRoomMember,
+  updatePvpRoomCas,
+  upsertPvpRoomSubmission,
+  getPvpRoomSubmissions,
+  deletePvpRoomSubmission,
+  getPvpEligibleDataCard,
+  getPvpEligibleScenarioDataCard,
+  clearPvpRoomMatchState,
+  clearPvpRoomRuntimeState,
+  upsertPvpRoomHand,
+  deletePvpRoomHand,
+  getPvpRoomHands,
+  createPvpCardSnapshot,
+  getPvpCardSnapshots,
+  createPvpRound,
+  getPvpRoundById,
+  getLatestPvpRoundByRoom,
+  getLatestPvpRoundByMatch,
+  getPvpRoundsByRoom,
+  getPvpRoundsByMatch,
+  updatePvpRound,
+  upsertPvpRoundChoice,
+  getPvpRoundChoices,
+  getPvpCardSnapshotById,
+  createPvpMatch,
+  createPvpMatchPlayers,
+  updatePvpMatch,
+  getPvpMatchById,
+  getPvpRoomChatMessages,
+  getLatestPvpRoomChatMessageBySender,
+  createPvpRoomChatMessage,
+  getPvpMatchesByUserId,
+  getPvpUserSummariesByUserIds,
+  type PvpMatchPlayerRow,
+  type PvpUserSummaryRow,
+  type PvpMatchRow,
+  type PvpMatchStatus,
+  type PvpRoomPhase,
+  type PvpRoomStatus,
+  type PvpRoomMemberRole,
+  type PvpRoundStatus,
+  type PvpRoomRow,
+  type PvpRoomBrowseRow,
+  type PvpRoomPlayerRow,
+  type PvpRoomChatMessageRow,
+  type PvpRoundRow,
+} from './database/pvp';
+
 // 重新导出战报生成记录相关功能
 export {
   createBattleReportGenerationRecord,
   updateBattleReportGenerationExtraJson,
   updateBattleReportGenerationCombatantsWriteResult,
+  getBattleReportGenerationByIdLite,
+  getBattleReportGenerationsByUserIdLite,
   type BattleReportGenerationInsert,
-  type BattleReportGenerationStatus
+  type BattleReportGenerationStatus,
+  type BattleReportGenerationRowLite
 } from './database/battle-report-generations';
 
 export {
   createBattleReportGenerationCombatants,
+  getBattleReportGenerationCombatantsByGenerationId,
   type BattleReportGenerationCombatantInsert,
+  type BattleReportGenerationCombatantRow,
 } from './database/battle-report-generation-combatants';
 
 // 重新导出徽章相关功能

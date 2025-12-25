@@ -6,7 +6,7 @@ import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/c
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
-import { AdjudicationResult } from '@/types/arena';
+import { AdjudicationResult, NarrativeHistoryEntry } from '@/types/arena';
 import { verifySignature, generateSignature } from '@/lib/signature';
 import { getSystemPrompt } from '@/lib/arena/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
@@ -53,6 +53,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	    let snapshotLanguage: string | null = null;
 	    let snapshotSelectedLevel: string | null = null;
 	    let snapshotStoryLength: string | null = null;
+	    let snapshotPvpRoomId: string | null = null;
+	    let snapshotPvpMatchId: string | null = null;
+	    let snapshotPvpRoundId: string | null = null;
 
 	    try {
 	        const body = await req.json();
@@ -61,6 +64,7 @@ async function handler(req: NextRequest): Promise<Response> {
             selectedLevel,
             mode = 'classic',
             userGuidance,
+            internalGuidance,
             scenario,
             teams,
             language = 'zh-CN',
@@ -70,18 +74,43 @@ async function handler(req: NextRequest): Promise<Response> {
             writeArenaHistory,
             readCurrentState,
             writeCurrentState,
+            readNarrativeHistory,
+            narrativeHistory,
             adjudicationEvents,
             storyLength,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioSourceDataCardId,
 	            scenarioSourceDataCardUpdatedAt,
+              pvpContext,
+              forceStreamMeta,
 	        } = body;
 
 	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 	        snapshotLanguage = typeof language === 'string' ? language : null;
 	        snapshotSelectedLevel = typeof selectedLevel === 'string' ? selectedLevel : null;
 	        snapshotStoryLength = typeof storyLength === 'string' ? storyLength : null;
+
+          const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
+              if (!value || typeof value !== 'object') return null;
+              const roomId = typeof (value as any).roomId === 'string' ? (value as any).roomId.trim() : '';
+              const matchId = typeof (value as any).matchId === 'string' ? (value as any).matchId.trim() : '';
+              const roundId = typeof (value as any).roundId === 'string' ? (value as any).roundId.trim() : '';
+              if (!roomId || !matchId || !roundId) return null;
+              if (roomId.length > 128 || matchId.length > 128 || roundId.length > 128) return null;
+              return { roomId, matchId, roundId };
+          };
+          const parsedPvpContext = pvpContext !== undefined ? parsePvpContext(pvpContext) : null;
+          if (pvpContext !== undefined && !parsedPvpContext) {
+              return new Response(JSON.stringify({ error: 'pvpContext 无效' }), { status: 400 });
+          }
+          snapshotPvpRoomId = parsedPvpContext?.roomId ?? null;
+          snapshotPvpMatchId = parsedPvpContext?.matchId ?? null;
+          snapshotPvpRoundId = parsedPvpContext?.roundId ?? null;
+
+          const finalInternalGuidance =
+              typeof internalGuidance === 'string' ? internalGuidance.trim().slice(0, 4000) : null;
+          const shouldForceStreamMeta = forceStreamMeta === true;
 
         const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
             ? readArenaHistory
@@ -91,6 +120,7 @@ async function handler(req: NextRequest): Promise<Response> {
             : (typeof useArenaHistory === 'boolean' ? useArenaHistory : true);
         const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
         const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
+        const resolvedReadNarrativeHistory = typeof readNarrativeHistory === 'boolean' ? readNarrativeHistory : false;
         const resolvedHistoryReadLimit = resolvedReadArenaHistory
             ? (() => {
                 if (arenaHistoryReadLimit === null) return Infinity;
@@ -100,6 +130,36 @@ async function handler(req: NextRequest): Promise<Response> {
                 return 3;
             })()
             : 0;
+
+        const normalizeNarrativeHistoryForPrompt = (input: unknown): NarrativeHistoryEntry[] => {
+            if (!Array.isArray(input)) return [];
+            return input
+                .map((entry) => {
+                    if (!entry || typeof entry !== 'object') return null;
+                    const rawTitle = typeof (entry as any).title === 'string' ? (entry as any).title.trim() : '';
+                    const rawContent = typeof (entry as any).content === 'string' ? (entry as any).content.trim() : '';
+                    if (!rawContent) return null;
+                    const createdAt = typeof (entry as any).createdAt === 'string'
+                        ? (entry as any).createdAt
+                        : (typeof (entry as any).created_at === 'string' ? (entry as any).created_at : new Date(0).toISOString());
+                    const updatedAt = typeof (entry as any).updatedAt === 'string'
+                        ? (entry as any).updatedAt
+                        : (typeof (entry as any).updated_at === 'string' ? (entry as any).updated_at : createdAt);
+                    return {
+                        id: typeof (entry as any).id === 'string' ? (entry as any).id : `${createdAt}:${rawTitle}`,
+                        title: rawTitle || '未命名战报',
+                        content: rawContent,
+                        createdAt,
+                        updatedAt,
+                    } satisfies NarrativeHistoryEntry;
+                })
+                .filter((item): item is NarrativeHistoryEntry => Boolean(item));
+        };
+
+        const narrativeHistoryForPrompt: NarrativeHistoryEntry[] | null = resolvedReadNarrativeHistory
+            ? normalizeNarrativeHistoryForPrompt(narrativeHistory)
+            : null;
+        const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 
         let customProviderOverride: AIProvider | null = null;
         let customProviderId: string | null = null;
@@ -186,6 +246,14 @@ async function handler(req: NextRequest): Promise<Response> {
         if (finalUserGuidance) {
             inputsToCheck.push({ type: 'userGuidance', content: finalUserGuidance, isNative: false });
         }
+        if (resolvedReadNarrativeHistory && narrativeHistoryForPrompt && narrativeHistoryForPrompt.length > 0) {
+            const narrativeText = narrativeHistoryForPrompt
+                .map((entry) => `# ${entry.title}\n${entry.content}`.trim())
+                .join('\n\n');
+            if (narrativeText) {
+                inputsToCheck.push({ type: 'userGuidance', content: narrativeText, isNative: false });
+            }
+        }
         if (scenario) {
             const isNative = await verifySignature(scenario);
             inputsToCheck.push({ type: 'scenario', content: JSON.stringify(scenario), isNative });
@@ -254,6 +322,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            language: snapshotLanguage,
 	                            selectedLevel: snapshotSelectedLevel,
 	                            storyLength: snapshotStoryLength,
+	                            pvpRoomId: snapshotPvpRoomId,
+	                            pvpMatchId: snapshotPvpMatchId,
+	                            pvpRoundId: snapshotPvpRoundId,
 	                            readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
 	                            arenaHistoryReadLimit: resolvedReadArenaHistory
 	                                ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
@@ -301,6 +372,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const prompt = createStreamPromptBuilder(
             questionnaire.questions,
             finalUserGuidance,
+            finalInternalGuidance,
             needsWorldviewWarning,
             language,
             selectedLevel,
@@ -310,9 +382,12 @@ async function handler(req: NextRequest): Promise<Response> {
             resolvedReadArenaHistory,
             resolvedHistoryReadLimit,
             resolvedReadCurrentState,
+            resolvedWriteArenaHistory,
             resolvedWriteCurrentState,
+            shouldForceStreamMeta,
             adjudicationResults,
             storyLength,
+            narrativeHistoryForPrompt,
         )({ combatants });
 
         const generationConfig: RawGenerationConfig = {
@@ -327,6 +402,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const streamResult = await generateWithStreamAI(generationConfig, aiOptions);
         const streamResponse = streamResult.response;
         const usagePromise = streamResult.usagePromise;
+        const resolvedUsagePromise = (async () => normalizeUsage(await usagePromise?.catch(() => null)))();
 
         log.info('✅ 流式响应已生成，准备返回');
 
@@ -408,7 +484,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
             const recordPromise = (async () => {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
-                const usage = normalizeUsage(await usagePromise?.catch(() => null));
+                const usage = await resolvedUsagePromise;
 
                 const shieldResult = applyShieldWords(outputPreview);
                 const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
@@ -449,6 +525,9 @@ async function handler(req: NextRequest): Promise<Response> {
                     language: typeof language === 'string' ? language : null,
                     selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
                     storyLength: typeof storyLength === 'string' ? storyLength : null,
+                    pvpRoomId: snapshotPvpRoomId,
+                    pvpMatchId: snapshotPvpMatchId,
+                    pvpRoundId: snapshotPvpRoundId,
                     readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                     arenaHistoryReadLimit: resolvedReadArenaHistory
                         ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
@@ -551,6 +630,45 @@ async function handler(req: NextRequest): Promise<Response> {
                     const { done, value } = await reader.read();
                     if (done) {
                         appendText(decoder.decode());
+
+                        // 在流式末尾追加一段系统 telemetry 注释，用于前端展示 token 与叙事历史读取条数。
+                        const usageForTelemetry = await Promise.race([
+                            resolvedUsagePromise,
+                            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+                        ]);
+                        const shouldIncludeTelemetry =
+                            (usageForTelemetry != null &&
+                                (typeof usageForTelemetry.promptTokens === 'number' ||
+                                    typeof usageForTelemetry.completionTokens === 'number' ||
+                                    typeof usageForTelemetry.reasoningTokens === 'number')) ||
+                            typeof narrativeHistoryReadCount === 'number';
+
+                        if (shouldIncludeTelemetry) {
+                            const telemetryPayload = {
+                                version: 1,
+                                ...(usageForTelemetry
+                                    ? {
+                                        usage: {
+                                            promptTokens: usageForTelemetry.promptTokens ?? null,
+                                            reasoningTokens: usageForTelemetry.reasoningTokens ?? null,
+                                            completionTokens: usageForTelemetry.completionTokens ?? null,
+                                            totalTokens: usageForTelemetry.totalTokens ?? null,
+                                            cachedTokens: usageForTelemetry.cachedTokens ?? null,
+                                        },
+                                    }
+                                    : {}),
+                                ...(typeof narrativeHistoryReadCount === 'number'
+                                    ? { narrativeHistoryReadCount }
+                                    : {}),
+                            };
+
+                            const telemetryComment = `\n\n<!-- MAHOSHOJO_TELEMETRY_META ${JSON.stringify(telemetryPayload)} -->\n`;
+                            const encoded = new TextEncoder().encode(telemetryComment);
+                            outputBytes += encoded.byteLength;
+                            appendText(telemetryComment);
+                            controller.enqueue(encoded);
+                        }
+
                         await finalizeOnce('completed');
                         controller.close();
                         return;
@@ -616,6 +734,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    language: snapshotLanguage,
 	                    selectedLevel: snapshotSelectedLevel,
 	                    storyLength: snapshotStoryLength,
+	                    pvpRoomId: snapshotPvpRoomId,
+	                    pvpMatchId: snapshotPvpMatchId,
+	                    pvpRoundId: snapshotPvpRoundId,
 	                    extraJson: {
 	                        errorMessage,
 	                        stage: 'top-level-catch',

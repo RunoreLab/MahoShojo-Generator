@@ -21,6 +21,17 @@ interface StreamingBattleReportCardProps {
     userGuidance?: string | null;
     /** 本次生成时的随机判定结果 */
     adjudicationResults?: AdjudicationResult[] | null;
+    /** AI 生成 token 统计（输入/推理/输出），可选。 */
+    aiUsage?: {
+        promptTokens?: number | null;
+        reasoningTokens?: number | null;
+        completionTokens?: number | null;
+        totalTokens?: number | null;
+        cachedTokens?: number | null;
+        [key: string]: unknown;
+    } | null;
+    /** 读取叙事历史条数：仅在开启 readNarrativeHistory 时传入（没开就不显示）。 */
+    narrativeHistoryReadCount?: number | null;
     /** 是否正在生成中（可选，用于显示加载光标等） */
     isStreaming?: boolean;
 }
@@ -33,11 +44,13 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     reporterInfo = null,
     userGuidance = null,
     adjudicationResults = null,
+    aiUsage = null,
+    narrativeHistoryReadCount = null,
     isStreaming = false
 }) => {
     const cardRef = useRef<HTMLDivElement>(null);
     const [isSavingImage, setIsSavingImage] = useState(false);
-    const headlineMatch = content.match(/^\s*#\s*(.*)(?:\r?\n|$)/);
+    const headlineMatch = content.match(/^\s*#{1,3}\s*(.*)(?:\r?\n|$)/);
     const headline = headlineMatch ? headlineMatch[1].trim() : '';
     const markdownBody = headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content;
 
@@ -57,6 +70,17 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     };
 
     const modeDisplay = mode ? getModeDisplay(mode) : null;
+    const hasAnyTokenNumber =
+        aiUsage != null &&
+        [aiUsage.promptTokens, aiUsage.reasoningTokens, aiUsage.completionTokens].some(
+            (value) => typeof value === 'number' && Number.isFinite(value)
+        );
+    const shouldShowNarrativeReadCount = typeof narrativeHistoryReadCount === 'number';
+
+    const formatToken = (value: unknown): string => {
+        if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+        return value.toLocaleString();
+    };
 
     const buildExportMarkdown = (): string => {
         const metaLines: string[] = [];
@@ -71,7 +95,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
         const insertMetaAfterTitle = (raw: string): string => {
             if (!metaBlock) return raw;
-            const match = raw.match(/^\s*#\s*.*(?:\r?\n|$)/);
+            const match = raw.match(/^\s*#{1,3}\s*.*(?:\r?\n|$)/);
             if (!match) {
                 return `# 战斗战报\n${metaBlock}\n${raw}`.trim();
             }
@@ -116,7 +140,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             if (buttonsContainer) buttonsContainer.style.display = 'none';
             if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-            const titleMatch = content.match(/^#\s*(.+)$/m);
+            const titleMatch = content.match(/^#{1,3}\s*(.+)$/m);
             const title = titleMatch ? titleMatch[1] : '战斗战报';
             const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
             const filename = `魔法少女速报_${sanitizedTitle}.png`;
@@ -164,7 +188,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
         const link = document.createElement('a');
         link.href = url;
 
-        const titleMatch = exportMarkdown.match(/^#\s*(.+)$/m);
+        const titleMatch = exportMarkdown.match(/^#{1,3}\s*(.+)$/m);
         const title = titleMatch ? titleMatch[1] : '战斗战报';
         const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
 
@@ -310,12 +334,28 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
                 {headline && <h2 className="text-xl font-bold mb-2 mt-2 px-1">{headline}</h2>}
 
-                {reporterInfo?.name && reporterInfo?.publication && (
+                {(reporterInfo?.name && reporterInfo?.publication) || hasAnyTokenNumber || shouldShowNarrativeReadCount ? (
                     <div className="px-1 mb-4 text-sm text-gray-300">
-                        <p>记者 | {reporterInfo.name}</p>
-                        <p>来源 | {reporterInfo.publication}</p>
+                        {reporterInfo?.name && reporterInfo?.publication && (
+                            <>
+                                <p>记者 | {reporterInfo.name}</p>
+                                <p>来源 | {reporterInfo.publication}</p>
+                            </>
+                        )}
+                        {(hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
+                            <p className="text-xs text-gray-400 mt-1">
+                                {hasAnyTokenNumber && (
+                                    <>
+                                        tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}
+                                        {formatToken(aiUsage?.completionTokens)}
+                                    </>
+                                )}
+                                {hasAnyTokenNumber && shouldShowNarrativeReadCount ? ' · ' : ''}
+                                {shouldShowNarrativeReadCount && <>叙事历史读取：{narrativeHistoryReadCount} 条</>}
+                            </p>
+                        )}
                     </div>
-                )}
+                ) : null}
 
                 {/* Markdown 内容渲染区域 */}
                 <div className="min-h-[200px]">

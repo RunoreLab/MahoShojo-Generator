@@ -1,47 +1,9 @@
 // components/MagicalGirlCard.tsx
 import React, { useRef, useState } from 'react';
 import { snapdom } from '@zumer/snapdom';
-import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState, CurrentStateField } from '@/types/arena';
-
-const formatCurrentStateValue = (field: CurrentStateField) => {
-  if (field.type === 'boolean') {
-    return field.value ? '是' : '否';
-  }
-  if (field.type === 'number') {
-    return typeof field.value === 'number' ? field.value : Number(field.value) || 0;
-  }
-  return String(field.value ?? '');
-};
-
-const renderCurrentStatePanel = (state?: CharacterCurrentState | null) => {
-  if (!state) return null;
-  const hasSummary = Boolean(state.summary && state.summary.trim());
-  const fields = Array.isArray(state.fields) ? state.fields : [];
-  const hasFields = fields.length > 0;
-  if (!hasSummary && !hasFields) return null;
-
-  return (
-    <div className="result-item">
-      <div className="result-label">🧭 当前状态</div>
-      <div className="result-value text-sm space-y-2">
-        {hasSummary && <p className="leading-relaxed">{state.summary}</p>}
-        {hasFields && (
-          <ul className="text-xs space-y-1">
-            {fields.map(field => (
-              <li key={field.id} className="flex justify-between gap-2">
-                <span className="font-semibold text-gray-700">{field.label}</span>
-                <span className="text-gray-900">{formatCurrentStateValue(field)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {state.updated_at && (
-          <p className="text-[10px] text-gray-400">最近更新：{new Date(state.updated_at).toLocaleString()}</p>
-        )}
-      </div>
-    </div>
-  );
-};
+import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
+import { CurrentStatePanel } from '@/components/CurrentStatePanel';
+import { MarkdownBlock } from '@/components/MarkdownBlock';
 
 interface MagicalGirlCardProps {
   magicalGirl: {
@@ -139,6 +101,17 @@ const renderInlineValue = (value: unknown): string => {
     }
   }
   return String(value);
+};
+
+const FieldRow = ({ label, content }: { label: string; content: string }) => {
+  return (
+    <div className="flex items-start gap-2 min-w-0">
+      <div className="shrink-0 font-semibold">{label}：</div>
+      <div className="min-w-0 flex-1">
+        <MarkdownBlock content={content} variant="dark" />
+      </div>
+    </div>
+  );
 };
 
 const renderAbilityItem = (ability: string | Record<string, unknown>, index: number) => {
@@ -283,56 +256,71 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         {/* 基本信息 */}
         <div className="result-item">
           <div className="result-label">💝 魔法少女代号</div>
-          <div className="result-value">{magicalGirl.codename}</div>
+          <div className="result-value whitespace-pre-wrap break-words">{magicalGirl.codename}</div>
         </div>
 
         {/* 外观描述 */}
         <div className="result-item">
           <div className="result-label">👗 魔法少女外观</div>
-          <div className="result-value">
-            <div><strong>服装：</strong>{magicalGirl.appearance.outfit}</div>
-            <div><strong>饰品：</strong>{magicalGirl.appearance.accessories}</div>
-            <div><strong>配色：</strong>{magicalGirl.appearance.colorScheme}</div>
-            <div><strong>整体风格：</strong>{magicalGirl.appearance.overallLook}</div>
+          <div className="result-value whitespace-pre-wrap break-words">
+            <div className="space-y-1">
+              <FieldRow label="服装" content={magicalGirl.appearance.outfit} />
+              <FieldRow label="饰品" content={magicalGirl.appearance.accessories} />
+              <FieldRow label="配色" content={magicalGirl.appearance.colorScheme} />
+              <FieldRow label="整体风格" content={magicalGirl.appearance.overallLook} />
+            </div>
           </div>
         </div>
 
         {/* 魔力构装 */}
         <div className="result-item">
           <div className="result-label">⚔️ 魔力构装</div>
-          <div className="result-value">
-            <div><strong>名称：</strong>{magicalGirl.magicConstruct.name}</div>
-            <div><strong>形态：</strong>{renderComplexValue(magicalGirl.magicConstruct.form)}</div>
+          <div className="result-value whitespace-pre-wrap break-words">
+            <div className="space-y-1">
+              <FieldRow label="名称" content={magicalGirl.magicConstruct.name} />
+              <div className="flex items-start gap-2 min-w-0">
+                <div className="shrink-0 font-semibold">形态：</div>
+                <div className="min-w-0 flex-1">{renderComplexValue(magicalGirl.magicConstruct.form)}</div>
+              </div>
+            </div>
             <div><strong>基本能力：</strong></div>
             {Array.isArray(magicalGirl.magicConstruct.basicAbilities) ? (
               <ul style={{ marginLeft: '1rem', marginTop: '0.5rem' }}>
                 {magicalGirl.magicConstruct.basicAbilities.map((ability, index) => renderAbilityItem(ability, index))}
               </ul>
             ) : (
-              <p className="text-sm" style={{ marginLeft: '0.5rem', marginTop: '0.5rem' }}>
-                {renderInlineValue(magicalGirl.magicConstruct.basicAbilities)}
-              </p>
+              <div className="mt-2 ml-2 text-sm">
+                <MarkdownBlock content={renderInlineValue(magicalGirl.magicConstruct.basicAbilities)} variant="dark" />
+              </div>
             )}
-            <div style={{ marginTop: '0.5rem' }}><strong>详细描述：</strong>{magicalGirl.magicConstruct.description}</div>
+            <div className="mt-2">
+              <div className="font-semibold">详细描述：</div>
+              <MarkdownBlock content={magicalGirl.magicConstruct.description} variant="dark" />
+            </div>
           </div>
         </div>
 
         {/* 奇境规则 */}
         <div className="result-item">
           <div className="result-label">🌟 奇境规则</div>
-          <div className="result-value">
-            <div><strong>规则名称：</strong>{magicalGirl.wonderlandRule.name}</div>
-            <div><strong>规则描述：</strong>{magicalGirl.wonderlandRule.description}</div>
-            <div><strong>规则倾向：</strong>{magicalGirl.wonderlandRule.tendency}</div>
-            <div><strong>激活条件：</strong>{magicalGirl.wonderlandRule.activation}</div>
+          <div className="result-value whitespace-pre-wrap break-words">
+            <div className="space-y-1">
+              <FieldRow label="规则名称" content={magicalGirl.wonderlandRule.name} />
+              <FieldRow label="规则描述" content={magicalGirl.wonderlandRule.description} />
+              <FieldRow label="规则倾向" content={magicalGirl.wonderlandRule.tendency} />
+              <FieldRow label="激活条件" content={magicalGirl.wonderlandRule.activation} />
+            </div>
           </div>
         </div>
 
         {/* 繁开状态 */}
         <div className="result-item">
           <div className="result-label">🌸 繁开状态</div>
-          <div className="result-value">
-            <div><strong>繁开名：</strong>{renderComplexValue(magicalGirl.blooming.name)}</div>
+          <div className="result-value whitespace-pre-wrap break-words">
+            <div className="flex items-start gap-2 min-w-0">
+              <div className="shrink-0 font-semibold">繁开名：</div>
+              <div className="min-w-0 flex-1">{renderComplexValue(magicalGirl.blooming.name)}</div>
+            </div>
             <div><strong>进化能力：</strong></div>
             <ul style={{ marginLeft: '1rem', marginTop: '0.5rem' }}>
               {/*如果 magicalGirl.blooming.evolvedAbilities 是字符串，.map() 会抛出 TypeError。
@@ -342,26 +330,38 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
                 <li key={index}>• {ability}</li>
               ))}
             </ul>
-            <div><strong>进化形态：</strong>{renderComplexValue(magicalGirl.blooming.evolvedForm)}</div>
-            <div><strong>进化衣装：</strong>{magicalGirl.blooming.evolvedOutfit}</div>
-            <div><strong>力量等级：</strong>{magicalGirl.blooming.powerLevel}</div>
+            <div className="mt-2 space-y-1">
+              {typeof magicalGirl.blooming.evolvedForm === 'string' ? (
+                <FieldRow label="进化形态" content={magicalGirl.blooming.evolvedForm} />
+              ) : (
+                <div className="flex items-start gap-2 min-w-0">
+                  <div className="shrink-0 font-semibold">进化形态：</div>
+                  <div className="min-w-0 flex-1">{renderComplexValue(magicalGirl.blooming.evolvedForm)}</div>
+                </div>
+              )}
+              <FieldRow label="进化衣装" content={magicalGirl.blooming.evolvedOutfit} />
+              <FieldRow label="力量等级" content={magicalGirl.blooming.powerLevel} />
+            </div>
           </div>
         </div>
 
         {/* 性格分析 */}
         <div className="result-item">
           <div className="result-label">🔮 性格分析</div>
-          <div className="result-value">
-            <div><strong>性格分析：</strong>{magicalGirl.analysis.personalityAnalysis}</div>
-            <div><strong>能力推理：</strong>{magicalGirl.analysis.abilityReasoning}</div>
-            <div><strong>核心特征：</strong>
-              {/* 使用三元运算符进行判断。如果是数组，则正常 join；如果不是，则直接显示该字符串或不显示，避免错误。
-              */}
-              {Array.isArray(magicalGirl.analysis.coreTraits) 
-                ? magicalGirl.analysis.coreTraits.join('、') 
-                : magicalGirl.analysis.coreTraits}
+          <div className="result-value whitespace-pre-wrap break-words">
+            <div className="space-y-1">
+              <FieldRow label="性格分析" content={magicalGirl.analysis.personalityAnalysis} />
+              <FieldRow label="能力推理" content={magicalGirl.analysis.abilityReasoning} />
+              <FieldRow
+                label="核心特征"
+                content={
+                  Array.isArray(magicalGirl.analysis.coreTraits)
+                    ? magicalGirl.analysis.coreTraits.join('、')
+                    : String(magicalGirl.analysis.coreTraits ?? '')
+                }
+              />
+              <FieldRow label="预测依据" content={magicalGirl.analysis.predictionBasis} />
             </div>
-            <div><strong>预测依据：</strong>{magicalGirl.analysis.predictionBasis}</div>
           </div>
         </div>
 
@@ -369,14 +369,16 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         {magicalGirl.analysis.background && (
           <div className="result-item">
             <div className="result-label">📖 角色背景</div>
-            <div className="result-value">
-              <div><strong>信念：</strong>{magicalGirl.analysis.background.belief}</div>
-              <div style={{ marginTop: '0.5rem' }}><strong>羁绊：</strong>{magicalGirl.analysis.background.bonds}</div>
+            <div className="result-value whitespace-pre-wrap break-words">
+              <div className="space-y-2">
+                <FieldRow label="信念" content={magicalGirl.analysis.background.belief} />
+                <FieldRow label="羁绊" content={magicalGirl.analysis.background.bonds} />
+              </div>
             </div>
           </div>
         )}
 
-        {renderCurrentStatePanel(magicalGirl.current_state)}
+        <CurrentStatePanel state={magicalGirl.current_state} variant="dark" />
 
         {/* --- 历战记录展示区 --- */}
         {/*
@@ -404,7 +406,10 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
                     <div key={entry.id} className="p-2 rounded" style={{ backgroundColor: historyItemBackground }}>
                       <p><strong>{entry.title}</strong></p>
                       <p><strong>类型:</strong> {entry.type} | <strong>胜利者:</strong> {entry.winner}</p>
-                      <p><strong>影响:</strong> {entry.impact}</p>
+                      <div className="mt-1">
+                        <p className="font-semibold">影响:</p>
+                        <MarkdownBlock content={entry.impact || '暂无影响描述'} variant="dark" />
+                      </div>
                     </div>
                   );
                 })}

@@ -70,3 +70,37 @@ export async function createBattleReportGenerationCombatants(
     return { ok: false, errorMessage };
   }
 }
+
+export interface BattleReportGenerationCombatantRow {
+  generation_id: string;
+  sort_index: number;
+  name: string;
+  type: string | null;
+  template_id: string | null;
+  is_native: number | null;
+  is_preset: number | null;
+  team_id: number | null;
+  data_card_id: string | null;
+  data_card_updated_at: string | null;
+  size_chars: number | null;
+  size_bytes: number | null;
+  created_at: string;
+}
+
+export async function getBattleReportGenerationCombatantsByGenerationId(
+  generationId: string
+): Promise<BattleReportGenerationCombatantRow[]> {
+  try {
+    const result = (await queryFromD1(
+      'SELECT * FROM battle_report_generation_combatants WHERE generation_id = ? ORDER BY sort_index ASC',
+      [generationId]
+    )) as any;
+    if (result.success && result.result?.[0]?.results) {
+      return result.result[0].results as BattleReportGenerationCombatantRow[];
+    }
+    return [];
+  } catch (error) {
+    console.error('读取 battle_report_generation_combatants 失败:', error);
+    return [];
+  }
+}

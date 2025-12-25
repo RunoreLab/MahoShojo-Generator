@@ -64,6 +64,8 @@ export interface BattleSettings {
   writeArenaHistory: boolean;
   readCurrentState: boolean;
   writeCurrentState: boolean;
+  readNarrativeHistory: boolean;
+  writeNarrativeHistory: boolean;
   userGuidance: string;
 }
 
@@ -92,6 +94,8 @@ export interface BattleStoreState {
   streamingMarkdown: string | null;
   streamReporterInfo: NewsReport['reporterInfo'] | null;
   streamUserGuidance: string | null;
+  streamAiUsage: NewsReport['aiUsage'] | null;
+  streamNarrativeHistoryReadCount: number | null;
   storyLength: StoryLengthOption;
   selectedLevel: string;
   selectedLanguage: string;
@@ -114,6 +118,8 @@ export interface BattleStoreState {
   setStreamingMarkdown: (markdown: string | null) => void;
   setStreamReporterInfo: (info: NewsReport['reporterInfo'] | null) => void;
   setStreamUserGuidance: (guidance: string | null) => void;
+  setStreamAiUsage: (usage: NewsReport['aiUsage'] | null) => void;
+  setStreamNarrativeHistoryReadCount: (count: number | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setSelectedLevel: (level: string) => void;
   setSelectedLanguage: (language: string) => void;
@@ -122,6 +128,7 @@ export interface BattleStoreState {
   addCombatant: (combatant: Combatant) => void;
   removeCombatant: (identifier: string) => void;
   setCombatants: (combatants: Combatant[]) => void;
+  moveCombatant: (fromIndex: number, toIndex: number) => void;
   clearCombatants: () => void;
   updateCombatantTeam: (filename: string, teamId: number) => void;
 
