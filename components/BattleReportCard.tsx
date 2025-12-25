@@ -55,7 +55,15 @@ interface BattleReportCardProps {
 
 const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody }) => {
   const cardRef = useRef<HTMLDivElement>(null);
-  const bodyContent = liveBody ?? report.article.body;
+
+  const headline = typeof report?.headline === 'string' && report.headline.trim() ? report.headline.trim() : '（无标题）';
+  const reporterName = typeof report?.reporterInfo?.name === 'string' ? report.reporterInfo.name : '';
+  const reporterPublication = typeof report?.reporterInfo?.publication === 'string' ? report.reporterInfo.publication : '';
+  const bodyContent = (liveBody ?? report.article?.body ?? '').trimEnd();
+  const analysisContent = (report.article?.analysis ?? '').trimEnd();
+  const officialWinner = (report.officialReport?.winner ?? '').trim();
+  const officialConclusion = (report.officialReport?.conclusion ?? '').trimEnd();
+
   const aiUsage = report.aiUsage;
   const hasAnyTokenNumber =
     aiUsage != null &&
@@ -80,7 +88,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
   };
 
   const modeDisplay = mode ? getModeDisplay(mode) : null;
-  const showScenarioTitle = mode === 'scenario' && report.scenario;
+  const showScenarioTitle = mode === 'scenario' && typeof report.scenario === 'string' && Boolean(report.scenario.trim());
 
   const formatToken = (value: unknown): string => {
     if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
@@ -121,7 +129,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
         const downloadLink = document.createElement('a');
         downloadLink.href = imageUrl;
         // 使用新闻标题并清理特殊字符作为文件名
-        const sanitizedTitle = report.headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
+        const sanitizedTitle = headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'battle_report';
         downloadLink.download = `魔法少女速报_${sanitizedTitle}.png`;
         document.body.appendChild(downloadLink);
         downloadLink.click();
@@ -155,8 +163,8 @@ ${report.adjudicationResults.map(res => {
         : '';
 
     const markdownContent = `
-# ${report.headline}
-**来源：${report.reporterInfo.publication} | 记者：${report.reporterInfo.name}**
+# ${headline}
+**来源：${reporterPublication || '—'} | 记者：${reporterName || '—'}**
 ${mode ? `**模式：${modeDisplay?.text}**\n` : ''}
 ---
 
@@ -166,13 +174,13 @@ ${bodyContent}
 ---
 
 ## 记者点评
-> ${report.article.analysis}
+> ${analysisContent}
 
 ---
 
 ## 官方通报
-- **胜利者**: ${report.officialReport.winner}
-- **最终结果**: ${report.officialReport.conclusion}
+- **胜利者**: ${officialWinner || '—'}
+- **最终结果**: ${officialConclusion || '—'}
 ${report.userGuidance ? `
 ---
 
@@ -186,7 +194,7 @@ ${adjudicationMarkdown}
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    const sanitizedTitle = report.headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
+    const sanitizedTitle = headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'battle_report';
     link.download = `魔法少女速报_${sanitizedTitle}.md`;
     document.body.appendChild(link);
     link.click();
@@ -262,15 +270,15 @@ ${adjudicationMarkdown}
       <div className="result-content">
         <img src="/arena-white.svg" style={{ marginTop: '1rem' }} width={320} height={90} alt="魔法少女竞技场" className="feature-title-svg" />
 
-        {showScenarioTitle && <h3 className='ml-2 font-bold text-gray-100'>~ {report.scenario} ~</h3> }
-        <h2 className="text-xl font-bold mt-8 mb-2" style={{ marginLeft: '0.5rem' }}>{report.headline}</h2>
+        {showScenarioTitle && <h3 className='ml-2 font-bold text-gray-100'>~ {String(report.scenario)} ~</h3> }
+        <h2 className="text-xl font-bold mt-8 mb-2" style={{ marginLeft: '0.5rem' }}>{headline}</h2>
         <div style={{ position: 'relative', marginLeft: '0.5rem', minHeight: '60px' }}>
           <div>
             <p className="text-sm text-gray-300">
-              记者 | {report.reporterInfo.name}
+              记者 | {reporterName || '—'}
             </p>
             <p className="text-sm text-gray-300">
-              来源 | {report.reporterInfo.publication}
+              来源 | {reporterPublication || '—'}
             </p>
             {(hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
               <p className="text-xs text-gray-400 mt-1">
@@ -312,16 +320,16 @@ ${adjudicationMarkdown}
         <div className="result-item" style={{ borderLeft: '4px solid #ff6b9d', background: 'rgba(0,0,0,0.2)' }}>
           <div className="result-label">🎤 记者点评</div>
           <div className="result-value">
-            <p className="text-sm opacity-90 italic">{report.article.analysis}</p>
+            <p className="text-sm opacity-90 italic">{analysisContent}</p>
           </div>
         </div>
 
         <div className="result-item">
           <div className="result-value">
             <h3 className="font-semibold mt-2">胜利者</h3>
-            <p className="text-sm opacity-90" style={{ marginBottom: '0.5rem' }}>{report.officialReport.winner}</p>
+            <p className="text-sm opacity-90" style={{ marginBottom: '0.5rem' }}>{officialWinner || '—'}</p>
             <h3 className="font-semibold mt-2">最终结果</h3>
-            <p className="text-sm opacity-90" style={{ marginBottom: '0.5rem' }}>{report.officialReport.conclusion}</p>
+            <p className="text-sm opacity-90" style={{ marginBottom: '0.5rem' }}>{officialConclusion || '—'}</p>
           </div>
         </div>
 
