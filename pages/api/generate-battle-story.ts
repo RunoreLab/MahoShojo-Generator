@@ -32,6 +32,7 @@ import {
     compactExtraJson,
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
+import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 
 const log = getLogger('api-gen-battle-story');
 const MAX_COMBATANTS = 10;
@@ -551,7 +552,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const reportJson = JSON.stringify(report);
         const outputBytes = new TextEncoder().encode(reportJson).length;
-        const outputPreview = buildContentPreview(reportJson, { headChars: 800, tailChars: 800 });
+        const outputPreview = buildOutputPreviewForStorage(reportJson);
         const shieldResult = applyShieldWords(outputPreview);
         const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
             ? await quickCheck(outputPreview)
