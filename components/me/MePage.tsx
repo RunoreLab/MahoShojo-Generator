@@ -13,11 +13,13 @@ import { BattleReportsPanel } from '@/components/me/BattleReportsPanel';
 import { MeTabs } from '@/components/me/MeTabs';
 import { PvpMatchDetailsModal } from '@/components/me/PvpMatchDetailsModal';
 import { PvpMatchesPanel } from '@/components/me/PvpMatchesPanel';
+import { ProfileHeader } from '@/components/me/ProfileHeader';
+import { ProfileSettingsPanel } from '@/components/me/ProfileSettingsPanel';
 import { authStorage } from '@/lib/auth';
 import { useAuth } from '@/lib/useAuth';
 
 export function MePage() {
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, userBadges, isAuthenticated, loading } = useAuth();
   const [tab, setTab] = useState<'reports' | 'pvp' | 'settings'>('reports');
 
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
@@ -85,14 +87,7 @@ export function MePage() {
             ) : null}
 
             {!loading && isAuthenticated && user ? (
-              <div className="mt-3 rounded-xl border bg-white p-4 text-sm">
-                当前用户：
-                <span className="ml-1 font-semibold">
-                  {user.prefix ? `${user.prefix} ` : ''}
-                  {user.username}
-                </span>
-                <span className="ml-2 text-xs text-gray-600">ID：{user.id}</span>
-              </div>
+              <ProfileHeader user={user} badges={userBadges} onOpenSettings={() => setTab('settings')} />
             ) : null}
 
             <div className="mt-4">{retentionNotice}</div>
@@ -127,15 +122,18 @@ export function MePage() {
 
             {tab === 'settings' ? (
               <div className="mt-4">
-                <div className="font-semibold mb-2">个人设置（预留）</div>
-                <div className="rounded-xl border bg-white p-4 text-sm text-gray-700">
-                  <div className="mb-2">此区域将用于后续实现：</div>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>改绑邮箱</li>
-                    <li>修改密码</li>
-                    <li>修改用户名</li>
-                  </ul>
-                  <div className="text-xs text-gray-500 mt-2">当前版本仅预留入口，功能后续逐步上线。</div>
+                <ProfileSettingsPanel />
+                <div className="mt-4">
+                  <div className="font-semibold mb-2">账号设置（预留）</div>
+                  <div className="rounded-xl border bg-white p-4 text-sm text-gray-700">
+                    <div className="mb-2">此区域将用于后续实现：</div>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>改绑邮箱</li>
+                      <li>修改密码</li>
+                      <li>修改用户名</li>
+                    </ul>
+                    <div className="text-xs text-gray-500 mt-2">当前版本仅预留入口，功能后续逐步上线。</div>
+                  </div>
                 </div>
               </div>
             ) : null}
