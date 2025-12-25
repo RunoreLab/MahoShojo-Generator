@@ -162,8 +162,12 @@ export {
   getBattleReportGenerationByIdLite,
   getBattleReportGenerationsByUserIdLite,
   countBattleReportGenerationsByUserId,
+  buildBattleReportGenerationsWhereClause,
   type BattleReportGenerationInsert,
+  type BattleReportGenerationMode,
   type BattleReportGenerationStatus,
+  type BattleReportGenerationListSort,
+  type BattleReportGenerationsListFilter,
   type BattleReportGenerationRowLite
 } from './database/battle-report-generations';
 
