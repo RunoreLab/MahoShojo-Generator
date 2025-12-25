@@ -77,6 +77,7 @@ const sensitiveWordsConfig = {
     "5qao5Y+W",
     "6Zi06YGT",
     "5oCn5b+r5oSf",
+    "6IKJ5L6/5Zmo",
     // 奥菲利亚相关违禁词
     "5rOo5Y21",
     "5Y+X5a2V",
