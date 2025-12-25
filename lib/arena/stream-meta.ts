@@ -447,23 +447,39 @@ export async function extractStreamTelemetryMeta(markdown: string): Promise<Extr
   if (!hit) return null;
 
   const candidate = extractBestJsonCandidate(hit.inner);
-  if (!candidate) return null;
-
-  const meta = await repairNormalizeValidate({
-    input: candidate,
-    schema: StreamTelemetryMetaSchema,
-    unwrapCandidates: ['meta', 'data', 'payload', 'result', 'value'],
-    textFieldCandidates: ['json', 'text', 'raw', 'content', 'body'],
-    coerce: { wrapSingleToArray: true, emptyStringToUndefined: true },
-    as: 'object',
-  });
-
-  const sanitized = sanitizeTelemetryMeta(meta as StreamTelemetryMeta);
   const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
+  const rawComment = markdown.slice(hit.start, hit.end);
 
-  return {
-    meta: sanitized,
-    rawComment: markdown.slice(hit.start, hit.end),
-    strippedMarkdown,
-  };
+  // telemetry 注释是程序自动追加的：即便 JSON 无法解析，也应优先剥离，避免“系统专用内容”漏出到 UI。
+  if (!candidate) {
+    return {
+      meta: {},
+      rawComment,
+      strippedMarkdown,
+    };
+  }
+
+  try {
+    const meta = await repairNormalizeValidate({
+      input: candidate,
+      schema: StreamTelemetryMetaSchema,
+      unwrapCandidates: ['meta', 'data', 'payload', 'result', 'value'],
+      textFieldCandidates: ['json', 'text', 'raw', 'content', 'body'],
+      coerce: { wrapSingleToArray: true, emptyStringToUndefined: true },
+      as: 'object',
+    });
+
+    const sanitized = sanitizeTelemetryMeta(meta as StreamTelemetryMeta);
+    return {
+      meta: sanitized,
+      rawComment,
+      strippedMarkdown,
+    };
+  } catch {
+    return {
+      meta: {},
+      rawComment,
+      strippedMarkdown,
+    };
+  }
 }
