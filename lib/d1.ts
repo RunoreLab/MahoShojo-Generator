@@ -131,10 +131,13 @@ export {
   createPvpMatchPlayers,
   updatePvpMatch,
   getPvpMatchById,
+  getPvpMatchPlayersByMatchId,
   getPvpRoomChatMessages,
   getLatestPvpRoomChatMessageBySender,
   createPvpRoomChatMessage,
   getPvpMatchesByUserId,
+  countPvpMatchesByUserId,
+  isUserInPvpMatch,
   getPvpUserSummariesByUserIds,
   type PvpMatchPlayerRow,
   type PvpUserSummaryRow,
@@ -158,8 +161,13 @@ export {
   updateBattleReportGenerationCombatantsWriteResult,
   getBattleReportGenerationByIdLite,
   getBattleReportGenerationsByUserIdLite,
+  countBattleReportGenerationsByUserId,
+  buildBattleReportGenerationsWhereClause,
   type BattleReportGenerationInsert,
+  type BattleReportGenerationMode,
   type BattleReportGenerationStatus,
+  type BattleReportGenerationListSort,
+  type BattleReportGenerationsListFilter,
   type BattleReportGenerationRowLite
 } from './database/battle-report-generations';
 

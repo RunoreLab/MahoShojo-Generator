@@ -2,6 +2,16 @@ import { queryFromD1, generateUUID } from './core';
 
 export type BattleReportGenerationStatus = 'completed' | 'aborted' | 'failed';
 export type BattleReportGenerationMode = 'stream' | 'non-stream';
+export type BattleReportGenerationListSort = 'started_at_desc' | 'started_at_asc';
+
+export type BattleReportGenerationsListFilter = {
+  status?: BattleReportGenerationStatus;
+  mode?: string;
+  generationMode?: BattleReportGenerationMode;
+  pvpOnly?: boolean;
+  titleQuery?: string;
+  sort?: BattleReportGenerationListSort;
+};
 
 export interface BattleReportGenerationInsert {
   id?: string;
@@ -251,7 +261,14 @@ export interface BattleReportGenerationRowLite {
   story_length: string | null;
   headline: string | null;
   winner: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  cached_tokens: number | null;
+  reasoning_tokens: number | null;
   output_preview: string | null;
+  output_has_sensitive_words: number | null;
+  output_has_shield_words: number | null;
   pvp_room_id: string | null;
   pvp_match_id: string | null;
   pvp_round_id: string | null;
@@ -282,7 +299,14 @@ export async function getBattleReportGenerationByIdLite(
         story_length,
         headline,
         winner,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cached_tokens,
+        reasoning_tokens,
         output_preview,
+        output_has_sensitive_words,
+        output_has_shield_words,
         pvp_room_id,
         pvp_match_id,
         pvp_round_id,
@@ -305,10 +329,14 @@ export async function getBattleReportGenerationByIdLite(
 
 export async function getBattleReportGenerationsByUserIdLite(
   userId: number,
-  limit: number
+  limit: number,
+  offset = 0,
+  filter?: BattleReportGenerationsListFilter
 ): Promise<BattleReportGenerationRowLite[]> {
   try {
     const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+    const safeOffset = Math.max(0, Math.floor(offset));
+    const { whereSql, params, orderBySql } = buildBattleReportGenerationsWhereClause(userId, filter);
     const result = (await queryFromD1(
       `SELECT
         id,
@@ -328,17 +356,24 @@ export async function getBattleReportGenerationsByUserIdLite(
         story_length,
         headline,
         winner,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cached_tokens,
+        reasoning_tokens,
         output_preview,
+        output_has_sensitive_words,
+        output_has_shield_words,
         pvp_room_id,
         pvp_match_id,
         pvp_round_id,
         created_at,
         updated_at
       FROM battle_report_generations
-      WHERE user_id = ?
-      ORDER BY started_at DESC
-      LIMIT ?`,
-      [userId, safeLimit]
+      WHERE ${whereSql}
+      ORDER BY ${orderBySql}
+      LIMIT ? OFFSET ?`,
+      [...params, safeLimit, safeOffset]
     )) as any;
 
     if (result.success && result.result?.[0]?.results) {
@@ -349,6 +384,68 @@ export async function getBattleReportGenerationsByUserIdLite(
     console.error('读取 battle_report_generations(user) 失败:', error);
     return [];
   }
+}
+
+export async function countBattleReportGenerationsByUserId(
+  userId: number,
+  filter?: BattleReportGenerationsListFilter
+): Promise<number> {
+  try {
+    const { whereSql, params } = buildBattleReportGenerationsWhereClause(userId, filter);
+    const result = (await queryFromD1(
+      `SELECT COUNT(1) AS total FROM battle_report_generations WHERE ${whereSql}`,
+      params
+    )) as any;
+    const row = result?.result?.[0]?.results?.[0];
+    const total = typeof row?.total === 'number' ? row.total : Number(row?.total);
+    return Number.isFinite(total) ? Math.max(0, Math.floor(total)) : 0;
+  } catch (error) {
+    console.error('统计 battle_report_generations(user) 失败:', error);
+    return 0;
+  }
+}
+
+export function buildBattleReportGenerationsWhereClause(
+  userId: number,
+  filter?: BattleReportGenerationsListFilter
+): { whereSql: string; params: unknown[]; orderBySql: string } {
+  const where: string[] = ['user_id = ?'];
+  const params: unknown[] = [userId];
+
+  const status = filter?.status;
+  if (status === 'completed' || status === 'aborted' || status === 'failed') {
+    where.push('status = ?');
+    params.push(status);
+  }
+
+  const generationMode = filter?.generationMode;
+  if (generationMode === 'stream' || generationMode === 'non-stream') {
+    where.push('generation_mode = ?');
+    params.push(generationMode);
+  }
+
+  const mode = typeof filter?.mode === 'string' ? filter.mode.trim() : '';
+  if (mode) {
+    where.push('mode = ?');
+    params.push(mode);
+  }
+
+  if (filter?.pvpOnly) {
+    where.push('pvp_match_id IS NOT NULL');
+  }
+
+  const titleQuery = typeof filter?.titleQuery === 'string' ? filter.titleQuery.trim() : '';
+  if (titleQuery) {
+    const safe = titleQuery.length > 120 ? titleQuery.slice(0, 120) : titleQuery;
+    const pattern = `%${safe}%`;
+    where.push('(headline LIKE ? OR scenario_title LIKE ?)');
+    params.push(pattern, pattern);
+  }
+
+  const sort = filter?.sort;
+  const orderBySql = sort === 'started_at_asc' ? 'started_at ASC' : 'started_at DESC';
+
+  return { whereSql: where.join(' AND '), params, orderBySql };
 }
 
 export async function updateBattleReportGenerationCombatantsWriteResult(

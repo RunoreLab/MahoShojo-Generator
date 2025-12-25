@@ -1,0 +1,81 @@
+import { getBattleReportGenerationByIdLite, getBattleReportGenerationCombatantsByGenerationId, isUserInPvpMatch } from '@/lib/d1';
+import { json, requireAuthUser } from '@/lib/pvp/server';
+import { quickCheck } from '@/lib/sensitive-word-filter';
+
+export const runtime = 'edge';
+
+const getGenerationIdFromUrl = (url: string): string | null => {
+  try {
+    const parts = new URL(url).pathname.split('/').filter(Boolean);
+    // /api/me/battle-reports/:generationId
+    const idx = parts.findIndex((p) => p === 'battle-reports');
+    if (idx === -1) return null;
+    return parts[idx + 1] || null;
+  } catch {
+    return null;
+  }
+};
+
+export default async function handler(req: Request): Promise<Response> {
+  if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
+
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
+
+  const generationId = getGenerationIdFromUrl(req.url);
+  if (!generationId) return json({ error: '缺少 generationId' }, { status: 400 });
+
+  const record = await getBattleReportGenerationByIdLite(generationId);
+  if (!record) return json({ error: '记录不存在' }, { status: 404 });
+
+  const isOwner = record.user_id === auth.user.id;
+  const canReadByPvp = record.pvp_match_id ? await isUserInPvpMatch(record.pvp_match_id, auth.user.id) : false;
+  if (!isOwner && !canReadByPvp) return json({ error: '无权限' }, { status: 403 });
+
+  const combatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
+
+  const outputPreview = typeof record.output_preview === 'string' ? record.output_preview : null;
+  const flaggedSensitive = Boolean(record.output_has_sensitive_words);
+  const needsCheck = Boolean(outputPreview && outputPreview.trim());
+  const sensitiveCheck = !flaggedSensitive && needsCheck ? await quickCheck(outputPreview!) : null;
+  const contentBlocked = flaggedSensitive || Boolean(sensitiveCheck?.hasSensitiveWords);
+
+  return json({
+    success: true,
+    record: {
+      id: record.id,
+      startedAt: record.started_at,
+      endedAt: record.ended_at,
+      durationMs: record.duration_ms,
+      status: record.status,
+      endpoint: record.endpoint,
+      generationMode: record.generation_mode,
+      mode: record.mode,
+      scenarioTitle: record.scenario_title,
+      language: record.language,
+      selectedLevel: record.selected_level,
+      storyLength: record.story_length,
+      headline: record.headline,
+      winner: record.winner,
+      outputPreview: contentBlocked ? null : outputPreview,
+      hasPreview: Boolean(outputPreview && outputPreview.trim()) && !contentBlocked,
+      contentBlocked,
+      outputHasShieldWords: Boolean(record.output_has_shield_words),
+      pvpRoomId: record.pvp_room_id,
+      pvpMatchId: record.pvp_match_id,
+      pvpRoundId: record.pvp_round_id,
+    },
+    combatants: combatants.map((c) => ({
+      sortIndex: c.sort_index,
+      name: c.name,
+      type: c.type,
+      templateId: c.template_id,
+      isNative: Boolean(c.is_native),
+      isPreset: Boolean(c.is_preset),
+      teamId: c.team_id,
+      dataCardId: c.data_card_id,
+      dataCardUpdatedAt: c.data_card_updated_at,
+    })),
+  });
+}
+
