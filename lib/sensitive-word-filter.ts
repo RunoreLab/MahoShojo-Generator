@@ -2,10 +2,11 @@
 import { pinyin } from 'pinyin-pro';
 import {
   buildKeepCharsMapping,
+  buildLatinTokenMappingForPinyinCheck,
   createWordsSearch,
   foldFullwidthAscii,
-  keepAsciiWordChar,
   keepHanOrAsciiWordChar,
+  normalizeLatin,
   toSimplifiedChinese,
   uniqBy,
 } from '@/lib/word-filter-utils';
@@ -55,7 +56,6 @@ const sensitiveWordsConfig = {
     "6IKb5Lqk",
     "5Lqk6YWN",
     // "6Imy5oOF",
-    "5rap5Zu+",
     "6KO45L2T",
     "5rer6I2h",
     "57+75aKZ",
@@ -271,12 +271,7 @@ export class SensitiveWordFilter {
       } catch {
         p = '';
       }
-      const normalized = p
-        .toLowerCase()
-        .replace(/u:/g, 'u')
-        .replace(/ü/g, 'u')
-        .replace(/v/g, 'u')
-        .replace(/[^a-z0-9]/g, '');
+      const normalized = normalizeLatin(p);
       if (!normalized) continue;
 
       pinyinKeywords.push(normalized);
@@ -299,30 +294,6 @@ export class SensitiveWordFilter {
    */
   private escapeRegExp(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  private buildLatinMapping(text: string): { normalized: string; indexMap: number[] } {
-    const normalizedChars: string[] = [];
-    const indexMap: number[] = [];
-
-    for (let i = 0; i < text.length; i++) {
-      const raw = text[i];
-      const folded = foldFullwidthAscii(raw);
-      if (keepAsciiWordChar(folded)) {
-        const lowered = folded.toLowerCase();
-        // 拼音输入常见写法：v / ü / u:
-        const normalized = lowered === 'v' ? 'u' : lowered;
-        normalizedChars.push(normalized);
-        indexMap.push(i);
-        continue;
-      }
-      if (raw === 'ü' || raw === 'Ü') {
-        normalizedChars.push('u');
-        indexMap.push(i);
-      }
-    }
-
-    return { normalized: normalizedChars.join(''), indexMap };
   }
 
   /**
@@ -455,23 +426,27 @@ export class SensitiveWordFilter {
 
     // 4) 纯拼音绕过：对原文抽取拉丁字母/数字后检索拼音关键字
     if (this.pinyinSearch) {
-      const { normalized, indexMap } = this.buildLatinMapping(text);
-      const latinNormalized = normalized.replace(/u:/g, 'u');
-      const pinyinMatches = this.pinyinSearch.FindAll(latinNormalized) as any[];
-      for (const m of pinyinMatches) {
-        const startNormalized = Number(m?.Start);
-        const endNormalizedInclusive = Number(m?.End);
-        const keywordPinyin = String(m?.Keyword ?? '');
-        if (!Number.isFinite(startNormalized) || !Number.isFinite(endNormalizedInclusive) || !keywordPinyin) continue;
-        if (endNormalizedInclusive >= indexMap.length) continue;
+      const { normalized, indexMap, isTokenStart, isTokenEnd } = buildLatinTokenMappingForPinyinCheck(text);
+      if (normalized) {
+        const pinyinMatches = this.pinyinSearch.FindAll(normalized) as any[];
+        for (const m of pinyinMatches) {
+          const startNormalized = Number(m?.Start);
+          const endNormalizedInclusive = Number(m?.End);
+          const keywordPinyin = String(m?.Keyword ?? '');
+          if (!Number.isFinite(startNormalized) || !Number.isFinite(endNormalizedInclusive) || !keywordPinyin) continue;
+          if (startNormalized < 0 || endNormalizedInclusive < startNormalized) continue;
+          if (endNormalizedInclusive >= indexMap.length) continue;
+          // 关键：只接受“整 token 命中”（可跨 token），避免在长英文/驼峰标识符里子串误报
+          if (!isTokenStart[startNormalized] || !isTokenEnd[endNormalizedInclusive]) continue;
 
-        const startIndex = indexMap[startNormalized];
-        const endIndex = indexMap[endNormalizedInclusive] + 1;
-        const sourceWord = this.pinyinToSource.get(keywordPinyin) ?? keywordPinyin;
-        const matchedText = text.slice(startIndex, endIndex);
-        addDetail(sourceWord, matchedText, startIndex, endIndex, 'variant');
-        if (!detectedWords.includes(`${sourceWord}(拼音)`)) detectedWords.push(`${sourceWord}(拼音)`);
-        maskRange(startIndex, endIndex);
+          const startIndex = indexMap[startNormalized];
+          const endIndex = indexMap[endNormalizedInclusive] + 1;
+          const sourceWord = this.pinyinToSource.get(keywordPinyin) ?? keywordPinyin;
+          const matchedText = text.slice(startIndex, endIndex);
+          addDetail(sourceWord, matchedText, startIndex, endIndex, 'variant');
+          if (!detectedWords.includes(`${sourceWord}(拼音)`)) detectedWords.push(`${sourceWord}(拼音)`);
+          maskRange(startIndex, endIndex);
+        }
       }
     }
 

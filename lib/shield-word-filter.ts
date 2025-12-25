@@ -1,7 +1,13 @@
 // lib/shield-word-filter.ts
 
 import { pinyin } from 'pinyin-pro';
-import { buildKeepCharsMapping, createWordsSearch, foldFullwidthAscii, keepAsciiWordChar, normalizeLatin, toSimplifiedChinese } from '@/lib/word-filter-utils';
+import {
+  buildLatinTokenMappingForPinyinCheck,
+  createWordsSearch,
+  foldFullwidthAscii,
+  normalizeLatin,
+  toSimplifiedChinese,
+} from '@/lib/word-filter-utils';
 
 /**
  * 说明：
@@ -71,6 +77,7 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '55m95rWK',
     '6IKJ5qOS',
     '6Imy5Zu+',
+    "5rap5Zu+",
     // 使用指定词汇替换
     '5Lit5Zu9',
     '5Lit5Y2O5Lq65rCR5YWx5ZKM5Zu9',
@@ -255,23 +262,27 @@ export const applyShieldWords = (text: string): ShieldWordFilterResult => {
   // 额外：纯拼音绕过（仅对拉丁字母/数字做抽取；匹配到后统一用遮罩字符替换）
   const { search: pinyinSearch, pinyinToSource } = getPinyinSearch();
   if (pinyinSearch) {
-    const { normalized: latinNormalized, indexMap } = buildKeepCharsMapping(foldFullwidthAscii(text), keepAsciiWordChar);
-    const normalized = normalizeLatin(latinNormalized);
-    const matches = pinyinSearch.FindAll(normalized) as any[];
-    for (const m of matches) {
-      const startN = Number(m?.Start);
-      const endN = Number(m?.End);
-      const keywordPinyin = String(m?.Keyword ?? '');
-      if (!Number.isFinite(startN) || !Number.isFinite(endN) || !keywordPinyin) continue;
-      if (endN >= indexMap.length) continue;
+    const { normalized, indexMap, isTokenStart, isTokenEnd } = buildLatinTokenMappingForPinyinCheck(text);
+    if (normalized) {
+      const matches = pinyinSearch.FindAll(normalized) as any[];
+      for (const m of matches) {
+        const startN = Number(m?.Start);
+        const endN = Number(m?.End);
+        const keywordPinyin = String(m?.Keyword ?? '');
+        if (!Number.isFinite(startN) || !Number.isFinite(endN) || !keywordPinyin) continue;
+        if (startN < 0 || endN < startN) continue;
+        if (endN >= indexMap.length) continue;
+        // 只接受“整 token 命中”（可跨 token），避免长英文/驼峰标识符里子串误报
+        if (!isTokenStart[startN] || !isTokenEnd[endN]) continue;
 
-      const start = indexMap[startN];
-      const endInclusive = indexMap[endN];
-      const source = pinyinToSource.get(keywordPinyin) ?? keywordPinyin;
-      const originalSlice = text.slice(start, endInclusive + 1);
-      if (source && !detectedWords.includes(`${source}(拼音)`)) detectedWords.push(`${source}(拼音)`);
-      const maskLen = Math.max(1, Array.from(originalSlice).length);
-      replacements.push({ start, endInclusive, replacement: maskChar.repeat(maskLen) });
+        const start = indexMap[startN];
+        const endInclusive = indexMap[endN];
+        const source = pinyinToSource.get(keywordPinyin) ?? keywordPinyin;
+        const originalSlice = text.slice(start, endInclusive + 1);
+        if (source && !detectedWords.includes(`${source}(拼音)`)) detectedWords.push(`${source}(拼音)`);
+        const maskLen = Math.max(1, Array.from(originalSlice).length);
+        replacements.push({ start, endInclusive, replacement: maskChar.repeat(maskLen) });
+      }
     }
   }
 
