@@ -57,6 +57,76 @@ export const foldFullwidthAscii = (text: string): string => {
   return out;
 };
 
+const stripCombiningMarks = (text: string): string => text.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+
+/**
+ * 为“纯拼音绕过”检测构造拉丁字符映射：
+ * - 只保留能归一化为 [a-z0-9] 的字符（全角折叠、去音标、统一大小写、v/ü/u: -> u）
+ * - 同时记录 token 边界（token 由原文中连续的拉丁/数字组成）
+ *
+ * 重要：拼音检测必须基于 token 边界做“整 token 命中”，否则会在驼峰/长英文标识符里产生大量误报
+ * （例如 `setUniversalProc` 会包含 `setu`，而 `setu` 恰好是“涩图”的拼音）。
+ */
+export const buildLatinTokenMappingForPinyinCheck = (
+  text: string
+): { normalized: string; indexMap: number[]; isTokenStart: boolean[]; isTokenEnd: boolean[] } => {
+  const normalizedChars: string[] = [];
+  const indexMap: number[] = [];
+  const tokenStarts: number[] = [];
+  const tokenEnds: number[] = [];
+
+  let inToken = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const raw = text[i];
+    const folded = foldFullwidthAscii(raw);
+    const noMarks = stripCombiningMarks(folded);
+
+    // 允许某些字符展开为多个 ASCII（例如 NFKC 的合字），每个展开字符都映射回同一原始索引
+    const outChars: string[] = [];
+    for (const ch of noMarks) {
+      if (/[a-zA-Z0-9]/.test(ch)) {
+        let lowered = ch.toLowerCase();
+        if (lowered === 'v') lowered = 'u';
+        outChars.push(lowered);
+      }
+    }
+
+    if (outChars.length === 0) {
+      if (inToken) {
+        tokenEnds.push(normalizedChars.length - 1);
+        inToken = false;
+      }
+      continue;
+    }
+
+    if (!inToken) {
+      tokenStarts.push(normalizedChars.length);
+      inToken = true;
+    }
+
+    for (const ch of outChars) {
+      normalizedChars.push(ch);
+      indexMap.push(i);
+    }
+  }
+
+  if (inToken) {
+    tokenEnds.push(normalizedChars.length - 1);
+  }
+
+  const isTokenStart = new Array(normalizedChars.length).fill(false);
+  const isTokenEnd = new Array(normalizedChars.length).fill(false);
+  for (const s of tokenStarts) {
+    if (s >= 0 && s < isTokenStart.length) isTokenStart[s] = true;
+  }
+  for (const e of tokenEnds) {
+    if (e >= 0 && e < isTokenEnd.length) isTokenEnd[e] = true;
+  }
+
+  return { normalized: normalizedChars.join(''), indexMap, isTokenStart, isTokenEnd };
+};
+
 export const buildKeepCharsMapping = (
   text: string,
   keepChar: (ch: string) => boolean
