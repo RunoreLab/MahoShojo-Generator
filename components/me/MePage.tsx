@@ -122,7 +122,7 @@ export function MePage() {
 
             {tab === 'settings' ? (
               <div className="mt-4">
-                <ProfileSettingsPanel />
+                <ProfileSettingsPanel userId={user?.id ?? null} />
                 <div className="mt-4">
                   <div className="font-semibold mb-2">账号设置（预留）</div>
                   <div className="rounded-xl border bg-white p-4 text-sm text-gray-700">

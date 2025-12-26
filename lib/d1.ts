@@ -189,6 +189,9 @@ export {
   getAllBadges
 } from './database/badges';
 
+// 重新导出用户个人资料相关功能
+export { getUserProfileByUserId, updateUserAvatarWebpBase64, updateUserSignature, type UserProfileRow } from './database/profile';
+
 /*
 数据库 Schema 说明：
 请查看 lib/database/schema.sql 文件了解完整的数据库结构。
