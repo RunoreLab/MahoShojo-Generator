@@ -9,14 +9,13 @@ const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;
 
 function arrayBufferToBase64(ab: ArrayBuffer) {
   const bytes = new Uint8Array(ab);
-  let binary = '';
-  const chunkSize = 0x8000;
+  const chunkSize = 4096;
+  const parts: string[] = [];
   for (let i = 0; i < bytes.length; i += chunkSize) {
     const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
+    parts.push(String.fromCharCode(...chunk));
   }
-  // btoa 在 Edge Runtime 可用（Web API）
-  return btoa(binary);
+  return btoa(parts.join(''));
 }
 
 async function compressAvatarToWebpBase64(file: File) {
@@ -29,8 +28,11 @@ async function compressAvatarToWebpBase64(file: File) {
     throw new Error('当前运行环境不支持后端图片压缩（缺少 OffscreenCanvas/createImageBitmap）');
   }
 
-  const bitmap = await (globalThis as any).createImageBitmap(file);
-  const canvas = new (globalThis as any).OffscreenCanvas(AVATAR_SIZE, AVATAR_SIZE) as OffscreenCanvas;
+  const blob = new Blob([await file.arrayBuffer()], { type: file.type });
+  const bitmap = (await (globalThis as any).createImageBitmap(blob)) as ImageBitmap;
+  const canvas = new (globalThis as any).OffscreenCanvas(AVATAR_SIZE, AVATAR_SIZE) as OffscreenCanvas & {
+    convertToBlob?: (opts: { type: string; quality?: number }) => Promise<Blob>;
+  };
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('浏览器不支持 Canvas 2D');
 
@@ -43,9 +45,15 @@ async function compressAvatarToWebpBase64(file: File) {
   ctx.clearRect(0, 0, AVATAR_SIZE, AVATAR_SIZE);
   ctx.drawImage(bitmap, sx, sy, size, size, 0, 0, AVATAR_SIZE, AVATAR_SIZE);
 
-  // Cloudflare Workers 的 OffscreenCanvas 支持 convertToBlob
+  if (typeof canvas.convertToBlob !== 'function') {
+    throw new Error('当前运行环境不支持后端图片压缩（缺少 OffscreenCanvas.convertToBlob）');
+  }
+
   const out = await canvas.convertToBlob({ type: 'image/webp', quality: WEBP_QUALITY });
   const base64 = arrayBufferToBase64(await out.arrayBuffer());
+  if (typeof (bitmap as any).close === 'function') {
+    (bitmap as any).close();
+  }
   return base64;
 }
 
@@ -60,14 +68,19 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     const file = (formData.get('file') ?? formData.get('avatar')) as unknown;
     if (!(file instanceof File)) return json({ error: '缺少头像文件（file/avatar）' }, { status: 400 });
 
-    const base64 = await compressAvatarToWebpBase64(file);
-    const ok = await updateUserAvatarWebpBase64(auth.user.id, base64);
-    if (!ok) return json({ error: '保存头像失败' }, { status: 500 });
+    try {
+      const base64 = await compressAvatarToWebpBase64(file);
+      const ok = await updateUserAvatarWebpBase64(auth.user.id, base64);
+      if (!ok) return json({ error: '保存头像失败' }, { status: 500 });
 
-    return json(
-      { success: true, avatarDataUrl: `data:image/webp;base64,${base64}` },
-      { headers: { 'Cache-Control': 'no-store' } },
-    );
+      return json(
+        { success: true, avatarDataUrl: `data:image/webp;base64,${base64}` },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : '头像处理失败';
+      return json({ error: message }, { status: 400 });
+    }
   }
 
   if (req.method === 'DELETE') {
