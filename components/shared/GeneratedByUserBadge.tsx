@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '@/lib/useAuth';
-import BadgeIcon from '@/components/badge/BadgeIcon';
+import Badge from '@/components/badge/Badge';
 
 type Variant = 'dark' | 'light';
 
@@ -21,7 +21,7 @@ export function GeneratedByUserBadge({
 
   const baseTextClass = variant === 'light' ? 'text-gray-700' : 'text-white/85';
   const labelClass = variant === 'light' ? 'text-gray-500' : 'text-white/55';
-  const iconClass = variant === 'light' ? 'text-gray-600' : 'text-white/70';
+  const usernameClass = variant === 'light' ? 'text-gray-800' : 'text-white/90';
 
   const username = (user.username || '').trim() || `用户${user.id}`;
   const equippedBadges = (Array.isArray(userBadges) ? userBadges : [])
@@ -31,22 +31,16 @@ export function GeneratedByUserBadge({
   return (
     <div className={['w-full text-center text-xs drop-shadow', baseTextClass, className].filter(Boolean).join(' ')}>
       <div className={['leading-tight', labelClass].filter(Boolean).join(' ')}>{label}</div>
-      <div className="mt-0.5 inline-flex flex-wrap items-center justify-center gap-1.5">
-        <span className="font-medium text-white/90">{username}</span>
-        {equippedBadges.length > 0 && (
-          <span className="inline-flex items-center gap-1">
-            {equippedBadges.map((userBadge) => {
-              const icon = userBadge.badge?.icon;
-              if (!icon || icon.type === 'null') return null;
-              return (
-                <span key={userBadge.id} title={userBadge.badge?.name || '徽章'}>
-                  <BadgeIcon icon={icon} size={12} className={iconClass} />
-                </span>
-              );
-            })}
-          </span>
-        )}
+      <div className="mt-1 inline-flex flex-wrap items-center justify-center gap-1.5">
+        <span className={['font-medium', usernameClass].filter(Boolean).join(' ')}>{username}</span>
       </div>
+      {equippedBadges.length > 0 && (
+        <div className="mt-2 inline-flex max-w-full flex-wrap items-center justify-center gap-1.5">
+          {equippedBadges.map((userBadge) => (
+            <Badge key={userBadge.id} badge={userBadge.badge} size="sm" className="opacity-95" />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
