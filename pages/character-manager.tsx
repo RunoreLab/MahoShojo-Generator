@@ -52,7 +52,7 @@ const NATIVE_PRESERVING_PATHS = new Set([
 
 // “一键替换曾用名”用于批量替换数据中的名称引用。
 // 为避免滥用该能力伪造“魔改原生卡”，当替换用的新基础名称过长时，允许替换，但会导致原生性丧失（保存时移除原生签名）。
-const NAME_REPLACE_NATIVE_MAX_CHARS = 12;
+const NAME_REPLACE_NATIVE_MAX_CHARS = 32;
 
 const getDisplayCharCount = (text: string): number => {
     return Array.from((text ?? '').trim()).length;
