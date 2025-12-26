@@ -40,11 +40,11 @@ export default async function handler(req: Request): Promise<Response> {
   const combatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
 
   const outputPreview = typeof record.output_preview === 'string' ? record.output_preview : null;
-  const flaggedSensitive = record.output_has_sensitive_words;
+  const hasPreviewText = Boolean(outputPreview && outputPreview.trim());
 
-  let contentBlocked = Boolean(flaggedSensitive);
-  if (flaggedSensitive == null && outputPreview && outputPreview.trim()) {
-    const sensitiveCheck = await quickCheck(outputPreview);
+  let contentBlocked = record.output_has_sensitive_words === 1;
+  if (hasPreviewText) {
+    const sensitiveCheck = await quickCheck(outputPreview!);
     contentBlocked = Boolean(sensitiveCheck.hasSensitiveWords);
     await updateBattleReportGenerationOutputHasSensitiveWords(record.id, contentBlocked);
   }
