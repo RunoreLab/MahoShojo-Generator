@@ -4,6 +4,7 @@ import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 export interface CanshouDetails {
   name: string;
@@ -102,6 +103,7 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
             className="w-72 mb-4"
           />
         </div>
+        <GeneratedByUserBadge variant="dark" className="mb-3" />
 
         <div className="result-item">
           <div className="result-label">名称</div>

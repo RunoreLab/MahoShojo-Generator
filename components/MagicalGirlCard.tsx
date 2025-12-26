@@ -4,6 +4,7 @@ import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 interface MagicalGirlCardProps {
   magicalGirl: {
@@ -252,6 +253,7 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         <div className="flex justify-center items-center" style={{ marginBottom: '1rem', background: 'transparent' }}>
           <img src="/questionnaire-title.svg" width={300} height={70} alt="Logo" style={{ display: 'block', background: 'transparent' }} />
         </div>
+        <GeneratedByUserBadge variant="dark" className="mb-3" />
 
         {/* 基本信息 */}
         <div className="result-item">

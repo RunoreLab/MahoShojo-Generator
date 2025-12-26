@@ -7,6 +7,7 @@ import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 interface StreamingBattleReportCardProps {
     /** 流式输入的 Markdown 文本内容 */
@@ -356,6 +357,8 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                         )}
                     </div>
                 ) : null}
+
+                <GeneratedByUserBadge variant="dark" className="mb-4" />
 
                 {/* Markdown 内容渲染区域 */}
                 <div className="min-h-[200px]">

@@ -10,6 +10,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { useRouter } from 'next/router';
 import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 // 注意：QueueStatus 组件及其相关逻辑已被移除，因为它在Serverless环境下无法正常工作。
 
@@ -379,6 +380,7 @@ export default function Name() {
                   <div className="flex justify-center items-center" style={{ marginBottom: '1rem', background: 'transparent' }}>
                     <img src="/mahou-title.svg" width={300} height={70} alt="Logo" style={{ display: 'block', background: 'transparent' }} />
                   </div>
+                  <GeneratedByUserBadge variant="dark" className="mb-3" />
                   <div className="result-item">
                     <div className="result-label">✨ 真名解放</div>
                     <div className="result-value">{magicalGirl.realName}</div>
