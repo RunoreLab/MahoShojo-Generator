@@ -19,8 +19,12 @@ export {
   getUserByEmail,
   getUserByAuthKey,
   verifyUserLogin,
+  getUserProfileByUserId,
+  updateUserAvatarWebpBase64,
+  updateUserSignature,
   getUserDataCardCapacity,
-  increaseUserSlotCount
+  increaseUserSlotCount,
+  type UserProfileRow
 } from './database/users';
 
 // 重新导出数据卡相关功能
@@ -188,9 +192,6 @@ export {
   userHasBadge,
   getAllBadges
 } from './database/badges';
-
-// 重新导出用户个人资料相关功能
-export { getUserProfileByUserId, updateUserAvatarWebpBase64, updateUserSignature, type UserProfileRow } from './database/profile';
 
 /*
 数据库 Schema 说明：
