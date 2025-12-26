@@ -497,3 +497,24 @@ export async function updateBattleReportGenerationExtraJson(
     return false;
   }
 }
+
+export async function updateBattleReportGenerationOutputHasSensitiveWords(
+  id: string,
+  outputHasSensitiveWords: boolean
+): Promise<boolean> {
+  try {
+    const nowIso = new Date().toISOString();
+    const sql = `
+      UPDATE battle_report_generations
+      SET output_has_sensitive_words = ?,
+          updated_at = ?
+      WHERE id = ?;
+    `;
+    const params: unknown[] = [outputHasSensitiveWords ? 1 : 0, nowIso, id];
+    const result = (await queryFromD1(sql, params)) as any;
+    return Boolean(result?.success);
+  } catch (error) {
+    console.error('更新 battle_report_generations.output_has_sensitive_words 失败:', error);
+    return false;
+  }
+}
