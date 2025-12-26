@@ -19,8 +19,12 @@ export {
   getUserByEmail,
   getUserByAuthKey,
   verifyUserLogin,
+  getUserProfileByUserId,
+  updateUserAvatarWebpBase64,
+  updateUserSignature,
   getUserDataCardCapacity,
-  increaseUserSlotCount
+  increaseUserSlotCount,
+  type UserProfileRow
 } from './database/users';
 
 // 重新导出数据卡相关功能
