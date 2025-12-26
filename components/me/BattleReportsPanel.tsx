@@ -62,6 +62,49 @@ const getSingleQueryValue = (value: string | string[] | undefined): string | nul
   return typeof value === 'string' ? value : null;
 };
 
+const areQueryRecordsEqual = (a: Record<string, string>, b: Record<string, string>): boolean => {
+  const aKeys = Object.keys(a).sort();
+  const bKeys = Object.keys(b).sort();
+  if (aKeys.length !== bKeys.length) return false;
+  for (let i = 0; i < aKeys.length; i++) {
+    const key = aKeys[i];
+    if (key !== bKeys[i]) return false;
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+};
+
+const normalizeQueryFromRouter = (
+  query: Record<string, string | string[] | undefined>
+): Record<string, string> => {
+  const normalized: Record<string, string> = {};
+
+  const page = clampInt(getSingleQueryValue(query.page), 1, 1, 10_000);
+  const pageSize = clampInt(getSingleQueryValue(query.pageSize), 10, 1, 30);
+  const status = getSingleQueryValue(query.status);
+  const mode = getSingleQueryValue(query.mode);
+  const generationMode = getSingleQueryValue(query.generationMode);
+  const pvpOnly = getSingleQueryValue(query.pvpOnly);
+  const sort = getSingleQueryValue(query.sort);
+  const q = getSingleQueryValue(query.q);
+
+  if (page !== 1) normalized.page = String(page);
+  if (pageSize !== 10) normalized.pageSize = String(pageSize);
+  if (status === 'completed' || status === 'aborted' || status === 'failed') normalized.status = status;
+  if (mode === 'classic' || mode === 'kizuna' || mode === 'daily' || mode === 'scenario') normalized.mode = mode;
+  if (generationMode === 'stream' || generationMode === 'non-stream') normalized.generationMode = generationMode;
+  if (typeof pvpOnly === 'string') {
+    const v = pvpOnly.trim().toLowerCase();
+    if (v === '1' || v === 'true' || v === 'yes' || v === 'on') normalized.pvpOnly = '1';
+  }
+  if (sort === 'started_at_asc' || sort === 'started_at_desc') {
+    if (sort !== 'started_at_desc') normalized.sort = sort;
+  }
+  if (typeof q === 'string' && q.trim()) normalized.q = q.trim();
+
+  return normalized;
+};
+
 export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerate, isRegenerating, regenerateError }: Props) {
   const router = useRouter();
 
@@ -129,6 +172,9 @@ export function BattleReportsPanel({ isAuthenticated, onOpenDetails, onRegenerat
     if (pvpOnly) nextQuery.pvpOnly = '1';
     if (sort !== 'started_at_desc') nextQuery.sort = sort;
     if (search) nextQuery.q = search;
+
+    const currentQuery = normalizeQueryFromRouter(router.query as Record<string, string | string[] | undefined>);
+    if (areQueryRecordsEqual(currentQuery, nextQuery)) return;
 
     void router.replace({ pathname: router.pathname, query: nextQuery }, undefined, { shallow: true });
   }, [router, page, pageSize, status, mode, generationMode, pvpOnly, sort, search]);

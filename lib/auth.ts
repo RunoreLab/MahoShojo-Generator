@@ -1,3 +1,5 @@
+import type { UserBadge } from '@/types/badge';
+
 const STORAGE_KEY = 'mahoshojo_auth';
 const ENCRYPTION_KEY = 'mahoshojo_2024_secret_encryption_key';
 
@@ -68,23 +70,57 @@ class CryptoHelper {
 
 const cryptoHelper = new CryptoHelper();
 
+let cachedEncryptedValue: string | null = null;
+let cachedAuthValue: AuthData | null = null;
+let cachedAuthPromise: Promise<AuthData | null> | null = null;
+
 export const authStorage = {
   // 加密存储认证信息
   async setAuth(data: AuthData): Promise<void> {
     const encrypted = await cryptoHelper.encrypt(JSON.stringify(data));
     localStorage.setItem(STORAGE_KEY, encrypted);
+    cachedEncryptedValue = encrypted;
+    cachedAuthValue = data;
+    cachedAuthPromise = null;
   },
 
   // 获取并解密认证信息
   async getAuth(): Promise<AuthData | null> {
     try {
       const encrypted = localStorage.getItem(STORAGE_KEY);
-      if (!encrypted) return null;
+      if (!encrypted) {
+        cachedEncryptedValue = null;
+        cachedAuthValue = null;
+        cachedAuthPromise = null;
+        return null;
+      }
 
-      const decryptedStr = await cryptoHelper.decrypt(encrypted);
-      if (!decryptedStr) return null;
-      
-      return JSON.parse(decryptedStr) as AuthData;
+      if (encrypted === cachedEncryptedValue) {
+        if (cachedAuthPromise) return await cachedAuthPromise;
+        return cachedAuthValue;
+      }
+
+      cachedEncryptedValue = encrypted;
+      cachedAuthPromise = (async () => {
+        const decryptedStr = await cryptoHelper.decrypt(encrypted);
+        if (!decryptedStr) {
+          cachedAuthValue = null;
+          return null;
+        }
+        try {
+          cachedAuthValue = JSON.parse(decryptedStr) as AuthData;
+          return cachedAuthValue;
+        } catch (error) {
+          console.error('Failed to parse auth data:', error);
+          cachedAuthValue = null;
+          return null;
+        } finally {
+          cachedAuthPromise = null;
+        }
+      })();
+
+      return await cachedAuthPromise;
+
     } catch (error) {
       console.error('Failed to decrypt auth data:', error);
       return null;
@@ -94,6 +130,9 @@ export const authStorage = {
   // 清除认证信息
   clearAuth(): void {
     localStorage.removeItem(STORAGE_KEY);
+    cachedEncryptedValue = null;
+    cachedAuthValue = null;
+    cachedAuthPromise = null;
   },
 
   // 获取认证头
@@ -164,6 +203,7 @@ export const authApi = {
   async verify(): Promise<{
     success: boolean;
     user?: { id: number; username: string; prefix?: string | null };
+    badges?: UserBadge[];
   }> {
     const authHeader = await authStorage.getAuthHeader();
     if (!authHeader) {

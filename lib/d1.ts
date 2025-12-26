@@ -162,6 +162,7 @@ export {
 export {
   createBattleReportGenerationRecord,
   updateBattleReportGenerationExtraJson,
+  updateBattleReportGenerationOutputHasSensitiveWords,
   updateBattleReportGenerationCombatantsWriteResult,
   getBattleReportGenerationByIdLite,
   getBattleReportGenerationsByUserIdLite,
