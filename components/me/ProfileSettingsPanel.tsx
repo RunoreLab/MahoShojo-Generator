@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useMeProfile } from '@/components/me/useMeProfile';
 
@@ -16,7 +16,6 @@ export function ProfileSettingsPanel({ userId }: { userId: number | null }) {
   const {
     profile,
     error,
-    setSignatureOptimistic,
     saveSignature,
     isSavingSignature,
     uploadAvatar,
@@ -29,21 +28,23 @@ export function ProfileSettingsPanel({ userId }: { userId: number | null }) {
     () => (profile.avatarDataUrl ? formatBytes(profile.avatarDataUrl.length) : null),
     [profile.avatarDataUrl],
   );
-  const count = profile.signature.length;
-
+  const [draftSignature, setDraftSignature] = useState('');
   const [signatureHint, setSignatureHint] = useState<string | null>(null);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const dirty = draftSignature !== (profile.signature ?? '');
+  const count = draftSignature.length;
+
+  useEffect(() => {
+    if (!dirty) {
+      setDraftSignature(profile.signature ?? '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.signature]);
 
   useEffect(() => {
     if (isSavingSignature) setSignatureHint('保存中…');
     else if (signatureHint === '保存中…') setSignatureHint('已保存');
   }, [isSavingSignature, signatureHint]);
-
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, []);
 
   if (!userId) {
     return (
@@ -111,42 +112,39 @@ export function ProfileSettingsPanel({ userId }: { userId: number | null }) {
           <textarea
             className="input-field mt-2 min-h-[90px] resize-y"
             placeholder="写一句你想展示的话…（最多 120 字）"
-            value={profile.signature}
+            value={draftSignature}
             onChange={(e) => {
-              const next = e.target.value;
-              setSignatureOptimistic(next);
-              setSignatureHint('保存中…');
-              if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-              saveTimerRef.current = setTimeout(() => {
-                saveSignature(next)
-                  .then(() => setSignatureHint('已保存'))
-                  .catch(() => {});
-              }, 700);
-            }}
-            onBlur={() => {
-              const current = profile.signature;
-              if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-              saveSignature(current)
-                .then(() => setSignatureHint('已保存'))
-                .catch(() => {});
+              setDraftSignature(e.target.value);
+              setSignatureHint(null);
             }}
           />
           <div className="mt-2 flex items-center justify-between gap-2">
             <div className="text-xs text-gray-500">
-              提示：支持换行；{signatureHint ? signatureHint : '自动保存到账号。'}
+              提示：支持换行；{signatureHint ? signatureHint : dirty ? '未保存' : '已保存'}
             </div>
-            <button
-              type="button"
-              className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
-              onClick={() => {
-                setSignatureOptimistic('');
-                if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-                saveSignature('').catch(() => {});
-              }}
-              disabled={!profile.signature || isSavingSignature}
-            >
-              清空签名
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
+                onClick={() => setDraftSignature('')}
+                disabled={!draftSignature || isSavingSignature}
+              >
+                清空
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
+                onClick={() => {
+                  setSignatureHint('保存中…');
+                  saveSignature(draftSignature)
+                    .then(() => setSignatureHint('已保存'))
+                    .catch(() => {});
+                }}
+                disabled={!dirty || isSavingSignature}
+              >
+                保存
+              </button>
+            </div>
           </div>
         </div>
       </div>
