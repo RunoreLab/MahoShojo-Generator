@@ -19,34 +19,35 @@ export function GeneratedByUserBadge({
 
   if (loading || !isAuthenticated || !user) return null;
 
-  const baseTextClass = variant === 'light' ? 'text-gray-700' : 'text-gray-100';
+  const baseTextClass = variant === 'light' ? 'text-gray-800' : 'text-gray-100';
   const baseBgClass =
     variant === 'light'
-      ? 'bg-white/85 border-gray-200'
-      : 'bg-black/30 border-white/15';
+      ? 'bg-white/90 border-black/10 shadow-sm'
+      : 'bg-white/10 border-white/15 shadow-sm';
 
   const username = (user.username || '').trim() || `用户${user.id}`;
   const badges = Array.isArray(userBadges) ? userBadges : [];
 
   return (
-    <div
-      className={[
-        'inline-flex items-center gap-2 rounded-lg border px-3 py-1 text-xs',
-        baseTextClass,
-        baseBgClass,
-        className,
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
-      <span className="opacity-80">{label}</span>
-      <UserWithTitle
-        username={username}
-        prefix={user.prefix}
-        badges={badges}
-        showBadges={true}
-        usernameClassName="font-semibold"
-      />
+    <div className={['w-full flex justify-center', className].filter(Boolean).join(' ')}>
+      <div
+        className={[
+          'inline-flex max-w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-full border px-4 py-2 text-xs backdrop-blur-sm',
+          baseTextClass,
+          baseBgClass,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        <span className="opacity-80">{label}</span>
+        <UserWithTitle
+          username={username}
+          prefix={user.prefix}
+          badges={badges}
+          showBadges={true}
+          usernameClassName="font-semibold"
+        />
+      </div>
     </div>
   );
 }
