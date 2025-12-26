@@ -343,6 +343,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                                 <p>来源 | {reporterInfo.publication}</p>
                             </>
                         )}
+                        <GeneratedByUserBadge variant="dark" className="mt-2" />
                         {(hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
                             <p className="text-xs text-gray-400 mt-1">
                                 {hasAnyTokenNumber && (
@@ -357,8 +358,6 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                         )}
                     </div>
                 ) : null}
-
-                <GeneratedByUserBadge variant="dark" className="mb-4" />
 
                 {/* Markdown 内容渲染区域 */}
                 <div className="min-h-[200px]">

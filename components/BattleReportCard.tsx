@@ -281,6 +281,7 @@ ${adjudicationMarkdown}
             <p className="text-sm text-gray-300">
               来源 | {reporterPublication || '—'}
             </p>
+            <GeneratedByUserBadge variant="dark" className="mt-2" />
             {(hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
               <p className="text-xs text-gray-400 mt-1">
                 {hasAnyTokenNumber && (
@@ -293,7 +294,6 @@ ${adjudicationMarkdown}
                 {shouldShowNarrativeReadCount && <>叙事历史读取：{report.narrativeHistoryReadCount} 条</>}
               </p>
             )}
-            <GeneratedByUserBadge variant="dark" className="mt-2" />
           </div>
           {/* 显示战斗模式 */}
           {modeDisplay && (
