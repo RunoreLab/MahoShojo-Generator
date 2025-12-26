@@ -493,3 +493,16 @@ CREATE TABLE IF NOT EXISTS pvp_round_choices (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pvp_round_choices_round_id ON pvp_round_choices(round_id);
+
+-- 用户个人资料（头像/签名）
+-- 头像存储为 128x128 WebP 的 Base64（不含 dataURL 前缀），由后端压缩后写入
+CREATE TABLE IF NOT EXISTS user_profiles (
+  user_id INTEGER PRIMARY KEY NOT NULL,
+  signature TEXT,
+  avatar_webp_base64 TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_profiles_updated_at ON user_profiles(updated_at);

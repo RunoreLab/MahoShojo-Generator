@@ -5,7 +5,7 @@ import { useMemo, useRef } from 'react';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { User } from '@/lib/useAuth';
 import type { UserBadge } from '@/types/badge';
-import { useLocalProfile } from '@/components/me/useLocalProfile';
+import { useMeProfile } from '@/components/me/useMeProfile';
 
 function getInitials(name: string) {
   const trimmed = name.trim();
@@ -22,7 +22,7 @@ export function ProfileHeader({
   badges: UserBadge[];
   onOpenSettings: () => void;
 }) {
-  const { avatarDataUrl, signature, error, setAvatarFromFile } = useLocalProfile();
+  const { profile, error, uploadAvatar, isUploadingAvatar } = useMeProfile(user.id);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const initials = useMemo(() => getInitials(user.username), [user.username]);
@@ -33,12 +33,16 @@ export function ProfileHeader({
         <div className="shrink-0">
           <button
             type="button"
-            className="group relative h-16 w-16 overflow-hidden rounded-2xl border bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100"
+            className={[
+              'group relative h-16 w-16 overflow-hidden rounded-2xl border bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100',
+              isUploadingAvatar ? 'opacity-70 cursor-not-allowed' : '',
+            ].join(' ')}
             onClick={() => fileInputRef.current?.click()}
-            title="点击上传头像（仅本机保存）"
+            title="点击上传头像（将压缩后存入数据库）"
+            disabled={isUploadingAvatar}
           >
-            {avatarDataUrl ? (
-              <img src={avatarDataUrl} alt="头像" className="h-full w-full object-cover" />
+            {profile.avatarDataUrl ? (
+              <img src={profile.avatarDataUrl} alt="头像" className="h-full w-full object-cover" />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-lg font-bold text-gray-700">
                 {initials}
@@ -54,7 +58,7 @@ export function ProfileHeader({
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (!f) return;
-              setAvatarFromFile(f);
+              uploadAvatar(f).catch(() => {});
               e.target.value = '';
             }}
           />
@@ -82,11 +86,11 @@ export function ProfileHeader({
           <div className="mt-1 text-xs text-gray-600">ID：{user.id}</div>
 
           <div className="mt-2 rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-700">
-            {signature ? (
-              <div className="whitespace-pre-wrap break-words">{signature}</div>
+            {profile.signature ? (
+              <div className="whitespace-pre-wrap break-words">{profile.signature}</div>
             ) : (
               <div className="text-gray-500">
-                还没有个性签名，去「设置」里写一句话吧。
+                还没有个性签名，去「设置」里写一句话吧（会保存到账号）。
               </div>
             )}
           </div>
