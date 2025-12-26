@@ -96,19 +96,18 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
   return (
     <div ref={cardRef} className="result-card" style={{ background: 'linear-gradient(135deg, #434343 0%, #000000 100%)' }}>
       <div className="result-content">
-        <div className="flex justify-center">
-          <img
-            src="/beast-title.svg"
-            alt="残兽档案"
-            className="w-72 mb-4"
-          />
-        </div>
-        <GeneratedByUserBadge variant="dark" className="mb-3" />
+	        <div className="flex justify-center">
+	          <img
+	            src="/beast-title.svg"
+	            alt="残兽档案"
+	            className="w-72 mb-4"
+	          />
+	        </div>
 
-        <div className="result-item">
-          <div className="result-label">名称</div>
-          <div className="result-value">{canshou.name}</div>
-        </div>
+	        <div className="result-item">
+	          <div className="result-label">名称</div>
+	          <div className="result-value">{canshou.name}</div>
+	        </div>
 
         <div className="flex">
         <div className="result-item w-full mr-4">
@@ -222,22 +221,26 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
         </button>
 
         {/* 【核心修改】新增：用于截图的Logo占位符，默认隐藏 */}
-        <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
-          <img
-            src="/logo-white-qrcode.svg"
-            width={280}
-            height={280}
-            alt="Logo"
-            style={{
-              display: 'block',
-              maxWidth: '100%',
-              height: 'auto'
-            }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-};
+	        <div
+	          className="logo-placeholder"
+	          style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+	        >
+	          <img
+	            src="/logo-white-qrcode.svg"
+	            width={280}
+	            height={280}
+	            alt="Logo"
+	            style={{
+	              display: 'block',
+	              maxWidth: '100%',
+	              height: 'auto'
+	            }}
+	          />
+	          <GeneratedByUserBadge variant="dark" className="mt-3" />
+	        </div>
+	      </div>
+	    </div>
+	  );
+	};
 
 export default CanshouCard;

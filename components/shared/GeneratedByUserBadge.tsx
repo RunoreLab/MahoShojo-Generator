@@ -1,6 +1,6 @@
 import React from 'react';
-import { UserWithTitle } from '@/components/UserTitle';
 import { useAuth } from '@/lib/useAuth';
+import BadgeIcon from '@/components/badge/BadgeIcon';
 
 type Variant = 'dark' | 'light';
 
@@ -19,34 +19,33 @@ export function GeneratedByUserBadge({
 
   if (loading || !isAuthenticated || !user) return null;
 
-  const baseTextClass = variant === 'light' ? 'text-gray-800' : 'text-gray-100';
-  const baseBgClass =
-    variant === 'light'
-      ? 'bg-white/90 border-black/10 shadow-sm'
-      : 'bg-white/10 border-white/15 shadow-sm';
+  const baseTextClass = variant === 'light' ? 'text-gray-700' : 'text-white/85';
+  const labelClass = variant === 'light' ? 'text-gray-500' : 'text-white/55';
+  const iconClass = variant === 'light' ? 'text-gray-600' : 'text-white/70';
 
   const username = (user.username || '').trim() || `用户${user.id}`;
-  const badges = Array.isArray(userBadges) ? userBadges : [];
+  const equippedBadges = (Array.isArray(userBadges) ? userBadges : [])
+    .filter((badge) => badge.isEquipped)
+    .sort((a, b) => a.displayOrder - b.displayOrder);
 
   return (
-    <div className={['w-full flex justify-center', className].filter(Boolean).join(' ')}>
-      <div
-        className={[
-          'inline-flex max-w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-full border px-4 py-2 text-xs backdrop-blur-sm',
-          baseTextClass,
-          baseBgClass,
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        <span className="opacity-80">{label}</span>
-        <UserWithTitle
-          username={username}
-          prefix={user.prefix}
-          badges={badges}
-          showBadges={true}
-          usernameClassName="font-semibold"
-        />
+    <div className={['w-full text-center text-xs drop-shadow', baseTextClass, className].filter(Boolean).join(' ')}>
+      <div className={['leading-tight', labelClass].filter(Boolean).join(' ')}>{label}</div>
+      <div className="mt-0.5 inline-flex flex-wrap items-center justify-center gap-1.5">
+        <span className="font-medium text-white/90">{username}</span>
+        {equippedBadges.length > 0 && (
+          <span className="inline-flex items-center gap-1">
+            {equippedBadges.map((userBadge) => {
+              const icon = userBadge.badge?.icon;
+              if (!icon || icon.type === 'null') return null;
+              return (
+                <span key={userBadge.id} title={userBadge.badge?.name || '徽章'}>
+                  <BadgeIcon icon={icon} size={12} className={iconClass} />
+                </span>
+              );
+            })}
+          </span>
+        )}
       </div>
     </div>
   );

@@ -380,7 +380,6 @@ export default function Name() {
                   <div className="flex justify-center items-center" style={{ marginBottom: '1rem', background: 'transparent' }}>
                     <img src="/mahou-title.svg" width={300} height={70} alt="Logo" style={{ display: 'block', background: 'transparent' }} />
                   </div>
-                  <GeneratedByUserBadge variant="dark" className="mb-3" />
                   <div className="result-item">
                     <div className="result-label">✨ 真名解放</div>
                     <div className="result-value">{magicalGirl.realName}</div>
@@ -433,7 +432,10 @@ export default function Name() {
                     📄 下载设定文件
                   </button>
 
-                  <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
+                  <div
+                    className="logo-placeholder"
+                    style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+                  >
                     <img
                       src="/logo-white-qrcode.svg"
                       width={240}
@@ -445,6 +447,7 @@ export default function Name() {
                         height: 'auto'
                       }}
                     />
+                    <GeneratedByUserBadge variant="dark" className="mt-3" />
                   </div>
                 </div>
               </div>

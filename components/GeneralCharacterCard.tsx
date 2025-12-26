@@ -194,7 +194,6 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
         <div className="flex justify-center">
           <img src="/questionnaire-title.svg" alt="通用角色档案" className="w-72 mb-4" />
         </div>
-        <GeneratedByUserBadge variant="dark" className="mb-3" />
 
         <div className="result-item">
           <div className="result-label">角色名称</div>
@@ -252,7 +251,10 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
           {saveButtonLabel ?? '📱 保存为图片'}
         </button>
 
-        <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
+        <div
+          className="logo-placeholder"
+          style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+        >
           <img
             src="/logo-white-qrcode.svg"
             width={240}
@@ -265,6 +267,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
               padding: '1rem',
             }}
           />
+          <GeneratedByUserBadge variant="dark" className="mt-3" />
         </div>
       </div>
     </div>
