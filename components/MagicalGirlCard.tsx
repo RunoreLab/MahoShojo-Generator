@@ -253,7 +253,6 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         <div className="flex justify-center items-center" style={{ marginBottom: '1rem', background: 'transparent' }}>
           <img src="/questionnaire-title.svg" width={300} height={70} alt="Logo" style={{ display: 'block', background: 'transparent' }} />
         </div>
-        <GeneratedByUserBadge variant="dark" className="mb-3" />
 
         {/* 基本信息 */}
         <div className="result-item">
@@ -424,7 +423,10 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
           {saveButtonLabel ?? '📱 保存为图片'}
         </button>
 
-        <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
+        <div
+          className="logo-placeholder"
+          style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+        >
           <img
             src="/logo-white-qrcode.svg"
             width={280}
@@ -436,6 +438,7 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
               height: 'auto'
             }}
           />
+          <GeneratedByUserBadge variant="dark" className="mt-3" />
         </div>
       </div>
     </div>

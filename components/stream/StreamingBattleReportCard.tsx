@@ -343,7 +343,6 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                                 <p>来源 | {reporterInfo.publication}</p>
                             </>
                         )}
-                        <GeneratedByUserBadge variant="dark" className="mt-2" />
                         {(hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
                             <p className="text-xs text-gray-400 mt-1">
                                 {hasAnyTokenNumber && (
@@ -428,7 +427,10 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 </div>
 
                 {/* Logo占位符，用于截图 */}
-                <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
+                <div
+                    className="logo-placeholder"
+                    style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+                >
                     <img
                         src="/logo-white-qrcode.svg"
                         width={280}
@@ -436,6 +438,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                         alt="Logo"
                         style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
                     />
+                    <GeneratedByUserBadge variant="dark" className="mt-3" />
                 </div>
             </div>
         </div>
