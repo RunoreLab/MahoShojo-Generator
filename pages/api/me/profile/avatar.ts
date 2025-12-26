@@ -6,6 +6,22 @@ export const runtime = 'edge';
 const AVATAR_SIZE = 128;
 const WEBP_QUALITY = 0.82;
 const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;
+const MAX_BASE64_LENGTH = 350_000;
+
+function isProbablyBase64(s: string) {
+  // 允许换行/空白的 base64 也很常见，这里做最小校验即可
+  const trimmed = s.trim();
+  if (!trimmed) return false;
+  if (trimmed.length > MAX_BASE64_LENGTH) return false;
+  return /^[A-Za-z0-9+/=\s]+$/.test(trimmed);
+}
+
+function stripWebpDataUrlPrefix(input: string) {
+  const trimmed = input.trim();
+  const prefix = 'data:image/webp;base64,';
+  if (trimmed.startsWith(prefix)) return trimmed.slice(prefix.length);
+  return trimmed;
+}
 
 function arrayBufferToBase64(ab: ArrayBuffer) {
   const bytes = new Uint8Array(ab);
@@ -62,6 +78,29 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
   if ('response' in auth) return auth.response;
 
   if (req.method === 'PUT') {
+    const contentType = req.headers.get('content-type') || '';
+
+    // 优先支持 JSON：前端先压缩为 128×128 WebP，再上传 base64（Edge 环境更稳定）
+    if (contentType.includes('application/json')) {
+      const body = (await req.json().catch(() => null)) as any;
+      if (!body) return json({ error: '请求体不是有效 JSON' }, { status: 400 });
+
+      const raw = body.avatarWebpBase64 ?? body.avatar_base64 ?? body.avatarDataUrl ?? body.avatar_data_url;
+      if (typeof raw !== 'string') return json({ error: '缺少头像内容（avatarWebpBase64/avatarDataUrl）' }, { status: 400 });
+
+      const base64 = stripWebpDataUrlPrefix(raw).replace(/\s+/g, '');
+      if (!isProbablyBase64(base64)) return json({ error: '头像内容不是有效 base64' }, { status: 400 });
+
+      const ok = await updateUserAvatarWebpBase64(auth.user.id, base64);
+      if (!ok) return json({ error: '保存头像失败' }, { status: 500 });
+
+      return json(
+        { success: true, avatarDataUrl: `data:image/webp;base64,${base64}` },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    // 兼容 multipart/form-data：若运行环境支持则后端压缩；否则提示前端走 JSON 压缩上传
     const formData = await req.formData().catch(() => null);
     if (!formData) return json({ error: '请求体不是有效表单' }, { status: 400 });
 
@@ -79,6 +118,12 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
       );
     } catch (e) {
       const message = e instanceof Error ? e.message : '头像处理失败';
+      if (String(message).includes('OffscreenCanvas') || String(message).includes('createImageBitmap')) {
+        return json(
+          { error: '当前运行环境不支持后端图片压缩，请改用前端压缩上传（JSON：avatarWebpBase64）' },
+          { status: 400 },
+        );
+      }
       return json({ error: message }, { status: 400 });
     }
   }
