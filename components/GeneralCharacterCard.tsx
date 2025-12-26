@@ -6,6 +6,7 @@ import { GeneralCharacterData } from '@/lib/schemas/general-character';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 export interface GeneralCharacterDetails extends GeneralCharacterData {
   arena_history?: ArenaHistory | null;
@@ -193,6 +194,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
         <div className="flex justify-center">
           <img src="/questionnaire-title.svg" alt="通用角色档案" className="w-72 mb-4" />
         </div>
+        <GeneratedByUserBadge variant="dark" className="mb-3" />
 
         <div className="result-item">
           <div className="result-label">角色名称</div>

@@ -6,6 +6,7 @@ import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
@@ -292,6 +293,7 @@ ${adjudicationMarkdown}
                 {shouldShowNarrativeReadCount && <>叙事历史读取：{report.narrativeHistoryReadCount} 条</>}
               </p>
             )}
+            <GeneratedByUserBadge variant="dark" className="mt-2" />
           </div>
           {/* 显示战斗模式 */}
           {modeDisplay && (
