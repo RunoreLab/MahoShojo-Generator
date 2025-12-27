@@ -184,7 +184,7 @@ const buildTokenBreakdownLabel = (report: BattleReportLite): string => {
       ? report.completionTokens
       : null;
 
-  const fallbackTotal = [prompt, reasoning, completion].reduce((sum, n) => sum + (typeof n === 'number' ? n : 0), 0);
+  const fallbackTotal = [prompt, reasoning, completion].reduce<number>((sum, n) => sum + (typeof n === 'number' ? n : 0), 0);
   const resolvedTotal = total ?? (fallbackTotal > 0 ? fallbackTotal : null);
 
   const pieces: string[] = [];
