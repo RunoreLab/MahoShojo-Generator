@@ -100,6 +100,32 @@ export type UserProfileRow = {
   avatar_webp_base64: string | null;
 };
 
+export type UserProfileCardRow = {
+  id: number;
+  username: string;
+  prefix: string | null;
+  created_at: string;
+  signature: string | null;
+  avatar_webp_base64: string | null;
+};
+
+export async function getUserProfileCardRowByUserId(userId: number): Promise<UserProfileCardRow | null> {
+  try {
+    const result = (await queryFromD1(
+      'SELECT id, username, prefix, created_at, signature, avatar_webp_base64 FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    )) as any;
+
+    if (result.success && result.result && result.result[0]?.results?.length > 0) {
+      return result.result[0].results[0] as UserProfileCardRow;
+    }
+    return null;
+  } catch (error) {
+    console.error('获取用户资料卡信息失败:', error);
+    return null;
+  }
+}
+
 export async function getUserProfileByUserId(userId: number): Promise<UserProfileRow | null> {
   try {
     const result = (await queryFromD1(

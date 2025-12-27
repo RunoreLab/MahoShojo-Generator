@@ -17,10 +17,12 @@ export function ProfileHeader({
   user,
   badges,
   onOpenSettings,
+  onOpenProfileCard,
 }: {
   user: User;
   badges: UserBadge[];
   onOpenSettings: () => void;
+  onOpenProfileCard: () => void;
 }) {
   const { profile, error, uploadAvatar, isUploadingAvatar } = useMeProfile(user.id);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -74,13 +76,22 @@ export function ProfileHeader({
               usernameClassName="font-semibold text-gray-900"
               titleClassName="text-xs"
             />
-            <button
-              type="button"
-              className="rounded-lg border bg-white px-3 py-1.5 text-xs hover:bg-gray-50"
-              onClick={onOpenSettings}
-            >
-              编辑资料
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
+                onClick={onOpenProfileCard}
+              >
+                生成资料卡
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border bg-white px-3 py-1.5 text-xs hover:bg-gray-50"
+                onClick={onOpenSettings}
+              >
+                编辑资料
+              </button>
+            </div>
           </div>
 
           <div className="mt-1 text-xs text-gray-600">ID：{user.id}</div>
