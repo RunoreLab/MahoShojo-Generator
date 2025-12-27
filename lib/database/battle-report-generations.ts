@@ -498,6 +498,43 @@ export async function updateBattleReportGenerationExtraJson(
   }
 }
 
+export type BattleReportCountsByStatus = {
+  total: number;
+  completed: number;
+  aborted: number;
+  failed: number;
+};
+
+export async function countBattleReportGenerationsByUserIdSince(
+  userId: number,
+  sinceIso: string
+): Promise<BattleReportCountsByStatus> {
+  const out: BattleReportCountsByStatus = { total: 0, completed: 0, aborted: 0, failed: 0 };
+  try {
+    const result = (await queryFromD1(
+      `SELECT status, COUNT(1) AS total
+       FROM battle_report_generations
+       WHERE user_id = ? AND started_at >= ?
+       GROUP BY status`,
+      [userId, sinceIso]
+    )) as any;
+
+    const rows: Array<{ status: string; total: number }> = result?.result?.[0]?.results ?? [];
+    for (const row of rows) {
+      const n = typeof row.total === 'number' ? row.total : Number(row.total || 0);
+      const count = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+      out.total += count;
+      if (row.status === 'completed') out.completed += count;
+      else if (row.status === 'aborted') out.aborted += count;
+      else if (row.status === 'failed') out.failed += count;
+    }
+    return out;
+  } catch (error) {
+    console.error('统计 battle_report_generations(user, since) 失败:', error);
+    return out;
+  }
+}
+
 export async function updateBattleReportGenerationOutputHasSensitiveWords(
   id: string,
   outputHasSensitiveWords: boolean

@@ -36,6 +36,7 @@ export {
   checkPublicCardNameExists,
   getUserDataCards,
   getUserTopDataCardsByEngagement,
+  getUserProfileCardDataStats,
   updateDataCard,
   deleteDataCard,
   getUserRecycleBinCards,
@@ -54,7 +55,8 @@ export {
   getDataCardById,
   incrementDataCardLike,
   incrementDataCardUsage,
-  type UserTopDataCardRow
+  type UserTopDataCardRow,
+  type UserProfileCardDataStats
 } from './database/data-cards';
 
 // 重新导出收藏相关功能
@@ -144,6 +146,7 @@ export {
   getLatestPvpRoomChatMessageBySender,
   createPvpRoomChatMessage,
   getPvpMatchesByUserId,
+  getPvpMatchRoundOutcomeSummariesByMatchIds,
   countPvpMatchesByUserId,
   isUserInPvpMatch,
   getPvpUserSummariesByUserIds,
@@ -151,6 +154,7 @@ export {
   type PvpUserSummaryRow,
   type PvpMatchRow,
   type PvpMatchStatus,
+  type PvpMatchRoundOutcomeSummary,
   type PvpRoomPhase,
   type PvpRoomStatus,
   type PvpRoomMemberRole,
@@ -171,13 +175,15 @@ export {
   getBattleReportGenerationByIdLite,
   getBattleReportGenerationsByUserIdLite,
   countBattleReportGenerationsByUserId,
+  countBattleReportGenerationsByUserIdSince,
   buildBattleReportGenerationsWhereClause,
   type BattleReportGenerationInsert,
   type BattleReportGenerationMode,
   type BattleReportGenerationStatus,
   type BattleReportGenerationListSort,
   type BattleReportGenerationsListFilter,
-  type BattleReportGenerationRowLite
+  type BattleReportGenerationRowLite,
+  type BattleReportCountsByStatus
 } from './database/battle-report-generations';
 
 export {
