@@ -166,6 +166,35 @@ const formatCount = (value: unknown): string => {
   return value.toLocaleString('zh-CN');
 };
 
+const buildTokenBreakdownLabel = (report: BattleReportLite): string => {
+  const total =
+    typeof report.totalTokens === 'number' && Number.isFinite(report.totalTokens)
+      ? report.totalTokens
+      : null;
+  const prompt =
+    typeof report.promptTokens === 'number' && Number.isFinite(report.promptTokens)
+      ? report.promptTokens
+      : null;
+  const reasoning =
+    typeof report.reasoningTokens === 'number' && Number.isFinite(report.reasoningTokens)
+      ? report.reasoningTokens
+      : null;
+  const completion =
+    typeof report.completionTokens === 'number' && Number.isFinite(report.completionTokens)
+      ? report.completionTokens
+      : null;
+
+  const fallbackTotal = [prompt, reasoning, completion].reduce((sum, n) => sum + (typeof n === 'number' ? n : 0), 0);
+  const resolvedTotal = total ?? (fallbackTotal > 0 ? fallbackTotal : null);
+
+  const pieces: string[] = [];
+  pieces.push(`总 ${resolvedTotal == null ? '-' : formatCount(resolvedTotal)}`);
+  if (prompt != null) pieces.push(`输入 ${formatCount(prompt)}`);
+  if (reasoning != null) pieces.push(`推理 ${formatCount(reasoning)}`);
+  if (completion != null) pieces.push(`输出 ${formatCount(completion)}`);
+  return pieces.join(' / ');
+};
+
 export function ProfileCard({
   data,
   imageSaveMode = 'auto',
@@ -498,8 +527,10 @@ export function ProfileCard({
                     <div className="mt-1 text-[11px] text-white/85">
                       胜利者：{r.winner || '—'}
                       <span className="mx-2 text-white/60">·</span>
-                      Tokens：{formatCount(r.totalTokens)}
-                      {typeof r.cachedTokens === 'number' && Number.isFinite(r.cachedTokens) && r.cachedTokens > 0 ? `（缓存 ${formatCount(r.cachedTokens)}）` : ''}
+                      Tokens：{buildTokenBreakdownLabel(r)}
+                      {typeof r.cachedTokens === 'number' && Number.isFinite(r.cachedTokens) && r.cachedTokens > 0
+                        ? `（缓存 ${formatCount(r.cachedTokens)}）`
+                        : ''}
                     </div>
                   </div>
                 ))
