@@ -959,6 +959,46 @@ export async function getPvpMatchesByUserId(
   }
 }
 
+export type PvpMatchRoundOutcomeSummary = {
+  match_id: string;
+  total_rounds: number;
+  wins: number;
+  losses: number;
+  draws: number;
+};
+
+export async function getPvpMatchRoundOutcomeSummariesByMatchIds(
+  matchIds: string[],
+  userId: number
+): Promise<PvpMatchRoundOutcomeSummary[]> {
+  try {
+    const ids = [...new Set(matchIds.map((id) => String(id)).filter(Boolean))];
+    if (ids.length <= 0) return [];
+
+    const placeholders = ids.map(() => '?').join(', ');
+    const result = (await queryFromD1(
+      `SELECT
+        match_id,
+        COUNT(1) AS total_rounds,
+        SUM(CASE WHEN winner_user_id = ? THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN winner_user_id IS NOT NULL AND winner_user_id != ? THEN 1 ELSE 0 END) AS losses,
+        SUM(CASE WHEN winner_user_id IS NULL THEN 1 ELSE 0 END) AS draws
+      FROM pvp_rounds
+      WHERE match_id IN (${placeholders}) AND status = 'completed'
+      GROUP BY match_id`,
+      [userId, userId, ...ids]
+    )) as any;
+
+    if (result.success && result.result?.[0]?.results) {
+      return result.result[0].results as PvpMatchRoundOutcomeSummary[];
+    }
+    return [];
+  } catch (error) {
+    console.error('读取 PVP 回合胜负统计失败:', error);
+    return [];
+  }
+}
+
 export async function countPvpMatchesByUserId(userId: number): Promise<number> {
   try {
     const result = (await queryFromD1(

@@ -18,6 +18,7 @@ type ApiResponse = {
   profile: MeProfileCardPayload['profile'];
   badges: MeProfileCardPayload['badges'];
   topCards: MeProfileCardPayload['topCards'];
+  stats: MeProfileCardPayload['stats'];
   pvp: MeProfileCardPayload['pvp'];
   recentBattleReports: MeProfileCardPayload['recentBattleReports'];
 };
@@ -59,6 +60,7 @@ export function ProfileCardModal({ isOpen, onClose }: Props) {
       profile: query.data.profile,
       badges: query.data.badges,
       topCards: query.data.topCards,
+      stats: query.data.stats,
       pvp: query.data.pvp,
       recentBattleReports: query.data.recentBattleReports,
     };
@@ -132,4 +134,3 @@ export function ProfileCardModal({ isOpen, onClose }: Props) {
     </>
   );
 }
-

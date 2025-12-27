@@ -4,7 +4,9 @@ import { useMemo, useRef } from 'react';
 import { snapdom } from '@zumer/snapdom';
 
 import Badge from '@/components/badge/Badge';
+import BadgeIcon from '@/components/badge/BadgeIcon';
 import type { UserBadge } from '@/types/badge';
+import { parseUserPrefix } from '@/lib/user-prefix';
 
 type CardLite = {
   id: string;
@@ -36,6 +38,11 @@ type BattleReportLite = {
   mode: string;
   headline: string | null;
   winner: string | null;
+  promptTokens: number | null;
+  reasoningTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  cachedTokens: number | null;
   pvpMatchId: string | null;
   contentBlocked: boolean;
 };
@@ -52,10 +59,33 @@ export type MeProfileCardPayload = {
   badges: {
     equipped: UserBadge[];
     recent: UserBadge[];
+    all: UserBadge[];
   };
   topCards: {
     characters: CardLite[];
     scenario: CardLite | null;
+  };
+  stats: {
+    dataCards: {
+      total: number;
+      characters: number;
+      scenarios: number;
+      history: number;
+      publicCards: number;
+      magicalGirl: number;
+      canshou: number;
+      general: number;
+      unknownCharacter: number;
+      likeTotal: number;
+      favoriteTotal: number;
+      usageTotal: number;
+    };
+    battleReports7d: {
+      total: number;
+      completed: number;
+      aborted: number;
+      failed: number;
+    };
   };
   pvp: {
     summary: {
@@ -66,7 +96,11 @@ export type MeProfileCardPayload = {
       abortedMatches: number;
       lastPlayedAt: string | null;
     };
-    recentMatches: PvpMatchLite[];
+    recentMatches: Array<
+      PvpMatchLite & {
+        roundSummary: { total: number; wins: number; losses: number; draws: number } | null;
+      }
+    >;
   };
   recentBattleReports: BattleReportLite[];
 };
@@ -124,6 +158,11 @@ function sanitizeFilename(value: string): string {
   return normalized.replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '_') || 'profile';
 }
 
+const formatCount = (value: unknown): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  return value.toLocaleString('zh-CN');
+};
+
 export function ProfileCard({
   data,
   imageSaveMode = 'auto',
@@ -136,6 +175,7 @@ export function ProfileCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const initials = useMemo(() => getInitials(data.profile.username), [data.profile.username]);
   const generatedAtLabel = useMemo(() => new Date().toLocaleString('zh-CN'), []);
+  const parsedPrefix = useMemo(() => parseUserPrefix(data.profile.prefix), [data.profile.prefix]);
 
   const winRate = useMemo(() => {
     const completed = data.pvp.summary.completedMatches || 0;
@@ -198,8 +238,9 @@ export function ProfileCard({
     }
   };
 
+  const allBadges = data.badges.all ?? [];
   const equippedBadges = (data.badges.equipped ?? []).slice(0, 5);
-  const recentBadges = (data.badges.recent ?? []).slice(0, 5);
+  const stats = data.stats;
 
   return (
     <div
@@ -221,21 +262,37 @@ export function ProfileCard({
             </div>
 
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
                 <div className="text-xl font-bold tracking-wide truncate">{data.profile.username}</div>
-                {data.profile.prefix ? (
-                  <div className="rounded-full bg-white/15 px-2 py-0.5 text-xs font-semibold">{data.profile.prefix}</div>
+                {parsedPrefix ? (
+                  <span
+                    className={[
+                      'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold',
+                      parsedPrefix.borderColor ? 'border' : '',
+                    ].join(' ')}
+                    style={{
+                      color: parsedPrefix.textColor,
+                      background: parsedPrefix.backgroundColor,
+                      ...(parsedPrefix.borderColor
+                        ? { borderColor: parsedPrefix.borderColor, borderWidth: '1px', borderStyle: 'solid' }
+                        : null),
+                    }}
+                    title={`头衔：${parsedPrefix.title}`}
+                  >
+                    {parsedPrefix.icon && parsedPrefix.icon.type !== 'null' ? (
+                      <BadgeIcon icon={parsedPrefix.icon} size={12} />
+                    ) : null}
+                    <span className="whitespace-nowrap">{parsedPrefix.title}</span>
+                  </span>
+                ) : null}
+                {data.profile.signature ? (
+                  <span className="min-w-0 max-w-[520px] truncate text-sm text-white/85">
+                    {data.profile.signature}
+                  </span>
                 ) : null}
               </div>
               <div className="mt-1 text-xs text-white/85">
                 ID：{data.profile.id} · 注册：{formatDate(data.profile.createdAt)}
-              </div>
-              <div className="mt-3 max-w-[620px] rounded-2xl bg-black/15 px-4 py-3 text-sm leading-relaxed text-white/90">
-                {data.profile.signature ? (
-                  <div className="whitespace-pre-wrap break-words">{data.profile.signature}</div>
-                ) : (
-                  <div className="text-white/70">（还没有个性签名）</div>
-                )}
               </div>
             </div>
           </div>
@@ -258,7 +315,12 @@ export function ProfileCard({
 
         <div className="mt-5 grid grid-cols-2 gap-4">
           <div className="rounded-2xl bg-black/15 p-4">
-            <div className="text-sm font-semibold">当前佩戴徽章</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold">徽章与统计</div>
+              <div className="text-xs text-white/75">徽章 {allBadges.length}</div>
+            </div>
+
+            <div className="mt-2 text-xs font-semibold text-white/85">佩戴中</div>
             <div className="mt-2 flex flex-wrap gap-2">
               {equippedBadges.length > 0 ? (
                 equippedBadges.map((ub) => (
@@ -271,23 +333,51 @@ export function ProfileCard({
               )}
             </div>
 
-            <div className="mt-4 text-sm font-semibold">最近获得（除佩戴外）</div>
+            <div className="mt-4 text-xs font-semibold text-white/85">全部徽章</div>
             <div className="mt-2 flex flex-wrap gap-2">
-              {recentBadges.length > 0 ? (
-                recentBadges.map((ub) => (
-                  <div key={`recent-${ub.id}`} className="max-w-full">
-                    <Badge badge={ub.badge} size="sm" />
+              {allBadges.length > 0 ? (
+                allBadges.map((ub) => (
+                  <div key={`badge-${ub.id}`} className="max-w-full">
+                    <Badge badge={ub.badge} size="sm" className={ub.isEquipped ? 'ring-1 ring-white/60' : ''} />
                   </div>
                 ))
               ) : (
-                <div className="text-xs text-white/70">暂无其他徽章</div>
+                <div className="text-xs text-white/70">暂无徽章</div>
               )}
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-white/10 px-3 py-2">
+                <div className="text-[11px] text-white/75">角色卡（魔法少女/残兽/通用/未知）</div>
+                <div className="mt-1 text-sm font-semibold text-white/95">
+                  {stats.dataCards.magicalGirl}/{stats.dataCards.canshou}/{stats.dataCards.general}/{stats.dataCards.unknownCharacter}
+                </div>
+              </div>
+              <div className="rounded-xl bg-white/10 px-3 py-2">
+                <div className="text-[11px] text-white/75">情景卡</div>
+                <div className="mt-1 text-sm font-semibold text-white/95">{stats.dataCards.scenarios}</div>
+              </div>
+              <div className="rounded-xl bg-white/10 px-3 py-2">
+                <div className="text-[11px] text-white/75">公开卡</div>
+                <div className="mt-1 text-sm font-semibold text-white/95">{stats.dataCards.publicCards}</div>
+              </div>
+              <div className="rounded-xl bg-white/10 px-3 py-2">
+                <div className="text-[11px] text-white/75">获赞 / 收藏 / 使用</div>
+                <div className="mt-1 text-sm font-semibold text-white/95">
+                  {formatCount(stats.dataCards.likeTotal)} / {formatCount(stats.dataCards.favoriteTotal)} / {formatCount(stats.dataCards.usageTotal)}
+                </div>
+              </div>
+              <div className="rounded-xl bg-white/10 px-3 py-2 col-span-2">
+                <div className="text-[11px] text-white/75">近 7 天战报（完成/中断/失败）</div>
+                <div className="mt-1 text-sm font-semibold text-white/95">
+                  {stats.battleReports7d.total}（{stats.battleReports7d.completed}/{stats.battleReports7d.aborted}/{stats.battleReports7d.failed}）
+                </div>
+              </div>
             </div>
           </div>
 
           <div className="rounded-2xl bg-black/15 p-4">
             <div className="text-sm font-semibold">数据卡高光</div>
-            <div className="mt-2 text-xs text-white/80">按 点赞 + 收藏 + 使用 统计排序</div>
 
             <div className="mt-3">
               <div className="text-xs font-semibold text-white/85">Top 角色卡（3）</div>
@@ -366,6 +456,9 @@ export function ProfileCard({
                     .map((p) => p.username || `用户${p.userId}`)
                     .slice(0, 3)
                     .join(' / ');
+                  const roundSummaryText = m.roundSummary
+                    ? `回合：胜 ${m.roundSummary.wins} / 负 ${m.roundSummary.losses} / 平 ${m.roundSummary.draws}（共 ${m.roundSummary.total}）`
+                    : '回合：—';
                   return (
                     <div key={`match-${m.id}`} className="rounded-xl bg-white/10 px-3 py-2">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -374,7 +467,7 @@ export function ProfileCard({
                         </div>
                         <div className="text-[11px] text-white/80">{formatDateTime(m.startedAt)}</div>
                       </div>
-                      <div className="mt-1 text-[11px] text-white/75">matchId：{m.id}</div>
+                      <div className="mt-1 text-[11px] text-white/80">{roundSummaryText}</div>
                     </div>
                   );
                 })
@@ -399,7 +492,12 @@ export function ProfileCard({
                     <div className="mt-1 text-xs text-white/90 break-words">
                       {r.contentBlocked ? '（内容已屏蔽）' : r.headline || '（无标题）'}
                     </div>
-                    <div className="mt-1 text-[11px] text-white/75">generationId：{r.id}</div>
+                    <div className="mt-1 text-[11px] text-white/85">
+                      胜利者：{r.winner || '—'}
+                      <span className="mx-2 text-white/60">·</span>
+                      Tokens：{formatCount(r.totalTokens)}
+                      {typeof r.cachedTokens === 'number' && Number.isFinite(r.cachedTokens) && r.cachedTokens > 0 ? `（缓存 ${formatCount(r.cachedTokens)}）` : ''}
+                    </div>
                   </div>
                 ))
               ) : (
