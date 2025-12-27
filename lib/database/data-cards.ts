@@ -723,6 +723,57 @@ export async function getDataCardStatsByIds(ids: string[]): Promise<Array<{ id: 
   }
 }
 
+export type UserTopDataCardRow = {
+  id: string;
+  type: 'character' | 'scenario' | 'history';
+  name: string;
+  description: string | null;
+  is_public: number;
+  review_status: string | null;
+  usage_count: number;
+  like_count: number;
+  favorite_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function getUserTopDataCardsByEngagement(
+  userId: number,
+  type: 'character' | 'scenario',
+  limit: number
+): Promise<UserTopDataCardRow[]> {
+  try {
+    const safeLimit = Math.max(1, Math.min(10, Math.floor(limit)));
+    const result = (await queryFromD1(
+      `SELECT
+        id,
+        type,
+        name,
+        description,
+        is_public,
+        review_status,
+        usage_count,
+        like_count,
+        favorite_count,
+        created_at,
+        updated_at
+      FROM data_cards
+      WHERE user_id = ? AND type = ? AND deleted_at IS NULL
+      ORDER BY (usage_count + like_count + favorite_count) DESC, updated_at DESC
+      LIMIT ?`,
+      [userId, type, safeLimit]
+    )) as any;
+
+    if (result.success && result.result?.[0]?.results) {
+      return result.result[0].results as UserTopDataCardRow[];
+    }
+    return [];
+  } catch (error) {
+    console.error('读取用户热门数据卡失败:', error);
+    return [];
+  }
+}
+
 // 检查数据卡是否被封禁
 export function isDataCardBanned(card: any): boolean {
   return card && card.is_public === -1;

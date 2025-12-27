@@ -20,11 +20,13 @@ export {
   getUserByAuthKey,
   verifyUserLogin,
   getUserProfileByUserId,
+  getUserProfileCardRowByUserId,
   updateUserAvatarWebpBase64,
   updateUserSignature,
   getUserDataCardCapacity,
   increaseUserSlotCount,
-  type UserProfileRow
+  type UserProfileRow,
+  type UserProfileCardRow
 } from './database/users';
 
 // 重新导出数据卡相关功能
@@ -33,6 +35,7 @@ export {
   createDataCardWithAuthor,
   checkPublicCardNameExists,
   getUserDataCards,
+  getUserTopDataCardsByEngagement,
   updateDataCard,
   deleteDataCard,
   getUserRecycleBinCards,
@@ -50,7 +53,8 @@ export {
   getDataCardStatsByIds,
   getDataCardById,
   incrementDataCardLike,
-  incrementDataCardUsage
+  incrementDataCardUsage,
+  type UserTopDataCardRow
 } from './database/data-cards';
 
 // 重新导出收藏相关功能
@@ -187,6 +191,7 @@ export {
 export {
   getUserBadges,
   getUserEquippedBadges,
+  getUserRecentBadgesExcludingEquipped,
   updateEquippedBadges,
   grantBadgeToUser,
   revokeBadgeFromUser,
