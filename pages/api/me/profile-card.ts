@@ -1,5 +1,6 @@
 import {
   getBattleReportGenerationsByUserIdLite,
+  countBattleReportGenerationsByUserId,
   countBattleReportGenerationsByUserIdSince,
   getPvpMatchRoundOutcomeSummariesByMatchIds,
   getPvpMatchesByUserId,
@@ -100,7 +101,18 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
   const sinceIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [userRow, allBadges, topCharacters, topScenarios, pvpSummaries, pvp, recentReports, dataCardStats, battleReports7d] =
+  const [
+    userRow,
+    allBadges,
+    topCharacters,
+    topScenarios,
+    pvpSummaries,
+    pvp,
+    recentReports,
+    dataCardStats,
+    battleReports7d,
+    battleReportsAllTotal,
+  ] =
     await Promise.all([
       getUserProfileCardRowByUserId(auth.user.id),
       getUserBadges(auth.user.id),
@@ -111,6 +123,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
       getBattleReportGenerationsByUserIdLite(auth.user.id, 3, 0),
       getUserProfileCardDataStats(auth.user.id),
       countBattleReportGenerationsByUserIdSince(auth.user.id, sinceIso),
+      countBattleReportGenerationsByUserId(auth.user.id),
     ]);
 
   if (!userRow) return json({ error: '用户不存在' }, { status: 404 });
@@ -218,6 +231,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
       stats: {
         dataCards: dataCardStats,
         battleReports7d,
+        battleReportsAll: { total: battleReportsAllTotal },
       },
       pvp: {
         summary: {

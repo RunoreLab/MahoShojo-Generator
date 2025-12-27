@@ -86,6 +86,9 @@ export type MeProfileCardPayload = {
       aborted: number;
       failed: number;
     };
+    battleReportsAll: {
+      total: number;
+    };
   };
   pvp: {
     summary: {
@@ -368,7 +371,7 @@ export function ProfileCard({
                 </div>
               </div>
               <div className="rounded-xl bg-white/10 px-3 py-2 col-span-2">
-                <div className="text-[11px] text-white/75">近 7 天战报（完成/中断/失败）</div>
+                <div className="text-[11px] text-white/75">近 7 天战报（完成/中断/失败） · 累计 {stats.battleReportsAll.total}</div>
                 <div className="mt-1 text-sm font-semibold text-white/95">
                   {stats.battleReports7d.total}（{stats.battleReports7d.completed}/{stats.battleReports7d.aborted}/{stats.battleReports7d.failed}）
                 </div>
