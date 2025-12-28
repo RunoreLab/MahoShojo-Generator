@@ -23,6 +23,7 @@ import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/rou
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { buildPvpSensitiveArrestWarrantReport } from '@/lib/pvp/arrest-warrant';
+import { resolvePvpAdjudicationEvents } from '@/lib/pvp/adjudication-events';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { createPvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
@@ -373,7 +374,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       writeArenaHistory: rules.writeArenaHistory,
       readCurrentState: rules.readCurrentState,
       writeCurrentState: rules.writeCurrentState,
-      adjudicationEvents: rules.adjudicationEvents,
+      adjudicationEvents: resolvePvpAdjudicationEvents({ roomEvents: rules.adjudicationEvents, scenarioPayload }),
       ...(customProvider ? { customProvider } : {}),
       pvpContext: { roomId, matchId, roundId },
     }),

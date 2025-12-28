@@ -24,6 +24,7 @@ import { buildPvpSensitiveArrestWarrantReport } from '@/lib/pvp/arrest-warrant';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { createPvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
+import { resolvePvpAdjudicationEvents } from '@/lib/pvp/adjudication-events';
 
 export const runtime = 'edge';
 
@@ -379,7 +380,7 @@ async function resolveHandler(req: Request): Promise<Response> {
           writeArenaHistory: rules.writeArenaHistory,
           readCurrentState: rules.readCurrentState,
           writeCurrentState: rules.writeCurrentState,
-          adjudicationEvents: rules.adjudicationEvents,
+          adjudicationEvents: resolvePvpAdjudicationEvents({ roomEvents: rules.adjudicationEvents, scenarioPayload }),
           ...(customProvider ? { customProvider } : {}),
           pvpContext: {
             roomId,
