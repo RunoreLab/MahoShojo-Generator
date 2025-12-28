@@ -244,15 +244,9 @@ export default function DataCard({
     >
       {/* 主要内容区域 */}
       <div className="flex-1">
-        {/* 标题和标签行 */}
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <h4 className={`font-semibold text-lg ${textColor} flex-1`}>{name}</h4>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {hot && (
-              <span className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-800 border border-orange-200">
-                🔥 热门卡片
-              </span>
-            )}
+        <div className="mb-2">
+          <h4 className={`font-semibold text-lg ${textColor}`}>{name}</h4>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             {hot && (
               <span className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-800 border border-orange-200">
                 🔥 热门卡片
