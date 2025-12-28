@@ -1,5 +1,49 @@
 import type { AdjudicatorEvent } from '@/types/arena';
 
+export const isLegacyAdjudicatorFormat = (events: unknown): boolean => {
+  if (!Array.isArray(events) || events.length === 0) return false;
+  const firstEvent = events[0] as any;
+  return (
+    typeof firstEvent === 'object' &&
+    firstEvent !== null &&
+    typeof firstEvent.event === 'string' &&
+    typeof firstEvent.probability === 'number' &&
+    typeof firstEvent.type === 'undefined'
+  );
+};
+
+const normalizeEventId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+export const mergeAdjudicationEvents = (current: unknown, incoming: unknown): AdjudicatorEvent[] => {
+  const base = Array.isArray(current) ? (current as AdjudicatorEvent[]) : [];
+  const next = Array.isArray(incoming) ? (incoming as AdjudicatorEvent[]) : [];
+  if (next.length === 0) return base;
+  if (isLegacyAdjudicatorFormat(next)) return base;
+
+  const seen = new Set<string>();
+  const merged: AdjudicatorEvent[] = [];
+  for (const evt of base) {
+    const id = normalizeEventId((evt as any)?.id);
+    if (id) seen.add(id);
+    merged.push(evt);
+  }
+  for (const evt of next) {
+    const id = normalizeEventId((evt as any)?.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    merged.push(evt);
+  }
+  return merged;
+};
+
+export const extractScenarioAdjudicationEvents = (scenarioPayload: unknown): AdjudicatorEvent[] => {
+  if (!scenarioPayload || typeof scenarioPayload !== 'object') return [];
+  const raw = (scenarioPayload as any).adjudicationEvents;
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  if (isLegacyAdjudicatorFormat(raw)) return [];
+  return raw as AdjudicatorEvent[];
+};
+
 /**
  * PVP 专用：解析本轮应使用的“随机判定器事件”列表。
  *
@@ -16,11 +60,5 @@ export const resolvePvpAdjudicationEvents = (input: {
 }): AdjudicatorEvent[] => {
   const roomEvents = Array.isArray(input.roomEvents) ? (input.roomEvents as AdjudicatorEvent[]) : [];
   if (roomEvents.length > 0) return roomEvents;
-
-  const scenarioEvents =
-    input.scenarioPayload && typeof input.scenarioPayload === 'object' && Array.isArray((input.scenarioPayload as any).adjudicationEvents)
-      ? ((input.scenarioPayload as any).adjudicationEvents as AdjudicatorEvent[])
-      : [];
-  return scenarioEvents;
+  return extractScenarioAdjudicationEvents(input.scenarioPayload);
 };
-
