@@ -73,6 +73,10 @@ async function getRoomHandler(req: Request): Promise<Response> {
   const bots = parsed.internal.bots;
   const postRoundRaw = (parsed.internal.raw as any)?._postRound;
   const scenarioSelection = parsePvpScenarioSelection((parsed.internal.raw as any)?._scenario);
+  const scenarioAdjudicationImportedFor =
+    typeof (parsed.internal.raw as any)?._scenarioAdjudicationImportedFor === 'string'
+      ? String((parsed.internal.raw as any)._scenarioAdjudicationImportedFor).trim() || null
+      : null;
   const scenario = scenarioSelection
     ? {
         title: getPvpScenarioTitle(scenarioSelection),
@@ -416,6 +420,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
       lastActivityAt: room.last_activity_at,
       currentMatchId,
       rules,
+      scenarioAdjudicationImportedFor,
       scenario,
     },
     players: [
