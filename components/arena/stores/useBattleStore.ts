@@ -8,6 +8,7 @@ import {
   BattleSettings,
   MAX_COMBATANTS,
   ScenarioState,
+  MAX_AUX_SCENARIOS,
 } from '../types';
 
 const defaultScenario: ScenarioState = {
@@ -48,6 +49,7 @@ export const useBattleStore = create<BattleStoreState>()(
     (set) => ({
       combatants: [],
       scenario: defaultScenario,
+      auxScenarios: [],
       battleMode: 'classic',
       generationMode: 'non-stream',
       isStreaming: false,
@@ -150,6 +152,35 @@ export const useBattleStore = create<BattleStoreState>()(
 
       setScenario: (scenario) => set({ scenario }),
       clearScenario: () => set({ scenario: defaultScenario }),
+
+      addAuxScenario: (scenario) =>
+        set((state) => {
+          if (state.auxScenarios.length >= MAX_AUX_SCENARIOS) {
+            return state;
+          }
+          return { auxScenarios: [...state.auxScenarios, scenario] };
+        }),
+
+      removeAuxScenario: (id) =>
+        set((state) => ({
+          auxScenarios: state.auxScenarios.filter((item) => item.id !== id),
+        })),
+
+      moveAuxScenario: (fromIndex, toIndex) =>
+        set((state) => {
+          const current = state.auxScenarios;
+          if (fromIndex === toIndex) return state;
+          if (fromIndex < 0 || fromIndex >= current.length) return state;
+          if (toIndex < 0 || toIndex >= current.length) return state;
+
+          const next = [...current];
+          const [moved] = next.splice(fromIndex, 1);
+          next.splice(toIndex, 0, moved!);
+          return { auxScenarios: next };
+        }),
+
+      clearAuxScenarios: () => set({ auxScenarios: [] }),
+      setAuxScenarios: (scenarios) => set({ auxScenarios: scenarios }),
 
       setAdjudicationEvents: (events) => set({ adjudicationEvents: events }),
       setAdjudicationResults: (results) => set({ adjudicationResults: results }),

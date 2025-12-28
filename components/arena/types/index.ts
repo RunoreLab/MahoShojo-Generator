@@ -5,6 +5,7 @@ import type { StatsData } from '@/pages/api/get-stats';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 
 export const MAX_COMBATANTS = 10;
+export const MAX_AUX_SCENARIOS = 10;
 export const ARENA_STATE_PREF_KEY = 'arena-history-state-preferences-v1';
 
 export type CombatantType = 'magical-girl' | 'canshou' | 'general-character';
@@ -57,6 +58,11 @@ export interface ScenarioState {
   sourceAuthor?: string;
 }
 
+export type AuxiliaryScenarioState = Omit<ScenarioState, 'content'> & {
+  id: string;
+  content: Record<string, unknown>;
+};
+
 export interface BattleSettings {
   readArenaHistory: boolean;
   readArenaHistoryLimit: number;
@@ -88,6 +94,7 @@ export interface BattleApiResponse {
 export interface BattleStoreState {
   combatants: Combatant[];
   scenario: ScenarioState;
+  auxScenarios: AuxiliaryScenarioState[];
   battleMode: BattleMode;
   generationMode: GenerationMode;
   isStreaming: boolean;
@@ -134,6 +141,12 @@ export interface BattleStoreState {
 
   setScenario: (scenario: ScenarioState) => void;
   clearScenario: () => void;
+
+  addAuxScenario: (scenario: AuxiliaryScenarioState) => void;
+  removeAuxScenario: (id: string) => void;
+  moveAuxScenario: (fromIndex: number, toIndex: number) => void;
+  clearAuxScenarios: () => void;
+  setAuxScenarios: (scenarios: AuxiliaryScenarioState[]) => void;
 
   setAdjudicationEvents: (events: AdjudicatorEvent[]) => void;
   setAdjudicationResults: (results: AdjudicationResult[] | null) => void;

@@ -97,6 +97,7 @@ export function BattleActions() {
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const scenario = useBattleSelector((state) => state.scenario);
+  const auxScenarios = useBattleSelector((state) => state.auxScenarios);
   const selectedLevel = useBattleSelector((state) => state.selectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const storyLength = useBattleSelector((state) => state.storyLength);
@@ -114,7 +115,10 @@ export function BattleActions() {
         return typeof name === 'string' ? name.trim() : '';
       })
       .filter((name) => Boolean(name));
-    const isPureBattle = !settings.userGuidance?.trim() && !(battleMode === 'scenario' && scenario?.content);
+    const isPureBattle =
+      !settings.userGuidance?.trim() &&
+      !(battleMode === 'scenario' && scenario?.content) &&
+      !(battleMode === 'scenario' && auxScenarios.length > 0);
     const arenaHistoryReadLimitForEstimate =
       settings.readArenaHistory && !settings.isArenaHistoryUnlimited
         ? normalizeArenaHistoryReadLimitForEstimate(settings.readArenaHistoryLimit)
@@ -174,6 +178,7 @@ export function BattleActions() {
       narrativeHistory: narrativeHistoryPayload,
       combatants: combatantPayload,
       ...(battleMode === 'scenario' ? { scenario: scenario.content } : {}),
+      ...(battleMode === 'scenario' && auxScenarios.length > 0 ? { auxScenarios: auxScenarios.map((s) => s.content) } : {}),
       ...(Object.keys(teams).length > 0 ? { teams } : {}),
     };
 

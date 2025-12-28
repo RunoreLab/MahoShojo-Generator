@@ -107,6 +107,7 @@ const buildBattleBackupItems = (
   scenarioFileName: string | null,
   isScenarioNative: boolean,
   scenarioDisplayName: string | null,
+  auxScenarios: { content: Record<string, unknown>; fileName: string | null; isNative: boolean }[],
   userGuidance: string,
   adjudicationEvents: any[],
   adjudicationResults?: any[] | null
@@ -132,6 +133,17 @@ const buildBattleBackupItems = (
       description: isScenarioNative ? '原生情景文件' : '用户自定义情景',
     });
   }
+
+  auxScenarios.forEach((aux, index) => {
+    const title = typeof (aux.content as any)?.title === 'string' ? (aux.content as any).title.trim() : '';
+    items.push({
+      id: `aux-scenario-${index}`,
+      label: title ? `辅助情景：${title}` : `辅助情景 #${index + 1}`,
+      filename: aux.fileName || `aux-scenario-${index + 1}.json`,
+      content: aux.content,
+      description: aux.isNative ? '原生辅助情景文件' : '用户自定义辅助情景',
+    });
+  });
 
   if (userGuidance.trim()) {
     items.push({
@@ -207,6 +219,7 @@ export const useBattleEngine = () => {
   const battleMode = useBattleSelector((state) => state.battleMode);
   const generationMode = useBattleSelector((state) => state.generationMode);
   const scenario = useBattleSelector((state) => state.scenario);
+  const auxScenarios = useBattleSelector((state) => state.auxScenarios);
   const selectedLevel = useBattleSelector((state) => state.selectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const storyLength = useBattleSelector((state) => state.storyLength);
@@ -310,6 +323,7 @@ export const useBattleEngine = () => {
         JSON.stringify(freshCombatants.map((c) => c.data)),
         settings.userGuidance,
         shouldUseScenario ? JSON.stringify(scenario.content) : '',
+        shouldUseScenario && auxScenarios.length > 0 ? JSON.stringify(auxScenarios.map((s) => s.content)) : '',
       ];
 
       for (const payload of sensitiveTargets) {
@@ -353,6 +367,7 @@ export const useBattleEngine = () => {
         mode: battleMode,
         userGuidance: settings.userGuidance,
         scenario: shouldUseScenario ? scenario.content : undefined,
+        auxScenarios: shouldUseScenario && auxScenarios.length > 0 ? auxScenarios.map((s) => s.content) : undefined,
         scenarioTitle: shouldUseScenario ? scenarioDisplayName : undefined,
         scenarioSourceDataCardId: shouldUseScenario ? scenario.sourceDataCardId : undefined,
         scenarioSourceDataCardUpdatedAt: shouldUseScenario ? scenario.sourceDataCardUpdatedAt : undefined,
@@ -394,6 +409,7 @@ export const useBattleEngine = () => {
           shouldUseScenario ? scenario.fileName : null,
           shouldUseScenario ? scenario.isNative : false,
           shouldUseScenario ? scenarioDisplayName : null,
+          shouldUseScenario ? auxScenarios.map((s) => ({ content: s.content, fileName: s.fileName, isNative: s.isNative })) : [],
           settings.userGuidance,
           adjudicationEvents,
           result.adjudicationResults
@@ -528,6 +544,7 @@ export const useBattleEngine = () => {
             shouldUseScenario ? scenario.fileName : null,
             shouldUseScenario ? scenario.isNative : false,
             shouldUseScenario && scenarioDisplayName ? sanitizeTextByShieldWords(scenarioDisplayName) : null,
+            shouldUseScenario ? auxScenarios.map((s) => ({ content: s.content, fileName: s.fileName, isNative: s.isNative })) : [],
             settings.userGuidance,
             adjudicationEvents
           );
@@ -778,6 +795,7 @@ export const useBattleEngine = () => {
     generationMode,
     combatants,
     scenario,
+    auxScenarios,
     userProviderConfig,
     settings,
     selectedLevel,

@@ -190,6 +190,7 @@ export const createPromptBuilder = (
     selectedLevel: string | undefined,
     mode: string | undefined,
     scenario: any | null,
+    auxScenarios: any[] | null,
     teams: { [key: string]: string[] } | undefined,
     readArenaHistory: boolean,
     historyReadLimit: number | null,
@@ -201,7 +202,7 @@ export const createPromptBuilder = (
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const allNames = combatants.map(c => c.data.codename || c.data.name);
-    const isPureBattle = !userGuidance && !scenario;
+    const isPureBattle = !userGuidance && !scenario && !(auxScenarios && auxScenarios.length > 0);
 
     const profiles = combatants.map((c, index) => {
         const { data, type } = c;
@@ -282,6 +283,17 @@ export const createPromptBuilder = (
         delete scenarioForPrompt.signature;
         delete scenarioForPrompt.metadata;
         finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架：\n\`\`\`json\n${JSON.stringify(scenarioForPrompt, null, 2)}\n\`\`\`\n\n`;
+    }
+
+    if (mode === 'scenario' && Array.isArray(auxScenarios) && auxScenarios.length > 0) {
+        finalPrompt += `## 【辅助情景设定（可选）】\n以下为补充情景；请以【情景设定】为最高优先级，若出现冲突请以主情景为准：\n\n`;
+        auxScenarios.forEach((aux, index) => {
+            const auxForPrompt: any = { ...aux };
+            delete auxForPrompt.signature;
+            delete auxForPrompt.metadata;
+            const title = typeof auxForPrompt.title === 'string' && auxForPrompt.title.trim() ? auxForPrompt.title.trim() : '';
+            finalPrompt += `### 辅助情景 #${index + 1}${title ? `：${title}` : ''}\n\`\`\`json\n${JSON.stringify(auxForPrompt, null, 2)}\n\`\`\`\n\n`;
+        });
     }
 
     if (teams && Object.keys(teams).length > 0) {
@@ -334,6 +346,7 @@ export const createStreamPromptBuilder = (
     selectedLevel: string | undefined,
     mode: string | undefined,
     scenario: any | null,
+    auxScenarios: any[] | null,
     teams: { [key: string]: string[] } | undefined,
     readArenaHistory: boolean,
     historyReadLimit: number | null,
@@ -347,7 +360,7 @@ export const createStreamPromptBuilder = (
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const allNames = combatants.map(c => c.data.codename || c.data.name);
-    const isPureBattle = !userGuidance && !scenario;
+    const isPureBattle = !userGuidance && !scenario && !(auxScenarios && auxScenarios.length > 0);
 
     const profiles = combatants.map((c, index) => {
         const { data, type } = c;
@@ -428,6 +441,17 @@ export const createStreamPromptBuilder = (
         delete scenarioForPrompt.signature;
         delete scenarioForPrompt.metadata;
         finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架：\n\`\`\`json\n${JSON.stringify(scenarioForPrompt, null, 2)}\n\`\`\`\n\n`;
+    }
+
+    if (mode === 'scenario' && Array.isArray(auxScenarios) && auxScenarios.length > 0) {
+        finalPrompt += `## 【辅助情景设定（可选）】\n以下为补充情景；请以【情景设定】为最高优先级，若出现冲突请以主情景为准：\n\n`;
+        auxScenarios.forEach((aux, index) => {
+            const auxForPrompt: any = { ...aux };
+            delete auxForPrompt.signature;
+            delete auxForPrompt.metadata;
+            const title = typeof auxForPrompt.title === 'string' && auxForPrompt.title.trim() ? auxForPrompt.title.trim() : '';
+            finalPrompt += `### 辅助情景 #${index + 1}${title ? `：${title}` : ''}\n\`\`\`json\n${JSON.stringify(auxForPrompt, null, 2)}\n\`\`\`\n\n`;
+        });
     }
 
     if (teams && Object.keys(teams).length > 0) {

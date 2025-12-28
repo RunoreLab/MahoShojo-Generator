@@ -26,26 +26,27 @@ import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
 import { ArenaStatistics } from './components/ArenaStatistics';
 import { useBattleStore } from './stores/useBattleStore';
-import { BattleStoreState, CombatantData, MAX_COMBATANTS } from './types';
+import { BattleStoreState, CombatantData, MAX_AUX_SCENARIOS, MAX_COMBATANTS } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
 import { usePresetQuery, useLanguagesQuery, useStatsQuery } from './hooks/useArenaData';
 
 export function ArenaPage() {
   const { isAuthenticated } = useAuth();
   const [showBattleDataModal, setShowBattleDataModal] = useState(false);
-  const [dataModalType, setDataModalType] = useState<'character' | 'scenario'>('character');
+  const [dataModalType, setDataModalType] = useState<'character' | 'scenario' | 'auxScenario'>('character');
   const [selectedCombatant, setSelectedCombatant] = useState<CombatantData | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
 
   const combatants = useBattleStore((state: BattleStoreState) => state.combatants);
   const scenario = useBattleStore((state: BattleStoreState) => state.scenario);
+  const auxScenarios = useBattleStore((state: BattleStoreState) => state.auxScenarios);
   const battleMode = useBattleStore((state: BattleStoreState) => state.battleMode);
   const isGenerating = useBattleStore((state: BattleStoreState) => state.isGenerating);
   const isMatching = useBattleStore((state: BattleStoreState) => state.isMatching);
   const error = useBattleStore((state: BattleStoreState) => state.error);
 
-  const { handleSelectDataCard, handleRandomMatch } = useBattleActions();
+  const { handleSelectDataCard, handleRandomMatch, handleToggleAuxScenarioDataCard } = useBattleActions();
 
   const { grouped: presetGrouped } = usePresetQuery();
   const { data: languages } = useLanguagesQuery();
@@ -74,6 +75,16 @@ export function ArenaPage() {
     return typeof scenario?.sourceDataCardId === 'string' && scenario.sourceDataCardId ? [scenario.sourceDataCardId] : [];
   }, [scenario?.sourceDataCardId]);
 
+  const selectedAuxScenarioDataCardIds = useMemo(() => {
+    const out: string[] = [];
+    auxScenarios.forEach((s) => {
+      if (typeof s.sourceDataCardId === 'string' && s.sourceDataCardId) {
+        out.push(s.sourceDataCardId);
+      }
+    });
+    return out;
+  }, [auxScenarios]);
+
   const handleOpenCharacterDataModal = () => {
     setDataModalType('character');
     setShowBattleDataModal(true);
@@ -81,6 +92,11 @@ export function ArenaPage() {
 
   const handleOpenScenarioDataModal = () => {
     setDataModalType('scenario');
+    setShowBattleDataModal(true);
+  };
+
+  const handleOpenAuxScenarioDataModal = () => {
+    setDataModalType('auxScenario');
     setShowBattleDataModal(true);
   };
 
@@ -126,6 +142,7 @@ export function ArenaPage() {
               <ScenarioPanel
                 onOpenScenarioModal={handleOpenScenarioDataModal}
                 onRandomMatchScenario={() => handleRandomMatch('scenario')}
+                onOpenAuxScenarioModal={handleOpenAuxScenarioDataModal}
                 isAuthenticated={isAuthenticated}
               />
             )}
@@ -223,11 +240,25 @@ export function ArenaPage() {
         isOpen={showBattleDataModal}
         onClose={() => setShowBattleDataModal(false)}
         onSelectCard={(card) => void handleSelectDataCard(card)}
-        selectedType={dataModalType}
-        selectionMode={dataModalType === 'character' ? 'multi' : 'single'}
-        selectedCardIds={dataModalType === 'character' ? selectedCharacterDataCardIds : selectedScenarioDataCardIds}
-        selectedCountOverride={dataModalType === 'character' ? combatants.length : undefined}
-        maxSelected={dataModalType === 'character' ? MAX_COMBATANTS : undefined}
+        onToggleCard={
+          dataModalType === 'auxScenario'
+            ? (card, nextSelected) => void handleToggleAuxScenarioDataCard(card, nextSelected)
+            : undefined
+        }
+        selectedType={dataModalType === 'character' ? 'character' : 'scenario'}
+        titleOverride={dataModalType === 'auxScenario' ? '选择辅助情景' : undefined}
+        selectionMode={dataModalType === 'scenario' ? 'single' : 'multi'}
+        selectedCardIds={
+          dataModalType === 'character'
+            ? selectedCharacterDataCardIds
+            : (dataModalType === 'auxScenario' ? selectedAuxScenarioDataCardIds : selectedScenarioDataCardIds)
+        }
+        selectedCountOverride={
+          dataModalType === 'character'
+            ? combatants.length
+            : (dataModalType === 'auxScenario' ? auxScenarios.length : undefined)
+        }
+        maxSelected={dataModalType === 'character' ? MAX_COMBATANTS : (dataModalType === 'auxScenario' ? MAX_AUX_SCENARIOS : undefined)}
       />
 
       {selectedCombatant && (
