@@ -36,6 +36,7 @@ import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCa
 import { formatPvpDisplayName } from '@/lib/pvp/displayName';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
 import { buildPvpScenarioRulesPatch } from '@/lib/pvp/rules-patch';
+import { isLegacyAdjudicatorFormat, mergeAdjudicationEvents } from '@/lib/pvp/adjudication-events';
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
 import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
 
@@ -252,6 +253,7 @@ export function PvpRoomPage() {
   const [roomPasswordDraft, setRoomPasswordDraft] = useState('');
   const [rulesDraft, setRulesDraft] = useState<PvpRoomRules | null>(null);
   const [scenarioDraft, setScenarioDraft] = useState<PvpScenarioSelection | null>(null);
+  const autoScenarioImportKeyRef = useRef<string>('');
   const [isScenarioMatching, setIsScenarioMatching] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -390,6 +392,10 @@ export function PvpRoomPage() {
   const room = roomQuery.data?.room;
   const rules: PvpRoomRules | null = room?.rules || null;
   const roomScenario = (room as any)?.scenario ?? null;
+  const scenarioAdjudicationImportedFor: string | null =
+    typeof (room as any)?.scenarioAdjudicationImportedFor === 'string'
+      ? String((room as any).scenarioAdjudicationImportedFor).trim() || null
+      : null;
   const phase: string = room?.phase || 'unknown';
   const version: number = room?.version ?? 0;
   const lastActivityAt: string | null = typeof room?.lastActivityAt === 'string' ? room.lastActivityAt : null;
@@ -461,6 +467,25 @@ export function PvpRoomPage() {
     }
     if (!rulesDraft && rules) setRulesDraft(clonePvpRoomRules(rules));
   }, [roomId, rules, rulesDraft]);
+
+  useEffect(() => {
+    if (!isHost) return;
+    if (!rules || !roomScenario || typeof roomScenario !== 'object') return;
+    const id = typeof (roomScenario as any).sourceDataCardId === 'string' ? String((roomScenario as any).sourceDataCardId).trim() : '';
+    if (!id) return;
+    const updatedAt =
+      typeof (roomScenario as any).sourceDataCardUpdatedAt === 'string' ? String((roomScenario as any).sourceDataCardUpdatedAt) : null;
+    const key = `${id}|${updatedAt ?? ''}`;
+    if (scenarioAdjudicationImportedFor !== key) return;
+    if (autoScenarioImportKeyRef.current !== key) return;
+
+    setRulesDraft((draft) => {
+      if (!draft) return clonePvpRoomRules(rules);
+      const currentEvents = Array.isArray((draft as any).adjudicationEvents) ? (draft as any).adjudicationEvents : [];
+      if (currentEvents.length > 0) return draft;
+      return { ...draft, adjudicationEvents: Array.isArray(rules.adjudicationEvents) ? rules.adjudicationEvents : [] };
+    });
+  }, [autoScenarioImportKeyRef, isHost, roomScenario, rules, scenarioAdjudicationImportedFor]);
 
   useEffect(() => {
     if (phase !== 'choosing') setShowHandModal(false);
@@ -1199,6 +1224,47 @@ export function PvpRoomPage() {
     },
     onError: (e) => handlePvpRequestError(e, '更新情景失败'),
   });
+  const triggerScenarioSave = scenarioMutation.mutate;
+  const isScenarioSaving = scenarioMutation.isPending;
+
+  // 修复/迁移：旧房间可能已经设置了情景，但当时未导入情景内的 adjudicationEvents。
+  // 这里在房主进入房间后自动触发一次“重存情景”，由后端将情景事件导入判定器并持久化。
+  useEffect(() => {
+    if (!roomId || !isHost) return;
+    if (scenarioDraft) return;
+    if (phase !== 'waiting' && phase !== 'submitting') return;
+    if (!roomScenario || typeof roomScenario !== 'object') return;
+    const id = typeof (roomScenario as any).sourceDataCardId === 'string' ? String((roomScenario as any).sourceDataCardId).trim() : '';
+    if (!id) return;
+    const updatedAt =
+      typeof (roomScenario as any).sourceDataCardUpdatedAt === 'string' ? String((roomScenario as any).sourceDataCardUpdatedAt) : null;
+    const key = `${id}|${updatedAt ?? ''}`;
+    if (scenarioAdjudicationImportedFor === key) return;
+    if (autoScenarioImportKeyRef.current === key) return;
+    if (isScenarioSaving || rulesMutation.isPending) return;
+
+    autoScenarioImportKeyRef.current = key;
+    triggerScenarioSave({
+      selection: {
+        kind: 'data_card',
+        id,
+        updatedAt,
+        name: typeof (roomScenario as any).sourceDataCardName === 'string' ? String((roomScenario as any).sourceDataCardName) : null,
+        isPublic: typeof (roomScenario as any).sourceIsPublic === 'boolean' ? (roomScenario as any).sourceIsPublic : null,
+        author: typeof (roomScenario as any).sourceAuthor === 'string' ? String((roomScenario as any).sourceAuthor) : null,
+      },
+    });
+  }, [
+    isHost,
+    phase,
+    roomId,
+    roomScenario,
+    scenarioAdjudicationImportedFor,
+    scenarioDraft,
+    isScenarioSaving,
+    triggerScenarioSave,
+    rulesMutation.isPending,
+  ]);
 
   const restartMutation = useMutation({
     mutationFn: async () => {
@@ -1355,6 +1421,18 @@ export function PvpRoomPage() {
     const name = typeof cardData?._cardName === 'string'
       ? cardData._cardName.trim()
       : (typeof cleaned?.title === 'string' ? cleaned.title.trim() : '');
+
+    // 与 /arena 逻辑保持一致：当情景卡含有 adjudicationEvents 时，将其加入判定器并展示（用户可再编辑/删除）。
+    // 注意：这里仅更新本地草稿（rulesDraft）；真正持久化仍以“保存情景/保存设置”为准。
+    const scenarioEvents = (cleaned as any)?.adjudicationEvents;
+    let warning: string | null = null;
+    if (Array.isArray(scenarioEvents) && scenarioEvents.length > 0) {
+      if (isLegacyAdjudicatorFormat(scenarioEvents)) {
+        warning = `⚠️ 情景 "${name || (typeof cleaned?.title === 'string' ? cleaned.title : '未命名')}" 包含旧版随机事件，已忽略。`;
+      } else {
+        setRulesDraft((r) => (r ? { ...r, adjudicationEvents: mergeAdjudicationEvents((r as any).adjudicationEvents, scenarioEvents) } : r));
+      }
+    }
     setScenarioDraft({
       kind: 'data_card',
       id: cardId,
@@ -1365,7 +1443,7 @@ export function PvpRoomPage() {
         : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : null),
       author: typeof cardData?._author === 'string' ? cardData._author : null,
     } satisfies PvpScenarioSelection);
-    setError(null);
+    setError(warning);
   };
 
   const handleRandomMatchScenario = async () => {

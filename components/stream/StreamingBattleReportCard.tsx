@@ -7,6 +7,7 @@ import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 interface StreamingBattleReportCardProps {
     /** 流式输入的 Markdown 文本内容 */
@@ -426,7 +427,10 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 </div>
 
                 {/* Logo占位符，用于截图 */}
-                <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
+                <div
+                    className="logo-placeholder"
+                    style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+                >
                     <img
                         src="/logo-white-qrcode.svg"
                         width={280}
@@ -434,6 +438,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                         alt="Logo"
                         style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
                     />
+                    <GeneratedByUserBadge variant="dark" className="mt-3" />
                 </div>
             </div>
         </div>

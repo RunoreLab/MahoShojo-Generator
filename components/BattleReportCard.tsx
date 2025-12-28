@@ -6,6 +6,7 @@ import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
@@ -376,7 +377,10 @@ ${adjudicationMarkdown}
         </div>
 
         {/* Logo占位符，用于截图 */}
-        <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
+        <div
+          className="logo-placeholder"
+          style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+        >
           <img
             src="/logo-white-qrcode.svg"
             width={280}
@@ -384,6 +388,7 @@ ${adjudicationMarkdown}
             alt="Logo"
             style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
           />
+          <GeneratedByUserBadge variant="dark" className="mt-3" />
         </div>
       </div>
     </div>

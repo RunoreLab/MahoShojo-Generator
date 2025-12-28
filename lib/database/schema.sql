@@ -35,11 +35,14 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   auth_key TEXT UNIQUE NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   last_login_at DATETIME,
   is_banned TEXT,
   slot_count INTEGER,
   registration_ip TEXT,
-  prefix TEXT
+  prefix TEXT,
+  signature TEXT,
+  avatar_webp_base64 TEXT
 );
 
 CREATE INDEX idx_users_username ON users(username);

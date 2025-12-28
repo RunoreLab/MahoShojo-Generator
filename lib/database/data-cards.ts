@@ -1,4 +1,5 @@
 import { queryFromD1, generateUUID } from './core';
+import { inferCharacterKind } from '@/lib/schemas';
 
 // 检查公开数据卡是否存在同名
 export async function checkPublicCardNameExists(
@@ -720,6 +721,144 @@ export async function getDataCardStatsByIds(ids: string[]): Promise<Array<{ id: 
   } catch (error) {
     console.error("批量读取数据卡统计失败:", error);
     return [];
+  }
+}
+
+export type UserTopDataCardRow = {
+  id: string;
+  type: 'character' | 'scenario' | 'history';
+  name: string;
+  description: string | null;
+  is_public: number;
+  review_status: string | null;
+  usage_count: number;
+  like_count: number;
+  favorite_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function getUserTopDataCardsByEngagement(
+  userId: number,
+  type: 'character' | 'scenario',
+  limit: number
+): Promise<UserTopDataCardRow[]> {
+  try {
+    const safeLimit = Math.max(1, Math.min(10, Math.floor(limit)));
+    const result = (await queryFromD1(
+      `SELECT
+        id,
+        type,
+        name,
+        description,
+        is_public,
+        review_status,
+        usage_count,
+        like_count,
+        favorite_count,
+        created_at,
+        updated_at
+      FROM data_cards
+      WHERE user_id = ? AND type = ? AND deleted_at IS NULL
+      ORDER BY (usage_count + like_count + favorite_count) DESC, updated_at DESC
+      LIMIT ?`,
+      [userId, type, safeLimit]
+    )) as any;
+
+    if (result.success && result.result?.[0]?.results) {
+      return result.result[0].results as UserTopDataCardRow[];
+    }
+    return [];
+  } catch (error) {
+    console.error('读取用户热门数据卡失败:', error);
+    return [];
+  }
+}
+
+export type UserProfileCardDataStats = {
+  total: number;
+  characters: number;
+  scenarios: number;
+  history: number;
+  publicCards: number;
+  magicalGirl: number;
+  canshou: number;
+  general: number;
+  unknownCharacter: number;
+  likeTotal: number;
+  favoriteTotal: number;
+  usageTotal: number;
+};
+
+export async function getUserProfileCardDataStats(userId: number): Promise<UserProfileCardDataStats> {
+  const out: UserProfileCardDataStats = {
+    total: 0,
+    characters: 0,
+    scenarios: 0,
+    history: 0,
+    publicCards: 0,
+    magicalGirl: 0,
+    canshou: 0,
+    general: 0,
+    unknownCharacter: 0,
+    likeTotal: 0,
+    favoriteTotal: 0,
+    usageTotal: 0,
+  };
+
+  try {
+    const result = (await queryFromD1(
+      `SELECT type, data, is_public, like_count, favorite_count, usage_count
+       FROM data_cards
+       WHERE user_id = ? AND deleted_at IS NULL`,
+      [userId]
+    )) as any;
+
+    const rows: Array<{
+      type: string;
+      data: string;
+      is_public: number;
+      like_count: number;
+      favorite_count: number;
+      usage_count: number;
+    }> = result?.result?.[0]?.results ?? [];
+
+    out.total = rows.length;
+
+    for (const row of rows) {
+      const isPublic = Boolean(row.is_public);
+      if (isPublic) out.publicCards += 1;
+
+      const likes = typeof row.like_count === 'number' ? row.like_count : Number(row.like_count || 0);
+      const favorites = typeof row.favorite_count === 'number' ? row.favorite_count : Number(row.favorite_count || 0);
+      const usage = typeof row.usage_count === 'number' ? row.usage_count : Number(row.usage_count || 0);
+      out.likeTotal += Number.isFinite(likes) ? likes : 0;
+      out.favoriteTotal += Number.isFinite(favorites) ? favorites : 0;
+      out.usageTotal += Number.isFinite(usage) ? usage : 0;
+
+      if (row.type === 'character') {
+        out.characters += 1;
+        try {
+          const parsed = JSON.parse(row.data);
+          const kind = inferCharacterKind(parsed);
+          if (kind === 'magical-girl') out.magicalGirl += 1;
+          else if (kind === 'canshou') out.canshou += 1;
+          else if (kind === 'general') out.general += 1;
+          else out.unknownCharacter += 1;
+        } catch {
+          out.unknownCharacter += 1;
+        }
+      } else if (row.type === 'scenario') {
+        out.scenarios += 1;
+      } else if (row.type === 'history') {
+        out.history += 1;
+      }
+    }
+
+    return out;
+  } catch (error) {
+    console.error('统计用户资料卡数据失败:', error);
+    return out;
   }
 }
 

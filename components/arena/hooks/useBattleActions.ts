@@ -6,7 +6,14 @@ import { inferTemplate } from '@/lib/data-card-converter';
 import { generateRandomCanshou, generateRandomMagicalGirl } from '@/lib/random-character-generator';
 
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState, CombatantData, MAX_COMBATANTS, RandomCombatantPlaceholder } from '../types';
+import {
+  AuxiliaryScenarioState,
+  BattleStoreState,
+  CombatantData,
+  MAX_AUX_SCENARIOS,
+  MAX_COMBATANTS,
+  RandomCombatantPlaceholder,
+} from '../types';
 import {
   getCombatantDisplayName,
   inferCombatantType,
@@ -45,16 +52,56 @@ const verifyOrigin = async (payload: any): Promise<boolean> => {
 // 追踪正在处理中的卡片，防止重复点击
 const loadingCards = new Set<string>();
 
+const createClientId = (prefix: string): string => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
 export const useBattleActions = () => {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
+  const auxScenarios = useBattleSelector((state) => state.auxScenarios);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const setError = useBattleSelector((state) => state.setError);
   const addCombatant = useBattleSelector((state) => state.addCombatant);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const setScenario = useBattleSelector((state) => state.setScenario);
+  const addAuxScenario = useBattleSelector((state) => state.addAuxScenario);
+  const removeAuxScenario = useBattleSelector((state) => state.removeAuxScenario);
+  const moveAuxScenario = useBattleSelector((state) => state.moveAuxScenario);
+  const clearAuxScenarios = useBattleSelector((state) => state.clearAuxScenarios);
+  const setAuxScenarios = useBattleSelector((state) => state.setAuxScenarios);
   const setAdjudicationEvents = useBattleSelector((state) => state.setAdjudicationEvents);
   const scenario = useBattleSelector((state) => state.scenario);
+
+  const buildAuxScenario = useCallback(
+    async (input: {
+      id?: string;
+      rawScenario: any;
+      fileName: string;
+      sourceDataCardId?: string;
+      sourceDataCardName?: string;
+      sourceDataCardUpdatedAt?: string;
+      sourceIsPublic?: boolean;
+      sourceAuthor?: string;
+    }): Promise<AuxiliaryScenarioState> => {
+      const parsed = ScenarioSchema.safeParse(input.rawScenario);
+      if (!parsed.success) {
+        throw new Error(parsed.error.issues[0]?.message || '情景文件缺少必需字段');
+      }
+
+      const isNative = await verifyOrigin(parsed.data);
+      return {
+        id: input.id || createClientId('aux-scenario'),
+        content: parsed.data,
+        fileName: input.fileName,
+        isNative,
+        sourceDataCardId: input.sourceDataCardId,
+        sourceDataCardUpdatedAt: input.sourceDataCardUpdatedAt,
+        sourceDataCardName: input.sourceDataCardName,
+        sourceIsPublic: input.sourceIsPublic,
+        sourceAuthor: input.sourceAuthor,
+      };
+    },
+    []
+  );
 
   const appendAdjudicationEvents = useCallback(
     (events: unknown, label: string) => {
@@ -257,6 +304,121 @@ export const useBattleActions = () => {
     [combatants.length, handleSelectDataCard, setError]
   );
 
+  const handleToggleAuxScenarioDataCard = useCallback(
+    async (cardData: any, nextSelected: boolean) => {
+      if (useBattleStore.getState().battleMode !== 'scenario') {
+        setError('❌ 仅在情景模式下可添加辅助情景。');
+        return;
+      }
+      if (!useBattleStore.getState().scenario.content) {
+        setError('❌ 请先选择主情景，再添加辅助情景。');
+        return;
+      }
+
+      const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : undefined;
+      const sourceDataCardName = typeof cardData?._cardName === 'string' ? cardData._cardName : undefined;
+      const sourceDataCardUpdatedAt = typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : undefined;
+      const sourceIsPublic = typeof cardData?._isPublic === 'boolean'
+        ? cardData._isPublic
+        : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : undefined);
+      const sourceAuthor = typeof cardData?._author === 'string' ? cardData._author : undefined;
+
+      const cleanedCardData = removePrivateKeys(cardData);
+      const inferredTemplate = inferTemplate(cleanedCardData);
+      if (inferredTemplate !== 'scenario') {
+        setError('❌ 请选择“情景”类型的数据卡。');
+        return;
+      }
+
+      const auxId = sourceDataCardId ? `aux-scenario-card-${sourceDataCardId}` : createClientId('aux-scenario');
+
+      if (!nextSelected) {
+        // 多选模式中取消：优先按 sourceDataCardId 匹配，否则按 id 匹配
+        setAuxScenarios(
+          useBattleStore
+            .getState()
+            .auxScenarios.filter((item) =>
+              sourceDataCardId ? item.sourceDataCardId !== sourceDataCardId : item.id !== auxId
+            )
+        );
+        setError(null);
+        return;
+      }
+
+      if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
+        setError(`❌ 最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+        return;
+      }
+      if (sourceDataCardId && useBattleStore.getState().auxScenarios.some((item) => item.sourceDataCardId === sourceDataCardId)) {
+        return;
+      }
+
+      // 检查是否已在加载中（防止重复点击）
+      if (loadingCards.has(auxId)) {
+        return;
+      }
+      loadingCards.add(auxId);
+
+      try {
+        const resolvedName = getCombatantDisplayName(cleanedCardData);
+        const built = await buildAuxScenario({
+          id: auxId,
+          rawScenario: cleanedCardData,
+          fileName: `${sourceDataCardName || resolvedName}.json`,
+          sourceDataCardId,
+          sourceDataCardName,
+          sourceDataCardUpdatedAt,
+          sourceIsPublic,
+          sourceAuthor,
+        });
+        addAuxScenario(built);
+        setError(null);
+      } catch (error) {
+        setError(`❌ 添加辅助情景失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      } finally {
+        loadingCards.delete(auxId);
+      }
+    },
+    [addAuxScenario, buildAuxScenario, setAuxScenarios, setError]
+  );
+
+  const handleRandomMatchAuxScenario = useCallback(async () => {
+    if (!useBattleStore.getState().scenario.content) {
+      setError('❌ 请先选择主情景，再添加辅助情景。');
+      return;
+    }
+    if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
+      setError(`最多只能选择 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+      return;
+    }
+    useBattleStore.getState().setIsMatching('scenario');
+    setError('正在从数据库中随机寻找一份公开的辅助情景...');
+    try {
+      const response = await fetch('/api/random-public-card?type=scenario');
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '无法获取随机数据');
+      }
+      const cardData = JSON.parse(result.card.data);
+      await handleToggleAuxScenarioDataCard(
+        {
+          ...cardData,
+          _cardId: result.card.id,
+          _cardName: result.card.name,
+          _isPublic: result.card.is_public,
+          _updatedAt: result.card.updated_at,
+          _createdAt: result.card.created_at,
+          _author: result.card.username || '未知',
+        },
+        true
+      );
+    } catch (error) {
+      setError(`❌ 随机匹配失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      useBattleStore.getState().setIsMatching(null);
+    }
+  }, [handleToggleAuxScenarioDataCard, setError]);
+
   const handleScenarioUpload = useCallback(
     async (file: File) => {
       const text = await file.text();
@@ -277,6 +439,30 @@ export const useBattleActions = () => {
     [appendAdjudicationEvents, setError, setScenario]
   );
 
+  const handleAuxScenarioUpload = useCallback(
+    async (file: File) => {
+      if (useBattleStore.getState().battleMode !== 'scenario') {
+        throw new Error('仅在情景模式下可添加辅助情景。');
+      }
+      if (!useBattleStore.getState().scenario.content) {
+        throw new Error('请先选择主情景，再添加辅助情景。');
+      }
+      if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
+        throw new Error(`最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+      }
+
+      const text = await file.text();
+      const json = JSON.parse(text);
+      const built = await buildAuxScenario({
+        rawScenario: json,
+        fileName: file.name,
+      });
+      addAuxScenario(built);
+      setError(null);
+    },
+    [addAuxScenario, buildAuxScenario, setError]
+  );
+
   const handleScenarioPaste = useCallback(
     async (text: string) => {
       const parsed = ScenarioSchema.safeParse(JSON.parse(text));
@@ -293,6 +479,33 @@ export const useBattleActions = () => {
       setError(null);
     },
     [appendAdjudicationEvents, setError, setScenario]
+  );
+
+  const handleAuxScenarioPaste = useCallback(
+    async (text: string) => {
+      if (useBattleStore.getState().battleMode !== 'scenario') {
+        throw new Error('仅在情景模式下可添加辅助情景。');
+      }
+      if (!useBattleStore.getState().scenario.content) {
+        throw new Error('请先选择主情景，再添加辅助情景。');
+      }
+      if (useBattleStore.getState().auxScenarios.length >= MAX_AUX_SCENARIOS) {
+        throw new Error(`最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
+      }
+
+      const parsed = ScenarioSchema.safeParse(JSON.parse(text));
+      if (!parsed.success) {
+        throw new Error(parsed.error.issues[0]?.message || '情景文件缺少必需字段');
+      }
+
+      const built = await buildAuxScenario({
+        rawScenario: parsed.data,
+        fileName: parsed.data.title ? `${parsed.data.title}.json` : '粘贴的辅助情景.json',
+      });
+      addAuxScenario(built);
+      setError(null);
+    },
+    [addAuxScenario, buildAuxScenario, setError]
   );
 
   const handleResolveRandomPlaceholders = useCallback(async () => {
@@ -328,9 +541,17 @@ export const useBattleActions = () => {
     handleRandomMatch,
     handleScenarioUpload,
     handleScenarioPaste,
+    handleAuxScenarioUpload,
+    handleAuxScenarioPaste,
+    handleToggleAuxScenarioDataCard,
+    handleRandomMatchAuxScenario,
     handleSelectDataCard,
     handleResolveRandomPlaceholders,
     handleClearRoster,
+    auxScenarios,
+    removeAuxScenario,
+    moveAuxScenario,
+    clearAuxScenarios,
     scenario,
   };
 };

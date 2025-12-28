@@ -14,6 +14,7 @@ import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+import { extractScenarioAdjudicationEvents, mergeAdjudicationEvents } from '@/lib/pvp/adjudication-events';
 import { parsePvpRules } from '@/lib/pvp/validate';
 import type { PvpSubmissionPayload } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
@@ -28,6 +29,17 @@ const sanitizeRulesPatch = (patch: Record<string, unknown>): Record<string, unkn
   for (const [key, value] of Object.entries(patch)) {
     if (key.startsWith('_') && key !== '_scenario') continue;
     out[key] = value;
+  }
+  return out;
+};
+
+const stripPrivateKeys = (value: any): any => {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(stripPrivateKeys);
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    if (key.startsWith('_')) continue;
+    out[key] = stripPrivateKeys(value[key]);
   }
   return out;
 };
@@ -104,6 +116,32 @@ async function rulesHandler(req: Request): Promise<Response> {
   const mergedRaw = { ...(internal.raw || {}), ...safePatch } as Record<string, unknown>;
   if ('_scenario' in safePatch && safePatch._scenario === null) {
     delete (mergedRaw as any)._scenario;
+  }
+
+  const scenarioSelection = parsePvpScenarioSelection((mergedRaw as any)?._scenario);
+  const scenarioKey = scenarioSelection ? `${scenarioSelection.id}|${scenarioSelection.updatedAt ?? ''}` : '';
+  const importedFor = typeof (mergedRaw as any)?._scenarioAdjudicationImportedFor === 'string'
+    ? String((mergedRaw as any)._scenarioAdjudicationImportedFor).trim()
+    : '';
+
+  // 与 /arena 逻辑保持一致：当情景卡包含 adjudicationEvents 时，将其导入判定器（并持久化到房间规则中）。
+  // 为避免重复导入，使用 _scenarioAdjudicationImportedFor 标记“已导入的情景版本”。
+  if (scenarioSelection && scenarioKey && importedFor !== scenarioKey) {
+    const row = await getPvpEligibleScenarioDataCard(scenarioSelection.id, auth.user.id);
+    if (row && typeof row.data === 'string') {
+      try {
+        const parsedScenario = JSON.parse(row.data);
+        const scenarioPayload = stripPrivateKeys(parsedScenario);
+        const scenarioEvents = extractScenarioAdjudicationEvents(scenarioPayload);
+        mergedRaw.adjudicationEvents = mergeAdjudicationEvents(mergedRaw.adjudicationEvents, scenarioEvents);
+        (mergedRaw as any)._scenarioAdjudicationImportedFor = scenarioKey;
+      } catch {
+        // ignore：解析失败则不导入（但也不写入标记，避免吞掉未来修复机会）
+      }
+    }
+  }
+  if (!scenarioSelection && (mergedRaw as any)?._scenarioAdjudicationImportedFor) {
+    delete (mergedRaw as any)._scenarioAdjudicationImportedFor;
   }
 
   const parsed = parsePvpRules(mergedRaw);

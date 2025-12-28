@@ -1,6 +1,9 @@
 'use client';
 
+import { useEffect } from 'react';
+
 import { BaseModal } from '@/components/shared/BaseModal';
+import { revokeBlobUrl } from '@/lib/client/blobUrl';
 
 type Props = {
   isOpen: boolean;
@@ -9,6 +12,10 @@ type Props = {
 };
 
 export function ImagePreviewModal({ isOpen, imageUrl, onClose }: Props) {
+  useEffect(() => {
+    return () => revokeBlobUrl(imageUrl);
+  }, [imageUrl]);
+
   if (!isOpen) return null;
 
   return (

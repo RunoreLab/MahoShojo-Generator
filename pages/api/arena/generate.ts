@@ -63,6 +63,7 @@ async function handler(req: NextRequest): Promise<Response> {
             mode = 'classic',
             userGuidance,
             scenario,
+            auxScenarios,
             teams,
             language = 'zh-CN',
             useArenaHistory,
@@ -81,6 +82,13 @@ async function handler(req: NextRequest): Promise<Response> {
             scenarioSourceDataCardId,
             scenarioSourceDataCardUpdatedAt,
         } = body;
+
+        const normalizedAuxScenarios = Array.isArray(auxScenarios)
+            ? auxScenarios.filter((item) => item && typeof item === 'object')
+            : null;
+        if (normalizedAuxScenarios && normalizedAuxScenarios.length > 10) {
+            return new Response(JSON.stringify({ error: '辅助情景最多 10 个' }), { status: 400 });
+        }
 
         const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean'
             ? readArenaHistory
@@ -239,6 +247,12 @@ async function handler(req: NextRequest): Promise<Response> {
             const isNative = await verifySignature(scenario);
             inputsToCheck.push({ type: 'scenario', content: JSON.stringify(scenario), isNative });
         }
+        if (normalizedAuxScenarios && normalizedAuxScenarios.length > 0) {
+            for (const aux of normalizedAuxScenarios) {
+                const isNative = await verifySignature(aux);
+                inputsToCheck.push({ type: 'scenario', content: JSON.stringify(aux), isNative });
+            }
+        }
         combatants.forEach((c: any) => {
             inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
         });
@@ -288,6 +302,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 selectedLevel,
                 mode,
                 scenario,
+                normalizedAuxScenarios,
                 teams,
                 resolvedReadArenaHistory,
                 resolvedHistoryReadLimit,

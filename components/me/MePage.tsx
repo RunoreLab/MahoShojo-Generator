@@ -14,6 +14,7 @@ import { MeTabs } from '@/components/me/MeTabs';
 import { PvpMatchDetailsModal } from '@/components/me/PvpMatchDetailsModal';
 import { PvpMatchesPanel } from '@/components/me/PvpMatchesPanel';
 import { ProfileHeader } from '@/components/me/ProfileHeader';
+import { ProfileCardModal } from '@/components/me/ProfileCardModal';
 import { ProfileSettingsPanel } from '@/components/me/ProfileSettingsPanel';
 import { authStorage } from '@/lib/auth';
 import { useAuth } from '@/lib/useAuth';
@@ -30,6 +31,8 @@ export function MePage() {
 
   const [generated, setGenerated] = useState<{ report: NewsReport; generationId?: string; liveBody?: string } | null>(null);
   const [showCardModal, setShowCardModal] = useState(false);
+
+  const [showProfileCardModal, setShowProfileCardModal] = useState(false);
 
   const regenerateMutation = useMutation({
     mutationFn: async (generationId: string) => {
@@ -87,7 +90,12 @@ export function MePage() {
             ) : null}
 
             {!loading && isAuthenticated && user ? (
-              <ProfileHeader user={user} badges={userBadges} onOpenSettings={() => setTab('settings')} />
+              <ProfileHeader
+                user={user}
+                badges={userBadges}
+                onOpenSettings={() => setTab('settings')}
+                onOpenProfileCard={() => setShowProfileCardModal(true)}
+              />
             ) : null}
 
             <div className="mt-4">{retentionNotice}</div>
@@ -122,7 +130,7 @@ export function MePage() {
 
             {tab === 'settings' ? (
               <div className="mt-4">
-                <ProfileSettingsPanel />
+                <ProfileSettingsPanel userId={user?.id ?? null} />
                 <div className="mt-4">
                   <div className="font-semibold mb-2">账号设置（预留）</div>
                   <div className="rounded-xl border bg-white p-4 text-sm text-gray-700">
@@ -172,6 +180,8 @@ export function MePage() {
         liveBody={generated?.liveBody ?? null}
         onClose={() => setShowCardModal(false)}
       />
+
+      <ProfileCardModal isOpen={showProfileCardModal} onClose={() => setShowProfileCardModal(false)} />
     </>
   );
 }

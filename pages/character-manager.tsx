@@ -50,6 +50,14 @@ const NATIVE_PRESERVING_PATHS = new Set([
     'appearance.colorScheme' // 允许修改配色方案
 ]);
 
+// “一键替换曾用名”用于批量替换数据中的名称引用。
+// 为避免滥用该能力伪造“魔改原生卡”，当替换用的新基础名称过长时，允许替换，但会导致原生性丧失（保存时移除原生签名）。
+const NAME_REPLACE_NATIVE_MAX_CHARS = 32;
+
+const getDisplayCharCount = (text: string): number => {
+    return Array.from((text ?? '').trim()).length;
+};
+
 /**
  * 辅助函数：判断一个值是否为可以遍历的普通对象（非数组、非null）。
  * @param item - 要检查的值。
@@ -1058,10 +1066,27 @@ const CharacterManagerPage: React.FC = () => {
 
         if (oldBaseName === newBaseName) return;
 
-        // 对当前编辑的数据和原始备份数据同时执行替换操作
-        // 这是保持原生性的关键：让 useEffect 认为除了豁免字段外，其他内容没有“意外”变化。
+        const newBaseNameCharCount = getDisplayCharCount(newBaseName);
+        const shouldPreserveNativeness = newBaseNameCharCount <= NAME_REPLACE_NATIVE_MAX_CHARS;
+
+        // 始终替换当前编辑数据
         const updatedCharacterData = replaceAllNamesInData(characterData, oldBaseName, newBaseName);
-        const updatedOriginalData = replaceAllNamesInData(originalData, oldBaseName, newBaseName);
+
+        // 是否同步替换“原始备份数据”决定了该操作是否保持原生性：
+        // - 名称不过长：同步替换 originalData，让系统认为除豁免字段外没有意外变化，从而保持原生性。
+        // - 名称过长：只同步 top-level 名称字段以收起按钮，但不替换其他字段，强制触发原生性丧失。
+        let updatedOriginalData = originalData;
+        if (shouldPreserveNativeness) {
+            updatedOriginalData = replaceAllNamesInData(originalData, oldBaseName, newBaseName);
+        } else {
+            updatedOriginalData = JSON.parse(JSON.stringify(originalData));
+            if (typeof (updatedOriginalData as any).codename === 'string' && typeof characterData.codename === 'string') {
+                (updatedOriginalData as any).codename = characterData.codename;
+            }
+            if (typeof (updatedOriginalData as any).name === 'string' && typeof characterData.name === 'string') {
+                (updatedOriginalData as any).name = characterData.name;
+            }
+        }
 
         // 更新状态
         setCharacterData(updatedCharacterData);
@@ -1069,9 +1094,17 @@ const CharacterManagerPage: React.FC = () => {
 
         // 隐藏按钮并显示成功消息
         setShowNameReplaceButton(false);
-        setMessage({ type: 'success', text: `已将所有“${oldBaseName}”替换为“${newBaseName}”！` });
+        if (!shouldPreserveNativeness && isNative && !hasLostNativeness) {
+            setHasLostNativeness(true);
+            setMessage({
+                type: 'info',
+                text: `已将所有“${oldBaseName}”替换为“${newBaseName}”。注意：新基础名称长度为 ${newBaseNameCharCount} 字，超过 ${NAME_REPLACE_NATIVE_MAX_CHARS} 字上限，本次替换会导致原生性丧失，保存时将移除原生签名。`
+            });
+        } else {
+            setMessage({ type: 'success', text: `已将所有“${oldBaseName}”替换为“${newBaseName}”！` });
+        }
 
-    }, [characterData, originalData]);
+    }, [characterData, originalData, hasLostNativeness, isNative]);
 
     const totalMatches = useMemo(() => {
         return sensitiveIssues.reduce((sum, issue) => sum + issue.matches.length, 0);
@@ -1235,12 +1268,17 @@ const CharacterManagerPage: React.FC = () => {
                     </div>
                     {/* 条件渲染“一键替换”按钮 */}
                     {showNameReplaceButton && (currentPath === 'codename' || currentPath === 'name') && (
-                        <button
-                            onClick={handleReplaceAllNames}
-                            className="text-sm text-white bg-green-500 hover:bg-green-600 rounded-md px-3 py-1 mt-2 w-full"
-                        >
-                            点击将所有“{originalData.codename || originalData.name}”替换为“{characterData.codename || characterData.name}”
-                        </button>
+                        <div className="mt-2">
+                            <button
+                                onClick={handleReplaceAllNames}
+                                className="text-sm text-white bg-green-500 hover:bg-green-600 rounded-md px-3 py-1 w-full"
+                            >
+                                点击将所有“{originalData.codename || originalData.name}”替换为“{characterData.codename || characterData.name}”
+                            </button>
+                            <p className="text-xs text-gray-500 mt-1">
+                                提示：若新基础名称超过 {NAME_REPLACE_NATIVE_MAX_CHARS} 字，替换仍可执行，但会视为“衍生数据”并移除原生签名。
+                            </p>
+                        </div>
                     )}
                     {issueHint}
                 </div>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, Info, Star, Heart, Download } from 'lucide-react';
+import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
 import { formatDateTime } from '@/lib/constants';
 
@@ -40,7 +41,19 @@ export default function DataCardDetailsModal({
 
   // 递归渲染对象内容
   const renderObjectContent = (obj: any, level: number = 0): React.ReactNode => {
-    if (typeof obj === 'string' || typeof obj === 'number' || typeof obj === 'boolean') {
+    if (typeof obj === 'string') {
+      if (!obj.trim()) return <span className="text-gray-500">（空）</span>;
+
+      return (
+        <MarkdownBlock
+          content={obj}
+          variant="light"
+          className="text-sm"
+        />
+      );
+    }
+
+    if (typeof obj === 'number' || typeof obj === 'boolean') {
       return <span className="text-gray-700">{String(obj)}</span>;
     }
 

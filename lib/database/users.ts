@@ -95,6 +95,80 @@ export async function verifyUserLogin(username: string, authKey: string): Promis
   }
 }
 
+export type UserProfileRow = {
+  signature: string | null;
+  avatar_webp_base64: string | null;
+};
+
+export type UserProfileCardRow = {
+  id: number;
+  username: string;
+  prefix: string | null;
+  created_at: string;
+  signature: string | null;
+  avatar_webp_base64: string | null;
+};
+
+export async function getUserProfileCardRowByUserId(userId: number): Promise<UserProfileCardRow | null> {
+  try {
+    const result = (await queryFromD1(
+      'SELECT id, username, prefix, created_at, signature, avatar_webp_base64 FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    )) as any;
+
+    if (result.success && result.result && result.result[0]?.results?.length > 0) {
+      return result.result[0].results[0] as UserProfileCardRow;
+    }
+    return null;
+  } catch (error) {
+    console.error('获取用户资料卡信息失败:', error);
+    return null;
+  }
+}
+
+export async function getUserProfileByUserId(userId: number): Promise<UserProfileRow | null> {
+  try {
+    const result = (await queryFromD1(
+      'SELECT signature, avatar_webp_base64 FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    )) as any;
+
+    if (result.success && result.result && result.result[0]?.results?.length > 0) {
+      return result.result[0].results[0] as UserProfileRow;
+    }
+    return null;
+  } catch (error) {
+    console.error('获取用户个人资料失败:', error);
+    return null;
+  }
+}
+
+export async function updateUserSignature(userId: number, signature: string | null): Promise<boolean> {
+  try {
+    const result = (await queryFromD1(
+      'UPDATE users SET signature = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [signature, userId],
+    )) as any;
+    return Boolean(result?.success);
+  } catch (error) {
+    console.error('更新用户签名失败:', error);
+    return false;
+  }
+}
+
+export async function updateUserAvatarWebpBase64(userId: number, avatarWebpBase64: string | null): Promise<boolean> {
+  try {
+    const result = (await queryFromD1(
+      'UPDATE users SET avatar_webp_base64 = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [avatarWebpBase64, userId],
+    )) as any;
+    return Boolean(result?.success);
+  } catch (error) {
+    console.error('更新用户头像失败:', error);
+    return false;
+  }
+}
+
 // 获取用户数据卡容量限制
 export async function getUserDataCardCapacity(userId: number, defaultCapacity: number): Promise<number> {
   try {

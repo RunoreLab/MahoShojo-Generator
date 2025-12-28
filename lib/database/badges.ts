@@ -93,6 +93,73 @@ export async function getUserEquippedBadges(userId: number): Promise<UserBadge[]
 }
 
 /**
+ * 获取用户最近获得但未佩戴的徽章
+ * @param userId 用户ID
+ * @param limit 返回数量（默认 5，最多 10）
+ */
+export async function getUserRecentBadgesExcludingEquipped(userId: number, limit = 5): Promise<UserBadge[]> {
+  try {
+    const safeLimit = Math.max(1, Math.min(10, Math.floor(limit)));
+    const result = await queryFromD1(
+      `
+      SELECT
+        ub.id as ub_id,
+        ub.user_id,
+        ub.badge_id,
+        ub.is_equipped,
+        ub.display_order,
+        ub.obtained_at,
+        b.id as badge_id,
+        b.name as badge_name,
+        b.description as badge_description,
+        b.icon as badge_icon,
+        b.text_color,
+        b.background_color,
+        b.border_color,
+        b.rarity,
+        b.sort_order,
+        b.is_active
+      FROM user_badges ub
+      JOIN badges b ON ub.badge_id = b.id
+      WHERE ub.user_id = ? AND b.is_active = 1 AND ub.is_equipped = 0
+      ORDER BY ub.obtained_at DESC
+      LIMIT ?
+      `,
+      [userId, safeLimit]
+    ) as any;
+
+    if (!result.success || !result.result || !result.result[0]?.results) {
+      return [];
+    }
+
+    const rows = result.result[0].results;
+    return rows.map((row: any) => ({
+      id: row.ub_id,
+      userId: row.user_id,
+      badgeId: row.badge_id,
+      isEquipped: !!row.is_equipped,
+      displayOrder: row.display_order || 0,
+      obtainedAt: row.obtained_at,
+      badge: {
+        id: row.badge_id,
+        name: row.badge_name,
+        description: row.badge_description,
+        icon: parseJsonField<IconConfig>(row.badge_icon) || { type: 'null', value: null },
+        textColor: parseJsonField<ColorConfig>(row.text_color) || { type: 'solid', value: '#000000' },
+        backgroundColor: parseJsonField<ColorConfig>(row.background_color) || { type: 'solid', value: '#FFFFFF' },
+        borderColor: parseJsonField<ColorConfig>(row.border_color),
+        rarity: row.rarity || 0,
+        sortOrder: row.sort_order || 0,
+        isActive: !!row.is_active
+      }
+    }));
+  } catch (error) {
+    console.error('获取用户最近徽章失败:', error);
+    return [];
+  }
+}
+
+/**
  * 更新用户佩戴的徽章
  * @param userId 用户ID
  * @param badgeIds 徽章ID数组（按顺序）

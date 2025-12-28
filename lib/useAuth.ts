@@ -28,8 +28,11 @@ export function useAuth() {
         const result = await authApi.verify();
         if (result.success && result.user) {
           setUser(result.user);
-          // 加载用户徽章
-          await loadUserBadges();
+          if (Array.isArray(result.badges)) {
+            setUserBadges(result.badges);
+          } else {
+            void loadUserBadges();
+          }
         } else {
           authStorage.clearAuth();
         }
@@ -48,8 +51,11 @@ export function useAuth() {
       const verifyResult = await authApi.verify();
       if (verifyResult.success && verifyResult.user) {
         setUser(verifyResult.user);
-        // 加载用户徽章
-        await loadUserBadges();
+        if (Array.isArray(verifyResult.badges)) {
+          setUserBadges(verifyResult.badges);
+        } else {
+          void loadUserBadges();
+        }
       }
     }
     return result;
@@ -61,7 +67,7 @@ export function useAuth() {
     if (result.success && result.user) {
       setUser(result.user);
       // 加载用户徽章
-      await loadUserBadges();
+      void loadUserBadges();
     }
     return result;
   };

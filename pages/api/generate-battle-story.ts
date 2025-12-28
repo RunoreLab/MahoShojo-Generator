@@ -473,6 +473,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 selectedLevel,
                 mode,
                 scenario,
+                null,
                 teams,
                 resolvedReadArenaHistory,
                 resolvedHistoryReadLimit,

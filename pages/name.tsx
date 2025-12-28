@@ -10,6 +10,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { useRouter } from 'next/router';
 import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 // 注意：QueueStatus 组件及其相关逻辑已被移除，因为它在Serverless环境下无法正常工作。
 
@@ -431,7 +432,10 @@ export default function Name() {
                     📄 下载设定文件
                   </button>
 
-                  <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
+                  <div
+                    className="logo-placeholder"
+                    style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+                  >
                     <img
                       src="/logo-white-qrcode.svg"
                       width={240}
@@ -443,6 +447,7 @@ export default function Name() {
                         height: 'auto'
                       }}
                     />
+                    <GeneratedByUserBadge variant="dark" className="mt-3" />
                   </div>
                 </div>
               </div>

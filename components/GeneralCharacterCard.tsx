@@ -6,6 +6,7 @@ import { GeneralCharacterData } from '@/lib/schemas/general-character';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 export interface GeneralCharacterDetails extends GeneralCharacterData {
   arena_history?: ArenaHistory | null;
@@ -250,7 +251,10 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
           {saveButtonLabel ?? '📱 保存为图片'}
         </button>
 
-        <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
+        <div
+          className="logo-placeholder"
+          style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+        >
           <img
             src="/logo-white-qrcode.svg"
             width={240}
@@ -263,6 +267,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
               padding: '1rem',
             }}
           />
+          <GeneratedByUserBadge variant="dark" className="mt-3" />
         </div>
       </div>
     </div>

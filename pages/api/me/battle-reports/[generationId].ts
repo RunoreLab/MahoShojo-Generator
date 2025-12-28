@@ -1,4 +1,9 @@
-import { getBattleReportGenerationByIdLite, getBattleReportGenerationCombatantsByGenerationId, isUserInPvpMatch } from '@/lib/d1';
+import {
+  getBattleReportGenerationByIdLite,
+  getBattleReportGenerationCombatantsByGenerationId,
+  isUserInPvpMatch,
+  updateBattleReportGenerationOutputHasSensitiveWords,
+} from '@/lib/d1';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 
@@ -35,10 +40,14 @@ export default async function handler(req: Request): Promise<Response> {
   const combatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
 
   const outputPreview = typeof record.output_preview === 'string' ? record.output_preview : null;
-  const flaggedSensitive = Boolean(record.output_has_sensitive_words);
-  const needsCheck = Boolean(outputPreview && outputPreview.trim());
-  const sensitiveCheck = !flaggedSensitive && needsCheck ? await quickCheck(outputPreview!) : null;
-  const contentBlocked = flaggedSensitive || Boolean(sensitiveCheck?.hasSensitiveWords);
+  const hasPreviewText = Boolean(outputPreview && outputPreview.trim());
+
+  let contentBlocked = record.output_has_sensitive_words === 1;
+  if (hasPreviewText) {
+    const sensitiveCheck = await quickCheck(outputPreview!);
+    contentBlocked = Boolean(sensitiveCheck.hasSensitiveWords);
+    await updateBattleReportGenerationOutputHasSensitiveWords(record.id, contentBlocked);
+  }
 
   return json({
     success: true,

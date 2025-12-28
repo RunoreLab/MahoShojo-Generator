@@ -4,6 +4,7 @@ import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 interface MagicalGirlCardProps {
   magicalGirl: {
@@ -422,7 +423,10 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
           {saveButtonLabel ?? '📱 保存为图片'}
         </button>
 
-        <div className="logo-placeholder" style={{ display: 'none', justifyContent: 'center', marginTop: '1rem' }}>
+        <div
+          className="logo-placeholder"
+          style={{ display: 'none', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '1rem' }}
+        >
           <img
             src="/logo-white-qrcode.svg"
             width={280}
@@ -434,6 +438,7 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
               height: 'auto'
             }}
           />
+          <GeneratedByUserBadge variant="dark" className="mt-3" />
         </div>
       </div>
     </div>
