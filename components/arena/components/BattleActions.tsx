@@ -30,6 +30,60 @@ const estimateTokens = (text: string): number => {
   return Math.max(1, Math.ceil(cjk + nonCjk / 4));
 };
 
+const normalizeArenaHistoryReadLimitForEstimate = (value: unknown): number | null => {
+  if (value === null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(1, Math.floor(value));
+  }
+  return 3;
+};
+
+const trimArenaHistoryEntriesForEstimate = (
+  entries: unknown[],
+  otherParticipantNames: string[],
+  isPureBattle: boolean,
+  limit: number | null
+): unknown[] => {
+  let relevantEntries = entries.filter((entry) => entry && typeof entry === 'object');
+
+  if (isPureBattle) {
+    relevantEntries = relevantEntries.filter((entry) => {
+      const metadata = (entry as any)?.metadata;
+      return !metadata?.user_guidance && !metadata?.scenario_title;
+    });
+  }
+
+  relevantEntries.sort((a, b) => {
+    const aParticipants = Array.isArray((a as any)?.participants) ? (a as any).participants : [];
+    const bParticipants = Array.isArray((b as any)?.participants) ? (b as any).participants : [];
+    const aIsRelevant = aParticipants.some((p: unknown) => typeof p === 'string' && otherParticipantNames.includes(p));
+    const bIsRelevant = bParticipants.some((p: unknown) => typeof p === 'string' && otherParticipantNames.includes(p));
+    if (aIsRelevant && !bIsRelevant) return -1;
+    if (!aIsRelevant && bIsRelevant) return 1;
+
+    const aId = typeof (a as any)?.id === 'number' && Number.isFinite((a as any).id) ? (a as any).id : 0;
+    const bId = typeof (b as any)?.id === 'number' && Number.isFinite((b as any).id) ? (b as any).id : 0;
+    return bId - aId;
+  });
+
+  if (limit === null) return relevantEntries;
+  if (typeof limit === 'number' && limit > 0) return relevantEntries.slice(0, limit);
+  return relevantEntries.slice(0, 20);
+};
+
+const trimArenaHistoryForEstimate = (
+  history: unknown,
+  otherParticipantNames: string[],
+  isPureBattle: boolean,
+  limit: number | null
+): unknown => {
+  if (!history || typeof history !== 'object') return history;
+  const rawEntries = (history as any).entries;
+  if (!Array.isArray(rawEntries)) return history;
+  const trimmedEntries = trimArenaHistoryEntriesForEstimate(rawEntries, otherParticipantNames, isPureBattle, limit);
+  return { ...(history as Record<string, unknown>), entries: trimmedEntries };
+};
+
 const buttonTextMap: Record<string, string> = {
   daily: '生成日常故事 (´｡• ᵕ •｡`) ♡',
   kizuna: '生成宿命对决 (๑•̀ㅂ•́)و✧',
@@ -54,6 +108,20 @@ export function BattleActions() {
 
   const estimatePayloadText = (() => {
     const readableCombatants = combatants.filter((item): item is any => 'data' in item);
+    const allNames: string[] = readableCombatants
+      .map((combatant) => {
+        const name = combatant?.data?.codename || combatant?.data?.name;
+        return typeof name === 'string' ? name.trim() : '';
+      })
+      .filter((name) => Boolean(name));
+    const isPureBattle = !settings.userGuidance?.trim() && !(battleMode === 'scenario' && scenario?.content);
+    const arenaHistoryReadLimitForEstimate =
+      settings.readArenaHistory && !settings.isArenaHistoryUnlimited
+        ? normalizeArenaHistoryReadLimitForEstimate(settings.readArenaHistoryLimit)
+        : settings.readArenaHistory
+          ? null
+          : undefined;
+
     const combatantPayload = readableCombatants.map((combatant) => {
       const raw = combatant.data;
       if (!raw || typeof raw !== 'object') {
@@ -62,6 +130,17 @@ export function BattleActions() {
       const clone: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
       if (!settings.readArenaHistory) delete clone.arena_history;
       if (!settings.readCurrentState) delete clone.current_state;
+      if (settings.readArenaHistory && 'arena_history' in clone) {
+        const name = typeof (raw as any)?.codename === 'string' ? (raw as any).codename.trim() : (raw as any)?.name;
+        const characterName = typeof name === 'string' ? name.trim() : '';
+        const otherNames = characterName ? allNames.filter((n) => n !== characterName) : allNames;
+        clone.arena_history = trimArenaHistoryForEstimate(
+          clone.arena_history,
+          otherNames,
+          isPureBattle,
+          typeof arenaHistoryReadLimitForEstimate === 'undefined' ? 3 : arenaHistoryReadLimitForEstimate
+        );
+      }
       return { type: combatant.type, data: clone };
     });
 
@@ -89,6 +168,7 @@ export function BattleActions() {
       storyLength,
       userGuidance: settings.userGuidance,
       readArenaHistory: settings.readArenaHistory,
+      arenaHistoryReadLimit: arenaHistoryReadLimitForEstimate,
       readCurrentState: settings.readCurrentState,
       readNarrativeHistory: settings.readNarrativeHistory,
       narrativeHistory: narrativeHistoryPayload,
