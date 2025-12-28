@@ -49,10 +49,23 @@ export function ScenarioPanel({
   };
 
   const onAuxFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    if (files.length === 0) return;
     try {
-      await handleAuxScenarioUpload(file);
+      const errors: string[] = [];
+      for (const file of files) {
+        try {
+          await handleAuxScenarioUpload(file);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '上传文件解析失败';
+          errors.push(`${file.name}: ${message}`);
+        }
+      }
+      if (errors.length > 0) {
+        reportError(new Error(`${errors.length}/${files.length} 个文件导入失败：${errors.join('；')}`));
+      } else {
+        setError(null);
+      }
     } catch (error) {
       reportError(error);
     } finally {
@@ -148,6 +161,7 @@ export function ScenarioPanel({
                 ref={auxInputRef}
                 id="aux-scenario-upload"
                 type="file"
+                multiple
                 accept=".json"
                 onChange={onAuxFileChange}
                 disabled={isGenerating || !canAddAuxScenario}
