@@ -1,10 +1,11 @@
 'use client';
 
 import { useMemo, useRef } from 'react';
-import { snapdom } from '@zumer/snapdom';
 
 import Badge from '@/components/badge/Badge';
 import BadgeIcon from '@/components/badge/BadgeIcon';
+import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
+import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import type { UserBadge } from '@/types/badge';
 import { parseUserPrefix } from '@/lib/user-prefix';
 
@@ -227,13 +228,7 @@ export function ProfileCard({
       if (buttonsContainer) buttonsContainer.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, { scale: 1 });
-
-      if (buttonsContainer) buttonsContainer.style.display = 'flex';
-      if (logoPlaceholder) logoPlaceholder.style.display = 'none';
-
-      const imgElement = await result.toPng();
-      const imageUrl = imgElement.src;
+      const blob = await capturePngBlob(cardRef.current, { scale: 1, dprMax: 2, fast: false });
 
       const resolvedMode: 'modal' | 'download' =
         imageSaveMode === 'modal' || imageSaveMode === 'download'
@@ -243,6 +238,7 @@ export function ProfileCard({
             : 'download';
 
       if (resolvedMode === 'modal') {
+        const imageUrl = createBlobUrl(blob);
         if (onSaveImage) {
           onSaveImage(imageUrl);
           return;
@@ -254,15 +250,11 @@ export function ProfileCard({
         return;
       }
 
-      const downloadLink = document.createElement('a');
-      downloadLink.href = imageUrl;
-      downloadLink.download = `个人资料卡_${sanitizeFilename(data.profile.username)}_${data.profile.id}.png`;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      document.body.removeChild(downloadLink);
+      downloadBlob(blob, `个人资料卡_${sanitizeFilename(data.profile.username)}_${data.profile.id}.png`);
     } catch (err) {
       alert('生成图片失败，请重试');
       console.error('ProfileCard image generation failed:', err);
+    } finally {
       const buttonsContainer = cardRef.current?.querySelector('.buttons-container') as HTMLElement | null;
       const logoPlaceholder = cardRef.current?.querySelector('.logo-placeholder') as HTMLElement | null;
       if (buttonsContainer) buttonsContainer.style.display = 'flex';
@@ -347,9 +339,9 @@ export function ProfileCard({
 
         <div className="mt-5 grid grid-cols-2 gap-4">
           <div className="rounded-2xl bg-black/15 p-4">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-semibold">徽章与统计</div>
-              <div className="text-xs text-white/75">徽章 {allBadges.length}</div>
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <div className="min-w-0 flex-1 truncate whitespace-nowrap text-sm font-semibold">徽章与统计</div>
+              <div className="shrink-0 whitespace-nowrap text-xs text-white/75">徽章 {allBadges.length}</div>
             </div>
 
             <div className="mt-2 text-xs font-semibold text-white/85">佩戴中</div>
@@ -458,9 +450,9 @@ export function ProfileCard({
           </div>
 
           <div className="rounded-2xl bg-black/15 p-4">
-            <div className="flex items-end justify-between gap-2">
-              <div className="text-sm font-semibold">卡牌对决战绩（PVP）</div>
-              {winRate ? <div className="text-xs text-white/85">胜率 {winRate}</div> : null}
+            <div className="flex min-w-0 items-end justify-between gap-2">
+              <div className="min-w-0 flex-1 truncate whitespace-nowrap text-sm font-semibold">卡牌对决战绩（PVP）</div>
+              {winRate ? <div className="shrink-0 whitespace-nowrap text-xs text-white/85">胜率 {winRate}</div> : null}
             </div>
             <div className="mt-2 text-sm text-white/90">
               {data.pvp.summary.completedMatches} 场 · 胜 {data.pvp.summary.wins} · 负 {data.pvp.summary.losses} · 平 {data.pvp.summary.draws} · 中止{' '}

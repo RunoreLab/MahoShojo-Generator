@@ -7,6 +7,7 @@ import { BaseModal } from '@/components/shared/BaseModal';
 import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
 import { ProfileCard, type MeProfileCardPayload } from '@/components/me/ProfileCard';
 import { authStorage } from '@/lib/auth';
+import { revokeBlobUrl } from '@/lib/client/blobUrl';
 
 type Props = {
   isOpen: boolean;
@@ -122,7 +123,10 @@ export function ProfileCardModal({ isOpen, onClose }: Props) {
               data={payload}
               imageSaveMode={saveMode}
               onSaveImage={(url) => {
-                setImageUrl(url);
+                setImageUrl((prev) => {
+                  revokeBlobUrl(prev);
+                  return url;
+                });
                 setShowImageModal(true);
               }}
             />
@@ -130,7 +134,17 @@ export function ProfileCardModal({ isOpen, onClose }: Props) {
         ) : null}
       </BaseModal>
 
-      <ImagePreviewModal isOpen={showImageModal} imageUrl={imageUrl} onClose={() => setShowImageModal(false)} />
+      <ImagePreviewModal
+        isOpen={showImageModal}
+        imageUrl={imageUrl}
+        onClose={() => {
+          setShowImageModal(false);
+          setImageUrl((prev) => {
+            revokeBlobUrl(prev);
+            return null;
+          });
+        }}
+      />
     </>
   );
 }
