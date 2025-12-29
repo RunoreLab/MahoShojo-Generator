@@ -32,10 +32,15 @@ export interface CombatantData {
   wasCorrected?: boolean;
   teamId?: number;
   sourceDataCardId?: string;
+  sourceDataCardDescription?: string;
+  sourceDataCardCreatedAt?: string;
   sourceDataCardUpdatedAt?: string;
   sourceDataCardName?: string;
   sourceIsPublic?: boolean;
   sourceAuthor?: string;
+  sourceDataCardUsageCount?: number;
+  sourceDataCardLikeCount?: number;
+  sourceDataCardFavoriteCount?: number;
 }
 
 export interface RandomCombatantPlaceholder {
@@ -52,10 +57,15 @@ export interface ScenarioState {
   fileName: string | null;
   isNative: boolean;
   sourceDataCardId?: string;
+  sourceDataCardDescription?: string;
+  sourceDataCardCreatedAt?: string;
   sourceDataCardUpdatedAt?: string;
   sourceDataCardName?: string;
   sourceIsPublic?: boolean;
   sourceAuthor?: string;
+  sourceDataCardUsageCount?: number;
+  sourceDataCardLikeCount?: number;
+  sourceDataCardFavoriteCount?: number;
 }
 
 export type AuxiliaryScenarioState = Omit<ScenarioState, 'content'> & {

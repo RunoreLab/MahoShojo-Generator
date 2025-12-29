@@ -266,12 +266,28 @@ export function ArenaPage() {
           isOpen
           onClose={() => setSelectedCombatant(null)}
           card={{
-            id: selectedCombatant.filename,
-            name: getCombatantDisplayName(selectedCombatant.data),
-            description: '角色详细设定',
+            id: selectedCombatant.sourceDataCardId || selectedCombatant.filename,
+            name:
+              typeof selectedCombatant.sourceDataCardName === 'string' && selectedCombatant.sourceDataCardName.trim()
+                ? selectedCombatant.sourceDataCardName
+                : getCombatantDisplayName(selectedCombatant.data),
+            description:
+              typeof selectedCombatant.sourceDataCardDescription === 'string' &&
+              selectedCombatant.sourceDataCardDescription.trim()
+                ? selectedCombatant.sourceDataCardDescription
+                : (selectedCombatant.isPreset ? '系统预设角色' : '本地角色设定'),
             type: 'character',
             data: JSON.stringify(selectedCombatant.data, null, 2),
-            isPublic: Boolean(selectedCombatant.isPreset),
+            isPublic: Boolean(selectedCombatant.sourceIsPublic),
+            usageCount: selectedCombatant.sourceDataCardUsageCount,
+            likeCount: selectedCombatant.sourceDataCardLikeCount,
+            favoriteCount: selectedCombatant.sourceDataCardFavoriteCount,
+            author:
+              typeof selectedCombatant.sourceAuthor === 'string' && selectedCombatant.sourceAuthor.trim()
+                ? selectedCombatant.sourceAuthor
+                : (selectedCombatant.isPreset ? '系统' : '—'),
+            createdAt: selectedCombatant.sourceDataCardCreatedAt,
+            updatedAt: selectedCombatant.sourceDataCardUpdatedAt,
           }}
         />
       )}
