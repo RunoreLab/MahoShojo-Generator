@@ -194,11 +194,18 @@ export const useBattleActions = () => {
     async (cardData: any) => {
       const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : undefined;
       const sourceDataCardName = typeof cardData?._cardName === 'string' ? cardData._cardName : undefined;
+      const sourceDataCardDescription =
+        typeof cardData?._cardDescription === 'string' ? cardData._cardDescription : undefined;
+      const sourceDataCardCreatedAt = typeof cardData?._createdAt === 'string' ? cardData._createdAt : undefined;
       const sourceDataCardUpdatedAt = typeof cardData?._updatedAt === 'string' ? cardData._updatedAt : undefined;
       const sourceIsPublic = typeof cardData?._isPublic === 'boolean'
         ? cardData._isPublic
         : (typeof cardData?._isPublic === 'number' ? cardData._isPublic === 1 : undefined);
       const sourceAuthor = typeof cardData?._author === 'string' ? cardData._author : undefined;
+      const sourceDataCardLikeCount = typeof cardData?._likeCount === 'number' ? cardData._likeCount : undefined;
+      const sourceDataCardFavoriteCount =
+        typeof cardData?._favoriteCount === 'number' ? cardData._favoriteCount : undefined;
+      const sourceDataCardUsageCount = typeof cardData?._usageCount === 'number' ? cardData._usageCount : undefined;
 
       const cleanedCardData = removePrivateKeys(cardData);
       const resolvedName = getCombatantDisplayName(cleanedCardData);
@@ -226,10 +233,15 @@ export const useBattleActions = () => {
             fileName: `${cardData._cardName || resolvedName}.json`,
             isNative,
             sourceDataCardId,
+            sourceDataCardDescription,
+            sourceDataCardCreatedAt,
             sourceDataCardUpdatedAt,
             sourceDataCardName,
             sourceIsPublic,
             sourceAuthor,
+            sourceDataCardUsageCount,
+            sourceDataCardLikeCount,
+            sourceDataCardFavoriteCount,
           });
           appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName);
           setError(null);
@@ -256,10 +268,15 @@ export const useBattleActions = () => {
           isPreset: false,
           isNonStandard: false,
           sourceDataCardId,
+          sourceDataCardDescription,
+          sourceDataCardCreatedAt,
           sourceDataCardUpdatedAt,
           sourceDataCardName,
           sourceIsPublic,
           sourceAuthor,
+          sourceDataCardUsageCount,
+          sourceDataCardLikeCount,
+          sourceDataCardFavoriteCount,
         });
         appendAdjudicationEvents(cleanedCardData.adjudicationEvents, resolvedName);
         setError(null);
@@ -290,10 +307,14 @@ export const useBattleActions = () => {
           ...cardData,
           _cardId: result.card.id,
           _cardName: result.card.name,
+          _cardDescription: result.card.description || '',
           _isPublic: result.card.is_public,
           _updatedAt: result.card.updated_at,
           _createdAt: result.card.created_at,
           _author: result.card.username || '未知',
+          _likeCount: typeof result.card.like_count === 'number' ? result.card.like_count : undefined,
+          _favoriteCount: typeof result.card.favorite_count === 'number' ? result.card.favorite_count : undefined,
+          _usageCount: typeof result.card.usage_count === 'number' ? result.card.usage_count : undefined,
         });
       } catch (error) {
         setError(`❌ 随机匹配失败: ${error instanceof Error ? error.message : '未知错误'}`);
@@ -405,10 +426,14 @@ export const useBattleActions = () => {
           ...cardData,
           _cardId: result.card.id,
           _cardName: result.card.name,
+          _cardDescription: result.card.description || '',
           _isPublic: result.card.is_public,
           _updatedAt: result.card.updated_at,
           _createdAt: result.card.created_at,
           _author: result.card.username || '未知',
+          _likeCount: typeof result.card.like_count === 'number' ? result.card.like_count : undefined,
+          _favoriteCount: typeof result.card.favorite_count === 'number' ? result.card.favorite_count : undefined,
+          _usageCount: typeof result.card.usage_count === 'number' ? result.card.usage_count : undefined,
         },
         true
       );
