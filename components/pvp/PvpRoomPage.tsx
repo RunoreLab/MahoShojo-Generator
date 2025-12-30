@@ -25,6 +25,8 @@ import { BattleModeSelector } from '@/components/shared/BattleModeSelector';
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { StoryOptionsPanel } from '@/components/shared/StoryOptionsPanel';
 import { GenerationModeSwitcher } from '@/components/shared/GenerationModeSwitcher';
+import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
+import { PvpSettlementCardModal } from '@/components/pvp/PvpSettlementCardModal';
 import { authStorage } from '@/lib/auth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useCooldown } from '@/lib/cooldown';
@@ -42,6 +44,7 @@ import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
 
 import type { Preset } from '@/pages/api/get-presets';
 import type { UserBadge } from '@/types/badge';
+import { revokeBlobUrl } from '@/lib/client/blobUrl';
 
 const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
 const RESOLVE_REQUEST_TIMEOUT_MS = 120_000;
@@ -249,6 +252,7 @@ export function PvpRoomPage() {
 
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
+  const [showSettlementCardModal, setShowSettlementCardModal] = useState(false);
 
   const [roomPasswordDraft, setRoomPasswordDraft] = useState('');
   const [rulesDraft, setRulesDraft] = useState<PvpRoomRules | null>(null);
@@ -1824,14 +1828,7 @@ export function PvpRoomPage() {
     });
   };
 
-  useEffect(() => {
-    if (!savedImageUrl) return;
-    return () => {
-      if (savedImageUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(savedImageUrl);
-      }
-    };
-  }, [savedImageUrl]);
+  // 图片预览弹窗关闭时统一回收 blob URL（用于战报卡片导出）
 
   return (
     <>
@@ -1997,6 +1994,19 @@ export function PvpRoomPage() {
                     {phase === 'choosing' && !isSpectator ? (
                       <div className="mt-1 text-xs text-gray-600">
                         我的手牌：{myHandCards.length} 张；弃牌：{Array.isArray(myHand?.discarded) ? myHand?.discarded.length : 0} 张
+                      </div>
+                    ) : null}
+                    {room?.currentMatchId ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowSettlementCardModal(true)}
+                          className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs"
+                          title="生成可保存/分享的战局结算图片"
+                        >
+                          生成战局结算卡
+                        </button>
+                        <div className="text-xs text-gray-500">提示：推荐在对局结束或关键回合结算后生成。</div>
                       </div>
                     ) : null}
                   </div>
@@ -3455,34 +3465,23 @@ export function PvpRoomPage() {
         />
       )}
 
-      {showImageModal && savedImageUrl && (
-        <div
-          className="fixed inset-0 bg-black flex items-center justify-center z-50"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem' }}
-        >
-          <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
-            <div className="flex justify-between items-center m-0">
-              <div></div>
-              <button
-                onClick={() => {
-                  setShowImageModal(false);
-                  setSavedImageUrl(null);
-                }}
-                className="text-gray-500 hover:text-gray-700 text-3xl leading-none"
-                style={{ marginRight: '0.5rem' }}
-              >
-                ×
-              </button>
-            </div>
-            <p className="text-center text-sm text-gray-600" style={{ marginTop: '0.5rem' }}>
-              📱 长按图片保存到相册
-            </p>
-            <div className="items-center flex flex-col" style={{ padding: '0.5rem' }}>
-              <img src={savedImageUrl} alt="战报" className="max-w-full h-auto rounded" />
-            </div>
-          </div>
-        </div>
-      )}
+      <ImagePreviewModal
+        isOpen={showImageModal}
+        imageUrl={savedImageUrl}
+        onClose={() => {
+          setShowImageModal(false);
+          setSavedImageUrl((prev) => {
+            revokeBlobUrl(prev);
+            return null;
+          });
+        }}
+      />
+
+      <PvpSettlementCardModal
+        isOpen={showSettlementCardModal}
+        onClose={() => setShowSettlementCardModal(false)}
+        roomId={roomId}
+      />
     </>
   );
 }

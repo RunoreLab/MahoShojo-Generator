@@ -673,6 +673,8 @@ async function startHandler(req: Request): Promise<Response> {
     return json({ success: true, roundId, nextVersion: dealingVersion + 1 });
   }
 
+  const initialHandsBySeat: Record<string, string[]> = {};
+
   if (rules.shuffleDecks !== true && !hostOnlyDeck) {
     const botById = new Map(internal.bots.map((b) => [b.id, b]));
 
@@ -744,6 +746,9 @@ async function startHandler(req: Request): Promise<Response> {
         participant.kind === 'human'
           ? await fillHandWithFallback(participant.userId, baseHand, rules.dealPerPlayer)
           : await fillHandWithFallback(auth.user.id, baseHand, rules.dealPerPlayer);
+      initialHandsBySeat[String(participant.seat)] = (Array.isArray(filled.cards) ? filled.cards : [])
+        .map((c: any) => (c && typeof c === 'object' && c.kind === 'snapshot' && typeof c.id === 'string' ? c.id : null))
+        .filter(Boolean) as string[];
       hands.push(filled);
     }
 
@@ -768,6 +773,8 @@ async function startHandler(req: Request): Promise<Response> {
 
     (internal.raw as any)._drawPile = drawPile;
     (internal.raw as any)._usedPile = [];
+    (internal.raw as any)._initialHandsMatchId = matchId;
+    (internal.raw as any)._initialHandsBySeat = initialHandsBySeat;
     (internal.raw as any)._submittedDataCardIds = [...submittedDataCardIds];
     (internal.raw as any)._submittedPresetFilenames = [...submittedPresetFilenames];
     (internal.raw as any)._publicDrawnCardIds = [...publicDrawnDataCardIds];
@@ -969,6 +976,9 @@ async function startHandler(req: Request): Promise<Response> {
       participant.kind === 'human'
         ? await fillHandWithFallback(participant.userId, baseHand, rules.dealPerPlayer)
         : await fillHandWithFallback(auth.user.id, baseHand, rules.dealPerPlayer);
+    initialHandsBySeat[String(participant.seat)] = (Array.isArray(filled.cards) ? filled.cards : [])
+      .map((c: any) => (c && typeof c === 'object' && c.kind === 'snapshot' && typeof c.id === 'string' ? c.id : null))
+      .filter(Boolean) as string[];
     if (participant.kind === 'human') {
       const ok = await upsertPvpRoomHand(roomId, participant.userId, JSON.stringify(filled));
       if (!ok) {
@@ -987,6 +997,8 @@ async function startHandler(req: Request): Promise<Response> {
 
   (internal.raw as any)._drawPile = drawPile;
   (internal.raw as any)._usedPile = [];
+  (internal.raw as any)._initialHandsMatchId = matchId;
+  (internal.raw as any)._initialHandsBySeat = initialHandsBySeat;
   (internal.raw as any)._submittedDataCardIds = [...submittedDataCardIds];
   (internal.raw as any)._submittedPresetFilenames = [...submittedPresetFilenames];
   (internal.raw as any)._publicDrawnCardIds = [...publicDrawnDataCardIds];
