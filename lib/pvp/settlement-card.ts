@@ -10,11 +10,14 @@ export type PvpSettlementCardRoundCombatant = {
 };
 
 export type PvpSettlementCardRoundResult = {
+  generationMode?: string | null;
   winnerUserId: number | null;
   winnerName: string | null;
   winnerSeat: number | null;
   winnerIsBot: boolean | null;
   winnerStatus?: string | null;
+  reportMarkdown?: string | null;
+  streamMeta?: any;
   combatants: PvpSettlementCardRoundCombatant[];
   report?: {
     headline?: string | null;
@@ -45,6 +48,34 @@ export type PvpSettlementCardRoundSummary = {
 
 const safeString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
+const extractHeadlineFromMarkdown = (markdown: string | null | undefined): string | null => {
+  if (typeof markdown !== 'string') return null;
+  const pickHeading = (re: RegExp): string | null => {
+    const match = markdown.match(re);
+    const raw = match ? match[1] : '';
+    const text = typeof raw === 'string' ? raw.trim() : '';
+    return text ? text : null;
+  };
+
+  // 优先取主标题，避免把“## 胜利者/战斗经过”当作标题
+  const h1 = pickHeading(/^\s*#\s+(.*)(?:\r?\n|$)/m);
+  if (h1) return h1;
+  const h2 = pickHeading(/^\s*##\s+(.*)(?:\r?\n|$)/m);
+  if (h2) return h2;
+  const h3 = pickHeading(/^\s*###\s+(.*)(?:\r?\n|$)/m);
+  if (h3) return h3;
+
+  // 最后兜底：取第一行可读文本
+  const firstLine = markdown
+    .split(/\r?\n|\u2028|\u2029|\\n/g)
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith('<!--') && !line.startsWith('---'));
+  if (!firstLine) return null;
+  const normalized = firstLine.replace(/^[-*>#\s]+/, '').trim();
+  if (!normalized) return null;
+  return normalized.length > 48 ? `${normalized.slice(0, 48)}…` : normalized;
+};
+
 export function parsePvpRoundResultJson(raw: string | null | undefined): PvpSettlementCardRoundResult | null {
   if (!raw) return null;
   try {
@@ -69,20 +100,41 @@ export function parsePvpRoundResultJson(raw: string | null | undefined): PvpSett
 
     const report = parsed.report && typeof parsed.report === 'object' ? parsed.report : null;
     const reportHeadline = report ? safeString(report.headline) : null;
+    const reportArticleBody = report && typeof report.article === 'object' ? safeString(report.article?.body) : null;
+
+    const reportMarkdown = safeString(parsed.reportMarkdown) ?? reportArticleBody;
+
+    const streamMeta = parsed.streamMeta && typeof parsed.streamMeta === 'object' ? parsed.streamMeta : null;
+    const metaHeadline =
+      safeString(streamMeta?.report?.headline) ??
+      safeString(streamMeta?.report?.title) ??
+      safeString(streamMeta?.report?.headlineText) ??
+      null;
+
+    const resolvedHeadline =
+      (reportHeadline && reportHeadline.trim() ? reportHeadline.trim() : null) ??
+      (metaHeadline && metaHeadline.trim() ? metaHeadline.trim() : null) ??
+      extractHeadlineFromMarkdown(reportMarkdown);
+
     const officialReport = report && typeof report.officialReport === 'object' ? report.officialReport : null;
     const officialWinner = officialReport ? safeString(officialReport.winner) : null;
 
+    const shouldProvideReport = Boolean(report) || Boolean(resolvedHeadline) || Boolean(officialWinner);
+
     return {
+      generationMode: safeString(parsed.generationMode),
       winnerUserId: typeof parsed.winnerUserId === 'number' && Number.isFinite(parsed.winnerUserId) ? Math.floor(parsed.winnerUserId) : null,
       winnerName: safeString(parsed.winnerName),
       winnerSeat: typeof parsed.winnerSeat === 'number' && Number.isFinite(parsed.winnerSeat) ? Math.floor(parsed.winnerSeat) : null,
       winnerIsBot: parsed.winnerIsBot == null ? null : Boolean(parsed.winnerIsBot),
       winnerStatus: safeString(parsed.winnerStatus),
+      reportMarkdown,
+      streamMeta,
       combatants,
-      report: report
+      report: shouldProvideReport
         ? {
-            headline: reportHeadline,
-            officialReport: officialReport ? { winner: officialWinner } : null,
+            headline: resolvedHeadline,
+            officialReport: officialWinner != null ? { winner: officialWinner } : null,
           }
         : null,
     };
@@ -149,4 +201,3 @@ export function buildPvpSettlementRoundSummary(params: {
       : null,
   };
 }
-

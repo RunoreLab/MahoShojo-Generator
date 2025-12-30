@@ -101,5 +101,53 @@ describe('pvp settlement card', () => {
     expect(summary.winner.status).toBe('pending');
     expect(summary.headline).toBeNull();
   });
-});
 
+  it('extracts headline from reportMarkdown for stream results', () => {
+    const raw = JSON.stringify({
+      generationMode: 'stream',
+      winnerUserId: 12,
+      winnerName: '星光之刃',
+      winnerSeat: 1,
+      winnerIsBot: false,
+      combatants: [{ userId: 12, seat: 1, isBot: false, snapshotId: 'snap_a', name: '星光之刃', type: 'magical-girl' }],
+      reportMarkdown: '# 月下决斗\n\n## 胜利者\n星光之刃',
+    });
+
+    const result = parsePvpRoundResultJson(raw);
+    const summary = buildPvpSettlementRoundSummary({
+      roundId: 'r4',
+      roundIndex: 4,
+      status: 'completed',
+      result,
+      usernameByUserId: new Map([[12, '小明']]),
+      isBotByUserId: new Map([[12, false]]),
+      myUserId: 12,
+    });
+
+    expect(summary.headline).toBe('月下决斗');
+  });
+
+  it('falls back to first non-empty line when markdown has no heading', () => {
+    const raw = JSON.stringify({
+      generationMode: 'stream',
+      winnerUserId: null,
+      winnerName: null,
+      winnerSeat: null,
+      combatants: [],
+      reportMarkdown: '这是一条没有标题的战报第一行\\n\\n后续内容…',
+    });
+
+    const result = parsePvpRoundResultJson(raw);
+    const summary = buildPvpSettlementRoundSummary({
+      roundId: 'r5',
+      roundIndex: 5,
+      status: 'completed',
+      result,
+      usernameByUserId: new Map(),
+      isBotByUserId: new Map(),
+      myUserId: 1,
+    });
+
+    expect(summary.headline).toBe('这是一条没有标题的战报第一行');
+  });
+});
