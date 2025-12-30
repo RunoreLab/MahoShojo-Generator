@@ -6,7 +6,7 @@ import Badge from '@/components/badge/Badge';
 import BadgeIcon from '@/components/badge/BadgeIcon';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
-import { COLOR_GRADIENTS, getMainColorGradient, MainColor, type MainColorKey } from '@/lib/main-color';
+import { getMainColorGradient, type MainColorKey } from '@/lib/main-color';
 import type { PvpRoomRules } from '@/lib/pvp/types';
 import type { UserBadge } from '@/types/badge';
 import { parseUserPrefix } from '@/lib/user-prefix';
@@ -253,16 +253,13 @@ export function PvpSettlementCard({
                   </span>
                 ) : null}
                 <span className="text-xs text-white/85">
-                  配色：{MainColor[themeKey]}（{COLOR_GRADIENTS[MainColor[themeKey]] ? '渐变' : '默认'}）
+                  {data.me.signature.trim()}
                 </span>
               </div>
 
               <div className="mt-1 text-xs text-white/85">
-                房间 {data.room.id} · 对局 {data.match.id} · 生成 {new Date(data.generatedAt).toLocaleString('zh-CN')}
+                生成 {new Date(data.generatedAt).toLocaleString('zh-CN')}
               </div>
-              {data.me.signature?.trim() ? (
-                <div className="mt-1 max-w-[720px] truncate text-xs text-white/80">签名：{data.me.signature.trim()}</div>
-              ) : null}
 
               {displayBadges.length > 0 ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -361,7 +358,6 @@ export function PvpSettlementCard({
               );
             })}
           </div>
-          <div className="mt-2 text-xs text-white/80">已高亮自己的计分行。</div>
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-4">
