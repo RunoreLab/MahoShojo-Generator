@@ -6,6 +6,7 @@ import {
   getPvpRoomSubmissions,
   getPvpRoundsByMatch,
   getPvpUserSummariesByUserIds,
+  getUserBadges,
   getUserEquippedBadges,
   getUserProfileByUserId,
 } from '@/lib/d1';
@@ -124,7 +125,11 @@ async function handler(req: Request): Promise<Response> {
     isBotByUserId.set(p.userId, Boolean(p.isBot));
   }
 
-  const myBadges = badgesByUserId.get(auth.user.id) ?? [];
+  const allMyBadges = await getUserBadges(auth.user.id);
+  const myBadges = [
+    ...allMyBadges.filter((b) => b.isEquipped).sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)),
+    ...allMyBadges.filter((b) => !b.isEquipped),
+  ].slice(0, 5);
 
   const profileRow = await getUserProfileByUserId(auth.user.id);
   const avatarDataUrl = profileRow?.avatar_webp_base64 ? `data:image/webp;base64,${profileRow.avatar_webp_base64}` : null;

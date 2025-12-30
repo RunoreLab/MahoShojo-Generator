@@ -123,7 +123,7 @@ export function PvpSettlementCard({
   );
 
   const rules = data.room.rules;
-  const equippedBadges = (data.me.badges ?? []).slice(0, 5);
+  const displayBadges = (data.me.badges ?? []).slice(0, 5);
 
   const scoreByUserId = useMemo(() => {
     const map = new Map<number, number>();
@@ -264,17 +264,17 @@ export function PvpSettlementCard({
                 <div className="mt-1 max-w-[720px] truncate text-xs text-white/80">签名：{data.me.signature.trim()}</div>
               ) : null}
 
-              {equippedBadges.length > 0 ? (
+              {displayBadges.length > 0 ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <div className="text-xs font-semibold text-white/90">佩戴徽章</div>
-                  {equippedBadges.map((ub) => (
-                    <div key={`equipped-${ub.id}`} className="max-w-full">
-                      <Badge badge={ub.badge} size="sm" />
+                  <div className="text-xs font-semibold text-white/90">徽章</div>
+                  {displayBadges.map((ub) => (
+                    <div key={`badge-${ub.id}`} className="max-w-full">
+                      <Badge badge={ub.badge} size="sm" className={ub.isEquipped ? 'ring-1 ring-white/70' : 'opacity-95'} />
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="mt-2 text-xs text-white/80">暂无佩戴徽章</div>
+                <div className="mt-2 text-xs text-white/80">暂无徽章</div>
               )}
             </div>
           </div>

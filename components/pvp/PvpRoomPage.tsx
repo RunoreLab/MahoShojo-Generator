@@ -1996,19 +1996,6 @@ export function PvpRoomPage() {
                         我的手牌：{myHandCards.length} 张；弃牌：{Array.isArray(myHand?.discarded) ? myHand?.discarded.length : 0} 张
                       </div>
                     ) : null}
-                    {room?.currentMatchId ? (
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowSettlementCardModal(true)}
-                          className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 text-xs"
-                          title="生成可保存/分享的战局结算图片"
-                        >
-                          生成战局结算卡
-                        </button>
-                        <div className="text-xs text-gray-500">提示：推荐在对局结束或关键回合结算后生成。</div>
-                      </div>
-                    ) : null}
                   </div>
 
                   <PvpScoreboard score={score} players={players} />
@@ -3306,6 +3293,16 @@ export function PvpRoomPage() {
                     对局已结束。
                   </div>
                 )}
+
+                <button
+                  className="generate-button mt-3 w-full"
+                  style={{ backgroundColor: '#ec4899', backgroundImage: 'linear-gradient(to right, #ec4899, #db2777)' }}
+                  onClick={() => setShowSettlementCardModal(true)}
+                  disabled={!room?.currentMatchId}
+                  title={!room?.currentMatchId ? '尚未开始对局：需要房主先开局' : '生成可保存/分享的战局结算图片'}
+                >
+                  生成战局结算卡
+                </button>
 
                 {isHost && (phase === 'finished' || phase === 'aborted' || phase === 'waiting' || phase === 'submitting') && (
                   <button
