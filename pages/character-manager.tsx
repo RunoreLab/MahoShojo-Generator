@@ -2164,10 +2164,20 @@ const CharacterManagerPage: React.FC = () => {
                 {/* 【新增】用于移动端长按保存的图片模态框 */}
                 {showImageModal && savedImageUrl && (
                     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4" onClick={() => setShowImageModal(false)}>
-                        <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative p-4" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => setShowImageModal(false)} className="absolute top-2 right-2 text-3xl text-gray-600 hover:text-gray-900">&times;</button>
-                            <p className="text-center text-sm text-gray-600 mb-2">📱 长按图片保存到相册</p>
-                            <img src={savedImageUrl} alt="角色卡片" className="w-full h-auto rounded-lg" />
+                        <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative" onClick={(e) => e.stopPropagation()}>
+                            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
+                                <button
+                                    onClick={() => setShowImageModal(false)}
+                                    aria-label="关闭"
+                                    className="text-3xl leading-none text-gray-600 hover:text-gray-900"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                            <div className="px-4 pb-4">
+                                <p className="text-center text-sm text-gray-600 mb-2">📱 长按图片保存到相册</p>
+                                <img src={savedImageUrl} alt="角色卡片" className="w-full h-auto rounded-lg" />
+                            </div>
                         </div>
                     </div>
                 )}
