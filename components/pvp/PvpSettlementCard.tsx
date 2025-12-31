@@ -30,7 +30,7 @@ export type PvpSettlementCardPayload = {
     prefix: string | null;
     seat: number | null;
     avatarDataUrl: string | null;
-    signature: string;
+    signature?: string | null;
     badges: UserBadge[];
     pvp: {
       completedMatches: number;
@@ -115,6 +115,7 @@ export function PvpSettlementCard({
   const [isSavingImage, setIsSavingImage] = useState(false);
   const initials = useMemo(() => getInitials(data.me.username), [data.me.username]);
   const parsedPrefix = useMemo(() => parseUserPrefix(data.me.prefix), [data.me.prefix]);
+  const signature = (data.me.signature ?? '').trim();
 
   const gradient = useMemo(() => getMainColorGradient(themeKey), [themeKey]);
   const background = useMemo(
@@ -252,9 +253,7 @@ export function PvpSettlementCard({
                     <span className="whitespace-nowrap">{parsedPrefix.title}</span>
                   </span>
                 ) : null}
-                <span className="text-xs text-white/85">
-                  {data.me.signature.trim()}
-                </span>
+                {signature ? <span className="text-xs text-white/85">{signature}</span> : null}
               </div>
 
               <div className="mt-1 text-xs text-white/85">
