@@ -62,6 +62,7 @@ export default async function handler(req: Request): Promise<Response> {
     headline: record.headline,
     winner: record.winner,
     outputPreview: outputPreview,
+    aiModel: record.ai_model,
     promptTokens: record.prompt_tokens,
     completionTokens: record.completion_tokens,
     totalTokens: record.total_tokens,

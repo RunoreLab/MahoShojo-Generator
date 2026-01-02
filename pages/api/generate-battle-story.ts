@@ -513,6 +513,9 @@ async function handler(req: NextRequest): Promise<Response> {
         if (typeof narrativeHistoryReadCount === 'number') {
             report.narrativeHistoryReadCount = narrativeHistoryReadCount;
         }
+        if (typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim()) {
+            report.aiModel = aiTelemetry.model.trim();
+        }
 
         // 异步更新数据库统计，不阻塞响应
         // 仅在写入历战记录时更新统计，避免污染数据

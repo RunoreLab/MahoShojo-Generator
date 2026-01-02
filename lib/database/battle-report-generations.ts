@@ -254,6 +254,7 @@ export interface BattleReportGenerationRowLite {
   user_id: number | null;
   mode: string;
   scenario_title: string | null;
+  ai_model: string | null;
   scenario_data_card_id: string | null;
   scenario_data_card_updated_at: string | null;
   language: string | null;
@@ -292,6 +293,7 @@ export async function getBattleReportGenerationByIdLite(
         user_id,
         mode,
         scenario_title,
+        ai_model,
         scenario_data_card_id,
         scenario_data_card_updated_at,
         language,
@@ -349,6 +351,7 @@ export async function getBattleReportGenerationsByUserIdLite(
         user_id,
         mode,
         scenario_title,
+        ai_model,
         scenario_data_card_id,
         scenario_data_card_updated_at,
         language,

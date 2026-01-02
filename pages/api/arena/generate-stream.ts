@@ -638,11 +638,15 @@ async function handler(req: NextRequest): Promise<Response> {
                                 (typeof usageForTelemetry.promptTokens === 'number' ||
                                     typeof usageForTelemetry.completionTokens === 'number' ||
                                     typeof usageForTelemetry.reasoningTokens === 'number')) ||
-                            typeof narrativeHistoryReadCount === 'number';
+                            typeof narrativeHistoryReadCount === 'number' ||
+                            (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
 
                         if (shouldIncludeTelemetry) {
+                            const aiModelForTelemetry =
+                                typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim() ? aiTelemetry.model.trim() : null;
                             const telemetryPayload = {
                                 version: 1,
+                                ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
                                 ...(usageForTelemetry
                                     ? {
                                         usage: {
