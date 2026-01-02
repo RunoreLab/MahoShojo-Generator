@@ -13,6 +13,14 @@ export type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type StoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 export type GenerationMode = 'non-stream' | 'stream';
 
+export interface BattleTeam {
+  id: number;
+  /** 分队名称（会传递给 AI）。 */
+  name: string;
+  /** 是否在列表中折叠。 */
+  isCollapsed: boolean;
+}
+
 export interface UpdatedCombatantData {
   codename?: string;
   name?: string;
@@ -105,6 +113,7 @@ export interface BattleApiResponse {
 
 export interface BattleStoreState {
   combatants: Combatant[];
+  teams: BattleTeam[];
   scenario: ScenarioState;
   auxScenarios: AuxiliaryScenarioState[];
   battleMode: BattleMode;
@@ -153,8 +162,15 @@ export interface BattleStoreState {
   setCombatants: (combatants: Combatant[]) => void;
   moveCombatant: (fromIndex: number, toIndex: number) => void;
   clearCombatants: () => void;
-  updateCombatantTeam: (filename: string, teamId: number) => void;
+  /** 调整角色所属分队；teamId 为 null/0 代表未分队。identifier 支持角色 filename 或占位符 id。 */
+  updateCombatantTeam: (identifier: string, teamId: number | null) => void;
   updateCombatantCharacterGuidance: (filename: string, guidance: string) => void;
+
+  /** 新建分队并返回分队 id。 */
+  addTeam: (name?: string) => number;
+  removeTeam: (teamId: number) => void;
+  renameTeam: (teamId: number, name: string) => void;
+  toggleTeamCollapsed: (teamId: number) => void;
 
   setScenario: (scenario: ScenarioState) => void;
   clearScenario: () => void;

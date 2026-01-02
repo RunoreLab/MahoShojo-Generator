@@ -188,8 +188,6 @@ export const useBattleActions = () => {
     [addCombatant, combatants.length, isGenerating, setError]
   );
 
-  const handleTeamChange = useBattleSelector((state) => state.updateCombatantTeam);
-
   const handleSelectDataCard = useCallback(
     async (cardData: any) => {
       const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : undefined;
@@ -547,6 +545,7 @@ export const useBattleActions = () => {
       isValid: true,
       isPreset: false,
       isNonStandard: false,
+      teamId: placeholders[index].teamId,
     }));
     const existing = combatants.filter((item): item is CombatantData => !('id' in item));
     setCombatants([...existing, ...newCombatantData]);
@@ -562,7 +561,6 @@ export const useBattleActions = () => {
     handleFileUpload,
     handlePaste,
     handleAddRandomPlaceholder,
-    handleTeamChange,
     handleRandomMatch,
     handleScenarioUpload,
     handleScenarioPaste,

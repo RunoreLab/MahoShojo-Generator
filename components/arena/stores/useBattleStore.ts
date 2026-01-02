@@ -48,6 +48,7 @@ export const useBattleStore = create<BattleStoreState>()(
   persist(
     (set) => ({
       combatants: [],
+      teams: [],
       scenario: defaultScenario,
       auxScenarios: [],
       battleMode: 'classic',
@@ -131,6 +132,7 @@ export const useBattleStore = create<BattleStoreState>()(
       clearCombatants: () =>
         set({
           combatants: [],
+          teams: [],
           newsReport: null,
           updatedCombatants: [],
           streamingMarkdown: null,
@@ -143,13 +145,14 @@ export const useBattleStore = create<BattleStoreState>()(
           streamNarrativeHistoryReadCount: null,
         }),
 
-      updateCombatantTeam: (filename, teamId) =>
+      updateCombatantTeam: (identifier, teamId) =>
         set((state) => ({
           combatants: state.combatants.map((combatant) => {
-            if ('filename' in combatant && combatant.filename === filename) {
+            const isMatch = 'id' in combatant ? combatant.id === identifier || combatant.filename === identifier : combatant.filename === identifier;
+            if (isMatch) {
               return {
                 ...combatant,
-                teamId: teamId === 0 ? undefined : teamId,
+                teamId: !teamId ? undefined : teamId,
               };
             }
             return combatant;
@@ -166,6 +169,43 @@ export const useBattleStore = create<BattleStoreState>()(
               characterGuidance: guidance,
             };
           }),
+        })),
+
+      addTeam: (name) => {
+        let createdId = 1;
+        set((state) => {
+          const maxId = state.teams.reduce((max, team) => Math.max(max, team.id), 0);
+          createdId = maxId + 1;
+          const trimmedName = typeof name === 'string' ? name.trim() : '';
+          const nextTeam = {
+            id: createdId,
+            name: trimmedName || `分队 ${createdId}`,
+            isCollapsed: false,
+          };
+          return { teams: [...state.teams, nextTeam] };
+        });
+        return createdId;
+      },
+
+      removeTeam: (teamId) =>
+        set((state) => ({
+          teams: state.teams.filter((team) => team.id !== teamId),
+          combatants: state.combatants.map((combatant) => {
+            if (combatant.teamId !== teamId) return combatant;
+            return { ...combatant, teamId: undefined };
+          }),
+        })),
+
+      renameTeam: (teamId, name) =>
+        set((state) => ({
+          teams: state.teams.map((team) =>
+            team.id === teamId ? { ...team, name: name.trim().slice(0, 50) || `分队 ${teamId}` } : team
+          ),
+        })),
+
+      toggleTeamCollapsed: (teamId) =>
+        set((state) => ({
+          teams: state.teams.map((team) => (team.id === teamId ? { ...team, isCollapsed: !team.isCollapsed } : team)),
         })),
 
       setScenario: (scenario) => set({ scenario }),
