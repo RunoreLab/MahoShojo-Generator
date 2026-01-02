@@ -57,6 +57,7 @@ export const useBattleStore = create<BattleStoreState>()(
       streamReporterInfo: null,
       streamUserGuidance: null,
       streamAiUsage: null,
+      streamAiModel: null,
       streamNarrativeHistoryReadCount: null,
       storyLength: 'default',
       selectedLevel: '',
@@ -81,6 +82,7 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamReporterInfo: (info) => set({ streamReporterInfo: info }),
       setStreamUserGuidance: (guidance) => set({ streamUserGuidance: guidance }),
       setStreamAiUsage: (usage) => set({ streamAiUsage: usage }),
+      setStreamAiModel: (model) => set({ streamAiModel: model }),
       setStreamNarrativeHistoryReadCount: (count) => set({ streamNarrativeHistoryReadCount: count }),
       setStoryLength: (storyLength) => set({ storyLength }),
       setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
@@ -134,6 +136,7 @@ export const useBattleStore = create<BattleStoreState>()(
           streamReporterInfo: null,
           streamUserGuidance: null,
           streamAiUsage: null,
+          streamAiModel: null,
           streamNarrativeHistoryReadCount: null,
         }),
 

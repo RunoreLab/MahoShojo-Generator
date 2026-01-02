@@ -31,6 +31,8 @@ interface StreamingBattleReportCardProps {
         cachedTokens?: number | null;
         [key: string]: unknown;
     } | null;
+    /** 本次生成所使用的 AI 模型（用于战报元数据展示，可能为空）。 */
+    aiModel?: string | null;
     /** 读取叙事历史条数：仅在开启 readNarrativeHistory 时传入（没开就不显示）。 */
     narrativeHistoryReadCount?: number | null;
     /** 是否正在生成中（可选，用于显示加载光标等） */
@@ -46,6 +48,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     userGuidance = null,
     adjudicationResults = null,
     aiUsage = null,
+    aiModel = null,
     narrativeHistoryReadCount = null,
     isStreaming = false
 }) => {
@@ -77,6 +80,8 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             (value) => typeof value === 'number' && Number.isFinite(value)
         );
     const shouldShowNarrativeReadCount = typeof narrativeHistoryReadCount === 'number';
+    const aiModelText = typeof aiModel === 'string' ? aiModel.trim() : '';
+    const shouldShowAiModel = Boolean(aiModelText);
 
     const formatToken = (value: unknown): string => {
         if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
@@ -335,7 +340,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
                 {headline && <h2 className="text-xl font-bold mb-2 mt-2 px-1">{headline}</h2>}
 
-                {(reporterInfo?.name && reporterInfo?.publication) || hasAnyTokenNumber || shouldShowNarrativeReadCount ? (
+                {(reporterInfo?.name && reporterInfo?.publication) || shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount ? (
                     <div className="px-1 mb-4 text-sm text-gray-300">
                         {reporterInfo?.name && reporterInfo?.publication && (
                             <>
@@ -343,8 +348,10 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                                 <p>来源 | {reporterInfo.publication}</p>
                             </>
                         )}
-                        {(hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
+                        {(shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
                             <p className="text-xs text-gray-400 mt-1">
+                                {shouldShowAiModel && <>模型：{aiModelText}</>}
+                                {shouldShowAiModel && (hasAnyTokenNumber || shouldShowNarrativeReadCount) ? ' · ' : ''}
                                 {hasAnyTokenNumber && (
                                     <>
                                         tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}

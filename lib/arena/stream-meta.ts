@@ -42,6 +42,7 @@ export type StreamUpdateMeta = z.infer<typeof StreamUpdateMetaSchema>;
 export const StreamTelemetryMetaSchema = z
   .object({
     version: z.number().int().min(1).optional(),
+    aiModel: z.string().optional(),
     usage: z
       .object({
         promptTokens: z.number().int().nonnegative().nullable().optional(),
@@ -75,6 +76,7 @@ export interface ExtractedStreamMeta {
 }
 
 export interface NormalizedStreamTelemetryMeta {
+  aiModel?: string;
   usage?: {
     promptTokens?: number | null;
     completionTokens?: number | null;
@@ -413,6 +415,13 @@ export async function extractStreamUpdateMeta(markdown: string): Promise<Extract
 
 const sanitizeTelemetryMeta = (meta: StreamTelemetryMeta): NormalizedStreamTelemetryMeta => {
   const out: NormalizedStreamTelemetryMeta = { ...(meta as any) };
+  if (typeof (out as any).aiModel === 'string') {
+    const trimmed = String((out as any).aiModel).trim();
+    if (trimmed) (out as any).aiModel = trimmed;
+    else delete (out as any).aiModel;
+  } else if ('aiModel' in out) {
+    delete (out as any).aiModel;
+  }
   if (out.usage != null && !isRecord(out.usage)) {
     delete out.usage;
   }

@@ -17,6 +17,8 @@ export interface NewsReport {
     name:string;
     publication: string;
   };
+  /** 本次生成所使用的 AI 模型（用于战报元数据展示，可能为空）。 */
+  aiModel?: string | null;
   article: {
     body: string;
     analysis: string;
@@ -65,6 +67,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
   const officialWinner = (report.officialReport?.winner ?? '').trim();
   const officialConclusion = (report.officialReport?.conclusion ?? '').trimEnd();
 
+  const aiModel = typeof report.aiModel === 'string' ? report.aiModel.trim() : '';
   const aiUsage = report.aiUsage;
   const hasAnyTokenNumber =
     aiUsage != null &&
@@ -72,6 +75,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
       (value) => typeof value === 'number' && Number.isFinite(value)
     );
   const shouldShowNarrativeReadCount = typeof report.narrativeHistoryReadCount === 'number';
+  const shouldShowAiModel = Boolean(aiModel);
 
   const getModeDisplay = (mode: string) => {
     switch (mode) {
@@ -281,8 +285,10 @@ ${adjudicationMarkdown}
             <p className="text-sm text-gray-300">
               来源 | {reporterPublication || '—'}
             </p>
-            {(hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
+            {(shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
               <p className="text-xs text-gray-400 mt-1">
+                {shouldShowAiModel && <>模型：{aiModel}</>}
+                {shouldShowAiModel && (hasAnyTokenNumber || shouldShowNarrativeReadCount) ? ' · ' : ''}
                 {hasAnyTokenNumber && (
                   <>
                     tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}

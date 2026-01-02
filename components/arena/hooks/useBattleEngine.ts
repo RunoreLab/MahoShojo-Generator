@@ -83,6 +83,7 @@ const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
   ...report,
   headline: sanitizeTextByShieldWords(report.headline),
   scenario: report.scenario ? sanitizeTextByShieldWords(report.scenario) : undefined,
+  aiModel: typeof report.aiModel === 'string' ? sanitizeTextByShieldWords(report.aiModel) : report.aiModel,
   reporterInfo: {
     ...report.reporterInfo,
     name: sanitizeTextByShieldWords(report.reporterInfo.name),
@@ -237,6 +238,7 @@ export const useBattleEngine = () => {
   const setStreamReporterInfo = useBattleSelector((state) => state.setStreamReporterInfo);
   const setStreamUserGuidance = useBattleSelector((state) => state.setStreamUserGuidance);
   const setStreamAiUsage = useBattleSelector((state) => state.setStreamAiUsage);
+  const setStreamAiModel = useBattleSelector((state) => state.setStreamAiModel);
   const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
@@ -312,6 +314,7 @@ export const useBattleEngine = () => {
     setStreamReporterInfo(null);
     setStreamUserGuidance(null);
     setStreamAiUsage(null);
+    setStreamAiModel(null);
     setStreamNarrativeHistoryReadCount(null);
 
     try {
@@ -524,6 +527,11 @@ export const useBattleEngine = () => {
               if (adjudicationResults && adjudicationResults.length > 0) {
                 setAdjudicationResults(adjudicationResults);
               }
+
+              const aiModel = typeof parsed?.ai?.model === 'string' ? parsed.ai.model.trim() : '';
+              if (aiModel) {
+                setStreamAiModel(sanitizeTextByShieldWords(aiModel));
+              }
             } catch (metaError) {
               // 元信息解析失败不影响正文流式展示
               console.warn('解析流式战报元信息失败，将继续渲染正文', metaError);
@@ -650,6 +658,10 @@ export const useBattleEngine = () => {
                   : null;
               setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
               setStreamNarrativeHistoryReadCount(narrativeCount);
+              const aiModel = typeof telemetryExtracted.meta.aiModel === 'string' ? telemetryExtracted.meta.aiModel.trim() : '';
+              if (aiModel) {
+                setStreamAiModel(sanitizeTextByShieldWords(aiModel));
+              }
             }
             if (telemetryExtracted && typeof telemetryExtracted.strippedMarkdown === 'string') {
               markdownForUi = telemetryExtracted.strippedMarkdown;
@@ -810,14 +822,15 @@ export const useBattleEngine = () => {
     setIsGenerating,
     setIsStreaming,
     setStreamingMarkdown,
-    setStreamReporterInfo,
-    setStreamUserGuidance,
-    setStreamAiUsage,
-    setStreamNarrativeHistoryReadCount,
-    setCombatants,
-    handleResolveRandomPlaceholders,
-    redirectToArrested,
-    startCooldown,
+	    setStreamReporterInfo,
+	    setStreamUserGuidance,
+	    setStreamAiUsage,
+	    setStreamAiModel,
+	    setStreamNarrativeHistoryReadCount,
+	    setCombatants,
+	    handleResolveRandomPlaceholders,
+	    redirectToArrested,
+	    startCooldown,
     updateFromMarkdown,
   ]);
 

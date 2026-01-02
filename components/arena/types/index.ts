@@ -112,6 +112,7 @@ export interface BattleStoreState {
   streamReporterInfo: NewsReport['reporterInfo'] | null;
   streamUserGuidance: string | null;
   streamAiUsage: NewsReport['aiUsage'] | null;
+  streamAiModel: string | null;
   streamNarrativeHistoryReadCount: number | null;
   storyLength: StoryLengthOption;
   selectedLevel: string;
@@ -136,6 +137,7 @@ export interface BattleStoreState {
   setStreamReporterInfo: (info: NewsReport['reporterInfo'] | null) => void;
   setStreamUserGuidance: (guidance: string | null) => void;
   setStreamAiUsage: (usage: NewsReport['aiUsage'] | null) => void;
+  setStreamAiModel: (model: string | null) => void;
   setStreamNarrativeHistoryReadCount: (count: number | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setSelectedLevel: (level: string) => void;
