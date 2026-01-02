@@ -21,7 +21,7 @@ export const BattleSettingsSchema = z.object({
 export const StoryPreferencesSchema = z.object({
   selectedLevel: z.string(),
   selectedLanguage: z.string().min(1, '请选择语言'),
-  userGuidance: z.string().max(50, '提示语不应超过 50 字').optional(),
+  userGuidance: z.string().max(200, '提示语不应超过 200 字').optional(),
 });
 
 export type BattleSettingsFormValues = z.infer<typeof BattleSettingsSchema>;

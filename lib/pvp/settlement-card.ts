@@ -7,6 +7,7 @@ export type PvpSettlementCardRoundCombatant = {
   snapshotId: string;
   name: string;
   type: string | null;
+  characterGuidance?: string | null;
 };
 
 export type PvpSettlementCardRoundResult = {
@@ -43,6 +44,7 @@ export type PvpSettlementCardRoundSummary = {
     snapshotId: string | null;
     name: string | null;
     type: string | null;
+    guidance?: string | null;
   } | null;
 };
 
@@ -87,6 +89,8 @@ export function parsePvpRoundResultJson(raw: string | null | undefined): PvpSett
         const seat = typeof c?.seat === 'number' && Number.isFinite(c.seat) ? Math.floor(c.seat) : null;
         const snapshotId = typeof c?.snapshotId === 'string' ? c.snapshotId : null;
         if (seat === null || !snapshotId) return null;
+        const characterGuidance =
+          typeof c?.characterGuidance === 'string' ? c.characterGuidance.trim().slice(0, 100) : null;
         return {
           userId: typeof c?.userId === 'number' && Number.isFinite(c.userId) ? Math.floor(c.userId) : null,
           seat,
@@ -94,6 +98,7 @@ export function parsePvpRoundResultJson(raw: string | null | undefined): PvpSett
           snapshotId,
           name: typeof c?.name === 'string' && c.name.trim() ? c.name.trim() : '未命名',
           type: typeof c?.type === 'string' && c.type.trim() ? c.type.trim() : null,
+          characterGuidance,
         };
       })
       .filter(Boolean) as PvpSettlementCardRoundCombatant[];
@@ -197,6 +202,7 @@ export function buildPvpSettlementRoundSummary(params: {
           snapshotId: myCombatant.snapshotId,
           name: myCombatant.name,
           type: myCombatant.type,
+          guidance: myCombatant.characterGuidance ?? null,
         }
       : null,
   };

@@ -326,9 +326,30 @@ async function handler(req: NextRequest): Promise<Response> {
         const inputsToCheck: { type: keyof SafetyCheckPolicy, content: string, isNative: boolean }[] = [];
 
         // 1. 收集所有用户输入及其元数据
-        const finalUserGuidance = userGuidance?.trim() || null;
+        const finalUserGuidance = typeof userGuidance === 'string' ? userGuidance.trim().slice(0, 200) || null : null;
+
+        const characterGuidancesForReport =
+            Array.isArray(combatants)
+                ? (combatants as any[])
+                    .map((c) => {
+                        const characterName = (c?.data?.codename || c?.data?.name || '').toString().trim();
+                        const guidance = typeof c?.characterGuidance === 'string' ? c.characterGuidance.trim().slice(0, 100) : '';
+                        if (!characterName || !guidance) return null;
+                        return { characterName, guidance };
+                    })
+                    .filter(Boolean) as Array<{ characterName: string; guidance: string }>
+                : [];
         if (finalUserGuidance) {
             inputsToCheck.push({ type: 'userGuidance', content: finalUserGuidance, isNative: false });
+        }
+        if (characterGuidancesForReport.length > 0) {
+            for (const item of characterGuidancesForReport) {
+                inputsToCheck.push({
+                    type: 'userGuidance',
+                    content: `【角色行动引导】${item.characterName}：${item.guidance}`,
+                    isNative: false,
+                });
+            }
         }
         if (resolvedInternalGuidance) {
             inputsToCheck.push({ type: 'userGuidance', content: resolvedInternalGuidance, isNative: false });
@@ -504,6 +525,7 @@ async function handler(req: NextRequest): Promise<Response> {
             ...(aiResult as Record<string, unknown>),
             reporterInfo: getRandomJournalist(),
             userGuidance: finalUserGuidance || undefined,
+            ...(characterGuidancesForReport.length > 0 ? { characterGuidances: characterGuidancesForReport } : {}),
             mode: mode,
         } as NewsReport;
 
@@ -647,6 +669,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 const rows = combatants.map((c: any, index: number) => {
                     const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
                     const payload = typeof c?.data === 'object' ? JSON.stringify(c.data) : '';
+                    const characterGuidance =
+                        typeof c?.characterGuidance === 'string' ? c.characterGuidance.trim().slice(0, 100) : '';
                     return {
                         generationId: recordId,
                         sortIndex: index,
@@ -656,6 +680,7 @@ async function handler(req: NextRequest): Promise<Response> {
                         isNative: typeof c?.isNative === 'boolean' ? c.isNative : null,
                         isPreset: typeof c?.isPreset === 'boolean' ? c.isPreset : null,
                         teamId: typeof c?.teamId === 'number' ? c.teamId : null,
+                        characterGuidance: characterGuidance || null,
                         dataCardId: typeof c?.sourceDataCardId === 'string' ? c.sourceDataCardId : null,
                         dataCardUpdatedAt: typeof c?.sourceDataCardUpdatedAt === 'string' ? c.sourceDataCardUpdatedAt : null,
                         sizeChars: payload ? payload.length : null,

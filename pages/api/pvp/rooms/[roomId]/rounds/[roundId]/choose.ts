@@ -53,7 +53,8 @@ async function chooseHandler(req: Request): Promise<Response> {
   const snapshotId = typeof body.data.snapshotId === 'string' ? body.data.snapshotId.trim() : '';
   if (!snapshotId) return json({ error: '缺少 snapshotId' }, { status: 400 });
 
-  const rawGuidance = typeof (body.data as ChooseBody).characterGuidance === 'string' ? (body.data as ChooseBody).characterGuidance : '';
+  const rawGuidanceValue = (body.data as ChooseBody).characterGuidance;
+  const rawGuidance = typeof rawGuidanceValue === 'string' ? rawGuidanceValue : '';
   const characterGuidance = rawGuidance.trim().slice(0, 100) || null;
 
   if (characterGuidance) {

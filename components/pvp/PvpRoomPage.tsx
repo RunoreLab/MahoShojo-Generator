@@ -243,6 +243,7 @@ export function PvpRoomPage() {
   const [showSubmitEditor, setShowSubmitEditor] = useState(false);
   const [showBattleDataModal, setShowBattleDataModal] = useState(false);
   const [showHandModal, setShowHandModal] = useState(false);
+  const [myCharacterGuidanceDraft, setMyCharacterGuidanceDraft] = useState('');
   const [isMatching, setIsMatching] = useState<'character' | 'scenario' | null>(null);
   const [mgPage, setMgPage] = useState(1);
   const [canshouPage, setCanshouPage] = useState(1);
@@ -417,6 +418,7 @@ export function PvpRoomPage() {
   );
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
   const allowNonHostControl = rules?.allowNonHostControl === true;
+  const allowPlayerCharacterGuidance = rules?.allowPlayerCharacterGuidance === true;
   const allowSpectators = rules?.allowSpectators !== false;
   const allowSpectatorChat = rules?.allowSpectatorChat === true;
   const canControlResolve = isHost || allowNonHostControl;
@@ -494,6 +496,14 @@ export function PvpRoomPage() {
   useEffect(() => {
     if (phase !== 'choosing') setShowHandModal(false);
   }, [phase]);
+
+  useEffect(() => {
+    if (phase !== 'choosing') setMyCharacterGuidanceDraft('');
+  }, [phase]);
+
+  useEffect(() => {
+    if (!isHost && !allowPlayerCharacterGuidance) setMyCharacterGuidanceDraft('');
+  }, [allowPlayerCharacterGuidance, isHost]);
 
   useEffect(() => {
     if (phase !== 'submitting') setShowSubmitEditor(false);
@@ -734,7 +744,7 @@ export function PvpRoomPage() {
     }
 
     const userGuidance = typeof (rulesDraft as any).userGuidance === 'string' ? String((rulesDraft as any).userGuidance).trim() : '';
-    if (userGuidance.length > 50) return '故事引导不应超过 50 字';
+    if (userGuidance.length > 200) return '故事引导不应超过 200 字';
 
     const readArenaHistory = (rulesDraft as any).readArenaHistory === true;
     const isArenaHistoryUnlimited = (rulesDraft as any).isArenaHistoryUnlimited === true;
@@ -983,7 +993,11 @@ export function PvpRoomPage() {
       const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/choose`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ expectedVersion: version, snapshotId }),
+        body: JSON.stringify({
+          expectedVersion: version,
+          snapshotId,
+          characterGuidance: myCharacterGuidanceDraft,
+        }),
       });
       const { data } = await readJsonOrText(res);
       if (!res.ok) {
@@ -1145,7 +1159,7 @@ export function PvpRoomPage() {
   });
 
   const permissionsMutation = useMutation({
-    mutationFn: async (payload: { allowNonHostControl?: boolean; allowSpectators?: boolean; allowSpectatorChat?: boolean }) => {
+    mutationFn: async (payload: { allowNonHostControl?: boolean; allowPlayerCharacterGuidance?: boolean; allowSpectators?: boolean; allowSpectatorChat?: boolean }) => {
       const authHeader = await authStorage.getAuthHeader();
       if (!authHeader) throw new Error('未登录');
       const res = await fetch(`/api/pvp/rooms/${roomId}/permissions`, {
@@ -2208,6 +2222,19 @@ export function PvpRoomPage() {
                       <label className="flex items-center gap-2 text-sm">
                         <input
                           type="checkbox"
+                          checked={allowPlayerCharacterGuidance}
+                          onChange={(e) => permissionsMutation.mutate({ allowPlayerCharacterGuidance: e.target.checked })}
+                          disabled={permissionsMutation.isPending}
+                        />
+                        <span>允许玩家填写“本回合角色行动引导”</span>
+                      </label>
+                      <div className="text-xs text-gray-500 mt-1">默认关闭；开启后玩家可在出牌前为自己本回合打出的角色添加引导（最多100字）。</div>
+                    </div>
+
+                    <div className={(phase === 'waiting' || phase === 'submitting') ? 'mt-3' : ''}>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
                           checked={allowSpectators}
                           onChange={(e) => permissionsMutation.mutate({ allowSpectators: e.target.checked })}
                           disabled={permissionsMutation.isPending}
@@ -2953,6 +2980,26 @@ export function PvpRoomPage() {
                         </button>
                       </div>
 
+                      {!isHandDealing && !choices?.hasChosenMe && (isHost || allowPlayerCharacterGuidance) ? (
+                        <div className="mt-3">
+                          <div className="text-xs text-gray-600 mb-1">本回合角色行动引导（可选，最多100字；仅对你本回合打出的角色生效）</div>
+                          <textarea
+                            className="w-full border rounded px-2 py-1 text-sm"
+                            rows={3}
+                            maxLength={100}
+                            value={myCharacterGuidanceDraft}
+                            onChange={(e) => setMyCharacterGuidanceDraft(e.target.value)}
+                            disabled={chooseMutation.isPending}
+                            placeholder="例如：优先保护同伴、试图谈判、隐藏身份、恐惧但硬撑、专注救援等"
+                          />
+                          <div className="mt-1 text-xs text-gray-500">{Array.from(myCharacterGuidanceDraft).length}/100</div>
+                        </div>
+                      ) : null}
+
+                      {!isHost && !allowPlayerCharacterGuidance && !choices?.hasChosenMe ? (
+                        <div className="mt-3 text-xs text-gray-500">提示：房主未允许玩家填写“本回合角色行动引导”。</div>
+                      ) : null}
+
                       {isHandDealing ? (
                         <div className="text-sm text-gray-700 mt-3 flex items-center gap-2">
                           <span className="inline-block w-4 h-4 rounded-full border-2 border-gray-400 border-t-transparent animate-spin" />
@@ -3069,6 +3116,7 @@ export function PvpRoomPage() {
                         isStreaming={isStreamingResolve}
                         reporterInfo={(reportMetaForUi as any)?.reporterInfo ?? null}
                         userGuidance={(reportMetaForUi as any)?.userGuidance ?? null}
+                        characterGuidances={(reportMetaForUi as any)?.characterGuidances ?? null}
                         adjudicationResults={(reportMetaForUi as any)?.adjudicationResults ?? null}
                         aiModel={(reportMetaForUi as any)?.ai?.model ?? null}
                         onSaveImage={(imageUrl) => {

@@ -23,8 +23,10 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const removeCombatant = useBattleSelector((state) => state.removeCombatant);
   const moveCombatant = useBattleSelector((state) => state.moveCombatant);
+  const updateCombatantCharacterGuidance = useBattleSelector((state) => state.updateCombatantCharacterGuidance);
   const { handleAddRandomPlaceholder, handleTeamChange, handleClearRoster } = useBattleActions();
   const [copiedStatus, setCopiedStatus] = useState<Record<string, boolean>>({});
+  const [guidanceOpenFor, setGuidanceOpenFor] = useState<string | null>(null);
 
   const downloadJson = (combatant: CombatantData) => {
     const jsonData = JSON.stringify(combatant.data, null, 2);
@@ -98,96 +100,138 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
           const canMoveDown = index < combatants.length - 1;
 
           return (
-            <li key={key} className="flex justify-between items-start group gap-2">
-              <div className="flex flex-col gap-1 pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => moveCombatant(index, index - 1)}
-                  disabled={isGenerating || !canMoveUp}
-                  className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  aria-label={`上移 ${displayName}`}
-                  title="上移"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveCombatant(index, index + 1)}
-                  disabled={isGenerating || !canMoveDown}
-                  className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  aria-label={`下移 ${displayName}`}
-                  title="下移"
-                >
-                  ↓
-                </button>
-              </div>
-              <div className="flex items-center flex-grow min-w-0">
-                <span className="break-words mr-2" title={displayName}>
-                  {displayName}
-                  <span className="text-xs text-gray-500 ml-1">{typeDisplay}</span>
-                  {!isPlaceholder && combatant.isPreset && <span className="text-xs text-purple-600 ml-1">(预设)</span>}
-                  {!isPlaceholder && combatant.isValid && <span className="text-xs text-green-600 ml-1">(原生)</span>}
-                  {!isPlaceholder && combatant.wasCorrected && <span className="text-xs text-yellow-600 ml-2">(格式已修正)</span>}
-                  {!isPlaceholder && combatant.isNonStandard && (
-                    <span className="text-xs text-orange-500 ml-1 font-semibold">(非规范格式)</span>
-                  )}
-                </span>
-                {!isPlaceholder && (
-                  <select
-                    value={combatant.teamId || 0}
-                    onChange={(e) => handleTeamChange(combatant.filename, parseInt(e.target.value, 10))}
-                    className="text-xs border border-gray-300 rounded px-1 py-0.5 bg-white disabled:opacity-50 ml-auto"
-                    disabled={isGenerating}
+            <li key={key} className="group">
+              <div className="flex justify-between items-start gap-2">
+                <div className="flex flex-col gap-1 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => moveCombatant(index, index - 1)}
+                    disabled={isGenerating || !canMoveUp}
+                    className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                    aria-label={`上移 ${displayName}`}
+                    title="上移"
                   >
-                    <option value={0}>无分队</option>
-                    <option value={1}>队伍 1</option>
-                    <option value={2}>队伍 2</option>
-                    <option value={3}>队伍 3</option>
-                    <option value={4}>队伍 4</option>
-                  </select>
-                )}
-              </div>
-              <div className="flex items-center flex-shrink-0">
-                {!isPlaceholder && (
-                  <>
-                    <button
-                      onClick={() => onShowDetails(combatant)}
-                      className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300 mr-2"
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveCombatant(index, index + 1)}
+                    disabled={isGenerating || !canMoveDown}
+                    className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                    aria-label={`下移 ${displayName}`}
+                    title="下移"
+                  >
+                    ↓
+                  </button>
+                </div>
+                <div className="flex items-center flex-grow min-w-0">
+                  <span className="break-words mr-2" title={displayName}>
+                    {displayName}
+                    <span className="text-xs text-gray-500 ml-1">{typeDisplay}</span>
+                    {!isPlaceholder && combatant.isPreset && <span className="text-xs text-purple-600 ml-1">(预设)</span>}
+                    {!isPlaceholder && combatant.isValid && <span className="text-xs text-green-600 ml-1">(原生)</span>}
+                    {!isPlaceholder && combatant.wasCorrected && <span className="text-xs text-yellow-600 ml-2">(格式已修正)</span>}
+                    {!isPlaceholder && combatant.isNonStandard && (
+                      <span className="text-xs text-orange-500 ml-1 font-semibold">(非规范格式)</span>
+                    )}
+                  </span>
+                  {!isPlaceholder && (
+                    <select
+                      value={combatant.teamId || 0}
+                      onChange={(e) => handleTeamChange(combatant.filename, parseInt(e.target.value, 10))}
+                      className="text-xs border border-gray-300 rounded px-1 py-0.5 bg-white disabled:opacity-50 ml-auto"
                       disabled={isGenerating}
                     >
-                      详情
-                    </button>
-                    {combatant.wasCorrected && (
-                      <div className="flex gap-2 mr-2">
-                        <button
-                          onClick={() => downloadJson(combatant)}
-                          disabled={isGenerating}
-                          className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
-                        >
-                          下载
-                        </button>
-                        <button
-                          onClick={() => copyJson(combatant)}
-                          disabled={isGenerating}
-                          className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 w-16"
-                        >
-                          {copiedStatus[combatant.filename] ? '已复制!' : '复制'}
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-                <button
-                  onClick={() => !isGenerating && removeCombatant(isPlaceholder ? combatant.id : combatant.filename)}
-                  className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${
-                    isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'
-                  }`}
-                  aria-label={`移除 ${displayName}`}
-                  disabled={isGenerating}
-                >
-                  X
-                </button>
+                      <option value={0}>无分队</option>
+                      <option value={1}>队伍 1</option>
+                      <option value={2}>队伍 2</option>
+                      <option value={3}>队伍 3</option>
+                      <option value={4}>队伍 4</option>
+                    </select>
+                  )}
+                </div>
+                <div className="flex items-center flex-shrink-0">
+                  {!isPlaceholder && (
+                    <>
+                      <button
+                        onClick={() => setGuidanceOpenFor((prev) => (prev === key ? null : key))}
+                        className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 mr-2"
+                        disabled={isGenerating}
+                        title="为该角色输入行动/想法引导（最多100字）"
+                      >
+                        行动
+                      </button>
+                      <button
+                        onClick={() => onShowDetails(combatant)}
+                        className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300 mr-2"
+                        disabled={isGenerating}
+                      >
+                        详情
+                      </button>
+                      {combatant.wasCorrected && (
+                        <div className="flex gap-2 mr-2">
+                          <button
+                            onClick={() => downloadJson(combatant)}
+                            disabled={isGenerating}
+                            className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+                          >
+                            下载
+                          </button>
+                          <button
+                            onClick={() => copyJson(combatant)}
+                            disabled={isGenerating}
+                            className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 w-16"
+                          >
+                            {copiedStatus[combatant.filename] ? '已复制!' : '复制'}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <button
+                    onClick={() => !isGenerating && removeCombatant(isPlaceholder ? combatant.id : combatant.filename)}
+                    className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${
+                      isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'
+                    }`}
+                    aria-label={`移除 ${displayName}`}
+                    disabled={isGenerating}
+                  >
+                    X
+                  </button>
+                </div>
               </div>
+
+              {!isPlaceholder && guidanceOpenFor === key && (
+                <div className="mt-2 ml-6 p-2 rounded bg-white/70 border border-gray-300">
+                  <div className="text-xs text-gray-700 mb-1">角色行动引导（可选，最多100字）</div>
+                  <textarea
+                    className="w-full text-xs border border-gray-300 rounded px-2 py-1 bg-white disabled:opacity-50"
+                    rows={3}
+                    maxLength={100}
+                    disabled={isGenerating}
+                    placeholder="例如：谨慎试探、优先保护同伴、尽量不杀、被恐惧支配、隐藏身份等"
+                    value={data?.characterGuidance ?? ''}
+                    onChange={(e) => updateCombatantCharacterGuidance(data!.filename, e.target.value)}
+                  />
+                  <div className="mt-1 flex justify-between items-center text-xs text-gray-500">
+                    <span>{Array.from((data?.characterGuidance ?? '')).length}/100</span>
+                    <button
+                      type="button"
+                      className="px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+                      onClick={() => setGuidanceOpenFor(null)}
+                      disabled={isGenerating}
+                    >
+                      收起
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!isPlaceholder && guidanceOpenFor !== key && data?.characterGuidance?.trim() && (
+                <div className="mt-1 ml-6 text-xs text-gray-500 italic break-words">
+                  行动引导：{data.characterGuidance.trim()}
+                </div>
+              )}
             </li>
           );
         })}

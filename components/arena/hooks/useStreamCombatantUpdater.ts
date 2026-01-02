@@ -332,6 +332,7 @@ export const useStreamCombatantUpdater = () => {
           data: c.data,
           isNative: c.isValid, // 使用 isValid 作为原生性标记
           isPreset: c.isPreset,
+          characterGuidance: typeof (c as any).characterGuidance === 'string' ? (c as any).characterGuidance : null,
         })),
         report: {
           headline: headline || '魔法少女速报',

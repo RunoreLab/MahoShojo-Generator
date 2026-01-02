@@ -20,6 +20,8 @@ interface StreamingBattleReportCardProps {
     reporterInfo?: { name: string; publication: string } | null;
     /** 本次生成时的故事引导快照 */
     userGuidance?: string | null;
+    /** 本次生成时的逐角色行动/想法引导快照（可选） */
+    characterGuidances?: Array<{ characterName: string; guidance: string }> | null;
     /** 本次生成时的随机判定结果 */
     adjudicationResults?: AdjudicationResult[] | null;
     /** AI 生成 token 统计（输入/推理/输出），可选。 */
@@ -46,6 +48,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     scenarioName,
     reporterInfo = null,
     userGuidance = null,
+    characterGuidances = null,
     adjudicationResults = null,
     aiUsage = null,
     aiModel = null,
@@ -115,6 +118,23 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
         const hasGuidanceSection = /(^|\n)##\s*故事引导\s*(\n|$)/.test(result);
         if (!hasGuidanceSection && userGuidance?.trim()) {
             result = `${result.trim()}\n\n---\n\n## 故事引导\n> ${userGuidance.trim()}\n`;
+        }
+
+        const normalizedCharacterGuidances =
+            Array.isArray(characterGuidances)
+                ? characterGuidances
+                    .map((item) => {
+                        const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                        const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+                        if (!characterName || !guidance) return null;
+                        return { characterName, guidance };
+                    })
+                    .filter(Boolean) as Array<{ characterName: string; guidance: string }>
+                : [];
+        const hasCharacterGuidanceSection = /(^|\n)##\s*角色行动引导\s*(\n|$)/.test(result);
+        if (!hasCharacterGuidanceSection && normalizedCharacterGuidances.length > 0) {
+            const lines = normalizedCharacterGuidances.map((item) => `- ${item.characterName}：${item.guidance}`).join('\n');
+            result = `${result.trim()}\n\n---\n\n## 角色行动引导\n${lines}\n`;
         }
 
         const hasAdjudicationSection = /(^|\n)##\s*随机判定记录\s*(\n|$)/.test(result);
@@ -380,6 +400,27 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                     <div className="mt-6 border-l-4 border-purple-400 bg-black/20 p-3 rounded">
                         <div className="text-sm font-semibold mb-1">📖 故事引导</div>
                         <p className="text-sm opacity-90 italic">“{userGuidance.trim()}”</p>
+                    </div>
+                )}
+
+                {Array.isArray(characterGuidances) && characterGuidances.length > 0 && (
+                    <div className="mt-4 border-l-4 border-indigo-300 bg-black/20 p-3 rounded">
+                        <div className="text-sm font-semibold mb-2">🎭 角色行动引导</div>
+                        <div className="space-y-2 text-sm">
+                            {characterGuidances
+                                .map((item, index) => {
+                                    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                                    const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+                                    if (!characterName || !guidance) return null;
+                                    return (
+                                        <div key={`${characterName}-${index}`} className="opacity-90">
+                                            <span className="font-semibold">{characterName}</span>
+                                            <span className="opacity-80">：{guidance}</span>
+                                        </div>
+                                    );
+                                })
+                                .filter(Boolean)}
+                        </div>
                     </div>
                 )}
 
