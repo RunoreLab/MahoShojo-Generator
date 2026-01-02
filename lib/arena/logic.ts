@@ -193,6 +193,7 @@ export const createPromptBuilder = (
     scenario: any | null,
     auxScenarios: any[] | null,
     teams: { [key: string]: string[] } | undefined,
+    teamNames: { [key: string]: string } | undefined,
     readArenaHistory: boolean,
     historyReadLimit: number | null,
     readCurrentState: boolean,
@@ -305,7 +306,9 @@ export const createPromptBuilder = (
     if (teams && Object.keys(teams).length > 0) {
         finalPrompt += `## 【分队情况】\n本次的参与者进行了如下分队，请在故事中体现出团队对抗或合作的特点：\n`;
         Object.entries(teams).forEach(([teamId, members]) => {
-            finalPrompt += `- 队伍 ${teamId}: ${members.join('、')}\n`;
+            const resolvedName = typeof teamNames?.[teamId] === 'string' ? teamNames![teamId]!.trim() : '';
+            const label = resolvedName ? `${resolvedName}（队伍 ${teamId}）` : `队伍 ${teamId}`;
+            finalPrompt += `- ${label}: ${members.join('、')}\n`;
         });
         finalPrompt += `未被分队的成员各自为战。\n\n`;
     }
@@ -354,6 +357,7 @@ export const createStreamPromptBuilder = (
     scenario: any | null,
     auxScenarios: any[] | null,
     teams: { [key: string]: string[] } | undefined,
+    teamNames: { [key: string]: string } | undefined,
     readArenaHistory: boolean,
     historyReadLimit: number | null,
     readCurrentState: boolean,
@@ -468,7 +472,9 @@ export const createStreamPromptBuilder = (
     if (teams && Object.keys(teams).length > 0) {
         finalPrompt += `## 【分队情况】\n本次的参与者进行了如下分队，请在故事中体现出团队对抗或合作的特点：\n`;
         Object.entries(teams).forEach(([teamId, members]) => {
-            finalPrompt += `- 队伍 ${teamId}: ${members.join('、')}\n`;
+            const resolvedName = typeof teamNames?.[teamId] === 'string' ? teamNames![teamId]!.trim() : '';
+            const label = resolvedName ? `${resolvedName}（队伍 ${teamId}）` : `队伍 ${teamId}`;
+            finalPrompt += `- ${label}: ${members.join('、')}\n`;
         });
         finalPrompt += `未被分队的成员各自为战。\n\n`;
     }

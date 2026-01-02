@@ -102,6 +102,7 @@ export function BattleActions() {
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const storyLength = useBattleSelector((state) => state.storyLength);
   const settings = useBattleSelector((state) => state.settings);
+  const teamsState = useBattleSelector((state) => state.teams);
   const [showNarrativeModal, setShowNarrativeModal] = useState(false);
   const narrativeCount = useNarrativeHistoryStore((state) => state.entries.length);
   const narrativeLastUpdatedAt = useNarrativeHistoryStore((state) => state.lastUpdatedAt);
@@ -129,7 +130,7 @@ export function BattleActions() {
     const combatantPayload = readableCombatants.map((combatant) => {
       const raw = combatant.data;
       if (!raw || typeof raw !== 'object') {
-        return { type: combatant.type, data: raw };
+        return { type: combatant.type, data: raw, teamId: typeof combatant.teamId === 'number' ? combatant.teamId : null };
       }
       const clone: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
       if (!settings.readArenaHistory) delete clone.arena_history;
@@ -145,10 +146,14 @@ export function BattleActions() {
           typeof arenaHistoryReadLimitForEstimate === 'undefined' ? 3 : arenaHistoryReadLimitForEstimate
         );
       }
-      return { type: combatant.type, data: clone };
+      return { type: combatant.type, data: clone, teamId: typeof combatant.teamId === 'number' ? combatant.teamId : null };
     });
 
     const teams: Record<number, string[]> = {};
+    const teamNamesById = new Map<number, string>(
+      teamsState.map((team) => [team.id, typeof team.name === 'string' ? team.name.trim() : ''] as const)
+    );
+
     readableCombatants.forEach((combatant) => {
       const teamId = combatant.teamId;
       if (!teamId) return;
@@ -156,6 +161,13 @@ export function BattleActions() {
       if (!name) return;
       if (!teams[teamId]) teams[teamId] = [];
       teams[teamId].push(name);
+    });
+
+    const teamNames: Record<number, string> = {};
+    Object.keys(teams).forEach((key) => {
+      const teamId = Number(key);
+      const name = teamNamesById.get(teamId);
+      if (name) teamNames[teamId] = name;
     });
 
     const narrativeHistoryPayload = settings.readNarrativeHistory
@@ -179,7 +191,7 @@ export function BattleActions() {
       combatants: combatantPayload,
       ...(battleMode === 'scenario' ? { scenario: scenario.content } : {}),
       ...(battleMode === 'scenario' && auxScenarios.length > 0 ? { auxScenarios: auxScenarios.map((s) => s.content) } : {}),
-      ...(Object.keys(teams).length > 0 ? { teams } : {}),
+      ...(Object.keys(teams).length > 0 ? { teams, ...(Object.keys(teamNames).length > 0 ? { teamNames } : {}) } : {}),
     };
 
     try {

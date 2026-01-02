@@ -348,11 +348,23 @@ export const useBattleEngine = () => {
       }
 
       const teams: Record<number, string[]> = {};
+      const teamNamesById = new Map<number, string>(
+        useBattleStore
+          .getState()
+          .teams.map((team) => [team.id, typeof team.name === 'string' ? team.name.trim() : ''] as const)
+      );
+
       freshCombatants.forEach((combatant) => {
-        if (combatant.teamId) {
-          if (!teams[combatant.teamId]) teams[combatant.teamId] = [];
-          teams[combatant.teamId].push(combatant.data.codename || combatant.data.name);
-        }
+        if (!combatant.teamId) return;
+        if (!teams[combatant.teamId]) teams[combatant.teamId] = [];
+        teams[combatant.teamId].push(combatant.data.codename || combatant.data.name);
+      });
+
+      const teamNames: Record<number, string> = {};
+      Object.keys(teams).forEach((key) => {
+        const teamId = Number(key);
+        const name = teamNamesById.get(teamId);
+        if (name) teamNames[teamId] = name;
       });
 
       const numericLimit = settings.isArenaHistoryUnlimited ? null : Math.max(1, settings.readArenaHistoryLimit);
@@ -375,6 +387,7 @@ export const useBattleEngine = () => {
           data: combatant.data,
           isNative: combatant.isValid,
           isPreset: combatant.isPreset,
+          teamId: typeof combatant.teamId === 'number' ? combatant.teamId : null,
           characterGuidance: typeof (combatant as any).characterGuidance === 'string' ? (combatant as any).characterGuidance : null,
           sourceDataCardId: combatant.sourceDataCardId,
           sourceDataCardUpdatedAt: combatant.sourceDataCardUpdatedAt,
@@ -388,6 +401,7 @@ export const useBattleEngine = () => {
         scenarioSourceDataCardId: shouldUseScenario ? scenario.sourceDataCardId : undefined,
         scenarioSourceDataCardUpdatedAt: shouldUseScenario ? scenario.sourceDataCardUpdatedAt : undefined,
         teams: Object.keys(teams).length > 0 ? teams : undefined,
+        teamNames: Object.keys(teamNames).length > 0 ? teamNames : undefined,
         language: selectedLanguage,
         readArenaHistory: settings.readArenaHistory,
         arenaHistoryReadLimit,
