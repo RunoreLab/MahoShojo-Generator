@@ -198,11 +198,32 @@
 - 在一定程度上也可能预测强度（因为“规则密度高”往往更容易影响裁判）
 
 ### 2.2 计算输入与稳定性
-建议以“角色卡 JSON 全量字符串”作为基础输入，并做两类特征：
-1) **关键词密度特征**（提示词/规则/代码相关词的出现频率与覆盖面）
-2) **结构复杂度特征**（对象深度、键数量、数组规模、总字符数、重复模式）
+技术值必须满足一个工程约束：**同一张卡，在不同页面/不同调用链路下计算结果一致**。因此输入需要“去噪 + 规范化”。推荐口径：
 
-参考资料： `/mnt/d/04-生活与娱乐/魔法少女竞技场` ，其中的JSON角色卡可为你设计指标和权重提供参考。
+1) 输入对象：**数据卡 `data` 字段的 JSON**（即 `data_cards.data`，或预设的 `public/presets/*.json`）
+
+2) 规范化（Canonicalization）：解析 JSON 后先做“剔除不应计入技术值的字段”，再做特征抽取  
+建议默认忽略（不参与结构与文本统计）的字段/分支：
+- `signature` / `templateId` / `isPreset`（非内容本体，且不同生成链路可能存在差异）
+- `_author` / `_authorId`（写库时注入，避免把作者名当成“技术值”）
+- `arena_history` / `adjudicationEvents` / `current_state`（运行态“对局上下文/历战/裁判事件”，不应污染“卡本体技术值”）
+
+3) 文本抽取与资源上限（Edge Runtime 友好）：  
+对 JSON 值做深度遍历抽取字符串，建议设置安全上限（防止极端卡导致耗时/内存飙升）：
+- `max_depth = 6`（深层内容对“技术值”增益有限）
+- `max_nodes = 6000`（遍历节点数上限）
+- `max_chars = 250_000`（抽取字符串总字符上限；超过部分仍可统计结构，但不再拼接进文本 blob）
+
+4) 特征类型：v0.6.0 先按两大类落地即可，后续可扩展
+- **关键词/符号密度特征**：提示词工程/规则/代码/公式等“技术信号”的出现频率与覆盖面
+- **结构复杂度特征**：对象深度、键数量、数组规模、行/列表结构等“复杂度信号”
+
+参考资料（用于标定与自检）：`/mnt/d/04-生活与娱乐/魔法少女竞技场`  
+其中包含大量历史角色卡 JSON 与强度榜单文本，可用于：
+- 检查“高技法卡”是否能被指标拉高（例如：带大量规则/优先级/反注入的卡）
+- 检查“纯长文本叙事卡”是否不会被误伤（长度高但技术密度低）
+- 对照强度榜单做 sanity check（仅作参考，不作为监督学习标签）
+  - 强度榜单：`/mnt/d/04-生活与娱乐/魔法少女竞技场/社群内排行榜单/AAA MLA V9.0/📘 魔法少女  残兽 强度排行榜（非原生篇）V8.0.txt`
 
 ### 2.3 v0.6.0 推荐的“可解释”指标结构
 输出建议包含三层：
@@ -210,37 +231,117 @@
 - `techLevel`：L0–L5（离散档位，用于 UI 徽章）
 - `techNotes`：可选的解释信息
 
-#### 2.3.1 参考口径
-可参考下列口径：
+#### 2.3.1 从 JSON 抽取文本 blob（落地口径）
+- 深度遍历 JSON 的**值**（不遍历 key 名作为正文，但 key 名会进入结构统计）
+- 收集所有字符串（保留原始换行），并用换行拼接为 `text_blob`
+- 在抽取阶段就执行 2.2 的“忽略字段”与资源上限
 
-1) 从角色卡 JSON 中抽取文本 blob
-- 深度遍历 JSON 值（`max_depth=6`），最多 `max_nodes=6000`，最多 `max_chars=250_000`  
-- 收集所有字符串并用换行拼接
+#### 2.3.2 建议纳入的“原始特征”（v0.6.0 最小闭环）
+下面这些特征的共同点是：**可解释、可快速计算、对 Edge Runtime 友好**。建议全部落库（至少进 `details_json`），便于后续调权重/重算。
 
-2) 原始特征
-- `json_key_count`：顶层 key 数（`len(obj.keys())`）
-- `text_len_chars`：blob 字符数
-- …… # 各种结构复杂度特征（可补充对象深度、数组规模、重复模式……）
-- 关键词计数（正则大致为）：
-  - `kw_system`: `(系统|system|sys\\b……)`
-  - `kw_must`: `(必须|务必|must\\b……)`
-  - `kw_meta`: `(元指令|元叙事|meta\\b|instruction……)`
-  - `kw_dice`: `(掷骰|骰子|判定|d\\d+|dice……)`
-  - …… # 各种关键词特征
+**A. 结构复杂度（JSON Structure）**
+- `json_total_nodes`：遍历到的节点总数（含对象/数组/原子值）
+- `json_total_keys`：所有对象的 key 总数（忽略字段不计入）
+- `json_unique_key_count`：去重后的 key 数（反映 schema 丰富度）
+- `json_max_depth`：最大深度（裁剪到 `max_depth`）
+- `json_array_count`：数组节点数
+- `json_total_array_elems`：数组元素总量（裁剪后）
+- `json_max_array_len`：最大数组长度（常对应“规则清单/技能列表/约束列表”）
+- `json_string_chars_total`：所有字符串累计字符数（与 `text_blob` 长度接近，但不受 `max_chars` 拼接策略影响）
+- `json_longest_string_chars`：最长单段字符串长度（常对应“总规则声明/绝对条款”）
 
-3) 综合指标
-- 根据各类特征加权计算，或采用其他计算方法。
+**B. 格式/结构化写作（Formatting & Layout）**
+这些是“提示词工程常见外观特征”，即便没有明确关键词，也能抓到“结构化约束”的痕迹：
+- `line_count`：`text_blob` 行数
+- `unique_line_count`：去重后的非空行数（对“重复条款/模板化段落”敏感）
+- `repeat_line_ratio`：重复行比例（`1 - unique_line_count / max(line_count, 1)`；建议对行做 `trim()` 后再去重）
+- `bullet_line_count`：以 `-/*/数字序号/①②③…` 等开头的行数（规则/步骤/条款密集时会显著升高）
+- `heading_line_count`：Markdown 标题行数（`#`）
+- `code_fence_count`：``` 代码块出现次数（少见但信号很强）
+- `uppercase_snake_count`：形如 `ENEMY_PRESENCE` 的变量 token 数（伪代码/规则引擎常见）
 
-4) 密度指标（用于区分“堆料” vs “技术密集”）
-- `kw_control_sum = kw_system + kw_must + kw_meta + …… (+ 可选 kw_format/kw_copy_or_point 等)`
-- `tech_density_per_1k_chars = kw_control_sum / max(text_len_chars, 1) * 1000`
-- `kw_sum_resid_on_text_len`：对 `kw_control_sum ~ text_len_chars` 做一元回归残差，表示“密度偏离”
+**C. 关键词/符号（Keyword & Symbol Signals）**
+建议按“类别计数”，并同时保留一个“加权总和”，避免单一关键词被刷爆。
 
-> 这套设计的优点是：既能作为“总体强度 proxy”（含总量），又能单独给出“技术密度”。
+控制/提示词工程（Control / Prompting）
+- `kw_must`：强制性/禁止性词（必须/务必/不得/禁止/只能/严格…；MUST/NEVER/DO NOT…）
+- `kw_system`：系统/优先级/覆盖词（系统/system/sys/优先级/override/不可覆盖/最高优先级…）
+- `kw_format`：输出格式/结构约束词（输出/格式/JSON/YAML/schema/字段/key/仅输出/不要输出…）
+- `kw_role`：角色/对话角色词（你是/作为/扮演/role: /assistant/user/developer…）
+- `kw_meta`：元叙事/元指令/反注入词（元叙事/元指令/meta/prompt/提示词/越狱/jailbreak/注入/忽略之前…）
+- `kw_exploit`：强信号“技法/漏洞化”词（代码杀/战报控制/系统归零/重置系统/绕过裁判/overrideConflictResolution…）
 
-#### 2.3.2 映射到本项目的建议
+规则/数值/机制（Mechanics）
+- `kw_dice`：掷骰/判定（掷骰/骰子/判定/d20/1d100/d\\d+…）
+- `kw_combat`：战斗系统词（回合/阶段/先攻/行动/冷却/CD/技能/效果/状态/HP/MP/buff/debuff/伤害/概率/%…）
+
+代码/公式（Code / Math）
+- `kw_code`：代码符号与语法（```/function/return/if/else/for/while/=>/==/&&/||/const/let/var/JSON.parse…）
+- `kw_math`：数学与公式符号（∑/∏/∞/φ/×/^/阶乘/!! 等）
+
+> 备注：建议将 `kw_exploit` 单独存储（甚至可作为系统标签触发条件），因为它更像“风险提示”而不是一般复杂度。
+
+#### 2.3.3 派生特征（密度/归一化用）
+为了区分“纯堆料长文本”与“技术密集”，至少需要一个密度指标：
+- `kw_control_weighted_sum`：对控制类关键词做加权求和（见 2.3.4）
+- `tech_density_per_1k_chars = kw_control_weighted_sum / max(json_string_chars_total, 1) * 1000`
+- `mechanics_density_per_1k_chars = (kw_dice + kw_combat) / max(json_string_chars_total, 1) * 1000`
+- `code_density_per_1k_chars = (kw_code + kw_math + uppercase_snake_count + code_fence_count*10) / max(json_string_chars_total, 1) * 1000`
+
+> v0.6.0 不强制落地“回归残差（residual）”，因为需要维护拟合参数；但可以把它作为 v0.6.1+ 的增强项（离线标定后固化系数）。
+
+#### 2.3.4 v0.6.0 推荐的指标计算方式（权重 + 饱和函数）
+目标：简单、可解释、可调参，并且对极端卡不会爆表。
+
+1) 关键词加权（用于 `kw_control_weighted_sum`）
+- `kw_must * 1.0`
+- `kw_system * 1.2`
+- `kw_format * 1.0`
+- `kw_role * 0.8`
+- `kw_meta * 0.8`
+- `kw_exploit * 1.5`
+
+2) 把各维度归一化到 0–1（建议用对数饱和，抗极端值）
+- `kw_control_weighted_sum = 1.0*kw_must + 1.2*kw_system + 1.0*kw_format + 0.8*kw_role + 0.8*kw_meta + 1.5*kw_exploit`
+- `clamp01(v) = min(1, max(0, v))`
+- `norm(x; cap) = clamp01( ln(1+x) / ln(1+cap) )`（`ln` 为自然对数）
+
+3) 维度得分（0–1）
+- `score_control = norm(tech_density_per_1k_chars; cap=10)`
+- `score_mechanics = norm(mechanics_density_per_1k_chars; cap=8)`
+- `score_code = norm(code_density_per_1k_chars; cap=2)`（稀疏但强信号，cap 取小）
+- `score_structure = 0.35*norm(json_total_keys; cap=100) + 0.35*norm(json_total_nodes; cap=250) + 0.20*norm(json_max_array_len; cap=70) + 0.10*norm(repeat_line_ratio; cap=0.30)`
+- `score_size = norm(json_string_chars_total; cap=30000)`（仅作弱权重，避免长叙事误伤）
+
+4) 合成 `techScore`（0–100）
+- `techScore = round(100 * (0.35*score_control + 0.25*score_mechanics + 0.20*score_structure + 0.15*score_code + 0.05*score_size))`
+- 额外规则（可选，风险提示更敏感）：若 `kw_exploit > 0`，则 `techScore = min(100, techScore + 10)`
+
+5) `techLevel` 映射（可配置）
+推荐先用固定阈值（后续可改成按分位数切档）：
+- L0：`0–9`
+- L1：`10–24`
+- L2：`25–39`
+- L3：`40–59`
+- L4：`60–79`
+- L5：`80–100`
+
+#### 2.3.5 初始标定建议（来自参考语料的分布）
+对 `/mnt/d/04-生活与娱乐/魔法少女竞技场` 下随机抽样的 JSON（约 600 份）做快速统计，可得到一组“够用”的初始 cap（便于让分数落在合理区间）：
+- `json_string_chars_total`：P95 约 30k
+- `tech_density_per_1k_chars`：P95 约 10
+- `mechanics_density_per_1k_chars`：P95 约 8
+- `json_total_keys`：P95 约 100
+- `json_total_nodes`：P95 约 250
+- `json_max_array_len`：P95 约 70
+- `repeat_line_ratio`：P95 约 0.28（因此 cap 建议取 0.30）
+- `code_density_per_1k_chars`：P99 才开始明显抬头（大多数卡为 0），因此 cap 建议取 2 以突出“代码/公式卡”
+
+> 这些 cap 本质是“让指标饱和”的刻度尺；上线后应结合本项目线上数据分布（以及用户反馈）迭代。
+
+#### 2.3.6 映射到本项目的建议
 v0.6.0 建议至少落地：
-- 总体综合指标，便于排序）
+- 总体综合指标（便于排序）
 - `tech_density_per_1k_chars`（风险提示更贴近“科技与狠活”）
 - 以及所有原始 proxy（便于后续迭代、重算与解释）
 
@@ -255,9 +356,12 @@ v0.6.0 建议至少落地：
 - 可选 `details_json`（解释信息，仅作者可见/或仅用于后台）
 
 建议同步存下原始 proxy（可选列或放到 `details_json`）：
-- `text_len_chars / json_key_count`（可按需扩展对象深度、数组规模、重复模式等）
-- `kw_system / kw_must / kw_meta / kw_dice`（可按需扩展 kw_format / kw_scenario / kw_ai_attention 等）
-- `kw_control_sum / tech_density_per_1k_chars / kw_sum_resid_on_text_len`
+- 结构类：`json_string_chars_total / json_total_keys / json_unique_key_count / json_total_nodes / json_max_depth / json_max_array_len`
+- 格式类：`line_count / bullet_line_count / heading_line_count / code_fence_count / uppercase_snake_count`
+- （可选但推荐）重复度：`unique_line_count / repeat_line_ratio`
+- 关键词类：`kw_must / kw_system / kw_format / kw_role / kw_meta / kw_exploit / kw_dice / kw_combat / kw_code / kw_math`
+- 派生类：`kw_control_weighted_sum / tech_density_per_1k_chars / mechanics_density_per_1k_chars / code_density_per_1k_chars`
+- （可选增强）`kw_sum_resid_on_text_len`：回归残差（v0.6.1+ 再上更稳）
 
 更新策略三选一：
 1) **保存/更新数据卡时计算**（最干净，需要改 data-card 写入 API）
