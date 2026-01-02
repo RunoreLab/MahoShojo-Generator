@@ -99,6 +99,12 @@ export interface PvpRoomRules {
    */
   allowNonHostControl?: boolean;
   /**
+   * 是否允许非房主玩家为“本回合自己打出的角色卡”填写行动/想法引导（默认 false）。
+   * - 兼容旧房间：若缺失则视为 false
+   * - 该引导会进入战报/结算卡，并可在生成时传递给 AI
+   */
+  allowPlayerCharacterGuidance?: boolean;
+  /**
    * 是否开启观战（默认 true）。
    * 兼容旧房间：若缺失则视为 true。
    */

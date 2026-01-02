@@ -43,6 +43,12 @@ export interface NewsReport {
   narrativeHistoryReadCount?: number;
   // 可选的用户引导信息字段
   userGuidance?: string;
+  /**
+   * 角色行动/想法引导（逐角色、可选）。
+   * - 仅当用户填写时返回/展示
+   * - 会被记录进战报生成记录与（可选）历战记录
+   */
+  characterGuidances?: Array<{ characterName: string; guidance: string }>;
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
   // 2. [新增] 为战报数据接口增加随机判定结果字段
   adjudicationResults?: AdjudicationResult[];

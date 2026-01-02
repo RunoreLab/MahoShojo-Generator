@@ -56,6 +56,7 @@ export const useBattleStore = create<BattleStoreState>()(
       streamingMarkdown: null,
       streamReporterInfo: null,
       streamUserGuidance: null,
+      streamCharacterGuidances: null,
       streamAiUsage: null,
       streamAiModel: null,
       streamNarrativeHistoryReadCount: null,
@@ -81,6 +82,7 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamingMarkdown: (markdown) => set({ streamingMarkdown: markdown }),
       setStreamReporterInfo: (info) => set({ streamReporterInfo: info }),
       setStreamUserGuidance: (guidance) => set({ streamUserGuidance: guidance }),
+      setStreamCharacterGuidances: (guidances) => set({ streamCharacterGuidances: guidances }),
       setStreamAiUsage: (usage) => set({ streamAiUsage: usage }),
       setStreamAiModel: (model) => set({ streamAiModel: model }),
       setStreamNarrativeHistoryReadCount: (count) => set({ streamNarrativeHistoryReadCount: count }),
@@ -135,6 +137,7 @@ export const useBattleStore = create<BattleStoreState>()(
           isStreaming: false,
           streamReporterInfo: null,
           streamUserGuidance: null,
+          streamCharacterGuidances: null,
           streamAiUsage: null,
           streamAiModel: null,
           streamNarrativeHistoryReadCount: null,
@@ -150,6 +153,18 @@ export const useBattleStore = create<BattleStoreState>()(
               };
             }
             return combatant;
+          }),
+        })),
+
+      updateCombatantCharacterGuidance: (filename, guidance) =>
+        set((state) => ({
+          combatants: state.combatants.map((combatant) => {
+            if (!('data' in combatant)) return combatant;
+            if (combatant.filename !== filename) return combatant;
+            return {
+              ...combatant,
+              characterGuidance: guidance,
+            };
           }),
         })),
 

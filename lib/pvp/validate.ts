@@ -202,6 +202,11 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const allowNonHostControl =
     typeof raw.allowNonHostControl === 'boolean' ? raw.allowNonHostControl : DEFAULT_PVP_RULES.allowNonHostControl;
 
+  const allowPlayerCharacterGuidance =
+    typeof (raw as any).allowPlayerCharacterGuidance === 'boolean'
+      ? Boolean((raw as any).allowPlayerCharacterGuidance)
+      : DEFAULT_PVP_RULES.allowPlayerCharacterGuidance;
+
   const allowSpectators =
     typeof raw.allowSpectators === 'boolean' ? raw.allowSpectators : DEFAULT_PVP_RULES.allowSpectators;
 
@@ -236,7 +241,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
   const selectedLevel = allowedLevels.has(selectedLevelRaw.trim()) ? selectedLevelRaw.trim() : DEFAULT_PVP_RULES.selectedLevel;
 
   const userGuidanceRaw = typeof raw.userGuidance === 'string' ? raw.userGuidance : DEFAULT_PVP_RULES.userGuidance;
-  const userGuidance = userGuidanceRaw.trim().slice(0, 50);
+  const userGuidance = userGuidanceRaw.trim().slice(0, 200);
 
   const storyLengthRaw = typeof raw.storyLength === 'string' ? raw.storyLength : DEFAULT_PVP_RULES.storyLength;
   const storyLength = allowedStoryLengths.has(storyLengthRaw) ? (storyLengthRaw as any) : DEFAULT_PVP_RULES.storyLength;
@@ -261,6 +266,7 @@ export const parsePvpRules = (input: unknown): { rules: PvpRoomRules } | { error
     mode,
     bestOf: { enabled, maxRounds, winCondition, tieBreaker },
     allowNonHostControl,
+    allowPlayerCharacterGuidance,
     allowSpectators,
     allowSpectatorChat,
 

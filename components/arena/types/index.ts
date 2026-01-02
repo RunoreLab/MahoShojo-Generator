@@ -31,6 +31,8 @@ export interface CombatantData {
   isNonStandard?: boolean;
   wasCorrected?: boolean;
   teamId?: number;
+  /** 用户对该角色的行动/想法引导（可选，最多 100 字）。 */
+  characterGuidance?: string;
   sourceDataCardId?: string;
   sourceDataCardDescription?: string;
   sourceDataCardCreatedAt?: string;
@@ -111,6 +113,7 @@ export interface BattleStoreState {
   streamingMarkdown: string | null;
   streamReporterInfo: NewsReport['reporterInfo'] | null;
   streamUserGuidance: string | null;
+  streamCharacterGuidances: NonNullable<NewsReport['characterGuidances']> | null;
   streamAiUsage: NewsReport['aiUsage'] | null;
   streamAiModel: string | null;
   streamNarrativeHistoryReadCount: number | null;
@@ -136,6 +139,7 @@ export interface BattleStoreState {
   setStreamingMarkdown: (markdown: string | null) => void;
   setStreamReporterInfo: (info: NewsReport['reporterInfo'] | null) => void;
   setStreamUserGuidance: (guidance: string | null) => void;
+  setStreamCharacterGuidances: (guidances: NonNullable<NewsReport['characterGuidances']> | null) => void;
   setStreamAiUsage: (usage: NewsReport['aiUsage'] | null) => void;
   setStreamAiModel: (model: string | null) => void;
   setStreamNarrativeHistoryReadCount: (count: number | null) => void;
@@ -150,6 +154,7 @@ export interface BattleStoreState {
   moveCombatant: (fromIndex: number, toIndex: number) => void;
   clearCombatants: () => void;
   updateCombatantTeam: (filename: string, teamId: number) => void;
+  updateCombatantCharacterGuidance: (filename: string, guidance: string) => void;
 
   setScenario: (scenario: ScenarioState) => void;
   clearScenario: () => void;
