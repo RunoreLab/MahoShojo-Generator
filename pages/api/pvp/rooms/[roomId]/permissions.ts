@@ -8,6 +8,7 @@ export const runtime = 'edge';
 type PermissionsBody = {
   expectedVersion?: number;
   allowNonHostControl?: boolean;
+  allowPlayerCharacterGuidance?: boolean;
   allowSpectators?: boolean;
   allowSpectatorChat?: boolean;
 };
@@ -43,6 +44,10 @@ async function permissionsHandler(req: Request): Promise<Response> {
   const allowNonHostControl = typeof (body.data as PermissionsBody).allowNonHostControl === 'boolean'
     ? (body.data as PermissionsBody).allowNonHostControl
     : internal.rules.allowNonHostControl;
+  const allowPlayerCharacterGuidance =
+    typeof (body.data as PermissionsBody).allowPlayerCharacterGuidance === 'boolean'
+      ? (body.data as PermissionsBody).allowPlayerCharacterGuidance
+      : internal.rules.allowPlayerCharacterGuidance;
   const allowSpectators = typeof (body.data as PermissionsBody).allowSpectators === 'boolean'
     ? (body.data as PermissionsBody).allowSpectators
     : internal.rules.allowSpectators;
@@ -53,6 +58,7 @@ async function permissionsHandler(req: Request): Promise<Response> {
   internal.rules = {
     ...internal.rules,
     allowNonHostControl,
+    allowPlayerCharacterGuidance,
     allowSpectators,
     allowSpectatorChat: allowSpectators ? allowSpectatorChat : false,
   };
@@ -63,7 +69,13 @@ async function permissionsHandler(req: Request): Promise<Response> {
   });
 
   if (!ok) return json({ error: '更新失败', code: 'UPDATE_FAILED' }, { status: 409 });
-  return json({ success: true, allowNonHostControl, allowSpectators, allowSpectatorChat: internal.rules.allowSpectatorChat === true });
+  return json({
+    success: true,
+    allowNonHostControl,
+    allowPlayerCharacterGuidance: internal.rules.allowPlayerCharacterGuidance === true,
+    allowSpectators,
+    allowSpectatorChat: internal.rules.allowSpectatorChat === true,
+  });
 }
 
 export default withPvpErrorBoundary(permissionsHandler);

@@ -102,8 +102,8 @@ export function StoryOptionsPanel({
             id="user-guidance"
             type="text"
             className="input-field"
-            placeholder="输入关键词或一句话 (最多50字)"
-            maxLength={50}
+            placeholder="输入关键词或一句话 (最多200字)"
+            maxLength={200}
             disabled={isGenerating}
             value={userGuidance}
             onChange={(e) => onUserGuidanceChange(e.target.value)}

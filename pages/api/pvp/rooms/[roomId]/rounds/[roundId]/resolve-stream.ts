@@ -42,15 +42,23 @@ type PvpPickedPlayer = {
   prefix: string | null;
   token: string;
   snapshot: PvpPickedSnapshot;
+  characterGuidance?: string | null;
   isBot?: boolean;
   botId?: string | null;
 };
 
-const parseChoice = (raw: string): PvpSnapshotRef | null => {
+type ParsedChoice = { ref: PvpSnapshotRef; characterGuidance: string | null };
+
+const parseChoice = (raw: string): ParsedChoice | null => {
   try {
-    const parsed = JSON.parse(raw) as PvpSnapshotRef;
+    const parsed = JSON.parse(raw) as any;
     if (!parsed || parsed.kind !== 'snapshot' || typeof parsed.id !== 'string') return null;
-    return parsed;
+    const characterGuidance =
+      typeof parsed.characterGuidance === 'string' ? parsed.characterGuidance.trim().slice(0, 100) : '';
+    return {
+      ref: { kind: 'snapshot', id: parsed.id } as PvpSnapshotRef,
+      characterGuidance: characterGuidance || null,
+    };
   } catch {
     return null;
   }

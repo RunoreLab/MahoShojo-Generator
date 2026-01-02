@@ -39,15 +39,23 @@ type PvpPickedPlayer = {
   prefix: string | null;
   token: string;
   snapshot: PvpPickedSnapshot;
+  characterGuidance?: string | null;
   isBot?: boolean;
   botId?: string | null;
 };
 
-const parseChoice = (raw: string): PvpSnapshotRef | null => {
+type ParsedChoice = { ref: PvpSnapshotRef; characterGuidance: string | null };
+
+const parseChoice = (raw: string): ParsedChoice | null => {
   try {
-    const parsed = JSON.parse(raw) as PvpSnapshotRef;
+    const parsed = JSON.parse(raw) as any;
     if (!parsed || parsed.kind !== 'snapshot' || typeof parsed.id !== 'string') return null;
-    return parsed;
+    const characterGuidance =
+      typeof parsed.characterGuidance === 'string' ? parsed.characterGuidance.trim().slice(0, 100) : '';
+    return {
+      ref: { kind: 'snapshot', id: parsed.id } as PvpSnapshotRef,
+      characterGuidance: characterGuidance || null,
+    };
   } catch {
     return null;
   }
@@ -224,7 +232,7 @@ async function resolveHandler(req: Request): Promise<Response> {
   const choices = await getPvpRoundChoices(roundId);
   if (choices.length < humanCount) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
 
-  const choiceByUserId = new Map<number, PvpSnapshotRef>();
+  const choiceByUserId = new Map<number, ParsedChoice>();
   for (const row of choices) {
     const parsed = parseChoice(row.choice_ref_json);
     if (!parsed) return json({ error: '选择数据损坏' }, { status: 500 });
@@ -267,7 +275,7 @@ async function resolveHandler(req: Request): Promise<Response> {
     const token = `P${i + 1}`;
     if (participant.kind === 'human') {
       const choice = choiceByUserId.get(participant.userId)!;
-      const snap = await getPvpCardSnapshotById(choice.id);
+      const snap = await getPvpCardSnapshotById(choice.ref.id);
       if (!snap) return json({ error: '快照不存在，请重试' }, { status: 409 });
       picked.push({
         userId: participant.userId,
@@ -276,6 +284,7 @@ async function resolveHandler(req: Request): Promise<Response> {
         prefix: participant.prefix,
         token,
         snapshot: snap,
+        characterGuidance: choice.characterGuidance,
         isBot: false,
       });
       continue;
@@ -352,15 +361,16 @@ async function resolveHandler(req: Request): Promise<Response> {
           ...(authHeader ? { Authorization: authHeader } : {}),
           ...subrequestAuthHeaders,
         },
-        body: JSON.stringify({
-          combatants: picked.map((p) => ({
-            type: p.snapshot.card_type,
-            data: JSON.parse(p.snapshot.data_json),
-            isNative: false,
-            isPreset: false,
-          })),
-          selectedLevel: rules.selectedLevel,
-          mode: rules.mode,
+      body: JSON.stringify({
+        combatants: picked.map((p) => ({
+          type: p.snapshot.card_type,
+          data: JSON.parse(p.snapshot.data_json),
+          isNative: false,
+          isPreset: false,
+          characterGuidance: p.characterGuidance ?? null,
+        })),
+        selectedLevel: rules.selectedLevel,
+        mode: rules.mode,
           ...(rules.mode === 'scenario' && scenarioPayload
             ? {
                 scenario: scenarioPayload,
@@ -559,6 +569,7 @@ async function resolveHandler(req: Request): Promise<Response> {
       snapshotId: p.snapshot.id,
       name: p.snapshot.name,
       type: p.snapshot.card_type,
+      ...(p.characterGuidance ? { characterGuidance: p.characterGuidance } : {}),
     })),
     report,
     updatedCombatants: updatedCombatants ?? [],

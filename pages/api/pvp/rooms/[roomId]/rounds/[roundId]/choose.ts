@@ -2,12 +2,14 @@ import { getPvpRoundById, getPvpRoomById, getPvpRoomHands, getPvpRoomPlayers, up
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
+import { parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 
 export const runtime = 'edge';
 
 type ChooseBody = {
   expectedVersion?: number;
   snapshotId?: string;
+  characterGuidance?: string;
 };
 
 const parseHand = (raw: string): PvpHandState | null => {
@@ -51,6 +53,18 @@ async function chooseHandler(req: Request): Promise<Response> {
   const snapshotId = typeof body.data.snapshotId === 'string' ? body.data.snapshotId.trim() : '';
   if (!snapshotId) return json({ error: '缺少 snapshotId' }, { status: 400 });
 
+  const rawGuidance = typeof (body.data as ChooseBody).characterGuidance === 'string' ? (body.data as ChooseBody).characterGuidance : '';
+  const characterGuidance = rawGuidance.trim().slice(0, 100) || null;
+
+  if (characterGuidance) {
+    const parsed = parsePvpRoomInternalState(room.rules_json);
+    if ('error' in parsed) return json({ error: parsed.error }, { status: 500 });
+    const allowNonHost = parsed.internal.rules.allowPlayerCharacterGuidance === true;
+    if (auth.user.id !== room.host_user_id && !allowNonHost) {
+      return json({ error: '房主未允许玩家填写角色行动引导', code: 'CHARACTER_GUIDANCE_FORBIDDEN' }, { status: 403 });
+    }
+  }
+
   const hands = await getPvpRoomHands(roomId);
   const myHandRow = hands.find((h) => h.user_id === auth.user.id);
   if (!myHandRow) return json({ error: '未找到你的手牌，请刷新' }, { status: 409 });
@@ -60,7 +74,11 @@ async function chooseHandler(req: Request): Promise<Response> {
   const hasCard = hand.cards.some((c) => c.kind === 'snapshot' && c.id === snapshotId);
   if (!hasCard) return json({ error: '只能从自己的手牌中选择出战卡', code: 'CARD_NOT_IN_HAND' }, { status: 403 });
 
-  const choice: PvpSnapshotRef = { kind: 'snapshot', id: snapshotId };
+  const choice: PvpSnapshotRef & { characterGuidance?: string | null } = {
+    kind: 'snapshot',
+    id: snapshotId,
+    ...(characterGuidance ? { characterGuidance } : {}),
+  };
   const ok = await upsertPvpRoundChoice(roundId, auth.user.id, JSON.stringify(choice));
   if (!ok) return json({ error: '提交选择失败' }, { status: 500 });
 
