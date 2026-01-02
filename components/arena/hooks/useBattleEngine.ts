@@ -100,6 +100,16 @@ const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
     conclusion: sanitizeTextByShieldWords(report.officialReport.conclusion),
   },
   userGuidance: report.userGuidance ? sanitizeTextByShieldWords(report.userGuidance) : undefined,
+  characterGuidances: Array.isArray((report as any).characterGuidances)
+    ? ((report as any).characterGuidances as any[])
+        .map((item) => {
+          const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+          const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+          if (!characterName || !guidance) return null;
+          return { characterName: sanitizeTextByShieldWords(characterName), guidance: sanitizeTextByShieldWords(guidance) };
+        })
+        .filter((item): item is { characterName: string; guidance: string } => Boolean(item))
+    : undefined,
 });
 
 const buildBattleBackupItems = (
@@ -237,6 +247,7 @@ export const useBattleEngine = () => {
   const setStreamingMarkdown = useBattleSelector((state) => state.setStreamingMarkdown);
   const setStreamReporterInfo = useBattleSelector((state) => state.setStreamReporterInfo);
   const setStreamUserGuidance = useBattleSelector((state) => state.setStreamUserGuidance);
+  const setStreamCharacterGuidances = useBattleSelector((state) => state.setStreamCharacterGuidances);
   const setStreamAiUsage = useBattleSelector((state) => state.setStreamAiUsage);
   const setStreamAiModel = useBattleSelector((state) => state.setStreamAiModel);
   const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
@@ -325,6 +336,7 @@ export const useBattleEngine = () => {
       const sensitiveTargets = [
         JSON.stringify(freshCombatants.map((c) => c.data)),
         settings.userGuidance,
+        JSON.stringify(freshCombatants.map((c) => (typeof (c as any).characterGuidance === 'string' ? (c as any).characterGuidance : ''))),
         shouldUseScenario ? JSON.stringify(scenario.content) : '',
         shouldUseScenario && auxScenarios.length > 0 ? JSON.stringify(auxScenarios.map((s) => s.content)) : '',
       ];
@@ -363,6 +375,7 @@ export const useBattleEngine = () => {
           data: combatant.data,
           isNative: combatant.isValid,
           isPreset: combatant.isPreset,
+          characterGuidance: typeof (combatant as any).characterGuidance === 'string' ? (combatant as any).characterGuidance : null,
           sourceDataCardId: combatant.sourceDataCardId,
           sourceDataCardUpdatedAt: combatant.sourceDataCardUpdatedAt,
         })),
@@ -477,6 +490,7 @@ export const useBattleEngine = () => {
         let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
         try {
+          setStreamCharacterGuidances(null);
           const response = await fetch('/api/arena/generate-stream', {
             method: 'POST',
             headers: requestHeaders,
@@ -523,6 +537,21 @@ export const useBattleEngine = () => {
                 setStreamUserGuidance(sanitizeTextByShieldWords(userGuidance));
               }
 
+              const characterGuidancesRaw = Array.isArray(parsed?.characterGuidances) ? parsed.characterGuidances : null;
+              if (characterGuidancesRaw && characterGuidancesRaw.length > 0) {
+                const normalized = characterGuidancesRaw
+                  .map((item: any) => {
+                    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                    const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+                    if (!characterName || !guidance) return null;
+                    return { characterName: sanitizeTextByShieldWords(characterName), guidance: sanitizeTextByShieldWords(guidance) };
+                  })
+                  .filter(Boolean);
+                if (normalized.length > 0) {
+                  setStreamCharacterGuidances(normalized as any);
+                }
+              }
+
               const adjudicationResults = Array.isArray(parsed?.adjudicationResults) ? parsed.adjudicationResults : null;
               if (adjudicationResults && adjudicationResults.length > 0) {
                 setAdjudicationResults(adjudicationResults);
@@ -540,6 +569,17 @@ export const useBattleEngine = () => {
             const snapshotGuidance = settings.userGuidance.trim();
             if (snapshotGuidance) {
               setStreamUserGuidance(sanitizeTextByShieldWords(snapshotGuidance));
+            }
+            const snapshotCharacterGuidances = freshCombatants
+              .map((c) => {
+                const characterName = (c.data.codename || c.data.name || '').toString().trim();
+                const guidance = typeof (c as any).characterGuidance === 'string' ? String((c as any).characterGuidance).trim() : '';
+                if (!characterName || !guidance) return null;
+                return { characterName: sanitizeTextByShieldWords(characterName), guidance: sanitizeTextByShieldWords(guidance) };
+              })
+              .filter(Boolean);
+            if (snapshotCharacterGuidances.length > 0) {
+              setStreamCharacterGuidances(snapshotCharacterGuidances as any);
             }
           }
 
@@ -824,6 +864,7 @@ export const useBattleEngine = () => {
     setStreamingMarkdown,
 	    setStreamReporterInfo,
 	    setStreamUserGuidance,
+	    setStreamCharacterGuidances,
 	    setStreamAiUsage,
 	    setStreamAiModel,
 	    setStreamNarrativeHistoryReadCount,

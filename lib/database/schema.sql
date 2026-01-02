@@ -309,6 +309,7 @@ CREATE TABLE IF NOT EXISTS battle_report_generation_combatants (
   is_native BOOLEAN,
   is_preset BOOLEAN,
   team_id INTEGER,
+  character_guidance TEXT,              -- 用户对该角色的行动/想法引导（可选，<=100字）
 
   data_card_id TEXT,                     -- 角色数据卡ID（若来自数据库）
   data_card_updated_at TEXT,             -- 角色数据卡更新时间（若来自数据库）

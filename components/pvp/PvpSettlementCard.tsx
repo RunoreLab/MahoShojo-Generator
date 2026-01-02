@@ -71,7 +71,7 @@ export type PvpSettlementCardPayload = {
       isBot: boolean | null;
       status: 'final' | 'draw' | 'pending' | 'unknown';
     };
-    myPlay: { seat: number | null; snapshotId: string | null; name: string | null; type: string | null } | null;
+    myPlay: { seat: number | null; snapshotId: string | null; name: string | null; type: string | null; guidance?: string | null } | null;
   }>;
 };
 
@@ -455,6 +455,9 @@ export function PvpSettlementCard({
                         <>
                           <div className="text-white/95 break-words">{r.myPlay.name}</div>
                           <div className="text-[11px] text-white/75">座位：{r.myPlay.seat ?? '—'}</div>
+                          {typeof r.myPlay.guidance === 'string' && r.myPlay.guidance.trim() ? (
+                            <div className="text-[11px] text-white/75 break-words">引导：{r.myPlay.guidance.trim()}</div>
+                          ) : null}
                         </>
                       ) : (
                         <div className="text-white/75">—</div>

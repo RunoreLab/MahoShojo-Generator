@@ -140,6 +140,7 @@ describe('pvp: parsePvpRules', () => {
     expect(parsed.rules.writeCurrentState).toBe(false);
     expect(parsed.rules.selectedLevel).toBe('');
     expect(parsed.rules.userGuidance).toBe('');
+    expect(parsed.rules.allowPlayerCharacterGuidance).toBe(false);
     expect(parsed.rules.storyLength).toBe('default');
     expect(parsed.rules.language).toBe('');
     expect(parsed.rules.adjudicationEvents).toEqual([]);
@@ -160,7 +161,7 @@ describe('pvp: parsePvpRules', () => {
     expect(parsed.rules.selectedLevel).toBe(DEFAULT_PVP_RULES.selectedLevel);
     expect(parsed.rules.storyLength).toBe(DEFAULT_PVP_RULES.storyLength);
     expect(parsed.rules.language.length).toBeLessThanOrEqual(32);
-    expect(parsed.rules.userGuidance.length).toBeLessThanOrEqual(50);
+    expect(parsed.rules.userGuidance.length).toBeLessThanOrEqual(200);
     expect(parsed.rules.adjudicationEvents.length).toBeLessThanOrEqual(50);
     expect(parsed.rules.readArenaHistoryLimit).toBeLessThanOrEqual(999);
   });

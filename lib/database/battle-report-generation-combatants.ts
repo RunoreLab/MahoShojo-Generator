@@ -9,6 +9,7 @@ export interface BattleReportGenerationCombatantInsert {
   isNative?: boolean | null;
   isPreset?: boolean | null;
   teamId?: number | null;
+  characterGuidance?: string | null;
   dataCardId?: string | null;
   dataCardUpdatedAt?: string | null;
   sizeChars?: number | null;
@@ -22,7 +23,7 @@ export async function createBattleReportGenerationCombatants(
     if (!combatants.length) return { ok: true };
     const nowIso = new Date().toISOString();
 
-    const valuesSql = combatants.map(() => `(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    const valuesSql = combatants.map(() => `(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .join(', ');
 
     const sql = `
@@ -35,6 +36,7 @@ export async function createBattleReportGenerationCombatants(
         is_native,
         is_preset,
         team_id,
+        character_guidance,
         data_card_id,
         data_card_updated_at,
         size_chars,
@@ -54,6 +56,7 @@ export async function createBattleReportGenerationCombatants(
         typeof c.isNative === 'boolean' ? (c.isNative ? 1 : 0) : null,
         typeof c.isPreset === 'boolean' ? (c.isPreset ? 1 : 0) : null,
         c.teamId ?? null,
+        c.characterGuidance ?? null,
         c.dataCardId ?? null,
         c.dataCardUpdatedAt ?? null,
         c.sizeChars ?? null,
@@ -80,6 +83,7 @@ export interface BattleReportGenerationCombatantRow {
   is_native: number | null;
   is_preset: number | null;
   team_id: number | null;
+  character_guidance: string | null;
   data_card_id: string | null;
   data_card_updated_at: string | null;
   size_chars: number | null;

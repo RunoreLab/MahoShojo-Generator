@@ -82,6 +82,7 @@ export default async function handler(req: Request): Promise<Response> {
       isNative: Boolean(c.is_native),
       isPreset: Boolean(c.is_preset),
       teamId: c.team_id,
+      characterGuidance: typeof c.character_guidance === 'string' && c.character_guidance.trim() ? c.character_guidance : null,
       dataCardId: c.data_card_id,
       dataCardUpdatedAt: c.data_card_updated_at,
     })),

@@ -72,7 +72,7 @@ export const filterAndFormatHistory = (
 
     if (isPureBattle) {
         relevantEntries = relevantEntries.filter(
-            entry => !entry.metadata.user_guidance && !entry.metadata.scenario_title
+            entry => !entry.metadata.user_guidance && !entry.metadata.scenario_title && !(entry.metadata as any)?.character_guidance
         );
     }
 
@@ -97,9 +97,10 @@ export const filterAndFormatHistory = (
         return '';
     }
 
-    const formattedHistory = selectedEntries.map(entry =>
-        `- 事件: "${entry.title}", 胜利者: ${entry.winner}, 对${characterName}的影响: "${entry.impact}"`
-    ).join('\n');
+    const formattedHistory = selectedEntries.map(entry => {
+        const g = typeof (entry.metadata as any)?.character_guidance === 'string' ? (entry.metadata as any).character_guidance.trim() : '';
+        return `- 事件: "${entry.title}", 胜利者: ${entry.winner}, 对${characterName}的影响: "${entry.impact}"${g ? `, 当时的角色行动引导: "${g}"` : ''}`;
+    }).join('\n');
 
     return `\n// ${characterName}的过往重要经历回顾:\n${formattedHistory}\n`;
 };
@@ -210,7 +211,12 @@ export const createPromptBuilder = (
         const characterName = data.codename || data.name;
         const otherNames = allNames.filter(name => name !== characterName);
         const typeDisplay = type === 'magical-girl' ? '魔法少女' : type === 'canshou' ? '残兽' : '通用角色';
+        const characterGuidance =
+            typeof (c as any)?.characterGuidance === 'string' ? (c as any).characterGuidance.trim().slice(0, 100) : '';
         let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
+        if (characterGuidance) {
+            profileString += `// 角色行动引导（用户输入，优先参考）\n${characterGuidance}\n`;
+        }
         if (readArenaHistory) {
             profileString += filterAndFormatHistory(characterName, data.arena_history, otherNames, isPureBattle, historyReadLimit);
         }
@@ -368,7 +374,12 @@ export const createStreamPromptBuilder = (
         const characterName = data.codename || data.name;
         const otherNames = allNames.filter(name => name !== characterName);
         const typeDisplay = type === 'magical-girl' ? '魔法少女' : type === 'canshou' ? '残兽' : '通用角色';
+        const characterGuidance =
+            typeof (c as any)?.characterGuidance === 'string' ? (c as any).characterGuidance.trim().slice(0, 100) : '';
         let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
+        if (characterGuidance) {
+            profileString += `// 角色行动引导（用户输入，优先参考）\n${characterGuidance}\n`;
+        }
         if (readArenaHistory) {
             profileString += filterAndFormatHistory(characterName, data.arena_history, otherNames, isPureBattle, historyReadLimit);
         }

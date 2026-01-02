@@ -47,6 +47,10 @@ export const applyPostBattleUpdates = async (
     for (const combatant of combatants) {
         const characterData = JSON.parse(JSON.stringify(combatant.data));
         const characterName = characterData.codename || characterData.name;
+        const characterGuidance =
+            typeof (combatant as any)?.characterGuidance === 'string'
+                ? (combatant as any).characterGuidance.trim().slice(0, 100)
+                : '';
 
         if (!characterData.templateId) {
             characterData.templateId = inferTemplateId(characterData);
@@ -97,6 +101,7 @@ export const applyPostBattleUpdates = async (
                 impact: characterImpact,
                 metadata: {
                     user_guidance: userGuidance,
+                    ...(characterGuidance ? { character_guidance: characterGuidance } : {}),
                     scenario_title: scenario?.title || null,
                     non_native_data_involved: isAnyNonNative,
                 },
@@ -181,14 +186,18 @@ export const redoPostBattleUpdates = async (
     const isScenarioNative = scenario ? await verifySignature(scenario) : true;
     const isAnyNonNative = combatants.some(c => !c.isNative || conflictingNames.has(c.data.codename || c.data.name)) || (report.mode === 'scenario' && !isScenarioNative);
 
-    for (const combatant of combatants) {
-        const characterData = JSON.parse(JSON.stringify(combatant.data));
-        const characterName = characterData.codename || characterData.name;
+	    for (const combatant of combatants) {
+	        const characterData = JSON.parse(JSON.stringify(combatant.data));
+	        const characterName = characterData.codename || characterData.name;
+	        const characterGuidance =
+	            typeof (combatant as any)?.characterGuidance === 'string'
+	                ? (combatant as any).characterGuidance.trim().slice(0, 100)
+	                : '';
 
-        if (!characterData.templateId) {
-            characterData.templateId = inferTemplateId(characterData);
-            log.info(`为旧版角色 "${characterName}" 补充了 templateId: ${characterData.templateId}`);
-        }
+	        if (!characterData.templateId) {
+	            characterData.templateId = inferTemplateId(characterData);
+	            log.info(`为旧版角色 "${characterName}" 补充了 templateId: ${characterData.templateId}`);
+	        }
 
         const inferredKind = inferCharacterKind(characterData);
         combatant.type =
@@ -254,6 +263,7 @@ export const redoPostBattleUpdates = async (
                 metadata: {
                     ...(previous?.metadata ?? {}),
                     user_guidance: userGuidance,
+                    ...(characterGuidance ? { character_guidance: characterGuidance } : {}),
                     scenario_title: scenario?.title || null,
                     non_native_data_involved: isAnyNonNative,
                 },

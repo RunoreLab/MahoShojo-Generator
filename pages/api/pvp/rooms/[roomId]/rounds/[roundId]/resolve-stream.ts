@@ -243,7 +243,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   const choices = await getPvpRoundChoices(roundId);
   if (choices.length < humanCount) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
 
-  const choiceByUserId = new Map<number, PvpSnapshotRef>();
+  const choiceByUserId = new Map<number, ParsedChoice>();
   for (const row of choices) {
     const parsed = parseChoice(row.choice_ref_json);
     if (!parsed) return json({ error: '选择数据损坏' }, { status: 500 });
@@ -286,7 +286,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     const token = `P${i + 1}`;
     if (participant.kind === 'human') {
       const choice = choiceByUserId.get(participant.userId)!;
-      const snap = await getPvpCardSnapshotById(choice.id);
+      const snap = await getPvpCardSnapshotById(choice.ref.id);
       if (!snap) return json({ error: '快照不存在，请重试' }, { status: 409 });
       picked.push({
         userId: participant.userId,
@@ -295,6 +295,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         prefix: participant.prefix,
         token,
         snapshot: snap,
+        characterGuidance: choice.characterGuidance,
         isBot: false,
       });
       continue;
@@ -361,6 +362,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         data: JSON.parse(p.snapshot.data_json),
         isNative: false,
         isPreset: false,
+        characterGuidance: p.characterGuidance ?? null,
       })),
       selectedLevel: rules.selectedLevel,
       mode: rules.mode,
@@ -430,6 +432,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
           snapshotId: p.snapshot.id,
           name: p.snapshot.name,
           type: p.snapshot.card_type,
+          ...(p.characterGuidance ? { characterGuidance: p.characterGuidance } : {}),
         })),
         reportMarkdown: markdown,
         report: report,
@@ -597,6 +600,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         snapshotId: p.snapshot.id,
         name: p.snapshot.name,
         type: p.snapshot.card_type,
+        ...(p.characterGuidance ? { characterGuidance: p.characterGuidance } : {}),
       })),
       reportMarkdown: markdownForStorage,
       streamMeta,

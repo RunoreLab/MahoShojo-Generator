@@ -197,6 +197,19 @@ ${report.userGuidance ? `
 
 ## 故事引导
 > ${report.userGuidance}` : ''}
+${Array.isArray(report.characterGuidances) && report.characterGuidances.length > 0 ? `
+---
+
+## 角色行动引导
+${report.characterGuidances
+  .map((item) => {
+    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+    const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+    if (!characterName || !guidance) return null;
+    return `- ${characterName}：${guidance}`;
+  })
+  .filter(Boolean)
+  .join('\n')}` : ''}
 ${adjudicationMarkdown}
     `.trim();
 
@@ -352,6 +365,27 @@ ${adjudicationMarkdown}
             <div className="result-label">📖 故事引导</div>
             <div className="result-value">
               <p className="text-sm opacity-90 italic">“{report.userGuidance}”</p>
+            </div>
+          </div>
+        )}
+
+        {Array.isArray(report.characterGuidances) && report.characterGuidances.length > 0 && (
+          <div className="result-item" style={{ borderLeft: '4px solid #93c5fd', background: 'rgba(0,0,0,0.2)' }}>
+            <div className="result-label">🎭 角色行动引导</div>
+            <div className="result-value space-y-1 text-sm">
+              {report.characterGuidances
+                .map((item, index) => {
+                  const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                  const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+                  if (!characterName || !guidance) return null;
+                  return (
+                    <div key={`${characterName}-${index}`} className="opacity-90">
+                      <span className="font-semibold">{characterName}</span>
+                      <span className="opacity-80">：{guidance}</span>
+                    </div>
+                  );
+                })
+                .filter(Boolean)}
             </div>
           </div>
         )}
