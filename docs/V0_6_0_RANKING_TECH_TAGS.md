@@ -202,35 +202,37 @@
 1) **关键词密度特征**（提示词/规则/代码相关词的出现频率与覆盖面）
 2) **结构复杂度特征**（对象深度、键数量、数组规模、总字符数、重复模式）
 
-参考资料： `/mnt/d/13-IT与编程/Autonomous_Science_Project` ，其中的 tech_index 相关的指标构造思路值得参考（可以根据本项目需求做具体调整）。
+参考资料： `/mnt/d/04-生活与娱乐/魔法少女竞技场` ，其中的JSON角色卡可为你设计指标和权重提供参考。
 
 ### 2.3 v0.6.0 推荐的“可解释”指标结构
 输出建议包含三层：
 - `techScore`：0–100（连续值）
 - `techLevel`：L0–L5（离散档位，用于 UI 徽章）
-- `techNotes`：可选的解释信息（仅对作者可见，避免被当作“刷分攻略”）
+- `techNotes`：可选的解释信息
 
-#### 2.3.1 参考口径（来自 Autonomous_Science_Project，可复用）
-你提供的参考仓库中，tech_index 的一个稳定版本是：
+#### 2.3.1 参考口径
+可参考下列口径：
 
-1) 从角色卡 JSON 中抽取文本 blob（不保留原文，只用于计数）  
+1) 从角色卡 JSON 中抽取文本 blob
 - 深度遍历 JSON 值（`max_depth=6`），最多 `max_nodes=6000`，最多 `max_chars=250_000`  
 - 收集所有字符串并用换行拼接
 
-2) proxy（原始特征）
+2) 原始特征
 - `json_key_count`：顶层 key 数（`len(obj.keys())`）
 - `text_len_chars`：blob 字符数
+- …… # 各种结构复杂度特征（可补充对象深度、数组规模、重复模式……）
 - 关键词计数（正则大致为）：
-  - `kw_system`: `(系统|system|sys\\b)`
-  - `kw_must`: `(必须|务必|must\\b)`
-  - `kw_meta`: `(元指令|元叙事|meta\\b|instruction)`
-  - `kw_dice`: `(掷骰|骰子|判定|d\\d+|dice)`
+  - `kw_system`: `(系统|system|sys\\b……)`
+  - `kw_must`: `(必须|务必|must\\b……)`
+  - `kw_meta`: `(元指令|元叙事|meta\\b|instruction……)`
+  - `kw_dice`: `(掷骰|骰子|判定|d\\d+|dice……)`
+  - …… # 各种关键词特征
 
-3) 综合指标（tech_index）
-- `tech_index_zmean = mean(z(text_len_chars), z(json_key_count), z(kw_system), z(kw_must), z(kw_meta), z(kw_dice))`
+3) 综合指标
+- 根据各类特征加权计算，或采用其他计算方法。
 
 4) 密度指标（用于区分“堆料” vs “技术密集”）
-- `kw_control_sum = kw_system + kw_must + kw_meta + kw_dice (+ 可选 kw_format/kw_copy_or_point 等)`
+- `kw_control_sum = kw_system + kw_must + kw_meta + …… (+ 可选 kw_format/kw_copy_or_point 等)`
 - `tech_density_per_1k_chars = kw_control_sum / max(text_len_chars, 1) * 1000`
 - `kw_sum_resid_on_text_len`：对 `kw_control_sum ~ text_len_chars` 做一元回归残差，表示“密度偏离”
 
@@ -238,7 +240,7 @@
 
 #### 2.3.2 映射到本项目的建议
 v0.6.0 建议至少落地：
-- `tech_index_zmean`（总体 proxy，便于排序）
+- 总体综合指标，便于排序）
 - `tech_density_per_1k_chars`（风险提示更贴近“科技与狠活”）
 - 以及所有原始 proxy（便于后续迭代、重算与解释）
 
@@ -247,13 +249,13 @@ v0.6.0 建议至少落地：
 
 推荐 v0.6.0：新增表 `data_card_metrics`：
 - `data_card_id`（PK）
-- `tech_score / tech_level`（由 `tech_index_zmean` 或 `tech_density_per_1k_chars` 映射得到，口径可在后续迭代中调整）
-- `is_native`（用于你想要的“原生性筛选”）
+- `tech_score / tech_level`（由总体综合指标或 `tech_density_per_1k_chars` 映射得到，口径可在后续迭代中调整）
+- `is_native`（用于原生性筛选）
 - `updated_at`
 - 可选 `details_json`（解释信息，仅作者可见/或仅用于后台）
 
 建议同步存下原始 proxy（可选列或放到 `details_json`）：
-- `text_len_chars / json_key_count`
+- `text_len_chars / json_key_count`（可按需扩展对象深度、数组规模、重复模式等）
 - `kw_system / kw_must / kw_meta / kw_dice`（可按需扩展 kw_format / kw_scenario / kw_ai_attention 等）
 - `kw_control_sum / tech_density_per_1k_chars / kw_sum_resid_on_text_len`
 
@@ -362,8 +364,5 @@ v0.6.0 的最小教程集：
 5) 平局计入并微调分数。  
 6) 预设角色出现在排行榜。  
 7) tech_index 参考仓库可访问，已摘取并迁移其 proxy/公式到本文第 2 节。
-
-仍需你决定的少量问题（用于进入实现）：
-1) `techScore` 主展示口径：更偏向 `tech_index_zmean`（总体）还是 `tech_density_per_1k_chars`（密度/风险）？我倾向于“主展示密度，详情展示两者”。
-2) strict 的反刷分规则要到什么强度：只做“10 分钟同对手去重”，还是再加“每日上限/对手多样性要求”？
-3) 段位阈值是否沿用本文默认（900/1100/1300/1600），还是你有更贴合魔法少女设定的分段想法？
+8) strict 的反刷分规则目前只做 10 分钟同对手去重。
+9) 段位阈值可沿用本文默认（900/1100/1300/1600）。
