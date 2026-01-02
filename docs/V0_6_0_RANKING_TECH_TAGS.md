@@ -9,6 +9,14 @@
 
 ## 0. 目标与边界
 
+### 0.1 已确认的口径（来自本次讨论）
+- 排位分的“对象”统一以 **数据卡 ID（`data_cards.id`）** 为准；预设角色以 **`preset filename`** 作为 ID。
+- strict 排位：**允许自由挑对手**，但 **必须登录才计分**。
+- free 排位：**不强制登录** 也可计分。
+- 平局：**计入对局数**，并按 Elo 的 `S=0.5` 微调分数。
+- 预设角色：**出现在排行榜里**（与数据库角色卡同榜展示）。
+- v0.6.0 对“是否只做 1v1 计分”的态度：你表示“都行”，本文按“先 1v1”做 MVP，后续再扩展多人/队伍。
+
 ### 目标（v0.6.0）
 - 在「生成战报」的链路上，**满足条件则计算并记录排位分**，并提供排行榜/筛选展示。
 - 为角色卡/情景卡提供「定位标签」体系（从项目内标签库选择），并在 UI 中展示与筛选。
@@ -65,10 +73,12 @@
 - `read_arena_history = 0`
 - `read_current_state = 0`
 - `battle_report_generation_combatants.character_guidance IS NULL`（或全为空串）
+- `battle_report_generations.user_id IS NOT NULL`（必须登录才计分）
 - v0.6.0 建议再加一条：`combatant_count = 2`（先只做 1v1，减少多人/队伍歧义）
 
 #### 自由排位（Free）资格
 - 满足基础资格即可；不要求 classic/无引导/不读状态。
+- v0.6.0 建议先限定 `combatant_count = 2`（你表示“都行”，此处按 MVP 落地）。
 
 #### 严格与自由的关系（推荐）
 - 若满足严格排位：**同时更新 strict 与 free**（strict 是 free 的子集，便于用户理解）
@@ -172,10 +182,11 @@
 > 注意：v0.6.0 不一定要一次把三张表全上；但至少应有 events 表，否则很难排查与回滚。
 
 ### 1.9 风控与反刷分（建议至少做基础版）
-排位系统如果不加约束，很容易被“重复生成同一对局”刷分。可选的最低成本风控：
-- **必须登录**才计分（`battle_report_generations.user_id IS NOT NULL`）
-- **同一用户**在一定时间窗内（如 10 分钟）对同一对手组合只计分一次（用 `arena_rating_events` + 组合 key 实现）
-- 每日计分上限（例如 strict 每日最多 30 局）
+排位系统如果不加约束，很容易被“重复生成同一对局”刷分。建议的最低成本风控：
+- strict：**必须登录**才计分（`battle_report_generations.user_id IS NOT NULL`）
+- strict：**同一用户**在一定时间窗内（如 10 分钟）对同一对手组合只计分一次（用 `arena_rating_events` + 组合 key 实现；尤其适配“自由挑对手”）
+- strict：每日计分上限（例如 strict 每日最多 30 局）
+- free：因为允许匿名，建议至少做“弱风控”（例如按 `ip_anonymized + 对手组合` 限速），否则 free 更像“娱乐分”（可接受但需在 UI/百科中说明）
 
 ---
 
@@ -199,20 +210,52 @@
 - `techLevel`：L0–L5（离散档位，用于 UI 徽章）
 - `techNotes`：可选的解释信息（仅对作者可见，避免被当作“刷分攻略”）
 
-特征举例（可按权重组合）：
-- 代码/指令迹象：出现 `system/assistant/user/prompt/JSON/YAML/代码块/输出/必须/禁止/规则/当检测到...` 等
-- 规则武器化迹象：高频出现 “无效/免疫/必然/立即/无法/对...无效/直接改写/强制/锁定”等
-- 结构复杂度：`maxDepth`、`totalKeys`、`arrayCount`、`totalChars`、`uniqueTokenCount`
+#### 2.3.1 参考口径（来自 Autonomous_Science_Project，可复用）
+你提供的参考仓库中，tech_index 的一个稳定版本是：
+
+1) 从角色卡 JSON 中抽取文本 blob（不保留原文，只用于计数）  
+- 深度遍历 JSON 值（`max_depth=6`），最多 `max_nodes=6000`，最多 `max_chars=250_000`  
+- 收集所有字符串并用换行拼接
+
+2) proxy（原始特征）
+- `json_key_count`：顶层 key 数（`len(obj.keys())`）
+- `text_len_chars`：blob 字符数
+- 关键词计数（正则大致为）：
+  - `kw_system`: `(系统|system|sys\\b)`
+  - `kw_must`: `(必须|务必|must\\b)`
+  - `kw_meta`: `(元指令|元叙事|meta\\b|instruction)`
+  - `kw_dice`: `(掷骰|骰子|判定|d\\d+|dice)`
+
+3) 综合指标（tech_index）
+- `tech_index_zmean = mean(z(text_len_chars), z(json_key_count), z(kw_system), z(kw_must), z(kw_meta), z(kw_dice))`
+
+4) 密度指标（用于区分“堆料” vs “技术密集”）
+- `kw_control_sum = kw_system + kw_must + kw_meta + kw_dice (+ 可选 kw_format/kw_copy_or_point 等)`
+- `tech_density_per_1k_chars = kw_control_sum / max(text_len_chars, 1) * 1000`
+- `kw_sum_resid_on_text_len`：对 `kw_control_sum ~ text_len_chars` 做一元回归残差，表示“密度偏离”
+
+> 这套设计的优点是：既能作为“总体强度 proxy”（含总量），又能单独给出“技术密度”。
+
+#### 2.3.2 映射到本项目的建议
+v0.6.0 建议至少落地：
+- `tech_index_zmean`（总体 proxy，便于排序）
+- `tech_density_per_1k_chars`（风险提示更贴近“科技与狠活”）
+- 以及所有原始 proxy（便于后续迭代、重算与解释）
 
 ### 2.4 落库与更新策略
 不建议每次列表查询都现场计算（成本高、也会拖慢排行榜）。
 
 推荐 v0.6.0：新增表 `data_card_metrics`：
 - `data_card_id`（PK）
-- `tech_score / tech_level`
+- `tech_score / tech_level`（由 `tech_index_zmean` 或 `tech_density_per_1k_chars` 映射得到，口径可在后续迭代中调整）
 - `is_native`（用于你想要的“原生性筛选”）
 - `updated_at`
 - 可选 `details_json`（解释信息，仅作者可见/或仅用于后台）
+
+建议同步存下原始 proxy（可选列或放到 `details_json`）：
+- `text_len_chars / json_key_count`
+- `kw_system / kw_must / kw_meta / kw_dice`（可按需扩展 kw_format / kw_scenario / kw_ai_attention 等）
+- `kw_control_sum / tech_density_per_1k_chars / kw_sum_resid_on_text_len`
 
 更新策略三选一：
 1) **保存/更新数据卡时计算**（最干净，需要改 data-card 写入 API）
@@ -276,9 +319,10 @@ v0.6.0 的最小教程集：
 - 标签列表（可点击查看说明/百科）
 
 ### 5.2 排行榜模态框
-排行榜数据源建议以“角色数据卡”为主：
+排行榜数据源建议以“可计分实体”为主（数据卡 + 预设）：
 - 公共榜：`data_cards.is_public=1 AND review_status='approved'`
 - 私有卡：只对作者展示，不参与公共名次，但可以插入榜单中“显示我自己的位置”
+- 预设角色：来自 `pages/api/get-presets.ts`（恒公开），参与公共名次；其排位实体 ID 建议使用 `preset filename`
 
 支持排序：
 - strict rating / free rating / 技术值
@@ -310,11 +354,16 @@ v0.6.0 的最小教程集：
 
 ## 7. 需要你确认/补充的问题（决定实现细节）
 
-1) 排位的“对象”是：**数据卡（data_cards.id）** 还是 **角色名（codename）**？（我强烈建议用 data_cards.id，否则同名/改名会崩）
-2) v0.6.0 是否接受“只对 1v1 计分”？多人/队伍我们放 v0.6.1+。
-3) strict 排位是否需要额外约束“对手必须随机匹配/必须来自公共库”？还是允许用户自由挑对手？
-4) 是否要求“必须登录才计分”？（这对反刷分非常关键）
-5) “平局”是否计入对局数并微调分数（Elo 的 0.5）？还是完全不变？
-6) 预设角色：要不要出现在排行榜里？还是只作为对手存在？
-7) 你提到的 `tech_index` 参考：能否提供核心特征/权重（哪怕是简表），我可以把它迁移为本项目的 `techScore` 方案。
+已确认：
+1) 排位对象：数据卡 `data_cards.id`（预设用 preset filename）。  
+2) v0.6.0 先按 1v1 计分 MVP。  
+3) strict 允许自由挑对手。  
+4) strict 必须登录才计分；free 不强制登录。  
+5) 平局计入并微调分数。  
+6) 预设角色出现在排行榜。  
+7) tech_index 参考仓库可访问，已摘取并迁移其 proxy/公式到本文第 2 节。
 
+仍需你决定的少量问题（用于进入实现）：
+1) `techScore` 主展示口径：更偏向 `tech_index_zmean`（总体）还是 `tech_density_per_1k_chars`（密度/风险）？我倾向于“主展示密度，详情展示两者”。
+2) strict 的反刷分规则要到什么强度：只做“10 分钟同对手去重”，还是再加“每日上限/对手多样性要求”？
+3) 段位阈值是否沿用本文默认（900/1100/1300/1600），还是你有更贴合魔法少女设定的分段想法？
