@@ -1,7 +1,9 @@
 // components/AdjudicatorEditor.tsx
 
-import React from 'react';
-import { AdjudicatorEvent } from '@/types/arena';
+import React, { useEffect } from 'react';
+
+import { normalizeAdjudicationEvents, createAdjudicatorId } from '@/lib/adjudicator/normalize';
+import type { AdjudicatorEvent } from '@/types/arena';
 
 /**
  * @fileoverview 这是一个全新的、可复用的组件，专门用于创建和编辑增强型随机判定器。
@@ -20,6 +22,13 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
     onEventsChange,
     depth = 0
 }) => {
+    useEffect(() => {
+        const normalized = normalizeAdjudicationEvents(events);
+        if (normalized !== events) {
+            onEventsChange(normalized);
+        }
+    }, [events, onEventsChange]);
+
     // ---- 核心状态更新函数 ----
 
     /**
@@ -38,7 +47,7 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
      */
     const addEvent = () => {
         const newEvent: AdjudicatorEvent = {
-            id: `event-${Date.now()}-${Math.random()}`,
+            id: createAdjudicatorId('event'),
             description: '',
             type: 'binary',
             probability: 50,
@@ -114,7 +123,7 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
                     <button
                         onClick={() => onChainedEventChange({
                             event: {
-                                id: `event-${Date.now()}-${Math.random()}`,
+                                id: createAdjudicatorId('event'),
                                 description: '',
                                 type: 'binary',
                                 probability: 50
@@ -155,7 +164,7 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
                     </div>
                     <div className="flex items-center gap-2">
                         <input type="radio" id={`type-custom-${event.id}`} name={`type-${event.id}`} value="custom" checked={event.type === 'custom'}
-                            onChange={() => handleEventChange(index, { ...event, type: 'custom', outcomes: event.outcomes?.length ? event.outcomes : [{ id: `outcome-${Date.now()}`, name: '结果1', probability: 100 }] })} />
+                            onChange={() => handleEventChange(index, { ...event, type: 'custom', outcomes: event.outcomes?.length ? event.outcomes : [{ id: createAdjudicatorId('outcome'), name: '结果1', probability: 100 }] })} />
                         <label htmlFor={`type-custom-${event.id}`}>自定义结果</label>
                     </div>
                 </div>
@@ -213,7 +222,7 @@ const AdjudicatorEditor: React.FC<AdjudicatorEditorProps> = ({
                             </div>
                         ))}
                         <button onClick={() => {
-                            const newOutcomes = [...(event.outcomes || []), { id: `outcome-${Date.now()}`, name: `结果${(event.outcomes?.length || 0) + 1}`, probability: 0 }];
+                            const newOutcomes = [...(event.outcomes || []), { id: createAdjudicatorId('outcome'), name: `结果${(event.outcomes?.length || 0) + 1}`, probability: 0 }];
                             // 重新分配概率
                             const avgProb = Math.floor(100 / newOutcomes.length);
                             newOutcomes.forEach(o => o.probability = avgProb);
