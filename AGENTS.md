@@ -27,7 +27,7 @@
 - 测试脚本逻辑基于 `bun` 的测试能力执行，请不要使用其他测试框架的代码。
 - 在 `tests/` 下新建 `*.test.ts` 测试文件（仅针对遗留代码使用 `.test.js`），共用 `tests/test.json` 等夹具。
 - 随机逻辑需可复现，参考 `tests/getWeightedRandomFromSeed.test.js`：为辅助函数设定种子，并验证概率分布而非采样结果。
-- 每次提交前执行 `bun test`，在 PR 描述中记录重要日志差异；任何结构性变更需同步更新夹具与类型声明。
+- 每次提交前执行 `bun test`、`bun run lint` 和 `bun run build`，在 PR 描述中记录重要日志差异；任何结构性变更需同步更新夹具与类型声明。
 
 ### 提交与 PR 规范
 - 遵循 Conventional Commit 前缀（`feat:`、`fix:`、`chore:` 等）；提交信息正文可中英混写。
