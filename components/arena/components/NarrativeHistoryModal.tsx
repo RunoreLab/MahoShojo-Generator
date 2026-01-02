@@ -114,11 +114,13 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
   const lastUpdatedAt = useNarrativeHistoryStore((state) => state.lastUpdatedAt);
   const sort = useNarrativeHistoryStore((state) => state.sort);
   const setSort = useNarrativeHistoryStore((state) => state.setSort);
+  const appendEntry = useNarrativeHistoryStore((state) => state.appendEntry);
   const updateEntry = useNarrativeHistoryStore((state) => state.updateEntry);
   const deleteEntry = useNarrativeHistoryStore((state) => state.deleteEntry);
   const replaceAll = useNarrativeHistoryStore((state) => state.replaceAll);
   const clearAll = useNarrativeHistoryStore((state) => state.clear);
 
+  const [view, setView] = useState<'list' | 'create' | 'edit'>('list');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftContent, setDraftContent] = useState('');
@@ -139,6 +141,7 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
   );
 
   const closeAndReset = () => {
+    setView('list');
     setActiveId(null);
     setDraftTitle('');
     setDraftContent('');
@@ -165,11 +168,68 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    if (view !== 'edit') return;
+    if (!activeId || !activeEntry) {
+      setView('list');
+      setActiveId(null);
+      setDraftTitle('');
+      setDraftContent('');
+      setSaveHint(null);
+    }
+  }, [view, activeId, activeEntry]);
+
   const handlePick = (entry: NarrativeHistoryEntry) => {
+    setView('edit');
     setActiveId(entry.id);
     setDraftTitle(entry.title);
     setDraftContent(entry.content);
     setSaveHint(null);
+  };
+
+  const handleStartCreate = () => {
+    setView('create');
+    setActiveId(null);
+    setDraftTitle('');
+    setDraftContent('');
+    setSaveHint(null);
+  };
+
+  const handleCreate = async () => {
+    setIsSaving(true);
+    setSaveHint(null);
+
+    try {
+      const rawTitle = draftTitle.trim();
+      const rawContent = draftContent.trim();
+      if (!rawContent) {
+        setSaveHint('正文不能为空。');
+        return;
+      }
+
+      const [titleCheck, contentCheck] = await Promise.all([quickCheck(rawTitle || '未命名'), quickCheck(rawContent)]);
+      const nextTitle = (titleCheck.filteredText || rawTitle || '未命名').trim();
+      const nextContent = (contentCheck.filteredText || rawContent).trim();
+
+      const created = appendEntry({ title: nextTitle, content: nextContent });
+      if (!created) {
+        setSaveHint('正文不能为空。');
+        return;
+      }
+
+      setActiveId(created.id);
+      setDraftTitle(created.title);
+      setDraftContent(created.content);
+      setView('edit');
+
+      if (titleCheck.hasSensitiveWords || contentCheck.hasSensitiveWords) {
+        setSaveHint('已自动屏蔽敏感词后创建。');
+      } else {
+        setSaveHint('已创建。');
+      }
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -205,6 +265,7 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
     const ok = confirm('确定删除这条叙事历史记录吗？此操作不可恢复。');
     if (!ok) return;
     deleteEntry(activeId);
+    setView('list');
     setActiveId(null);
     setDraftTitle('');
     setDraftContent('');
@@ -305,6 +366,7 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
     const ok = confirm(`确定清空叙事历史（共 ${entries.length} 条）吗？此操作不可恢复。`);
     if (!ok) return;
     clearAll();
+    setView('list');
     setActiveId(null);
   };
 
@@ -355,7 +417,7 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
         </div>
 
         <div className="flex-1 overflow-auto p-4">
-          {!activeEntry ? (
+          {view === 'list' ? (
             <>
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="text-sm text-gray-700 font-semibold">历史列表</div>
@@ -376,6 +438,14 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 disabled:opacity-60"
+                  onClick={handleStartCreate}
+                  disabled={isImporting}
+                >
+                  新建条目
+                </button>
                 <button
                   type="button"
                   className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-60"
@@ -508,14 +578,24 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
               <div className="flex items-center justify-between gap-2">
                 <button
                   className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
-                  onClick={() => setActiveId(null)}
+                  onClick={() => {
+                    setView('list');
+                    setActiveId(null);
+                    setDraftTitle('');
+                    setDraftContent('');
+                    setSaveHint(null);
+                  }}
                   disabled={isSaving}
                 >
                   ← 返回列表
                 </button>
-                <div className="text-xs text-gray-500">
-                  创建：{formatDateTime(activeEntry.createdAt)}｜更新：{formatDateTime(activeEntry.updatedAt)}
-                </div>
+                {view === 'edit' && activeEntry ? (
+                  <div className="text-xs text-gray-500">
+                    创建：{formatDateTime(activeEntry.createdAt)}｜更新：{formatDateTime(activeEntry.updatedAt)}
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-500">新建叙事历史条目</div>
+                )}
               </div>
 
               <div>
@@ -543,20 +623,32 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
               {saveHint && <div className="text-xs text-gray-600">{saveHint}</div>}
 
               <div className="flex items-center justify-end gap-2">
-                <button
-                  className="px-3 py-2 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
-                  onClick={handleDelete}
-                  disabled={isSaving}
-                >
-                  删除
-                </button>
-                <button
-                  className="px-3 py-2 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 disabled:opacity-60"
-                  onClick={() => void handleSave()}
-                  disabled={isSaving}
-                >
-                  {isSaving ? '保存中…' : '保存修改'}
-                </button>
+                {view === 'edit' ? (
+                  <>
+                    <button
+                      className="px-3 py-2 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
+                      onClick={handleDelete}
+                      disabled={isSaving}
+                    >
+                      删除
+                    </button>
+                    <button
+                      className="px-3 py-2 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 disabled:opacity-60"
+                      onClick={() => void handleSave()}
+                      disabled={isSaving}
+                    >
+                      {isSaving ? '保存中…' : '保存修改'}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="px-3 py-2 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 disabled:opacity-60"
+                    onClick={() => void handleCreate()}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? '创建中…' : '创建条目'}
+                  </button>
+                )}
               </div>
             </div>
           )}
