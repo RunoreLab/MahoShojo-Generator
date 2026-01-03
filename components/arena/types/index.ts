@@ -109,6 +109,8 @@ export interface BattleApiResponse {
   report: NewsReport;
   updatedCombatants: UpdatedCombatantData[];
   adjudicationResults?: AdjudicationResult[];
+  /** 本次战报生成记录 ID（用于排位结算查询等增强功能）。 */
+  generationId?: string;
 }
 
 export interface BattleStoreState {
@@ -129,6 +131,8 @@ export interface BattleStoreState {
   storyLength: StoryLengthOption;
   selectedLevel: string;
   selectedLanguage: string;
+  /** 最近一次生成战报的 generationId（用于排位结算展示）。 */
+  lastGenerationId: string | null;
   settings: BattleSettings;
   adjudicationEvents: AdjudicatorEvent[];
   adjudicationResults: AdjudicationResult[] | null;
@@ -155,6 +159,7 @@ export interface BattleStoreState {
   setStoryLength: (length: StoryLengthOption) => void;
   setSelectedLevel: (level: string) => void;
   setSelectedLanguage: (language: string) => void;
+  setLastGenerationId: (generationId: string | null) => void;
   updateSettings: (settings: Partial<BattleSettings>) => void;
 
   addCombatant: (combatant: Combatant) => void;

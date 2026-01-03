@@ -567,10 +567,13 @@ async function handler(req: NextRequest): Promise<Response> {
             { writeArenaHistory: resolvedWriteArenaHistory, writeCurrentState: resolvedWriteCurrentState }
         );
 
+        const recordId = generateUUID();
+
         const apiResponse: BattleApiResponse = {
             report,
             updatedCombatants,
-            adjudicationResults: adjudicationResults || undefined // v0.4.0 新增
+            adjudicationResults: adjudicationResults || undefined, // v0.4.0 新增
+            generationId: recordId,
         };
 
         const endedAtMs = Date.now();
@@ -600,7 +603,6 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const recordPromise = (async () => {
             const user = authKey ? await getUserByAuthKey(authKey) : null;
-            const recordId = generateUUID();
 
             const createdId = await createBattleReportGenerationRecord({
                 id: recordId,

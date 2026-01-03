@@ -64,6 +64,7 @@ export const useBattleStore = create<BattleStoreState>()(
       storyLength: 'default',
       selectedLevel: '',
       selectedLanguage: 'zh-CN',
+      lastGenerationId: null,
       settings: defaultSettings,
       adjudicationEvents: [],
       adjudicationResults: null,
@@ -90,6 +91,7 @@ export const useBattleStore = create<BattleStoreState>()(
       setStoryLength: (storyLength) => set({ storyLength }),
       setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
+      setLastGenerationId: (lastGenerationId) => set({ lastGenerationId }),
       updateSettings: (incoming) =>
         set((state) => ({
           settings: {
@@ -143,6 +145,7 @@ export const useBattleStore = create<BattleStoreState>()(
           streamAiUsage: null,
           streamAiModel: null,
           streamNarrativeHistoryReadCount: null,
+          lastGenerationId: null,
         }),
 
       updateCombatantTeam: (identifier, teamId) =>

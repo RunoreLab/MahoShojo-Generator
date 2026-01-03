@@ -251,6 +251,7 @@ export const useBattleEngine = () => {
   const setStreamAiUsage = useBattleSelector((state) => state.setStreamAiUsage);
   const setStreamAiModel = useBattleSelector((state) => state.setStreamAiModel);
   const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
+  const setLastGenerationId = useBattleSelector((state) => state.setLastGenerationId);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
@@ -327,6 +328,7 @@ export const useBattleEngine = () => {
     setStreamAiUsage(null);
     setStreamAiModel(null);
     setStreamNarrativeHistoryReadCount(null);
+    setLastGenerationId(null);
 
     try {
       await handleResolveRandomPlaceholders();
@@ -434,6 +436,10 @@ export const useBattleEngine = () => {
       if (authHeader) requestHeaders.Authorization = authHeader;
 
       const applyBattleResult = async (result: BattleApiResponse, origin: 'battle' | 'battle-stream') => {
+        if (typeof result.generationId === 'string' && result.generationId.trim()) {
+          setLastGenerationId(result.generationId.trim());
+        }
+
         const backupItems = buildBattleBackupItems(
           freshCombatants,
           shouldUseScenario ? scenario.content : null,
@@ -538,6 +544,11 @@ export const useBattleEngine = () => {
           if (metaHeader) {
             try {
               const parsed = JSON.parse(decodeURIComponent(metaHeader));
+              const generationId = typeof parsed?.generationId === 'string' ? parsed.generationId.trim() : '';
+              if (generationId) {
+                setLastGenerationId(generationId);
+              }
+
               const reporterInfo = parsed?.reporterInfo;
               if (reporterInfo && typeof reporterInfo === 'object') {
                 const name = typeof reporterInfo.name === 'string' ? reporterInfo.name : '';
@@ -883,6 +894,7 @@ export const useBattleEngine = () => {
 	    setStreamAiUsage,
 	    setStreamAiModel,
 	    setStreamNarrativeHistoryReadCount,
+      setLastGenerationId,
 	    setCombatants,
 	    handleResolveRandomPlaceholders,
 	    redirectToArrested,

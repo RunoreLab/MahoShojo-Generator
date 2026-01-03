@@ -26,6 +26,7 @@ import { BattleResult } from './components/BattleResult';
 import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
 import { ArenaStatistics } from './components/ArenaStatistics';
+import { RankingQuickActions } from './components/RankingQuickActions';
 import { useBattleStore } from './stores/useBattleStore';
 import { BattleStoreState, CombatantData, MAX_AUX_SCENARIOS, MAX_COMBATANTS } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
@@ -154,6 +155,7 @@ export function ArenaPage() {
             <RosterUploader />
             <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />
             <BattleModeSwitcher />
+            <RankingQuickActions />
             {battleMode === 'scenario' && (
               <ScenarioPanel
                 onOpenScenarioModal={handleOpenScenarioDataModal}

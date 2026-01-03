@@ -451,10 +451,13 @@ async function handler(req: NextRequest): Promise<Response> {
 
         log.info('✅ 流式响应已生成，准备返回');
 
+        const generationId = generateUUID();
+
         const headers = new Headers(streamResponse.headers);
         try {
             const encodedMeta = encodeURIComponent(JSON.stringify({
                 ...streamMeta,
+                generationId,
                 ai: {
                     providerName: aiTelemetry.providerName,
                     providerType: aiTelemetry.providerType,
@@ -476,7 +479,6 @@ async function handler(req: NextRequest): Promise<Response> {
         const ipAnonymized = anonymizeIp(ip);
         const authHeader = req.headers.get('authorization');
         const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-        const generationId = generateUUID();
         let r2UploadPromise: Promise<Awaited<ReturnType<typeof storeBattleReportGenerationOutputStreamToR2>>> | null = null;
 
         let outputBytes = 0;

@@ -1,6 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useQueries, useQuery } from '@tanstack/react-query';
+
+import { TierBadge } from '@/components/ranking/TierBadge';
+import { authStorage } from '@/lib/auth';
+import { computeTechIndex } from '@/lib/metrics/techIndex';
 
 import { useBattleActions } from '../hooks/useBattleActions';
 import { useBattleStore } from '../stores/useBattleStore';
@@ -26,11 +31,116 @@ const getCombatantKey = (combatant: Combatant) => ('id' in combatant ? combatant
 
 const getCombatantIdentifier = getCombatantKey;
 
+type Queue = 'strict' | 'free';
+
+type ApiRating = {
+  queue: Queue;
+  rating: number;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  tier: string;
+};
+
+type DataCardMetaResponse = {
+  success: boolean;
+  metrics: { techScore: number; techLevel: string } | null;
+  ratings: { strict: ApiRating | null; free: ApiRating | null };
+};
+
+type PresetMetaResponse = {
+  success: boolean;
+  ratings: { strict: ApiRating | null; free: ApiRating | null };
+};
+
+type GenerationRankingResponse =
+  | { success: true; state: 'pending'; message: string; generationId: string }
+  | {
+      success: true;
+      state: 'ready';
+      generationId: string;
+      snapshot: { status: string | null; combatantCount: number | null };
+      participants: Array<{
+        displayName: string;
+        entityKey: string | null;
+        queues: Record<Queue, {
+          eligible: boolean;
+          ineligibleReasons: string[];
+          eventStatus: 'missing' | 'pending' | 'applied' | 'skipped' | 'failed';
+          skipReason: string | null;
+          rating: number | null;
+          games: number | null;
+          tier: string | null;
+          delta: number | null;
+        }>;
+      }>;
+    }
+  | { success: false; generationId: string; error: string };
+
+const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
+  const res = await fetch(url, init);
+  const json = (await res.json()) as T;
+  if (!res.ok) {
+    const errorMessage =
+      typeof (json as any)?.error === 'string' ? (json as any).error : `HTTP ${res.status}: ${JSON.stringify(json)}`;
+    throw new Error(errorMessage);
+  }
+  return json;
+};
+
+const buildEntityKeyForCombatant = (combatant: CombatantData): string | null => {
+  if (combatant.isPreset) {
+    const id = (combatant.filename ?? '').toString().trim();
+    return id ? `preset:${id}` : null;
+  }
+  const id = (combatant.sourceDataCardId ?? '').toString().trim();
+  return id ? `data_card:${id}` : null;
+};
+
+const pickTierBadge = (ratings?: { strict: ApiRating | null; free: ApiRating | null } | null): { tier: string; label: string } | null => {
+  if (ratings?.strict?.tier) return { tier: ratings.strict.tier, label: '严格' };
+  if (ratings?.free?.tier) return { tier: ratings.free.tier, label: '自由' };
+  return null;
+};
+
+const formatIneligibleReasons = (reasons: string[]): string => {
+  const map: Record<string, string> = {
+    'status-not-completed': '战报未完成',
+    'combatant-count-not-2': '需 2 人对战',
+    'ip-missing': '无法获取 IP',
+    'mode-not-classic': '需经典模式',
+    'need-login': '需登录',
+    'has-user-guidance': '存在故事引导',
+    'has-adjudication-events': '存在随机判定器事件',
+    'read-arena-history': '开启读取历战',
+    'read-current-state': '开启读取当前状态',
+    'has-character-guidance': '存在角色行动引导',
+  };
+  return reasons.map((r) => map[r] ?? r).join('、');
+};
+
+const formatSkipReason = (reason: string | null): string => {
+  if (!reason) return '未知原因';
+  const map: Record<string, string> = {
+    'winner-empty': '战报未给出胜者',
+    'multi-winner': '胜者包含多人',
+    'winner-ambiguous': '胜者无法匹配参战者',
+    'daily-limit': '今日严格排位次数已达上限',
+    'dedup-user-pair': '短时间同一对手重复对局（严格去重）',
+    'dedup-ip-pair': '短时间同 IP 重复对局（自由去重）',
+    'ratings-missing': '排位记录缺失',
+    'rating-conflict': '排位并发冲突',
+  };
+  return map[reason] ?? reason;
+};
+
 export function CombatantList({ onShowDetails }: CombatantListProps) {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const teams = useBattleSelector((state) => state.teams);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const lastGenerationId = useBattleSelector((state) => state.lastGenerationId);
   const removeCombatant = useBattleSelector((state) => state.removeCombatant);
   const moveCombatant = useBattleSelector((state) => state.moveCombatant);
   const addTeam = useBattleSelector((state) => state.addTeam);
@@ -127,6 +237,118 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
     }, 2000);
   };
 
+  const readableCombatants = useMemo(
+    () => combatants.filter((c): c is CombatantData => 'data' in c),
+    [combatants],
+  );
+
+  const techByCombatantKey = useMemo(() => {
+    const map = new Map<string, { techScore: number; techLevel: string }>();
+    for (const combatant of readableCombatants) {
+      const key = getCombatantKey(combatant);
+      try {
+        const result = computeTechIndex(combatant.data);
+        map.set(key, { techScore: result.techScore, techLevel: result.techLevel });
+      } catch {
+        // 技术值用于增强显示，失败不影响主流程
+      }
+    }
+    return map;
+  }, [readableCombatants]);
+
+  const metaTargets = useMemo(() => {
+    return readableCombatants
+      .map((combatant) => {
+        const entityKey = buildEntityKeyForCombatant(combatant);
+        if (!entityKey) return null;
+        if (combatant.isPreset) {
+          return {
+            entityKey,
+            kind: 'preset' as const,
+            id: combatant.filename,
+          };
+        }
+        const dataCardId = combatant.sourceDataCardId;
+        if (!dataCardId) return null;
+        return {
+          entityKey,
+          kind: 'data_card' as const,
+          id: dataCardId,
+        };
+      })
+      .filter(Boolean) as Array<{ entityKey: string; kind: 'data_card' | 'preset'; id: string }>;
+  }, [readableCombatants]);
+
+  const metaQueries = useQueries({
+    queries: metaTargets.map((target) => {
+      if (target.kind === 'preset') {
+        return {
+          queryKey: ['arenaPresetMeta', target.id],
+          queryFn: () => fetchJson<PresetMetaResponse>(`/api/arena/preset-meta?entityId=${encodeURIComponent(target.id)}`),
+          staleTime: 60_000,
+        };
+      }
+      return {
+        queryKey: ['arenaDataCardMeta', target.id],
+        queryFn: async () => {
+          const authHeader = await authStorage.getAuthHeader();
+          const headers: Record<string, string> = {};
+          if (authHeader) headers.Authorization = authHeader;
+          return fetchJson<DataCardMetaResponse>(
+            `/api/data-card-meta?dataCardId=${encodeURIComponent(target.id)}`,
+            Object.keys(headers).length > 0 ? { headers } : undefined,
+          );
+        },
+        staleTime: 60_000,
+      };
+    }),
+  });
+
+  const metaByEntityKey = useMemo(() => {
+    const map = new Map<string, { ratings: { strict: ApiRating | null; free: ApiRating | null }; tech?: { techScore: number; techLevel: string } | null }>();
+    metaTargets.forEach((target, index) => {
+      const data = metaQueries[index]?.data as any;
+      const ratings = (data?.ratings ?? { strict: null, free: null }) as { strict: ApiRating | null; free: ApiRating | null };
+      const tech = (data?.metrics ?? null) as { techScore: number; techLevel: string } | null;
+      map.set(target.entityKey, { ratings, tech });
+    });
+    return map;
+  }, [metaQueries, metaTargets]);
+
+  const generationRankingQuery = useQuery({
+    queryKey: ['arenaGenerationRanking', lastGenerationId],
+    queryFn: () =>
+      fetchJson<GenerationRankingResponse>(
+        `/api/arena/generation-ranking?generationId=${encodeURIComponent(lastGenerationId as string)}`,
+      ),
+    enabled: Boolean(lastGenerationId),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return 1500;
+      if (data.success && data.state === 'pending') return 1500;
+      if (data.success && data.state === 'ready') {
+        const hasAnyQueuePending = data.participants.some((p) =>
+          (p.queues.strict.eligible && (p.queues.strict.eventStatus === 'missing' || p.queues.strict.eventStatus === 'pending')) ||
+          (p.queues.free.eligible && (p.queues.free.eventStatus === 'missing' || p.queues.free.eventStatus === 'pending')),
+        );
+        return hasAnyQueuePending ? 1500 : false;
+      }
+      return false;
+    },
+  });
+
+  const generationParticipantByEntityKey = useMemo(() => {
+    const map = new Map<string, NonNullable<Extract<GenerationRankingResponse, { success: true; state: 'ready' }>>['participants'][number]>();
+    const data = generationRankingQuery.data;
+    if (!data || !data.success || data.state !== 'ready') return map;
+    data.participants.forEach((p) => {
+      if (typeof p.entityKey === 'string' && p.entityKey.trim()) {
+        map.set(p.entityKey.trim(), p);
+      }
+    });
+    return map;
+  }, [generationRankingQuery.data]);
+
   if (combatants.length === 0) {
     return null;
   }
@@ -136,6 +358,18 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
     const key = getCombatantKey(combatant);
     const data = isPlaceholder ? null : (combatant as CombatantData);
     const displayName = isPlaceholder ? combatant.filename : getCombatantDisplayName(data?.data);
+    const entityKey = !isPlaceholder && data ? buildEntityKeyForCombatant(data) : null;
+    const meta = entityKey ? metaByEntityKey.get(entityKey) : null;
+    const tierBadge = meta ? pickTierBadge(meta.ratings) : null;
+    const localTech = techByCombatantKey.get(key) ?? null;
+    const techLevel = meta?.tech?.techLevel ?? localTech?.techLevel ?? null;
+    const techScore = meta?.tech?.techScore ?? localTech?.techScore ?? null;
+    const generationParticipant = entityKey ? generationParticipantByEntityKey.get(entityKey) : null;
+    const fallbackTier = generationParticipant?.queues.strict.tier ?? generationParticipant?.queues.free.tier ?? null;
+    const fallbackTierLabel =
+      generationParticipant?.queues.strict.tier ? '严格' : (generationParticipant?.queues.free.tier ? '自由' : '');
+    const tierToShow = tierBadge?.tier ?? fallbackTier ?? (isPlaceholder ? null : (entityKey ? '无牌' : '未登记'));
+    const tierLabelToShow = tierBadge?.label ?? fallbackTierLabel;
     const typeDisplay = isPlaceholder
       ? combatant.type === 'random-magical-girl'
         ? '(随机魔法少女)'
@@ -184,6 +418,15 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                     <span className="text-orange-500 font-semibold whitespace-nowrap">(非规范格式)</span>
                   )}
                   {!isPlaceholder && data?.wasCorrected && <span className="text-yellow-600 whitespace-nowrap">(格式已修正)</span>}
+                  {!isPlaceholder && techLevel && (
+                    <span className="whitespace-nowrap text-gray-600">技术等级：{techLevel}</span>
+                  )}
+                  {!isPlaceholder && tierToShow && (
+                    <span className="flex items-center gap-1">
+                      <TierBadge tier={tierToShow} />
+                      {tierLabelToShow ? <span className="text-[10px] text-gray-500">({tierLabelToShow})</span> : null}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -241,6 +484,50 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
             {!isPlaceholder && guidanceOpenFor !== key && data?.characterGuidance?.trim() && (
               <div className="mt-1 text-xs text-gray-500 italic break-words">
                 行动引导：{data.characterGuidance.trim()}
+              </div>
+            )}
+
+            {!isPlaceholder && entityKey && lastGenerationId && !generationParticipant && generationRankingQuery.data?.success && generationRankingQuery.data.state === 'pending' && (
+              <div className="mt-1 text-xs text-gray-600">排位结算中…（可能需要几秒钟）</div>
+            )}
+
+            {!isPlaceholder && !entityKey && lastGenerationId && generationRankingQuery.data?.success && generationRankingQuery.data.state === 'ready' && (
+              <div className="mt-1 text-xs text-gray-600">本角色未登记为数据卡/预设，无法参与排位计分。</div>
+            )}
+
+            {!isPlaceholder && generationParticipant && (generationParticipant.queues.strict.eligible || generationParticipant.queues.free.eligible) && (
+              <div className="mt-1 text-xs text-gray-600">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="whitespace-nowrap">
+                    技术值：{typeof techScore === 'number' ? `${techScore} (${techLevel ?? '-'})` : '-'}
+                  </span>
+                  <span className="whitespace-nowrap">
+                    严格：{(() => {
+                      const q = generationParticipant.queues.strict;
+                      if (!q.eligible) return `未满足（${formatIneligibleReasons(q.ineligibleReasons)}）`;
+                      if (q.eventStatus === 'missing' || q.eventStatus === 'pending') return '结算中...';
+                      if (q.eventStatus === 'skipped' || q.eventStatus === 'failed') return `失败（${formatSkipReason(q.skipReason)}）`;
+                      const delta = typeof q.delta === 'number' ? (q.delta >= 0 ? `+${q.delta}` : String(q.delta)) : '±0';
+                      return `${q.rating ?? '-'}（Δ${delta}）`;
+                    })()}
+                  </span>
+                  <span className="whitespace-nowrap">
+                    自由：{(() => {
+                      const q = generationParticipant.queues.free;
+                      if (!q.eligible) return `未满足（${formatIneligibleReasons(q.ineligibleReasons)}）`;
+                      if (q.eventStatus === 'missing' || q.eventStatus === 'pending') return '结算中...';
+                      if (q.eventStatus === 'skipped' || q.eventStatus === 'failed') return `失败（${formatSkipReason(q.skipReason)}）`;
+                      const delta = typeof q.delta === 'number' ? (q.delta >= 0 ? `+${q.delta}` : String(q.delta)) : '±0';
+                      return `${q.rating ?? '-'}（Δ${delta}）`;
+                    })()}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {!isPlaceholder && generationParticipant && !(generationParticipant.queues.strict.eligible || generationParticipant.queues.free.eligible) && (
+              <div className="mt-1 text-xs text-gray-600">
+                本局未进入排位：{formatIneligibleReasons(generationParticipant.queues.free.ineligibleReasons)}
               </div>
             )}
           </div>
@@ -485,4 +772,3 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
     </div>
   );
 }
-
