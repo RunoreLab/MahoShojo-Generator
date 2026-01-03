@@ -41,11 +41,11 @@ type CardRatingLite = {
   games: number;
   tier: string;
   publicRank: number | null;
+  publicTotal: number | null;
 } | null;
 
 type CardRatingsLite = {
   strict: CardRatingLite;
-  free: CardRatingLite;
 };
 
 type CharacterHighlight = CardLite & {
@@ -211,11 +211,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     try {
       const strictResult = (await queryFromD1(baseSql, ['strict', auth.user.id])) as any;
       const strictRow = readRows<UserTopDataCardRow>(strictResult)[0];
-      if (strictRow?.id) return strictRow;
-
-      const freeResult = (await queryFromD1(baseSql, ['free', auth.user.id])) as any;
-      const freeRow = readRows<UserTopDataCardRow>(freeResult)[0];
-      return freeRow?.id ? freeRow : null;
+      return strictRow?.id ? strictRow : null;
     } catch (error) {
       console.warn('读取最高排位角色卡失败（降级为 null）:', error);
       return null;
@@ -281,13 +277,13 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
   type RatingRow = {
     dataCardId: string;
-    queue: 'strict' | 'free';
+    queue: 'strict';
     rating: number;
     games: number;
     updatedAt: string;
   };
 
-  const ratingsById = new Map<string, { strict?: RatingRow; free?: RatingRow }>();
+  const ratingsById = new Map<string, { strict?: RatingRow }>();
   if (characterHighlightIds.length > 0) {
     try {
       const placeholders = characterHighlightIds.map(() => '?').join(', ');
@@ -301,13 +297,13 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
          FROM arena_ratings
          WHERE entity_type = 'data_card'
            AND entity_id IN (${placeholders})
-           AND queue IN ('strict','free')`,
+           AND queue = 'strict'`,
         characterHighlightIds,
       )) as any;
       const rows = readRows<RatingRow>(ratingsResult);
       rows.forEach((row) => {
         if (!row?.dataCardId) return;
-        if (row.queue !== 'strict' && row.queue !== 'free') return;
+        if (row.queue !== 'strict') return;
         const entry = ratingsById.get(row.dataCardId) ?? {};
         entry[row.queue] = row;
         ratingsById.set(row.dataCardId, entry);
@@ -318,7 +314,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
   }
 
   const computePublicRank = async (payload: {
-    queue: 'strict' | 'free';
+    queue: 'strict';
     rating: number;
     games: number;
     updatedAt: string;
@@ -375,7 +371,36 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     }
   };
 
-  const buildRating = async (row: RatingRow | undefined): Promise<CardRatingLite> => {
+  const computePublicTotal = async (queue: 'strict'): Promise<number | null> => {
+    try {
+      const result = (await queryFromD1(
+        `SELECT COUNT(*) as total
+         FROM arena_ratings ar
+         LEFT JOIN data_cards dc
+           ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
+         WHERE ar.queue = ?
+           AND (
+             ar.entity_type = 'preset'
+             OR (
+               dc.id IS NOT NULL
+               AND dc.type = 'character'
+               AND dc.is_public = 1
+               AND dc.review_status = 'approved'
+               AND dc.deleted_at IS NULL
+             )
+           )`,
+        [queue],
+      )) as any;
+      const row = readRows<{ total: unknown }>(result)[0];
+      return clampInt(row?.total);
+    } catch {
+      return null;
+    }
+  };
+
+  const strictPublicTotal = await computePublicTotal('strict');
+
+  const buildRating = async (row: RatingRow | undefined, publicTotal: number | null): Promise<CardRatingLite> => {
     if (!row) return null;
     if (typeof row.rating !== 'number' || typeof row.games !== 'number') return null;
     const tier = computeTier(row.rating, row.games);
@@ -386,19 +411,18 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
       updatedAt: row.updatedAt,
       dataCardId: row.dataCardId,
     });
-    return { rating: row.rating, games: row.games, tier, publicRank };
+    return { rating: row.rating, games: row.games, tier, publicRank, publicTotal };
   };
 
   const mapCharacterHighlight = async (row: UserTopDataCardRow): Promise<CharacterHighlight> => {
     const base = mapCard(row);
     const metrics = metricsById.get(row.id) ?? null;
     const ratingRows = ratingsById.get(row.id) ?? {};
-    const strict = await buildRating(ratingRows.strict);
-    const free = await buildRating(ratingRows.free);
+    const strict = await buildRating(ratingRows.strict, strictPublicTotal);
     return {
       ...base,
       metrics,
-      ratings: { strict, free },
+      ratings: { strict },
     };
   };
 
