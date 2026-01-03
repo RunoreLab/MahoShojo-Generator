@@ -207,14 +207,13 @@ const extractTextAndStructure = (value: unknown, config: TechIndexConfig): Extra
       return;
     }
 
-    const currentType = typeof current;
-    if (currentType === 'string') {
+    if (typeof current === 'string') {
       jsonTotalNodes += 1;
       pushText(current);
       return;
     }
 
-    if (currentType === 'number' || currentType === 'boolean') {
+    if (typeof current === 'number' || typeof current === 'boolean') {
       jsonTotalNodes += 1;
       return;
     }
@@ -228,7 +227,7 @@ const extractTextAndStructure = (value: unknown, config: TechIndexConfig): Extra
       return;
     }
 
-    if (currentType === 'object') {
+    if (typeof current === 'object') {
       jsonTotalNodes += 1;
       for (const [key, child] of Object.entries(current as Record<string, unknown>)) {
         if (excludedKeys.has(key)) continue;
