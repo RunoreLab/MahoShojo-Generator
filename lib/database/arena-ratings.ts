@@ -36,6 +36,25 @@ export const INITIAL_RATING = 1000;
 export const STRICT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const FREE_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
+export async function resetStrictArenaRatingForDataCard(dataCardId: string): Promise<void> {
+  const id = typeof dataCardId === 'string' ? dataCardId.trim() : '';
+  if (!id) return;
+
+  try {
+    const nowIso = new Date().toISOString();
+    await queryFromD1(
+      `UPDATE arena_ratings
+       SET rating = ?, games = 0, wins = 0, losses = 0, draws = 0, updated_at = ?
+       WHERE entity_type = 'data_card'
+         AND entity_id = ?
+         AND queue = 'strict'`,
+      [INITIAL_RATING, nowIso, id]
+    );
+  } catch (error) {
+    console.warn('重置严格排位分失败（降级为忽略）:', { dataCardId, error });
+  }
+}
+
 const isFiniteInteger = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value);
 
 const readD1Changes = (result: unknown): number => {

@@ -17,6 +17,7 @@ import { formatKilobytes, getUtf8ByteLength, MAX_DATA_CARD_BYTES } from '@/lib/d
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
+import { resetStrictArenaRatingForDataCard } from '@/lib/database/arena-ratings';
 
 export const runtime = 'edge';
 
@@ -316,11 +317,16 @@ export default async function handler(req: Request): Promise<Response> {
             );
 
             const metricsPromise = computeAndUpsertMetrics(id, dataString!);
+            const resetStrictPromise =
+              currentCard.type === 'character'
+                ? resetStrictArenaRatingForDataCard(id)
+                : Promise.resolve();
+            const combined = Promise.all([metricsPromise, resetStrictPromise]).then(() => undefined);
             const executionContext = (req as any).context;
             if (executionContext?.waitUntil) {
-              executionContext.waitUntil(metricsPromise);
+              executionContext.waitUntil(combined);
             } else {
-              await metricsPromise;
+              await combined;
             }
           }
 
@@ -344,6 +350,18 @@ export default async function handler(req: Request): Promise<Response> {
               headers: { 'Content-Type': 'application/json' }
             });
           }
+
+          // v0.6.0：角色卡 JSON 更新时重置严格排位分（free 不重置）
+          if (currentCard.type === 'character') {
+            const resetPromise = resetStrictArenaRatingForDataCard(id);
+            const executionContext = (req as any).context;
+            if (executionContext?.waitUntil) {
+              executionContext.waitUntil(resetPromise);
+            } else {
+              await resetPromise;
+            }
+          }
+
           return new Response(JSON.stringify({ success: true, pendingReview: true, message: '更新已提交，待审核' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }

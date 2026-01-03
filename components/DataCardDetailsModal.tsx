@@ -30,6 +30,9 @@ type ApiRating = {
   losses: number;
   draws: number;
   tier: string;
+  lastDelta: number | null;
+  lastAppliedAt: string | null;
+  publicRank: number | null;
 };
 
 type ApiMetaResponse =
@@ -136,6 +139,8 @@ export default function DataCardDetailsModal({
     if (!meta?.tags) return [];
     return meta.tags;
   }, [meta?.tags]);
+
+  const formatSignedDelta = (value: number) => (value >= 0 ? `+${value}` : String(value));
 
   const openTagEditor = useCallback(async () => {
     if (!isOwner) return;
@@ -345,9 +350,40 @@ export default function DataCardDetailsModal({
                       </span>
                       {card.type === 'character' && (
                         <span>
-                          排位：{meta.ratings.strict ? `strict ${meta.ratings.strict.rating}（${meta.ratings.strict.tier}）` : 'strict —'}
+                          排位：
+                          {meta.ratings.strict ? (
+                            <span
+                              title={
+                                meta.ratings.strict.lastDelta != null && meta.ratings.strict.lastAppliedAt
+                                  ? `最近变动：Δ${formatSignedDelta(meta.ratings.strict.lastDelta)} @ ${formatDateTime(meta.ratings.strict.lastAppliedAt)}`
+                                  : undefined
+                              }
+                            >
+                              strict {meta.ratings.strict.rating}（{meta.ratings.strict.tier}
+                              {meta.ratings.strict.lastDelta != null ? `，Δ${formatSignedDelta(meta.ratings.strict.lastDelta)}` : ''}
+                              {isOwner && meta.ratings.strict.publicRank != null ? `，公共#${meta.ratings.strict.publicRank}` : ''}
+                              ）
+                            </span>
+                          ) : (
+                            'strict —'
+                          )}
                           {' / '}
-                          {meta.ratings.free ? `free ${meta.ratings.free.rating}（${meta.ratings.free.tier}）` : 'free —'}
+                          {meta.ratings.free ? (
+                            <span
+                              title={
+                                meta.ratings.free.lastDelta != null && meta.ratings.free.lastAppliedAt
+                                  ? `最近变动：Δ${formatSignedDelta(meta.ratings.free.lastDelta)} @ ${formatDateTime(meta.ratings.free.lastAppliedAt)}`
+                                  : undefined
+                              }
+                            >
+                              free {meta.ratings.free.rating}（{meta.ratings.free.tier}
+                              {meta.ratings.free.lastDelta != null ? `，Δ${formatSignedDelta(meta.ratings.free.lastDelta)}` : ''}
+                              {isOwner && meta.ratings.free.publicRank != null ? `，公共#${meta.ratings.free.publicRank}` : ''}
+                              ）
+                            </span>
+                          ) : (
+                            'free —'
+                          )}
                         </span>
                       )}
                     </div>
