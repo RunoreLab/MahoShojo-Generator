@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Download, Heart, Share, Info, Ban, AlertTriangle, Clock, XCircle, Star, BadgeCheck } from 'lucide-react';
 import { isCardLiked, addLikedCard } from '@/lib/localStorage';
 import { getDataCardStatus } from '@/lib/database/data-cards';
@@ -253,21 +254,36 @@ export default function DataCard({
               </span>
             )}
             {pending && (
-              <span className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-200">
+              <Link
+                href="/encyclopedia/review"
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-200 hover:underline"
+                title="了解公开与审核机制"
+              >
                 <Clock className="w-3 h-3" /> 更新审核中
-              </span>
+              </Link>
             )}
             {reviewStatus === 'pending' && isPublic === 1 && (
-              <span className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-yellow-100 text-yellow-800 border border-yellow-200">
+              <Link
+                href="/encyclopedia/review"
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-yellow-100 text-yellow-800 border border-yellow-200 hover:underline"
+                title="了解公开与审核机制"
+              >
                 <Clock className="w-3 h-3" />
                 审查中
-              </span>
+              </Link>
             )}
             {reviewStatus === 'rejected' && (
-              <span className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-red-100 text-red-800 border border-red-200">
+              <Link
+                href="/encyclopedia/review"
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs px-2 py-1 rounded-full flex items-center gap-1 bg-red-100 text-red-800 border border-red-200 hover:underline"
+                title="了解公开与审核机制"
+              >
                 <XCircle className="w-3 h-3" />
                 未通过
-              </span>
+              </Link>
             )}
             <span className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
               cardStatus.status === 'banned' 
