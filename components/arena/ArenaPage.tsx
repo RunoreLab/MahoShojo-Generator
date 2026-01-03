@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
@@ -9,7 +10,7 @@ import Footer from '@/components/Footer';
 import { qqGroups } from '@/lib/communityGroups';
 import { useAuth } from '@/lib/useAuth';
 import { config as appConfig } from '@/lib/config';
-import { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 
 import { BattleHeader } from './components/BattleHeader';
 import { PresetSelector } from './components/PresetSelector';
@@ -126,6 +127,11 @@ export function ArenaPage() {
         <div className="container">
           <div className="card" style={{ border: '2px solid #ccc', background: '#f9f9f9' }}>
             <BattleHeader />
+            <div className="flex justify-end mt-2">
+              <Link href="/ranking" className="text-sm text-blue-600 hover:underline font-semibold">
+                查看排位排行榜（v0.6.0）
+              </Link>
+            </div>
             <PresetSelector />
             <DatabaseSelector
               onOpenCharacterModal={handleOpenCharacterDataModal}

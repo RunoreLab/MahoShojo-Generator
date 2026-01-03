@@ -33,6 +33,7 @@ import {
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
 import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
+import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
@@ -622,18 +623,26 @@ async function handler(req: NextRequest): Promise<Response> {
                         errorMessage: combatantsWrite.errorMessage ?? null,
                     });
 
-                    if (!combatantsWrite.ok) {
-                        await updateBattleReportGenerationExtraJson(
-                            recordId,
-                            compactExtraJson({
-                                errorMessage: normalizeErrorMessage(normalizedErrorMessage),
-                                combatantsFallbackReason: 'combatants-table-write-failed',
-                                combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
-                            })
-                        );
+	                    if (!combatantsWrite.ok) {
+	                        await updateBattleReportGenerationExtraJson(
+	                            recordId,
+	                            compactExtraJson({
+	                                errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+	                                combatantsFallbackReason: 'combatants-table-write-failed',
+	                                combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
+	                            })
+	                        );
+	                    }
+	                }
+
+                    if (recordId) {
+                        try {
+                            await settleArenaRatingsForGeneration(recordId);
+                        } catch (error) {
+                            log.warn('排位结算失败（非阻塞）', { recordId, error });
+                        }
                     }
-                }
-            })();
+	            })();
 
             try {
                 if (executionContext?.waitUntil) {

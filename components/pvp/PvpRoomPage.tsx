@@ -42,7 +42,7 @@ import { isLegacyAdjudicatorFormat, mergeAdjudicationEvents } from '@/lib/pvp/ad
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
 import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
 
-import type { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 import type { UserBadge } from '@/types/badge';
 import { revokeBlobUrl } from '@/lib/client/blobUrl';
 

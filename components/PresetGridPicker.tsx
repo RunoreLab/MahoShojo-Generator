@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 
-import type { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 
 const PRESETS_PER_PAGE = 4;
 
