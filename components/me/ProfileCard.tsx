@@ -33,11 +33,11 @@ type CardRatingLite = {
   games: number;
   tier: string;
   publicRank: number | null;
+  publicTotal: number | null;
 } | null;
 
 type CardRatingsLite = {
   strict: CardRatingLite;
-  free: CardRatingLite;
 };
 
 type CharacterHighlight = CardLite & {
@@ -191,9 +191,11 @@ const formatCount = (value: unknown): string => {
   return value.toLocaleString('zh-CN');
 };
 
-const formatRank = (value: number | null | undefined): string => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '—';
-  return `#${Math.floor(value)}`;
+const formatRankFraction = (rank: number | null | undefined, total: number | null | undefined): string | null => {
+  const safeRank = typeof rank === 'number' && Number.isFinite(rank) && rank > 0 ? Math.floor(rank) : null;
+  if (safeRank == null) return null;
+  const safeTotal = typeof total === 'number' && Number.isFinite(total) && total > 0 ? Math.floor(total) : null;
+  return safeTotal == null ? `#${safeRank}` : `#${safeRank}/${safeTotal}`;
 };
 
 const buildTokenBreakdownLabel = (report: BattleReportLite): string => {
@@ -299,10 +301,14 @@ export function ProfileCard({
     const techLevel = c.metrics?.techLevel ?? null;
     const techScore = c.metrics?.techScore ?? null;
     const strict = c.ratings.strict;
-    const free = c.ratings.free;
+    const isPublicLeaderboardEligible = c.isPublic && c.reviewStatus === 'approved';
 
-    const strictLabel = strict ? `严格 ${strict.rating} ${formatRank(strict.publicRank)}` : '严格 —';
-    const freeLabel = free ? `自由 ${free.rating} ${formatRank(free.publicRank)}` : '自由 —';
+    const strictLabel = (() => {
+      if (!strict) return '无严格排位';
+      const ratingLabel = `${formatCount(strict.rating)}分`;
+      const rankLabel = isPublicLeaderboardEligible ? formatRankFraction(strict.publicRank, strict.publicTotal) : null;
+      return rankLabel ? `${ratingLabel} ${rankLabel}` : ratingLabel;
+    })();
 
     return (
       <div key={`${keyPrefix}-${c.id}`} className="rounded-xl bg-white/10 px-3 py-2">
@@ -315,8 +321,6 @@ export function ProfileCard({
           ) : null}
           {strict ? <TierBadge tier={strict.tier} /> : null}
           <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/90 whitespace-nowrap">{strictLabel}</div>
-          {free ? <TierBadge tier={free.tier} /> : null}
-          <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/90 whitespace-nowrap">{freeLabel}</div>
           {!c.isPublic ? (
             <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/85 whitespace-nowrap">🔒 私有</div>
           ) : null}
