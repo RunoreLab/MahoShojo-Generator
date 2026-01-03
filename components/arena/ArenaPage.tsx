@@ -30,6 +30,7 @@ import { useBattleStore } from './stores/useBattleStore';
 import { BattleStoreState, CombatantData, MAX_AUX_SCENARIOS, MAX_COMBATANTS } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
 import { usePresetQuery, useLanguagesQuery, useStatsQuery } from './hooks/useArenaData';
+import { ArenaRankingModal } from './components/ArenaRankingModal';
 
 export function ArenaPage() {
   const { isAuthenticated } = useAuth();
@@ -38,6 +39,7 @@ export function ArenaPage() {
   const [selectedCombatant, setSelectedCombatant] = useState<CombatantData | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
+  const [showRankingModal, setShowRankingModal] = useState(false);
 
   const combatants = useBattleStore((state: BattleStoreState) => state.combatants);
   const scenario = useBattleStore((state: BattleStoreState) => state.scenario);
@@ -128,9 +130,17 @@ export function ArenaPage() {
           <div className="card" style={{ border: '2px solid #ccc', background: '#f9f9f9' }}>
             <BattleHeader />
             <div className="flex justify-end mt-2">
-              <Link href="/ranking" className="text-sm text-blue-600 hover:underline font-semibold">
-                查看排行榜
-              </Link>
+              <div className="flex items-center gap-3 text-sm flex-wrap">
+                <button
+                  onClick={() => setShowRankingModal(true)}
+                  className="text-blue-600 hover:underline font-semibold"
+                >
+                  快速查看排行榜
+                </button>
+                <Link href="/ranking" className="text-blue-600 hover:underline">
+                  进入排行榜页
+                </Link>
+              </div>
             </div>
             <PresetSelector />
             <DatabaseSelector
@@ -298,6 +308,8 @@ export function ArenaPage() {
           }}
         />
       )}
+
+      <ArenaRankingModal isOpen={showRankingModal} onClose={() => setShowRankingModal(false)} />
     </>
   );
 }

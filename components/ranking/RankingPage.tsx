@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
+import { TierBadge } from '@/components/ranking/TierBadge';
+
 type Queue = 'strict' | 'free';
 type Sort = 'rating' | 'tech';
 
@@ -45,7 +47,16 @@ export function RankingPage() {
   const [sort, setSort] = useState<Sort>('rating');
   const [includePresets, setIncludePresets] = useState(true);
   const [isNative, setIsNative] = useState<'any' | '1' | '0'>('any');
-  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [includeTagIds, setIncludeTagIds] = useState<string[]>([]);
+  const [excludeTagIds, setExcludeTagIds] = useState<string[]>([]);
+  const [minRating, setMinRating] = useState('');
+  const [maxRating, setMaxRating] = useState('');
+  const [minGames, setMinGames] = useState('');
+  const [maxGames, setMaxGames] = useState('');
+  const [minTechScore, setMinTechScore] = useState('');
+  const [maxTechScore, setMaxTechScore] = useState('');
+  const [offset, setOffset] = useState(0);
+  const limit = 50;
 
   const tagsQuery = useQuery({
     queryKey: ['tags'],
@@ -59,16 +70,38 @@ export function RankingPage() {
   );
 
   const leaderboardQuery = useQuery({
-    queryKey: ['arenaLeaderboard', queue, sort, includePresets, isNative, selectedTagIds.join(',')],
+    queryKey: [
+      'arenaLeaderboard',
+      queue,
+      sort,
+      includePresets,
+      isNative,
+      includeTagIds.join(','),
+      excludeTagIds.join(','),
+      minRating,
+      maxRating,
+      minGames,
+      maxGames,
+      minTechScore,
+      maxTechScore,
+      offset,
+    ],
     queryFn: () => {
       const params = new URLSearchParams();
       params.set('queue', queue);
       params.set('sort', sort);
-      params.set('limit', '50');
-      params.set('offset', '0');
+      params.set('limit', String(limit));
+      params.set('offset', String(offset));
       params.set('includePresets', includePresets ? '1' : '0');
       params.set('isNative', isNative);
-      if (selectedTagIds.length > 0) params.set('tagIds', selectedTagIds.join(','));
+      if (includeTagIds.length > 0) params.set('tagIds', includeTagIds.join(','));
+      if (excludeTagIds.length > 0) params.set('excludeTagIds', excludeTagIds.join(','));
+      if (minRating.trim()) params.set('minRating', minRating.trim());
+      if (maxRating.trim()) params.set('maxRating', maxRating.trim());
+      if (minGames.trim()) params.set('minGames', minGames.trim());
+      if (maxGames.trim()) params.set('maxGames', maxGames.trim());
+      if (minTechScore.trim()) params.set('minTechScore', minTechScore.trim());
+      if (maxTechScore.trim()) params.set('maxTechScore', maxTechScore.trim());
       return fetchJson<{ success: boolean; items: LeaderboardItem[] }>(`/api/arena/leaderboard?${params.toString()}`);
     },
     staleTime: 10_000,
@@ -76,12 +109,40 @@ export function RankingPage() {
 
   const items = leaderboardQuery.data?.items ?? [];
 
-  const toggleTag = (tagId: string) => {
-    setSelectedTagIds((prev) => {
+  const toggleIncludeTag = (tagId: string) => {
+    setOffset(0);
+    setIncludeTagIds((prev) => {
       if (prev.includes(tagId)) return prev.filter((id) => id !== tagId);
       return [...prev, tagId];
     });
   };
+
+  const toggleExcludeTag = (tagId: string) => {
+    setOffset(0);
+    setExcludeTagIds((prev) => {
+      if (prev.includes(tagId)) return prev.filter((id) => id !== tagId);
+      return [...prev, tagId];
+    });
+  };
+
+  const resetFilters = () => {
+    setQueue('strict');
+    setSort('rating');
+    setIncludePresets(true);
+    setIsNative('any');
+    setIncludeTagIds([]);
+    setExcludeTagIds([]);
+    setMinRating('');
+    setMaxRating('');
+    setMinGames('');
+    setMaxGames('');
+    setMinTechScore('');
+    setMaxTechScore('');
+    setOffset(0);
+  };
+
+  const canGoPrev = offset > 0;
+  const canGoNext = items.length >= limit;
 
   return (
     <>
@@ -105,11 +166,14 @@ export function RankingPage() {
                 梯子
                 <select
                   value={queue}
-                  onChange={(e) => setQueue(e.target.value === 'free' ? 'free' : 'strict')}
+                  onChange={(e) => {
+                    setOffset(0);
+                    setQueue(e.target.value === 'free' ? 'free' : 'strict');
+                  }}
                   className="input-field mt-1"
                 >
-                  <option value="strict">strict（严格）</option>
-                  <option value="free">free（自由）</option>
+                  <option value="strict">严格</option>
+                  <option value="free">自由</option>
                 </select>
               </label>
 
@@ -117,7 +181,10 @@ export function RankingPage() {
                 排序
                 <select
                   value={sort}
-                  onChange={(e) => setSort(e.target.value === 'tech' ? 'tech' : 'rating')}
+                  onChange={(e) => {
+                    setOffset(0);
+                    setSort(e.target.value === 'tech' ? 'tech' : 'rating');
+                  }}
                   className="input-field mt-1"
                 >
                   <option value="rating">排位分</option>
@@ -130,6 +197,7 @@ export function RankingPage() {
                 <select
                   value={isNative}
                   onChange={(e) => {
+                    setOffset(0);
                     const v = e.target.value;
                     setIsNative(v === '1' ? '1' : v === '0' ? '0' : 'any');
                   }}
@@ -147,7 +215,10 @@ export function RankingPage() {
                   <input
                     type="checkbox"
                     checked={includePresets}
-                    onChange={(e) => setIncludePresets(e.target.checked)}
+                    onChange={(e) => {
+                      setOffset(0);
+                      setIncludePresets(e.target.checked);
+                    }}
                   />
                   <span>在榜单中包含预设</span>
                 </div>
@@ -155,30 +226,151 @@ export function RankingPage() {
             </div>
 
             <div className="mt-4">
-              <div className="text-sm font-medium text-gray-700 mb-2">标签筛选（OR）</div>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-sm font-medium text-gray-700">标签筛选</div>
+                <button
+                  onClick={resetFilters}
+                  className="text-xs px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50"
+                >
+                  重置筛选
+                </button>
+              </div>
               {tagsQuery.isLoading ? (
                 <div className="text-sm text-gray-500">正在加载标签库...</div>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {activeTags.map((tag) => (
-                    <button
-                      key={tag.id}
-                      onClick={() => toggleTag(tag.id)}
-                      className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                        selectedTagIds.includes(tag.id)
-                          ? 'bg-purple-600 text-white border-purple-600'
-                          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                      }`}
-                      title={tag.description ?? undefined}
-                    >
-                      {tag.name}
-                    </button>
-                  ))}
-                  {activeTags.length === 0 && (
-                    <div className="text-sm text-gray-500">暂无可用标签（可先运行 scripts/init-tags.ts 同步种子）</div>
-                  )}
-                </div>
+                <>
+                  <div className="mt-2 text-xs text-gray-500">
+                    包含标签为“或（OR）”；排除标签会过滤掉包含任意排除项的数据卡（预设不受标签影响）。
+                  </div>
+
+                  <div className="mt-3">
+                    <div className="text-xs font-medium text-gray-700 mb-2">包含标签（OR）</div>
+                    <div className="flex flex-wrap gap-2">
+                      {activeTags.map((tag) => (
+                        <button
+                          key={`include:${tag.id}`}
+                          onClick={() => toggleIncludeTag(tag.id)}
+                          className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                            includeTagIds.includes(tag.id)
+                              ? 'bg-purple-600 text-white border-purple-600'
+                              : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                          }`}
+                          title={tag.description ?? undefined}
+                        >
+                          {tag.name}
+                        </button>
+                      ))}
+                      {activeTags.length === 0 && (
+                        <div className="text-sm text-gray-500">暂无可用标签（可先运行 scripts/init-tags.ts 同步种子）</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="text-xs font-medium text-gray-700 mb-2">排除标签</div>
+                    <div className="flex flex-wrap gap-2">
+                      {activeTags.map((tag) => (
+                        <button
+                          key={`exclude:${tag.id}`}
+                          onClick={() => toggleExcludeTag(tag.id)}
+                          className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                            excludeTagIds.includes(tag.id)
+                              ? 'bg-red-600 text-white border-red-600'
+                              : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                          }`}
+                          title={tag.description ?? undefined}
+                        >
+                          {tag.name}
+                        </button>
+                      ))}
+                      {activeTags.length === 0 && (
+                        <div className="text-sm text-gray-500">暂无可用标签（可先运行 scripts/init-tags.ts 同步种子）</div>
+                      )}
+                    </div>
+                  </div>
+                </>
               )}
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-6">
+              <label className="text-sm text-gray-700">
+                最低分
+                <input
+                  type="number"
+                  value={minRating}
+                  onChange={(e) => {
+                    setOffset(0);
+                    setMinRating(e.target.value);
+                  }}
+                  className="input-field mt-1"
+                  placeholder="如 900"
+                />
+              </label>
+              <label className="text-sm text-gray-700">
+                最高分
+                <input
+                  type="number"
+                  value={maxRating}
+                  onChange={(e) => {
+                    setOffset(0);
+                    setMaxRating(e.target.value);
+                  }}
+                  className="input-field mt-1"
+                  placeholder="如 1600"
+                />
+              </label>
+              <label className="text-sm text-gray-700">
+                最少对局
+                <input
+                  type="number"
+                  value={minGames}
+                  onChange={(e) => {
+                    setOffset(0);
+                    setMinGames(e.target.value);
+                  }}
+                  className="input-field mt-1"
+                  placeholder="如 5"
+                />
+              </label>
+              <label className="text-sm text-gray-700">
+                最多对局
+                <input
+                  type="number"
+                  value={maxGames}
+                  onChange={(e) => {
+                    setOffset(0);
+                    setMaxGames(e.target.value);
+                  }}
+                  className="input-field mt-1"
+                  placeholder="可留空"
+                />
+              </label>
+              <label className="text-sm text-gray-700">
+                最低技术值
+                <input
+                  type="number"
+                  value={minTechScore}
+                  onChange={(e) => {
+                    setOffset(0);
+                    setMinTechScore(e.target.value);
+                  }}
+                  className="input-field mt-1"
+                  placeholder="0-100"
+                />
+              </label>
+              <label className="text-sm text-gray-700">
+                最高技术值
+                <input
+                  type="number"
+                  value={maxTechScore}
+                  onChange={(e) => {
+                    setOffset(0);
+                    setMaxTechScore(e.target.value);
+                  }}
+                  className="input-field mt-1"
+                  placeholder="0-100"
+                />
+              </label>
             </div>
 
             <div className="mt-6">
@@ -209,7 +401,7 @@ export function RankingPage() {
                             <div className="font-medium text-gray-800">{item.displayName}</div>
                             <div className="text-xs text-gray-500">{item.entityType === 'preset' ? '预设' : '数据卡'}</div>
                           </td>
-                          <td className="py-2 pr-3">{item.tier}</td>
+                          <td className="py-2 pr-3"><TierBadge tier={item.tier} /></td>
                           <td className="py-2 pr-3 font-mono">{item.rating}</td>
                           <td className="py-2 pr-3 font-mono">{item.games}</td>
                           <td className="py-2 pr-3 font-mono">{item.wins}/{item.losses}/{item.draws}</td>
@@ -232,6 +424,28 @@ export function RankingPage() {
                   </table>
                 </div>
               )}
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-3 flex-wrap text-sm">
+              <div className="text-gray-500">
+                当前偏移：{offset}（每页 {limit}）
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setOffset((v) => Math.max(0, v - limit))}
+                  disabled={!canGoPrev}
+                  className="px-3 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
+                >
+                  上一页
+                </button>
+                <button
+                  onClick={() => setOffset((v) => v + limit)}
+                  disabled={!canGoNext}
+                  className="px-3 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
+                >
+                  下一页
+                </button>
+              </div>
             </div>
           </div>
         </div>
