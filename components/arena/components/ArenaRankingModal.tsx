@@ -110,6 +110,22 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
     [tagsQuery.data?.tags],
   );
 
+  const groupedActiveTags = useMemo(() => {
+    const sorted = activeTags.slice().sort((a, b) => {
+      const category = (a.category ?? '').localeCompare(b.category ?? '', 'zh-CN');
+      if (category !== 0) return category;
+      return a.name.localeCompare(b.name, 'zh-CN');
+    });
+    const map = new Map<string, Tag[]>();
+    for (const tag of sorted) {
+      const key = tag.category ?? '未分类';
+      const list = map.get(key) ?? [];
+      list.push(tag);
+      map.set(key, list);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b, 'zh-CN'));
+  }, [activeTags]);
+
   const leaderboardQuery = useQuery({
     queryKey: [
       'arenaLeaderboardModal',
@@ -377,39 +393,57 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-2">包含标签（OR）</div>
-                  <div className="flex flex-wrap gap-2">
-                    {activeTags.map((tag) => (
-                      <button
-                        key={`include:${tag.id}`}
-                        onClick={() => toggleIncludeTag(tag.id)}
-                        className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                          includeTagIds.includes(tag.id)
-                            ? 'bg-purple-600 text-white border-purple-600'
-                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                        }`}
-                        title={tag.description ?? undefined}
-                      >
-                        {tag.name}
-                      </button>
+                  <div className="max-h-56 overflow-auto pr-1 space-y-3">
+                    {groupedActiveTags.map(([category, categoryTags]) => (
+                      <div key={`include:${category}`}>
+                        <div className="text-[11px] font-medium text-gray-600">
+                          {category}（{categoryTags.length}）
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {categoryTags.map((tag) => (
+                            <button
+                              key={`include:${tag.id}`}
+                              onClick={() => toggleIncludeTag(tag.id)}
+                              className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                                includeTagIds.includes(tag.id)
+                                  ? 'bg-purple-600 text-white border-purple-600'
+                                  : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                              }`}
+                              title={tag.description ?? undefined}
+                            >
+                              {tag.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-2">排除标签</div>
-                  <div className="flex flex-wrap gap-2">
-                    {activeTags.map((tag) => (
-                      <button
-                        key={`exclude:${tag.id}`}
-                        onClick={() => toggleExcludeTag(tag.id)}
-                        className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                          excludeTagIds.includes(tag.id)
-                            ? 'bg-red-600 text-white border-red-600'
-                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                        }`}
-                        title={tag.description ?? undefined}
-                      >
-                        {tag.name}
-                      </button>
+                  <div className="max-h-56 overflow-auto pr-1 space-y-3">
+                    {groupedActiveTags.map(([category, categoryTags]) => (
+                      <div key={`exclude:${category}`}>
+                        <div className="text-[11px] font-medium text-gray-600">
+                          {category}（{categoryTags.length}）
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {categoryTags.map((tag) => (
+                            <button
+                              key={`exclude:${tag.id}`}
+                              onClick={() => toggleExcludeTag(tag.id)}
+                              className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                                excludeTagIds.includes(tag.id)
+                                  ? 'bg-red-600 text-white border-red-600'
+                                  : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                              }`}
+                              title={tag.description ?? undefined}
+                            >
+                              {tag.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -520,4 +554,3 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
     </div>
   );
 }
-

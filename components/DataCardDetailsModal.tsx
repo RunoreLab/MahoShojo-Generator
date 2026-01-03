@@ -171,8 +171,25 @@ export default function DataCardDetailsModal({
       .filter((t) => {
         if (!q) return true;
         return (t.name ?? '').toLowerCase().includes(q) || (t.category ?? '').toLowerCase().includes(q);
+      })
+      .slice()
+      .sort((a, b) => {
+        const category = (a.category ?? '').localeCompare(b.category ?? '', 'zh-CN');
+        if (category !== 0) return category;
+        return a.name.localeCompare(b.name, 'zh-CN');
       });
   }, [allTags, tagSearch]);
+
+  const groupedSelectableTags = useMemo(() => {
+    const map = new Map<string, ApiTag[]>();
+    for (const tag of selectableTags) {
+      const key = tag.category ?? '未分类';
+      const list = map.get(key) ?? [];
+      list.push(tag);
+      map.set(key, list);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b, 'zh-CN'));
+  }, [selectableTags]);
 
   const selectedTagCount = selectedTagIds.length;
   const isTagLimitReached = selectedTagCount >= 30;
@@ -475,28 +492,37 @@ export default function DataCardDetailsModal({
                         ) : tagsError ? (
                           <div className="mt-2 text-xs text-red-600">标签库加载失败：{tagsError}</div>
                         ) : (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {selectableTags.map((tag) => {
-                              const selected = selectedTagIds.includes(tag.id);
-                              const disabled = !selected && isTagLimitReached;
-                              return (
-                                <button
-                                  key={tag.id}
-                                  onClick={() => toggleSelectTag(tag.id)}
-                                  disabled={disabled}
-                                  className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                                    selected
-                                      ? 'bg-purple-600 text-white border-purple-600'
-                                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'
-                                  } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                  title={tag.description ?? undefined}
-                                >
-                                  {tag.name}
-                                </button>
-                              );
-                            })}
+                          <div className="mt-2 max-h-64 overflow-auto pr-1 space-y-3">
+                            {groupedSelectableTags.map(([category, categoryTags]) => (
+                              <div key={category}>
+                                <div className="text-[11px] font-medium text-gray-600">
+                                  {category}（{categoryTags.length}）
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {categoryTags.map((tag) => {
+                                    const selected = selectedTagIds.includes(tag.id);
+                                    const disabled = !selected && isTagLimitReached;
+                                    return (
+                                      <button
+                                        key={tag.id}
+                                        onClick={() => toggleSelectTag(tag.id)}
+                                        disabled={disabled}
+                                        className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                                          selected
+                                            ? 'bg-purple-600 text-white border-purple-600'
+                                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'
+                                        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        title={tag.description ?? undefined}
+                                      >
+                                        {tag.name}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
 
-                            {selectableTags.length === 0 && (
+                            {groupedSelectableTags.length === 0 && (
                               <div className="text-xs text-gray-500">没有匹配的标签</div>
                             )}
                           </div>
