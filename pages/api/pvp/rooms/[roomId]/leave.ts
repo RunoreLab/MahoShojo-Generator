@@ -1,4 +1,5 @@
 import {
+  clearPvpRoomEphemeralState,
   deletePvpRoomHand,
   deletePvpRoomSubmission,
   generateUUID,
@@ -14,7 +15,7 @@ import {
 } from '@/lib/d1';
 import { pickBotStrategyId } from '@/lib/pvp/bot/strategies';
 import { buildBotSubmissionPayload } from '@/lib/pvp/bot/submission';
-import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { clearPvpRoomRuntimeFromRulesJson, parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -104,7 +105,9 @@ async function leaveHandler(req: Request): Promise<Response> {
   }
 
   if (isBusyPhase) {
-    const patch = isHostLeaving ? { status: 'closed' as const, phase: 'closed' as const } : {};
+    const patch = isHostLeaving
+      ? { status: 'closed' as const, phase: 'closed' as const, rules_json: clearPvpRoomRuntimeFromRulesJson(room.rules_json) }
+      : {};
     const ok = await updatePvpRoomCas(roomId, expectedVersion, { ...patch, last_activity_at: now });
     await removePvpRoomPlayer(roomId, auth.user.id);
     await deletePvpRoomSubmission(roomId, auth.user.id);
@@ -209,7 +212,12 @@ async function leaveHandler(req: Request): Promise<Response> {
         ? { status: 'closed' as const, phase: 'closed' as const }
         : { phase: 'waiting' as const };
 
-  const ok = await updatePvpRoomCas(roomId, expectedVersion, { ...patch, last_activity_at: now });
+  const shouldClose = patch.status === 'closed' || patch.phase === 'closed';
+  const ok = await updatePvpRoomCas(roomId, expectedVersion, {
+    ...patch,
+    ...(shouldClose ? { rules_json: clearPvpRoomRuntimeFromRulesJson(room.rules_json) } : {}),
+    last_activity_at: now,
+  });
   if (!ok) {
     await removePvpRoomPlayer(roomId, auth.user.id);
     await deletePvpRoomSubmission(roomId, auth.user.id);
@@ -218,6 +226,16 @@ async function leaveHandler(req: Request): Promise<Response> {
   }
 
   await removePvpRoomPlayer(roomId, auth.user.id);
+
+  if (shouldClose) {
+    const cleanupPromise = clearPvpRoomEphemeralState(roomId);
+    const executionContext = (req as any).context;
+    if (executionContext?.waitUntil) {
+      executionContext.waitUntil(cleanupPromise);
+    } else {
+      cleanupPromise.catch((error) => console.warn('PVP 房间临时数据清理失败（非阻塞）:', error));
+    }
+  }
 
   return json({ success: true });
 }

@@ -39,6 +39,16 @@ SQLite 文件大小包含已释放但未回收的页面（freelist）。本次�
 
 ## 2. 关键结论（先看这个）
 
+### 2.0 需求确认（你在 2026-01-03 的补充结论）
+
+- D1 单库大小上限：目前距离上限约 **1.5 GB**（仍有缓冲，但需要尽快控制“持续增长项”）。  
+- `battle_report_generations.output_preview` 主要用于“重生战报”（允许慢一些），迁移后可接受 **直接置 NULL**（不要求列表/详情快速展示全文）。  
+- PVP：除“战绩记录/个人资料卡/统计”外，其它房间过程数据都可在 **全员退出或超时后立即清理**；不要求历史回放完全复现，但个人资料卡需要展示“每回合打出卡牌/胜利者”的**卡牌名字**。  
+- R2 对象访问：只对登录用户可见，不需要公开分享链接。  
+- 方案偏好：倾向 **方案 B（统一大对象索引表 large_objects）**，便于后续扩展（例如角色立绘）。  
+
+> 这会显著影响方案：战报正文不必保留 excerpt；PVP 可以更激进地“结算后清场”；同时必须确保“重生战报”在 output_preview 置空后仍能工作（需要改为从 R2 取全文）。  
+
 ### 2.1 近期增长最快、且体量最大的字段：`battle_report_generations.output_preview`
 
 对比 2025-12-24 → 2025-12-31：
@@ -176,6 +186,45 @@ SQLite 文件大小包含已释放但未回收的页面（freelist）。本次�
 
 业务表只存 `large_object_id` 或 `r2_key`，便于后续把更多字段迁移出去。
 
+#### 6.1.1 代码审阅要点：`重生战报` 当前依赖 `output_preview`
+
+当前实现中，`/api/me/battle-reports/:generationId/regenerate` 会把 `battle_report_generations.output_preview` 作为输入传给 `hydrateBattleReportCardFromGenerationRecord(...)`。  
+因此如果你希望迁移后 `output_preview = NULL`，则必须在 regenerate 路径做“**双读**”：
+
+- `output_preview` 有值：沿用旧逻辑（纯 D1 兼容）。  
+- `output_preview` 为空且存在 `large_objects` 引用：从 R2 读取全文（JSON/Markdown），再继续 hydrate。  
+- 读取失败：给出明确错误（不要 silent 生成空战报）。  
+
+这也是你强调“兼容 D1/R2 两种存储方式”的关键落点之一。
+
+#### 6.1.2 结合“登录可见、无公开分享”的落地建议
+
+- 不向客户端直接暴露 R2 公网 URL；由后端在校验权限后，用服务端签名请求读取 R2（或返回短期 presigned URL 也行，但你目前不需要公开分享，优先服务端直读更简单）。  
+- 建议把战报正文以 **`application/json; charset=utf-8` + gzip** 存 R2（内容本身高度可压缩，前期抽样 ratio ≈ 0.37–0.49）。  
+- `output_preview` 可以迁移后置 `NULL`（符合你的使用偏好），但建议保留 `output_bytes` / `headline` / `winner` 等可统计字段在 D1。  
+
+#### 6.1.3 large_objects（方案 B）推荐字段（可作为 schema 草案）
+
+> 以“未来可能保存/分享角色立绘”为前提，建议从一开始就做成通用对象索引表。
+
+- `id TEXT PRIMARY KEY`  
+- `kind TEXT NOT NULL`（例如：`battle_report_output_json` / `pvp_room_rules_json` / `tachie_image_webp`）  
+- `owner_user_id INTEGER`（可空；PVP 共享/系统生成可为空）  
+- `owner_ref_id TEXT`（generationId / roomId / dataCardId 等）  
+- `r2_key TEXT NOT NULL`  
+- `bytes INTEGER NOT NULL`  
+- `sha256 TEXT`（可选，用于去重/校验）  
+- `content_type TEXT`（如 `application/json; charset=utf-8`、`image/webp`）  
+- `content_encoding TEXT`（如 `gzip`，无则为空）  
+- `created_at TEXT NOT NULL`  
+- `updated_at TEXT NOT NULL`  
+
+（可选）约束/索引：
+
+- `UNIQUE(kind, owner_ref_id)`：保证“一个业务实体只挂一个同类大对象”。  
+- `INDEX(kind, created_at)`：便于做清理/统计。  
+- `INDEX(owner_user_id, created_at)`：便于按用户追踪体积/用量。  
+
 ### 6.2 P1：PVP 大 JSON 的“去内嵌 + 外部化快照”
 
 优先改造目标：
@@ -254,9 +303,56 @@ SQLite 文件大小包含已释放但未回收的页面（freelist）。本次�
 
 ---
 
+## 11. PVP：战绩/资料卡依赖梳理与“可清理清单”（基于代码审阅）
+
+### 11.1 个人资料卡与战绩页面依赖哪些表？
+
+从 `pages/api/me/profile-card.ts` 与 `pages/api/me/pvp.ts` 的调用链看：
+
+- 生涯战绩摘要：`pvp_match_players` + `pvp_matches`（completed/wins/losses/draws/aborted、last_played_at）。  
+- 最近对局列表：`pvp_matches` + `pvp_match_players`（对手昵称/前缀快照）。  
+- 回合胜负统计：`pvp_rounds`（按 match_id 聚合 winner_user_id）。  
+- 单场详情（我的对局 → 详情）：`pvp_matches` + `pvp_match_players` + `pvp_rounds`。  
+
+并且在回合结算写入 `pvp_rounds.result_json` 时，已经包含每个参战者的 `name`（卡牌名）与 `winnerName`（胜者名）。  
+因此“个人资料卡显示每回合打出卡牌/胜利者”在数据层面可以只依赖：
+
+- `pvp_rounds.winner_name` 与/或 `pvp_rounds.result_json.combatants[].name`  
+
+无需永久保留“房间提交/手牌/卡快照”等过程数据。
+
+### 11.2 结算后可立即清理的表/字段（不影响战绩统计）
+
+建议在“整场对局结束（phase=finished）”或“全员退出/超时关闭”后，清理以下内容：
+
+- `pvp_room_submissions`（submission_json 很大，且为过程数据）  
+- `pvp_room_hands`（过程数据）  
+- `pvp_room_card_snapshots`（用于结算时取卡牌全量 JSON；无历史回放需求时可删）  
+- `pvp_room_chat_messages`（可选，量不大但属于过程数据）  
+- `pvp_round_choices`（可选，结算后 result_json 已含参战卡名/快照 id，choices 冗余）  
+- `pvp_rooms.rules_json`：建议清理运行时字段（如 `_bots/_postRound/_winnerVote/_drawPile/_usedPile/...`），只保留规则配置与必要元数据，避免 rules_json 变成“房间状态垃圾桶”
+
+### 11.4 推荐触发点（实现层面）
+
+- **最后一回合确认推进（match 完结）**：在将房间推进到 `phase=finished` 时立刻清理一次（收益最大，且不再需要快照/手牌）。  
+- **房间关闭（全员退出/房主关闭）**：在 `status/phase` 进入 `closed` 时再兜底清理一次（覆盖“未打完就散场”的情况）。  
+
+两类触发点叠加，可以把“过程数据的留存时间”压到最短，从而显著减缓 D1 的持续增长。
+
+### 11.3 重要约束：不要直接删 `pvp_rooms` 行
+
+当前 schema 中，`pvp_matches.room_id` 与 `pvp_rounds.room_id` 均外键引用 `pvp_rooms(id)`（并可能存在级联删除）。  
+如果直接删除 `pvp_rooms` 行，存在把战绩主表一起删掉的风险。  
+
+在不做 schema 级解耦（例如把外键改为 `ON DELETE SET NULL`）之前，推荐策略是：
+
+- **保留 `pvp_rooms` 行**（仅作为历史关联占位），但把大字段/过程数据清空。  
+
+
+---
+
 ## 10. 附：本次统计中观察到的风险点（简述）
 
 - **freelist 膨胀**：删除/迁移不等于容量下降，必须配套 VACUUM/重建策略。  
 - **PVP JSON 内嵌重复**：`submission_json` 内嵌卡牌全量 JSON 是典型“空间指数型增长点”，应尽早改为“引用 + 可选快照”。  
 - **R2 外部化不是银弹**：若需要 SQL 级全文检索/统计，必须保留可检索的字段（如标题、摘要、结构化事件）在 D1。  
-

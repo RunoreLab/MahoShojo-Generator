@@ -1,4 +1,5 @@
 import {
+  clearPvpRoomEphemeralState,
   deletePvpRoomHand,
   deletePvpRoomSubmission,
   generateUUID,
@@ -14,7 +15,7 @@ import {
 } from '@/lib/d1';
 import { pickBotStrategyId } from '@/lib/pvp/bot/strategies';
 import { buildBotSubmissionPayload } from '@/lib/pvp/bot/submission';
-import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { clearPvpRoomRuntimeFromRulesJson, parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -192,9 +193,24 @@ async function kickHandler(req: Request): Promise<Response> {
   }
 
   const remaining = players.filter((p) => p.user_id !== targetId);
-  const ok = await updatePvpRoomCas(roomId, expectedVersion, { phase: remaining.length <= 0 ? 'closed' : 'waiting', last_activity_at: now, ...(remaining.length <= 0 ? { status: 'closed' as const } : {}) });
+  const shouldClose = remaining.length <= 0;
+  const ok = await updatePvpRoomCas(roomId, expectedVersion, {
+    phase: shouldClose ? 'closed' : 'waiting',
+    last_activity_at: now,
+    ...(shouldClose ? { status: 'closed' as const, rules_json: clearPvpRoomRuntimeFromRulesJson(room.rules_json) } : {}),
+  });
   if (!ok) return json({ error: '踢出失败（版本冲突），请刷新后重试', code: 'VERSION_CONFLICT' }, { status: 409 });
   await removePvpRoomPlayer(roomId, targetId);
+
+  if (shouldClose) {
+    const cleanupPromise = clearPvpRoomEphemeralState(roomId);
+    const executionContext = (req as any).context;
+    if (executionContext?.waitUntil) {
+      executionContext.waitUntil(cleanupPromise);
+    } else {
+      cleanupPromise.catch((error) => console.warn('PVP 房间临时数据清理失败（非阻塞）:', error));
+    }
+  }
 
   return json({ success: true, nextVersion: expectedVersion + 1 });
 }

@@ -1,6 +1,7 @@
 import {
   createPvpRound,
   createPvpCardSnapshot,
+  clearPvpRoomEphemeralState,
   getPvpCardSnapshotById,
   getPvpRoomById,
   getPvpRoomHands,
@@ -14,7 +15,7 @@ import {
   upsertPvpRoomHand,
 } from '@/lib/d1';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
-import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { clearPvpRoomRuntimeFromRulesJson, parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { isPvpCombatantTypeAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
@@ -582,13 +583,22 @@ async function confirmHandler(req: Request): Promise<Response> {
   }
 
   delete (internal.raw as any)._postRound;
+  const compactRulesJson = clearPvpRoomRuntimeFromRulesJson(stringifyPvpRoomInternalState(internal));
   const finishOk = await updatePvpRoomCas(roomId, advancingVersion, {
     phase: 'finished',
-    rules_json: stringifyPvpRoomInternalState(internal),
+    rules_json: compactRulesJson,
     last_activity_at: endedAt,
   });
   if (!finishOk) {
     return json({ success: true, advanced: true, finished: true, matchWinnerUserId, warning: '对局结束但房间状态更新失败，请刷新' });
+  }
+
+  const cleanupPromise = clearPvpRoomEphemeralState(roomId);
+  const executionContext = (req as any).context;
+  if (executionContext?.waitUntil) {
+    executionContext.waitUntil(cleanupPromise);
+  } else {
+    cleanupPromise.catch((error) => console.warn('PVP 房间临时数据清理失败（非阻塞）:', error));
   }
 
   return json({ success: true, advanced: true, finished: true, matchWinnerUserId });
