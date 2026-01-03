@@ -4,6 +4,7 @@ import { useMemo, useRef } from 'react';
 
 import Badge from '@/components/badge/Badge';
 import BadgeIcon from '@/components/badge/BadgeIcon';
+import { TierBadge } from '@/components/ranking/TierBadge';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import type { UserBadge } from '@/types/badge';
@@ -20,6 +21,28 @@ type CardLite = {
   favoriteCount: number;
   usageCount: number;
   engagementScore: number;
+};
+
+type CardMetricsLite = {
+  techScore: number;
+  techLevel: string;
+} | null;
+
+type CardRatingLite = {
+  rating: number;
+  games: number;
+  tier: string;
+  publicRank: number | null;
+} | null;
+
+type CardRatingsLite = {
+  strict: CardRatingLite;
+  free: CardRatingLite;
+};
+
+type CharacterHighlight = CardLite & {
+  metrics: CardMetricsLite;
+  ratings: CardRatingsLite;
 };
 
 type PvpMatchLite = {
@@ -63,7 +86,8 @@ export type MeProfileCardPayload = {
     all: UserBadge[];
   };
   topCards: {
-    characters: CardLite[];
+    characters: CharacterHighlight[];
+    topRatedCharacter: CharacterHighlight | null;
     scenario: CardLite | null;
   };
   stats: {
@@ -167,6 +191,11 @@ const formatCount = (value: unknown): string => {
   return value.toLocaleString('zh-CN');
 };
 
+const formatRank = (value: number | null | undefined): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '—';
+  return `#${Math.floor(value)}`;
+};
+
 const buildTokenBreakdownLabel = (report: BattleReportLite): string => {
   const total =
     typeof report.totalTokens === 'number' && Number.isFinite(report.totalTokens)
@@ -265,6 +294,41 @@ export function ProfileCard({
   const allBadges = data.badges.all ?? [];
   const equippedBadges = (data.badges.equipped ?? []).slice(0, 5);
   const stats = data.stats;
+
+  const renderCharacterHighlight = (c: CharacterHighlight, keyPrefix: string) => {
+    const techLevel = c.metrics?.techLevel ?? null;
+    const techScore = c.metrics?.techScore ?? null;
+    const strict = c.ratings.strict;
+    const free = c.ratings.free;
+
+    const strictLabel = strict ? `严格 ${strict.rating} ${formatRank(strict.publicRank)}` : '严格 —';
+    const freeLabel = free ? `自由 ${free.rating} ${formatRank(free.publicRank)}` : '自由 —';
+
+    return (
+      <div key={`${keyPrefix}-${c.id}`} className="rounded-xl bg-white/10 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-semibold break-words">{c.name}</div>
+          {techLevel ? (
+            <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/90 whitespace-nowrap">
+              {techLevel}
+            </div>
+          ) : null}
+          {strict ? <TierBadge tier={strict.tier} /> : null}
+          <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/90 whitespace-nowrap">{strictLabel}</div>
+          {free ? <TierBadge tier={free.tier} /> : null}
+          <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/90 whitespace-nowrap">{freeLabel}</div>
+          {!c.isPublic ? (
+            <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/85 whitespace-nowrap">🔒 私有</div>
+          ) : null}
+        </div>
+        <div className="mt-1 text-[11px] text-white/85">
+          ❤️ {c.likeCount} · ⭐ {c.favoriteCount} · 📥 {c.usageCount}
+          {' · '}
+          技术值 {techScore == null ? '—' : techScore}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div
@@ -404,24 +468,23 @@ export function ProfileCard({
             <div className="text-sm font-semibold">数据卡高光</div>
 
             <div className="mt-3">
-              <div className="text-xs font-semibold text-white/85">Top 角色卡（3）</div>
+              <div className="text-xs font-semibold text-white/85">Top 角色卡（2）</div>
               <div className="mt-2 space-y-2">
                 {(data.topCards.characters ?? []).length > 0 ? (
-                  data.topCards.characters.slice(0, 3).map((c) => (
-                    <div key={`top-char-${c.id}`} className="rounded-xl bg-white/10 px-3 py-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-sm font-semibold break-words">{c.name}</div>
-                        {!c.isPublic ? (
-                          <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/85">🔒 私有</div>
-                        ) : null}
-                      </div>
-                      <div className="mt-1 text-[11px] text-white/85">
-                        ❤️ {c.likeCount} · ⭐ {c.favoriteCount} · 📥 {c.usageCount} · 合计 {c.engagementScore}
-                      </div>
-                    </div>
-                  ))
+                  data.topCards.characters.slice(0, 2).map((c) => renderCharacterHighlight(c, 'top-char'))
                 ) : (
                   <div className="text-xs text-white/70">暂无角色卡数据</div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-white/85">排位最高角色卡（1）</div>
+              <div className="mt-2 space-y-2">
+                {data.topCards.topRatedCharacter ? (
+                  renderCharacterHighlight(data.topCards.topRatedCharacter, 'top-rated')
+                ) : (
+                  <div className="text-xs text-white/70">暂无排位记录</div>
                 )}
               </div>
             </div>

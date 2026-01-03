@@ -9,6 +9,7 @@ import {
   getUserProfileCardRowByUserId,
   getUserProfileCardDataStats,
   getUserTopDataCardsByEngagement,
+  queryFromD1,
   type PvpMatchRoundOutcomeSummary,
   type UserTopDataCardRow,
 } from '@/lib/d1';
@@ -28,6 +29,28 @@ type CardLite = {
   favoriteCount: number;
   usageCount: number;
   engagementScore: number;
+};
+
+type CardMetricsLite = {
+  techScore: number;
+  techLevel: string;
+} | null;
+
+type CardRatingLite = {
+  rating: number;
+  games: number;
+  tier: string;
+  publicRank: number | null;
+} | null;
+
+type CardRatingsLite = {
+  strict: CardRatingLite;
+  free: CardRatingLite;
+};
+
+type CharacterHighlight = CardLite & {
+  metrics: CardMetricsLite;
+  ratings: CardRatingsLite;
 };
 
 type PvpMatchLite = {
@@ -93,6 +116,20 @@ function normalizeRoundSummary(row: PvpMatchRoundOutcomeSummary): { total: numbe
   return { total, wins, losses, draws };
 }
 
+function computeTier(rating: number, games: number) {
+  const placementGames = 5;
+  if (games < placementGames || rating < 900) return '无牌';
+  if (rating < 1100) return '白牌';
+  if (rating < 1300) return '字牌';
+  if (rating < 1600) return '花牌';
+  return '权杖';
+}
+
+const readRows = <T,>(result: any): T[] => {
+  const rows = result?.result?.[0]?.results;
+  return Array.isArray(rows) ? (rows as T[]) : [];
+};
+
 export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
 
@@ -116,7 +153,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     await Promise.all([
       getUserProfileCardRowByUserId(auth.user.id),
       getUserBadges(auth.user.id),
-      getUserTopDataCardsByEngagement(auth.user.id, 'character', 3),
+      getUserTopDataCardsByEngagement(auth.user.id, 'character', 6),
       getUserTopDataCardsByEngagement(auth.user.id, 'scenario', 1),
       getPvpUserSummariesByUserIds([auth.user.id]),
       getPvpMatchesByUserId(auth.user.id, 3, 0),
@@ -147,6 +184,44 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     playersByMatchId.set(row.match_id, list);
   }
 
+  const getTopRatedCharacterRow = async (): Promise<UserTopDataCardRow | null> => {
+    const baseSql = `SELECT
+        dc.id,
+        dc.type,
+        dc.name,
+        dc.description,
+        dc.is_public,
+        dc.review_status,
+        dc.usage_count,
+        dc.like_count,
+        dc.favorite_count,
+        dc.created_at,
+        dc.updated_at
+      FROM data_cards dc
+      JOIN arena_ratings ar
+        ON ar.entity_type = 'data_card'
+       AND ar.entity_id = dc.id
+       AND ar.queue = ?
+      WHERE dc.user_id = ?
+        AND dc.type = 'character'
+        AND dc.deleted_at IS NULL
+      ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, dc.updated_at DESC, dc.id ASC
+      LIMIT 1`;
+
+    try {
+      const strictResult = (await queryFromD1(baseSql, ['strict', auth.user.id])) as any;
+      const strictRow = readRows<UserTopDataCardRow>(strictResult)[0];
+      if (strictRow?.id) return strictRow;
+
+      const freeResult = (await queryFromD1(baseSql, ['free', auth.user.id])) as any;
+      const freeRow = readRows<UserTopDataCardRow>(freeResult)[0];
+      return freeRow?.id ? freeRow : null;
+    } catch (error) {
+      console.warn('读取最高排位角色卡失败（降级为 null）:', error);
+      return null;
+    }
+  };
+
   const mapCard = (row: UserTopDataCardRow): CardLite => {
     const usage = typeof row.usage_count === 'number' ? row.usage_count : Number(row.usage_count || 0);
     const likes = typeof row.like_count === 'number' ? row.like_count : Number(row.like_count || 0);
@@ -165,6 +240,170 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
       engagementScore,
     };
   };
+
+  const topRatedRow = await getTopRatedCharacterRow();
+  const topRatedId = topRatedRow?.id ?? null;
+
+  const topCharacterRows = topCharacters
+    .filter((row) => row?.id && row.type === 'character')
+    .filter((row) => (topRatedId ? row.id !== topRatedId : true))
+    .slice(0, 2);
+
+  const topRatedRowResolved = topRatedRow && topRatedRow.type === 'character' ? topRatedRow : null;
+
+  const characterHighlightRows: UserTopDataCardRow[] = [
+    ...topCharacterRows,
+    ...(topRatedRowResolved ? [topRatedRowResolved] : []),
+  ];
+
+  const characterHighlightIds = Array.from(new Set(characterHighlightRows.map((r) => r.id).filter(Boolean)));
+
+  const metricsById = new Map<string, CardMetricsLite>();
+  if (characterHighlightIds.length > 0) {
+    try {
+      const placeholders = characterHighlightIds.map(() => '?').join(', ');
+      const metricsResult = (await queryFromD1(
+        `SELECT data_card_id as id, tech_score as techScore, tech_level as techLevel
+         FROM data_card_metrics
+         WHERE data_card_id IN (${placeholders})`,
+        characterHighlightIds,
+      )) as any;
+      const rows = readRows<{ id: string; techScore: number; techLevel: string }>(metricsResult);
+      rows.forEach((row) => {
+        if (!row?.id) return;
+        if (typeof row.techScore !== 'number' || typeof row.techLevel !== 'string') return;
+        metricsById.set(row.id, { techScore: row.techScore, techLevel: row.techLevel });
+      });
+    } catch (error) {
+      console.warn('读取角色卡技术值失败（降级为 null）:', error);
+    }
+  }
+
+  type RatingRow = {
+    dataCardId: string;
+    queue: 'strict' | 'free';
+    rating: number;
+    games: number;
+    updatedAt: string;
+  };
+
+  const ratingsById = new Map<string, { strict?: RatingRow; free?: RatingRow }>();
+  if (characterHighlightIds.length > 0) {
+    try {
+      const placeholders = characterHighlightIds.map(() => '?').join(', ');
+      const ratingsResult = (await queryFromD1(
+        `SELECT
+          entity_id as dataCardId,
+          queue,
+          rating,
+          games,
+          updated_at as updatedAt
+         FROM arena_ratings
+         WHERE entity_type = 'data_card'
+           AND entity_id IN (${placeholders})
+           AND queue IN ('strict','free')`,
+        characterHighlightIds,
+      )) as any;
+      const rows = readRows<RatingRow>(ratingsResult);
+      rows.forEach((row) => {
+        if (!row?.dataCardId) return;
+        if (row.queue !== 'strict' && row.queue !== 'free') return;
+        const entry = ratingsById.get(row.dataCardId) ?? {};
+        entry[row.queue] = row;
+        ratingsById.set(row.dataCardId, entry);
+      });
+    } catch (error) {
+      console.warn('读取角色卡排位失败（降级为 null）:', error);
+    }
+  }
+
+  const computePublicRank = async (payload: {
+    queue: 'strict' | 'free';
+    rating: number;
+    games: number;
+    updatedAt: string;
+    dataCardId: string;
+  }): Promise<number | null> => {
+    try {
+      const result = (await queryFromD1(
+        `SELECT COUNT(*) as higherCount
+         FROM arena_ratings ar
+         LEFT JOIN data_cards dc
+           ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
+         WHERE ar.queue = ?
+           AND (
+             ar.entity_type = 'preset'
+             OR (
+               dc.id IS NOT NULL
+               AND dc.type = 'character'
+               AND dc.is_public = 1
+               AND dc.review_status = 'approved'
+               AND dc.deleted_at IS NULL
+             )
+           )
+           AND (
+             ar.rating > ?
+             OR (ar.rating = ? AND ar.games > ?)
+             OR (ar.rating = ? AND ar.games = ? AND ar.updated_at > ?)
+             OR (
+               ar.rating = ? AND ar.games = ? AND ar.updated_at = ?
+               AND (
+                 ar.entity_type < 'data_card'
+                 OR (ar.entity_type = 'data_card' AND ar.entity_id < ?)
+               )
+             )
+           )`,
+        [
+          payload.queue,
+          payload.rating,
+          payload.rating,
+          payload.games,
+          payload.rating,
+          payload.games,
+          payload.updatedAt,
+          payload.rating,
+          payload.games,
+          payload.updatedAt,
+          payload.dataCardId,
+        ],
+      )) as any;
+      const row = readRows<{ higherCount: number }>(result)[0];
+      const higherCount = typeof row?.higherCount === 'number' ? row.higherCount : 0;
+      return Math.max(1, Math.floor(higherCount) + 1);
+    } catch {
+      return null;
+    }
+  };
+
+  const buildRating = async (row: RatingRow | undefined): Promise<CardRatingLite> => {
+    if (!row) return null;
+    if (typeof row.rating !== 'number' || typeof row.games !== 'number') return null;
+    const tier = computeTier(row.rating, row.games);
+    const publicRank = await computePublicRank({
+      queue: row.queue,
+      rating: row.rating,
+      games: row.games,
+      updatedAt: row.updatedAt,
+      dataCardId: row.dataCardId,
+    });
+    return { rating: row.rating, games: row.games, tier, publicRank };
+  };
+
+  const mapCharacterHighlight = async (row: UserTopDataCardRow): Promise<CharacterHighlight> => {
+    const base = mapCard(row);
+    const metrics = metricsById.get(row.id) ?? null;
+    const ratingRows = ratingsById.get(row.id) ?? {};
+    const strict = await buildRating(ratingRows.strict);
+    const free = await buildRating(ratingRows.free);
+    return {
+      ...base,
+      metrics,
+      ratings: { strict, free },
+    };
+  };
+
+  const topCharacterHighlights = await Promise.all(topCharacterRows.map(mapCharacterHighlight));
+  const topRatedHighlight = topRatedRowResolved ? await mapCharacterHighlight(topRatedRowResolved) : null;
 
   const avatarDataUrl = userRow.avatar_webp_base64 ? `data:image/webp;base64,${userRow.avatar_webp_base64}` : null;
 
@@ -225,7 +464,8 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
         all: allBadges,
       },
       topCards: {
-        characters: topCharacters.map(mapCard),
+        characters: topCharacterHighlights,
+        topRatedCharacter: topRatedHighlight,
         scenario: topScenarios.length > 0 ? mapCard(topScenarios[0]) : null,
       },
       stats: {

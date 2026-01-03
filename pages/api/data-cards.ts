@@ -351,17 +351,6 @@ export default async function handler(req: Request): Promise<Response> {
             });
           }
 
-          // v0.6.0：角色卡 JSON 更新时重置严格排位分（free 不重置）
-          if (currentCard.type === 'character') {
-            const resetPromise = resetStrictArenaRatingForDataCard(id);
-            const executionContext = (req as any).context;
-            if (executionContext?.waitUntil) {
-              executionContext.waitUntil(resetPromise);
-            } else {
-              await resetPromise;
-            }
-          }
-
           return new Response(JSON.stringify({ success: true, pendingReview: true, message: '更新已提交，待审核' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
