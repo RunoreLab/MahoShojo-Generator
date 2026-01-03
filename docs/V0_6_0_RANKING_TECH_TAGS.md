@@ -32,6 +32,7 @@
 - 平局：**计入对局数**，并按 Elo 的 `S=0.5` 微调分数。
 - 预设角色：**出现在排行榜里**（与数据库角色卡同榜展示）。
 - v0.6.0 对“是否只做 1v1 计分”的态度：你表示“都行”，本文按“先 1v1”做 MVP，后续再扩展多人/队伍。
+- PVP 触发的战报：**允许计入排位**（仍需满足 strict/free 的计分资格；通常更偏向落在 free）。
 
 ### 0.2 术语表（本文统一口径）
 - **实体（Entity）**：参与计分/榜单展示的对象。v0.6.0 仅包含：数据库角色卡（`data_cards.id` 且 `type='character'`）与预设角色（`preset filename`）。
@@ -76,7 +77,7 @@
   - 来自数据库角色卡：`battle_report_generation_combatants.data_card_id IS NOT NULL`
   - 或系统预设：`battle_report_generation_combatants.is_preset = 1`
 - `battle_report_generations.status = 'completed'`
-- （默认建议）不计入 PVP：`pvp_match_id IS NULL AND pvp_round_id IS NULL`（是否采用见第 7 节待确认）
+- `battle_report_generations.ip_anonymized IS NOT NULL`（free 梯子限速所需；若为空则该局 strict/free 都不计分）
 - 能从战报解析出胜负，且能把胜者与参战者**唯一匹配**：
   - `winner = '平局'` → 允许（视为平局）
   - `winner` 为单个名字 → 必须匹配到且仅匹配到 1 名参战者
@@ -325,7 +326,7 @@ v0.6.0 推荐采用“事件先行”的两阶段：
 - strict（按用户）：`queue='strict' AND status='applied' AND user_id=? AND pair_key=? AND created_at >= ?`
 - free（按脱敏 IP）：`queue='free' AND status='applied' AND ip_anonymized=? AND pair_key=? AND created_at >= ?`
 
-> 建议：如果 `ip_anonymized IS NULL`，free 梯子默认不计分（避免无法限速）。是否采用该策略见第 7 节待确认。
+> 规则：如果 `ip_anonymized IS NULL`，则 free 梯子不计分（避免无法限速）。由于 strict 命中会同时更新 free，为保证 strict ⊆ free，v0.6.0 直接将该条件放入“基础资格”，使该局 strict/free 均跳过（宁可漏算）。
 
 ---
 
@@ -624,6 +625,30 @@ CREATE INDEX IF NOT EXISTS idx_data_card_tags_data_card_id ON data_card_tags(dat
 - `scope='system'`：仅服务端自动写入（例如：技术值高、疑似 kw_exploit）
 - `scope='admin'`：仅管理员接口写入（推荐/活动/精选）
 
+#### 3.3.3 标签库种子（静态资源入库，作为单一真相来源）
+你已确认：标签库的初始种子以静态资源形式随 Git 入库（类似 `public/flowers.json` / `public/journalists.json`）。推荐：
+- 种子文件：`public/tags.seed.json`
+- 文件仅用于“初始化/同步 DB”，**前端与业务查询一律以 DB 为准**（`GET /api/tags`）
+
+建议的 JSON 结构（示例）：
+```json
+{
+  "tags": [
+    { "id": "style:daily", "name": "日常向", "description": "偏日常/轻剧情", "category": "题材/风格", "scope": "user", "isActive": true }
+  ],
+  "aliases": [
+    { "alias": "代码杀", "tagId": "risk:code-kill" }
+  ]
+}
+```
+
+同步到 D1 的推荐方式（v0.6.0）：
+- 新增脚本 `scripts/init-tags.ts`：读取 `public/tags.seed.json`，对 `tags` / `tag_aliases` 执行 upsert（幂等）
+- 运行时机：上线前/上线后执行一次；或每次发布时执行（可选）
+- 行为约定：
+  - 以 seed 为准更新 `name/description/category/scope/is_active`
+  - DB 中存在但 seed 不存在的标签：不删除，只置 `is_active=0`（避免破坏历史绑定）
+
 ### 3.4 你给的标签提案：建议的规范化（示例）
 以下是“建议收敛”的方向（便于筛选与百科）：
 - 题材/风格：`搞笑向`、`日常向`、`战友情`
@@ -722,7 +747,7 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 
 **排位**
 - 同一 `generation_id` 在 strict/free 下不会重复计分（接口重试、流中断重连等都不重复）
-- strict/free 的 eligibility 与本文一致（含：1v1、strict 必须登录；PVP 是否计分见第 7 节）
+- strict/free 的 eligibility 与本文一致（含：1v1、strict 必须登录、PVP 允许计入）
 - 可以根据 `arena_rating_events` 反查一次分数变化（含 before/delta/after、winner_slot）
 
 **技术值**
@@ -734,25 +759,21 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 
 ---
 
-## 7. 需要你确认/补充的问题（决定实现细节）
+## 7. 已确认口径（实现依据）
 
-已确认：
-1) 排位对象：数据卡 `data_cards.id`（预设用 preset filename）。  
-2) v0.6.0 先按 1v1 计分 MVP。  
-3) strict 允许自由挑对手。  
-4) strict 必须登录才计分；free 不强制登录。  
-5) 平局计入并微调分数。  
-6) 预设角色出现在排行榜。  
-7) tech_index 参考仓库可访问，已摘取并迁移其 proxy/公式到本文第 2 节。
-8) strict 的反刷分规则目前只做 10 分钟同对手去重。
-9) 段位阈值可沿用本文默认（900/1100/1300/1600）。
+确认时间：2026-01-03
 
-待你确认（会影响实现与风控口径）：
-1) **PVP 触发的战报是否计入排位？**（本文默认：不计入）
-2) **strict 的公共榜是否要求双方都是公开且已审核？**（本文默认：计分允许包含私有卡，但公共榜过滤；若要更强风控，可要求 strict 计分也仅限 public+approved）
-3) **free 梯子在 `ip_anonymized IS NULL` 时怎么处理？**（本文建议：不计分；否则无法限速）
-4) **strict 命中时同时更新 free 的策略是否确认？**（本文默认：是；strict 作为 free 子集）
-5) **标签库的初始种子来源**：你希望“写死在代码里一次性导入”，还是“手动 SQL 初始化”，或“后台管理页维护”？（v0.6.0 推荐：手动 SQL/脚本导入，避免先做后台）
-6) **Elo 是否允许“双方 K 不同（非零和）”？**（本文默认：允许，以满足“新卡收敛更快、老卡更稳”；若你更偏好零和，需要改为 `K_common` 或固定 K）
-7) **初始分 `initial_rating=1000` 是否确认？**（若你希望 1200/1500 起步，需要同步调整段位阈值）
-8) **排行榜 API 路径与命名是否接受？**（本文示例：`GET /api/arena/leaderboard`）
+1) 排位对象：数据卡 `data_cards.id`；预设用 `preset filename`。
+2) v0.6.0 先按 1v1 计分 MVP（`combatant_count = 2`）。
+3) strict：允许自由挑对手，但必须登录才计分；free：不强制登录。
+4) PVP 触发的战报：允许计入排位（仍需满足 strict/free eligibility；通常更偏向落在 free）。
+5) 平局：计入对局数，按 Elo 的 `S=0.5` 微调分数。
+6) strict 命中：同时更新 strict 与 free（strict ⊆ free）。
+7) free 梯子：`ip_anonymized IS NULL` 时不计分（为保证 strict ⊆ free，该条件已写入“基础资格”，使该局 strict/free 均跳过）。
+8) 计分允许包含私有卡，但公共榜过滤：仅展示 `data_cards.is_public=1 AND review_status='approved'` + 预设。
+9) 预设角色：出现在排行榜里（与数据库角色卡同榜展示）。
+10) strict 风控：目前仅做“10 分钟同对手组合去重”（见 1.9）。
+11) 段位阈值：沿用本文默认（900/1100/1300/1600）；初始分 `initial_rating=1000`。
+12) Elo：允许双方 K 不同（非零和）。
+13) 标签库种子：以静态资源入库（推荐 `public/tags.seed.json`），通过脚本同步到 D1（见 3.3.3）。
+14) 排行榜 API 路径与命名：采用本文示例（`GET /api/arena/leaderboard`）。
