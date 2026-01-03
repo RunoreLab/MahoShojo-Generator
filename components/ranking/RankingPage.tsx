@@ -92,6 +92,7 @@ export function RankingPage() {
   const [appliedFilters, setAppliedFilters] = useState<RankingFilters>(defaultFilters);
   const [offset, setOffset] = useState(0);
   const [tagSearch, setTagSearch] = useState('');
+  const [isTagFilterExpanded, setIsTagFilterExpanded] = useState(false);
   const limit = 50;
 
   const tagsQuery = useQuery({
@@ -104,6 +105,12 @@ export function RankingPage() {
     () => (tagsQuery.data?.tags ?? []).filter((t) => t.isActive),
     [tagsQuery.data?.tags]
   );
+
+  const tagById = useMemo(() => {
+    const map = new Map<string, Tag>();
+    for (const tag of activeTags) map.set(tag.id, tag);
+    return map;
+  }, [activeTags]);
 
   const filteredTags = useMemo(() => {
     const q = tagSearch.trim().toLowerCase();
@@ -174,6 +181,17 @@ export function RankingPage() {
       };
     });
   };
+
+  const selectedTagChips = useMemo(() => {
+    const chips: Array<{ mode: 'include' | 'exclude'; id: string; label: string }> = [];
+    for (const id of draftFilters.includeTagIds) {
+      chips.push({ mode: 'include', id, label: tagById.get(id)?.name ?? id });
+    }
+    for (const id of draftFilters.excludeTagIds) {
+      chips.push({ mode: 'exclude', id, label: tagById.get(id)?.name ?? id });
+    }
+    return chips;
+  }, [draftFilters.excludeTagIds, draftFilters.includeTagIds, tagById]);
 
   const leaderboardQuery = useQuery({
     queryKey: [
@@ -413,11 +431,65 @@ export function RankingPage() {
                     <hr className="my-4 border-gray-200" />
 
                     <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm font-medium text-gray-700">标签筛选</div>
-                      <span className="text-xs text-gray-500">包含为 OR</span>
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-medium text-gray-700">标签筛选</div>
+                        <span className="text-xs text-gray-500">包含为 OR</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsTagFilterExpanded((prev) => !prev)}
+                        className="text-xs font-medium text-blue-600 hover:underline"
+                        aria-expanded={isTagFilterExpanded}
+                      >
+                        {isTagFilterExpanded ? '收起' : '展开'}
+                      </button>
                     </div>
 
-                    {tagsQuery.isLoading ? (
+                    {!isTagFilterExpanded ? (
+                      <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
+                          <div>
+                            包含 {draftFilters.includeTagIds.length} · 排除 {draftFilters.excludeTagIds.length}
+                          </div>
+                          {(draftFilters.includeTagIds.length > 0 || draftFilters.excludeTagIds.length > 0) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDraftFilters((prev) => ({ ...prev, includeTagIds: [], excludeTagIds: [] }));
+                              }}
+                              className="text-xs font-medium text-gray-500 hover:text-gray-700 hover:underline"
+                            >
+                              清空标签
+                            </button>
+                          )}
+                        </div>
+
+                        {(draftFilters.includeTagIds.length > 0 || draftFilters.excludeTagIds.length > 0) && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {selectedTagChips.slice(0, 12).map((chip) => (
+                              <button
+                                key={`${chip.mode}:${chip.id}`}
+                                type="button"
+                                onClick={() => toggleTag(chip.mode, chip.id)}
+                                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                                  chip.mode === 'include'
+                                    ? 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100'
+                                    : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                                }`}
+                                title="点击移除"
+                              >
+                                {chip.label}
+                              </button>
+                            ))}
+                            {selectedTagChips.length > 12 && (
+                              <div className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-500">
+                                还有 {selectedTagChips.length - 12} 个…
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : tagsQuery.isLoading ? (
                       <div className="mt-2 text-sm text-gray-500">正在加载标签库...</div>
                     ) : tagsQuery.isError ? (
                       <div className="mt-2 text-sm text-red-600">标签库加载失败：{String(tagsQuery.error)}</div>

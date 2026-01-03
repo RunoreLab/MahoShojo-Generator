@@ -67,6 +67,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
   const [isNative, setIsNative] = useState<'any' | '1' | '0'>('any');
   const [includeTagIds, setIncludeTagIds] = useState<string[]>([]);
   const [excludeTagIds, setExcludeTagIds] = useState<string[]>([]);
+  const [isTagFilterExpanded, setIsTagFilterExpanded] = useState(false);
   const [minRating, setMinRating] = useState('');
   const [minGames, setMinGames] = useState('');
   const [minTechScore, setMinTechScore] = useState('');
@@ -110,6 +111,12 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
     [tagsQuery.data?.tags],
   );
 
+  const tagById = useMemo(() => {
+    const map = new Map<string, Tag>();
+    for (const tag of activeTags) map.set(tag.id, tag);
+    return map;
+  }, [activeTags]);
+
   const groupedActiveTags = useMemo(() => {
     const sorted = activeTags.slice().sort((a, b) => {
       const category = (a.category ?? '').localeCompare(b.category ?? '', 'zh-CN');
@@ -125,6 +132,13 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
     }
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b, 'zh-CN'));
   }, [activeTags]);
+
+  const selectedTagChips = useMemo(() => {
+    const chips: Array<{ mode: 'include' | 'exclude'; id: string; label: string }> = [];
+    for (const id of includeTagIds) chips.push({ mode: 'include', id, label: tagById.get(id)?.name ?? id });
+    for (const id of excludeTagIds) chips.push({ mode: 'exclude', id, label: tagById.get(id)?.name ?? id });
+    return chips;
+  }, [excludeTagIds, includeTagIds, tagById]);
 
   const leaderboardQuery = useQuery({
     queryKey: [
@@ -381,14 +395,75 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
               <span>包含预设</span>
             </label>
 
-            <div className="text-xs text-gray-500">
-              标签筛选只作用于数据卡；预设不会被标签包含/排除。
+            <div className="flex items-center gap-3">
+              <div className="text-xs text-gray-500">标签筛选只作用于数据卡；预设不会被标签包含/排除。</div>
+              <button
+                type="button"
+                onClick={() => setIsTagFilterExpanded((prev) => !prev)}
+                className="text-xs font-medium text-blue-600 hover:underline"
+                aria-expanded={isTagFilterExpanded}
+              >
+                {isTagFilterExpanded ? '收起标签' : '展开标签'}
+              </button>
             </div>
           </div>
 
           <div className="mt-3">
-            {tagsQuery.isLoading ? (
+            {!isTagFilterExpanded ? (
+              <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
+                  <div>
+                    包含 {includeTagIds.length} · 排除 {excludeTagIds.length}
+                  </div>
+                  {(includeTagIds.length > 0 || excludeTagIds.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOffset(0);
+                        setIncludeTagIds([]);
+                        setExcludeTagIds([]);
+                      }}
+                      className="text-xs font-medium text-gray-500 hover:text-gray-700 hover:underline"
+                    >
+                      清空标签
+                    </button>
+                  )}
+                </div>
+
+                {(includeTagIds.length > 0 || excludeTagIds.length > 0) && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {selectedTagChips.slice(0, 12).map((chip) => (
+                      <button
+                        key={`${chip.mode}:${chip.id}`}
+                        type="button"
+                        onClick={() => {
+                          if (chip.mode === 'include') toggleIncludeTag(chip.id);
+                          else toggleExcludeTag(chip.id);
+                        }}
+                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                          chip.mode === 'include'
+                            ? 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100'
+                            : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                        }`}
+                        title="点击移除"
+                      >
+                        {chip.label}
+                      </button>
+                    ))}
+                    {selectedTagChips.length > 12 && (
+                      <div className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-500">
+                        还有 {selectedTagChips.length - 12} 个…
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : tagsQuery.isLoading ? (
               <div className="text-sm text-gray-500">正在加载标签库...</div>
+            ) : tagsQuery.isError ? (
+              <div className="text-sm text-red-600">标签库加载失败：{String(tagsQuery.error)}</div>
+            ) : activeTags.length === 0 ? (
+              <div className="text-sm text-gray-500">暂无可用标签</div>
             ) : (
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
@@ -403,6 +478,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                           {categoryTags.map((tag) => (
                             <button
                               key={`include:${tag.id}`}
+                              type="button"
                               onClick={() => toggleIncludeTag(tag.id)}
                               className={`px-3 py-1 rounded-full text-xs border transition-colors ${
                                 includeTagIds.includes(tag.id)
@@ -431,6 +507,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                           {categoryTags.map((tag) => (
                             <button
                               key={`exclude:${tag.id}`}
+                              type="button"
                               onClick={() => toggleExcludeTag(tag.id)}
                               className={`px-3 py-1 rounded-full text-xs border transition-colors ${
                                 excludeTagIds.includes(tag.id)
