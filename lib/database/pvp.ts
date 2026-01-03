@@ -513,6 +513,28 @@ export async function clearPvpRoomRuntimeState(roomId: string): Promise<boolean>
   return clearPvpRoomMatchState(roomId);
 }
 
+/**
+ * 结束对局后清理“非战绩必要”的房间临时数据。
+ * - 目标：不影响 /api/me/pvp 战绩、个人资料卡等读取。
+ * - 注意：由于 schema 中 pvp_matches / pvp_rounds 仍通过 room_id 关联到 pvp_rooms（且可能存在级联），这里不删除 pvp_rooms 行本身。
+ */
+export async function clearPvpRoomEphemeralState(roomId: string): Promise<boolean> {
+  try {
+    await queryFromD1('DELETE FROM pvp_room_hands WHERE room_id = ?', [roomId]);
+    await queryFromD1('DELETE FROM pvp_room_submissions WHERE room_id = ?', [roomId]);
+    await queryFromD1('DELETE FROM pvp_room_card_snapshots WHERE room_id = ?', [roomId]);
+    await queryFromD1('DELETE FROM pvp_room_chat_messages WHERE room_id = ?', [roomId]);
+    await queryFromD1(
+      'DELETE FROM pvp_round_choices WHERE round_id IN (SELECT id FROM pvp_rounds WHERE room_id = ?)',
+      [roomId]
+    );
+    return true;
+  } catch (error) {
+    console.error('清理 PVP 房间临时数据失败:', error);
+    return false;
+  }
+}
+
 export async function upsertPvpRoomHand(roomId: string, userId: number, handJson: string): Promise<boolean> {
   try {
     const now = new Date().toISOString();
