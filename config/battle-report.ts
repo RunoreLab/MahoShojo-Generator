@@ -14,7 +14,7 @@ export type BattleReportOutputPreviewConfig = {
 };
 
 export const battleReportOutputPreviewConfig: BattleReportOutputPreviewConfig = {
-  persistPreviewInD1: true,
+  persistPreviewInD1: false,
   outputPreviewMode: 'full',
 };
 
