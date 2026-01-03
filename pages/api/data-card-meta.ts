@@ -29,6 +29,9 @@ type ApiRating = {
   losses: number;
   draws: number;
   tier: string;
+  lastDelta: number | null;
+  lastAppliedAt: string | null;
+  publicRank: number | null;
 };
 
 type ApiMetrics = {
@@ -215,8 +218,53 @@ export default async function handler(req: NextRequest) {
 
     const ratings: { strict: ApiRating | null; free: ApiRating | null } = { strict: null, free: null };
     try {
+      const lastEventsByQueue = new Map<Queue, { delta: number; appliedAt: string | null }>();
+      if (cardRow.type === 'character') {
+        try {
+          const lastEventsResult = (await queryFromD1(
+            `SELECT queue, delta, applied_at as appliedAt
+             FROM (
+               SELECT
+                 queue,
+                 applied_at,
+                 created_at,
+                 CASE
+                   WHEN a_entity_type = 'data_card' AND a_entity_id = ? THEN a_delta
+                   WHEN b_entity_type = 'data_card' AND b_entity_id = ? THEN b_delta
+                   ELSE NULL
+                 END AS delta,
+                 ROW_NUMBER() OVER (PARTITION BY queue ORDER BY applied_at DESC, created_at DESC) AS rn
+               FROM arena_rating_events
+               WHERE status = 'applied'
+                 AND queue IN ('strict', 'free')
+                 AND (
+                   (a_entity_type = 'data_card' AND a_entity_id = ?)
+                   OR
+                   (b_entity_type = 'data_card' AND b_entity_id = ?)
+                 )
+             )
+             WHERE rn = 1`,
+            [dataCardId, dataCardId, dataCardId, dataCardId],
+          )) as any;
+
+          const rows = (lastEventsResult?.result?.[0]?.results ?? []) as Array<{
+            queue: Queue;
+            delta: number | null;
+            appliedAt: string | null;
+          }>;
+
+          for (const row of rows) {
+            if (row.queue !== 'strict' && row.queue !== 'free') continue;
+            if (typeof row.delta !== 'number') continue;
+            lastEventsByQueue.set(row.queue, { delta: row.delta, appliedAt: typeof row.appliedAt === 'string' ? row.appliedAt : null });
+          }
+        } catch (error) {
+          console.warn('读取最近排位变动失败（降级为空）:', error);
+        }
+      }
+
       const res = (await queryFromD1(
-        `SELECT queue, rating, games, wins, losses, draws
+        `SELECT queue, rating, games, wins, losses, draws, updated_at
          FROM arena_ratings
          WHERE entity_type = 'data_card'
            AND entity_id = ?
@@ -230,10 +278,13 @@ export default async function handler(req: NextRequest) {
         wins: number;
         losses: number;
         draws: number;
+        updated_at: string;
       }>;
       for (const row of rows) {
         const rating = typeof row.rating === 'number' ? row.rating : 0;
         const games = typeof row.games === 'number' ? row.games : 0;
+        const ratingUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
+        const last = lastEventsByQueue.get(row.queue === 'free' ? 'free' : 'strict');
         const item: ApiRating = {
           queue: row.queue === 'free' ? 'free' : 'strict',
           rating,
@@ -242,9 +293,65 @@ export default async function handler(req: NextRequest) {
           losses: typeof row.losses === 'number' ? row.losses : 0,
           draws: typeof row.draws === 'number' ? row.draws : 0,
           tier: computeTier(rating, games),
+          lastDelta: typeof last?.delta === 'number' ? last.delta : null,
+          lastAppliedAt: typeof last?.appliedAt === 'string' ? last.appliedAt : null,
+          publicRank: null,
         };
         if (item.queue === 'strict') ratings.strict = item;
         else ratings.free = item;
+
+        // 仅角色卡计算公共榜位置（不影响公共榜展示）
+        if (cardRow.type === 'character' && ratingUpdatedAt) {
+          try {
+            const rankResult = (await queryFromD1(
+              `SELECT COUNT(*) as higherCount
+               FROM arena_ratings ar
+               LEFT JOIN data_cards dc
+                 ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
+               WHERE ar.queue = ?
+                 AND (
+                   ar.entity_type = 'preset'
+                   OR (
+                     dc.id IS NOT NULL
+                     AND dc.type = 'character'
+                     AND dc.is_public = 1
+                     AND dc.review_status = 'approved'
+                     AND dc.deleted_at IS NULL
+                   )
+                 )
+                 AND (
+                   ar.rating > ?
+                   OR (ar.rating = ? AND ar.games > ?)
+                   OR (ar.rating = ? AND ar.games = ? AND ar.updated_at > ?)
+                   OR (
+                     ar.rating = ? AND ar.games = ? AND ar.updated_at = ?
+                     AND (
+                       ar.entity_type < 'data_card'
+                       OR (ar.entity_type = 'data_card' AND ar.entity_id < ?)
+                     )
+                   )
+                 )`,
+              [
+                item.queue,
+                item.rating,
+                item.rating,
+                item.games,
+                item.rating,
+                item.games,
+                ratingUpdatedAt,
+                item.rating,
+                item.games,
+                ratingUpdatedAt,
+                dataCardId,
+              ],
+            )) as any;
+            const row = readSingleRow<{ higherCount: number }>(rankResult);
+            const higherCount = typeof row?.higherCount === 'number' ? row.higherCount : 0;
+            item.publicRank = Math.max(1, Math.floor(higherCount) + 1);
+          } catch (error) {
+            console.warn('计算公共榜位置失败（降级为 null）:', error);
+          }
+        }
       }
     } catch (error) {
       console.warn('读取排位失败（降级为 null）:', error);

@@ -134,8 +134,8 @@ export default async function handler(req: NextRequest) {
     }
 
     const orderBy = sort === 'tech'
-      ? 'ORDER BY (dcm.tech_score IS NULL) ASC, dcm.tech_score DESC, ar.rating DESC, ar.games DESC'
-      : 'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC';
+      ? 'ORDER BY (dcm.tech_score IS NULL) ASC, dcm.tech_score DESC, ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC'
+      : 'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
 
     const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
 
@@ -225,4 +225,3 @@ export default async function handler(req: NextRequest) {
     });
   }
 }
-
