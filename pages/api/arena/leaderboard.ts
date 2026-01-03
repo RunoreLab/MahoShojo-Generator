@@ -33,6 +33,14 @@ const parseIntParam = (value: string | null, fallback: number) => {
   return Number.isFinite(parsed) ? Math.floor(parsed) : fallback;
 };
 
+const parseOptionalIntParam = (value: string | null): number | null => {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? Math.floor(parsed) : null;
+};
+
 const computeTier = (rating: number, games: number) => {
   const placementGames = 5;
   if (games < placementGames || rating < 900) return '无牌';
@@ -69,6 +77,12 @@ export default async function handler(req: NextRequest) {
     const tagIds = parseCommaList(url.searchParams.get('tagIds'));
     const excludeTagIds = parseCommaList(url.searchParams.get('excludeTagIds'));
     const isNative = url.searchParams.get('isNative') ?? 'any';
+    const minRating = parseOptionalIntParam(url.searchParams.get('minRating'));
+    const maxRating = parseOptionalIntParam(url.searchParams.get('maxRating'));
+    const minGames = parseOptionalIntParam(url.searchParams.get('minGames'));
+    const maxGames = parseOptionalIntParam(url.searchParams.get('maxGames'));
+    const minTechScore = parseOptionalIntParam(url.searchParams.get('minTechScore'));
+    const maxTechScore = parseOptionalIntParam(url.searchParams.get('maxTechScore'));
 
     const presetNameByFilename = new Map(PRESET_LIST.map((preset) => [preset.filename, preset.name]));
 
@@ -131,6 +145,35 @@ export default async function handler(req: NextRequest) {
       whereParts.push("ar.entity_type = 'data_card' AND dcm.is_native = 1");
     } else if (isNative === '0') {
       whereParts.push("ar.entity_type = 'data_card' AND dcm.is_native = 0");
+    }
+
+    if (minRating != null) {
+      whereParts.push('ar.rating >= ?');
+      params.push(minRating);
+    }
+    if (maxRating != null) {
+      whereParts.push('ar.rating <= ?');
+      params.push(maxRating);
+    }
+    if (minGames != null) {
+      whereParts.push('ar.games >= ?');
+      params.push(minGames);
+    }
+    if (maxGames != null) {
+      whereParts.push('ar.games <= ?');
+      params.push(maxGames);
+    }
+
+    if (minTechScore != null || maxTechScore != null) {
+      whereParts.push("ar.entity_type = 'data_card' AND dcm.tech_score IS NOT NULL");
+      if (minTechScore != null) {
+        whereParts.push('dcm.tech_score >= ?');
+        params.push(minTechScore);
+      }
+      if (maxTechScore != null) {
+        whereParts.push('dcm.tech_score <= ?');
+        params.push(maxTechScore);
+      }
     }
 
     const orderBy = sort === 'tech'

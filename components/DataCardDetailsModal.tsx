@@ -4,6 +4,7 @@ import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
 import { formatDateTime } from '@/lib/constants';
 import { authStorage } from '@/lib/auth';
+import { TierBadge } from '@/components/ranking/TierBadge';
 
 type ApiTag = {
   id: string;
@@ -359,13 +360,18 @@ export default function DataCardDetailsModal({
                                   : undefined
                               }
                             >
-                              strict {meta.ratings.strict.rating}（{meta.ratings.strict.tier}
-                              {meta.ratings.strict.lastDelta != null ? `，Δ${formatSignedDelta(meta.ratings.strict.lastDelta)}` : ''}
-                              {isOwner && meta.ratings.strict.publicRank != null ? `，公共#${meta.ratings.strict.publicRank}` : ''}
+                              严格 {meta.ratings.strict.rating}（
+                              <TierBadge tier={meta.ratings.strict.tier} className="mx-1 align-middle" />
+                              {meta.ratings.strict.lastDelta != null ? (
+                                <span>，Δ{formatSignedDelta(meta.ratings.strict.lastDelta)}</span>
+                              ) : null}
+                              {isOwner && meta.ratings.strict.publicRank != null ? (
+                                <span>，公共排名#{meta.ratings.strict.publicRank}</span>
+                              ) : null}
                               ）
                             </span>
                           ) : (
-                            'strict —'
+                            '严格 —'
                           )}
                           {' / '}
                           {meta.ratings.free ? (
@@ -376,13 +382,18 @@ export default function DataCardDetailsModal({
                                   : undefined
                               }
                             >
-                              free {meta.ratings.free.rating}（{meta.ratings.free.tier}
-                              {meta.ratings.free.lastDelta != null ? `，Δ${formatSignedDelta(meta.ratings.free.lastDelta)}` : ''}
-                              {isOwner && meta.ratings.free.publicRank != null ? `，公共#${meta.ratings.free.publicRank}` : ''}
+                              自由 {meta.ratings.free.rating}（
+                              <TierBadge tier={meta.ratings.free.tier} className="mx-1 align-middle" />
+                              {meta.ratings.free.lastDelta != null ? (
+                                <span>，Δ{formatSignedDelta(meta.ratings.free.lastDelta)}</span>
+                              ) : null}
+                              {isOwner && meta.ratings.free.publicRank != null ? (
+                                <span>，公共排名#{meta.ratings.free.publicRank}</span>
+                              ) : null}
                               ）
                             </span>
                           ) : (
-                            'free —'
+                            '自由 —'
                           )}
                         </span>
                       )}

@@ -21,7 +21,7 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
   {
     slug: 'ranking',
     title: '排位与排行榜',
-    summary: 'strict/free 梯子、段位、风控与排行榜展示口径。',
+    summary: '严格/自由 梯子、段位、风控与排行榜展示口径。',
     markdownPath: '/encyclopedia/ranking.md',
   },
   {

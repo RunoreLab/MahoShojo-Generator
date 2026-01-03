@@ -35,6 +35,7 @@ export interface ArenaEligibilitySnapshot {
 export const INITIAL_RATING = 1000;
 export const STRICT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const FREE_DEDUP_WINDOW_MS = 10 * 60 * 1000;
+export const STRICT_DAILY_LIMIT = 30;
 
 export async function resetStrictArenaRatingForDataCard(dataCardId: string): Promise<void> {
   const id = typeof dataCardId === 'string' ? dataCardId.trim() : '';
@@ -65,6 +66,34 @@ const readD1Changes = (result: unknown): number => {
 const readD1Rows = <T>(result: unknown): T[] => {
   const rows = (result as any)?.result?.[0]?.results;
   return Array.isArray(rows) ? (rows as T[]) : [];
+};
+
+const startOfUtcDayIso = (): string => {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  return start.toISOString();
+};
+
+const hasExceededStrictDailyLimit = async (userId: number): Promise<boolean> => {
+  if (!Number.isFinite(userId) || userId <= 0) return false;
+  try {
+    const sinceIso = startOfUtcDayIso();
+    const result = (await queryFromD1(
+      `SELECT COUNT(*) as count
+       FROM arena_rating_events
+       WHERE queue = 'strict'
+         AND status = 'applied'
+         AND user_id = ?
+         AND created_at >= ?`,
+      [userId, sinceIso]
+    )) as any;
+    const row = readD1Rows<{ count: number }>(result)[0];
+    const count = typeof row?.count === 'number' ? row.count : 0;
+    return count >= STRICT_DAILY_LIMIT;
+  } catch (error) {
+    console.warn('读取 strict 每日计分次数失败（降级为不限制）:', error);
+    return false;
+  }
 };
 
 export const buildEntityKey = (entity: ArenaEntity): string => `${entity.entityType}:${entity.entityId}`;
@@ -604,7 +633,7 @@ export async function settleArenaRatingsForGeneration(
 
     const pairKey = buildPairKey(aEntity, bEntity);
 
-    const strictEligible = isStrictEligible(snapshot, combatants);
+    let strictEligible = isStrictEligible(snapshot, combatants);
     const freeEligible = isFreeEligible(snapshot);
     if (!strictEligible && !freeEligible) return;
 
@@ -646,7 +675,28 @@ export async function settleArenaRatingsForGeneration(
     const winnerSlot = winnerParse.winnerSlot;
 
     const shouldApplyFree = freeEligible;
-    const shouldApplyStrict = strictEligible;
+    let shouldApplyStrict = strictEligible;
+
+    if (shouldApplyStrict && snapshot.userId != null) {
+      const exceeded = await hasExceededStrictDailyLimit(snapshot.userId);
+      if (exceeded) {
+        await insertArenaRatingEvent({
+          id: buildArenaRatingEventId(generationId, 'strict'),
+          generationId,
+          queue: 'strict',
+          status: 'skipped',
+          skipReason: 'daily-limit',
+          userId: snapshot.userId,
+          ipAnonymized: snapshot.ipAnonymized,
+          pairKey,
+          a: aEntity,
+          b: bEntity,
+          winnerSlot,
+        });
+        shouldApplyStrict = false;
+        strictEligible = false;
+      }
+    }
 
     const queuesToApply: ArenaQueue[] = shouldApplyStrict ? ['strict', 'free'] : (shouldApplyFree ? ['free'] : []);
     for (const queue of queuesToApply) {
