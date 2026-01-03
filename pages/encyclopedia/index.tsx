@@ -18,10 +18,6 @@ export default function EncyclopediaIndex() {
               <Link href="/" className="text-sm text-blue-600 hover:underline">返回首页</Link>
             </div>
 
-            <p className="mt-3 text-sm text-gray-600">
-              这里是 v0.6.0 相关概念的最小可用说明。内容会随版本迭代调整，以页面实际实现为准。
-            </p>
-
             <div className="mt-6 grid gap-3 md:grid-cols-2">
               {encyclopediaEntries.map((entry) => (
                 <Link
