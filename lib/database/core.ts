@@ -5,6 +5,45 @@ type D1Config = {
   databaseUrl: string;
 };
 
+const sleep = async (ms: number) => {
+  await new Promise<void>((resolve) => setTimeout(resolve, ms));
+};
+
+const isRetryableFetchError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const anyError = error as { name?: unknown; message?: unknown; cause?: unknown };
+  if (anyError.name !== 'TypeError') return false;
+
+  const cause = anyError.cause as { code?: unknown } | undefined;
+  const code = typeof cause?.code === 'string' ? cause.code : '';
+  if (code === 'UND_ERR_CONNECT_TIMEOUT') return true;
+
+  const message = typeof anyError.message === 'string' ? anyError.message : '';
+  return message.toLowerCase().includes('fetch failed');
+};
+
+const fetchWithRetry = async (
+  url: string,
+  init: RequestInit,
+  options?: { attempts?: number; baseDelayMs?: number }
+): Promise<Response> => {
+  const attempts = Math.max(1, options?.attempts ?? 3);
+  const baseDelayMs = Math.max(0, options?.baseDelayMs ?? 300);
+
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableFetchError(error) || i === attempts - 1) throw error;
+      await sleep(baseDelayMs * Math.pow(2, i));
+    }
+  }
+
+  throw lastError;
+};
+
 const getD1Config = (): D1Config | null => {
   const databaseId = process.env.D1_DATABASE_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
@@ -81,17 +120,21 @@ export function generateUUID(): string {
 async function query(sql: string, params: unknown[] = []): Promise<Response> {
   const config = assertD1Config();
 
-  return await fetch(config.databaseUrl, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${config.apiToken}`,
-      "Content-Type": "application/json",
+  return await fetchWithRetry(
+    config.databaseUrl,
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${config.apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        sql,
+        params,
+      }),
     },
-    body: JSON.stringify({
-      sql,
-      params,
-    }),
-  });
+    { attempts: 3, baseDelayMs: 400 }
+  );
 }
 
 // 从 D1 数据库直接执行 SQL 语句
