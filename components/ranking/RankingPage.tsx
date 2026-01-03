@@ -123,6 +123,17 @@ export function RankingPage() {
     });
   }, [activeTags, tagSearch]);
 
+  const groupedFilteredTags = useMemo(() => {
+    const map = new Map<string, Tag[]>();
+    for (const tag of filteredTags) {
+      const key = tag.category ?? '未分类';
+      const list = map.get(key) ?? [];
+      list.push(tag);
+      map.set(key, list);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b, 'zh-CN'));
+  }, [filteredTags]);
+
   const hasPendingChanges = useMemo(() => {
     const normalizedDraft = normalizeFilters(draftFilters);
     return filtersKey(appliedFilters) !== filtersKey(normalizedDraft);
@@ -427,47 +438,61 @@ export function RankingPage() {
 
                         <div className="mt-3">
                           <div className="mb-2 text-xs font-medium text-gray-700">包含标签（OR）</div>
-                          <div className="max-h-48 overflow-auto pr-1">
-                            <div className="flex flex-wrap gap-2">
-                              {filteredTags.map((tag) => (
-                                <button
-                                  key={`include:${tag.id}`}
-                                  type="button"
-                                  onClick={() => toggleTag('include', tag.id)}
-                                  className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                                    draftFilters.includeTagIds.includes(tag.id)
-                                      ? 'bg-purple-600 text-white border-purple-600'
-                                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                                  }`}
-                                  title={tag.description ?? undefined}
-                                >
-                                  {tag.name}
-                                </button>
-                              ))}
-                            </div>
+                          <div className="max-h-56 overflow-auto pr-1 space-y-3">
+                            {groupedFilteredTags.map(([category, categoryTags]) => (
+                              <div key={`include:${category}`}>
+                                <div className="text-[11px] font-medium text-gray-600">
+                                  {category}（{categoryTags.length}）
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {categoryTags.map((tag) => (
+                                    <button
+                                      key={`include:${tag.id}`}
+                                      type="button"
+                                      onClick={() => toggleTag('include', tag.id)}
+                                      className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                                        draftFilters.includeTagIds.includes(tag.id)
+                                          ? 'bg-purple-600 text-white border-purple-600'
+                                          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                      }`}
+                                      title={tag.description ?? undefined}
+                                    >
+                                      {tag.name}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
 
                         <div className="mt-4">
                           <div className="mb-2 text-xs font-medium text-gray-700">排除标签</div>
-                          <div className="max-h-48 overflow-auto pr-1">
-                            <div className="flex flex-wrap gap-2">
-                              {filteredTags.map((tag) => (
-                                <button
-                                  key={`exclude:${tag.id}`}
-                                  type="button"
-                                  onClick={() => toggleTag('exclude', tag.id)}
-                                  className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                                    draftFilters.excludeTagIds.includes(tag.id)
-                                      ? 'bg-red-600 text-white border-red-600'
-                                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                                  }`}
-                                  title={tag.description ?? undefined}
-                                >
-                                  {tag.name}
-                                </button>
-                              ))}
-                            </div>
+                          <div className="max-h-56 overflow-auto pr-1 space-y-3">
+                            {groupedFilteredTags.map(([category, categoryTags]) => (
+                              <div key={`exclude:${category}`}>
+                                <div className="text-[11px] font-medium text-gray-600">
+                                  {category}（{categoryTags.length}）
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {categoryTags.map((tag) => (
+                                    <button
+                                      key={`exclude:${tag.id}`}
+                                      type="button"
+                                      onClick={() => toggleTag('exclude', tag.id)}
+                                      className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                                        draftFilters.excludeTagIds.includes(tag.id)
+                                          ? 'bg-red-600 text-white border-red-600'
+                                          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                      }`}
+                                      title={tag.description ?? undefined}
+                                    >
+                                      {tag.name}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       </>
