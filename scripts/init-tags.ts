@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { queryFromD1 } from '@/lib/d1';
+import { loadEnvConfig } from '@next/env';
 
 type TagSeed = {
   id: string;
@@ -22,6 +22,8 @@ type TagsSeedFile = {
   aliases?: AliasSeed[];
 };
 
+type QueryFromD1 = (sql: string, params?: unknown[]) => Promise<unknown>;
+
 const readSeed = (seedPath: string): TagsSeedFile => {
   const text = readFileSync(seedPath, 'utf-8');
   const parsed = JSON.parse(text) as TagsSeedFile;
@@ -36,7 +38,7 @@ const readRows = <T>(result: unknown): T[] => {
   return Array.isArray(rows) ? (rows as T[]) : [];
 };
 
-const upsertTag = async (tag: TagSeed) => {
+const upsertTag = async (queryFromD1: QueryFromD1, tag: TagSeed) => {
   const nowIso = new Date().toISOString();
   const isActive = tag.isActive === false ? 0 : 1;
   await queryFromD1(
@@ -62,7 +64,7 @@ const upsertTag = async (tag: TagSeed) => {
   );
 };
 
-const upsertAlias = async (alias: AliasSeed) => {
+const upsertAlias = async (queryFromD1: QueryFromD1, alias: AliasSeed) => {
   const nowIso = new Date().toISOString();
   await queryFromD1(
     `INSERT INTO tag_aliases (alias, tag_id, created_at)
@@ -74,6 +76,9 @@ const upsertAlias = async (alias: AliasSeed) => {
 };
 
 const main = async () => {
+  loadEnvConfig(process.cwd(), process.env.NODE_ENV !== 'production');
+  const { queryFromD1 } = await import('../lib/d1');
+
   const seedPath = resolve(process.cwd(), 'public', 'tags.seed.json');
   const seed = readSeed(seedPath);
 
@@ -86,13 +91,13 @@ const main = async () => {
     if (!tag.id || !tag.name || !tag.scope) {
       throw new Error(`tags.seed.json 存在无效条目：${JSON.stringify(tag)}`);
     }
-    await upsertTag(tag);
+    await upsertTag(queryFromD1, tag);
   }
 
   const aliases = Array.isArray(seed.aliases) ? seed.aliases : [];
   for (const alias of aliases) {
     if (!alias.alias || !alias.tagId) continue;
-    await upsertAlias(alias);
+    await upsertAlias(queryFromD1, alias);
   }
 
   // seed 未出现的标签：不删除，只置 is_active=0（避免破坏历史绑定）
@@ -114,4 +119,3 @@ main().catch((error) => {
   console.error('[init-tags] 失败:', error);
   process.exitCode = 1;
 });
-
