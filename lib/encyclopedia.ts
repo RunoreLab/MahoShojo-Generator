@@ -31,6 +31,30 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     markdownPath: '/encyclopedia/tags.md',
   },
   {
+    slug: 'code-kill',
+    title: '代码杀（概念与礼仪）',
+    summary: '“代码杀”是什么、为何是风险提示，以及社群礼仪建议。',
+    markdownPath: '/encyclopedia/code-kill.md',
+  },
+  {
+    slug: 'glossary',
+    title: '术语表（社区提案）',
+    summary: '历战记录、状态栏、优先级、八角笼等术语解释与来源标注。',
+    markdownPath: '/encyclopedia/glossary.md',
+  },
+  {
+    slug: 'newbie-guide',
+    title: '新手攻略（强度直觉）',
+    summary: '如何粗略判断对手强度，以及新手学习路线（社区攻略改写）。',
+    markdownPath: '/encyclopedia/newbie-guide.md',
+  },
+  {
+    slug: 'scenario-advanced',
+    title: '情景卡进阶（继承与长线）',
+    summary: '用历战记录/状态栏做“多回合延续”的情景卡（社区攻略改写）。',
+    markdownPath: '/encyclopedia/scenario-advanced.md',
+  },
+  {
     slug: 'pvp',
     title: 'PVP 与计分',
     summary: 'PVP 战报与排位系统的关系、哪些情况下会被计分。',
@@ -42,4 +66,3 @@ export const getEncyclopediaEntry = (slug: string | undefined) => {
   if (!slug) return null;
   return encyclopediaEntries.find((entry) => entry.slug === slug) ?? null;
 };
-
