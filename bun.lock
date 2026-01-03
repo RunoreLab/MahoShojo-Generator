@@ -13,6 +13,7 @@
         "@tanstack/react-query": "^5.90.12",
         "@zumer/snapdom": "^1.9.7",
         "ai": "^5.0.108",
+        "aws4fetch": "^1.0.20",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "jieba-wasm": "^2.4.0",
@@ -654,6 +655,8 @@
     "atomic-sleep": ["atomic-sleep@1.0.0", "https://registry.npmmirror.com/atomic-sleep/-/atomic-sleep-1.0.0.tgz", {}, "sha512-kNOjDqAh7px0XWNI+4QbzoiR/nTkHAWNud2uvnJquD1/x5a7EQZMJT0AczqK0Qn67oY/TTQ1LbUKajZpp3I9tQ=="],
 
     "available-typed-arrays": ["available-typed-arrays@1.0.7", "https://registry.npmmirror.com/available-typed-arrays/-/available-typed-arrays-1.0.7.tgz", { "dependencies": { "possible-typed-array-names": "^1.0.0" } }, "sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ=="],
+
+    "aws4fetch": ["aws4fetch@1.0.20", "https://registry.npmmirror.com/aws4fetch/-/aws4fetch-1.0.20.tgz", {}, "sha512-/djoAN709iY65ETD6LKCtyyEI04XIBP5xVvfmNxsEP0uJB5tyaGBztSryRr4HqMStr9R06PisQE7m9zDTXKu6g=="],
 
     "axe-core": ["axe-core@4.11.0", "https://registry.npmmirror.com/axe-core/-/axe-core-4.11.0.tgz", {}, "sha512-ilYanEU8vxxBexpJd8cWM4ElSQq4QctCLKih0TSfjIfCQTeyH/6zVrmIJfLPrKTKJRbiG+cfnZbQIjAlJmF1jQ=="],
 
