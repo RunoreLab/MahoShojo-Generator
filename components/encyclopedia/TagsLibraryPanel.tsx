@@ -9,8 +9,11 @@ type Tag = {
   isActive: boolean;
 };
 
-const fetchTags = async (): Promise<Tag[]> => {
-  const res = await fetch('/api/tags');
+const fetchTags = async (options?: { includeInactive?: boolean }): Promise<Tag[]> => {
+  const params = new URLSearchParams();
+  if (options?.includeInactive) params.set('includeInactive', '1');
+  const query = params.toString();
+  const res = await fetch(`/api/tags${query ? `?${query}` : ''}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = (await res.json()) as { success: boolean; tags: Tag[] };
   return json.tags ?? [];
@@ -28,7 +31,7 @@ export function TagsLibraryPanel() {
     setLoading(true);
     setError(null);
 
-    void fetchTags()
+    void fetchTags({ includeInactive })
       .then((data) => {
         if (cancelled) return;
         setTags(data);
@@ -43,7 +46,7 @@ export function TagsLibraryPanel() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [includeInactive]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -139,4 +142,3 @@ export function TagsLibraryPanel() {
     </div>
   );
 }
-

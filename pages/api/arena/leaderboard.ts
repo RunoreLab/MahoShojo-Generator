@@ -120,10 +120,16 @@ export default async function handler(req: NextRequest) {
 
     if (tagIds.length > 0) {
       const placeholders = tagIds.map(() => '?').join(', ');
-      whereParts.push(`ar.entity_type = 'data_card' AND EXISTS (
-        SELECT 1 FROM data_card_tags dct2
-        WHERE dct2.data_card_id = ar.entity_id
-          AND dct2.tag_id IN (${placeholders})
+      whereParts.push(`(
+        ar.entity_type = 'preset'
+        OR (
+          ar.entity_type = 'data_card'
+          AND EXISTS (
+            SELECT 1 FROM data_card_tags dct2
+            WHERE dct2.data_card_id = ar.entity_id
+              AND dct2.tag_id IN (${placeholders})
+          )
+        )
       )`);
       params.push(...tagIds);
     }

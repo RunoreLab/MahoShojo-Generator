@@ -387,6 +387,7 @@ export const useBattleEngine = () => {
           data: combatant.data,
           isNative: combatant.isValid,
           isPreset: combatant.isPreset,
+          filename: combatant.isPreset ? combatant.filename : null,
           teamId: typeof combatant.teamId === 'number' ? combatant.teamId : null,
           characterGuidance: typeof (combatant as any).characterGuidance === 'string' ? (combatant as any).characterGuidance : null,
           sourceDataCardId: combatant.sourceDataCardId,

@@ -35,7 +35,7 @@ export interface ArenaEligibilitySnapshot {
 export const INITIAL_RATING = 1000;
 export const STRICT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const FREE_DEDUP_WINDOW_MS = 10 * 60 * 1000;
-export const STRICT_DAILY_LIMIT = 30;
+export const STRICT_DAILY_LIMIT = 80;
 
 export async function resetStrictArenaRatingForDataCard(dataCardId: string): Promise<void> {
   const id = typeof dataCardId === 'string' ? dataCardId.trim() : '';

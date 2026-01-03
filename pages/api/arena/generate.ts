@@ -500,14 +500,16 @@ async function handler(req: NextRequest): Promise<Response> {
                     const payload = typeof c?.data === 'object' ? JSON.stringify(c.data) : '';
                     const characterGuidance =
                         typeof c?.characterGuidance === 'string' ? c.characterGuidance.trim().slice(0, 100) : '';
+                    const isPreset = typeof c?.isPreset === 'boolean' ? c.isPreset : false;
+                    const presetFilename = isPreset && typeof c?.filename === 'string' ? c.filename.trim() : '';
                     return {
                         generationId: recordId,
                         sortIndex: index,
                         name,
                         type: typeof c?.type === 'string' ? c.type : null,
-                        templateId: typeof c?.data?.templateId === 'string' ? c.data.templateId : null,
+                        templateId: presetFilename || (typeof c?.data?.templateId === 'string' ? c.data.templateId : null),
                         isNative: typeof c?.isNative === 'boolean' ? c.isNative : null,
-                        isPreset: typeof c?.isPreset === 'boolean' ? c.isPreset : null,
+                        isPreset: isPreset ? true : null,
                         teamId: typeof c?.teamId === 'number' ? c.teamId : null,
                         characterGuidance: characterGuidance || null,
                         dataCardId: typeof c?.sourceDataCardId === 'string' ? c.sourceDataCardId : null,
