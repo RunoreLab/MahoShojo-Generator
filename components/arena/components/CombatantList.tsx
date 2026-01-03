@@ -135,6 +135,17 @@ const formatSkipReason = (reason: string | null): string => {
   return map[reason] ?? reason;
 };
 
+const renderDeltaBadge = (delta: number) => {
+  const text = delta >= 0 ? `+${delta}` : String(delta);
+  const className =
+    delta > 0
+      ? 'text-emerald-700'
+      : delta < 0
+        ? 'text-red-700'
+        : 'text-gray-600';
+  return <span className={['font-mono font-semibold', className].join(' ')} title={`本局变化：${text}`}>Δ{text}</span>;
+};
+
 export function CombatantList({ onShowDetails }: CombatantListProps) {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
@@ -418,9 +429,6 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                     <span className="text-orange-500 font-semibold whitespace-nowrap">(非规范格式)</span>
                   )}
                   {!isPlaceholder && data?.wasCorrected && <span className="text-yellow-600 whitespace-nowrap">(格式已修正)</span>}
-                  {!isPlaceholder && techLevel && (
-                    <span className="whitespace-nowrap text-gray-600">技术等级：{techLevel}</span>
-                  )}
                   {!isPlaceholder && tierToShow && (
                     <span className="flex items-center gap-1">
                       <TierBadge tier={tierToShow} />
@@ -487,47 +495,58 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
               </div>
             )}
 
-            {!isPlaceholder && entityKey && lastGenerationId && !generationParticipant && generationRankingQuery.data?.success && generationRankingQuery.data.state === 'pending' && (
-              <div className="mt-1 text-xs text-gray-600">排位结算中…（可能需要几秒钟）</div>
-            )}
-
-            {!isPlaceholder && !entityKey && lastGenerationId && generationRankingQuery.data?.success && generationRankingQuery.data.state === 'ready' && (
-              <div className="mt-1 text-xs text-gray-600">本角色未登记为数据卡/预设，无法参与排位计分。</div>
-            )}
-
-            {!isPlaceholder && generationParticipant && (generationParticipant.queues.strict.eligible || generationParticipant.queues.free.eligible) && (
+            {!isPlaceholder && (
               <div className="mt-1 text-xs text-gray-600">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="whitespace-nowrap">
                     技术值：{typeof techScore === 'number' ? `${techScore} (${techLevel ?? '-'})` : '-'}
                   </span>
                   <span className="whitespace-nowrap">
-                    严格：{(() => {
-                      const q = generationParticipant.queues.strict;
-                      if (!q.eligible) return `未满足（${formatIneligibleReasons(q.ineligibleReasons)}）`;
-                      if (q.eventStatus === 'missing' || q.eventStatus === 'pending') return '结算中...';
-                      if (q.eventStatus === 'skipped' || q.eventStatus === 'failed') return `失败（${formatSkipReason(q.skipReason)}）`;
-                      const delta = typeof q.delta === 'number' ? (q.delta >= 0 ? `+${q.delta}` : String(q.delta)) : '±0';
-                      return `${q.rating ?? '-'}（Δ${delta}）`;
+                    严格：{meta?.ratings.strict?.rating ?? generationParticipant?.queues.strict.rating ?? '-'}
+                    {(() => {
+                      const q = generationParticipant?.queues.strict;
+                      if (!q) return null;
+                      if (q.eligible && q.eventStatus === 'applied' && typeof q.delta === 'number') {
+                        return <span className="ml-1">{renderDeltaBadge(q.delta)}</span>;
+                      }
+                      if (q.eligible && (q.eventStatus === 'missing' || q.eventStatus === 'pending')) {
+                        return <span className="ml-1 text-gray-500">（结算中）</span>;
+                      }
+                      if (q.eligible && (q.eventStatus === 'skipped' || q.eventStatus === 'failed')) {
+                        return <span className="ml-1 text-gray-500" title={formatSkipReason(q.skipReason)}>（未计分）</span>;
+                      }
+                      if (!q.eligible) {
+                        return <span className="ml-1 text-gray-500" title={formatIneligibleReasons(q.ineligibleReasons)}>（不计分）</span>;
+                      }
+                      return null;
                     })()}
                   </span>
                   <span className="whitespace-nowrap">
-                    自由：{(() => {
-                      const q = generationParticipant.queues.free;
-                      if (!q.eligible) return `未满足（${formatIneligibleReasons(q.ineligibleReasons)}）`;
-                      if (q.eventStatus === 'missing' || q.eventStatus === 'pending') return '结算中...';
-                      if (q.eventStatus === 'skipped' || q.eventStatus === 'failed') return `失败（${formatSkipReason(q.skipReason)}）`;
-                      const delta = typeof q.delta === 'number' ? (q.delta >= 0 ? `+${q.delta}` : String(q.delta)) : '±0';
-                      return `${q.rating ?? '-'}（Δ${delta}）`;
+                    自由：{meta?.ratings.free?.rating ?? generationParticipant?.queues.free.rating ?? '-'}
+                    {(() => {
+                      const q = generationParticipant?.queues.free;
+                      if (!q) return null;
+                      if (q.eligible && q.eventStatus === 'applied' && typeof q.delta === 'number') {
+                        return <span className="ml-1">{renderDeltaBadge(q.delta)}</span>;
+                      }
+                      if (q.eligible && (q.eventStatus === 'missing' || q.eventStatus === 'pending')) {
+                        return <span className="ml-1 text-gray-500">（结算中）</span>;
+                      }
+                      if (q.eligible && (q.eventStatus === 'skipped' || q.eventStatus === 'failed')) {
+                        return <span className="ml-1 text-gray-500" title={formatSkipReason(q.skipReason)}>（未计分）</span>;
+                      }
+                      if (!q.eligible) {
+                        return <span className="ml-1 text-gray-500" title={formatIneligibleReasons(q.ineligibleReasons)}>（不计分）</span>;
+                      }
+                      return null;
                     })()}
                   </span>
                 </div>
-              </div>
-            )}
-
-            {!isPlaceholder && generationParticipant && !(generationParticipant.queues.strict.eligible || generationParticipant.queues.free.eligible) && (
-              <div className="mt-1 text-xs text-gray-600">
-                本局未进入排位：{formatIneligibleReasons(generationParticipant.queues.free.ineligibleReasons)}
+                {!entityKey ? (
+                  <div className="mt-0.5 text-[11px] text-gray-500">提示：未登记为数据卡/预设时，无法参与排位计分。</div>
+                ) : entityKey && lastGenerationId && !generationParticipant && generationRankingQuery.data?.success && generationRankingQuery.data.state === 'pending' ? (
+                  <div className="mt-0.5 text-[11px] text-gray-500">排位结算中…（可能需要几秒钟）</div>
+                ) : null}
               </div>
             )}
           </div>
