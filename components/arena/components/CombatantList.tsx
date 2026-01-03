@@ -178,6 +178,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                 </div>
                 <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
                   <span className="whitespace-nowrap">{typeDisplay}</span>
+                  {!isPlaceholder && data?.isValid && <span className="text-green-600 whitespace-nowrap">(原生)</span>}
                   {!isPlaceholder && data?.isPreset && <span className="text-purple-600 whitespace-nowrap">(预设)</span>}
                   {!isPlaceholder && data?.isNonStandard && (
                     <span className="text-orange-500 font-semibold whitespace-nowrap">(非规范格式)</span>
@@ -305,7 +306,6 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
       </div>
 
       <div className="flex justify-between items-center mt-3">
-        <p className="text-xs text-gray-600">提示：不使用分队时，下面就是普通的角色列表；需要分队再新建即可。</p>
         <button
           type="button"
           onClick={() => {
