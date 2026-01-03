@@ -779,3 +779,9 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 12) Elo：允许双方 K 不同（非零和）。
 13) 标签库种子：以静态资源入库（推荐 `public/tags.seed.json`），通过脚本同步到 D1（见 3.3.3）。
 14) 排行榜 API 路径与命名：采用本文示例（`GET /api/arena/leaderboard`）。
+
+---
+
+## 8. 收尾工作
+- 更新 Readme 与公告。
+
