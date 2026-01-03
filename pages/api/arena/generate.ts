@@ -19,8 +19,10 @@ import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
 import {
     createBattleReportGenerationRecord,
     createBattleReportGenerationCombatants,
+    generateUUID,
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
+    updateBattleReportGenerationOutputPreview,
     getUserByAuthKey
 } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
@@ -34,6 +36,7 @@ import {
 } from '@/lib/arena/battle-report-log-utils';
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
 
 const log = getLogger('api-gen-battle-story');
 const MAX_COMBATANTS = 10;
@@ -426,7 +429,10 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const recordPromise = (async () => {
             const user = authKey ? await getUserByAuthKey(authKey) : null;
-            const recordId = await createBattleReportGenerationRecord({
+            const recordId = generateUUID();
+
+            const createdId = await createBattleReportGenerationRecord({
+                id: recordId,
                 startedAt: startedAtIso,
                 endedAt: endedAtIso,
                 durationMs,
@@ -493,7 +499,28 @@ async function handler(req: NextRequest): Promise<Response> {
                 }),
             });
 
-            if (recordId && Array.isArray(combatants)) {
+            if (createdId) {
+                const storePromise = (async () => {
+                    const stored = await storeBattleReportGenerationOutputTextToR2({
+                        generationId: recordId,
+                        startedAtIso: startedAtIso,
+                        ownerUserId: user?.id ?? null,
+                        format: 'json',
+                        text: reportJson,
+                    });
+                    if (stored.ok && !stored.persistPreviewInD1) {
+                        await updateBattleReportGenerationOutputPreview(recordId, null);
+                    }
+                })();
+                const executionContext = (req as any).context;
+                if (executionContext?.waitUntil) {
+                    executionContext.waitUntil(storePromise);
+                } else {
+                    await storePromise;
+                }
+            }
+
+            if (createdId && Array.isArray(combatants)) {
                 const toBytes = (value: string) => new TextEncoder().encode(value).length;
                 const rows = combatants.map((c: any, index: number) => {
                     const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
@@ -540,7 +567,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 }
             }
 
-            if (recordId) {
+            if (createdId) {
                 try {
                     await settleArenaRatingsForGeneration(recordId);
                 } catch (error) {

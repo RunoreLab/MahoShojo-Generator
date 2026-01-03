@@ -5,6 +5,7 @@ type UploadBody = string | ArrayBuffer | Uint8Array | Blob | ReadableStream | nu
 
 interface PutObjectOptions {
     contentType?: string;
+    contentEncoding?: string;
     cacheControl?: string;
     metadata?: Record<string, string>;
 }
@@ -109,6 +110,9 @@ export async function putObject(
         if (options.contentType) {
             headers.set('Content-Type', options.contentType);
         }
+        if (options.contentEncoding) {
+            headers.set('Content-Encoding', options.contentEncoding);
+        }
         if (options.cacheControl) {
             headers.set('Cache-Control', options.cacheControl);
         }
@@ -135,6 +139,32 @@ export async function putObject(
             status: response.status,
             data: { etag: response.headers.get('etag') },
         };
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : '未知错误' };
+    }
+}
+
+/**
+ * 读取对象为文本（服务端使用），不向客户端暴露 R2 URL。
+ */
+export async function getObjectText(
+    key: string,
+    options: { responseContentType?: string; expiresInSeconds?: number } = {}
+): Promise<R2Result<{ text: string }>> {
+    try {
+        assertConfig();
+        const url = await generatePresignedUrl(key, {
+            method: 'GET',
+            expiresInSeconds: options.expiresInSeconds ?? 120,
+            ...(options.responseContentType ? { responseContentType: options.responseContentType } : {}),
+        });
+        const res = await fetch(url, { method: 'GET' });
+        if (!res.ok) {
+            const errorText = await res.text().catch(() => '');
+            return { success: false, status: res.status, error: errorText || 'R2 读取失败' };
+        }
+        const text = await res.text();
+        return { success: true, status: res.status, data: { text } };
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : '未知错误' };
     }

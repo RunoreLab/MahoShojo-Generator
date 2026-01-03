@@ -257,21 +257,22 @@ SQLite 文件大小包含已释放但未回收的页面（freelist）。本次�
 
 建议统一使用：
 
-- `v1/<kind>/YYYY/MM/DD/<id>/<part>.<ext>[.gz]`
+- `v1/<kind>/YYYY/MM/DD/<id>/<part>.<ext>`
 
 示例：
 
 - 战报正文：
-  - `v1/battle-report-generations/2025/12/31/49e6ce5b-aa5c-43dc-9250-589805835c94/output.md.gz`
+  - `v1/battle-report-generations/2025/12/31/49e6ce5b-aa5c-43dc-9250-589805835c94/output.md`
 - PVP 房间规则：
-  - `v1/pvp-rooms/2025/12/31/07f62e9f-4b12-4a1f-b4bb-091e36d7abde/rules.json.gz`
+  - `v1/pvp-rooms/2025/12/31/07f62e9f-4b12-4a1f-b4bb-091e36d7abde/rules.json`
 - PVP 提交：
-  - `v1/pvp-room-submissions/2025/12/31/<roomId>/<submissionId>.json.gz`
+  - `v1/pvp-room-submissions/2025/12/31/<roomId>/<submissionId>.json`
 - 卡牌快照：
-  - `v1/pvp-room-card-snapshots/2025/12/31/<snapshotId>/data.json.gz`
+  - `v1/pvp-room-card-snapshots/2025/12/31/<snapshotId>/data.json`
 
 备注：
 
+- 是否 gzip 由 `Content-Encoding: gzip` 决定；不建议把 `.gz` 作为业务语义的一部分（避免在少数运行时不支持 `CompressionStream` 时出现“key 是 .gz 但内容未压缩”的不一致）。
 - 如果某些表的时间字段不稳定/缺失，可退化为 `YYYY/MM=0000/00` 或直接用 `created_at`/`started_at` 中可解析的日期部分。  
 - 不建议依赖 R2 的 list 做业务逻辑；D1 中应始终保存“直接可用的 key”。  
 
@@ -288,24 +289,69 @@ SQLite 文件大小包含已释放但未回收的页面（freelist）。本次�
 
 ---
 
-## 9. 需要你确认/回答的问题（决定最终落地形态）
+## 8.1 当前仓库已落地的改动点（便于对照）
 
-1) 你所说的 “R1 数据库容量不足” 具体是指：Cloudflare D1 的单库大小上限、还是自建/别家 R1（例如 PlanetScale/Neon/自建 Postgres）的配额？当前离上限还有多少？  
-2) `battle_report_generations.output_preview` 在前端的使用场景：
-   - 是否用于“列表页直接展示全文/长文”？  
-   - 是否需要全文检索（SQL LIKE/FTS）？如果需要，外部化会影响检索，需要配套索引策略（例如只索引摘要/标题/关键词）。  
-3) PVP 数据保留策略：
-   - 结束后的房间/对局数据需要永久保留、还是只保留 N 天？  
-   - 是否要求“历史回放时完全复现当时卡牌内容”（这会决定快照是否必须保留）。  
-4) R2 访问控制：
-   - 战报/回放内容是否只对登录用户可见？是否存在“公开分享链接”的需求？  
-5) 你更偏好“方案 A（原表加列）”还是“方案 B（统一大对象索引表）”？（我倾向 B：后续扩展更轻松，但 A 改动最小、上线最快）
+### 8.1.1 PVP：结算/关房自动清理过程数据（已实现）
+
+- 新增清理函数：`lib/database/pvp.ts` 的 `clearPvpRoomEphemeralState`  
+- 触发点：
+  - 对局结束（最后一回合确认推进到 finished）：`pages/api/pvp/rooms/[roomId]/rounds/[roundId]/confirm.ts`  
+  - 房间关闭（全员退出/房主关闭/踢出导致空房间）：`pages/api/pvp/rooms/[roomId]/leave.ts`、`pages/api/pvp/rooms/[roomId]/kick.ts`  
+
+### 8.1.2 战报：流式/非流式输出写入 R2 + regenerate 双读（已实现，需建表）
+
+- 非流式（JSON）：`pages/api/generate-battle-story.ts`、`pages/api/arena/generate.ts` 会把完整 `reportJson` 写入 R2（支持时 gzip）。  
+- 流式（Markdown）：`pages/api/arena/generate-stream.ts` 会把“客户端实际收到的 Markdown（含 telemetry 注释）”同步 tee 到 R2（支持时 gzip）。  
+- regenerate 双读：当 D1 的 `output_preview` 为空时，`pages/api/me/battle-reports/[generationId]/regenerate.ts` 会从 `large_objects` → R2 读取正文再重生。  
+
+### 8.1.3 环境变量开关（可选）
+
+- `BATTLE_REPORT_OUTPUT_PREVIEW_PERSIST`
+  - 默认：保留（等价于 true）
+  - 设为 `0/false/off`：在“R2 写入 + large_objects 索引成功”后，将 `battle_report_generations.output_preview` 置 `NULL`
+- `BATTLE_REPORT_OUTPUT_PREVIEW_MODE`
+  - 默认 `full`（等价于把全文写进 `output_preview`，会显著推高 D1 体积）
+  - 可设为 `truncate`（仅保留 head/tail 拼接的摘要；适合你后续如果决定“D1 仍保留摘要但不保留全文”的折中策略）
 
 ---
 
-## 11. PVP：战绩/资料卡依赖梳理与“可清理清单”（基于代码审阅）
+## 8.2 D1 建表/运维脚本（仓库内提供）
 
-### 11.1 个人资料卡与战绩页面依赖哪些表？
+1) 初始化 `large_objects` 表（必须先做，才会真正开始“置空 output_preview + 从 R2 双读”）：
+
+- `bun tsx scripts/init-large-objects.ts`
+
+2) 立即清理历史遗留的 PVP 过程数据（推荐先 dry-run 再执行）：
+
+- `bun tsx scripts/pvp-prune-ephemeral.ts --dry-run --limit=500`
+- `bun tsx scripts/pvp-prune-ephemeral.ts --limit=500`（可重复执行直到候选为空）
+
+---
+
+## 9. 已确认前提与仍需拍板事项
+
+### 9.1 已确认（2026-01-03）
+
+- 容量瓶颈：Cloudflare D1 单库大小上限，当前距离上限约 **1.5 GB**。  
+- `battle_report_generations.output_preview` 主要用于“重生战报”，允许慢；迁移后可接受置 `NULL`。  
+- PVP：除战绩/资料卡必需数据外，其它房间过程数据可在全员退出或超时后立即清理；不要求历史回放完全复现，但资料卡需要卡牌名字/胜者名字。  
+- R2 仅登录用户可见；当前不需要“公开分享链接”。  
+- 方向偏好：方案 B（统一 `large_objects` 索引表），便于未来扩展（例如角色立绘）。  
+
+### 9.2 仍需你拍板（影响后续迁移脚本/长期成本）
+
+1) **历史战报回填到 R2 的范围**：你希望迁移“全部历史”还是“只迁移近 N 天 / 近 N 条 / 只迁移活跃用户”？（这决定一次性脚本成本与风险窗口）  
+2) **D1 是否保留摘要**：当前已支持“R2 成功后置空 `output_preview`”。如果你希望列表/详情首屏仍有摘要，建议新增 `output_excerpt`（避免 `output_preview` 语义混乱），并把 `output_preview` 永久用于“兼容旧数据”。  
+3) **VACUUM/重建的执行方式**：你更偏好
+   - A：导出 → 新库导入/重建 → 切换绑定（更稳，通常能真正回收 freelist，但需要一次切换窗口）  
+   - B：低峰直接执行 `VACUUM`（如果 D1 支持且你接受锁库/临时空间/超时风险）  
+4) **R2 生命周期规则**：你现在倾向默认长期保留；是否需要先约定一个“PVP 快照类对象”的保留期（例如 7/30 天）以防后续再次膨胀？（战报正文可永久）  
+
+---
+
+## 10. PVP：战绩/资料卡依赖梳理与“可清理清单”（基于代码审阅）
+
+### 10.1 个人资料卡与战绩页面依赖哪些表？
 
 从 `pages/api/me/profile-card.ts` 与 `pages/api/me/pvp.ts` 的调用链看：
 
@@ -321,7 +367,7 @@ SQLite 文件大小包含已释放但未回收的页面（freelist）。本次�
 
 无需永久保留“房间提交/手牌/卡快照”等过程数据。
 
-### 11.2 结算后可立即清理的表/字段（不影响战绩统计）
+### 10.2 结算后可立即清理的表/字段（不影响战绩统计）
 
 建议在“整场对局结束（phase=finished）”或“全员退出/超时关闭”后，清理以下内容：
 
@@ -332,14 +378,14 @@ SQLite 文件大小包含已释放但未回收的页面（freelist）。本次�
 - `pvp_round_choices`（可选，结算后 result_json 已含参战卡名/快照 id，choices 冗余）  
 - `pvp_rooms.rules_json`：建议清理运行时字段（如 `_bots/_postRound/_winnerVote/_drawPile/_usedPile/...`），只保留规则配置与必要元数据，避免 rules_json 变成“房间状态垃圾桶”
 
-### 11.4 推荐触发点（实现层面）
+### 10.3 推荐触发点（实现层面）
 
 - **最后一回合确认推进（match 完结）**：在将房间推进到 `phase=finished` 时立刻清理一次（收益最大，且不再需要快照/手牌）。  
 - **房间关闭（全员退出/房主关闭）**：在 `status/phase` 进入 `closed` 时再兜底清理一次（覆盖“未打完就散场”的情况）。  
 
 两类触发点叠加，可以把“过程数据的留存时间”压到最短，从而显著减缓 D1 的持续增长。
 
-### 11.3 重要约束：不要直接删 `pvp_rooms` 行
+### 10.4 重要约束：不要直接删 `pvp_rooms` 行
 
 当前 schema 中，`pvp_matches.room_id` 与 `pvp_rounds.room_id` 均外键引用 `pvp_rooms(id)`（并可能存在级联删除）。  
 如果直接删除 `pvp_rooms` 行，存在把战绩主表一起删掉的风险。  
@@ -351,7 +397,7 @@ SQLite 文件大小包含已释放但未回收的页面（freelist）。本次�
 
 ---
 
-## 10. 附：本次统计中观察到的风险点（简述）
+## 11. 附：本次统计中观察到的风险点（简述）
 
 - **freelist 膨胀**：删除/迁移不等于容量下降，必须配套 VACUUM/重建策略。  
 - **PVP JSON 内嵌重复**：`submission_json` 内嵌卡牌全量 JSON 是典型“空间指数型增长点”，应尽早改为“引用 + 可选快照”。  
