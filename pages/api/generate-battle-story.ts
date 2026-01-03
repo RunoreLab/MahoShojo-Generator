@@ -33,6 +33,7 @@ import {
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
+import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 
 const log = getLogger('api-gen-battle-story');
 const MAX_COMBATANTS = 10;
@@ -708,6 +709,20 @@ async function handler(req: NextRequest): Promise<Response> {
                             combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
                         })
                     );
+                }
+            }
+
+            if (recordId) {
+                try {
+                    const settlePromise = settleArenaRatingsForGeneration(recordId);
+                    const executionContext = (req as any).context;
+                    if (executionContext?.waitUntil) {
+                        executionContext.waitUntil(settlePromise);
+                    } else {
+                        await settlePromise;
+                    }
+                } catch (error) {
+                    log.warn('排位结算失败（非阻塞）', { recordId, error });
                 }
             }
 

@@ -1,6 +1,6 @@
 import type { NewsReport } from '@/components/BattleReportCard';
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
-import type { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 import type { StatsData } from '@/pages/api/get-stats';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 

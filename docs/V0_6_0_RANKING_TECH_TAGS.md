@@ -12,7 +12,7 @@
 > 目标：把本文变成“能直接开工”的实现说明书（DB / API / 触发点 / 幂等 / 回填 / 验收）。
 
 **核心落点**
-- 计分触发点：`pages/api/arena/generate.ts` 与 `pages/api/arena/generate-stream.ts`（在写入 `battle_report_generations` + `battle_report_generation_combatants` 之后异步结算）
+- 计分触发点：非流式 `pages/api/generate-battle-story.ts`（以及兼容的 `pages/api/arena/generate.ts`）与流式 `pages/api/arena/generate-stream.ts`（在写入 `battle_report_generations` + `battle_report_generation_combatants` 之后异步结算；当前前端非流式与 PVP 结算均走 `/api/generate-battle-story`）
 - 排位持久化：新增 `arena_ratings`（当前分）+ `arena_rating_events`（审计/去重/回放）
 - 技术值实现：已存在 `lib/metrics/techIndex.ts`（本文仅定义落库口径与对外接口）
 - 标签体系：新增 `tags` / `data_card_tags`（v0.6.0 默认“只选不创”）

@@ -1,0 +1,25 @@
+{
+  "tags": [
+    { "id": "style:daily", "name": "日常向", "description": "偏日常/轻剧情", "category": "题材/风格", "scope": "user", "isActive": true },
+    { "id": "style:comedy", "name": "搞笑向", "description": "以轻松/趣味为主", "category": "题材/风格", "scope": "user", "isActive": true },
+    { "id": "theme:friendship", "name": "战友情", "description": "强调并肩作战/羁绊", "category": "题材/风格", "scope": "user", "isActive": true },
+
+    { "id": "ability:anti-magic", "name": "反魔法", "description": "具备针对或反制魔法/特殊能力的手段", "category": "设定/能力倾向", "scope": "user", "isActive": true },
+    { "id": "ability:physical", "name": "物理对抗系", "description": "主要依赖物理战斗/技巧/武器", "category": "设定/能力倾向", "scope": "user", "isActive": true },
+    { "id": "ability:inclusive", "name": "包容类能力", "description": "能力倾向于包容/吸收/容纳", "category": "设定/能力倾向", "scope": "user", "isActive": true },
+
+    { "id": "attr:mortal", "name": "凡人", "description": "设定上无超凡要素或极弱", "category": "卡片属性", "scope": "user", "isActive": true },
+    { "id": "attr:original", "name": "自设", "description": "原创设定/原创角色", "category": "卡片属性", "scope": "user", "isActive": true },
+    { "id": "attr:veteran", "name": "历战王", "description": "强调战斗经验/历战设定", "category": "卡片属性", "scope": "user", "isActive": true },
+
+    { "id": "risk:meta", "name": "元叙事", "description": "含元叙事/元角色/对 AI 的显式声明等", "category": "风险提示", "scope": "system", "isActive": true },
+    { "id": "risk:prompt-engineering", "name": "提示词工程", "description": "含大量提示词工程/格式约束", "category": "风险提示", "scope": "system", "isActive": true },
+    { "id": "risk:code-kill", "name": "代码杀", "description": "含显式代码/规则武器化以影响裁判的内容", "category": "风险提示", "scope": "system", "isActive": true }
+  ],
+  "aliases": [
+    { "alias": "元角色", "tagId": "risk:meta" },
+    { "alias": "科技与狠活", "tagId": "risk:prompt-engineering" },
+    { "alias": "代码杀", "tagId": "risk:code-kill" }
+  ]
+}
+
