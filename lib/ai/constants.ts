@@ -283,5 +283,21 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             { value: 'deepseek-reasoner', label: 'DeepSeek-V3.2 思考模式', description: 'DeepSeek 最新版本思考模式。' },
         ]
     },
+    {
+        id: 'mystery',
+        name: '魔法国度',
+        description: '神秘渠道，不定时放送。',
+        docsUrl: '',
+        baseUrl: 'https://www.right.codes/codex/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'gpt-5.2',
+                label: 'GPT 5.2 (仅流式)',
+                description: '神秘渠道的 GPT 5.2 模型，随机出现，仅供娱乐。'
+            },
+        ]
+    },
 ];
 
