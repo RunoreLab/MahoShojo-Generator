@@ -129,7 +129,7 @@ export function ArenaPage() {
             <BattleHeader />
             <div className="flex justify-end mt-2">
               <Link href="/ranking" className="text-sm text-blue-600 hover:underline font-semibold">
-                查看排位排行榜（v0.6.0）
+                查看排行榜
               </Link>
             </div>
             <PresetSelector />
