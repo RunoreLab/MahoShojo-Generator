@@ -1,6 +1,12 @@
-import { getBattleReportGenerationByIdLite, isUserInPvpMatch, updateBattleReportGenerationOutputHasSensitiveWords } from '@/lib/d1';
+import {
+  getBattleReportGenerationByIdLite,
+  getLargeObjectByOwnerRef,
+  isUserInPvpMatch,
+  updateBattleReportGenerationOutputHasSensitiveWords,
+} from '@/lib/d1';
 import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
+import { getObjectText } from '@/lib/r2';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 
 export const runtime = 'edge';
@@ -35,7 +41,17 @@ export default async function handler(req: Request): Promise<Response> {
   const canReadByPvp = record.pvp_match_id ? await isUserInPvpMatch(record.pvp_match_id, auth.user.id) : false;
   if (!isOwner && !canReadByPvp) return json({ error: '记录不存在' }, { status: 404 });
 
-  const outputPreview = typeof record.output_preview === 'string' ? record.output_preview : '';
+  let outputPreview = typeof record.output_preview === 'string' ? record.output_preview : '';
+  const lo = await getLargeObjectByOwnerRef('battle_report_generation_output', record.id);
+  const key = typeof lo?.r2_key === 'string' ? lo.r2_key : '';
+  if (key) {
+    const r2 = await getObjectText(key);
+    if (r2.success && r2.data?.text) {
+      outputPreview = r2.data.text;
+    } else if (!outputPreview.trim()) {
+      return json({ error: '战报正文已迁移至 R2，但读取失败，请稍后重试。' }, { status: 502 });
+    }
+  }
   const flaggedSensitive = record.output_has_sensitive_words;
 
   const hasPreviewText = Boolean(outputPreview && outputPreview.trim());

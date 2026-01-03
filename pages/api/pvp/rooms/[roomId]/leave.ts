@@ -212,7 +212,7 @@ async function leaveHandler(req: Request): Promise<Response> {
         ? { status: 'closed' as const, phase: 'closed' as const }
         : { phase: 'waiting' as const };
 
-  const shouldClose = patch.status === 'closed' || patch.phase === 'closed';
+  const shouldClose = 'status' in patch && patch.status === 'closed';
   const ok = await updatePvpRoomCas(roomId, expectedVersion, {
     ...patch,
     ...(shouldClose ? { rules_json: clearPvpRoomRuntimeFromRulesJson(room.rules_json) } : {}),

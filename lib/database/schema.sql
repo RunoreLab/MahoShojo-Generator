@@ -296,6 +296,28 @@ CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_room_id ON battle_r
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_match_id ON battle_report_generations(pvp_match_id);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_round_id ON battle_report_generations(pvp_round_id);
 
+-- 大对象索引表（R2 外部化）
+-- 用于把大字段（战报正文、PVP 快照、立绘等）外部化到 R2，并在 D1 内保存可查询的索引。
+CREATE TABLE IF NOT EXISTS large_objects (
+  id TEXT PRIMARY KEY NOT NULL,
+  kind TEXT NOT NULL,                    -- 业务类型（如 battle_report_generation_output）
+  owner_ref_id TEXT NOT NULL,            -- 业务实体ID（如 generationId / roomId / dataCardId）
+  owner_user_id INTEGER,                -- 归属用户（可空）
+  r2_key TEXT NOT NULL,                 -- R2 对象 key（不含 bucket）
+  bytes INTEGER NOT NULL,               -- 原始内容字节量（未压缩）
+  stored_bytes INTEGER,                 -- 存入 R2 的字节量（可空；gzip/流式场景可记录）
+  sha256 TEXT,                          -- 可选：内容 hash（用于去重/校验）
+  content_type TEXT,                    -- 如 application/json; charset=utf-8 / text/markdown; charset=utf-8 / image/webp
+  content_encoding TEXT,                -- 如 gzip
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE(kind, owner_ref_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_large_objects_kind_created_at ON large_objects(kind, created_at);
+CREATE INDEX IF NOT EXISTS idx_large_objects_owner_user_id_created_at ON large_objects(owner_user_id, created_at);
+
 -- 战报生成记录-参战者明细表
 -- 用于记录每条生成记录中每位角色的可查询信息（未来排行榜/统计的关键维度）。
 CREATE TABLE IF NOT EXISTS battle_report_generation_combatants (

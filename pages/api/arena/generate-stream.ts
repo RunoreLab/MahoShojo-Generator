@@ -18,6 +18,9 @@ import {
     createBattleReportGenerationCombatants,
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
+    updateBattleReportGenerationOutputPreview,
+    upsertLargeObjectByOwnerRef,
+    generateUUID,
     getUserByAuthKey
 } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
@@ -34,6 +37,8 @@ import {
 } from '@/lib/arena/battle-report-log-utils';
 import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
+import { deleteObject } from '@/lib/r2';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
@@ -471,6 +476,8 @@ async function handler(req: NextRequest): Promise<Response> {
         const ipAnonymized = anonymizeIp(ip);
         const authHeader = req.headers.get('authorization');
         const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+        const generationId = generateUUID();
+        let r2UploadPromise: Promise<Awaited<ReturnType<typeof storeBattleReportGenerationOutputStreamToR2>>> | null = null;
 
         let outputBytes = 0;
         let outputChars = 0;
@@ -520,7 +527,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 });
                 const inputBytes = new TextEncoder().encode(inputJson).length;
 
-                const recordId = await createBattleReportGenerationRecord({
+                const createdId = await createBattleReportGenerationRecord({
+                    id: generationId,
                     startedAt: startedAtIso,
                     endedAt: endedAtIso,
                     durationMs,
@@ -590,7 +598,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     }),
                 });
 
-                if (recordId && Array.isArray(combatants) && normalizedStatus !== 'failed') {
+                if (createdId && Array.isArray(combatants) && normalizedStatus !== 'failed') {
                     const toBytes = (value: string) => new TextEncoder().encode(value).length;
                     const rows = combatants.map((c: any, index: number) => {
                         const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
@@ -600,7 +608,7 @@ async function handler(req: NextRequest): Promise<Response> {
                         const isPreset = typeof c?.isPreset === 'boolean' ? c.isPreset : false;
                         const presetFilename = isPreset && typeof c?.filename === 'string' ? c.filename.trim() : '';
                         return {
-                            generationId: recordId,
+                            generationId: generationId,
                             sortIndex: index,
                             name,
                             type: typeof c?.type === 'string' ? c.type : null,
@@ -617,9 +625,9 @@ async function handler(req: NextRequest): Promise<Response> {
                     });
                     const combatantsWrite = await createBattleReportGenerationCombatants(rows);
                     if (!combatantsWrite.ok) {
-                        log.warn('战报生成记录：角色明细写入失败', { recordId, errorMessage: combatantsWrite.errorMessage });
+                        log.warn('战报生成记录：角色明细写入失败', { recordId: generationId, errorMessage: combatantsWrite.errorMessage });
                     }
-                    await updateBattleReportGenerationCombatantsWriteResult(recordId, {
+                    await updateBattleReportGenerationCombatantsWriteResult(generationId, {
                         ok: combatantsWrite.ok,
                         expectedRows: rows.length,
                         errorMessage: combatantsWrite.errorMessage ?? null,
@@ -627,7 +635,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
 	                    if (!combatantsWrite.ok) {
 	                        await updateBattleReportGenerationExtraJson(
-	                            recordId,
+	                            generationId,
 	                            compactExtraJson({
 	                                errorMessage: normalizeErrorMessage(normalizedErrorMessage),
 	                                combatantsFallbackReason: 'combatants-table-write-failed',
@@ -637,11 +645,33 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    }
 	                }
 
-                    if (recordId) {
+                    const stored = r2UploadPromise ? await r2UploadPromise.catch(() => null) : null;
+                    if (stored?.ok && stored.r2Key) {
+                        if (normalizedStatus === 'completed') {
+                            const indexed = await upsertLargeObjectByOwnerRef({
+                                kind: 'battle_report_generation_output',
+                                ownerRefId: generationId,
+                                ownerUserId: user?.id ?? null,
+                                r2Key: stored.r2Key,
+                                bytes: stored.bytes,
+                                storedBytes: stored.storedBytes,
+                                contentType: stored.contentType,
+                                contentEncoding: stored.contentEncoding,
+                                sha256: null,
+                            });
+                            if (indexed.ok && !stored.persistPreviewInD1) {
+                                await updateBattleReportGenerationOutputPreview(generationId, null);
+                            }
+                        } else {
+                            await deleteObject(stored.r2Key);
+                        }
+                    }
+
+                    if (createdId) {
                         try {
-                            await settleArenaRatingsForGeneration(recordId);
+                            await settleArenaRatingsForGeneration(generationId);
                         } catch (error) {
-                            log.warn('排位结算失败（非阻塞）', { recordId, error });
+                            log.warn('排位结算失败（非阻塞）', { recordId: generationId, error });
                         }
                     }
 	            })();
@@ -732,7 +762,14 @@ async function handler(req: NextRequest): Promise<Response> {
             }
         });
 
-        return new Response(wrappedBody, {
+        const [clientBody, r2Body] = wrappedBody.tee();
+        r2UploadPromise = storeBattleReportGenerationOutputStreamToR2({
+            generationId,
+            startedAtIso,
+            stream: r2Body,
+        });
+
+        return new Response(clientBody, {
             status: streamResponse.status,
             headers,
         });

@@ -14,6 +14,14 @@ export {
 
 // 重新导出用户相关功能
 export {
+  upsertLargeObjectByOwnerRef,
+  getLargeObjectByOwnerRef,
+  type LargeObjectRow,
+  type LargeObjectKind,
+} from './database/large-objects';
+
+// 重新导出用户相关功能
+export {
   createUser,
   getUserByUsername,
   getUserByEmail,
@@ -171,6 +179,7 @@ export {
 export {
   createBattleReportGenerationRecord,
   updateBattleReportGenerationExtraJson,
+  updateBattleReportGenerationOutputPreview,
   updateBattleReportGenerationOutputHasSensitiveWords,
   updateBattleReportGenerationCombatantsWriteResult,
   getBattleReportGenerationByIdLite,
