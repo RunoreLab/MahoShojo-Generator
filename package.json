@@ -6,7 +6,7 @@
         "dev": "next dev --turbopack",
         "dev:pretty": "next dev --turbopack | pino-pretty",
         "build": "next build",
-        "build:cf": "next-on-pages",
+        "build:cf": "node scripts/build-cf.mjs",
         "preview": "npm run build:cf && wrangler pages dev .vercel/output/static",
         "start": "next start",
         "lint": "next lint",
