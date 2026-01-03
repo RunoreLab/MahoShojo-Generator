@@ -121,7 +121,7 @@
 - `battle_report_generations.user_id IS NOT NULL`（必须登录才计分）
 - v0.6.0 建议再加一条：`combatant_count = 2`（先只做 1v1，减少多人/队伍歧义）
 
-注意：如果用户更新角色卡内容（即JSON角色卡，不包含描述等），则 **重置严格排位分** ，但不重置自由排位分。
+注意：如果用户更新角色卡 JSON（即主表 `data_cards.data` 实际发生变化），则 **重置严格排位分** ，但不重置自由排位分；若更新仅提交到待审核表、线上仍在使用旧版本，则不会立即重置，直到该更新被应用到主表为止。
 
 #### 自由排位（Free）资格
 - 满足基础资格即可；不要求 classic/无引导/不读状态。
@@ -316,7 +316,7 @@ v0.6.0 推荐采用“事件先行”的两阶段：
 排位系统如果不加约束，很容易被“重复生成同一对局”刷分。建议的最低成本风控：
 - strict：**必须登录**才计分（`battle_report_generations.user_id IS NOT NULL`）
 - strict：**同一用户**在一定时间窗内（如 10 分钟）对同一对手组合只计分一次（用 `arena_rating_events` + 组合 key 实现；尤其适配“自由挑对手”）
-- strict：每日计分上限（例如 strict 每日最多 30 局）
+- strict：每日计分上限（例如 strict 每日最多 80 局）
 - free：因为允许匿名，建议至少做“弱风控”（例如按 `ip_anonymized + 对手组合` 限速），否则 free 更像“娱乐分”（可接受但需在 UI/百科中说明）
 
 #### 1.9.1 对手组合 key（pair_key）定义（必须统一）
@@ -725,7 +725,9 @@ Query（建议）：
 - `includePresets=1|0`（默认 1）
 
 返回（建议字段）：
-- `items[]`：`rank / entityType / entityId / displayName / rating / games / wins / losses / draws / tier / techScore / techLevel / isNative / tags[]`
+- `items[]`：`rank / entityType / entityId / displayName / rating / games / wins / losses / draws / tier / techScore / techLevel / isNative / tagIds[]`
+
+> 说明：`tagIds[]` 只返回标签 ID；标签的 `name/description/category` 通过 `GET /api/tags` 获取并在前端映射展示。
 
 #### 5.4.2 `GET /api/tags`（标签库）
 - 默认仅返回 `is_active=1` 的标签（可加 `includeInactive=1` 给管理员/维护脚本用）
@@ -774,7 +776,7 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 7) free 梯子：`ip_anonymized IS NULL` 时不计分（为保证 strict ⊆ free，该条件已写入“基础资格”，使该局 strict/free 均跳过）。
 8) 计分允许包含私有卡，但公共榜过滤：仅展示 `data_cards.is_public=1 AND review_status='approved'` + 预设。
 9) 预设角色：出现在排行榜里（与数据库角色卡同榜展示）。
-10) strict 风控：目前仅做“10 分钟同对手组合去重”（见 1.9）。
+10) strict 风控：10 分钟同对手组合去重 + strict 每日计分上限 80 局（见 1.9）。
 11) 段位阈值：沿用本文默认（900/1100/1300/1600）；初始分 `initial_rating=1000`。
 12) Elo：允许双方 K 不同（非零和）。
 13) 标签库种子：以静态资源入库（推荐 `public/tags.seed.json`），通过脚本同步到 D1（见 3.3.3）。
@@ -784,4 +786,23 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 
 ## 8. 收尾工作
 - 更新 Readme 与公告。
+- v0.6.0 正式上线前建议跑一遍（本地/CI）：
+```bash
+bun install
+bun run lint
+bun test
+bun run build
+bun run preview
+```
+- v0.6.0 数据库与种子（需要具备 D1 管理权限与环境变量）：
+```bash
+# 先确保线上 D1 已执行 `lib/database/schema.sql` 的新增建表/索引（按你当前的迁移流程落地）
+# （可选：若你用 wrangler 管理 D1，可参考下面命令；将 <DB> 替换为你的 D1 数据库名称或 ID）
+# WRANGLER_HOME=.wrangler npx wrangler d1 execute <DB> --file=lib/database/schema.sql --remote
+#
+# 同步标签库种子到 D1（依赖 D1_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID）
+bun tsx scripts/init-tags.ts
+```
+
+---
 
