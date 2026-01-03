@@ -277,7 +277,7 @@
 
 代码/公式（Code / Math）
 - `kw_code`：代码符号与语法（```/function/return/if/else/for/while/=>/==/&&/||/const/let/var/JSON.parse…）
-- `kw_math`：数学与公式符号（∑/∏/∞/φ/×/^/阶乘/!! 等）
+- `kw_math`：数学与公式符号（∑/∏/∞/φ/log/exp/阶乘/13!/n!!/x^2 等）
 
 > 备注：建议将 `kw_exploit` 单独存储（甚至可作为系统标签触发条件），因为它更像“风险提示”而不是一般复杂度。
 
@@ -307,11 +307,11 @@
 - `norm(x; cap) = clamp01( ln(1+x) / ln(1+cap) )`（`ln` 为自然对数）
 
 3) 维度得分（0–1）
-- `score_control = norm(tech_density_per_1k_chars; cap=10)`
-- `score_mechanics = norm(mechanics_density_per_1k_chars; cap=8)`
-- `score_code = norm(code_density_per_1k_chars; cap=2)`（稀疏但强信号，cap 取小）
-- `score_structure = 0.35*norm(json_total_keys; cap=100) + 0.35*norm(json_total_nodes; cap=250) + 0.20*norm(json_max_array_len; cap=70) + 0.10*norm(repeat_line_ratio; cap=0.30)`
-- `score_size = norm(json_string_chars_total; cap=30000)`（仅作弱权重，避免长叙事误伤）
+- `score_control = norm(tech_density_per_1k_chars; cap=12)`
+- `score_mechanics = norm(mechanics_density_per_1k_chars; cap=10)`
+- `score_code = norm(code_density_per_1k_chars; cap=3)`（稀疏但强信号，cap 取小但留余量）
+- `score_structure = 0.35*norm(json_total_keys; cap=120) + 0.35*norm(json_total_nodes; cap=320) + 0.20*norm(json_max_array_len; cap=90) + 0.10*norm(repeat_line_ratio; cap=0.35)`
+- `score_size = norm(json_string_chars_total; cap=40000)`（仅作弱权重，避免长叙事误伤）
 
 4) 合成 `techScore`（0–100）
 - `techScore = round(100 * (0.35*score_control + 0.25*score_mechanics + 0.20*score_structure + 0.15*score_code + 0.05*score_size))`
@@ -334,10 +334,26 @@
 - `json_total_keys`：P95 约 100
 - `json_total_nodes`：P95 约 250
 - `json_max_array_len`：P95 约 70
-- `repeat_line_ratio`：P95 约 0.28（因此 cap 建议取 0.30）
-- `code_density_per_1k_chars`：P99 才开始明显抬头（大多数卡为 0），因此 cap 建议取 2 以突出“代码/公式卡”
+- `repeat_line_ratio`：P95 约 0.28
+- `code_density_per_1k_chars`：P99 才开始明显抬头（大多数卡为 0）
+
+考虑到你已说明：本地保存的是较早期角色卡，线上卡的技术密度/结构复杂度可能更高，建议 v0.6.0 默认 cap **在本地 P95 的基础上留 20%~30% 余量**，避免上线后大面积“顶格饱和”。一组推荐的默认 cap（带余量）示例：
+- `json_string_chars_total_cap = 40000`
+- `tech_density_per_1k_chars_cap = 12`
+- `mechanics_density_per_1k_chars_cap = 10`
+- `json_total_keys_cap = 120`
+- `json_total_nodes_cap = 320`
+- `json_max_array_len_cap = 90`
+- `repeat_line_ratio_cap = 0.35`
+- `code_density_per_1k_chars_cap = 3`
 
 > 这些 cap 本质是“让指标饱和”的刻度尺；上线后应结合本项目线上数据分布（以及用户反馈）迭代。
+
+**试算脚本（用于自检分布与榜单对照）**  
+可以用项目内脚本快速跑一遍本地语料与强度榜单（输出分布、各 tier 的均值/分位数、以及 Spearman 相关性，仅作 sanity check）：
+```bash
+bun run scripts/tech-index-report.ts --input "/mnt/d/04-生活与娱乐/魔法少女竞技场" --sample 600 --seed 20260103 --ranking "/mnt/d/04-生活与娱乐/魔法少女竞技场/社群内排行榜单/AAA MLA V9.0/📘 魔法少女  残兽 强度排行榜（非原生篇）V8.0.txt" --ranking-search-root "/mnt/d/04-生活与娱乐/魔法少女竞技场/社群内排行榜单/AAA MLA V9.0"
+```
 
 #### 2.3.6 映射到本项目的建议
 v0.6.0 建议至少落地：
