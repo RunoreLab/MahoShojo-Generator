@@ -121,6 +121,8 @@
 - `battle_report_generations.user_id IS NOT NULL`（必须登录才计分）
 - v0.6.0 建议再加一条：`combatant_count = 2`（先只做 1v1，减少多人/队伍歧义）
 
+注意：如果用户更新角色卡内容（即JSON角色卡，不包含描述等），则 **重置严格排位分** ，但不重置自由排位分。
+
 #### 自由排位（Free）资格
 - 满足基础资格即可；不要求 classic/无引导/不读状态。
 - v0.6.0 建议先限定 `combatant_count = 2`（你表示“都行”，此处按 MVP 落地）。
