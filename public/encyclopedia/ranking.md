@@ -2,7 +2,6 @@
 
 > 作者：末伏之夜  
 > 更新时间：2026-01-03  
-> 依据：`docs/V0_6_0_RANKING_TECH_TAGS.md`
 
 排位分是一个「近似强度/稳定性」的统计指标：它来自 LLM 叙事裁判，不追求电竞级公平。
 
@@ -45,9 +44,7 @@ v0.6.0 默认只对 `combatant_count = 2` 的对局计分，避免多人/队伍�
 - free 梯子缺少 `ip_anonymized`（无法做基础限速/去重，宁可漏算）
 - strict 梯子未登录（strict 必须登录才计分）
 
-如果你怀疑是 bug，可以结合战报的 `generation_id` 去查 `arena_rating_events`（可审计/可回放的核心表）。
-
-## 风控提示（MVP 版）
+## 风控提示
 
 strict 的默认“反刷分”口径是：同一用户在 10 分钟内对同一对手组合只计一次分。  
 free 则以脱敏 IP 做类似限速（前提是有 `ip_anonymized`）。
@@ -56,3 +53,5 @@ free 则以脱敏 IP 做类似限速（前提是有 `ip_anonymized`）。
 
 - 代码杀（概念与礼仪）：`/encyclopedia/code-kill`
 - 技术值（风险/风格提示）：`/encyclopedia/tech-index`
+- 引导与读写状态（strict/free 的关键差异）：`/encyclopedia/guidance`
+- 公开与审核机制（为什么公共榜需要已通过）：`/encyclopedia/review`

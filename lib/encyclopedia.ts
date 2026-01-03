@@ -13,10 +13,22 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     markdownPath: '/encyclopedia/arena.md',
   },
   {
+    slug: 'guidance',
+    title: '引导 / 裁判事件 / 读写状态',
+    summary: 'userGuidance、裁判事件、读写历战/状态栏对战报与计分的影响。',
+    markdownPath: '/encyclopedia/guidance.md',
+  },
+  {
     slug: 'ranking',
     title: '排位与排行榜',
     summary: 'strict/free 梯子、段位、风控与排行榜展示口径。',
     markdownPath: '/encyclopedia/ranking.md',
+  },
+  {
+    slug: 'native',
+    title: '原生性（签名）',
+    summary: '什么是原生卡、原生性如何计算，以及为什么可能显示“未知”。',
+    markdownPath: '/encyclopedia/native.md',
   },
   {
     slug: 'tech-index',
@@ -53,6 +65,36 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     title: '情景卡进阶（继承与长线）',
     summary: '用历战记录/状态栏做“多回合延续”的情景卡（社区攻略改写）。',
     markdownPath: '/encyclopedia/scenario-advanced.md',
+  },
+  {
+    slug: 'sublimation',
+    title: '成长升华',
+    summary: '让角色根据经历蜕变成新形态：模板、保留字段、读写历史/状态。',
+    markdownPath: '/encyclopedia/sublimation.md',
+  },
+  {
+    slug: 'archive',
+    title: '档案馆（角色管理）',
+    summary: '数据卡导入/编辑/替换、隐私提示，以及敏感词修正建议。',
+    markdownPath: '/encyclopedia/archive.md',
+  },
+  {
+    slug: 'review',
+    title: '公开与审核机制',
+    summary: 'review_status、公开展示口径，以及“提交审核/待审核”的含义。',
+    markdownPath: '/encyclopedia/review.md',
+  },
+  {
+    slug: 'sensitive-words',
+    title: '敏感词与逮捕',
+    summary: '什么会触发逮捕页、为什么会拦截，以及如何自救恢复内容。',
+    markdownPath: '/encyclopedia/sensitive-words.md',
+  },
+  {
+    slug: 'shield-words',
+    title: '屏蔽词（和谐替换）',
+    summary: '屏蔽词不会逮捕：只会对输出做遮罩或替换，减少误伤。',
+    markdownPath: '/encyclopedia/shield-words.md',
   },
   {
     slug: 'pvp',

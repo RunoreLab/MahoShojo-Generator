@@ -2,7 +2,6 @@
 
 > 作者：末伏之夜  
 > 更新时间：2026-01-03  
-> 依据：`docs/V0_6_0_RANKING_TECH_TAGS.md`
 
 定位标签用于描述角色卡/情景卡的定位与风格，便于筛选与快速理解。
 
@@ -29,3 +28,4 @@
 
 - 代码杀（概念与礼仪）：`/encyclopedia/code-kill`
 - 术语表（社区提案）：`/encyclopedia/glossary`
+- 原生性（签名）：`/encyclopedia/native`
