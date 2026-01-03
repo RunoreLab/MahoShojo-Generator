@@ -1,8 +1,36 @@
-// 核心数据库连接和查询功能
-const D1_DATABASE_ID = process.env.D1_DATABASE_ID;
-const D1_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
-const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
-const CLOUDFLARE_DATABASE_URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${D1_DATABASE_ID}/query`;
+type D1Config = {
+  databaseId: string;
+  apiToken: string;
+  accountId: string;
+  databaseUrl: string;
+};
+
+const getD1Config = (): D1Config | null => {
+  const databaseId = process.env.D1_DATABASE_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+
+  if (!databaseId || !apiToken || !accountId) return null;
+
+  return {
+    databaseId,
+    apiToken,
+    accountId,
+    databaseUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,
+  };
+};
+
+const assertD1Config = (): D1Config => {
+  const config = getD1Config();
+  if (config) return config;
+
+  const missing: string[] = [];
+  if (!process.env.CLOUDFLARE_API_TOKEN) missing.push('CLOUDFLARE_API_TOKEN');
+  if (!process.env.CLOUDFLARE_ACCOUNT_ID) missing.push('CLOUDFLARE_ACCOUNT_ID');
+  if (!process.env.D1_DATABASE_ID) missing.push('D1_DATABASE_ID');
+
+  throw new Error(`缺少 Cloudflare 配置信息：${missing.join(', ') || '未知'}`);
+};
 
 // 生成 32 位包含大小写字母和数字的随机字符串
 export function generateRandomId(): string {
@@ -51,14 +79,12 @@ export function generateUUID(): string {
 
 // 核心查询函数
 async function query(sql: string, params: unknown[] = []): Promise<Response> {
-  if (!D1_API_TOKEN || !CLOUDFLARE_ACCOUNT_ID || !D1_DATABASE_ID) {
-    throw new Error("缺少 Cloudflare 配置信息，跳过 D1 查询");
-  }
+  const config = assertD1Config();
 
-  return await fetch(CLOUDFLARE_DATABASE_URL, {
+  return await fetch(config.databaseUrl, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${D1_API_TOKEN}`,
+      "Authorization": `Bearer ${config.apiToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -71,10 +97,6 @@ async function query(sql: string, params: unknown[] = []): Promise<Response> {
 // 从 D1 数据库直接执行 SQL 语句
 export async function queryFromD1(sql: string, params: unknown[] = []): Promise<unknown> {
   try {
-    if (!D1_API_TOKEN || !CLOUDFLARE_ACCOUNT_ID) {
-      throw new Error("缺少 Cloudflare API Token 或 Account ID");
-    }
-
     const response = await query(sql, params);
 
     if (!response.ok) {
@@ -92,7 +114,7 @@ export async function queryFromD1(sql: string, params: unknown[] = []): Promise<
 // 保存数据到 D1 数据库，使用自定义 32 位随机字符串 ID 并返回 ID
 export async function createWithCustomId(data: string, table: string): Promise<string | null> {
   try {
-    if (!D1_API_TOKEN || !CLOUDFLARE_ACCOUNT_ID || !D1_DATABASE_ID) {
+    if (!getD1Config()) {
       console.warn("缺少 Cloudflare 配置信息，跳过 D1 保存");
       return null;
     }
@@ -126,7 +148,7 @@ export async function createWithCustomId(data: string, table: string): Promise<s
 // 根据 ID 更新数据库记录的函数
 export async function updateById(id: string, data: string, table: string): Promise<boolean> {
   try {
-    if (!D1_API_TOKEN || !CLOUDFLARE_ACCOUNT_ID || !D1_DATABASE_ID) {
+    if (!getD1Config()) {
       console.warn("缺少 Cloudflare 配置信息，跳过 D1 更新");
       return false;
     }
@@ -176,7 +198,7 @@ export async function getRecordById(id: string, table: string): Promise<unknown>
 // @deprecated 保存到 D1 数据库的函数
 export async function saveToD1(data: unknown): Promise<boolean> {
   try {
-    if (!D1_API_TOKEN || !CLOUDFLARE_ACCOUNT_ID || !D1_DATABASE_ID) {
+    if (!getD1Config()) {
       console.warn("缺少 Cloudflare 配置信息，跳过 D1 保存");
       return false;
     }
