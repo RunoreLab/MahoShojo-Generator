@@ -1,12 +1,11 @@
 import { upsertLargeObjectByOwnerRef } from '@/lib/d1';
 import { putObject } from '@/lib/r2';
+import { battleReportOutputPreviewConfig } from '@/config/battle-report';
 
 import { buildBattleReportGenerationR2Key, gzipStreamIfSupported, gzipTextIfSupported } from './large-object-r2';
 
 const shouldPersistPreviewInD1 = (): boolean => {
-  const v = (process.env.BATTLE_REPORT_OUTPUT_PREVIEW_PERSIST || '').trim().toLowerCase();
-  if (!v) return true;
-  return !(v === '0' || v === 'false' || v === 'no' || v === 'off');
+  return battleReportOutputPreviewConfig.persistPreviewInD1;
 };
 
 export type StoredBattleReportOutput = {

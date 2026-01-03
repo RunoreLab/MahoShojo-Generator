@@ -304,14 +304,16 @@ SQLite 文件大小包含已释放但未回收的页面（freelist）。本次�
 - 流式（Markdown）：`pages/api/arena/generate-stream.ts` 会把“客户端实际收到的 Markdown（含 telemetry 注释）”同步 tee 到 R2（支持时 gzip）。  
 - regenerate 双读：当 D1 的 `output_preview` 为空时，`pages/api/me/battle-reports/[generationId]/regenerate.ts` 会从 `large_objects` → R2 读取正文再重生。  
 
-### 8.1.3 环境变量开关（可选）
+### 8.1.3 配置开关（可选）
 
-- `BATTLE_REPORT_OUTPUT_PREVIEW_PERSIST`
-  - 默认：保留（等价于 true）
-  - 设为 `0/false/off`：在“R2 写入 + large_objects 索引成功”后，将 `battle_report_generations.output_preview` 置 `NULL`
-- `BATTLE_REPORT_OUTPUT_PREVIEW_MODE`
-  - 默认 `full`（等价于把全文写进 `output_preview`，会显著推高 D1 体积）
-  - 可设为 `truncate`（仅保留 head/tail 拼接的摘要；适合你后续如果决定“D1 仍保留摘要但不保留全文”的折中策略）
+已迁移到 `config/battle-report.ts`：
+
+- `battleReportOutputPreviewConfig.persistPreviewInD1`
+  - 默认：`true`（保留 D1 的 `output_preview`）
+  - 设为 `false`：在“R2 写入 + large_objects 索引成功”后，将 `battle_report_generations.output_preview` 置 `NULL`
+- `battleReportOutputPreviewConfig.outputPreviewMode`
+  - 默认：`full`（等价于把全文写进 `output_preview`，会显著推高 D1 体积）
+  - 可设为 `truncate`（仅保留 head/tail 拼接的摘要；适合“D1 仍保留摘要但不保留全文”的折中策略）
 
 ---
 
