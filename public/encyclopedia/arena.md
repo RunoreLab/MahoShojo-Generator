@@ -2,7 +2,6 @@
 
 > 作者：末伏之夜  
 > 更新时间：2026-01-03  
-> 依据：`docs/V0_6_0_RANKING_TECH_TAGS.md`
 
 竞技场是「生成战报」的主要入口：你选择参战者（数据卡或预设角色），系统生成战报并给出胜负结果。
 
@@ -14,11 +13,11 @@
 - 兼容端点：`/api/arena/generate`
 - 流式：`/api/arena/generate-stream`（写库后异步结算，不影响流式输出）
 
-## 参与对象
+## 排位参与对象
 
 v0.6.0 的排位对象以「实体」为单位：
 
-- 数据卡：`data_cards.id`
+- 已上传至线上数据库中的数据卡：`data_cards.id`
 - 预设角色：`preset filename`
 
 只有当参战者均可映射为上述实体时，才可能计分。
@@ -34,3 +33,4 @@ v0.6.0 的排位对象以「实体」为单位：
 
 - 术语表：`/encyclopedia/glossary`
 - 情景卡进阶：`/encyclopedia/scenario-advanced`
+- 引导与读写状态（strict/free 的差异点）：`/encyclopedia/guidance`

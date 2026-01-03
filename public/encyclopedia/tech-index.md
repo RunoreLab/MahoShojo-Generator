@@ -2,7 +2,6 @@
 
 > 作者：末伏之夜  
 > 更新时间：2026-01-03  
-> 依据：`docs/V0_6_0_RANKING_TECH_TAGS.md`
 
 技术值不是「强度值」，而是一个风险/风格提示：
 
@@ -19,7 +18,7 @@
 
 ## 落库与过期重算
 
-技术值会写入 `data_card_metrics`。当 `data_cards.updated_at` 与 `data_card_metrics.data_card_updated_at` 不一致时，会触发重算并异步回写。
+技术值会写入 `data_card_metrics`。当卡片更新时，会触发重算并异步回写。
 
 ## 和“代码杀”的关系
 
@@ -29,3 +28,7 @@
 想了解社群语境下对“代码杀”的讨论与礼仪建议：
 
 - `/encyclopedia/code-kill`
+
+以及它在 strict/free 计分口径里的位置：
+
+- `/encyclopedia/guidance`

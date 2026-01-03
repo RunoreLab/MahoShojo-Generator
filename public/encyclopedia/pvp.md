@@ -2,7 +2,6 @@
 
 > 作者：末伏之夜  
 > 更新时间：2026-01-03  
-> 依据：`docs/V0_6_0_RANKING_TECH_TAGS.md`
 
 PVP 触发的战报在 v0.6.0 允许计入排位，但仍需满足排位资格：
 
@@ -19,3 +18,6 @@ PVP 触发的战报在 v0.6.0 允许计入排位，但仍需满足排位资格�
 - 缺少可用的 `ip_anonymized`（free）
 - 未登录（strict）
 
+更完整的 strict/free 口径与原因解释：
+
+- `/encyclopedia/guidance`
