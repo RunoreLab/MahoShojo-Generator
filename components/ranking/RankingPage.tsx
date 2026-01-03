@@ -94,7 +94,10 @@ export function RankingPage() {
           <div className="card">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h1 className="text-xl font-bold text-gray-800">排位排行榜</h1>
-              <Link href="/arena" className="text-sm text-blue-600 hover:underline">返回竞技场</Link>
+              <div className="flex items-center gap-3 text-sm">
+                <Link href="/encyclopedia/ranking" className="text-blue-600 hover:underline">排位说明</Link>
+                <Link href="/arena" className="text-blue-600 hover:underline">返回竞技场</Link>
+              </div>
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-5">

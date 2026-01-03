@@ -332,6 +332,14 @@ export default function DataCardDetailsModal({
                         技术值：{meta.metrics ? `${meta.metrics.techScore}（${meta.metrics.techLevel}）` : '—'}
                         {meta.metrics?.isStale ? <span className="ml-1 text-amber-700">（已触发重算）</span> : null}
                       </span>
+                      <a
+                        href="/encyclopedia/tech-index"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        了解技术值
+                      </a>
                       <span>
                         原生：{meta.metrics?.isNative == null ? '未知' : meta.metrics.isNative ? '是' : '否'}
                       </span>
@@ -367,6 +375,14 @@ export default function DataCardDetailsModal({
                           编辑
                         </button>
                       )}
+                      <a
+                        href="/encyclopedia/tags"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-1 text-blue-600 hover:underline"
+                      >
+                        了解标签
+                      </a>
                     </div>
 
                     {isEditingTags && (
