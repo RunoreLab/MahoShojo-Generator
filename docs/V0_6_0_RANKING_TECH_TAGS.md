@@ -1,11 +1,27 @@
 # v0.6.0 设计记录：排位分 / 技术值 / 定位标签 / 百科 / 排行榜
 
-更新时间：2026-01-02  
+更新时间：2026-01-03  
 适用项目：Next.js（Edge Runtime）+ Cloudflare D1 + Tailwind 4 + Vercel AI SDK 1.x
 
 > 说明：本文是「可落地」的设计草案，用于讨论与实现对齐；具体数值（K 因子、段位阈值、技术值权重等）允许在上线后根据分布与反馈迭代。
 
 ---
+
+## 快速实现索引（给开发者）
+
+> 目标：把本文变成“能直接开工”的实现说明书（DB / API / 触发点 / 幂等 / 回填 / 验收）。
+
+**核心落点**
+- 计分触发点：`pages/api/arena/generate.ts` 与 `pages/api/arena/generate-stream.ts`（在写入 `battle_report_generations` + `battle_report_generation_combatants` 之后异步结算）
+- 排位持久化：新增 `arena_ratings`（当前分）+ `arena_rating_events`（审计/去重/回放）
+- 技术值实现：已存在 `lib/metrics/techIndex.ts`（本文仅定义落库口径与对外接口）
+- 标签体系：新增 `tags` / `data_card_tags`（v0.6.0 默认“只选不创”）
+- 公共排行榜：默认只展示 `data_cards.is_public=1 AND review_status='approved'` + 预设；作者可额外看到“我的卡的当前位置”（不影响公共名次）
+
+**必须明确的 3 个工程约束**
+1. **幂等**：同一 `generation_id` 在同一梯子（strict/free）下最多只能结算一次（允许重试但不得重复加分）
+2. **可审计**：任何分数变化必须能反查到 `battle_report_generations.id`
+3. **Edge 友好**：计算必须可在 `executionContext.waitUntil(...)` 中执行，超时/失败不影响主链路返回
 
 ## 0. 目标与边界
 
@@ -16,6 +32,12 @@
 - 平局：**计入对局数**，并按 Elo 的 `S=0.5` 微调分数。
 - 预设角色：**出现在排行榜里**（与数据库角色卡同榜展示）。
 - v0.6.0 对“是否只做 1v1 计分”的态度：你表示“都行”，本文按“先 1v1”做 MVP，后续再扩展多人/队伍。
+
+### 0.2 术语表（本文统一口径）
+- **实体（Entity）**：参与计分/榜单展示的对象。v0.6.0 仅包含：数据库角色卡（`data_cards.id` 且 `type='character'`）与预设角色（`preset filename`）。
+- **实体键（entityKey）**：字符串标识，格式：`data_card:<id>` 或 `preset:<filename>`（用于事件去重与组合 key）。
+- **梯子（queue/ladder）**：`strict` / `free` 两套独立评分。
+- **对局主键（generation_id）**：`battle_report_generations.id`，本文所有结算/审计均以它为锚点。
 
 ### 目标（v0.6.0）
 - 在「生成战报」的链路上，**满足条件则计算并记录排位分**，并提供排行榜/筛选展示。
@@ -54,6 +76,7 @@
   - 来自数据库角色卡：`battle_report_generation_combatants.data_card_id IS NOT NULL`
   - 或系统预设：`battle_report_generation_combatants.is_preset = 1`
 - `battle_report_generations.status = 'completed'`
+- （默认建议）不计入 PVP：`pvp_match_id IS NULL AND pvp_round_id IS NULL`（是否采用见第 7 节待确认）
 - 能从战报解析出胜负，且能把胜者与参战者**唯一匹配**：
   - `winner = '平局'` → 允许（视为平局）
   - `winner` 为单个名字 → 必须匹配到且仅匹配到 1 名参战者
@@ -64,6 +87,27 @@
   - 参战者存在“本地上传但非数据库卡、且非预设”的情况
 
 > 备注：为了把预设角色稳定地当成一个可计分实体，建议在 `battle_report_generation_combatants` 将 “preset filename” 写入 `name/template_id` 或其他合适的字段（建议不必专门增加新字段）。
+
+#### 参战者 → 计分实体 的解析规则（必须统一）
+对每个 `battle_report_generation_combatants` 记录，按以下顺序解析：
+1) `is_preset = 1`：
+   - `entity_type = 'preset'`
+   - `entity_id = template_id ?? name`（优先 `template_id`，兜底用 `name`）
+2) 否则若 `data_card_id IS NOT NULL`：
+   - `entity_type = 'data_card'`
+   - `entity_id = data_card_id`
+3) 其他情况：该参战者不具备计分资格（按“基础资格”整体跳过该局）
+
+> 说明：这样做可以避免“同名角色”导致的歧义，并且与本项目现有落库字段完全兼容（不需要新加 combatant 字段）。
+
+#### 胜者匹配规则（v0.6.0：宁可漏算，不可错算）
+输入：`battle_report_generations.winner`（由 `extractWinnerFromText` 提取）
+- 若 `winner` 为空：不计分（`skip_reason='winner-empty'`）
+- 若 `winner = '平局'`：视为平局（`winner_slot=0`）
+- 若 `winner` 包含明显分隔符（如 `,`/`，`/`、`/`/`/`/`&`/`和`）→ 视为多胜者：v0.6.0 默认不计分（`skip_reason='multi-winner'`）
+- 否则：对 `winner` 做轻量归一化（建议：`trim()` + 去掉结尾括号注释 `（...）/(...)` + 去掉尾部标点），再与参战者的 `name`（同样归一化）做匹配：
+  - 匹配到且仅匹配到 1 个参战者：`winner_slot = 1/2`
+  - 0 个或 >1 个：不计分（`skip_reason='winner-ambiguous'`）
 
 #### 严格排位（Strict）资格（在基础资格之上叠加）
 严格排位的目标是尽量排除“额外操控/额外上下文”，仅限经典模式+无引导/随机判定+不读历战/当前状态（没有额外的操控或输入）。对应到现有字段可落为：
@@ -96,7 +140,11 @@
 #### 基础公式（1v1）
 - 期望胜率：`E_A = 1 / (1 + 10 ^ ((R_B - R_A) / 400))`
 - 实际得分：胜=1，平=0.5，负=0
-- 分数变化：`Δ_A = round(K_A * (S_A - E_A))`，`Δ_B = -Δ_A`
+- 分数变化（允许双方 K 不同）：
+  - `Δ_A = round(K_A * (S_A - E_A))`
+  - `Δ_B = round(K_B * (S_B - E_B))`
+
+> 说明：当 `K_A != K_B` 时，`Δ_A + Δ_B` 不一定为 0（这在 Elo 家族里是正常且可接受的）。如果你强烈希望“严格零和”，可以在 v0.6.1+ 改为 `K_common = min(K_A, K_B)` 或固定 K。本文 v0.6.0 默认采用“各算各的”，以满足“新卡收敛更快、老卡更稳”。
 
 #### K 因子建议（可调）
 推荐用“对局数分段”实现“新卡收敛更快、老卡更稳定”：
@@ -106,6 +154,11 @@
 
 并且你想要“变动应当有上限”，可以再加硬上限：
 - `abs(Δ) <= 50`（或直接让上限 = K，避免二次规则）
+
+#### 初始分（必须定死，避免实现分歧）
+- `initial_rating = 1000`
+- `initial_games = 0`，`wins/losses/draws = 0`
+- 任意实体首次参与计分时：`INSERT OR IGNORE` 初始化（见 1.8 DDL）
 
 ### 1.5 段位（Tier）设计（无牌/白牌/字牌/花牌/权杖）
 
@@ -165,21 +218,96 @@
 
 ### 1.8 数据模型建议（D1 / SQLite）
 
-#### 1) 当前分表（推荐）
-`arena_ratings`：保存每个实体在 strict/free 下的当前分与对局数。
+#### 1) 当前分表（必须）
+`arena_ratings`：保存每个实体在 strict/free 下的当前分、对局数与胜负统计。
 
-#### 2) 变动事件表（强烈建议）
-`arena_rating_events`：保存每次变动的 before/delta/after，并关联 `generation_id`，用于审计与防重复计分。
+#### 2) 变动事件表（必须）
+`arena_rating_events`：保存每次变动的 before/delta/after，并关联 `generation_id`，用于：
+- 幂等（同一局不重复计分）
+- 审计（反查某次分数变化的原因）
+- 风控（时间窗去重、限速）
 
-#### 3) 可选：对局摘要表
-若你希望“快速查为什么没计分”，可加 `arena_ranked_match_summaries`，记录：
-- `generation_id`
-- `eligible_strict / eligible_free`
-- `applied_strict / applied_free`
-- `skip_reason`
-- `winners_json / participants_json`
+#### 1.8.1 DDL（建议直接追加到 `lib/database/schema.sql`）
+```sql
+-- =================================================================
+-- Arena 排位（v0.6.0）
+-- =================================================================
 
-> 注意：v0.6.0 不一定要一次把三张表全上；但至少应有 events 表，否则很难排查与回滚。
+CREATE TABLE IF NOT EXISTS arena_ratings (
+  entity_type TEXT NOT NULL CHECK(entity_type IN ('data_card', 'preset')),
+  entity_id TEXT NOT NULL,
+  queue TEXT NOT NULL CHECK(queue IN ('strict', 'free')),
+
+  rating INTEGER NOT NULL DEFAULT 1000,
+  games INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0,
+  draws INTEGER NOT NULL DEFAULT 0,
+
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+
+  PRIMARY KEY (entity_type, entity_id, queue)
+);
+
+CREATE INDEX IF NOT EXISTS idx_arena_ratings_queue_rating ON arena_ratings(queue, rating DESC);
+CREATE INDEX IF NOT EXISTS idx_arena_ratings_queue_games ON arena_ratings(queue, games DESC);
+CREATE INDEX IF NOT EXISTS idx_arena_ratings_updated_at ON arena_ratings(updated_at);
+
+CREATE TABLE IF NOT EXISTS arena_rating_events (
+  id TEXT PRIMARY KEY NOT NULL,
+  generation_id TEXT NOT NULL,
+  queue TEXT NOT NULL CHECK(queue IN ('strict', 'free')),
+
+  status TEXT NOT NULL CHECK(status IN ('pending', 'applied', 'skipped', 'failed')),
+  skip_reason TEXT,
+
+  user_id INTEGER,
+  ip_anonymized TEXT,
+
+  pair_key TEXT NOT NULL, -- 规范化后的 entityKey 组合（无序）
+
+  a_entity_type TEXT NOT NULL CHECK(a_entity_type IN ('data_card', 'preset')),
+  a_entity_id TEXT NOT NULL,
+  b_entity_type TEXT NOT NULL CHECK(b_entity_type IN ('data_card', 'preset')),
+  b_entity_id TEXT NOT NULL,
+
+  winner_slot INTEGER NOT NULL CHECK(winner_slot IN (0, 1, 2)), -- 0=平局, 1=A 胜, 2=B 胜
+
+  a_before_rating INTEGER,
+  a_after_rating INTEGER,
+  a_delta INTEGER,
+  a_before_games INTEGER,
+  a_after_games INTEGER,
+
+  b_before_rating INTEGER,
+  b_after_rating INTEGER,
+  b_delta INTEGER,
+  b_before_games INTEGER,
+  b_after_games INTEGER,
+
+  details_json TEXT,
+
+  created_at TEXT NOT NULL,
+  applied_at TEXT,
+
+  FOREIGN KEY (generation_id) REFERENCES battle_report_generations(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+
+  UNIQUE (generation_id, queue)
+);
+
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_queue_created_at ON arena_rating_events(queue, created_at);
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_user_pair_created_at ON arena_rating_events(user_id, pair_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_ip_pair_created_at ON arena_rating_events(ip_anonymized, pair_key, created_at);
+```
+
+#### 1.8.2 幂等与并发处理（实现口径）
+v0.6.0 推荐采用“事件先行”的两阶段：
+1) **插入事件（pending/skipped）**：`INSERT OR IGNORE`，利用 `UNIQUE(generation_id, queue)` 保证幂等  
+2) **若事件为 pending 才应用**：读出双方当前 rating → 计算 Δ → 更新 `arena_ratings` → 将事件置为 `applied` 并写入 before/after/delta  
+
+> 注意：如果你担心“更新 ratings 成功但写 event 失败导致重复加分”，需要在实现中把事件状态更新做成**强重试**（例如最多 3 次 + 指数退避），并在失败时将事件标记为 `failed`（同时把本次 generation_id 加入告警/巡检列表）。这属于 v0.6.0 的关键验收点（见 6.1 验收标准）。
 
 ### 1.9 风控与反刷分（建议至少做基础版）
 排位系统如果不加约束，很容易被“重复生成同一对局”刷分。建议的最低成本风控：
@@ -187,6 +315,17 @@
 - strict：**同一用户**在一定时间窗内（如 10 分钟）对同一对手组合只计分一次（用 `arena_rating_events` + 组合 key 实现；尤其适配“自由挑对手”）
 - strict：每日计分上限（例如 strict 每日最多 30 局）
 - free：因为允许匿名，建议至少做“弱风控”（例如按 `ip_anonymized + 对手组合` 限速），否则 free 更像“娱乐分”（可接受但需在 UI/百科中说明）
+
+#### 1.9.1 对手组合 key（pair_key）定义（必须统一）
+- `entityKey = "${entity_type}:${entity_id}"`（如：`data_card:xxxxxxxx` / `preset:homura.json`）
+- `pair_key = sort([entityKeyA, entityKeyB]).join('|')`
+- 目的：把 “A vs B” 与 “B vs A” 视为同一组合
+
+#### 1.9.2 去重查询口径（示例）
+- strict（按用户）：`queue='strict' AND status='applied' AND user_id=? AND pair_key=? AND created_at >= ?`
+- free（按脱敏 IP）：`queue='free' AND status='applied' AND ip_anonymized=? AND pair_key=? AND created_at >= ?`
+
+> 建议：如果 `ip_anonymized IS NULL`，free 梯子默认不计分（避免无法限速）。是否采用该策略见第 7 节待确认。
 
 ---
 
@@ -368,7 +507,8 @@ v0.6.0 建议至少落地：
 - `data_card_id`（PK）
 - `tech_score / tech_level`（由总体综合指标或 `tech_density_per_1k_chars` 映射得到，口径可在后续迭代中调整）
 - `is_native`（用于原生性筛选）
-- `updated_at`
+- `data_card_updated_at`（快照：对应 `data_cards.updated_at`，用于判断是否需要重算）
+- `created_at / updated_at`
 - 可选 `details_json`（解释信息，仅作者可见/或仅用于后台）
 
 建议同步存下原始 proxy（可选列或放到 `details_json`）：
@@ -383,6 +523,35 @@ v0.6.0 建议至少落地：
 1) **保存/更新数据卡时计算**（最干净，需要改 data-card 写入 API）
 2) **懒计算**：首次在列表/详情需要时计算并写回（实现快，但要小心并发与一致性）
 3) **脚本批处理**：用 `scripts/` 统一回填（适合上线前一次性）
+
+#### 2.4.1 DDL（建议直接追加到 `lib/database/schema.sql`）
+```sql
+-- =================================================================
+-- Data Card Metrics（v0.6.0）
+-- =================================================================
+CREATE TABLE IF NOT EXISTS data_card_metrics (
+  data_card_id TEXT PRIMARY KEY NOT NULL,
+  tech_score INTEGER NOT NULL,
+  tech_level TEXT NOT NULL CHECK(tech_level IN ('L0','L1','L2','L3','L4','L5')),
+  is_native BOOLEAN,
+  data_card_updated_at TEXT NOT NULL,
+  details_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (data_card_id) REFERENCES data_cards(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_card_metrics_tech_score ON data_card_metrics(tech_score DESC);
+CREATE INDEX IF NOT EXISTS idx_data_card_metrics_tech_level ON data_card_metrics(tech_level);
+CREATE INDEX IF NOT EXISTS idx_data_card_metrics_is_native ON data_card_metrics(is_native);
+```
+
+#### 2.4.2 “原生性（is_native）”建议定义（避免各处口径不一致）
+v0.6.0 建议：
+- 若能解析 `data_cards.data` 为 JSON：以 `verifySignature(json)` 作为原生性判定（`true/false`）
+- 若环境未配置 `SIGNATURE_SECRET_KEY` 或解析失败：`is_native = NULL`（表示“未知”，而不是强行 false）
+
+> 说明：原生性判定属于“信任/来源标识”，最好不要因为缺少密钥而把所有卡标成非原生，否则筛选会误导用户。
 
 ---
 
@@ -405,6 +574,56 @@ v0.6.0 建议至少落地：
 - `tag_aliases`（可选）：同义词映射（解决“代码杀/元角色”等命名分歧）
 - `data_card_tags`：`data_card_id / tag_id / created_by_user_id / created_at`
 
+#### 3.3.1 DDL（建议直接追加到 `lib/database/schema.sql`）
+```sql
+-- =================================================================
+-- Tags（v0.6.0）
+-- =================================================================
+CREATE TABLE IF NOT EXISTS tags (
+  id TEXT PRIMARY KEY NOT NULL,          -- 建议用稳定 slug（如 style:daily / risk:meta）
+  name TEXT NOT NULL,
+  description TEXT,
+  category TEXT,
+  scope TEXT NOT NULL CHECK(scope IN ('user','system','admin')),
+  is_active BOOLEAN NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tags_scope ON tags(scope);
+CREATE INDEX IF NOT EXISTS idx_tags_is_active ON tags(is_active);
+CREATE INDEX IF NOT EXISTS idx_tags_category ON tags(category);
+
+CREATE TABLE IF NOT EXISTS tag_aliases (
+  alias TEXT PRIMARY KEY NOT NULL,
+  tag_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_tag_aliases_tag_id ON tag_aliases(tag_id);
+
+CREATE TABLE IF NOT EXISTS data_card_tags (
+  data_card_id TEXT NOT NULL,
+  tag_id TEXT NOT NULL,
+  created_by_user_id INTEGER,            -- system/admin 赋予时可为 NULL
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (data_card_id, tag_id),
+  FOREIGN KEY (data_card_id) REFERENCES data_cards(id) ON DELETE CASCADE,
+  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_card_tags_tag_id ON data_card_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_data_card_tags_data_card_id ON data_card_tags(data_card_id);
+```
+
+#### 3.3.2 v0.6.0 标签治理的默认策略（写死，减少争议）
+- v0.6.0 **不允许用户创建新标签**：只能从 `tags` 表中选择（避免同义词泛滥与口径分裂）
+- `scope='user'`：作者可自行绑定/解绑
+- `scope='system'`：仅服务端自动写入（例如：技术值高、疑似 kw_exploit）
+- `scope='admin'`：仅管理员接口写入（推荐/活动/精选）
+
 ### 3.4 你给的标签提案：建议的规范化（示例）
 以下是“建议收敛”的方向（便于筛选与百科）：
 - 题材/风格：`搞笑向`、`日常向`、`战友情`
@@ -419,10 +638,11 @@ v0.6.0 建议至少落地：
 ## 4. 百科（Encyclopedia）
 
 ### 4.1 内容组织建议
-百科适合做成“可维护的 Markdown 集合”，同时从数据库拉取“标签说明”：
-- `docs/encyclopedia/*.md`：概念条目（竞技场、历战、升华、PVP、排位、技术值、敏感词/屏蔽词等）
+百科适合做成“可维护的 Markdown 集合”，同时从数据库拉取“标签说明”。考虑 Edge Runtime 不适合运行时读文件，v0.6.0 推荐：
+- `public/encyclopedia/*.md`：概念条目（竞技场、历战、升华、PVP、排位、技术值、敏感词/屏蔽词等）
+- `public/encyclopedia/index.json`：目录（标题/文件名/排序）
 - `GET /api/tags`：标签列表与说明（动态维护）
-- 前端 `pages/encyclopedia.tsx`：左侧目录 + 右侧内容渲染（`react-markdown`）
+- 前端 `pages/encyclopedia.tsx`：左侧目录（index.json）+ 右侧用 `react-markdown` 渲染（通过 `fetch('/encyclopedia/xxx.md')` 获取）
 
 ### 4.2 教程建议
 v0.6.0 的最小教程集：
@@ -462,6 +682,32 @@ v0.6.0 的最小教程集：
 - “我排位最高的角色卡”摘要（strict/free 各一个或只取 strict）
 - 点击跳转到该卡详情
 
+### 5.4 API 契约（MVP 建议）
+
+> 原则：榜单/筛选走独立 API；卡详情尽量一次返回 rating + metrics + tags，避免前端多次 round-trip。
+
+#### 5.4.1 `GET /api/arena/leaderboard`（排行榜）
+Query（建议）：
+- `queue=strict|free`（默认 strict）
+- `sort=rating|tech`（默认 rating）
+- `limit`（默认 50，建议上限 100）
+- `offset`（默认 0）
+- `tagIds`（逗号分隔，OR）
+- `excludeTagIds`（逗号分隔）
+- `isNative=1|0|any`（可选）
+- `includePresets=1|0`（默认 1）
+
+返回（建议字段）：
+- `items[]`：`rank / entityType / entityId / displayName / rating / games / wins / losses / draws / tier / techScore / techLevel / isNative / tags[]`
+
+#### 5.4.2 `GET /api/tags`（标签库）
+- 默认仅返回 `is_active=1` 的标签（可加 `includeInactive=1` 给管理员/维护脚本用）
+
+#### 5.4.3 `PUT /api/data-card-tags`（绑定用户标签）
+Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
+- 需要登录，且仅允许作者修改自己的卡
+- 仅允许绑定 `tags.scope='user'` 的标签；`system/admin` 绑定只能由服务端/管理员接口写入
+
 ---
 
 ## 6. v0.6.0 实施顺序（建议拆里程碑，避免一口吃成胖子）
@@ -471,6 +717,20 @@ v0.6.0 的最小教程集：
 3) **技术值 metrics 表 + 详情展示（先懒计算或保存时计算）**  
 4) **标签库 + 绑定关系 + UI 选择器**  
 5) **百科页 MVP（Markdown 渲染 + 标签说明联动）**
+
+### 6.1 v0.6.0 必须通过的验收标准（建议写进 PR Checklist）
+
+**排位**
+- 同一 `generation_id` 在 strict/free 下不会重复计分（接口重试、流中断重连等都不重复）
+- strict/free 的 eligibility 与本文一致（含：1v1、strict 必须登录；PVP 是否计分见第 7 节）
+- 可以根据 `arena_rating_events` 反查一次分数变化（含 before/delta/after、winner_slot）
+
+**技术值**
+- 同一张卡在不同页面/不同链路计算出的 `techScore/techLevel` 一致（使用 `lib/metrics/techIndex.ts`）
+- `data_card_metrics.data_card_updated_at` 与 `data_cards.updated_at` 不一致时会触发重算
+
+**标签**
+- 用户只能从 `tags` 选择（不能自建），且无法篡改 `scope=system/admin` 的标签绑定
 
 ---
 
@@ -486,3 +746,13 @@ v0.6.0 的最小教程集：
 7) tech_index 参考仓库可访问，已摘取并迁移其 proxy/公式到本文第 2 节。
 8) strict 的反刷分规则目前只做 10 分钟同对手去重。
 9) 段位阈值可沿用本文默认（900/1100/1300/1600）。
+
+待你确认（会影响实现与风控口径）：
+1) **PVP 触发的战报是否计入排位？**（本文默认：不计入）
+2) **strict 的公共榜是否要求双方都是公开且已审核？**（本文默认：计分允许包含私有卡，但公共榜过滤；若要更强风控，可要求 strict 计分也仅限 public+approved）
+3) **free 梯子在 `ip_anonymized IS NULL` 时怎么处理？**（本文建议：不计分；否则无法限速）
+4) **strict 命中时同时更新 free 的策略是否确认？**（本文默认：是；strict 作为 free 子集）
+5) **标签库的初始种子来源**：你希望“写死在代码里一次性导入”，还是“手动 SQL 初始化”，或“后台管理页维护”？（v0.6.0 推荐：手动 SQL/脚本导入，避免先做后台）
+6) **Elo 是否允许“双方 K 不同（非零和）”？**（本文默认：允许，以满足“新卡收敛更快、老卡更稳”；若你更偏好零和，需要改为 `K_common` 或固定 K）
+7) **初始分 `initial_rating=1000` 是否确认？**（若你希望 1200/1500 起步，需要同步调整段位阈值）
+8) **排行榜 API 路径与命名是否接受？**（本文示例：`GET /api/arena/leaderboard`）
