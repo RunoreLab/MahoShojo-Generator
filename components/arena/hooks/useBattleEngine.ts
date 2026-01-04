@@ -15,6 +15,7 @@ import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
+import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 
@@ -83,6 +84,7 @@ const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
   ...report,
   headline: sanitizeTextByShieldWords(report.headline),
   scenario: report.scenario ? sanitizeTextByShieldWords(report.scenario) : undefined,
+  aiModel: typeof report.aiModel === 'string' ? sanitizeTextByShieldWords(report.aiModel) : report.aiModel,
   reporterInfo: {
     ...report.reporterInfo,
     name: sanitizeTextByShieldWords(report.reporterInfo.name),
@@ -99,6 +101,16 @@ const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
     conclusion: sanitizeTextByShieldWords(report.officialReport.conclusion),
   },
   userGuidance: report.userGuidance ? sanitizeTextByShieldWords(report.userGuidance) : undefined,
+  characterGuidances: Array.isArray((report as any).characterGuidances)
+    ? ((report as any).characterGuidances as any[])
+        .map((item) => {
+          const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+          const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+          if (!characterName || !guidance) return null;
+          return { characterName: sanitizeTextByShieldWords(characterName), guidance: sanitizeTextByShieldWords(guidance) };
+        })
+        .filter((item): item is { characterName: string; guidance: string } => Boolean(item))
+    : undefined,
 });
 
 const buildBattleBackupItems = (
@@ -236,8 +248,11 @@ export const useBattleEngine = () => {
   const setStreamingMarkdown = useBattleSelector((state) => state.setStreamingMarkdown);
   const setStreamReporterInfo = useBattleSelector((state) => state.setStreamReporterInfo);
   const setStreamUserGuidance = useBattleSelector((state) => state.setStreamUserGuidance);
+  const setStreamCharacterGuidances = useBattleSelector((state) => state.setStreamCharacterGuidances);
   const setStreamAiUsage = useBattleSelector((state) => state.setStreamAiUsage);
+  const setStreamAiModel = useBattleSelector((state) => state.setStreamAiModel);
   const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
+  const setLastGenerationId = useBattleSelector((state) => state.setLastGenerationId);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
@@ -312,7 +327,9 @@ export const useBattleEngine = () => {
     setStreamReporterInfo(null);
     setStreamUserGuidance(null);
     setStreamAiUsage(null);
+    setStreamAiModel(null);
     setStreamNarrativeHistoryReadCount(null);
+    setLastGenerationId(null);
 
     try {
       await handleResolveRandomPlaceholders();
@@ -322,6 +339,7 @@ export const useBattleEngine = () => {
       const sensitiveTargets = [
         JSON.stringify(freshCombatants.map((c) => c.data)),
         settings.userGuidance,
+        JSON.stringify(freshCombatants.map((c) => (typeof (c as any).characterGuidance === 'string' ? (c as any).characterGuidance : ''))),
         shouldUseScenario ? JSON.stringify(scenario.content) : '',
         shouldUseScenario && auxScenarios.length > 0 ? JSON.stringify(auxScenarios.map((s) => s.content)) : '',
       ];
@@ -333,11 +351,23 @@ export const useBattleEngine = () => {
       }
 
       const teams: Record<number, string[]> = {};
+      const teamNamesById = new Map<number, string>(
+        useBattleStore
+          .getState()
+          .teams.map((team) => [team.id, typeof team.name === 'string' ? team.name.trim() : ''] as const)
+      );
+
       freshCombatants.forEach((combatant) => {
-        if (combatant.teamId) {
-          if (!teams[combatant.teamId]) teams[combatant.teamId] = [];
-          teams[combatant.teamId].push(combatant.data.codename || combatant.data.name);
-        }
+        if (!combatant.teamId) return;
+        if (!teams[combatant.teamId]) teams[combatant.teamId] = [];
+        teams[combatant.teamId].push(combatant.data.codename || combatant.data.name);
+      });
+
+      const teamNames: Record<number, string> = {};
+      Object.keys(teams).forEach((key) => {
+        const teamId = Number(key);
+        const name = teamNamesById.get(teamId);
+        if (name) teamNames[teamId] = name;
       });
 
       const numericLimit = settings.isArenaHistoryUnlimited ? null : Math.max(1, settings.readArenaHistoryLimit);
@@ -360,6 +390,9 @@ export const useBattleEngine = () => {
           data: combatant.data,
           isNative: combatant.isValid,
           isPreset: combatant.isPreset,
+          filename: combatant.isPreset ? combatant.filename : null,
+          teamId: typeof combatant.teamId === 'number' ? combatant.teamId : null,
+          characterGuidance: typeof (combatant as any).characterGuidance === 'string' ? (combatant as any).characterGuidance : null,
           sourceDataCardId: combatant.sourceDataCardId,
           sourceDataCardUpdatedAt: combatant.sourceDataCardUpdatedAt,
         })),
@@ -372,6 +405,7 @@ export const useBattleEngine = () => {
         scenarioSourceDataCardId: shouldUseScenario ? scenario.sourceDataCardId : undefined,
         scenarioSourceDataCardUpdatedAt: shouldUseScenario ? scenario.sourceDataCardUpdatedAt : undefined,
         teams: Object.keys(teams).length > 0 ? teams : undefined,
+        teamNames: Object.keys(teamNames).length > 0 ? teamNames : undefined,
         language: selectedLanguage,
         readArenaHistory: settings.readArenaHistory,
         arenaHistoryReadLimit,
@@ -403,6 +437,10 @@ export const useBattleEngine = () => {
       if (authHeader) requestHeaders.Authorization = authHeader;
 
       const applyBattleResult = async (result: BattleApiResponse, origin: 'battle' | 'battle-stream') => {
+        if (typeof result.generationId === 'string' && result.generationId.trim()) {
+          setLastGenerationId(result.generationId.trim());
+        }
+
         const backupItems = buildBattleBackupItems(
           freshCombatants,
           shouldUseScenario ? scenario.content : null,
@@ -474,6 +512,7 @@ export const useBattleEngine = () => {
         let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
         try {
+          setStreamCharacterGuidances(null);
           const response = await fetch('/api/arena/generate-stream', {
             method: 'POST',
             headers: requestHeaders,
@@ -506,6 +545,11 @@ export const useBattleEngine = () => {
           if (metaHeader) {
             try {
               const parsed = JSON.parse(decodeURIComponent(metaHeader));
+              const generationId = typeof parsed?.generationId === 'string' ? parsed.generationId.trim() : '';
+              if (generationId) {
+                setLastGenerationId(generationId);
+              }
+
               const reporterInfo = parsed?.reporterInfo;
               if (reporterInfo && typeof reporterInfo === 'object') {
                 const name = typeof reporterInfo.name === 'string' ? reporterInfo.name : '';
@@ -520,9 +564,29 @@ export const useBattleEngine = () => {
                 setStreamUserGuidance(sanitizeTextByShieldWords(userGuidance));
               }
 
+              const characterGuidancesRaw = Array.isArray(parsed?.characterGuidances) ? parsed.characterGuidances : null;
+              if (characterGuidancesRaw && characterGuidancesRaw.length > 0) {
+                const normalized = characterGuidancesRaw
+                  .map((item: any) => {
+                    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                    const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+                    if (!characterName || !guidance) return null;
+                    return { characterName: sanitizeTextByShieldWords(characterName), guidance: sanitizeTextByShieldWords(guidance) };
+                  })
+                  .filter(Boolean);
+                if (normalized.length > 0) {
+                  setStreamCharacterGuidances(normalized as any);
+                }
+              }
+
               const adjudicationResults = Array.isArray(parsed?.adjudicationResults) ? parsed.adjudicationResults : null;
               if (adjudicationResults && adjudicationResults.length > 0) {
                 setAdjudicationResults(adjudicationResults);
+              }
+
+              const aiModel = typeof parsed?.ai?.model === 'string' ? parsed.ai.model.trim() : '';
+              if (aiModel) {
+                setStreamAiModel(sanitizeTextByShieldWords(aiModel));
               }
             } catch (metaError) {
               // 元信息解析失败不影响正文流式展示
@@ -533,11 +597,49 @@ export const useBattleEngine = () => {
             if (snapshotGuidance) {
               setStreamUserGuidance(sanitizeTextByShieldWords(snapshotGuidance));
             }
+            const snapshotCharacterGuidances = freshCombatants
+              .map((c) => {
+                const characterName = (c.data.codename || c.data.name || '').toString().trim();
+                const guidance = typeof (c as any).characterGuidance === 'string' ? String((c as any).characterGuidance).trim() : '';
+                if (!characterName || !guidance) return null;
+                return { characterName: sanitizeTextByShieldWords(characterName), guidance: sanitizeTextByShieldWords(guidance) };
+              })
+              .filter(Boolean);
+            if (snapshotCharacterGuidances.length > 0) {
+              setStreamCharacterGuidances(snapshotCharacterGuidances as any);
+            }
           }
 
           const decoder = new TextDecoder();
           let accumulatedText = '';
           let shouldAbort = false;
+          const shouldTerminateByTelemetry = (text: string) => {
+            const marker = '<!-- MAHOSHOJO_TELEMETRY_META';
+            const trimmed = text.trimEnd();
+            const idx = trimmed.lastIndexOf(marker);
+            if (idx < 0) return false;
+            if (!trimmed.endsWith('-->')) return false;
+            return trimmed.length - idx < 4096;
+          };
+          const readWithTimeout = createStreamReadWithTimeout({
+            label: '战报流式生成',
+            idleTimeoutMs: 60_000,
+            totalTimeoutMs: 10 * 60_000,
+            onTimeout: () => {
+              try {
+                abortController.abort();
+              } catch {
+                // ignore
+              }
+              if (reader) {
+                try {
+                  void reader.cancel('timeout');
+                } catch {
+                  // ignore
+                }
+              }
+            },
+          });
           const streamBackupItems = buildBattleBackupItems(
             freshCombatants,
             shouldUseScenario ? scenario.content : null,
@@ -565,7 +667,7 @@ export const useBattleEngine = () => {
           };
 
           while (true) {
-            const { value, done } = await reader.read();
+            const { value, done } = await readWithTimeout(reader);
             if (done) {
               break;
             }
@@ -610,11 +712,24 @@ export const useBattleEngine = () => {
               setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
 
               shouldAbort = true;
-              await reader.cancel().catch(() => undefined);
+              try {
+                void reader.cancel('sensitive');
+              } catch {
+                // ignore
+              }
               break;
             }
 
             setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+
+            if (shouldTerminateByTelemetry(accumulatedText)) {
+              try {
+                void reader.cancel('telemetry-meta-received');
+              } catch {
+                // ignore
+              }
+              break;
+            }
 
             if (shouldAbort) {
               break;
@@ -650,6 +765,10 @@ export const useBattleEngine = () => {
                   : null;
               setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
               setStreamNarrativeHistoryReadCount(narrativeCount);
+              const aiModel = typeof telemetryExtracted.meta.aiModel === 'string' ? telemetryExtracted.meta.aiModel.trim() : '';
+              if (aiModel) {
+                setStreamAiModel(sanitizeTextByShieldWords(aiModel));
+              }
             }
             if (telemetryExtracted && typeof telemetryExtracted.strippedMarkdown === 'string') {
               markdownForUi = telemetryExtracted.strippedMarkdown;
@@ -747,7 +866,11 @@ export const useBattleEngine = () => {
           return;
         } finally {
           if (reader) {
-            await reader.cancel().catch(() => undefined);
+            try {
+              void reader.cancel();
+            } catch {
+              // ignore
+            }
           }
           abortController.abort();
         }
@@ -810,14 +933,17 @@ export const useBattleEngine = () => {
     setIsGenerating,
     setIsStreaming,
     setStreamingMarkdown,
-    setStreamReporterInfo,
-    setStreamUserGuidance,
-    setStreamAiUsage,
-    setStreamNarrativeHistoryReadCount,
-    setCombatants,
-    handleResolveRandomPlaceholders,
-    redirectToArrested,
-    startCooldown,
+	    setStreamReporterInfo,
+	    setStreamUserGuidance,
+	    setStreamCharacterGuidances,
+	    setStreamAiUsage,
+	    setStreamAiModel,
+	    setStreamNarrativeHistoryReadCount,
+      setLastGenerationId,
+	    setCombatants,
+	    handleResolveRandomPlaceholders,
+	    redirectToArrested,
+	    startCooldown,
     updateFromMarkdown,
   ]);
 

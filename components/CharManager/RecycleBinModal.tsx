@@ -115,6 +115,7 @@ export default function RecycleBinModal({
         <DataCardDetailsModal
           isOpen={true}
           onClose={() => setSelectedCard(null)}
+          isOwner={true}
           card={{
             id: selectedCard.id,
             name: selectedCard.name,

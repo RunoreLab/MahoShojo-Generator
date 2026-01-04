@@ -1,11 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQueries, useQuery } from '@tanstack/react-query';
 
-import { getCombatantDisplayName } from '../utils/characterValidator';
-import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState, CombatantData } from '../types';
+import { TierBadge } from '@/components/ranking/TierBadge';
+import { authStorage } from '@/lib/auth';
+import { computeTechIndex } from '@/lib/metrics/techIndex';
+
 import { useBattleActions } from '../hooks/useBattleActions';
+import { useBattleStore } from '../stores/useBattleStore';
+import type { BattleStoreState, Combatant, CombatantData } from '../types';
+import { getCombatantDisplayName } from '../utils/characterValidator';
 
 interface CombatantListProps {
   onShowDetails: (combatant: CombatantData) => void;
@@ -17,14 +22,208 @@ const COMBATANT_TYPE_LABELS: Record<CombatantData['type'], string> = {
   'general-character': '通用角色',
 };
 
+type IndexedCombatant = {
+  combatant: Combatant;
+  index: number;
+};
+
+const getCombatantKey = (combatant: Combatant) => ('id' in combatant ? combatant.id : combatant.filename);
+
+const getCombatantIdentifier = getCombatantKey;
+
+type Queue = 'strict' | 'free';
+
+type ApiRating = {
+  queue: Queue;
+  rating: number;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  tier: string;
+};
+
+type DataCardMetaResponse = {
+  success: boolean;
+  metrics: { techScore: number; techLevel: string } | null;
+  ratings: { strict: ApiRating | null; free: ApiRating | null };
+};
+
+type PresetMetaResponse = {
+  success: boolean;
+  ratings: { strict: ApiRating | null; free: ApiRating | null };
+};
+
+type GenerationRankingResponse =
+  | { success: true; state: 'pending'; message: string; generationId: string }
+  | {
+      success: true;
+      state: 'ready';
+      generationId: string;
+      snapshot: { status: string | null; combatantCount: number | null };
+      participants: Array<{
+        displayName: string;
+        entityKey: string | null;
+        queues: Record<Queue, {
+          eligible: boolean;
+          ineligibleReasons: string[];
+          eventStatus: 'missing' | 'pending' | 'applied' | 'skipped' | 'failed';
+          skipReason: string | null;
+          rating: number | null;
+          games: number | null;
+          tier: string | null;
+          delta: number | null;
+        }>;
+      }>;
+    }
+  | { success: false; generationId: string; error: string };
+
+const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
+  const res = await fetch(url, init);
+  const json = (await res.json()) as T;
+  if (!res.ok) {
+    const errorMessage =
+      typeof (json as any)?.error === 'string' ? (json as any).error : `HTTP ${res.status}: ${JSON.stringify(json)}`;
+    throw new Error(errorMessage);
+  }
+  return json;
+};
+
+const buildEntityKeyForCombatant = (combatant: CombatantData): string | null => {
+  if (combatant.isPreset) {
+    const id = (combatant.filename ?? '').toString().trim();
+    return id ? `preset:${id}` : null;
+  }
+  const id = (combatant.sourceDataCardId ?? '').toString().trim();
+  return id ? `data_card:${id}` : null;
+};
+
+const pickTierBadge = (ratings?: { strict: ApiRating | null; free: ApiRating | null } | null): { tier: string; label: string } | null => {
+  if (ratings?.strict?.tier) return { tier: ratings.strict.tier, label: '严格' };
+  if (ratings?.free?.tier) return { tier: ratings.free.tier, label: '自由' };
+  return null;
+};
+
+const formatIneligibleReasons = (reasons: string[]): string => {
+  const map: Record<string, string> = {
+    'status-not-completed': '战报未完成',
+    'combatant-count-not-2': '需 2 人对战',
+    'ip-missing': '无法获取 IP',
+    'mode-not-classic': '需经典模式',
+    'need-login': '需登录',
+    'has-user-guidance': '存在故事引导',
+    'has-adjudication-events': '存在随机判定器事件',
+    'read-arena-history': '开启读取历战',
+    'read-current-state': '开启读取当前状态',
+    'has-character-guidance': '存在角色行动引导',
+  };
+  return reasons.map((r) => map[r] ?? r).join('、');
+};
+
+const formatSkipReason = (reason: string | null): string => {
+  if (!reason) return '未知原因';
+  const map: Record<string, string> = {
+    'winner-empty': '战报未给出胜者',
+    'multi-winner': '胜者包含多人',
+    'winner-ambiguous': '胜者无法匹配参战者',
+    'daily-limit': '今日严格排位次数已达上限',
+    'dedup-user-pair': '短时间同一对手重复对局（严格去重）',
+    'dedup-ip-pair': '短时间同 IP 重复对局（自由去重）',
+    'ratings-missing': '排位记录缺失',
+    'rating-conflict': '排位并发冲突',
+  };
+  return map[reason] ?? reason;
+};
+
+const renderDeltaBadge = (delta: number) => {
+  const text = delta >= 0 ? `+${delta}` : String(delta);
+  const className =
+    delta > 0
+      ? 'text-emerald-700'
+      : delta < 0
+        ? 'text-red-700'
+        : 'text-gray-600';
+  return <span className={['font-mono font-semibold', className].join(' ')} title={`本局变化：${text}`}>Δ{text}</span>;
+};
+
 export function CombatantList({ onShowDetails }: CombatantListProps) {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
+  const teams = useBattleSelector((state) => state.teams);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const lastGenerationId = useBattleSelector((state) => state.lastGenerationId);
   const removeCombatant = useBattleSelector((state) => state.removeCombatant);
   const moveCombatant = useBattleSelector((state) => state.moveCombatant);
-  const { handleAddRandomPlaceholder, handleTeamChange, handleClearRoster } = useBattleActions();
+  const addTeam = useBattleSelector((state) => state.addTeam);
+  const removeTeam = useBattleSelector((state) => state.removeTeam);
+  const renameTeam = useBattleSelector((state) => state.renameTeam);
+  const toggleTeamCollapsed = useBattleSelector((state) => state.toggleTeamCollapsed);
+  const updateCombatantTeam = useBattleSelector((state) => state.updateCombatantTeam);
+  const updateCombatantCharacterGuidance = useBattleSelector((state) => state.updateCombatantCharacterGuidance);
+  const { handleAddRandomPlaceholder, handleClearRoster } = useBattleActions();
+
   const [copiedStatus, setCopiedStatus] = useState<Record<string, boolean>>({});
+  const [guidanceOpenFor, setGuidanceOpenFor] = useState<string | null>(null);
+  const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
+  const [editingTeamName, setEditingTeamName] = useState<string>('');
+  const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
+
+  const teamNameMap = useMemo(() => {
+    const map = new Map<number, string>();
+    teams.forEach((team) => map.set(team.id, team.name));
+    return map;
+  }, [teams]);
+
+  const getTeamLabel = (teamId: number | undefined) => {
+    if (!teamId) return '未分队';
+    const name = teamNameMap.get(teamId);
+    return name && name.trim() ? name.trim() : `队伍 ${teamId}`;
+  };
+
+  const indexedCombatants = useMemo<IndexedCombatant[]>(
+    () =>
+      combatants.map((combatant, index) => ({
+        combatant,
+        index,
+      })),
+    [combatants]
+  );
+
+  const hasAnyTeam = useMemo(() => {
+    if (teams.length > 0) return true;
+    return combatants.some((c) => typeof c.teamId === 'number' && c.teamId > 0);
+  }, [combatants, teams.length]);
+
+  const combatantsByTeam = useMemo(() => {
+    const byTeamId = new Map<number, IndexedCombatant[]>();
+    const unassigned: IndexedCombatant[] = [];
+
+    indexedCombatants.forEach((item) => {
+      const teamId = item.combatant.teamId;
+      if (!teamId) {
+        unassigned.push(item);
+        return;
+      }
+      const bucket = byTeamId.get(teamId) ?? [];
+      bucket.push(item);
+      byTeamId.set(teamId, bucket);
+    });
+
+    return { byTeamId, unassigned };
+  }, [indexedCombatants]);
+
+  const beginEditTeam = (teamId: number) => {
+    const current = teams.find((t) => t.id === teamId);
+    setEditingTeamId(teamId);
+    setEditingTeamName(current?.name ?? `分队 ${teamId}`);
+  };
+
+  const commitEditTeam = () => {
+    if (editingTeamId === null) return;
+    renameTeam(editingTeamId, editingTeamName);
+    setEditingTeamId(null);
+    setEditingTeamName('');
+  };
 
   const downloadJson = (combatant: CombatantData) => {
     const jsonData = JSON.stringify(combatant.data, null, 2);
@@ -49,9 +248,338 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
     }, 2000);
   };
 
+  const readableCombatants = useMemo(
+    () => combatants.filter((c): c is CombatantData => 'data' in c),
+    [combatants],
+  );
+
+  const techByCombatantKey = useMemo(() => {
+    const map = new Map<string, { techScore: number; techLevel: string }>();
+    for (const combatant of readableCombatants) {
+      const key = getCombatantKey(combatant);
+      try {
+        const result = computeTechIndex(combatant.data);
+        map.set(key, { techScore: result.techScore, techLevel: result.techLevel });
+      } catch {
+        // 技术值用于增强显示，失败不影响主流程
+      }
+    }
+    return map;
+  }, [readableCombatants]);
+
+  const metaTargets = useMemo(() => {
+    return readableCombatants
+      .map((combatant) => {
+        const entityKey = buildEntityKeyForCombatant(combatant);
+        if (!entityKey) return null;
+        if (combatant.isPreset) {
+          return {
+            entityKey,
+            kind: 'preset' as const,
+            id: combatant.filename,
+          };
+        }
+        const dataCardId = combatant.sourceDataCardId;
+        if (!dataCardId) return null;
+        return {
+          entityKey,
+          kind: 'data_card' as const,
+          id: dataCardId,
+        };
+      })
+      .filter(Boolean) as Array<{ entityKey: string; kind: 'data_card' | 'preset'; id: string }>;
+  }, [readableCombatants]);
+
+  const metaQueries = useQueries({
+    queries: metaTargets.map((target) => {
+      if (target.kind === 'preset') {
+        return {
+          queryKey: ['arenaPresetMeta', target.id],
+          queryFn: () => fetchJson<PresetMetaResponse>(`/api/arena/preset-meta?entityId=${encodeURIComponent(target.id)}`),
+          staleTime: 60_000,
+        };
+      }
+      return {
+        queryKey: ['arenaDataCardMeta', target.id],
+        queryFn: async () => {
+          const authHeader = await authStorage.getAuthHeader();
+          const headers: Record<string, string> = {};
+          if (authHeader) headers.Authorization = authHeader;
+          return fetchJson<DataCardMetaResponse>(
+            `/api/data-card-meta?dataCardId=${encodeURIComponent(target.id)}`,
+            Object.keys(headers).length > 0 ? { headers } : undefined,
+          );
+        },
+        staleTime: 60_000,
+      };
+    }),
+  });
+
+  const metaByEntityKey = useMemo(() => {
+    const map = new Map<string, { ratings: { strict: ApiRating | null; free: ApiRating | null }; tech?: { techScore: number; techLevel: string } | null }>();
+    metaTargets.forEach((target, index) => {
+      const data = metaQueries[index]?.data as any;
+      const ratings = (data?.ratings ?? { strict: null, free: null }) as { strict: ApiRating | null; free: ApiRating | null };
+      const tech = (data?.metrics ?? null) as { techScore: number; techLevel: string } | null;
+      map.set(target.entityKey, { ratings, tech });
+    });
+    return map;
+  }, [metaQueries, metaTargets]);
+
+  const generationRankingQuery = useQuery({
+    queryKey: ['arenaGenerationRanking', lastGenerationId],
+    queryFn: () =>
+      fetchJson<GenerationRankingResponse>(
+        `/api/arena/generation-ranking?generationId=${encodeURIComponent(lastGenerationId as string)}`,
+      ),
+    enabled: Boolean(lastGenerationId),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return 1500;
+      if (data.success && data.state === 'pending') return 1500;
+      if (data.success && data.state === 'ready') {
+        const hasAnyQueuePending = data.participants.some((p) =>
+          (p.queues.strict.eligible && (p.queues.strict.eventStatus === 'missing' || p.queues.strict.eventStatus === 'pending')) ||
+          (p.queues.free.eligible && (p.queues.free.eventStatus === 'missing' || p.queues.free.eventStatus === 'pending')),
+        );
+        return hasAnyQueuePending ? 1500 : false;
+      }
+      return false;
+    },
+  });
+
+  const generationParticipantByEntityKey = useMemo(() => {
+    const map = new Map<string, NonNullable<Extract<GenerationRankingResponse, { success: true; state: 'ready' }>>['participants'][number]>();
+    const data = generationRankingQuery.data;
+    if (!data || !data.success || data.state !== 'ready') return map;
+    data.participants.forEach((p) => {
+      if (typeof p.entityKey === 'string' && p.entityKey.trim()) {
+        map.set(p.entityKey.trim(), p);
+      }
+    });
+    return map;
+  }, [generationRankingQuery.data]);
+
   if (combatants.length === 0) {
     return null;
   }
+
+  const renderCombatantRow = (combatant: Combatant, index: number) => {
+    const isPlaceholder = 'id' in combatant;
+    const key = getCombatantKey(combatant);
+    const data = isPlaceholder ? null : (combatant as CombatantData);
+    const displayName = isPlaceholder ? combatant.filename : getCombatantDisplayName(data?.data);
+    const entityKey = !isPlaceholder && data ? buildEntityKeyForCombatant(data) : null;
+    const meta = entityKey ? metaByEntityKey.get(entityKey) : null;
+    const tierBadge = meta ? pickTierBadge(meta.ratings) : null;
+    const localTech = techByCombatantKey.get(key) ?? null;
+    const techLevel = meta?.tech?.techLevel ?? localTech?.techLevel ?? null;
+    const techScore = meta?.tech?.techScore ?? localTech?.techScore ?? null;
+    const generationParticipant = entityKey ? generationParticipantByEntityKey.get(entityKey) : null;
+    const fallbackTier = generationParticipant?.queues.strict.tier ?? generationParticipant?.queues.free.tier ?? null;
+    const fallbackTierLabel =
+      generationParticipant?.queues.strict.tier ? '严格' : (generationParticipant?.queues.free.tier ? '自由' : '');
+    const tierToShow = tierBadge?.tier ?? fallbackTier ?? (isPlaceholder ? null : (entityKey ? '无牌' : '未登记'));
+    const tierLabelToShow = tierBadge?.label ?? fallbackTierLabel;
+    const typeDisplay = isPlaceholder
+      ? combatant.type === 'random-magical-girl'
+        ? '(随机魔法少女)'
+        : '(随机残兽)'
+      : `(${COMBATANT_TYPE_LABELS[data!.type]})`;
+    const canMoveUp = index > 0;
+    const canMoveDown = index < combatants.length - 1;
+
+    return (
+      <div key={key} className="group rounded-lg bg-white/70 border border-gray-300 px-2 py-2">
+        <div className="flex items-start gap-2">
+          <div className="flex flex-col gap-1 pt-0.5">
+            <button
+              type="button"
+              onClick={() => moveCombatant(index, index - 1)}
+              disabled={isGenerating || !canMoveUp}
+              className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="上移"
+              title="上移"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={() => moveCombatant(index, index + 1)}
+              disabled={isGenerating || !canMoveDown}
+              className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="下移"
+              title="下移"
+            >
+              ↓
+            </button>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-gray-800 leading-snug break-words line-clamp-3" title={displayName}>
+                  {displayName}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+                  <span className="whitespace-nowrap">{typeDisplay}</span>
+                  {!isPlaceholder && data?.isValid && <span className="text-green-600 whitespace-nowrap">(原生)</span>}
+                  {!isPlaceholder && data?.isPreset && <span className="text-purple-600 whitespace-nowrap">(预设)</span>}
+                  {!isPlaceholder && data?.isNonStandard && (
+                    <span className="text-orange-500 font-semibold whitespace-nowrap">(非规范格式)</span>
+                  )}
+                  {!isPlaceholder && data?.wasCorrected && <span className="text-yellow-600 whitespace-nowrap">(格式已修正)</span>}
+                  {!isPlaceholder && tierToShow && (
+                    <span className="flex items-center gap-1">
+                      <TierBadge tier={tierToShow} />
+                      {tierLabelToShow ? <span className="text-[10px] text-gray-500">({tierLabelToShow})</span> : null}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-2 sm:mt-0 flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
+                {!isPlaceholder && (
+                  <>
+                    <button
+                      onClick={() => setGuidanceOpenFor((prev) => (prev === key ? null : key))}
+                      className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+                      disabled={isGenerating}
+                      title="为该角色输入行动/想法引导（最多100字）"
+                    >
+                      行动
+                    </button>
+                    <button
+                      onClick={() => onShowDetails(combatant as CombatantData)}
+                      className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300"
+                      disabled={isGenerating}
+                    >
+                      详情
+                    </button>
+                    {(combatant as CombatantData).wasCorrected && (
+                      <>
+                        <button
+                          onClick={() => downloadJson(combatant as CombatantData)}
+                          disabled={isGenerating}
+                          className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+                        >
+                          下载
+                        </button>
+                        <button
+                          onClick={() => copyJson(combatant as CombatantData)}
+                          disabled={isGenerating}
+                          className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 w-16"
+                        >
+                          {copiedStatus[(combatant as CombatantData).filename] ? '已复制!' : '复制'}
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+                <button
+                  onClick={() => !isGenerating && removeCombatant(getCombatantIdentifier(combatant))}
+                  className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${
+                    isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'
+                  }`}
+                  aria-label={`移除 ${displayName}`}
+                  disabled={isGenerating}
+                >
+                  X
+                </button>
+              </div>
+            </div>
+
+            {!isPlaceholder && guidanceOpenFor !== key && data?.characterGuidance?.trim() && (
+              <div className="mt-1 text-xs text-gray-500 italic break-words">
+                行动引导：{data.characterGuidance.trim()}
+              </div>
+            )}
+
+            {!isPlaceholder && (
+              <div className="mt-1 text-xs text-gray-600">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="whitespace-nowrap">
+                    技术值：{typeof techScore === 'number' ? `${techScore} (${techLevel ?? '-'})` : '-'}
+                  </span>
+                  <span className="whitespace-nowrap">
+                    严格：{meta?.ratings.strict?.rating ?? generationParticipant?.queues.strict.rating ?? '-'}
+                    {(() => {
+                      const q = generationParticipant?.queues.strict;
+                      if (!q) return null;
+                      if (q.eligible && q.eventStatus === 'applied' && typeof q.delta === 'number') {
+                        return <span className="ml-1">{renderDeltaBadge(q.delta)}</span>;
+                      }
+                      if (q.eligible && (q.eventStatus === 'missing' || q.eventStatus === 'pending')) {
+                        return <span className="ml-1 text-gray-500">（结算中）</span>;
+                      }
+                      if (q.eligible && (q.eventStatus === 'skipped' || q.eventStatus === 'failed')) {
+                        return <span className="ml-1 text-gray-500" title={formatSkipReason(q.skipReason)}>（未计分）</span>;
+                      }
+                      if (!q.eligible) {
+                        return <span className="ml-1 text-gray-500" title={formatIneligibleReasons(q.ineligibleReasons)}>（不计分）</span>;
+                      }
+                      return null;
+                    })()}
+                  </span>
+                  <span className="whitespace-nowrap">
+                    自由：{meta?.ratings.free?.rating ?? generationParticipant?.queues.free.rating ?? '-'}
+                    {(() => {
+                      const q = generationParticipant?.queues.free;
+                      if (!q) return null;
+                      if (q.eligible && q.eventStatus === 'applied' && typeof q.delta === 'number') {
+                        return <span className="ml-1">{renderDeltaBadge(q.delta)}</span>;
+                      }
+                      if (q.eligible && (q.eventStatus === 'missing' || q.eventStatus === 'pending')) {
+                        return <span className="ml-1 text-gray-500">（结算中）</span>;
+                      }
+                      if (q.eligible && (q.eventStatus === 'skipped' || q.eventStatus === 'failed')) {
+                        return <span className="ml-1 text-gray-500" title={formatSkipReason(q.skipReason)}>（未计分）</span>;
+                      }
+                      if (!q.eligible) {
+                        return <span className="ml-1 text-gray-500" title={formatIneligibleReasons(q.ineligibleReasons)}>（不计分）</span>;
+                      }
+                      return null;
+                    })()}
+                  </span>
+                </div>
+                {!entityKey ? (
+                  <div className="mt-0.5 text-[11px] text-gray-500">提示：未登记为数据卡/预设时，无法参与排位计分。</div>
+                ) : entityKey && lastGenerationId && !generationParticipant && generationRankingQuery.data?.success && generationRankingQuery.data.state === 'pending' ? (
+                  <div className="mt-0.5 text-[11px] text-gray-500">排位结算中…（可能需要几秒钟）</div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {!isPlaceholder && guidanceOpenFor === key && (
+          <div className="mt-2 ml-8 p-2 rounded bg-white/70 border border-gray-300">
+            <div className="text-xs text-gray-700 mb-1">角色行动引导（可选，最多100字）</div>
+            <textarea
+              className="w-full text-xs border border-gray-300 rounded px-2 py-1 bg-white disabled:opacity-50"
+              rows={3}
+              maxLength={100}
+              disabled={isGenerating}
+              placeholder="例如：谨慎试探、优先保护同伴、尽量不杀、被恐惧支配、隐藏身份等"
+              value={data?.characterGuidance ?? ''}
+              onChange={(e) => updateCombatantCharacterGuidance((combatant as CombatantData).filename, e.target.value)}
+            />
+            <div className="mt-1 flex justify-between items-center text-xs text-gray-500">
+              <span>{Array.from((data?.characterGuidance ?? '')).length}/100</span>
+              <button
+                type="button"
+                className="px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+                onClick={() => setGuidanceOpenFor(null)}
+                disabled={isGenerating}
+              >
+                收起
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="mb-4 p-3 bg-gray-200 rounded-lg">
@@ -83,116 +611,183 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
         </button>
       </div>
 
-      <ul className="list-disc list-inside text-sm text-gray-600 mt-2 space-y-2">
-        {combatants.map((combatant, index) => {
-          const isPlaceholder = 'id' in combatant;
-          const key = isPlaceholder ? combatant.id : combatant.filename;
-          const data = isPlaceholder ? null : (combatant as CombatantData);
-          const displayName = isPlaceholder ? combatant.filename : getCombatantDisplayName(data?.data);
-          const typeDisplay = isPlaceholder
-            ? combatant.type === 'random-magical-girl'
-              ? '(随机魔法少女)'
-              : '(随机残兽)'
-            : `(${COMBATANT_TYPE_LABELS[data!.type]})`;
-          const canMoveUp = index > 0;
-          const canMoveDown = index < combatants.length - 1;
+      <div className="flex justify-between items-center mt-3">
+        <button
+          type="button"
+          onClick={() => {
+            const id = addTeam();
+            setUnassignedCollapsed(false);
+            beginEditTeam(id);
+          }}
+          disabled={isGenerating}
+          className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50"
+        >
+          + 新建分队
+        </button>
+      </div>
 
-          return (
-            <li key={key} className="flex justify-between items-start group gap-2">
-              <div className="flex flex-col gap-1 pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => moveCombatant(index, index - 1)}
-                  disabled={isGenerating || !canMoveUp}
-                  className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  aria-label={`上移 ${displayName}`}
-                  title="上移"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveCombatant(index, index + 1)}
-                  disabled={isGenerating || !canMoveDown}
-                  className="w-6 h-6 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  aria-label={`下移 ${displayName}`}
-                  title="下移"
-                >
-                  ↓
-                </button>
-              </div>
-              <div className="flex items-center flex-grow min-w-0">
-                <span className="break-words mr-2" title={displayName}>
-                  {displayName}
-                  <span className="text-xs text-gray-500 ml-1">{typeDisplay}</span>
-                  {!isPlaceholder && combatant.isPreset && <span className="text-xs text-purple-600 ml-1">(预设)</span>}
-                  {!isPlaceholder && combatant.isValid && <span className="text-xs text-green-600 ml-1">(原生)</span>}
-                  {!isPlaceholder && combatant.wasCorrected && <span className="text-xs text-yellow-600 ml-2">(格式已修正)</span>}
-                  {!isPlaceholder && combatant.isNonStandard && (
-                    <span className="text-xs text-orange-500 ml-1 font-semibold">(非规范格式)</span>
-                  )}
-                </span>
-                {!isPlaceholder && (
+      {!hasAnyTeam && <div className="mt-2 space-y-2">{combatants.map((c, idx) => renderCombatantRow(c, idx))}</div>}
+
+      {hasAnyTeam && (
+        <div className="mt-2 space-y-2">
+          {(combatantsByTeam.unassigned.length > 0 || teams.length > 0) && (
+            <div className="rounded-lg border border-gray-300 bg-white/50">
+              <button
+                type="button"
+                className="w-full flex items-center justify-between px-2 py-2"
+                onClick={() => setUnassignedCollapsed((v) => !v)}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-xs text-gray-700">{unassignedCollapsed ? '▶' : '▼'}</span>
+                  <span className="font-semibold text-sm text-gray-700">未分队</span>
+                  <span className="text-xs text-gray-500">({combatantsByTeam.unassigned.length})</span>
+                </div>
+
+                {teams.length > 0 && (
                   <select
-                    value={combatant.teamId || 0}
-                    onChange={(e) => handleTeamChange(combatant.filename, parseInt(e.target.value, 10))}
-                    className="text-xs border border-gray-300 rounded px-1 py-0.5 bg-white disabled:opacity-50 ml-auto"
-                    disabled={isGenerating}
+                    defaultValue=""
+                    className="text-xs border border-gray-300 rounded px-1 py-1 bg-white disabled:opacity-50"
+                    disabled={isGenerating || indexedCombatants.every((item) => !item.combatant.teamId)}
+                    onChange={(e) => {
+                      const value = e.currentTarget.value;
+                      if (!value) return;
+                      updateCombatantTeam(value, null);
+                      e.currentTarget.value = '';
+                    }}
+                    title="把某个已分队的角色移回未分队"
                   >
-                    <option value={0}>无分队</option>
-                    <option value={1}>队伍 1</option>
-                    <option value={2}>队伍 2</option>
-                    <option value={3}>队伍 3</option>
-                    <option value={4}>队伍 4</option>
+                    <option value="">移回未分队…</option>
+                    {indexedCombatants
+                      .filter((item) => item.combatant.teamId)
+                      .map((item) => {
+                        const identifier = getCombatantIdentifier(item.combatant);
+                        const isPlaceholder = 'id' in item.combatant;
+                        const data = isPlaceholder ? null : (item.combatant as CombatantData);
+                        const name = isPlaceholder ? item.combatant.filename : getCombatantDisplayName(data?.data);
+                        const label = `${name}（${getTeamLabel(item.combatant.teamId)}）`;
+                        return (
+                          <option key={identifier} value={identifier}>
+                            {label}
+                          </option>
+                        );
+                      })}
                   </select>
                 )}
-              </div>
-              <div className="flex items-center flex-shrink-0">
-                {!isPlaceholder && (
-                  <>
-                    <button
-                      onClick={() => onShowDetails(combatant)}
-                      className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300 mr-2"
-                      disabled={isGenerating}
-                    >
-                      详情
-                    </button>
-                    {combatant.wasCorrected && (
-                      <div className="flex gap-2 mr-2">
-                        <button
-                          onClick={() => downloadJson(combatant)}
-                          disabled={isGenerating}
-                          className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
-                        >
-                          下载
-                        </button>
-                        <button
-                          onClick={() => copyJson(combatant)}
-                          disabled={isGenerating}
-                          className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 w-16"
-                        >
-                          {copiedStatus[combatant.filename] ? '已复制!' : '复制'}
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-                <button
-                  onClick={() => !isGenerating && removeCombatant(isPlaceholder ? combatant.id : combatant.filename)}
-                  className={`w-5 h-5 bg-red-200 text-red-700 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${
-                    isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-300'
-                  }`}
-                  aria-label={`移除 ${displayName}`}
-                  disabled={isGenerating}
-                >
-                  X
-                </button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+              </button>
 
+              {!unassignedCollapsed && (
+                <div className="p-2 pt-0 space-y-2">
+                  {combatantsByTeam.unassigned.map((item) => renderCombatantRow(item.combatant, item.index))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {teams.map((team) => {
+            const members = combatantsByTeam.byTeamId.get(team.id) ?? [];
+            const isCollapsed = team.isCollapsed;
+
+            return (
+              <div key={team.id} className="rounded-lg border border-gray-300 bg-white/50">
+                <div className="flex items-center justify-between px-2 py-2 gap-2">
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 min-w-0"
+                    onClick={() => toggleTeamCollapsed(team.id)}
+                  >
+                    <span className="text-xs text-gray-700">{isCollapsed ? '▶' : '▼'}</span>
+                    {editingTeamId === team.id ? (
+                      <input
+                        className="text-sm font-semibold text-gray-700 border border-gray-300 rounded px-2 py-1 bg-white w-44"
+                        value={editingTeamName}
+                        disabled={isGenerating}
+                        autoFocus
+                        maxLength={50}
+                        onChange={(e) => setEditingTeamName(e.target.value)}
+                        onBlur={commitEditTeam}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitEditTeam();
+                          if (e.key === 'Escape') {
+                            setEditingTeamId(null);
+                            setEditingTeamName('');
+                          }
+                        }}
+                        aria-label="分队名称"
+                      />
+                    ) : (
+                      <span className="font-semibold text-sm text-gray-700 truncate" title={team.name}>
+                        {team.name}
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-500">({members.length})</span>
+                  </button>
+
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <select
+                      defaultValue=""
+                      className="text-xs border border-gray-300 rounded px-1 py-1 bg-white disabled:opacity-50"
+                      disabled={isGenerating || indexedCombatants.length === 0}
+                      onChange={(e) => {
+                        const value = e.currentTarget.value;
+                        if (!value) return;
+                        updateCombatantTeam(value, team.id);
+                        e.currentTarget.value = '';
+                      }}
+                      title="把角色加入/转移到该分队"
+                    >
+                      <option value="">添加/转移成员…</option>
+                      {indexedCombatants
+                        .filter((item) => item.combatant.teamId !== team.id)
+                        .map((item) => {
+                          const identifier = getCombatantIdentifier(item.combatant);
+                          const isPlaceholder = 'id' in item.combatant;
+                          const data = isPlaceholder ? null : (item.combatant as CombatantData);
+                          const name = isPlaceholder ? item.combatant.filename : getCombatantDisplayName(data?.data);
+                          return (
+                            <option key={identifier} value={identifier}>
+                              {name}（{getTeamLabel(item.combatant.teamId)}）
+                            </option>
+                          );
+                        })}
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={() => beginEditTeam(team.id)}
+                      disabled={isGenerating}
+                      className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50"
+                    >
+                      改名
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isGenerating) return;
+                        if (!confirm(`确定删除分队「${team.name}」吗？成员会回到未分队。`)) return;
+                        removeTeam(team.id);
+                      }}
+                      disabled={isGenerating}
+                      className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200 disabled:opacity-50"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+
+                {!isCollapsed && (
+                  <div className="p-2 pt-0 space-y-2">
+                    {members.length === 0 ? (
+                      <div className="text-xs text-gray-500 px-1 py-2">暂无成员（可用右侧下拉框添加/转移）</div>
+                    ) : (
+                      members.map((item) => renderCombatantRow(item.combatant, item.index))
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

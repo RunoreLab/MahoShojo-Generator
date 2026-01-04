@@ -1176,7 +1176,14 @@ const CharacterManagerPage: React.FC = () => {
                 ? 'input-field border-red-400 focus:border-red-500 focus:ring-red-300 bg-red-50'
                 : 'input-field';
             const issueHint = hasIssue ? (
-                <p className="text-xs text-red-500 mt-1">检测到 {issueCount} 处敏感词，建议参考下方“敏感词检测”面板进行修正。</p>
+                <p className="text-xs text-red-500 mt-1">
+                    检测到 {issueCount} 处敏感词，建议参考下方“敏感词检测”面板进行修正。
+                    <span className="ml-1">
+                        <Link href="/encyclopedia/sensitive-words" className="text-blue-600 hover:underline">为什么会触发？</Link>
+                        <span className="mx-1 text-gray-400">·</span>
+                        <Link href="/encyclopedia/shield-words" className="text-blue-600 hover:underline">屏蔽词/和谐说明</Link>
+                    </span>
+                </p>
             ) : null;
 
             // 专门处理数组类型的逻辑
@@ -1982,6 +1989,16 @@ const CharacterManagerPage: React.FC = () => {
                                     'bg-blue-100 text-blue-800'
                                 }`}>
                                 {message.text}
+                                {message.text.includes('审核') && (
+                                    <div className="mt-2 text-xs">
+                                        <Link href="/encyclopedia/review" className="text-blue-700 hover:underline">了解公开与审核机制</Link>
+                                    </div>
+                                )}
+                                {(message.text.includes('敏感词') || message.text.includes('逮捕')) && (
+                                    <div className="mt-2 text-xs">
+                                        <Link href="/encyclopedia/sensitive-words" className="text-blue-700 hover:underline">了解敏感词与逮捕（含恢复建议）</Link>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -1989,6 +2006,11 @@ const CharacterManagerPage: React.FC = () => {
                     <div className="card mt-6">
                         <h3 className="text-xl font-bold text-gray-800 text-center mb-2">敏感词检测控制台</h3>
                         <p className="text-sm text-gray-600 text-center">实时标记角色与情景内容中的敏感词，并提供快捷的文本检测与和谐工具。</p>
+                        <div className="mt-2 flex flex-wrap justify-center gap-3 text-xs text-gray-600">
+                            <Link href="/encyclopedia/sensitive-words" className="text-blue-600 hover:underline">敏感词与逮捕</Link>
+                            <Link href="/encyclopedia/shield-words" className="text-blue-600 hover:underline">屏蔽词（和谐替换）</Link>
+                            <Link href="/encyclopedia/review" className="text-blue-600 hover:underline">公开与审核</Link>
+                        </div>
 
                         <div className="mt-4">
                             <div className="flex items-center justify-between">
@@ -2164,10 +2186,20 @@ const CharacterManagerPage: React.FC = () => {
                 {/* 【新增】用于移动端长按保存的图片模态框 */}
                 {showImageModal && savedImageUrl && (
                     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4" onClick={() => setShowImageModal(false)}>
-                        <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative p-4" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => setShowImageModal(false)} className="absolute top-2 right-2 text-3xl text-gray-600 hover:text-gray-900">&times;</button>
-                            <p className="text-center text-sm text-gray-600 mb-2">📱 长按图片保存到相册</p>
-                            <img src={savedImageUrl} alt="角色卡片" className="w-full h-auto rounded-lg" />
+                        <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative" onClick={(e) => e.stopPropagation()}>
+                            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
+                                <button
+                                    onClick={() => setShowImageModal(false)}
+                                    aria-label="关闭"
+                                    className="text-3xl leading-none text-gray-600 hover:text-gray-900"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                            <div className="px-4 pb-4">
+                                <p className="text-center text-sm text-gray-600 mb-2">📱 长按图片保存到相册</p>
+                                <img src={savedImageUrl} alt="角色卡片" className="w-full h-auto rounded-lg" />
+                            </div>
                         </div>
                     </div>
                 )}

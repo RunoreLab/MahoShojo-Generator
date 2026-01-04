@@ -232,6 +232,7 @@ export default function DataCardsModal({
             setShowDetailsModal(false);
             setSelectedCard(null);
           }}
+          isOwner={true}
           card={{
             id: selectedCard.id,
             name: selectedCard.name,

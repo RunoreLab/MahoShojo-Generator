@@ -14,6 +14,10 @@ import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { queryFromD1 } from '@/lib/d1';
 import { formatKilobytes, getUtf8ByteLength, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
+import { computeTechIndex } from '@/lib/metrics/techIndex';
+import { verifySignature } from '@/lib/signature';
+import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
+import { resetStrictArenaRatingForDataCard } from '@/lib/database/arena-ratings';
 
 export const runtime = 'edge';
 
@@ -38,6 +42,46 @@ async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> 
   const user = await getUserByAuthKey(authKey);
   
   return user;
+}
+
+async function getDataCardUpdatedAt(dataCardId: string): Promise<string | null> {
+  try {
+    const result = await queryFromD1('SELECT updated_at FROM data_cards WHERE id = ?', [dataCardId]) as any;
+    const row = result?.result?.[0]?.results?.[0];
+    return typeof row?.updated_at === 'string' ? row.updated_at : null;
+  } catch (error) {
+    console.error('读取 data_cards.updated_at 失败:', error);
+    return null;
+  }
+}
+
+async function computeAndUpsertMetrics(dataCardId: string, dataJsonString: string): Promise<void> {
+  try {
+    const jsonValue = JSON.parse(dataJsonString) as unknown;
+    const tech = computeTechIndex(jsonValue);
+
+    const hasSignatureKey = Boolean(process.env.SIGNATURE_SECRET_KEY);
+    const isNative = hasSignatureKey ? await verifySignature(jsonValue as any) : null;
+
+    const updatedAt = await getDataCardUpdatedAt(dataCardId);
+    if (!updatedAt) return;
+
+    await upsertDataCardMetrics({
+      dataCardId,
+      techScore: tech.techScore,
+      techLevel: tech.techLevel,
+      isNative,
+      dataCardUpdatedAt: updatedAt,
+      detailsJson: {
+        raw: tech.raw,
+        derived: tech.derived,
+        components: tech.components,
+        notes: tech.notes,
+      },
+    });
+  } catch (error) {
+    console.warn('更新 data_card_metrics 失败（非阻塞）:', error);
+  }
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -168,6 +212,16 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
+        if (result.id) {
+          const metricsPromise = computeAndUpsertMetrics(result.id, dataWithAuthorString);
+          const executionContext = (req as any).context;
+          if (executionContext?.waitUntil) {
+            executionContext.waitUntil(metricsPromise);
+          } else {
+            await metricsPromise;
+          }
+        }
+
         return new Response(JSON.stringify({ 
           success: true, 
           id: result.id,
@@ -261,6 +315,19 @@ export default async function handler(req: Request): Promise<Response> {
               'UPDATE data_cards SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
               [dataString!, id, userId]
             );
+
+            const metricsPromise = computeAndUpsertMetrics(id, dataString!);
+            const resetStrictPromise =
+              currentCard.type === 'character'
+                ? resetStrictArenaRatingForDataCard(id)
+                : Promise.resolve();
+            const combined = Promise.all([metricsPromise, resetStrictPromise]).then(() => undefined);
+            const executionContext = (req as any).context;
+            if (executionContext?.waitUntil) {
+              executionContext.waitUntil(combined);
+            } else {
+              await combined;
+            }
           }
 
           return new Response(JSON.stringify({ success: true, message: '数据卡更新成功' }), {
@@ -283,6 +350,7 @@ export default async function handler(req: Request): Promise<Response> {
               headers: { 'Content-Type': 'application/json' }
             });
           }
+
           return new Response(JSON.stringify({ success: true, pendingReview: true, message: '更新已提交，待审核' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }

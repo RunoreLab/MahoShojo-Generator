@@ -15,6 +15,7 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
+import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
@@ -42,15 +43,23 @@ type PvpPickedPlayer = {
   prefix: string | null;
   token: string;
   snapshot: PvpPickedSnapshot;
+  characterGuidance?: string | null;
   isBot?: boolean;
   botId?: string | null;
 };
 
-const parseChoice = (raw: string): PvpSnapshotRef | null => {
+type ParsedChoice = { ref: PvpSnapshotRef; characterGuidance: string | null };
+
+const parseChoice = (raw: string): ParsedChoice | null => {
   try {
-    const parsed = JSON.parse(raw) as PvpSnapshotRef;
+    const parsed = JSON.parse(raw) as any;
     if (!parsed || parsed.kind !== 'snapshot' || typeof parsed.id !== 'string') return null;
-    return parsed;
+    const characterGuidance =
+      typeof parsed.characterGuidance === 'string' ? parsed.characterGuidance.trim().slice(0, 100) : '';
+    return {
+      ref: { kind: 'snapshot', id: parsed.id } as PvpSnapshotRef,
+      characterGuidance: characterGuidance || null,
+    };
   } catch {
     return null;
   }
@@ -235,7 +244,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   const choices = await getPvpRoundChoices(roundId);
   if (choices.length < humanCount) return json({ error: '仍有玩家未选择出战卡' }, { status: 409 });
 
-  const choiceByUserId = new Map<number, PvpSnapshotRef>();
+  const choiceByUserId = new Map<number, ParsedChoice>();
   for (const row of choices) {
     const parsed = parseChoice(row.choice_ref_json);
     if (!parsed) return json({ error: '选择数据损坏' }, { status: 500 });
@@ -278,7 +287,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     const token = `P${i + 1}`;
     if (participant.kind === 'human') {
       const choice = choiceByUserId.get(participant.userId)!;
-      const snap = await getPvpCardSnapshotById(choice.id);
+      const snap = await getPvpCardSnapshotById(choice.ref.id);
       if (!snap) return json({ error: '快照不存在，请重试' }, { status: 409 });
       picked.push({
         userId: participant.userId,
@@ -287,6 +296,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         prefix: participant.prefix,
         token,
         snapshot: snap,
+        characterGuidance: choice.characterGuidance,
         isBot: false,
       });
       continue;
@@ -326,6 +336,17 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   const authHeader = req.headers.get('authorization') || '';
   const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
 
+  const UPSTREAM_TOTAL_TIMEOUT_MS = 10 * 60_000;
+  const upstreamAbortController = new AbortController();
+  const upstreamTimeoutId: ReturnType<typeof setTimeout> = setTimeout(() => upstreamAbortController.abort(), UPSTREAM_TOTAL_TIMEOUT_MS);
+  const clearUpstreamTimeout = () => {
+    try {
+      clearTimeout(upstreamTimeoutId);
+    } catch {
+      // ignore
+    }
+  };
+
   const buildGuidance = () => {
     const mapping = picked.map((p) => `- ${p.token}：${p.snapshot.name}`).join('\n');
     const tokenList = picked.map((p) => `“${p.token}”`).join('、');
@@ -340,10 +361,17 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     ].join('\n');
   };
 
+  const forwardedFor =
+    req.headers.get('cf-connecting-ip')?.trim() ||
+    req.headers.get('x-forwarded-for')?.trim() ||
+    req.headers.get('x-real-ip')?.trim() ||
+    '';
+
   const upstreamRes = await fetch(new URL('/api/arena/generate-stream', origin).toString(), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(forwardedFor ? { 'x-forwarded-for': forwardedFor } : {}),
       ...(authHeader ? { Authorization: authHeader } : {}),
       ...subrequestAuthHeaders,
     },
@@ -353,6 +381,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         data: JSON.parse(p.snapshot.data_json),
         isNative: false,
         isPreset: false,
+        characterGuidance: p.characterGuidance ?? null,
       })),
       selectedLevel: rules.selectedLevel,
       mode: rules.mode,
@@ -378,9 +407,11 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       ...(customProvider ? { customProvider } : {}),
       pvpContext: { roomId, matchId, roundId },
     }),
+    signal: upstreamAbortController.signal,
   });
 
   if (!upstreamRes.ok) {
+    clearUpstreamTimeout();
     const raw = await upstreamRes.text();
     let shouldRedirect = false;
     let redirectReason: string | null = null;
@@ -422,6 +453,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
           snapshotId: p.snapshot.id,
           name: p.snapshot.name,
           type: p.snapshot.card_type,
+          ...(p.characterGuidance ? { characterGuidance: p.characterGuidance } : {}),
         })),
         reportMarkdown: markdown,
         report: report,
@@ -472,6 +504,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   if (!upstreamBody) {
     await updatePvpRound(roundId, { status: 'pending' });
     await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
+    clearUpstreamTimeout();
     return json({ error: '无法读取响应流', code: 'STREAM_BODY_MISSING' }, { status: 500 });
   }
 
@@ -490,6 +523,14 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   const reader = upstreamBody.getReader();
   const decoder = new TextDecoder();
   let accumulatedText = '';
+  const shouldTerminateByTelemetry = (text: string) => {
+    const marker = '<!-- MAHOSHOJO_TELEMETRY_META';
+    const trimmed = text.trimEnd();
+    const idx = trimmed.lastIndexOf(marker);
+    if (idx < 0) return false;
+    if (!trimmed.endsWith('-->')) return false;
+    return trimmed.length - idx < 4096;
+  };
 
   const finalizeAndPersist = async (finalText: string) => {
     let winnerIndex: number | null = null;
@@ -589,6 +630,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         snapshotId: p.snapshot.id,
         name: p.snapshot.name,
         type: p.snapshot.card_type,
+        ...(p.characterGuidance ? { characterGuidance: p.characterGuidance } : {}),
       })),
       reportMarkdown: markdownForStorage,
       streamMeta,
@@ -687,18 +729,45 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   const wrappedBody = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
+        const readWithTimeout = createStreamReadWithTimeout({
+          label: 'api/pvp/resolve-stream 上游读取',
+          idleTimeoutMs: 60_000,
+          totalTimeoutMs: UPSTREAM_TOTAL_TIMEOUT_MS,
+          onTimeout: () => {
+            try {
+              upstreamAbortController.abort();
+            } catch {
+              // ignore
+            }
+            try {
+              void reader.cancel('timeout');
+            } catch {
+              // ignore
+            }
+          },
+        });
         while (true) {
-          const { value, done } = await reader.read();
+          const { value, done } = await readWithTimeout(reader);
           if (done) break;
           if (!value) continue;
           const chunkText = decoder.decode(value, { stream: true });
           accumulatedText += chunkText;
           controller.enqueue(value);
+          if (shouldTerminateByTelemetry(accumulatedText)) {
+            try {
+              void reader.cancel('telemetry-meta-received');
+            } catch {
+              // ignore
+            }
+            break;
+          }
         }
         accumulatedText += decoder.decode();
         await finalizeAndPersist(accumulatedText);
+        clearUpstreamTimeout();
         controller.close();
       } catch (e) {
+        clearUpstreamTimeout();
         try {
           await updatePvpRound(roundId, { status: 'pending' });
           await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
@@ -709,8 +778,14 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       }
     },
     async cancel() {
+      clearUpstreamTimeout();
       try {
-        await reader.cancel();
+        upstreamAbortController.abort();
+      } catch {
+        // ignore
+      }
+      try {
+        void reader.cancel();
       } catch {
         // ignore
       }

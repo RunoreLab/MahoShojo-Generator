@@ -20,6 +20,8 @@ interface StreamingBattleReportCardProps {
     reporterInfo?: { name: string; publication: string } | null;
     /** 本次生成时的故事引导快照 */
     userGuidance?: string | null;
+    /** 本次生成时的逐角色行动/想法引导快照（可选） */
+    characterGuidances?: Array<{ characterName: string; guidance: string }> | null;
     /** 本次生成时的随机判定结果 */
     adjudicationResults?: AdjudicationResult[] | null;
     /** AI 生成 token 统计（输入/推理/输出），可选。 */
@@ -31,6 +33,8 @@ interface StreamingBattleReportCardProps {
         cachedTokens?: number | null;
         [key: string]: unknown;
     } | null;
+    /** 本次生成所使用的 AI 模型（用于战报元数据展示，可能为空）。 */
+    aiModel?: string | null;
     /** 读取叙事历史条数：仅在开启 readNarrativeHistory 时传入（没开就不显示）。 */
     narrativeHistoryReadCount?: number | null;
     /** 是否正在生成中（可选，用于显示加载光标等） */
@@ -44,8 +48,10 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     scenarioName,
     reporterInfo = null,
     userGuidance = null,
+    characterGuidances = null,
     adjudicationResults = null,
     aiUsage = null,
+    aiModel = null,
     narrativeHistoryReadCount = null,
     isStreaming = false
 }) => {
@@ -77,6 +83,8 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             (value) => typeof value === 'number' && Number.isFinite(value)
         );
     const shouldShowNarrativeReadCount = typeof narrativeHistoryReadCount === 'number';
+    const aiModelText = typeof aiModel === 'string' ? aiModel.trim() : '';
+    const shouldShowAiModel = Boolean(aiModelText);
 
     const formatToken = (value: unknown): string => {
         if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
@@ -110,6 +118,23 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
         const hasGuidanceSection = /(^|\n)##\s*故事引导\s*(\n|$)/.test(result);
         if (!hasGuidanceSection && userGuidance?.trim()) {
             result = `${result.trim()}\n\n---\n\n## 故事引导\n> ${userGuidance.trim()}\n`;
+        }
+
+        const normalizedCharacterGuidances =
+            Array.isArray(characterGuidances)
+                ? characterGuidances
+                    .map((item) => {
+                        const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                        const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+                        if (!characterName || !guidance) return null;
+                        return { characterName, guidance };
+                    })
+                    .filter(Boolean) as Array<{ characterName: string; guidance: string }>
+                : [];
+        const hasCharacterGuidanceSection = /(^|\n)##\s*角色行动引导\s*(\n|$)/.test(result);
+        if (!hasCharacterGuidanceSection && normalizedCharacterGuidances.length > 0) {
+            const lines = normalizedCharacterGuidances.map((item) => `- ${item.characterName}：${item.guidance}`).join('\n');
+            result = `${result.trim()}\n\n---\n\n## 角色行动引导\n${lines}\n`;
         }
 
         const hasAdjudicationSection = /(^|\n)##\s*随机判定记录\s*(\n|$)/.test(result);
@@ -335,7 +360,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
                 {headline && <h2 className="text-xl font-bold mb-2 mt-2 px-1">{headline}</h2>}
 
-                {(reporterInfo?.name && reporterInfo?.publication) || hasAnyTokenNumber || shouldShowNarrativeReadCount ? (
+                {(reporterInfo?.name && reporterInfo?.publication) || shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount ? (
                     <div className="px-1 mb-4 text-sm text-gray-300">
                         {reporterInfo?.name && reporterInfo?.publication && (
                             <>
@@ -343,8 +368,10 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                                 <p>来源 | {reporterInfo.publication}</p>
                             </>
                         )}
-                        {(hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
+                        {(shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
                             <p className="text-xs text-gray-400 mt-1">
+                                {shouldShowAiModel && <>模型：{aiModelText}</>}
+                                {shouldShowAiModel && (hasAnyTokenNumber || shouldShowNarrativeReadCount) ? ' · ' : ''}
                                 {hasAnyTokenNumber && (
                                     <>
                                         tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}
@@ -373,6 +400,27 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                     <div className="mt-6 border-l-4 border-purple-400 bg-black/20 p-3 rounded">
                         <div className="text-sm font-semibold mb-1">📖 故事引导</div>
                         <p className="text-sm opacity-90 italic">“{userGuidance.trim()}”</p>
+                    </div>
+                )}
+
+                {Array.isArray(characterGuidances) && characterGuidances.length > 0 && (
+                    <div className="mt-4 border-l-4 border-indigo-300 bg-black/20 p-3 rounded">
+                        <div className="text-sm font-semibold mb-2">🎭 角色行动引导</div>
+                        <div className="space-y-2 text-sm">
+                            {characterGuidances
+                                .map((item, index) => {
+                                    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                                    const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+                                    if (!characterName || !guidance) return null;
+                                    return (
+                                        <div key={`${characterName}-${index}`} className="opacity-90">
+                                            <span className="font-semibold">{characterName}</span>
+                                            <span className="opacity-80">：{guidance}</span>
+                                        </div>
+                                    );
+                                })
+                                .filter(Boolean)}
+                        </div>
                     </div>
                 )}
 

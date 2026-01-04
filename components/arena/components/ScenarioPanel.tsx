@@ -106,7 +106,7 @@ export function ScenarioPanel({
         <button
           type="button"
           onClick={() => setIsAuxCollapsed((prev) => !prev)}
-          className="text-gray-700 hover:underline cursor-pointer font-semibold"
+          className="text-purple-700 hover:underline cursor-pointer font-semibold"
           disabled={isGenerating}
         >
           {isAuxCollapsed ? '▶ 展开辅助情景（可选）' : '▼ 折叠辅助情景（可选）'}

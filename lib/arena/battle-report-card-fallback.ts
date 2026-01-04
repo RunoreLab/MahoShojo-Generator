@@ -141,6 +141,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
   headline: unknown;
   winner: unknown;
   outputPreview: unknown;
+  aiModel?: unknown;
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
@@ -153,6 +154,7 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
   const rawPreview = normalizeText(input.outputPreview);
   const scenario = typeof input.scenarioTitle === 'string' && input.scenarioTitle.trim() ? input.scenarioTitle.trim() : undefined;
   const userGuidance = typeof input.userGuidance === 'string' && input.userGuidance.trim() ? input.userGuidance.trim() : undefined;
+  const aiModelFromRecord = typeof input.aiModel === 'string' && input.aiModel.trim() ? input.aiModel.trim() : undefined;
 
   const usageFromRecord = buildUsageFromRecord({
     prompt_tokens: input.promptTokens,
@@ -207,6 +209,9 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
 
     const merged: NewsReport = reportCandidate ? ({ ...base, ...(reportCandidate as any) } as NewsReport) : base;
     merged.aiUsage = mergeUsage(merged.aiUsage, usageFromRecord);
+    if (aiModelFromRecord && !(typeof merged.aiModel === 'string' && merged.aiModel.trim())) {
+      merged.aiModel = aiModelFromRecord;
+    }
     if (typeof merged.narrativeHistoryReadCount !== 'number' && typeof narrativeHistoryReadCount === 'number') {
       merged.narrativeHistoryReadCount = narrativeHistoryReadCount;
     }
@@ -250,6 +255,14 @@ export async function hydrateBattleReportCardFromGenerationRecord(input: {
 
   const usageFromTelemetry = telemetryExtracted?.meta?.usage as NewsReport['aiUsage'] | undefined;
   report.aiUsage = mergeUsage(usageFromTelemetry, usageFromRecord);
+
+  const aiModelFromTelemetry = typeof telemetryExtracted?.meta?.aiModel === 'string' && telemetryExtracted.meta.aiModel.trim()
+    ? telemetryExtracted.meta.aiModel.trim()
+    : undefined;
+  const aiModel = aiModelFromTelemetry || aiModelFromRecord;
+  if (aiModel) {
+    report.aiModel = aiModel;
+  }
 
   if (typeof telemetryExtracted?.meta?.narrativeHistoryReadCount === 'number') {
     report.narrativeHistoryReadCount = telemetryExtracted.meta.narrativeHistoryReadCount;

@@ -17,6 +17,8 @@ export interface NewsReport {
     name:string;
     publication: string;
   };
+  /** 本次生成所使用的 AI 模型（用于战报元数据展示，可能为空）。 */
+  aiModel?: string | null;
   article: {
     body: string;
     analysis: string;
@@ -41,6 +43,12 @@ export interface NewsReport {
   narrativeHistoryReadCount?: number;
   // 可选的用户引导信息字段
   userGuidance?: string;
+  /**
+   * 角色行动/想法引导（逐角色、可选）。
+   * - 仅当用户填写时返回/展示
+   * - 会被记录进战报生成记录与（可选）历战记录
+   */
+  characterGuidances?: Array<{ characterName: string; guidance: string }>;
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
   // 2. [新增] 为战报数据接口增加随机判定结果字段
   adjudicationResults?: AdjudicationResult[];
@@ -65,6 +73,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
   const officialWinner = (report.officialReport?.winner ?? '').trim();
   const officialConclusion = (report.officialReport?.conclusion ?? '').trimEnd();
 
+  const aiModel = typeof report.aiModel === 'string' ? report.aiModel.trim() : '';
   const aiUsage = report.aiUsage;
   const hasAnyTokenNumber =
     aiUsage != null &&
@@ -72,6 +81,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
       (value) => typeof value === 'number' && Number.isFinite(value)
     );
   const shouldShowNarrativeReadCount = typeof report.narrativeHistoryReadCount === 'number';
+  const shouldShowAiModel = Boolean(aiModel);
 
   const getModeDisplay = (mode: string) => {
     switch (mode) {
@@ -187,6 +197,19 @@ ${report.userGuidance ? `
 
 ## 故事引导
 > ${report.userGuidance}` : ''}
+${Array.isArray(report.characterGuidances) && report.characterGuidances.length > 0 ? `
+---
+
+## 角色行动引导
+${report.characterGuidances
+  .map((item) => {
+    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+    const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+    if (!characterName || !guidance) return null;
+    return `- ${characterName}：${guidance}`;
+  })
+  .filter(Boolean)
+  .join('\n')}` : ''}
 ${adjudicationMarkdown}
     `.trim();
 
@@ -281,8 +304,10 @@ ${adjudicationMarkdown}
             <p className="text-sm text-gray-300">
               来源 | {reporterPublication || '—'}
             </p>
-            {(hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
+            {(shouldShowAiModel || hasAnyTokenNumber || shouldShowNarrativeReadCount) && (
               <p className="text-xs text-gray-400 mt-1">
+                {shouldShowAiModel && <>模型：{aiModel}</>}
+                {shouldShowAiModel && (hasAnyTokenNumber || shouldShowNarrativeReadCount) ? ' · ' : ''}
                 {hasAnyTokenNumber && (
                   <>
                     tokens：输入 {formatToken(aiUsage?.promptTokens)}｜推理 {formatToken(aiUsage?.reasoningTokens)}｜输出{' '}
@@ -340,6 +365,27 @@ ${adjudicationMarkdown}
             <div className="result-label">📖 故事引导</div>
             <div className="result-value">
               <p className="text-sm opacity-90 italic">“{report.userGuidance}”</p>
+            </div>
+          </div>
+        )}
+
+        {Array.isArray(report.characterGuidances) && report.characterGuidances.length > 0 && (
+          <div className="result-item" style={{ borderLeft: '4px solid #93c5fd', background: 'rgba(0,0,0,0.2)' }}>
+            <div className="result-label">🎭 角色行动引导</div>
+            <div className="result-value space-y-1 text-sm">
+              {report.characterGuidances
+                .map((item, index) => {
+                  const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                  const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
+                  if (!characterName || !guidance) return null;
+                  return (
+                    <div key={`${characterName}-${index}`} className="opacity-90">
+                      <span className="font-semibold">{characterName}</span>
+                      <span className="opacity-80">：{guidance}</span>
+                    </div>
+                  );
+                })
+                .filter(Boolean)}
             </div>
           </div>
         )}

@@ -1,6 +1,6 @@
 import type { NewsReport } from '@/components/BattleReportCard';
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
-import type { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 import type { StatsData } from '@/pages/api/get-stats';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 
@@ -12,6 +12,14 @@ export type CombatantType = 'magical-girl' | 'canshou' | 'general-character';
 export type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type StoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 export type GenerationMode = 'non-stream' | 'stream';
+
+export interface BattleTeam {
+  id: number;
+  /** 分队名称（会传递给 AI）。 */
+  name: string;
+  /** 是否在列表中折叠。 */
+  isCollapsed: boolean;
+}
 
 export interface UpdatedCombatantData {
   codename?: string;
@@ -31,11 +39,18 @@ export interface CombatantData {
   isNonStandard?: boolean;
   wasCorrected?: boolean;
   teamId?: number;
+  /** 用户对该角色的行动/想法引导（可选，最多 100 字）。 */
+  characterGuidance?: string;
   sourceDataCardId?: string;
+  sourceDataCardDescription?: string;
+  sourceDataCardCreatedAt?: string;
   sourceDataCardUpdatedAt?: string;
   sourceDataCardName?: string;
   sourceIsPublic?: boolean;
   sourceAuthor?: string;
+  sourceDataCardUsageCount?: number;
+  sourceDataCardLikeCount?: number;
+  sourceDataCardFavoriteCount?: number;
 }
 
 export interface RandomCombatantPlaceholder {
@@ -52,10 +67,15 @@ export interface ScenarioState {
   fileName: string | null;
   isNative: boolean;
   sourceDataCardId?: string;
+  sourceDataCardDescription?: string;
+  sourceDataCardCreatedAt?: string;
   sourceDataCardUpdatedAt?: string;
   sourceDataCardName?: string;
   sourceIsPublic?: boolean;
   sourceAuthor?: string;
+  sourceDataCardUsageCount?: number;
+  sourceDataCardLikeCount?: number;
+  sourceDataCardFavoriteCount?: number;
 }
 
 export type AuxiliaryScenarioState = Omit<ScenarioState, 'content'> & {
@@ -89,10 +109,13 @@ export interface BattleApiResponse {
   report: NewsReport;
   updatedCombatants: UpdatedCombatantData[];
   adjudicationResults?: AdjudicationResult[];
+  /** 本次战报生成记录 ID（用于排位结算查询等增强功能）。 */
+  generationId?: string;
 }
 
 export interface BattleStoreState {
   combatants: Combatant[];
+  teams: BattleTeam[];
   scenario: ScenarioState;
   auxScenarios: AuxiliaryScenarioState[];
   battleMode: BattleMode;
@@ -101,11 +124,15 @@ export interface BattleStoreState {
   streamingMarkdown: string | null;
   streamReporterInfo: NewsReport['reporterInfo'] | null;
   streamUserGuidance: string | null;
+  streamCharacterGuidances: NonNullable<NewsReport['characterGuidances']> | null;
   streamAiUsage: NewsReport['aiUsage'] | null;
+  streamAiModel: string | null;
   streamNarrativeHistoryReadCount: number | null;
   storyLength: StoryLengthOption;
   selectedLevel: string;
   selectedLanguage: string;
+  /** 最近一次生成战报的 generationId（用于排位结算展示）。 */
+  lastGenerationId: string | null;
   settings: BattleSettings;
   adjudicationEvents: AdjudicatorEvent[];
   adjudicationResults: AdjudicationResult[] | null;
@@ -125,11 +152,14 @@ export interface BattleStoreState {
   setStreamingMarkdown: (markdown: string | null) => void;
   setStreamReporterInfo: (info: NewsReport['reporterInfo'] | null) => void;
   setStreamUserGuidance: (guidance: string | null) => void;
+  setStreamCharacterGuidances: (guidances: NonNullable<NewsReport['characterGuidances']> | null) => void;
   setStreamAiUsage: (usage: NewsReport['aiUsage'] | null) => void;
+  setStreamAiModel: (model: string | null) => void;
   setStreamNarrativeHistoryReadCount: (count: number | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setSelectedLevel: (level: string) => void;
   setSelectedLanguage: (language: string) => void;
+  setLastGenerationId: (generationId: string | null) => void;
   updateSettings: (settings: Partial<BattleSettings>) => void;
 
   addCombatant: (combatant: Combatant) => void;
@@ -137,7 +167,15 @@ export interface BattleStoreState {
   setCombatants: (combatants: Combatant[]) => void;
   moveCombatant: (fromIndex: number, toIndex: number) => void;
   clearCombatants: () => void;
-  updateCombatantTeam: (filename: string, teamId: number) => void;
+  /** 调整角色所属分队；teamId 为 null/0 代表未分队。identifier 支持角色 filename 或占位符 id。 */
+  updateCombatantTeam: (identifier: string, teamId: number | null) => void;
+  updateCombatantCharacterGuidance: (filename: string, guidance: string) => void;
+
+  /** 新建分队并返回分队 id。 */
+  addTeam: (name?: string) => number;
+  removeTeam: (teamId: number) => void;
+  renameTeam: (teamId: number, name: string) => void;
+  toggleTeamCollapsed: (teamId: number) => void;
 
   setScenario: (scenario: ScenarioState) => void;
   clearScenario: () => void;

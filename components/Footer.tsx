@@ -58,6 +58,9 @@ export default function Footer({ className = "footer", textWhite = false }: Foot
         <a href="https://docs.qq.com/form/page/DYmdrdWFQdmZCSGdZ" target="_blank" rel="noopener noreferrer" className="footer-link">反馈问题</a>
       </p>
       <p>
+        <Link href="/encyclopedia" className="footer-link">百科</Link>
+      </p>
+      <p>
         <a href="https://github.com/colasama/MahoShojo-Generator" target="_blank" rel="noopener noreferrer" className="footer-link">colasama/MahoShojo-Generator</a>
       </p>
     </footer>

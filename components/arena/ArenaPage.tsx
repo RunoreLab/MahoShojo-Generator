@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
@@ -9,7 +10,7 @@ import Footer from '@/components/Footer';
 import { qqGroups } from '@/lib/communityGroups';
 import { useAuth } from '@/lib/useAuth';
 import { config as appConfig } from '@/lib/config';
-import { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 
 import { BattleHeader } from './components/BattleHeader';
 import { PresetSelector } from './components/PresetSelector';
@@ -25,10 +26,12 @@ import { BattleResult } from './components/BattleResult';
 import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
 import { ArenaStatistics } from './components/ArenaStatistics';
+import { RankingQuickActions } from './components/RankingQuickActions';
 import { useBattleStore } from './stores/useBattleStore';
 import { BattleStoreState, CombatantData, MAX_AUX_SCENARIOS, MAX_COMBATANTS } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
 import { usePresetQuery, useLanguagesQuery, useStatsQuery } from './hooks/useArenaData';
+import { ArenaRankingModal } from './components/ArenaRankingModal';
 
 export function ArenaPage() {
   const { isAuthenticated } = useAuth();
@@ -37,6 +40,7 @@ export function ArenaPage() {
   const [selectedCombatant, setSelectedCombatant] = useState<CombatantData | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
+  const [showRankingModal, setShowRankingModal] = useState(false);
 
   const combatants = useBattleStore((state: BattleStoreState) => state.combatants);
   const scenario = useBattleStore((state: BattleStoreState) => state.scenario);
@@ -126,6 +130,19 @@ export function ArenaPage() {
         <div className="container">
           <div className="card" style={{ border: '2px solid #ccc', background: '#f9f9f9' }}>
             <BattleHeader />
+            <div className="flex justify-end mt-2">
+              <div className="flex items-center gap-3 text-sm flex-wrap">
+                <button
+                  onClick={() => setShowRankingModal(true)}
+                  className="text-blue-600 hover:underline font-semibold"
+                >
+                  快速查看排行榜
+                </button>
+                <Link href="/ranking" className="text-blue-600 hover:underline">
+                  进入排行榜页
+                </Link>
+              </div>
+            </div>
             <PresetSelector />
             <DatabaseSelector
               onOpenCharacterModal={handleOpenCharacterDataModal}
@@ -138,6 +155,7 @@ export function ArenaPage() {
             <RosterUploader />
             <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />
             <BattleModeSwitcher />
+            <RankingQuickActions />
             {battleMode === 'scenario' && (
               <ScenarioPanel
                 onOpenScenarioModal={handleOpenScenarioDataModal}
@@ -213,24 +231,25 @@ export function ArenaPage() {
           style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem' }}
         >
           <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
-            <div className="flex justify-between items-center m-0">
-              <div></div>
+            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
               <button
                 onClick={() => {
                   setShowImageModal(false);
                   setSavedImageUrl(null);
                 }}
+                aria-label="关闭"
                 className="text-gray-500 hover:text-gray-700 text-3xl leading-none"
-                style={{ marginRight: '0.5rem' }}
               >
                 ×
               </button>
             </div>
-            <p className="text-center text-sm text-gray-600" style={{ marginTop: '0.5rem' }}>
-              📱 长按图片保存到相册
-            </p>
-            <div className="items-center flex flex-col" style={{ padding: '0.5rem' }}>
-              <img src={savedImageUrl} alt="魔法少女战斗报告" className="w-full h-auto rounded-lg mx-auto" />
+            <div className="px-4 pb-4">
+              <p className="text-center text-sm text-gray-600" style={{ marginTop: '0.5rem' }}>
+                📱 长按图片保存到相册
+              </p>
+              <div className="items-center flex flex-col" style={{ padding: '0.5rem' }}>
+                <img src={savedImageUrl} alt="魔法少女战斗报告" className="w-full h-auto rounded-lg mx-auto" />
+              </div>
             </div>
           </div>
         </div>
@@ -266,15 +285,33 @@ export function ArenaPage() {
           isOpen
           onClose={() => setSelectedCombatant(null)}
           card={{
-            id: selectedCombatant.filename,
-            name: getCombatantDisplayName(selectedCombatant.data),
-            description: '角色详细设定',
+            id: selectedCombatant.sourceDataCardId || selectedCombatant.filename,
+            name:
+              typeof selectedCombatant.sourceDataCardName === 'string' && selectedCombatant.sourceDataCardName.trim()
+                ? selectedCombatant.sourceDataCardName
+                : getCombatantDisplayName(selectedCombatant.data),
+            description:
+              typeof selectedCombatant.sourceDataCardDescription === 'string' &&
+              selectedCombatant.sourceDataCardDescription.trim()
+                ? selectedCombatant.sourceDataCardDescription
+                : (selectedCombatant.isPreset ? '系统预设角色' : '本地角色设定'),
             type: 'character',
             data: JSON.stringify(selectedCombatant.data, null, 2),
-            isPublic: Boolean(selectedCombatant.isPreset),
+            isPublic: Boolean(selectedCombatant.sourceIsPublic),
+            usageCount: selectedCombatant.sourceDataCardUsageCount,
+            likeCount: selectedCombatant.sourceDataCardLikeCount,
+            favoriteCount: selectedCombatant.sourceDataCardFavoriteCount,
+            author:
+              typeof selectedCombatant.sourceAuthor === 'string' && selectedCombatant.sourceAuthor.trim()
+                ? selectedCombatant.sourceAuthor
+                : (selectedCombatant.isPreset ? '系统' : '—'),
+            createdAt: selectedCombatant.sourceDataCardCreatedAt,
+            updatedAt: selectedCombatant.sourceDataCardUpdatedAt,
           }}
         />
       )}
+
+      <ArenaRankingModal isOpen={showRankingModal} onClose={() => setShowRankingModal(false)} />
     </>
   );
 }

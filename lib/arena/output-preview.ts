@@ -1,4 +1,5 @@
 import { buildContentPreview } from '@/lib/arena/battle-report-log-utils';
+import { battleReportOutputPreviewConfig } from '@/config/battle-report';
 
 export type OutputPreviewMode = 'full' | 'truncate';
 
@@ -21,14 +22,8 @@ const clampInt = (value: string | undefined, fallback: number, min: number, max:
   return Math.max(min, Math.min(max, Math.floor(n)));
 };
 
-const readMode = (value: string | undefined): OutputPreviewMode => {
-  const v = (value || '').trim().toLowerCase();
-  if (v === 'truncate') return 'truncate';
-  return 'full';
-};
-
 export const getOutputPreviewStrategy = (): OutputPreviewStrategy => {
-  const mode = readMode(process.env.BATTLE_REPORT_OUTPUT_PREVIEW_MODE);
+  const mode = battleReportOutputPreviewConfig.outputPreviewMode;
   const headChars = clampInt(process.env.BATTLE_REPORT_OUTPUT_PREVIEW_HEAD_CHARS, 800, 0, 200_000);
   const tailChars = clampInt(process.env.BATTLE_REPORT_OUTPUT_PREVIEW_TAIL_CHARS, 800, 0, 200_000);
   const maxStoreChars = clampInt(process.env.BATTLE_REPORT_OUTPUT_PREVIEW_MAX_STORE_CHARS, 2_000_000, 1_000, 20_000_000);
@@ -94,4 +89,3 @@ export const createOutputPreviewCollector = (): OutputPreviewCollector => {
 
   return { append, finish };
 };
-

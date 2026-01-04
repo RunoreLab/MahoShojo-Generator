@@ -514,6 +514,12 @@ const SublimationPage: React.FC = () => {
                                 <li>选择目标模板（默认沿用原模板，无匹配时自动切换为通用角色），并可指定需要保留的字段。如果希望借此切换角色模板，建议选择【完全重塑】。</li>
                                 <li>AI 将结合设定、历战记录与可选的成长引导，生成“升华后”的新形态设定。</li>
                             </ol>
+                            <div className="mt-3 flex flex-wrap gap-3 text-xs">
+                                <Link href="/encyclopedia/sublimation" className="text-blue-700 hover:underline">百科：成长升华</Link>
+                                <Link href="/encyclopedia/sensitive-words" className="text-blue-700 hover:underline">敏感词与逮捕（含恢复）</Link>
+                                <Link href="/encyclopedia/shield-words" className="text-blue-700 hover:underline">屏蔽词（和谐替换）</Link>
+                                <Link href="/encyclopedia/archive" className="text-blue-700 hover:underline">档案馆（角色管理）</Link>
+                            </div>
                         </div>
 
                         {/* 文件上传与粘贴区域 */}
@@ -781,10 +787,20 @@ const SublimationPage: React.FC = () => {
 
                 {showImageModal && savedImageUrl && (
                     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative p-4">
-                            <button onClick={() => setShowImageModal(false)} className="absolute top-2 right-2 text-3xl text-gray-600 hover:text-gray-900">&times;</button>
-                            <p className="text-center text-sm text-gray-600 mb-2">长按图片保存到相册</p>
-                            <img src={savedImageUrl} alt="角色卡片" className="w-full h-auto rounded-lg" />
+                        <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
+                            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
+                                <button
+                                    onClick={() => setShowImageModal(false)}
+                                    aria-label="关闭"
+                                    className="text-3xl leading-none text-gray-600 hover:text-gray-900"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                            <div className="px-4 pb-4">
+                                <p className="text-center text-sm text-gray-600 mb-2">长按图片保存到相册</p>
+                                <img src={savedImageUrl} alt="角色卡片" className="w-full h-auto rounded-lg" />
+                            </div>
                         </div>
                     </div>
                 )}

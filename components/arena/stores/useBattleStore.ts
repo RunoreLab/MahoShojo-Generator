@@ -48,6 +48,7 @@ export const useBattleStore = create<BattleStoreState>()(
   persist(
     (set) => ({
       combatants: [],
+      teams: [],
       scenario: defaultScenario,
       auxScenarios: [],
       battleMode: 'classic',
@@ -56,11 +57,14 @@ export const useBattleStore = create<BattleStoreState>()(
       streamingMarkdown: null,
       streamReporterInfo: null,
       streamUserGuidance: null,
+      streamCharacterGuidances: null,
       streamAiUsage: null,
+      streamAiModel: null,
       streamNarrativeHistoryReadCount: null,
       storyLength: 'default',
       selectedLevel: '',
       selectedLanguage: 'zh-CN',
+      lastGenerationId: null,
       settings: defaultSettings,
       adjudicationEvents: [],
       adjudicationResults: null,
@@ -80,11 +84,14 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamingMarkdown: (markdown) => set({ streamingMarkdown: markdown }),
       setStreamReporterInfo: (info) => set({ streamReporterInfo: info }),
       setStreamUserGuidance: (guidance) => set({ streamUserGuidance: guidance }),
+      setStreamCharacterGuidances: (guidances) => set({ streamCharacterGuidances: guidances }),
       setStreamAiUsage: (usage) => set({ streamAiUsage: usage }),
+      setStreamAiModel: (model) => set({ streamAiModel: model }),
       setStreamNarrativeHistoryReadCount: (count) => set({ streamNarrativeHistoryReadCount: count }),
       setStoryLength: (storyLength) => set({ storyLength }),
       setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
+      setLastGenerationId: (lastGenerationId) => set({ lastGenerationId }),
       updateSettings: (incoming) =>
         set((state) => ({
           settings: {
@@ -127,27 +134,81 @@ export const useBattleStore = create<BattleStoreState>()(
       clearCombatants: () =>
         set({
           combatants: [],
+          teams: [],
           newsReport: null,
           updatedCombatants: [],
           streamingMarkdown: null,
           isStreaming: false,
           streamReporterInfo: null,
           streamUserGuidance: null,
+          streamCharacterGuidances: null,
           streamAiUsage: null,
+          streamAiModel: null,
           streamNarrativeHistoryReadCount: null,
+          lastGenerationId: null,
         }),
 
-      updateCombatantTeam: (filename, teamId) =>
+      updateCombatantTeam: (identifier, teamId) =>
         set((state) => ({
           combatants: state.combatants.map((combatant) => {
-            if ('filename' in combatant && combatant.filename === filename) {
+            const isMatch = 'id' in combatant ? combatant.id === identifier || combatant.filename === identifier : combatant.filename === identifier;
+            if (isMatch) {
               return {
                 ...combatant,
-                teamId: teamId === 0 ? undefined : teamId,
+                teamId: !teamId ? undefined : teamId,
               };
             }
             return combatant;
           }),
+        })),
+
+      updateCombatantCharacterGuidance: (filename, guidance) =>
+        set((state) => ({
+          combatants: state.combatants.map((combatant) => {
+            if (!('data' in combatant)) return combatant;
+            if (combatant.filename !== filename) return combatant;
+            return {
+              ...combatant,
+              characterGuidance: guidance,
+            };
+          }),
+        })),
+
+      addTeam: (name) => {
+        let createdId = 1;
+        set((state) => {
+          const maxId = state.teams.reduce((max, team) => Math.max(max, team.id), 0);
+          createdId = maxId + 1;
+          const trimmedName = typeof name === 'string' ? name.trim() : '';
+          const nextTeam = {
+            id: createdId,
+            name: trimmedName || `分队 ${createdId}`,
+            isCollapsed: false,
+          };
+          return { teams: [...state.teams, nextTeam] };
+        });
+        return createdId;
+      },
+
+      removeTeam: (teamId) =>
+        set((state) => ({
+          teams: state.teams.filter((team) => team.id !== teamId),
+          combatants: state.combatants.map((combatant) => {
+            if (combatant.teamId !== teamId) return combatant;
+            return { ...combatant, teamId: undefined };
+          }),
+        })),
+
+      renameTeam: (teamId, name) =>
+        set((state) => ({
+          teams: state.teams.map((team) =>
+            team.id === teamId ? { ...team, name: name.trim().slice(0, 50) || `分队 ${teamId}` } : team
+          ),
+        })),
+
+      toggleTeamCollapsed: (teamId) =>
+        set((state) => ({
+          teams: state.teams.map((team) => (team.id === teamId ? { ...team, isCollapsed: !team.isCollapsed } : team)),
         })),
 
       setScenario: (scenario) => set({ scenario }),

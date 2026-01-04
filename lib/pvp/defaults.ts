@@ -28,6 +28,7 @@ export const DEFAULT_PVP_RULES: PvpRoomRules = {
     tieBreaker: 'draw',
   },
   allowNonHostControl: false,
+  allowPlayerCharacterGuidance: false,
   allowSpectators: true,
   allowSpectatorChat: false,
 

@@ -25,27 +25,33 @@ import { BattleModeSelector } from '@/components/shared/BattleModeSelector';
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { StoryOptionsPanel } from '@/components/shared/StoryOptionsPanel';
 import { GenerationModeSwitcher } from '@/components/shared/GenerationModeSwitcher';
+import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
+import { PvpSettlementCardModal } from '@/components/pvp/PvpSettlementCardModal';
 import { authStorage } from '@/lib/auth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useCooldown } from '@/lib/cooldown';
 import { inferTemplate } from '@/lib/data-card-converter';
-import { config as appConfig } from '@/lib/config';
-import { useAuth } from '@/lib/useAuth';
-import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
-import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
-import { formatPvpDisplayName } from '@/lib/pvp/displayName';
-import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
-import { buildPvpScenarioRulesPatch } from '@/lib/pvp/rules-patch';
-import { isLegacyAdjudicatorFormat, mergeAdjudicationEvents } from '@/lib/pvp/adjudication-events';
-import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
-import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
+	import { config as appConfig } from '@/lib/config';
+	import { useAuth } from '@/lib/useAuth';
+	import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+	import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
+	import { formatPvpDisplayName } from '@/lib/pvp/displayName';
+	import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
+	import { buildPvpScenarioRulesPatch } from '@/lib/pvp/rules-patch';
+	import { isLegacyAdjudicatorFormat, mergeAdjudicationEvents } from '@/lib/pvp/adjudication-events';
+	import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
+	import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
+	import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
 
-import type { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 import type { UserBadge } from '@/types/badge';
+import { revokeBlobUrl } from '@/lib/client/blobUrl';
 
-const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
-const RESOLVE_REQUEST_TIMEOUT_MS = 120_000;
-const RESOLVE_STALE_WARNING_SECONDS = Math.floor(RESOLVE_REQUEST_TIMEOUT_MS / 1000);
+	const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
+	const RESOLVE_REQUEST_TIMEOUT_MS = 120_000;
+	const RESOLVE_STALE_WARNING_SECONDS = Math.floor(RESOLVE_REQUEST_TIMEOUT_MS / 1000);
+	const RESOLVE_STREAM_IDLE_TIMEOUT_MS = 60_000;
+	const RESOLVE_STREAM_TOTAL_TIMEOUT_MS = 10 * 60_000;
 
 const getCachedPassword = (roomId: string): string => {
   if (typeof window === 'undefined') return '';
@@ -240,6 +246,7 @@ export function PvpRoomPage() {
   const [showSubmitEditor, setShowSubmitEditor] = useState(false);
   const [showBattleDataModal, setShowBattleDataModal] = useState(false);
   const [showHandModal, setShowHandModal] = useState(false);
+  const [myCharacterGuidanceDraft, setMyCharacterGuidanceDraft] = useState('');
   const [isMatching, setIsMatching] = useState<'character' | 'scenario' | null>(null);
   const [mgPage, setMgPage] = useState(1);
   const [canshouPage, setCanshouPage] = useState(1);
@@ -249,6 +256,7 @@ export function PvpRoomPage() {
 
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
+  const [showSettlementCardModal, setShowSettlementCardModal] = useState(false);
 
   const [roomPasswordDraft, setRoomPasswordDraft] = useState('');
   const [rulesDraft, setRulesDraft] = useState<PvpRoomRules | null>(null);
@@ -413,6 +421,7 @@ export function PvpRoomPage() {
   );
   const isHost = Boolean(user?.id && room?.hostUserId === user.id);
   const allowNonHostControl = rules?.allowNonHostControl === true;
+  const allowPlayerCharacterGuidance = rules?.allowPlayerCharacterGuidance === true;
   const allowSpectators = rules?.allowSpectators !== false;
   const allowSpectatorChat = rules?.allowSpectatorChat === true;
   const canControlResolve = isHost || allowNonHostControl;
@@ -490,6 +499,14 @@ export function PvpRoomPage() {
   useEffect(() => {
     if (phase !== 'choosing') setShowHandModal(false);
   }, [phase]);
+
+  useEffect(() => {
+    if (phase !== 'choosing') setMyCharacterGuidanceDraft('');
+  }, [phase]);
+
+  useEffect(() => {
+    if (!isHost && !allowPlayerCharacterGuidance) setMyCharacterGuidanceDraft('');
+  }, [allowPlayerCharacterGuidance, isHost]);
 
   useEffect(() => {
     if (phase !== 'submitting') setShowSubmitEditor(false);
@@ -730,7 +747,7 @@ export function PvpRoomPage() {
     }
 
     const userGuidance = typeof (rulesDraft as any).userGuidance === 'string' ? String((rulesDraft as any).userGuidance).trim() : '';
-    if (userGuidance.length > 50) return '故事引导不应超过 50 字';
+    if (userGuidance.length > 200) return '故事引导不应超过 200 字';
 
     const readArenaHistory = (rulesDraft as any).readArenaHistory === true;
     const isArenaHistoryUnlimited = (rulesDraft as any).isArenaHistoryUnlimited === true;
@@ -979,7 +996,11 @@ export function PvpRoomPage() {
       const res = await fetch(`/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/choose`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: authHeader },
-        body: JSON.stringify({ expectedVersion: version, snapshotId }),
+        body: JSON.stringify({
+          expectedVersion: version,
+          snapshotId,
+          characterGuidance: myCharacterGuidanceDraft,
+        }),
       });
       const { data } = await readJsonOrText(res);
       if (!res.ok) {
@@ -1085,20 +1106,48 @@ export function PvpRoomPage() {
 
         if (!res.body) throw new Error('无法读取响应流');
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let accumulated = '';
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (!value) continue;
-          accumulated += decoder.decode(value, { stream: true });
-          setStreamingResolveMarkdown(accumulated);
-        }
-        accumulated += decoder.decode();
-        setStreamingResolveMarkdown(accumulated);
-        return { success: true, streamed: true };
-      } finally {
+	        const reader = res.body.getReader();
+	        const decoder = new TextDecoder();
+	        let accumulated = '';
+	        const shouldTerminateByTelemetry = (text: string) => {
+	          const marker = '<!-- MAHOSHOJO_TELEMETRY_META';
+	          const trimmed = text.trimEnd();
+	          const idx = trimmed.lastIndexOf(marker);
+	          if (idx < 0) return false;
+	          if (!trimmed.endsWith('-->')) return false;
+	          return trimmed.length - idx < 4096;
+	        };
+	        const readWithTimeout = createStreamReadWithTimeout({
+	          label: 'PVP 结算流式',
+	          idleTimeoutMs: RESOLVE_STREAM_IDLE_TIMEOUT_MS,
+	          totalTimeoutMs: RESOLVE_STREAM_TOTAL_TIMEOUT_MS,
+	          onTimeout: () => {
+	            try {
+	              void reader.cancel('timeout');
+	            } catch {
+	              // ignore
+	            }
+	          },
+	        });
+	        while (true) {
+	          const { value, done } = await readWithTimeout(reader);
+	          if (done) break;
+	          if (!value) continue;
+	          accumulated += decoder.decode(value, { stream: true });
+	          setStreamingResolveMarkdown(accumulated);
+	          if (shouldTerminateByTelemetry(accumulated)) {
+	            try {
+	              void reader.cancel('telemetry-meta-received');
+	            } catch {
+	              // ignore
+	            }
+	            break;
+	          }
+	        }
+	        accumulated += decoder.decode();
+	        setStreamingResolveMarkdown(accumulated);
+	        return { success: true, streamed: true };
+	      } finally {
         setIsStreamingResolve(false);
       }
     },
@@ -1141,7 +1190,7 @@ export function PvpRoomPage() {
   });
 
   const permissionsMutation = useMutation({
-    mutationFn: async (payload: { allowNonHostControl?: boolean; allowSpectators?: boolean; allowSpectatorChat?: boolean }) => {
+    mutationFn: async (payload: { allowNonHostControl?: boolean; allowPlayerCharacterGuidance?: boolean; allowSpectators?: boolean; allowSpectatorChat?: boolean }) => {
       const authHeader = await authStorage.getAuthHeader();
       if (!authHeader) throw new Error('未登录');
       const res = await fetch(`/api/pvp/rooms/${roomId}/permissions`, {
@@ -1824,14 +1873,7 @@ export function PvpRoomPage() {
     });
   };
 
-  useEffect(() => {
-    if (!savedImageUrl) return;
-    return () => {
-      if (savedImageUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(savedImageUrl);
-      }
-    };
-  }, [savedImageUrl]);
+  // 图片预览弹窗关闭时统一回收 blob URL（用于战报卡片导出）
 
   return (
     <>
@@ -2205,6 +2247,19 @@ export function PvpRoomPage() {
                         <span>允许其他玩家调整 AI 设置并结算</span>
                       </label>
                       <div className="text-xs text-gray-500 mt-1">默认关闭更安全；开启后任意玩家可结算并使用其选择的 AI 设置。</div>
+                    </div>
+
+                    <div className={(phase === 'waiting' || phase === 'submitting') ? 'mt-3' : ''}>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={allowPlayerCharacterGuidance}
+                          onChange={(e) => permissionsMutation.mutate({ allowPlayerCharacterGuidance: e.target.checked })}
+                          disabled={permissionsMutation.isPending}
+                        />
+                        <span>允许玩家填写“本回合角色行动引导”</span>
+                      </label>
+                      <div className="text-xs text-gray-500 mt-1">默认关闭；开启后玩家可在出牌前为自己本回合打出的角色添加引导（最多100字）。</div>
                     </div>
 
                     <div className={(phase === 'waiting' || phase === 'submitting') ? 'mt-3' : ''}>
@@ -2956,6 +3011,26 @@ export function PvpRoomPage() {
                         </button>
                       </div>
 
+                      {!isHandDealing && !choices?.hasChosenMe && (isHost || allowPlayerCharacterGuidance) ? (
+                        <div className="mt-3">
+                          <div className="text-xs text-gray-600 mb-1">本回合角色行动引导（可选，最多100字；仅对你本回合打出的角色生效）</div>
+                          <textarea
+                            className="w-full border rounded px-2 py-1 text-sm"
+                            rows={3}
+                            maxLength={100}
+                            value={myCharacterGuidanceDraft}
+                            onChange={(e) => setMyCharacterGuidanceDraft(e.target.value)}
+                            disabled={chooseMutation.isPending}
+                            placeholder="例如：优先保护同伴、试图谈判、隐藏身份、恐惧但硬撑、专注救援等"
+                          />
+                          <div className="mt-1 text-xs text-gray-500">{Array.from(myCharacterGuidanceDraft).length}/100</div>
+                        </div>
+                      ) : null}
+
+                      {!isHost && !allowPlayerCharacterGuidance && !choices?.hasChosenMe ? (
+                        <div className="mt-3 text-xs text-gray-500">提示：房主未允许玩家填写“本回合角色行动引导”。</div>
+                      ) : null}
+
                       {isHandDealing ? (
                         <div className="text-sm text-gray-700 mt-3 flex items-center gap-2">
                           <span className="inline-block w-4 h-4 rounded-full border-2 border-gray-400 border-t-transparent animate-spin" />
@@ -3072,7 +3147,9 @@ export function PvpRoomPage() {
                         isStreaming={isStreamingResolve}
                         reporterInfo={(reportMetaForUi as any)?.reporterInfo ?? null}
                         userGuidance={(reportMetaForUi as any)?.userGuidance ?? null}
+                        characterGuidances={(reportMetaForUi as any)?.characterGuidances ?? null}
                         adjudicationResults={(reportMetaForUi as any)?.adjudicationResults ?? null}
+                        aiModel={(reportMetaForUi as any)?.ai?.model ?? null}
                         onSaveImage={(imageUrl) => {
                           setSavedImageUrl(imageUrl);
                           setShowImageModal(true);
@@ -3297,6 +3374,16 @@ export function PvpRoomPage() {
                   </div>
                 )}
 
+                <button
+                  className="generate-button mt-3 w-full"
+                  style={{ backgroundColor: '#ec4899', backgroundImage: 'linear-gradient(to right, #ec4899, #db2777)' }}
+                  onClick={() => setShowSettlementCardModal(true)}
+                  disabled={!room?.currentMatchId}
+                  title={!room?.currentMatchId ? '尚未开始对局：需要房主先开局' : '生成可保存/分享的战局结算图片'}
+                >
+                  生成战局结算卡
+                </button>
+
                 {isHost && (phase === 'finished' || phase === 'aborted' || phase === 'waiting' || phase === 'submitting') && (
                   <button
                     className="generate-button mt-3 w-full"
@@ -3455,34 +3542,23 @@ export function PvpRoomPage() {
         />
       )}
 
-      {showImageModal && savedImageUrl && (
-        <div
-          className="fixed inset-0 bg-black flex items-center justify-center z-50"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem' }}
-        >
-          <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
-            <div className="flex justify-between items-center m-0">
-              <div></div>
-              <button
-                onClick={() => {
-                  setShowImageModal(false);
-                  setSavedImageUrl(null);
-                }}
-                className="text-gray-500 hover:text-gray-700 text-3xl leading-none"
-                style={{ marginRight: '0.5rem' }}
-              >
-                ×
-              </button>
-            </div>
-            <p className="text-center text-sm text-gray-600" style={{ marginTop: '0.5rem' }}>
-              📱 长按图片保存到相册
-            </p>
-            <div className="items-center flex flex-col" style={{ padding: '0.5rem' }}>
-              <img src={savedImageUrl} alt="战报" className="max-w-full h-auto rounded" />
-            </div>
-          </div>
-        </div>
-      )}
+      <ImagePreviewModal
+        isOpen={showImageModal}
+        imageUrl={savedImageUrl}
+        onClose={() => {
+          setShowImageModal(false);
+          setSavedImageUrl((prev) => {
+            revokeBlobUrl(prev);
+            return null;
+          });
+        }}
+      />
+
+      <PvpSettlementCardModal
+        isOpen={showSettlementCardModal}
+        onClose={() => setShowSettlementCardModal(false)}
+        roomId={roomId}
+      />
     </>
   );
 }

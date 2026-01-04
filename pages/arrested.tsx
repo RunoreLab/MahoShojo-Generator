@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { loadArrestedBackup, clearArrestedBackup, type ArrestedBackupPackage, type ArrestedBackupItem } from '@/lib/arrested-backup';
 
@@ -210,6 +211,13 @@ export default function ArrestedPage() {
                             <div className="text-4xl font-semibold text-purple-100" style={{ padding: '2rem' }}>
                                 批 准 逮 捕
                             </div>
+                        </div>
+                    </div>
+                    <div className="text-center text-sm text-purple-200 mb-8">
+                        <div>别慌：多数情况下是敏感词误伤或输出命中高风险片段。</div>
+                        <div className="mt-2 flex flex-wrap justify-center gap-4">
+                            <Link href="/encyclopedia/sensitive-words" className="text-pink-200 hover:underline">敏感词与逮捕（含恢复）</Link>
+                            <Link href="/encyclopedia/shield-words" className="text-pink-200 hover:underline">屏蔽词（和谐替换）</Link>
                         </div>
                     </div>
 

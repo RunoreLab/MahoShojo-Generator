@@ -30,6 +30,8 @@ export interface ArenaHistoryEntry {
   impact: string; // AI生成的对此角色的影响
   metadata: {
     user_guidance: string | null;
+    /** 用户对该角色的行动/想法引导（可选；若开启写入且用户填写则记录）。 */
+    character_guidance?: string | null;
     scenario_title: string | null;
     non_native_data_involved: boolean;
   };

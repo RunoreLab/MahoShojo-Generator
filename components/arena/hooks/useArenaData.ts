@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { config as appConfig } from '@/lib/config';
-import { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 import { StatsData } from '@/pages/api/get-stats';
 
 import { LanguageOption, PresetCollections } from '../types';

@@ -1,11 +1,15 @@
 'use client';
 
 import { useMemo, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import Badge from '@/components/badge/Badge';
 import BadgeIcon from '@/components/badge/BadgeIcon';
+import { TierBadge } from '@/components/ranking/TierBadge';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
+import type { SeasonsConfig } from '@/lib/seasons';
+import { formatSeasonTitle, getCurrentSeason } from '@/lib/seasons';
 import type { UserBadge } from '@/types/badge';
 import { parseUserPrefix } from '@/lib/user-prefix';
 
@@ -20,6 +24,28 @@ type CardLite = {
   favoriteCount: number;
   usageCount: number;
   engagementScore: number;
+};
+
+type CardMetricsLite = {
+  techScore: number;
+  techLevel: string;
+} | null;
+
+type CardRatingLite = {
+  rating: number;
+  games: number;
+  tier: string;
+  publicRank: number | null;
+  publicTotal: number | null;
+} | null;
+
+type CardRatingsLite = {
+  strict: CardRatingLite;
+};
+
+type CharacterHighlight = CardLite & {
+  metrics: CardMetricsLite;
+  ratings: CardRatingsLite;
 };
 
 type PvpMatchLite = {
@@ -63,7 +89,8 @@ export type MeProfileCardPayload = {
     all: UserBadge[];
   };
   topCards: {
-    characters: CardLite[];
+    characters: CharacterHighlight[];
+    topRatedCharacter: CharacterHighlight | null;
     scenario: CardLite | null;
   };
   stats: {
@@ -162,9 +189,22 @@ function sanitizeFilename(value: string): string {
   return normalized.replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '_') || 'profile';
 }
 
+const fetchJson = async <T,>(url: string): Promise<T> => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as T;
+};
+
 const formatCount = (value: unknown): string => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
   return value.toLocaleString('zh-CN');
+};
+
+const formatRankFraction = (rank: number | null | undefined, total: number | null | undefined): string | null => {
+  const safeRank = typeof rank === 'number' && Number.isFinite(rank) && rank > 0 ? Math.floor(rank) : null;
+  if (safeRank == null) return null;
+  const safeTotal = typeof total === 'number' && Number.isFinite(total) && total > 0 ? Math.floor(total) : null;
+  return safeTotal == null ? `#${safeRank}` : `#${safeRank}/${safeTotal}`;
 };
 
 const buildTokenBreakdownLabel = (report: BattleReportLite): string => {
@@ -209,6 +249,13 @@ export function ProfileCard({
   const initials = useMemo(() => getInitials(data.profile.username), [data.profile.username]);
   const generatedAtLabel = useMemo(() => new Date().toLocaleString('zh-CN'), []);
   const parsedPrefix = useMemo(() => parseUserPrefix(data.profile.prefix), [data.profile.prefix]);
+
+  const seasonsQuery = useQuery({
+    queryKey: ['seasonsConfig'],
+    queryFn: () => fetchJson<SeasonsConfig>('/config/seasons.json'),
+    staleTime: 60_000,
+  });
+  const currentSeason = useMemo(() => getCurrentSeason(seasonsQuery.data), [seasonsQuery.data]);
 
   const winRate = useMemo(() => {
     const completed = data.pvp.summary.completedMatches || 0;
@@ -265,6 +312,43 @@ export function ProfileCard({
   const allBadges = data.badges.all ?? [];
   const equippedBadges = (data.badges.equipped ?? []).slice(0, 5);
   const stats = data.stats;
+
+  const renderCharacterHighlight = (c: CharacterHighlight, keyPrefix: string) => {
+    const techLevel = c.metrics?.techLevel ?? null;
+    const techScore = c.metrics?.techScore ?? null;
+    const strict = c.ratings.strict;
+    const isPublicLeaderboardEligible = c.isPublic && c.reviewStatus === 'approved';
+
+    const strictLabel = (() => {
+      if (!strict) return '无严格排位';
+      const ratingLabel = `${formatCount(strict.rating)}分`;
+      const rankLabel = isPublicLeaderboardEligible ? formatRankFraction(strict.publicRank, strict.publicTotal) : null;
+      return rankLabel ? `${ratingLabel} ${rankLabel}` : ratingLabel;
+    })();
+
+    return (
+      <div key={`${keyPrefix}-${c.id}`} className="rounded-xl bg-white/10 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-semibold break-words">{c.name}</div>
+          {techLevel ? (
+            <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/90 whitespace-nowrap">
+              {techLevel}
+            </div>
+          ) : null}
+          {strict ? <TierBadge tier={strict.tier} /> : null}
+          <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/90 whitespace-nowrap">{strictLabel}</div>
+          {!c.isPublic ? (
+            <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/85 whitespace-nowrap">🔒 私有</div>
+          ) : null}
+        </div>
+        <div className="mt-1 text-[11px] text-white/85">
+          ❤️ {c.likeCount} · ⭐ {c.favoriteCount} · 📥 {c.usageCount}
+          {' · '}
+          技术值 {techScore == null ? '—' : techScore}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div
@@ -401,27 +485,33 @@ export function ProfileCard({
           </div>
 
           <div className="rounded-2xl bg-black/15 p-4">
-            <div className="text-sm font-semibold">数据卡高光</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-sm font-semibold">数据卡高光</div>
+              {currentSeason ? (
+                <div className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-white/85 ring-1 ring-white/15">
+                  当前赛季：{formatSeasonTitle(currentSeason)}
+                </div>
+              ) : null}
+            </div>
 
             <div className="mt-3">
-              <div className="text-xs font-semibold text-white/85">Top 角色卡（3）</div>
+              <div className="text-xs font-semibold text-white/85">Top 角色卡（2）</div>
               <div className="mt-2 space-y-2">
                 {(data.topCards.characters ?? []).length > 0 ? (
-                  data.topCards.characters.slice(0, 3).map((c) => (
-                    <div key={`top-char-${c.id}`} className="rounded-xl bg-white/10 px-3 py-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-sm font-semibold break-words">{c.name}</div>
-                        {!c.isPublic ? (
-                          <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/85">🔒 私有</div>
-                        ) : null}
-                      </div>
-                      <div className="mt-1 text-[11px] text-white/85">
-                        ❤️ {c.likeCount} · ⭐ {c.favoriteCount} · 📥 {c.usageCount} · 合计 {c.engagementScore}
-                      </div>
-                    </div>
-                  ))
+                  data.topCards.characters.slice(0, 2).map((c) => renderCharacterHighlight(c, 'top-char'))
                 ) : (
                   <div className="text-xs text-white/70">暂无角色卡数据</div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-white/85">排位最高角色卡（1）</div>
+              <div className="mt-2 space-y-2">
+                {data.topCards.topRatedCharacter ? (
+                  renderCharacterHighlight(data.topCards.topRatedCharacter, 'top-rated')
+                ) : (
+                  <div className="text-xs text-white/70">暂无排位记录</div>
                 )}
               </div>
             </div>

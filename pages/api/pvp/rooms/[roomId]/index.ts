@@ -11,7 +11,7 @@ import {
   updatePvpRoomCas,
   getUserEquippedBadges,
 } from '@/lib/d1';
-import { botUserIdForClient, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { botUserIdForClient, parsePvpRoomBotRoster, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -71,6 +71,8 @@ async function getRoomHandler(req: Request): Promise<Response> {
   if ('error' in parsed) return json({ error: parsed.error }, { status: 500 });
   const rules = parsed.internal.rules;
   const bots = parsed.internal.bots;
+  const botRoster = room.phase === 'finished' && bots.length <= 0 ? parsePvpRoomBotRoster(parsed.internal.raw) : [];
+  const displayBots = bots.length > 0 ? bots.map((b) => ({ id: b.id, name: b.name, seat: b.seat })) : botRoster;
   const postRoundRaw = (parsed.internal.raw as any)?._postRound;
   const scenarioSelection = parsePvpScenarioSelection((parsed.internal.raw as any)?._scenario);
   const scenarioAdjudicationImportedFor =
@@ -365,7 +367,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
     for (const p of players) {
       if (typeof p.seat === 'number') seatToUserId.set(p.seat, p.user_id);
     }
-    for (const b of bots) seatToUserId.set(b.seat, botUserIdForClient(b.seat));
+    for (const b of displayBots) seatToUserId.set(b.seat, botUserIdForClient(b.seat));
 
     const allPlayerIds = [...new Set([...seatToUserId.values()])];
     const winsMap = new Map<number, number>();
@@ -433,7 +435,7 @@ async function getRoomHandler(req: Request): Promise<Response> {
         badges: badgesByUserId.get(p.user_id) || [],
         botId: null,
       })),
-      ...bots.map((b) => ({
+      ...displayBots.map((b) => ({
         userId: botUserIdForClient(b.seat),
         username: b.name,
         prefix: null,
