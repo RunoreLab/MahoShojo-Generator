@@ -12,11 +12,13 @@ import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl }
 
 type Queue = 'strict' | 'free';
 type Sort = 'rating' | 'tech';
+type SortOrder = 'desc' | 'asc';
 type NativeFilter = 'any' | '1' | '0';
 
 type RankingFilters = {
   queue: Queue;
   sort: Sort;
+  order: SortOrder;
   includePresets: boolean;
   isNative: NativeFilter;
   includeTagIds: string[];
@@ -51,6 +53,7 @@ const fetchJson = async <T,>(url: string): Promise<T> => {
 const defaultFilters: RankingFilters = {
   queue: 'strict',
   sort: 'rating',
+  order: 'desc',
   includePresets: true,
   isNative: 'any',
   includeTagIds: [],
@@ -65,6 +68,7 @@ const defaultFilters: RankingFilters = {
 
 const normalizeFilters = (filters: RankingFilters): RankingFilters => ({
   ...filters,
+  order: filters.order === 'asc' ? 'asc' : 'desc',
   includeTagIds: Array.from(new Set(filters.includeTagIds)).sort(),
   excludeTagIds: Array.from(new Set(filters.excludeTagIds)).sort(),
   minRating: filters.minRating.trim(),
@@ -238,6 +242,7 @@ export function RankingPage() {
       'arenaLeaderboard',
       appliedFilters.queue,
       appliedFilters.sort,
+      appliedFilters.order,
       appliedFilters.includePresets,
       appliedFilters.isNative,
       appliedFilters.includeTagIds.join(','),
@@ -254,6 +259,7 @@ export function RankingPage() {
       const params = new URLSearchParams();
       params.set('queue', appliedFilters.queue);
       params.set('sort', appliedFilters.sort);
+      params.set('order', appliedFilters.order);
       params.set('limit', String(limit));
       params.set('offset', String(offset));
       params.set('includePresets', appliedFilters.includePresets ? '1' : '0');
@@ -292,6 +298,7 @@ export function RankingPage() {
     const parts: string[] = [];
     parts.push(appliedFilters.queue === 'strict' ? '严格天梯' : '自由天梯');
     parts.push(appliedFilters.sort === 'rating' ? '按排位分排序' : '按技术值排序');
+    parts.push(appliedFilters.order === 'asc' ? '升序' : '降序');
     if (appliedFilters.isNative === '1') parts.push('仅原生');
     else if (appliedFilters.isNative === '0') parts.push('仅非原生');
     if (!appliedFilters.includePresets) parts.push('不含预设');
@@ -416,6 +423,18 @@ export function RankingPage() {
                         >
                           <option value="rating">排位分</option>
                           <option value="tech">技术值</option>
+                        </select>
+                      </label>
+
+                      <label className="text-sm text-gray-700">
+                        顺序
+                        <select
+                          value={draftFilters.order}
+                          onChange={(e) => setDraftFilters((prev) => ({ ...prev, order: e.target.value === 'asc' ? 'asc' : 'desc' }))}
+                          className="input-field mt-1"
+                        >
+                          <option value="desc">降序（高 → 低）</option>
+                          <option value="asc">升序（低 → 高）</option>
                         </select>
                       </label>
 
