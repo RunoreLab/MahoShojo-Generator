@@ -16,13 +16,14 @@ import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
     createBattleReportGenerationRecord,
-	    createBattleReportGenerationCombatants,
-	    updateBattleReportGenerationExtraJson,
-	    updateBattleReportGenerationCombatantsWriteResult,
-	    upsertLargeObjectByOwnerRef,
-	    generateUUID,
-	    getUserByAuthKey
-	} from '@/lib/d1';
+    createBattleReportGenerationCombatants,
+    updateBattleReportGenerationExtraJson,
+    updateBattleReportGenerationCombatantsWriteResult,
+    updateBattleReportGenerationOutputPreview,
+    upsertLargeObjectByOwnerRef,
+    generateUUID,
+    getUserByAuthKey
+} from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
@@ -509,16 +510,16 @@ async function handler(req: NextRequest): Promise<Response> {
             const normalizedErrorMessage =
               normalizedStatus !== status ? (errorMessage || 'empty output') : errorMessage;
 
-            const { outputPreview: outputPreviewForScan } = previewCollector.finish();
-            const previewSource = outputPreviewForScan;
+            const { outputPreview } = previewCollector.finish();
+            const previewSource = outputPreview;
 
             const recordPromise = (async () => {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
                 const usage = await resolvedUsagePromise;
 
-                const shieldResult = applyShieldWords(outputPreviewForScan);
+                const shieldResult = applyShieldWords(outputPreview);
                 const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
-                    ? await quickCheck(outputPreviewForScan)
+                    ? await quickCheck(outputPreview)
                     : { hasSensitiveWords: false };
 
                 const inputJson = JSON.stringify({
@@ -592,8 +593,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     totalTokens: usage?.totalTokens ?? null,
                     cachedTokens: usage?.cachedTokens ?? null,
                     reasoningTokens: usage?.reasoningTokens ?? null,
-                    // 战报正文已外部化到 R2：D1 不再保存 output_preview（正文或摘要）
-                    outputPreview: null,
+                    outputPreview,
                     outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
                     outputHasShieldWords: shieldResult.hasShieldWords,
                     extraJson: compactExtraJson({
@@ -649,27 +649,26 @@ async function handler(req: NextRequest): Promise<Response> {
 	                }
 
                     const stored = r2UploadPromise ? await r2UploadPromise.catch(() => null) : null;
-	                    if (stored?.ok && stored.r2Key) {
-	                        if (normalizedStatus === 'completed') {
-	                            const indexed = await upsertLargeObjectByOwnerRef({
-	                                kind: 'battle_report_generation_output',
-	                                ownerRefId: generationId,
-	                                ownerUserId: user?.id ?? null,
-	                                r2Key: stored.r2Key,
-	                                bytes: stored.bytes,
-	                                storedBytes: stored.storedBytes,
-	                                contentType: stored.contentType,
-	                                contentEncoding: stored.contentEncoding,
-	                                sha256: null,
-	                            });
-	                            // D1 不再保存 output_preview；索引失败时清理 R2，避免孤儿对象。
-	                            if (!indexed.ok) {
-	                                await deleteObject(stored.r2Key);
-	                            }
-	                        } else {
-	                            await deleteObject(stored.r2Key);
-	                        }
-	                    }
+                    if (stored?.ok && stored.r2Key) {
+                        if (normalizedStatus === 'completed') {
+                            const indexed = await upsertLargeObjectByOwnerRef({
+                                kind: 'battle_report_generation_output',
+                                ownerRefId: generationId,
+                                ownerUserId: user?.id ?? null,
+                                r2Key: stored.r2Key,
+                                bytes: stored.bytes,
+                                storedBytes: stored.storedBytes,
+                                contentType: stored.contentType,
+                                contentEncoding: stored.contentEncoding,
+                                sha256: null,
+                            });
+                            if (indexed.ok && !stored.persistPreviewInD1) {
+                                await updateBattleReportGenerationOutputPreview(generationId, null);
+                            }
+                        } else {
+                            await deleteObject(stored.r2Key);
+                        }
+                    }
 
                     if (createdId) {
                         try {

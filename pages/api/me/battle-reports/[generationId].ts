@@ -1,12 +1,10 @@
 import {
   getBattleReportGenerationByIdLite,
   getBattleReportGenerationCombatantsByGenerationId,
-  getLargeObjectByOwnerRef,
   isUserInPvpMatch,
   updateBattleReportGenerationOutputHasSensitiveWords,
 } from '@/lib/d1';
 import { json, requireAuthUser } from '@/lib/pvp/server';
-import { getObjectText } from '@/lib/r2';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 
 export const runtime = 'edge';
@@ -41,18 +39,7 @@ export default async function handler(req: Request): Promise<Response> {
 
   const combatants = await getBattleReportGenerationCombatantsByGenerationId(generationId);
 
-  let outputPreview = typeof record.output_preview === 'string' ? record.output_preview : null;
-  const shouldTryR2 = !outputPreview || !outputPreview.trim();
-  if (shouldTryR2) {
-    const lo = await getLargeObjectByOwnerRef('battle_report_generation_output', record.id);
-    const key = typeof lo?.r2_key === 'string' ? lo.r2_key : '';
-    if (key) {
-      const r2 = await getObjectText(key);
-      if (r2.success && r2.data?.text) {
-        outputPreview = r2.data.text;
-      }
-    }
-  }
+  const outputPreview = typeof record.output_preview === 'string' ? record.output_preview : null;
   const hasPreviewText = Boolean(outputPreview && outputPreview.trim());
 
   let contentBlocked = record.output_has_sensitive_words === 1;
@@ -101,3 +88,4 @@ export default async function handler(req: Request): Promise<Response> {
     })),
   });
 }
+

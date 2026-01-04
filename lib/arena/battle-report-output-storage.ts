@@ -1,5 +1,5 @@
 import { upsertLargeObjectByOwnerRef } from '@/lib/d1';
-import { deleteObject, putObject } from '@/lib/r2';
+import { putObject } from '@/lib/r2';
 import { battleReportOutputPreviewConfig } from '@/config/battle-report';
 
 import { buildBattleReportGenerationR2Key, gzipStreamIfSupported, gzipTextIfSupported } from './large-object-r2';
@@ -66,12 +66,6 @@ export async function storeBattleReportGenerationOutputTextToR2(input: {
     });
 
     if (!upsert.ok) {
-      // 对齐流式：索引写入失败时，清理已上传的对象，避免 R2 孤儿文件。
-      try {
-        await deleteObject(key);
-      } catch {
-        // ignore
-      }
       return { ok: false, r2Key: null, bytes, storedBytes, contentType, contentEncoding: gz.contentEncoding, persistPreviewInD1, error: upsert.error || 'large_objects 写入失败' };
     }
 
