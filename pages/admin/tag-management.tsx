@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Save, Trash2 } from 'lucide-react';
 
+import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
+
 type TagScope = 'user' | 'system' | 'admin';
 
 type TagRow = {
@@ -36,6 +38,12 @@ const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const json = (await res.json()) as T;
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
   return json;
+};
+
+const formatScope = (scope: TagScope) => {
+  if (scope === 'user') return '用户';
+  if (scope === 'system') return '系统';
+  return '管理员';
 };
 
 export default function AdminTagManagementPage() {
@@ -256,11 +264,11 @@ export default function AdminTagManagementPage() {
           <h1 className="mb-4 text-2xl font-bold text-gray-800">标签库 / 别名管理</h1>
 
           <div className="grid gap-6 lg:grid-cols-3">
-            <div className="lg:col-span-2 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+            <div className="min-w-0 lg:col-span-2 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
               <div className="mb-4 grid gap-3 md:grid-cols-3">
                 <input
                   className="input-field"
-                  placeholder="搜索 id / name / category..."
+                  placeholder="搜索：ID / 名称 / 分类"
                   value={filters.search}
                   onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
                   onKeyDown={(e) => {
@@ -273,10 +281,10 @@ export default function AdminTagManagementPage() {
                   value={filters.scope}
                   onChange={(e) => setFilters((prev) => ({ ...prev, scope: e.target.value as any }))}
                 >
-                  <option value="all">所有 scope</option>
-                  <option value="user">user</option>
-                  <option value="system">system</option>
-                  <option value="admin">admin</option>
+                  <option value="all">所有范围</option>
+                  <option value="user">用户（user）</option>
+                  <option value="system">系统（system）</option>
+                  <option value="admin">管理员（admin）</option>
                 </select>
                 <label className="flex items-center gap-2 text-sm text-gray-700">
                   <input
@@ -303,17 +311,17 @@ export default function AdminTagManagementPage() {
 
               {error ? <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
 
-              <div className="overflow-x-auto rounded-lg border border-gray-100">
-                <table className="w-full text-left text-sm text-gray-600">
-                  <thead className="bg-gray-50 text-xs uppercase text-gray-600">
+              <AdminTableScroll withCard={false} className="rounded-lg border border-gray-100">
+                <table className="min-w-full w-max text-left text-sm text-gray-600">
+                  <thead className="bg-gray-50 text-xs text-gray-600">
                     <tr>
-                      <th className="px-4 py-3">ID</th>
-                      <th className="px-4 py-3">名称</th>
-                      <th className="px-4 py-3">scope</th>
-                      <th className="px-4 py-3">分类</th>
-                      <th className="px-4 py-3">别名</th>
-                      <th className="px-4 py-3">状态</th>
-                      <th className="px-4 py-3">操作</th>
+                      <th className="px-4 py-3 whitespace-nowrap">ID</th>
+                      <th className="px-4 py-3 whitespace-nowrap">名称</th>
+                      <th className="px-4 py-3 whitespace-nowrap">范围</th>
+                      <th className="px-4 py-3 whitespace-nowrap">分类</th>
+                      <th className="px-4 py-3 whitespace-nowrap">别名数</th>
+                      <th className="px-4 py-3 whitespace-nowrap">状态</th>
+                      <th className="px-4 py-3 whitespace-nowrap">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -325,7 +333,9 @@ export default function AdminTagManagementPage() {
                       >
                         <td className="px-4 py-3 font-mono text-xs text-gray-700">{t.id}</td>
                         <td className="px-4 py-3 text-gray-800">{t.name}</td>
-                        <td className="px-4 py-3">{t.scope}</td>
+                        <td className="px-4 py-3" title={t.scope}>
+                          {formatScope(t.scope)}
+                        </td>
                         <td className="px-4 py-3">{t.category ?? '—'}</td>
                         <td className="px-4 py-3">{t.aliasCount}</td>
                         <td className="px-4 py-3">{t.isActive ? '启用' : '停用'}</td>
@@ -351,7 +361,7 @@ export default function AdminTagManagementPage() {
                     )}
                   </tbody>
                 </table>
-              </div>
+              </AdminTableScroll>
 
               <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
                 <span>
@@ -376,7 +386,7 @@ export default function AdminTagManagementPage() {
               </div>
             </div>
 
-            <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+            <div className="min-w-0 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100 lg:sticky lg:top-6 h-fit">
               <h2 className="mb-3 text-lg font-semibold text-gray-800">编辑 / 别名</h2>
 
               {!editing && !selectedTag ? (
@@ -385,15 +395,15 @@ export default function AdminTagManagementPage() {
                 <div className="space-y-3">
                   <div>
                     <label className="text-xs text-gray-600">ID</label>
-                    <input
-                      className="input-field mt-1"
-                      value={form.id}
-                      disabled={Boolean(selectedId)}
-                      onChange={(e) => setForm((prev) => ({ ...prev, id: e.target.value }))}
-                      placeholder="例如: style:daily"
-                    />
-                    <div className="mt-1 text-[11px] text-gray-500">仅允许字母数字，且可包含 : _ -</div>
-                  </div>
+	                    <input
+	                      className="input-field mt-1"
+	                      value={form.id}
+	                      disabled={Boolean(selectedId)}
+	                      onChange={(e) => setForm((prev) => ({ ...prev, id: e.target.value }))}
+	                      placeholder="例如：style:daily"
+	                    />
+	                    <div className="mt-1 text-[11px] text-gray-500">仅允许字母数字，且可包含 : _ -</div>
+	                  </div>
                   <div>
                     <label className="text-xs text-gray-600">名称</label>
                     <input
@@ -404,25 +414,25 @@ export default function AdminTagManagementPage() {
                   </div>
                   <div>
                     <label className="text-xs text-gray-600">分类</label>
-                    <input
-                      className="input-field mt-1"
-                      value={form.category}
-                      onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
-                      placeholder="例如: 题材/风格"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-600">scope</label>
-                    <select
-                      className="input-field mt-1"
-                      value={form.scope}
-                      onChange={(e) => setForm((prev) => ({ ...prev, scope: e.target.value as TagScope }))}
-                    >
-                      <option value="user">user</option>
-                      <option value="system">system</option>
-                      <option value="admin">admin</option>
-                    </select>
-                  </div>
+	                    <input
+	                      className="input-field mt-1"
+	                      value={form.category}
+	                      onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
+	                      placeholder="例如：题材/风格"
+	                    />
+	                  </div>
+	                  <div>
+	                    <label className="text-xs text-gray-600">范围（scope）</label>
+	                    <select
+	                      className="input-field mt-1"
+	                      value={form.scope}
+	                      onChange={(e) => setForm((prev) => ({ ...prev, scope: e.target.value as TagScope }))}
+	                    >
+	                      <option value="user">用户（user）</option>
+	                      <option value="system">系统（system）</option>
+	                      <option value="admin">管理员（admin）</option>
+	                    </select>
+	                  </div>
                   <div>
                     <label className="text-xs text-gray-600">描述</label>
                     <textarea

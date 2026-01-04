@@ -5,6 +5,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { debounce } from '@/lib/debounce';
+import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
 
 // 定义用户数据类型接口
 interface User {
@@ -320,9 +321,9 @@ const UserManagementPage: React.FC = () => {
             <button onClick={() => handleBatchAction('unban')} className="admin-button-sm bg-gray-700 hover:bg-gray-800 text-white">解封</button>
           </div>
 
-          <div className="bg-white rounded-lg shadow-sm overflow-x-auto">
-            <table className="w-full text-sm text-left text-gray-500">
-              <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+          <AdminTableScroll withCard={false} className="bg-white rounded-lg shadow-sm">
+            <table className="min-w-full w-max text-sm text-left text-gray-500">
+              <thead className="text-xs text-gray-700 bg-gray-50">
                 <tr>
                   <th className="p-4"><input type="checkbox" onChange={handleSelectAll} checked={users.length > 0 && selectedIds.size === users.length}/></th>
                   <th className="px-6 py-3">用户</th>
@@ -354,7 +355,7 @@ const UserManagementPage: React.FC = () => {
                 )}
               </tbody>
             </table>
-          </div>
+          </AdminTableScroll>
 
           {totalPages > 1 && (
               <div className="flex justify-between items-center mt-4 text-sm">

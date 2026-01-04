@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, RotateCcw } from 'lucide-react';
 
+import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
+
 type ArenaQueue = 'strict' | 'free';
 type ArenaEntityType = 'data_card' | 'preset';
 
@@ -48,6 +50,9 @@ const formatIso = (iso: string | null | undefined) => {
   if (Number.isNaN(date.getTime())) return iso;
   return date.toISOString().replace('T', ' ').replace('Z', ' UTC');
 };
+
+const formatQueue = (queue: ArenaQueue) => (queue === 'strict' ? '严格' : '自由');
+const formatEntityType = (entityType: ArenaEntityType) => (entityType === 'data_card' ? '数据卡' : '预设');
 
 export default function AdminArenaRatingsPage() {
   const [loading, setLoading] = useState(false);
@@ -222,55 +227,55 @@ export default function AdminArenaRatingsPage() {
 
           <h1 className="mb-4 text-2xl font-bold text-gray-800">排位 / 排行榜运维（arena_ratings）</h1>
 
-          <div className="mb-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
-            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
-              <select
-                className="input-field"
-                value={filters.queue}
-                onChange={(e) => setFilters((prev) => ({ ...prev, queue: e.target.value as ArenaQueue }))}
-              >
-                <option value="strict">strict</option>
-                <option value="free">free</option>
-              </select>
-              <select
-                className="input-field"
-                value={filters.entityType}
-                onChange={(e) => setFilters((prev) => ({ ...prev, entityType: e.target.value as any }))}
-              >
-                <option value="all">所有 entity</option>
-                <option value="data_card">data_card</option>
-                <option value="preset">preset</option>
-              </select>
-              <input
-                className="input-field"
-                placeholder="search: entity_id / name / username"
-                value={filters.search}
-                onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
-                  void load(1);
+	          <div className="mb-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+	            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+	              <select
+	                className="input-field"
+	                value={filters.queue}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, queue: e.target.value as ArenaQueue }))}
+	              >
+	                <option value="strict">严格（strict）</option>
+	                <option value="free">自由（free）</option>
+	              </select>
+	              <select
+	                className="input-field"
+	                value={filters.entityType}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, entityType: e.target.value as any }))}
+	              >
+	                <option value="all">所有实体</option>
+	                <option value="data_card">数据卡（data_card）</option>
+	                <option value="preset">预设（preset）</option>
+	              </select>
+	              <input
+	                className="input-field"
+	                placeholder="搜索：entity_id / 名称 / 用户名"
+	                value={filters.search}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+	                onKeyDown={(e) => {
+	                  if (e.key !== 'Enter') return;
+	                  void load(1);
+	                }}
+	              />
+	              <input
+	                className="input-field"
+	                placeholder="归属用户ID（ownerUserId）"
+	                value={filters.ownerUserId}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, ownerUserId: e.target.value }))}
+	                onKeyDown={(e) => {
+	                  if (e.key !== 'Enter') return;
+	                  void load(1);
                 }}
               />
-              <input
-                className="input-field"
-                placeholder="ownerUserId"
-                value={filters.ownerUserId}
-                onChange={(e) => setFilters((prev) => ({ ...prev, ownerUserId: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
-                  void load(1);
-                }}
-              />
-              <select
-                className="input-field"
-                value={filters.reviewStatus}
-                onChange={(e) => setFilters((prev) => ({ ...prev, reviewStatus: e.target.value }))}
-              >
-                <option value="">所有审核</option>
-                <option value="pending">pending</option>
-                <option value="approved">approved</option>
-                <option value="rejected">rejected</option>
-              </select>
+	              <select
+	                className="input-field"
+	                value={filters.reviewStatus}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, reviewStatus: e.target.value }))}
+	              >
+	                <option value="">所有审核</option>
+	                <option value="pending">待审核（pending）</option>
+	                <option value="approved">已通过（approved）</option>
+	                <option value="rejected">已拒绝（rejected）</option>
+	              </select>
               <select
                 className="input-field"
                 value={filters.isPublic}
@@ -281,43 +286,43 @@ export default function AdminArenaRatingsPage() {
                 <option value="0">私有</option>
                 <option value="-1">封禁</option>
               </select>
-              <input
-                className="input-field"
-                placeholder="minRating"
-                value={filters.minRating}
-                onChange={(e) => setFilters((prev) => ({ ...prev, minRating: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
-                  void load(1);
+	              <input
+	                className="input-field"
+	                placeholder="最低分（minRating）"
+	                value={filters.minRating}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, minRating: e.target.value }))}
+	                onKeyDown={(e) => {
+	                  if (e.key !== 'Enter') return;
+	                  void load(1);
                 }}
               />
-              <input
-                className="input-field"
-                placeholder="minGames"
-                value={filters.minGames}
-                onChange={(e) => setFilters((prev) => ({ ...prev, minGames: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
-                  void load(1);
+	              <input
+	                className="input-field"
+	                placeholder="最低对局数（minGames）"
+	                value={filters.minGames}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, minGames: e.target.value }))}
+	                onKeyDown={(e) => {
+	                  if (e.key !== 'Enter') return;
+	                  void load(1);
                 }}
               />
-              <select
-                className="input-field"
-                value={filters.sortBy}
-                onChange={(e) => setFilters((prev) => ({ ...prev, sortBy: e.target.value }))}
-              >
-                <option value="rating">rating</option>
-                <option value="games">games</option>
-                <option value="updated_at">updated_at</option>
-              </select>
-              <select
-                className="input-field"
-                value={filters.sortOrder}
-                onChange={(e) => setFilters((prev) => ({ ...prev, sortOrder: e.target.value }))}
-              >
-                <option value="desc">desc</option>
-                <option value="asc">asc</option>
-              </select>
+	              <select
+	                className="input-field"
+	                value={filters.sortBy}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, sortBy: e.target.value }))}
+	              >
+	                <option value="rating">按分数（rating）</option>
+	                <option value="games">按对局数（games）</option>
+	                <option value="updated_at">按更新时间（updated_at）</option>
+	              </select>
+	              <select
+	                className="input-field"
+	                value={filters.sortOrder}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, sortOrder: e.target.value }))}
+	              >
+	                <option value="desc">降序（desc）</option>
+	                <option value="asc">升序（asc）</option>
+	              </select>
               <button
                 onClick={() => void load(1)}
                 className="rounded-lg bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800"
@@ -331,26 +336,50 @@ export default function AdminArenaRatingsPage() {
             </div>
           </div>
 
-          {error ? <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+	          {error ? <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
 
-          <div className="overflow-x-auto rounded-xl bg-white shadow-sm ring-1 ring-gray-100">
-            <table className="w-full text-left text-sm text-gray-600">
-              <thead className="bg-gray-50 text-xs uppercase text-gray-600">
-                <tr>
-                  <th className="p-4">
-                    <input type="checkbox" checked={allSelectedOnPage} onChange={toggleSelectAllCurrentPage} />
-                  </th>
-                  <th className="px-4 py-3">entity</th>
-                  <th className="px-4 py-3">owner</th>
-                  <th className="px-4 py-3">rating</th>
-                  <th className="px-4 py-3">games</th>
-                  <th className="px-4 py-3">W/L/D</th>
-                  <th className="px-4 py-3">tech</th>
-                  <th className="px-4 py-3">tags</th>
-                  <th className="px-4 py-3">updated</th>
-                  <th className="px-4 py-3">操作</th>
-                </tr>
-              </thead>
+	          <AdminTableScroll
+	            footer={
+	              <div className="flex items-center justify-between text-sm text-gray-600">
+	                <span>
+	                  第 {currentPage} / {totalPages} 页
+	                </span>
+	                <div className="flex items-center gap-2">
+	                  <button
+	                    className="admin-button-sm"
+	                    onClick={() => void load(Math.max(1, currentPage - 1))}
+	                    disabled={loading || currentPage <= 1}
+	                  >
+	                    上一页
+	                  </button>
+	                  <button
+	                    className="admin-button-sm"
+	                    onClick={() => void load(Math.min(totalPages, currentPage + 1))}
+	                    disabled={loading || currentPage >= totalPages}
+	                  >
+	                    下一页
+	                  </button>
+	                </div>
+	              </div>
+	            }
+	          >
+	            <table className="min-w-full w-max text-left text-sm text-gray-600">
+	              <thead className="bg-gray-50 text-xs text-gray-600">
+	                <tr>
+	                  <th className="p-4">
+	                    <input type="checkbox" checked={allSelectedOnPage} onChange={toggleSelectAllCurrentPage} />
+	                  </th>
+	                  <th className="px-4 py-3 whitespace-nowrap">实体</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">归属</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">分数</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">对局</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">胜/负/平</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">技术</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">标签</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">更新时间</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">操作</th>
+	                </tr>
+	              </thead>
               <tbody className="divide-y divide-gray-100">
                 {records.map((row) => {
                   const key = `${row.entity_type}:${row.entity_id}`;
@@ -361,15 +390,19 @@ export default function AdminArenaRatingsPage() {
                       <td className="p-4">
                         <input type="checkbox" checked={selectedIds.has(key)} onChange={() => toggleSelected(key)} />
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="text-gray-800">{displayName}</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
-                          <span className="rounded bg-gray-100 px-2 py-0.5">{row.queue}</span>
-                          <span className="rounded bg-gray-100 px-2 py-0.5">{row.entity_type}</span>
-                          <span className="font-mono">{row.entity_id}</span>
-                          {row.entity_type === 'data_card' ? (
-                            <Link href={`/admin/character-management?id=${encodeURIComponent(row.entity_id)}`} className="text-purple-600 hover:underline">
-                              管理卡
+	                      <td className="px-4 py-3">
+	                        <div className="text-gray-800">{displayName}</div>
+	                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+	                          <span className="rounded bg-gray-100 px-2 py-0.5" title={row.queue}>
+	                            {formatQueue(row.queue)}
+	                          </span>
+	                          <span className="rounded bg-gray-100 px-2 py-0.5" title={row.entity_type}>
+	                            {formatEntityType(row.entity_type)}
+	                          </span>
+	                          <span className="font-mono">{row.entity_id}</span>
+	                          {row.entity_type === 'data_card' ? (
+	                            <Link href={`/admin/character-management?id=${encodeURIComponent(row.entity_id)}`} className="text-purple-600 hover:underline">
+	                              管理卡
                             </Link>
                           ) : null}
                         </div>
@@ -380,32 +413,32 @@ export default function AdminArenaRatingsPage() {
                         ) : (
                           <div className="text-gray-400">—</div>
                         )}
-                        {row.entity_type === 'data_card' ? (
-                          <div className="mt-1 text-[11px] text-gray-500">
-                            public={row.data_card_is_public ?? '—'} review={row.data_card_review_status ?? '—'}
-                            {row.data_card_deleted_at ? ' deleted' : ''}
-                          </div>
-                        ) : null}
-                      </td>
+	                        {row.entity_type === 'data_card' ? (
+	                          <div className="mt-1 text-[11px] text-gray-500">
+	                            公开={row.data_card_is_public ?? '—'} 审核={row.data_card_review_status ?? '—'}
+	                            {row.data_card_deleted_at ? '（已删除）' : ''}
+	                          </div>
+	                        ) : null}
+	                      </td>
                       <td className="px-4 py-3 font-semibold text-gray-900">{row.rating}</td>
                       <td className="px-4 py-3">{row.games}</td>
                       <td className="px-4 py-3">
                         {row.wins}/{row.losses}/{row.draws}
                       </td>
-                      <td className="px-4 py-3">
-                        {row.tech_score != null ? (
-                          <span>
-                            {row.tech_score} ({row.tech_level ?? '—'})
-                          </span>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
-                        {row.is_native != null ? (
-                          <div className="mt-1 text-[11px] text-gray-500">native={row.is_native === 1 ? '1' : '0'}</div>
-                        ) : (
-                          <div className="mt-1 text-[11px] text-gray-400">native=—</div>
-                        )}
-                      </td>
+	                      <td className="px-4 py-3">
+	                        {row.tech_score != null ? (
+	                          <span>
+	                            {row.tech_score} ({row.tech_level ?? '—'})
+	                          </span>
+	                        ) : (
+	                          <span className="text-gray-400">—</span>
+	                        )}
+	                        {row.is_native != null ? (
+	                          <div className="mt-1 text-[11px] text-gray-500">原生={row.is_native === 1 ? '是' : '否'}</div>
+	                        ) : (
+	                          <div className="mt-1 text-[11px] text-gray-400">原生=—</div>
+	                        )}
+	                      </td>
                       <td className="px-4 py-3">{tagCount}</td>
                       <td className="px-4 py-3 text-[11px] text-gray-500">{formatIso(row.updated_at)}</td>
                       <td className="px-4 py-3">
@@ -426,34 +459,11 @@ export default function AdminArenaRatingsPage() {
                     </td>
                   </tr>
                 )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
-            <span>
-              第 {currentPage} / {totalPages} 页
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                className="admin-button-sm"
-                onClick={() => void load(Math.max(1, currentPage - 1))}
-                disabled={loading || currentPage <= 1}
-              >
-                上一页
-              </button>
-              <button
-                className="admin-button-sm"
-                onClick={() => void load(Math.min(totalPages, currentPage + 1))}
-                disabled={loading || currentPage >= totalPages}
-              >
-                下一页
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
-  );
+	              </tbody>
+	            </table>
+	          </AdminTableScroll>
+	        </div>
+	      </div>
+	    </>
+	  );
 }
-

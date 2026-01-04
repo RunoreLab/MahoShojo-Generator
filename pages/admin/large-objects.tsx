@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Download, RefreshCw, Trash2 } from 'lucide-react';
 
+import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
+
 type LargeObjectRow = {
   id: string;
   kind: string;
@@ -56,6 +58,8 @@ const formatBytes = (bytes: number | null | undefined) => {
 export default function AdminLargeObjectsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [detailsVisible, setDetailsVisible] = useState(true);
 
   const [rows, setRows] = useState<LargeObjectRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -164,6 +168,15 @@ export default function AdminLargeObjectsPage() {
     return `/admin/battle-report-generations?id=${encodeURIComponent(id)}`;
   }, [selected]);
 
+  const copyText = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(`已复制：${label}`);
+    } catch {
+      alert('复制失败：浏览器不支持或权限不足');
+    }
+  };
+
   return (
     <>
       <Head>
@@ -176,14 +189,23 @@ export default function AdminLargeObjectsPage() {
             <Link href="/admin" className="text-sm text-purple-600 hover:underline">
               ← 返回管理后台主页
             </Link>
-            <button
-              onClick={() => void load(page)}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              disabled={loading}
-            >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              刷新
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDetailsVisible((v) => !v)}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                {detailsVisible ? '隐藏详情' : '显示详情'}
+              </button>
+              <button
+                onClick={() => void load(page)}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                disabled={loading}
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                刷新
+              </button>
+            </div>
           </div>
 
           <h1 className="mb-4 text-2xl font-bold text-gray-800">大对象 / R2 索引管理（large_objects）</h1>
@@ -192,7 +214,7 @@ export default function AdminLargeObjectsPage() {
             <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
               <input
                 className="input-field"
-                placeholder="kind (可留空)"
+                placeholder="类型 kind（可留空）"
                 value={filters.kind}
                 onChange={(e) => setFilters((prev) => ({ ...prev, kind: e.target.value }))}
                 onKeyDown={(e) => {
@@ -202,7 +224,7 @@ export default function AdminLargeObjectsPage() {
               />
               <input
                 className="input-field"
-                placeholder="search: owner_ref_id / r2_key / username"
+                placeholder="搜索：owner_ref_id / r2_key / 用户名"
                 value={filters.search}
                 onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
                 onKeyDown={(e) => {
@@ -212,7 +234,7 @@ export default function AdminLargeObjectsPage() {
               />
               <input
                 className="input-field"
-                placeholder="ownerUserId"
+                placeholder="归属用户ID（ownerUserId）"
                 value={filters.ownerUserId}
                 onChange={(e) => setFilters((prev) => ({ ...prev, ownerUserId: e.target.value }))}
                 onKeyDown={(e) => {
@@ -234,7 +256,7 @@ export default function AdminLargeObjectsPage() {
               />
               <input
                 className="input-field"
-                placeholder="minBytes"
+                placeholder="最小大小（minBytes，单位：字节）"
                 value={filters.minBytes}
                 onChange={(e) => setFilters((prev) => ({ ...prev, minBytes: e.target.value }))}
                 onKeyDown={(e) => {
@@ -258,15 +280,41 @@ export default function AdminLargeObjectsPage() {
           {error ? <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
 
           <div className="grid gap-6 lg:grid-cols-3">
-            <div className="lg:col-span-2 overflow-x-auto rounded-xl bg-white shadow-sm ring-1 ring-gray-100">
-              <table className="w-full text-left text-sm text-gray-600">
-                <thead className="bg-gray-50 text-xs uppercase text-gray-600">
+            <div className={`min-w-0 ${detailsVisible ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
+              <AdminTableScroll
+                className="min-w-0"
+                footer={
+                  <div className="flex items-center justify-between text-sm text-gray-600">
+                    <span>
+                      第 {page} / {totalPages} 页
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="admin-button-sm"
+                        onClick={() => void load(Math.max(1, page - 1))}
+                        disabled={loading || page <= 1}
+                      >
+                        上一页
+                      </button>
+                      <button
+                        className="admin-button-sm"
+                        onClick={() => void load(Math.min(totalPages, page + 1))}
+                        disabled={loading || page >= totalPages}
+                      >
+                        下一页
+                      </button>
+                    </div>
+                  </div>
+                }
+              >
+                <table className="min-w-full w-max text-left text-sm text-gray-600">
+                  <thead className="bg-gray-50 text-xs text-gray-600">
                   <tr>
-                    <th className="px-4 py-3">kind</th>
-                    <th className="px-4 py-3">owner_ref_id</th>
-                    <th className="px-4 py-3">owner</th>
-                    <th className="px-4 py-3">bytes</th>
-                    <th className="px-4 py-3">created_at</th>
+                    <th className="px-4 py-3 whitespace-nowrap">类型</th>
+                    <th className="px-4 py-3 whitespace-nowrap">归属引用ID</th>
+                    <th className="px-4 py-3 whitespace-nowrap">归属用户</th>
+                    <th className="px-4 py-3 whitespace-nowrap">大小</th>
+                    <th className="px-4 py-3 whitespace-nowrap">创建时间</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -280,19 +328,21 @@ export default function AdminLargeObjectsPage() {
                         <div className="text-gray-800">{row.kind}</div>
                         <div className="mt-1 font-mono text-[11px] text-gray-500">{row.id}</div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="font-mono text-xs text-gray-700">{row.owner_ref_id}</div>
-                        <div className="mt-1 text-[11px] text-gray-500 truncate max-w-[22rem]" title={row.r2_key}>
-                          {row.r2_key}
-                        </div>
-                      </td>
+	                      <td className="px-4 py-3">
+	                        <div className="font-mono text-xs text-gray-700 truncate max-w-[20rem]" title={row.owner_ref_id}>
+	                          {row.owner_ref_id}
+	                        </div>
+	                        <div className="mt-1 text-[11px] text-gray-500 truncate max-w-[22rem]" title={row.r2_key}>
+	                          {row.r2_key}
+	                        </div>
+	                      </td>
                       <td className="px-4 py-3">
                         <div className="text-gray-800">{row.owner_username ?? '—'}</div>
                         <div className="mt-1 text-[11px] text-gray-500">userId={row.owner_user_id ?? '—'}</div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="text-gray-800">{formatBytes(row.bytes)}</div>
-                        <div className="mt-1 text-[11px] text-gray-500">stored={formatBytes(row.stored_bytes)}</div>
+                        <div className="mt-1 text-[11px] text-gray-500">存储={formatBytes(row.stored_bytes)}</div>
                       </td>
                       <td className="px-4 py-3 text-[11px] text-gray-500">{formatIso(row.created_at)}</td>
                     </tr>
@@ -306,55 +356,62 @@ export default function AdminLargeObjectsPage() {
                   )}
                 </tbody>
               </table>
-
-              <div className="flex items-center justify-between px-4 py-4 text-sm text-gray-600">
-                <span>
-                  第 {page} / {totalPages} 页
-                </span>
-                <div className="flex items-center gap-2">
-                  <button className="admin-button-sm" onClick={() => void load(Math.max(1, page - 1))} disabled={loading || page <= 1}>
-                    上一页
-                  </button>
-                  <button className="admin-button-sm" onClick={() => void load(Math.min(totalPages, page + 1))} disabled={loading || page >= totalPages}>
-                    下一页
-                  </button>
-                </div>
-              </div>
+              </AdminTableScroll>
             </div>
 
-            <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+            {detailsVisible ? (
+            <div className="min-w-0 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100 lg:sticky lg:top-6 h-fit">
               <h2 className="mb-3 text-lg font-semibold text-gray-800">详情 / 操作</h2>
-              {!selected ? (
-                <div className="text-sm text-gray-500">从左侧列表选择一条记录。</div>
-              ) : (
-                <div className="space-y-2 text-sm text-gray-700">
-                  <div className="font-mono text-xs text-gray-600 break-all">{selected.id}</div>
-                  <div>
-                    <span className="text-gray-500">kind：</span>
-                    {selected.kind}
-                  </div>
-                  <div>
-                    <span className="text-gray-500">owner_ref_id：</span>
-                    <span className="font-mono text-xs">{selected.owner_ref_id}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">R2 key：</span>
-                    <span className="font-mono text-xs break-all">{selected.r2_key}</span>
-                  </div>
+	              {!selected ? (
+	                <div className="text-sm text-gray-500">从左侧列表选择一条记录。</div>
+	              ) : (
+	                <div className="space-y-2 text-sm text-gray-700">
+	                  <div className="flex items-start justify-between gap-3">
+	                    <div className="font-mono text-xs text-gray-600 break-all">{selected.id}</div>
+	                    <button type="button" onClick={() => void copyText(selected.id, '记录ID')} className="admin-button-sm shrink-0">
+	                      复制
+	                    </button>
+	                  </div>
+	                  <div>
+	                    <span className="text-gray-500">类型：</span>
+	                    {selected.kind}
+	                  </div>
+	                  <div className="flex items-start justify-between gap-3">
+	                    <div>
+	                      <span className="text-gray-500">归属引用ID：</span>
+	                      <span className="font-mono text-xs break-all">{selected.owner_ref_id}</span>
+	                    </div>
+	                    <button
+	                      type="button"
+	                      onClick={() => void copyText(selected.owner_ref_id, '归属引用ID')}
+	                      className="admin-button-sm shrink-0"
+	                    >
+	                      复制
+	                    </button>
+	                  </div>
+	                  <div className="flex items-start justify-between gap-3">
+	                    <div>
+	                      <span className="text-gray-500">R2 键：</span>
+	                      <span className="font-mono text-xs break-all">{selected.r2_key}</span>
+	                    </div>
+	                    <button type="button" onClick={() => void copyText(selected.r2_key, 'R2 键')} className="admin-button-sm shrink-0">
+	                      复制
+	                    </button>
+	                  </div>
                   <div>
                     <span className="text-gray-500">大小：</span>
-                    {formatBytes(selected.bytes)}（stored {formatBytes(selected.stored_bytes)}）
+                    {formatBytes(selected.bytes)}（存储 {formatBytes(selected.stored_bytes)}）
                   </div>
                   <div>
-                    <span className="text-gray-500">content：</span>
+                    <span className="text-gray-500">内容类型：</span>
                     {selected.content_type ?? '—'} {selected.content_encoding ? `(${selected.content_encoding})` : ''}
                   </div>
                   <div>
-                    <span className="text-gray-500">created_at：</span>
+                    <span className="text-gray-500">创建时间：</span>
                     {formatIso(selected.created_at)}
                   </div>
                   <div>
-                    <span className="text-gray-500">updated_at：</span>
+                    <span className="text-gray-500">更新时间：</span>
                     {formatIso(selected.updated_at)}
                   </div>
 
@@ -420,10 +477,10 @@ export default function AdminLargeObjectsPage() {
                 </div>
               )}
             </div>
+            ) : null}
           </div>
         </div>
       </div>
     </>
   );
 }
-

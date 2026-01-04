@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 
+import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
+
 type ArenaQueue = 'strict' | 'free';
 type ArenaRatingEventStatus = 'pending' | 'applied' | 'skipped' | 'failed';
 
@@ -49,6 +51,14 @@ const formatIso = (iso: string | null | undefined) => {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toISOString().replace('T', ' ').replace('Z', ' UTC');
+};
+
+const formatQueue = (queue: ArenaQueue) => (queue === 'strict' ? '严格' : '自由');
+const formatStatus = (status: ArenaRatingEventStatus) => {
+  if (status === 'applied') return '已应用';
+  if (status === 'skipped') return '已跳过';
+  if (status === 'failed') return '失败';
+  return '待处理';
 };
 
 export default function AdminArenaRatingEventsPage() {
@@ -149,63 +159,63 @@ export default function AdminArenaRatingEventsPage() {
 
           <div className="mb-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
             <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
-              <select
-                className="input-field"
-                value={filters.queue}
-                onChange={(e) => setFilters((prev) => ({ ...prev, queue: e.target.value as any }))}
-              >
-                <option value="all">所有 queue</option>
-                <option value="strict">strict</option>
-                <option value="free">free</option>
-              </select>
-              <select
-                className="input-field"
-                value={filters.status}
-                onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value as any }))}
-              >
-                <option value="all">所有状态</option>
-                <option value="applied">applied</option>
-                <option value="skipped">skipped</option>
-                <option value="failed">failed</option>
-                <option value="pending">pending</option>
-              </select>
-              <input
-                className="input-field"
-                placeholder="search: id/generation/entity/user"
-                value={filters.search}
-                onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
-                  void load(1);
-                }}
-              />
-              <input
-                className="input-field"
-                placeholder="generationId"
-                value={filters.generationId}
-                onChange={(e) => setFilters((prev) => ({ ...prev, generationId: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
-                  void load(1);
-                }}
-              />
-              <input
-                className="input-field"
-                placeholder="entityId"
-                value={filters.entityId}
-                onChange={(e) => setFilters((prev) => ({ ...prev, entityId: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
-                  void load(1);
-                }}
-              />
-              <input
-                className="input-field"
-                placeholder="userId"
-                value={filters.userId}
-                onChange={(e) => setFilters((prev) => ({ ...prev, userId: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
+	              <select
+	                className="input-field"
+	                value={filters.queue}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, queue: e.target.value as any }))}
+	              >
+	                <option value="all">所有队列</option>
+	                <option value="strict">严格（strict）</option>
+	                <option value="free">自由（free）</option>
+	              </select>
+	              <select
+	                className="input-field"
+	                value={filters.status}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value as any }))}
+	              >
+	                <option value="all">所有状态</option>
+	                <option value="applied">已应用（applied）</option>
+	                <option value="skipped">已跳过（skipped）</option>
+	                <option value="failed">失败（failed）</option>
+	                <option value="pending">待处理（pending）</option>
+	              </select>
+	              <input
+	                className="input-field"
+	                placeholder="搜索：id / generationId / entityId / userId / 用户名"
+	                value={filters.search}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+	                onKeyDown={(e) => {
+	                  if (e.key !== 'Enter') return;
+	                  void load(1);
+	                }}
+	              />
+	              <input
+	                className="input-field"
+	                placeholder="generationId（生成ID）"
+	                value={filters.generationId}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, generationId: e.target.value }))}
+	                onKeyDown={(e) => {
+	                  if (e.key !== 'Enter') return;
+	                  void load(1);
+	                }}
+	              />
+	              <input
+	                className="input-field"
+	                placeholder="entityId（实体ID）"
+	                value={filters.entityId}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, entityId: e.target.value }))}
+	                onKeyDown={(e) => {
+	                  if (e.key !== 'Enter') return;
+	                  void load(1);
+	                }}
+	              />
+	              <input
+	                className="input-field"
+	                placeholder="userId（用户ID）"
+	                value={filters.userId}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, userId: e.target.value }))}
+	                onKeyDown={(e) => {
+	                  if (e.key !== 'Enter') return;
                   void load(1);
                 }}
               />
@@ -221,22 +231,22 @@ export default function AdminArenaRatingEventsPage() {
                 value={filters.dateTo}
                 onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))}
               />
-              <select
-                className="input-field"
-                value={filters.sortBy}
-                onChange={(e) => setFilters((prev) => ({ ...prev, sortBy: e.target.value }))}
-              >
-                <option value="created_at">created_at</option>
-                <option value="applied_at">applied_at</option>
-              </select>
-              <select
-                className="input-field"
-                value={filters.sortOrder}
-                onChange={(e) => setFilters((prev) => ({ ...prev, sortOrder: e.target.value }))}
-              >
-                <option value="desc">desc</option>
-                <option value="asc">asc</option>
-              </select>
+	              <select
+	                className="input-field"
+	                value={filters.sortBy}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, sortBy: e.target.value }))}
+	              >
+	                <option value="created_at">按创建时间（created_at）</option>
+	                <option value="applied_at">按应用时间（applied_at）</option>
+	              </select>
+	              <select
+	                className="input-field"
+	                value={filters.sortOrder}
+	                onChange={(e) => setFilters((prev) => ({ ...prev, sortOrder: e.target.value }))}
+	              >
+	                <option value="desc">降序（desc）</option>
+	                <option value="asc">升序（asc）</option>
+	              </select>
               <button
                 onClick={() => void load(1)}
                 className="rounded-lg bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-800"
@@ -248,45 +258,72 @@ export default function AdminArenaRatingEventsPage() {
             </div>
           </div>
 
-          {error ? <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+	          {error ? <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
 
-          <div className="overflow-x-auto rounded-xl bg-white shadow-sm ring-1 ring-gray-100">
-            <table className="w-full text-left text-sm text-gray-600">
-              <thead className="bg-gray-50 text-xs uppercase text-gray-600">
-                <tr>
-                  <th className="px-4 py-3">created_at</th>
-                  <th className="px-4 py-3">queue</th>
-                  <th className="px-4 py-3">status</th>
-                  <th className="px-4 py-3">generation</th>
-                  <th className="px-4 py-3">user</th>
-                  <th className="px-4 py-3">A vs B</th>
-                  <th className="px-4 py-3">Δ</th>
-                  <th className="px-4 py-3">skip_reason</th>
-                  <th className="px-4 py-3">details</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {records.map((row) => (
-                  <tr key={row.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-[11px] text-gray-500">{formatIso(row.created_at)}</td>
-                    <td className="px-4 py-3">{row.queue}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs ${
-                          row.status === 'applied'
+	          <AdminTableScroll
+	            footer={
+	              <div className="flex items-center justify-between text-sm text-gray-600">
+	                <span>
+	                  第 {currentPage} / {totalPages} 页
+	                </span>
+	                <div className="flex items-center gap-2">
+	                  <button
+	                    className="admin-button-sm"
+	                    onClick={() => void load(Math.max(1, currentPage - 1))}
+	                    disabled={loading || currentPage <= 1}
+	                  >
+	                    上一页
+	                  </button>
+	                  <button
+	                    className="admin-button-sm"
+	                    onClick={() => void load(Math.min(totalPages, currentPage + 1))}
+	                    disabled={loading || currentPage >= totalPages}
+	                  >
+	                    下一页
+	                  </button>
+	                </div>
+	              </div>
+	            }
+	          >
+	            <table className="min-w-full w-max text-left text-sm text-gray-600">
+	              <thead className="bg-gray-50 text-xs text-gray-600">
+	                <tr>
+	                  <th className="px-4 py-3 whitespace-nowrap">创建时间</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">队列</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">状态</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">生成</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">用户</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">A vs B</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">Δ</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">跳过原因</th>
+	                  <th className="px-4 py-3 whitespace-nowrap">详情</th>
+	                </tr>
+	              </thead>
+	              <tbody className="divide-y divide-gray-100">
+	                {records.map((row) => (
+	                  <tr key={row.id} className="hover:bg-gray-50">
+	                    <td className="px-4 py-3 text-[11px] text-gray-500">{formatIso(row.created_at)}</td>
+	                    <td className="px-4 py-3" title={row.queue}>
+	                      {formatQueue(row.queue)}
+	                    </td>
+	                    <td className="px-4 py-3">
+	                      <span
+	                        className={`rounded-full px-2 py-0.5 text-xs ${
+	                          row.status === 'applied'
                             ? 'bg-green-100 text-green-700'
                             : row.status === 'skipped'
                               ? 'bg-yellow-100 text-yellow-700'
                               : row.status === 'failed'
                                 ? 'bg-red-100 text-red-700'
-                                : 'bg-gray-100 text-gray-700'
-                        }`}
-                      >
-                        {row.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-mono text-xs text-gray-700">{row.generation_id}</div>
+	                                : 'bg-gray-100 text-gray-700'
+	                        }`}
+	                        title={row.status}
+	                      >
+	                        {formatStatus(row.status)}
+	                      </span>
+	                    </td>
+	                    <td className="px-4 py-3">
+	                      <div className="font-mono text-xs text-gray-700">{row.generation_id}</div>
                       {row.generation_started_at ? (
                         <div className="mt-1 text-[11px] text-gray-500">{formatIso(row.generation_started_at)}</div>
                       ) : null}
@@ -320,10 +357,10 @@ export default function AdminArenaRatingEventsPage() {
                       <div>A: {row.a_delta ?? '—'}</div>
                       <div className="mt-1">B: {row.b_delta ?? '—'}</div>
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-700">{row.skip_reason ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      <button
-                        onClick={() => {
+	                    <td className="px-4 py-3 text-xs text-gray-700">{row.skip_reason ?? '—'}</td>
+	                    <td className="px-4 py-3">
+	                      <button
+	                        onClick={() => {
                           setDetailsRow(row);
                           setDetailsOpen(true);
                         }}
@@ -332,49 +369,27 @@ export default function AdminArenaRatingEventsPage() {
                         查看
                       </button>
                     </td>
-                  </tr>
-                ))}
-                {records.length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
-                      {loading ? '加载中...' : '暂无数据'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+	                  </tr>
+	                ))}
+	                {records.length === 0 && (
+	                  <tr>
+	                    <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
+	                      {loading ? '加载中...' : '暂无数据'}
+	                    </td>
+	                  </tr>
+	                )}
+	              </tbody>
+	            </table>
+	          </AdminTableScroll>
 
-          <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
-            <span>
-              第 {currentPage} / {totalPages} 页
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                className="admin-button-sm"
-                onClick={() => void load(Math.max(1, currentPage - 1))}
-                disabled={loading || currentPage <= 1}
-              >
-                上一页
-              </button>
-              <button
-                className="admin-button-sm"
-                onClick={() => void load(Math.min(totalPages, currentPage + 1))}
-                disabled={loading || currentPage >= totalPages}
-              >
-                下一页
-              </button>
-            </div>
-          </div>
-
-          {detailsOpen && detailsRow ? (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-              <div className="w-full max-w-4xl overflow-hidden rounded-xl bg-white shadow-lg">
-                <div className="flex items-center justify-between border-b px-6 py-4">
-                  <div>
-                    <div className="text-sm font-semibold text-gray-800">details_json</div>
-                    <div className="mt-1 font-mono text-xs text-gray-500">{detailsRow.id}</div>
-                  </div>
+	          {detailsOpen && detailsRow ? (
+	            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+	              <div className="w-full max-w-4xl overflow-hidden rounded-xl bg-white shadow-lg">
+	                <div className="flex items-center justify-between border-b px-6 py-4">
+	                  <div>
+	                    <div className="text-sm font-semibold text-gray-800">事件详情（details_json）</div>
+	                    <div className="mt-1 font-mono text-xs text-gray-500">{detailsRow.id}</div>
+	                  </div>
                   <button
                     onClick={() => {
                       setDetailsOpen(false);
@@ -398,4 +413,3 @@ export default function AdminArenaRatingEventsPage() {
     </>
   );
 }
-

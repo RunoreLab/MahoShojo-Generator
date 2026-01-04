@@ -13,6 +13,8 @@ import {
   X,
 } from 'lucide-react';
 
+import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
+
 type BattleReportGenerationStatus = 'completed' | 'aborted' | 'failed';
 type BattleReportGenerationMode = 'stream' | 'non-stream';
 
@@ -86,6 +88,12 @@ function statusBadge(status: BattleReportGenerationStatus) {
   if (status === 'completed') return 'bg-green-100 text-green-700 border-green-200';
   if (status === 'aborted') return 'bg-yellow-100 text-yellow-700 border-yellow-200';
   return 'bg-red-100 text-red-700 border-red-200';
+}
+
+function formatStatus(status: BattleReportGenerationStatus) {
+  if (status === 'completed') return '完成';
+  if (status === 'aborted') return '中断';
+  return '失败';
 }
 
 export default function BattleReportGenerationAdminPage() {
@@ -403,12 +411,12 @@ export default function BattleReportGenerationAdminPage() {
               <label className="block text-sm text-gray-600 mb-1">关键词（ID / 用户 / 情景 / 标题 / 胜者 / 角色名等）</label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  value={filters.search}
-                  onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
-                  placeholder="例如：username / generationId / scenario / winner..."
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                />
+	                <input
+	                  value={filters.search}
+	                  onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+	                  placeholder="例如：用户名 / generationId / 情景 / 胜者 / 角色名…"
+	                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+	                />
               </div>
             </div>
 
@@ -614,8 +622,8 @@ export default function BattleReportGenerationAdminPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto border border-gray-200 rounded-lg">
-            <table className="min-w-full text-sm">
+          <AdminTableScroll withCard={false} className="rounded-lg border border-gray-200">
+            <table className="min-w-full w-max text-sm">
               <thead className="bg-gray-50 text-gray-600">
                 <tr>
                   <th className="px-3 py-2 text-left w-10">
@@ -629,7 +637,7 @@ export default function BattleReportGenerationAdminPage() {
                   <th className="px-3 py-2 text-left">参战者</th>
                   <th className="px-3 py-2 text-left">标题 / 胜者</th>
                   <th className="px-3 py-2 text-left">耗时</th>
-                  <th className="px-3 py-2 text-left">Tokens</th>
+                  <th className="px-3 py-2 text-left whitespace-nowrap">Token（用量）</th>
                   <th className="px-3 py-2 text-left w-28">操作</th>
                 </tr>
               </thead>
@@ -656,10 +664,10 @@ export default function BattleReportGenerationAdminPage() {
                         <div className="text-gray-800">{formatIso(r.started_at)}</div>
                         <div className="text-xs text-gray-400 font-mono">{r.id.slice(0, 8)}…</div>
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2 py-1 rounded border text-xs ${statusBadge(r.status)}`}>
-                          {r.status}
-                        </span>
+	                      <td className="px-3 py-2 whitespace-nowrap">
+	                        <span className={`inline-flex items-center px-2 py-1 rounded border text-xs ${statusBadge(r.status)}`}>
+	                          <span title={r.status}>{formatStatus(r.status)}</span>
+	                        </span>
                         {(r.status !== 'completed' || r.combatants_write_ok === 0) && (
                           <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3" />
@@ -732,7 +740,7 @@ export default function BattleReportGenerationAdminPage() {
                 )}
               </tbody>
             </table>
-          </div>
+          </AdminTableScroll>
 
           {totalPages > 1 && (
             <div className="flex justify-center gap-2 mt-4">

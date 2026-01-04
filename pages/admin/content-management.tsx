@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { debounce } from '@/lib/debounce';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
+import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
 
 // 定义数据卡类型接口
 interface DataCard {
@@ -860,9 +861,9 @@ ${JSON.stringify(cardsToCopy, null, 2)}
           </div>
           
           {/* 数据表格 */}
-          <div className="bg-white rounded-lg shadow-sm overflow-x-auto">
-            <table className="w-full text-sm text-left text-gray-500">
-              <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+          <AdminTableScroll withCard={false} className="bg-white rounded-lg shadow-sm">
+            <table className="min-w-full w-max text-sm text-left text-gray-500">
+              <thead className="text-xs text-gray-700 bg-gray-50">
                 <tr>
                   <th scope="col" className="p-4"><input type="checkbox" onChange={handleSelectAll} checked={selectedIds.size === dataCards.length && dataCards.length > 0} /></th>
                   <th scope="col" className="px-6 py-3">名称 / 作者</th>
@@ -991,7 +992,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                 )}
               </tbody>
             </table>
-          </div>
+          </AdminTableScroll>
 
           {/* 分页 */}
           {totalPages > 1 && (
