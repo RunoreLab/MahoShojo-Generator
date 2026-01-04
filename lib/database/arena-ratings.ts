@@ -59,6 +59,40 @@ export async function resetStrictArenaRatingForDataCard(dataCardId: string): Pro
   }
 }
 
+export async function resetArenaRating(entity: ArenaEntity, queue: ArenaQueue | 'all' = 'all'): Promise<{ ok: boolean; error?: string }> {
+  const entityType = entity?.entityType;
+  const entityId = typeof entity?.entityId === 'string' ? entity.entityId.trim() : '';
+  if ((entityType !== 'data_card' && entityType !== 'preset') || !entityId) {
+    return { ok: false, error: '参数无效' };
+  }
+
+  const targetQueues: ArenaQueue[] = queue === 'all' ? ['strict', 'free'] : [queue];
+  try {
+    const nowIso = new Date().toISOString();
+    for (const q of targetQueues) {
+      await queryFromD1(
+        `INSERT INTO arena_ratings (
+           entity_type, entity_id, queue,
+           rating, games, wins, losses, draws,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?)
+         ON CONFLICT(entity_type, entity_id, queue) DO UPDATE SET
+           rating = excluded.rating,
+           games = excluded.games,
+           wins = excluded.wins,
+           losses = excluded.losses,
+           draws = excluded.draws,
+           updated_at = excluded.updated_at`,
+        [entityType, entityId, q, INITIAL_RATING, nowIso, nowIso]
+      );
+    }
+    return { ok: true };
+  } catch (error) {
+    console.warn('重置 arena_ratings 失败（降级为忽略）:', { entity, queue, error });
+    return { ok: false, error: error instanceof Error ? error.message : '未知错误' };
+  }
+}
+
 const isFiniteInteger = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value);
 
 const readD1Changes = (result: unknown): number => {

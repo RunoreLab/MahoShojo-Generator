@@ -118,7 +118,8 @@ export default async function handler(req: NextRequest) {
         });
       }
 
-      if (user.id !== cardRow.user_id) {
+      const isAdmin = Number((user as any).is_admin) === 1;
+      if (!isAdmin && user.id !== cardRow.user_id) {
         return new Response(JSON.stringify({ error: '无权访问该数据卡' }), {
           status: 403,
           headers: { 'Content-Type': 'application/json' },

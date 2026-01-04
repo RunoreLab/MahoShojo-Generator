@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
@@ -53,6 +53,22 @@ interface BattleReportGenerationDetailResponse {
   error?: string;
 }
 
+type BattleReportOutputCandidate = {
+  format: 'json' | 'markdown';
+  r2Key: string;
+  downloadUrl: string;
+};
+
+type BattleReportOutputPresignResponse =
+  | {
+      success: true;
+      generationId: string;
+      indexed: boolean;
+      expiresInSeconds: number;
+      candidates: BattleReportOutputCandidate[];
+    }
+  | { success: false; error?: string };
+
 function formatIso(iso: string | null | undefined) {
   if (!iso) return '—';
   const date = new Date(iso);
@@ -74,6 +90,7 @@ function statusBadge(status: BattleReportGenerationStatus) {
 
 export default function BattleReportGenerationAdminPage() {
   const router = useRouter();
+  const outputRequestIdRef = useRef<string | null>(null);
 
   const [records, setRecords] = useState<BattleReportGenerationListRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -104,6 +121,9 @@ export default function BattleReportGenerationAdminPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailData, setDetailData] = useState<BattleReportGenerationDetailResponse | null>(null);
+  const [outputLinksLoading, setOutputLinksLoading] = useState(false);
+  const [outputLinksError, setOutputLinksError] = useState<string | null>(null);
+  const [outputLinks, setOutputLinks] = useState<Extract<BattleReportOutputPresignResponse, { success: true }> | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportIncludeCombatants, setExportIncludeCombatants] = useState(true);
   const [exportMaxRows, setExportMaxRows] = useState(20000);
@@ -156,6 +176,29 @@ export default function BattleReportGenerationAdminPage() {
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailData(null);
+    outputRequestIdRef.current = id;
+    setOutputLinksLoading(true);
+    setOutputLinksError(null);
+    setOutputLinks(null);
+
+    void (async () => {
+      try {
+        const res = await fetch(`/api/admin/battle-report-output?generationId=${encodeURIComponent(id)}`);
+        const data = (await res.json().catch(() => ({}))) as BattleReportOutputPresignResponse;
+        if (!res.ok || data.success === false) {
+          throw new Error((data as any)?.error || '获取 R2 正文下载链接失败');
+        }
+        if (outputRequestIdRef.current !== id) return;
+        setOutputLinks(data as Extract<BattleReportOutputPresignResponse, { success: true }>);
+      } catch (error) {
+        if (outputRequestIdRef.current !== id) return;
+        setOutputLinksError(error instanceof Error ? error.message : '未知错误');
+      } finally {
+        if (outputRequestIdRef.current !== id) return;
+        setOutputLinksLoading(false);
+      }
+    })();
+
     try {
       const res = await fetch(`/api/admin/battle-report-generations?id=${encodeURIComponent(id)}`);
       const data = await res.json().catch(() => ({}));
@@ -173,6 +216,10 @@ export default function BattleReportGenerationAdminPage() {
   const closeDetail = () => {
     setDetailOpen(false);
     setDetailData(null);
+    outputRequestIdRef.current = null;
+    setOutputLinksLoading(false);
+    setOutputLinksError(null);
+    setOutputLinks(null);
   };
 
   const toggleSelected = (id: string) => {
@@ -792,6 +839,37 @@ export default function BattleReportGenerationAdminPage() {
 
                 <div className="lg:col-span-2 bg-gray-50 rounded-lg p-4 border border-gray-200">
                   <h4 className="font-semibold text-gray-800 mb-3">输出预览 / 标记</h4>
+
+                  <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-gray-500">R2 正文</span>
+                    {outputLinksLoading ? (
+                      <span className="text-gray-500">加载中...</span>
+                    ) : outputLinksError ? (
+                      <span className="text-red-600">{outputLinksError}</span>
+                    ) : outputLinks?.candidates?.length ? (
+                      <>
+                        {outputLinks.candidates.map((item) => (
+                          <a
+                            key={item.r2Key}
+                            href={item.downloadUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50"
+                          >
+                            <Download className="h-3 w-3" />
+                            下载 {item.format === 'json' ? 'JSON' : 'Markdown'}
+                          </a>
+                        ))}
+                        <span className="text-gray-400">
+                          {outputLinks.indexed ? '（已索引）' : '（未索引，可能需要确认对象是否存在）'}
+                        </span>
+                        <span className="text-gray-400">有效期 {outputLinks.expiresInSeconds}s</span>
+                      </>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
+
                   <div className="grid md:grid-cols-3 gap-4 text-sm mb-4">
                     <div className="bg-white border border-gray-200 rounded-lg p-3">
                       <div className="text-gray-500 text-xs mb-1">标题</div>

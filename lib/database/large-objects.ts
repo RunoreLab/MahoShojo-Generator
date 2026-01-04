@@ -17,9 +17,23 @@ export type LargeObjectRow = {
   updated_at: string;
 };
 
+export type LargeObjectAdminRow = LargeObjectRow & {
+  owner_username: string | null;
+};
+
 const readRow = (result: any): any | null => {
   const row = result?.result?.[0]?.results?.[0];
   return row && typeof row === 'object' ? row : null;
+};
+
+const readRows = <T>(result: any): T[] => {
+  const rows = result?.result?.[0]?.results;
+  return Array.isArray(rows) ? (rows as T[]) : [];
+};
+
+const readChanges = (result: any): number => {
+  const changes = result?.result?.[0]?.meta?.changes;
+  return typeof changes === 'number' && Number.isFinite(changes) ? Math.max(0, Math.floor(changes)) : 0;
 };
 
 export async function upsertLargeObjectByOwnerRef(input: {
@@ -109,5 +123,134 @@ export async function getLargeObjectByOwnerRef(kind: LargeObjectKind, ownerRefId
     return row ? (row as LargeObjectRow) : null;
   } catch {
     return null;
+  }
+}
+
+export async function getLargeObjectById(id: string): Promise<LargeObjectAdminRow | null> {
+  const safeId = String(id || '').trim();
+  if (!safeId) return null;
+  try {
+    const result = (await queryFromD1(
+      `SELECT
+        lo.id, lo.kind, lo.owner_ref_id, lo.owner_user_id, lo.r2_key,
+        lo.bytes, lo.stored_bytes, lo.sha256, lo.content_type, lo.content_encoding,
+        lo.created_at, lo.updated_at,
+        u.username AS owner_username
+       FROM large_objects lo
+       LEFT JOIN users u ON u.id = lo.owner_user_id
+       WHERE lo.id = ?
+       LIMIT 1`,
+      [safeId]
+    )) as any;
+    const row = readRow(result);
+    return row ? (row as LargeObjectAdminRow) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function listLargeObjects(filters: {
+  page?: number;
+  limit?: number;
+  kind?: string;
+  ownerUserId?: number;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  minBytes?: number;
+  maxBytes?: number;
+}): Promise<{ rows: LargeObjectAdminRow[]; total: number }> {
+  const page = typeof filters.page === 'number' && Number.isFinite(filters.page) ? Math.max(1, Math.floor(filters.page)) : 1;
+  const limit = typeof filters.limit === 'number' && Number.isFinite(filters.limit) ? Math.max(1, Math.min(200, Math.floor(filters.limit))) : 50;
+  const offset = (page - 1) * limit;
+  const kind = typeof filters.kind === 'string' ? filters.kind.trim() : '';
+  const search = typeof filters.search === 'string' ? filters.search.trim() : '';
+  const dateFrom = typeof filters.dateFrom === 'string' ? filters.dateFrom.trim() : '';
+  const dateTo = typeof filters.dateTo === 'string' ? filters.dateTo.trim() : '';
+  const ownerUserId = typeof filters.ownerUserId === 'number' && Number.isFinite(filters.ownerUserId) ? Math.floor(filters.ownerUserId) : null;
+  const minBytes = typeof filters.minBytes === 'number' && Number.isFinite(filters.minBytes) ? Math.max(0, Math.floor(filters.minBytes)) : null;
+  const maxBytes = typeof filters.maxBytes === 'number' && Number.isFinite(filters.maxBytes) ? Math.max(0, Math.floor(filters.maxBytes)) : null;
+
+  const whereParts: string[] = [];
+  const params: unknown[] = [];
+
+  if (kind) {
+    whereParts.push('lo.kind = ?');
+    params.push(kind);
+  }
+  if (ownerUserId != null) {
+    whereParts.push('lo.owner_user_id = ?');
+    params.push(ownerUserId);
+  }
+  if (dateFrom) {
+    whereParts.push('DATE(lo.created_at) >= DATE(?)');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    whereParts.push('DATE(lo.created_at) <= DATE(?)');
+    params.push(dateTo);
+  }
+  if (minBytes != null) {
+    whereParts.push('lo.bytes >= ?');
+    params.push(minBytes);
+  }
+  if (maxBytes != null) {
+    whereParts.push('lo.bytes <= ?');
+    params.push(maxBytes);
+  }
+  if (search) {
+    const term = `%${search}%`;
+    whereParts.push('(lo.id LIKE ? OR lo.owner_ref_id LIKE ? OR lo.r2_key LIKE ? OR lo.kind LIKE ? OR u.username LIKE ?)');
+    params.push(term, term, term, term, term);
+  }
+
+  const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+  try {
+    const dataSql = `
+      SELECT
+        lo.id, lo.kind, lo.owner_ref_id, lo.owner_user_id, lo.r2_key,
+        lo.bytes, lo.stored_bytes, lo.sha256, lo.content_type, lo.content_encoding,
+        lo.created_at, lo.updated_at,
+        u.username AS owner_username
+      FROM large_objects lo
+      LEFT JOIN users u ON u.id = lo.owner_user_id
+      ${whereSql}
+      ORDER BY lo.created_at DESC, lo.id ASC
+      LIMIT ? OFFSET ?;
+    `;
+
+    const countSql = `
+      SELECT COUNT(*) AS total
+      FROM large_objects lo
+      LEFT JOIN users u ON u.id = lo.owner_user_id
+      ${whereSql};
+    `;
+
+    const [dataResult, countResult] = await Promise.all([
+      queryFromD1(dataSql, [...params, limit, offset]),
+      queryFromD1(countSql, params),
+    ]);
+
+    const rows = readRows<LargeObjectAdminRow>(dataResult as any);
+    const totalRow = readRows<{ total: number }>(countResult as any)[0];
+    const total = typeof totalRow?.total === 'number' ? totalRow.total : 0;
+    return { rows, total };
+  } catch (error) {
+    console.error('读取 large_objects 失败:', error);
+    return { rows: [], total: 0 };
+  }
+}
+
+export async function deleteLargeObjectById(id: string): Promise<{ ok: boolean; changes: number; error?: string }> {
+  const safeId = String(id || '').trim();
+  if (!safeId) return { ok: false, changes: 0, error: '缺少 id' };
+  try {
+    const result = (await queryFromD1('DELETE FROM large_objects WHERE id = ?', [safeId])) as any;
+    const changes = readChanges(result);
+    return { ok: Boolean(result?.success), changes };
+  } catch (error) {
+    console.error('删除 large_objects 失败:', error);
+    return { ok: false, changes: 0, error: error instanceof Error ? error.message : '未知错误' };
   }
 }

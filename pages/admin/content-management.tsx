@@ -340,6 +340,79 @@ const ContentManagementPage: React.FC = () => {
     }
   };
 
+  const handleRecomputeMetrics = async () => {
+    if (selectedIds.size === 0) return alert('请至少选择一个项目');
+    if (!window.confirm(`确定要对选中的 ${selectedIds.size} 个数据卡重算技术值/原生性吗？`)) return;
+
+    try {
+      const res = await fetch('/api/admin/data-card-metrics/recompute', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataCardIds: Array.from(selectedIds), force: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || '重算失败');
+      }
+      alert(`重算完成：processed=${data.processed} skipped=${data.skipped} failed=${data.failed} missing=${data.missing}`);
+      await fetchData(filters);
+    } catch (error) {
+      alert(`重算失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  const handleResetArenaRatings = async () => {
+    if (selectedIds.size === 0) return alert('请至少选择一个项目');
+
+    const characterIds = dataCards
+      .filter((card) => selectedIds.has(card.id) && card.type === 'character')
+      .map((card) => card.id);
+
+    if (characterIds.length === 0) {
+      alert('选中项中没有角色卡（type=character），无需重置排位。');
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `确定要重置选中的 ${characterIds.length} 张角色卡的排位分吗？（将同时重置 strict/free，重置为初始分）`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const results = await Promise.allSettled(
+        characterIds.map(async (id) => {
+          const res = await fetch('/api/admin/arena-ratings/reset', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entityType: 'data_card', entityId: id, queue: 'all' }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.success === false) {
+            throw new Error(data.error || `重置失败: ${id}`);
+          }
+        })
+      );
+
+      const failed = results
+        .map((r, idx) => ({ r, id: characterIds[idx] }))
+        .filter(({ r }) => r.status === 'rejected')
+        .map(({ id, r }) => `${id}: ${(r as PromiseRejectedResult).reason instanceof Error ? (r as PromiseRejectedResult).reason.message : String((r as PromiseRejectedResult).reason)}`);
+
+      if (failed.length > 0) {
+        alert(`部分重置失败（${failed.length}/${characterIds.length}）：\n${failed.slice(0, 10).join('\n')}${failed.length > 10 ? '\n...' : ''}`);
+      } else {
+        alert(`重置完成：${characterIds.length} 张角色卡`);
+      }
+
+      await fetchData(filters);
+    } catch (error) {
+      alert(`重置失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
   const executeBatchReviewUpdates = async (updateIds: string[], action: 'approve' | 'reject') => {
     const res = await fetch('/api/admin/data-card-updates/batch-review', {
       method: 'PUT',
@@ -777,6 +850,8 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                 <button onClick={() => handleBatchAction('set_public_status', -1)} className="admin-button-sm bg-zinc-700 hover:bg-zinc-800 text-white">设为封禁</button>
                 <button onClick={() => handleBatchAction('set_recommended', 1)} className="admin-button-sm bg-amber-500 hover:bg-amber-600 text-white">设为推荐</button>
                 <button onClick={() => handleBatchAction('set_recommended', 0)} className="admin-button-sm bg-amber-200 hover:bg-amber-300 text-amber-800">取消推荐</button>
+                <button onClick={handleRecomputeMetrics} className="admin-button-sm bg-indigo-700 hover:bg-indigo-800 text-white">重算技术值</button>
+                <button onClick={handleResetArenaRatings} className="admin-button-sm bg-rose-700 hover:bg-rose-800 text-white">重置排位（角色）</button>
                 <button onClick={handleExport} className="admin-button-sm bg-teal-600 hover:bg-teal-700 text-white disabled:opacity-50" disabled={isExporting || selectedIds.size === 0}>
                   {isExporting ? '导出中...' : '导出选中项'}
                 </button>
@@ -1038,6 +1113,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
           isOpen={isDetailsModalOpen}
           onClose={() => setIsDetailsModalOpen(false)}
           pendingNotice={detailsPendingNotice}
+          adminTagEditor
           card={{
             id: selectedCardDetails.id,
             name: selectedCardDetails.name,

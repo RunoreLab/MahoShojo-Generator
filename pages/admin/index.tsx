@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award } from 'lucide-react';
+import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award, Tags, BarChart3, Activity, HardDrive } from 'lucide-react';
 
 /**
  * @fileoverview 后台管理系统的统一入口和数据仪表盘。
@@ -227,6 +227,54 @@ const AdminHomePage: React.FC = () => {
                   </div>
                   <p className="text-gray-600 text-sm">
                     创建、编辑和删除徽章，为用户授予或撤销徽章，设计徽章样式和属性。
+                  </p>
+                </a>
+              </Link>
+
+              <Link href="/admin/tag-management" legacyBehavior>
+                <a className="admin-card bg-slate-50 border-slate-200 hover:border-slate-400">
+                  <div className="flex items-center text-slate-700 mb-3">
+                    <Tags className="w-8 h-8" />
+                    <h2 className="text-xl font-semibold ml-3">标签库管理</h2>
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    管理 tags / tag_aliases：新增、编辑、停用标签，以及维护同义词别名。
+                  </p>
+                </a>
+              </Link>
+
+              <Link href="/admin/arena-ratings" legacyBehavior>
+                <a className="admin-card bg-sky-50 border-sky-200 hover:border-sky-400">
+                  <div className="flex items-center text-sky-700 mb-3">
+                    <BarChart3 className="w-8 h-8" />
+                    <h2 className="text-xl font-semibold ml-3">排位运维</h2>
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    浏览并筛选 arena_ratings（strict/free），支持批量重置排位分，联动查看数据卡与技术值。
+                  </p>
+                </a>
+              </Link>
+
+              <Link href="/admin/arena-rating-events" legacyBehavior>
+                <a className="admin-card bg-rose-50 border-rose-200 hover:border-rose-400">
+                  <div className="flex items-center text-rose-700 mb-3">
+                    <Activity className="w-8 h-8" />
+                    <h2 className="text-xl font-semibold ml-3">排位事件审计</h2>
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    检索 arena_rating_events：查看每次结算的 before/delta/after、跳过原因与关联战报。
+                  </p>
+                </a>
+              </Link>
+
+              <Link href="/admin/large-objects" legacyBehavior>
+                <a className="admin-card bg-emerald-50 border-emerald-200 hover:border-emerald-400">
+                  <div className="flex items-center text-emerald-700 mb-3">
+                    <HardDrive className="w-8 h-8" />
+                    <h2 className="text-xl font-semibold ml-3">大对象管理</h2>
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    管理 large_objects 与 R2：筛选/检索大对象索引，生成下载链接，并支持清理索引与对象。
                   </p>
                 </a>
               </Link>

@@ -3,6 +3,7 @@ import { Search, Save, X, Database, Eye, Ban, CheckCircle, AlertTriangle, Calend
 import { getDataCardStatus } from '@/lib/database/data-cards';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 
 interface DataCard {
   id: string;
@@ -40,6 +41,7 @@ export default function CharacterManagement() {
   const [typeFilter, setTypeFilter] = useState<'all' | 'character' | 'scenario' | 'history'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'public' | 'private' | 'banned'>('all');
   const [viewingData, setViewingData] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const isComposingRef = useRef(false);
   const cardsAbortControllerRef = useRef<AbortController | null>(null);
 
@@ -378,6 +380,13 @@ export default function CharacterManagement() {
                 {selectedCard && editingCard && (
                   <div className="flex gap-2">
                     <button
+                      onClick={() => setDetailsOpen(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                    >
+                      <Eye className="w-4 h-4" />
+                      查看详情
+                    </button>
+                    <button
                       onClick={viewCardData}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                     >
@@ -607,6 +616,28 @@ export default function CharacterManagement() {
               </div>
             </div>
           </div>
+        )}
+
+        {selectedCard && (
+          <DataCardDetailsModal
+            isOpen={detailsOpen}
+            onClose={() => setDetailsOpen(false)}
+            adminTagEditor
+            card={{
+              id: selectedCard.id,
+              name: selectedCard.name,
+              description: selectedCard.description,
+              type: selectedCard.type,
+              data: selectedCard.data,
+              isPublic: selectedCard.is_public === 1,
+              usageCount: selectedCard.usage_count,
+              likeCount: selectedCard.like_count,
+              favoriteCount: selectedCard.favorite_count,
+              author: selectedCard.username ?? String(selectedCard.user_id),
+              createdAt: selectedCard.created_at,
+              updatedAt: selectedCard.updated_at,
+            }}
+          />
         )}
       </div>
     </div>
