@@ -239,7 +239,7 @@ export function RankingPage() {
 
   const appliedSummary = useMemo(() => {
     const parts: string[] = [];
-    parts.push(appliedFilters.queue === 'strict' ? '严格梯子' : '自由梯子');
+    parts.push(appliedFilters.queue === 'strict' ? '严格天梯' : '自由天梯');
     parts.push(appliedFilters.sort === 'rating' ? '按排位分排序' : '按技术值排序');
     if (appliedFilters.isNative === '1') parts.push('仅原生');
     else if (appliedFilters.isNative === '0') parts.push('仅非原生');
@@ -292,7 +292,7 @@ export function RankingPage() {
 
                     <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
                       <label className="text-sm text-gray-700">
-                        梯子
+                        天梯
                         <select
                           value={draftFilters.queue}
                           onChange={(e) => setDraftFilters((prev) => ({ ...prev, queue: e.target.value === 'free' ? 'free' : 'strict' }))}

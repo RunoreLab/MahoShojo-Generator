@@ -1,6 +1,6 @@
 # v0.6.0 设计记录：排位分 / 技术值 / 定位标签 / 百科 / 排行榜
 
-更新时间：2026-01-03  
+更新时间：2026-01-04  
 适用项目：Next.js（Edge Runtime）+ Cloudflare D1 + Tailwind 4 + Vercel AI SDK 1.x
 
 > 说明：本文是「可落地」的设计草案，用于讨论与实现对齐；具体数值（K 因子、段位阈值、技术值权重等）允许在上线后根据分布与反馈迭代。
@@ -19,7 +19,7 @@
 - 公共排行榜：默认只展示 `data_cards.is_public=1 AND review_status='approved'` + 预设；作者可额外看到“我的卡的当前位置”（不影响公共名次）
 
 **必须明确的 3 个工程约束**
-1. **幂等**：同一 `generation_id` 在同一梯子（strict/free）下最多只能结算一次（允许重试但不得重复加分）
+1. **幂等**：同一 `generation_id` 在同一天梯（strict/free）下最多只能结算一次（允许重试但不得重复加分）
 2. **可审计**：任何分数变化必须能反查到 `battle_report_generations.id`
 3. **Edge 友好**：计算必须可在 `executionContext.waitUntil(...)` 中执行，超时/失败不影响主链路返回
 
@@ -37,7 +37,7 @@
 ### 0.2 术语表（本文统一口径）
 - **实体（Entity）**：参与计分/榜单展示的对象。v0.6.0 仅包含：数据库角色卡（`data_cards.id` 且 `type='character'`）与预设角色（`preset filename`）。
 - **实体键（entityKey）**：字符串标识，格式：`data_card:<id>` 或 `preset:<filename>`（用于事件去重与组合 key）。
-- **梯子（queue/ladder）**：`strict` / `free` 两套独立评分。
+- **天梯（queue/ladder，旧称“梯子”）**：`strict` / `free` 两套独立评分。
 - **对局主键（generation_id）**：`battle_report_generations.id`，本文所有结算/审计均以它为锚点。
 
 ### 目标（v0.6.0）
@@ -77,7 +77,7 @@
   - 来自数据库角色卡：`battle_report_generation_combatants.data_card_id IS NOT NULL`
   - 或系统预设：`battle_report_generation_combatants.is_preset = 1`
 - `battle_report_generations.status = 'completed'`
-- `battle_report_generations.ip_anonymized IS NOT NULL`（free 梯子限速所需；若为空则该局 strict/free 都不计分）
+- `battle_report_generations.ip_anonymized IS NOT NULL`（free 天梯限速所需；若为空则该局 strict/free 都不计分）
 - 能从战报解析出胜负，且能把胜者与参战者**唯一匹配**：
   - `winner = '平局'` → 允许（视为平局）
   - `winner` 为单个名字 → 必须匹配到且仅匹配到 1 名参战者
@@ -328,7 +328,7 @@ v0.6.0 推荐采用“事件先行”的两阶段：
 - strict（按用户）：`queue='strict' AND status='applied' AND user_id=? AND pair_key=? AND created_at >= ?`
 - free（按脱敏 IP）：`queue='free' AND status='applied' AND ip_anonymized=? AND pair_key=? AND created_at >= ?`
 
-> 规则：如果 `ip_anonymized IS NULL`，则 free 梯子不计分（避免无法限速）。由于 strict 命中会同时更新 free，为保证 strict ⊆ free，v0.6.0 直接将该条件放入“基础资格”，使该局 strict/free 均跳过（宁可漏算）。
+> 规则：如果 `ip_anonymized IS NULL`，则 free 天梯不计分（避免无法限速）。由于 strict 命中会同时更新 free，为保证 strict ⊆ free，v0.6.0 直接将该条件放入“基础资格”，使该局 strict/free 均跳过（宁可漏算）。
 
 ---
 
@@ -765,7 +765,7 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 
 ## 7. 已确认口径（实现依据）
 
-确认时间：2026-01-03
+确认时间：2026-01-04
 
 1) 排位对象：数据卡 `data_cards.id`；预设用 `preset filename`。
 2) v0.6.0 先按 1v1 计分 MVP（`combatant_count = 2`）。
@@ -773,7 +773,7 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 4) PVP 触发的战报：允许计入排位（仍需满足 strict/free eligibility；通常更偏向落在 free）。
 5) 平局：计入对局数，按 Elo 的 `S=0.5` 微调分数。
 6) strict 命中：同时更新 strict 与 free（strict ⊆ free）。
-7) free 梯子：`ip_anonymized IS NULL` 时不计分（为保证 strict ⊆ free，该条件已写入“基础资格”，使该局 strict/free 均跳过）。
+7) free 天梯：`ip_anonymized IS NULL` 时不计分（为保证 strict ⊆ free，该条件已写入“基础资格”，使该局 strict/free 均跳过）。
 8) 计分允许包含私有卡，但公共榜过滤：仅展示 `data_cards.is_public=1 AND review_status='approved'` + 预设。
 9) 预设角色：出现在排行榜里（与数据库角色卡同榜展示）。
 10) strict 风控：10 分钟同对手组合去重 + strict 每日计分上限 80 局（见 1.9）。
@@ -805,4 +805,3 @@ bun tsx scripts/init-tags.ts
 ```
 
 ---
-
