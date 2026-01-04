@@ -62,13 +62,19 @@ async function handler(req: NextRequest): Promise<Response> {
 	    let snapshotSelectedLevel: string | null = null;
 	    let snapshotStoryLength: string | null = null;
 	    let snapshotPvpRoomId: string | null = null;
-	    let snapshotPvpMatchId: string | null = null;
-	    let snapshotPvpRoundId: string | null = null;
+        let snapshotPvpMatchId: string | null = null;
+        let snapshotPvpRoundId: string | null = null;
 
-	    try {
-	        const body = await req.json();
-	        const {
-	            combatants,
+        try {
+            const normalizeOptionalString = (value: unknown): string | null => {
+                if (typeof value !== 'string') return null;
+                const trimmed = value.trim();
+                return trimmed ? trimmed : null;
+            };
+
+            const body = await req.json();
+            const {
+                combatants,
             selectedLevel,
             mode = 'classic',
             userGuidance,
@@ -96,17 +102,17 @@ async function handler(req: NextRequest): Promise<Response> {
               forceStreamMeta,
 	        } = body;
 
-          const normalizedAuxScenarios = Array.isArray(auxScenarios)
-              ? auxScenarios.filter((item) => item && typeof item === 'object')
-              : null;
+	          const normalizedAuxScenarios = Array.isArray(auxScenarios)
+	              ? auxScenarios.filter((item) => item && typeof item === 'object')
+	              : null;
           if (normalizedAuxScenarios && normalizedAuxScenarios.length > 10) {
               return new Response(JSON.stringify({ error: '辅助情景最多 10 个' }), { status: 400 });
           }
 
-	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
-	        snapshotLanguage = typeof language === 'string' ? language : null;
-	        snapshotSelectedLevel = typeof selectedLevel === 'string' ? selectedLevel : null;
-	        snapshotStoryLength = typeof storyLength === 'string' ? storyLength : null;
+		        snapshotMode = typeof mode === 'string' ? mode : 'classic';
+		        snapshotLanguage = normalizeOptionalString(language);
+		        snapshotSelectedLevel = normalizeOptionalString(selectedLevel);
+		        snapshotStoryLength = normalizeOptionalString(storyLength);
 
           const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
               if (!value || typeof value !== 'object') return null;
@@ -380,11 +386,13 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            hasUserGuidance: typeof userGuidance === 'string' ? Boolean(userGuidance.trim()) : false,
 	                            hasAdjudicationEvents: Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0,
 	                            hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
-	                            extraJson: {
-	                                errorMessage: 'rejected by sensitive input filter',
-	                                rejectedBy: 'sensitive-input',
-	                            },
-	                        });
+		                            extraJson: compactExtraJson({
+		                                errorMessage: 'rejected by sensitive input filter',
+		                                rejectedBy: 'sensitive-input',
+		                                readNarrativeHistory: resolvedReadNarrativeHistory,
+		                                narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+		                            }),
+		                        });
 	                    } catch (writeError) {
 	                        log.warn('战报生成记录：写入失败（敏感词拒绝）', { writeError });
 	                    }
@@ -554,9 +562,9 @@ async function handler(req: NextRequest): Promise<Response> {
                         : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
                     scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                     scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
-                    language: typeof language === 'string' ? language : null,
-                    selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
-                    storyLength: typeof storyLength === 'string' ? storyLength : null,
+	                    language: normalizeOptionalString(language),
+	                    selectedLevel: normalizeOptionalString(selectedLevel),
+	                    storyLength: normalizeOptionalString(storyLength),
                     pvpRoomId: snapshotPvpRoomId,
                     pvpMatchId: snapshotPvpMatchId,
                     pvpRoundId: snapshotPvpRoundId,
@@ -593,13 +601,15 @@ async function handler(req: NextRequest): Promise<Response> {
                     totalTokens: usage?.totalTokens ?? null,
                     cachedTokens: usage?.cachedTokens ?? null,
                     reasoningTokens: usage?.reasoningTokens ?? null,
-                    outputPreview,
-                    outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
-                    outputHasShieldWords: shieldResult.hasShieldWords,
-                    extraJson: compactExtraJson({
-                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
-                    }),
-                });
+	                    outputPreview,
+	                    outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
+	                    outputHasShieldWords: shieldResult.hasShieldWords,
+	                    extraJson: compactExtraJson({
+	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+	                        readNarrativeHistory: resolvedReadNarrativeHistory,
+	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+	                    }),
+	                });
 
                 if (createdId && Array.isArray(combatants) && normalizedStatus !== 'failed') {
                     const toBytes = (value: string) => new TextEncoder().encode(value).length;
