@@ -1,4 +1,5 @@
 import {
+  createBattleReportGenerationRecord,
   getPvpCardSnapshotById,
   getPvpEligibleScenarioDataCard,
   getPvpRoomById,
@@ -7,6 +8,7 @@ import {
   getPvpRoomPlayers,
   getPvpRoundById,
   getPvpRoundChoices,
+  generateUUID,
   updatePvpRoomCas,
   updatePvpRound,
   upsertPvpRoomHand,
@@ -21,6 +23,7 @@ import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/rou
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { buildPvpSensitiveArrestWarrantReport } from '@/lib/pvp/arrest-warrant';
+import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { createPvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
@@ -344,6 +347,7 @@ async function resolveHandler(req: Request): Promise<Response> {
   };
 
   let report: any | null = null;
+  let battleGenerationId: string | null = null;
   let updatedCombatants: any[] | null = null;
   let rawWinnerText: string | null = null;
   let attempts = 0;
@@ -421,6 +425,7 @@ async function resolveHandler(req: Request): Promise<Response> {
         }
 
         if (generationId) {
+          battleGenerationId = generationId;
           await updatePvpRound(roundId, { battleGenerationId: generationId });
         }
 
@@ -433,6 +438,56 @@ async function resolveHandler(req: Request): Promise<Response> {
             roundId,
             issuedAt: new Date(),
           });
+
+          // 逮捕令也是战报：外部化到 R2，并写入 battle_report_generations（D1 不保存正文/摘要）。
+          try {
+            const generationId = generateUUID();
+            const startedAtIso = new Date().toISOString();
+            const reportJson = JSON.stringify(report);
+            const bytes = new TextEncoder().encode(reportJson).byteLength;
+
+            const stored = await storeBattleReportGenerationOutputTextToR2({
+              generationId,
+              startedAtIso,
+              ownerUserId: auth.user.id,
+              format: 'json',
+              text: reportJson,
+            });
+
+            if (stored.ok) {
+              await createBattleReportGenerationRecord({
+                id: generationId,
+                startedAt: startedAtIso,
+                endedAt: startedAtIso,
+                durationMs: 0,
+                status: 'completed',
+                generationMode: 'non-stream',
+                endpoint: 'api/pvp/resolve(arrest-warrant)',
+                userId: auth.user.id,
+                username: (auth.user as any)?.username ?? null,
+                userPrefix: (auth.user as any)?.prefix ?? null,
+                mode: rules.mode,
+                language: rules.language?.trim() ? rules.language.trim() : null,
+                selectedLevel: rules.selectedLevel ?? null,
+                storyLength: rules.storyLength ?? null,
+                headline: typeof report?.headline === 'string' && report.headline.trim() ? report.headline.trim() : '战报',
+                winner: '平局',
+                outputChars: reportJson.length,
+                outputBytes: bytes,
+                outputPreview: null,
+                outputHasSensitiveWords: false,
+                outputHasShieldWords: false,
+                pvpRoomId: roomId,
+                pvpMatchId: matchId,
+                pvpRoundId: roundId,
+              });
+              battleGenerationId = generationId;
+              await updatePvpRound(roundId, { battleGenerationId: generationId });
+            }
+          } catch {
+            // 外部化失败：仍继续结算（该逮捕令可能无法在刷新后回溯）
+          }
+
           rawWinnerText = '平局';
           isDraw = true;
           winnerIndex = null;
@@ -470,6 +525,7 @@ async function resolveHandler(req: Request): Promise<Response> {
 
       const generationId = typeof data?.generationId === 'string' ? data.generationId : null;
       if (generationId) {
+        battleGenerationId = generationId;
         await updatePvpRound(roundId, { battleGenerationId: generationId });
       }
       report = data?.report ?? null;
@@ -549,6 +605,8 @@ async function resolveHandler(req: Request): Promise<Response> {
     winnerToken: shouldStartWinnerVote ? null : (isDraw || winnerIndex === null ? null : picked[winnerIndex]!.token),
     winnerIsBot: shouldStartWinnerVote ? null : (isDraw || winnerIndex === null ? null : Boolean(picked[winnerIndex]!.isBot)),
     winnerStatus: shouldStartWinnerVote ? 'pending_vote' : 'final',
+    headline: typeof report?.headline === 'string' && report.headline.trim() ? report.headline.trim() : null,
+    battleGenerationId: battleGenerationId,
     winnerVote: shouldStartWinnerVote
       ? {
           status: 'open',
@@ -571,7 +629,6 @@ async function resolveHandler(req: Request): Promise<Response> {
       type: p.snapshot.card_type,
       ...(p.characterGuidance ? { characterGuidance: p.characterGuidance } : {}),
     })),
-    report,
     updatedCombatants: updatedCombatants ?? [],
   });
 

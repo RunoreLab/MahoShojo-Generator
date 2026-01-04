@@ -10,11 +10,11 @@ describe('pvp settlement card', () => {
       winnerSeat: 1,
       winnerIsBot: false,
       winnerStatus: 'final',
+      headline: '月下决斗',
       combatants: [
         { userId: 12, seat: 1, isBot: false, snapshotId: 'snap_a', name: '星光之刃', type: 'magical-girl' },
         { userId: 99, seat: 2, isBot: false, snapshotId: 'snap_b', name: '残兽·灰雾', type: 'canshou' },
       ],
-      report: { headline: '月下决斗', officialReport: { winner: '星光之刃' } },
     });
 
     const parsed = parsePvpRoundResultJson(raw);
@@ -30,11 +30,11 @@ describe('pvp settlement card', () => {
       winnerName: '星光之刃',
       winnerSeat: 1,
       winnerIsBot: false,
+      headline: '月下决斗',
       combatants: [
         { userId: 12, seat: 1, isBot: false, snapshotId: 'snap_a', name: '星光之刃', type: 'magical-girl' },
         { userId: 99, seat: 2, isBot: false, snapshotId: 'snap_b', name: '残兽·灰雾', type: 'canshou' },
       ],
-      report: { headline: '月下决斗' },
     });
 
     const result = parsePvpRoundResultJson(raw);
@@ -68,8 +68,8 @@ describe('pvp settlement card', () => {
       winnerName: null,
       winnerSeat: null,
       winnerIsBot: null,
+      headline: '调查院接管',
       combatants: [],
-      report: { headline: '调查院接管' },
     });
 
     const result = parsePvpRoundResultJson(raw);
@@ -102,7 +102,32 @@ describe('pvp settlement card', () => {
     expect(summary.headline).toBeNull();
   });
 
-  it('extracts headline from reportMarkdown for stream results', () => {
+  it('uses headline field when report body is externalized', () => {
+    const raw = JSON.stringify({
+      generationMode: 'stream',
+      winnerUserId: 12,
+      winnerName: '星光之刃',
+      winnerSeat: 1,
+      winnerIsBot: false,
+      headline: '月下决斗',
+      combatants: [{ userId: 12, seat: 1, isBot: false, snapshotId: 'snap_a', name: '星光之刃', type: 'magical-girl' }],
+    });
+
+    const result = parsePvpRoundResultJson(raw);
+    const summary = buildPvpSettlementRoundSummary({
+      roundId: 'r4',
+      roundIndex: 4,
+      status: 'completed',
+      result,
+      usernameByUserId: new Map([[12, '小明']]),
+      isBotByUserId: new Map([[12, false]]),
+      myUserId: 12,
+    });
+
+    expect(summary.headline).toBe('月下决斗');
+  });
+
+  it('still extracts headline from legacy reportMarkdown when headline missing', () => {
     const raw = JSON.stringify({
       generationMode: 'stream',
       winnerUserId: 12,
@@ -115,7 +140,7 @@ describe('pvp settlement card', () => {
 
     const result = parsePvpRoundResultJson(raw);
     const summary = buildPvpSettlementRoundSummary({
-      roundId: 'r4',
+      roundId: 'r4b',
       roundIndex: 4,
       status: 'completed',
       result,
