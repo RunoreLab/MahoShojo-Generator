@@ -8,6 +8,7 @@ import {
   isFreeEligible,
   isStrictEligible,
   parseCombatantEntity,
+  settleArenaRatingsForGeneration,
   type ArenaEntity,
   type ArenaEligibilitySnapshot,
 } from '@/lib/database/arena-ratings';
@@ -175,8 +176,8 @@ export default async function handler(req: NextRequest) {
       };
     });
 
-    // 读取事件（可能尚未插入）
-    const eventRows = readRows<{
+    const readEventRows = async () =>
+      readRows<{
       queue: ApiQueue;
       status: 'pending' | 'applied' | 'skipped' | 'failed';
       skip_reason: string | null;
@@ -195,31 +196,56 @@ export default async function handler(req: NextRequest) {
       b_before_games: number | null;
       b_after_games: number | null;
     }>(
-      await queryFromD1(
-        `SELECT
-          queue,
-          status,
-          skip_reason,
-          a_entity_type,
-          a_entity_id,
-          b_entity_type,
-          b_entity_id,
-          a_before_rating,
-          a_after_rating,
-          a_delta,
-          a_before_games,
-          a_after_games,
-          b_before_rating,
-          b_after_rating,
-          b_delta,
-          b_before_games,
-          b_after_games
-        FROM arena_rating_events
-        WHERE generation_id = ?
-          AND queue IN ('strict', 'free')`,
-        [generationId],
-      ),
-    );
+        await queryFromD1(
+          `SELECT
+            queue,
+            status,
+            skip_reason,
+            a_entity_type,
+            a_entity_id,
+            b_entity_type,
+            b_entity_id,
+            a_before_rating,
+            a_after_rating,
+            a_delta,
+            a_before_games,
+            a_after_games,
+            b_before_rating,
+            b_after_rating,
+            b_delta,
+            b_before_games,
+            b_after_games
+          FROM arena_rating_events
+          WHERE generation_id = ?
+            AND queue IN ('strict', 'free')`,
+          [generationId],
+        ),
+      );
+
+    // 读取事件（可能尚未插入）
+    let eventRows = await readEventRows();
+
+    // 自愈：流式生成时排位结算可能因边缘运行时中断而未执行/未完成。
+    // 若 eligible 队列缺事件或处于 pending，则尝试在查询端补做一次结算。
+    const shouldAttemptAutoSettle = (() => {
+      if (!strictEligible && !freeEligible) return false;
+      const byQueue = new Map<ApiQueue, (typeof eventRows)[number]>();
+      eventRows.forEach((row) => byQueue.set(row.queue === 'free' ? 'free' : 'strict', row));
+      if (strictEligible) {
+        const strictEvent = byQueue.get('strict');
+        if (!strictEvent || strictEvent.status === 'pending') return true;
+      }
+      if (freeEligible) {
+        const freeEvent = byQueue.get('free');
+        if (!freeEvent || freeEvent.status === 'pending') return true;
+      }
+      return false;
+    })();
+
+    if (shouldAttemptAutoSettle) {
+      await settleArenaRatingsForGeneration(generationId);
+      eventRows = await readEventRows();
+    }
 
     const eventByQueue = new Map<ApiQueue, (typeof eventRows)[number]>();
     eventRows.forEach((row) => eventByQueue.set(row.queue === 'free' ? 'free' : 'strict', row));

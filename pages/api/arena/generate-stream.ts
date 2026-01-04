@@ -630,28 +630,36 @@ async function handler(req: NextRequest): Promise<Response> {
                     if (!combatantsWrite.ok) {
                         log.warn('战报生成记录：角色明细写入失败', { recordId: generationId, errorMessage: combatantsWrite.errorMessage });
                     }
-                    await updateBattleReportGenerationCombatantsWriteResult(generationId, {
-                        ok: combatantsWrite.ok,
-                        expectedRows: rows.length,
-                        errorMessage: combatantsWrite.errorMessage ?? null,
-                    });
+	                    await updateBattleReportGenerationCombatantsWriteResult(generationId, {
+	                        ok: combatantsWrite.ok,
+	                        expectedRows: rows.length,
+	                        errorMessage: combatantsWrite.errorMessage ?? null,
+	                    });
 
-	                    if (!combatantsWrite.ok) {
-	                        await updateBattleReportGenerationExtraJson(
-	                            generationId,
-	                            compactExtraJson({
-	                                errorMessage: normalizeErrorMessage(normalizedErrorMessage),
-	                                combatantsFallbackReason: 'combatants-table-write-failed',
-	                                combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
-	                            })
-	                        );
+		                    if (!combatantsWrite.ok) {
+		                        await updateBattleReportGenerationExtraJson(
+		                            generationId,
+		                            compactExtraJson({
+		                                errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+		                                combatantsFallbackReason: 'combatants-table-write-failed',
+		                                combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
+		                            })
+		                        );
+		                    }
+		                }
+
+	                    if (createdId) {
+	                        try {
+	                            await settleArenaRatingsForGeneration(generationId);
+	                        } catch (error) {
+	                            log.warn('排位结算失败（非阻塞）', { recordId: generationId, error });
+	                        }
 	                    }
-	                }
 
-                    const stored = r2UploadPromise ? await r2UploadPromise.catch(() => null) : null;
-                    if (stored?.ok && stored.r2Key) {
-                        if (normalizedStatus === 'completed') {
-                            const indexed = await upsertLargeObjectByOwnerRef({
+	                    const stored = r2UploadPromise ? await r2UploadPromise.catch(() => null) : null;
+		                    if (stored?.ok && stored.r2Key) {
+		                        if (normalizedStatus === 'completed') {
+		                            const indexed = await upsertLargeObjectByOwnerRef({
                                 kind: 'battle_report_generation_output',
                                 ownerRefId: generationId,
                                 ownerUserId: user?.id ?? null,
@@ -666,18 +674,10 @@ async function handler(req: NextRequest): Promise<Response> {
                                 await updateBattleReportGenerationOutputPreview(generationId, null);
                             }
                         } else {
-                            await deleteObject(stored.r2Key);
-                        }
-                    }
-
-                    if (createdId) {
-                        try {
-                            await settleArenaRatingsForGeneration(generationId);
-                        } catch (error) {
-                            log.warn('排位结算失败（非阻塞）', { recordId: generationId, error });
-                        }
-                    }
-	            })();
+		                            await deleteObject(stored.r2Key);
+		                        }
+		                    }
+		            })();
 
             try {
                 if (executionContext?.waitUntil) {
