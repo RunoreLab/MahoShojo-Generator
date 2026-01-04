@@ -592,7 +592,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                       <th className="py-2 px-3">分</th>
                       <th className="py-2 px-3">局</th>
                       <th className="py-2 px-3">W/L/D</th>
-                      <th className="py-2 px-3">技</th>
+                      <th className="py-2 px-3">技术</th>
                       <th className="py-2 px-3">原生</th>
                       <th className="py-2 px-3">操作</th>
                     </tr>
