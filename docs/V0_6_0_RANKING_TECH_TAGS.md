@@ -794,6 +794,7 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 **8.1 静态配置与存储**
 - **赛季元数据**：维护在 `public/config/seasons.json` 中，包含赛季名称、ID、起止时间、状态及说明等所需信息。
 - **历史归档**：赛季结束时，生成的历史快照存储于 `public/data/seasons/archive_{season_id}.json`。客户端直接读取此静态文件展示历史榜单。
+- **作者快照**：归档时会尝试写入数据卡作者 `authorName`（来自 `users.username`）；旧归档或无法解析作者时，前端统一显示为 “—”。
 
 **8.2 UI 展示变更**
 - **排行榜 (Leaderboard)**：
