@@ -787,24 +787,28 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 
 ---
 
-## 8. 收尾工作
-- 更新 Readme 与公告。
-- v0.6.0 正式上线前建议跑一遍（本地/CI）：
-```bash
-bun install
-bun run lint
-bun test
-bun run build
-bun run preview
-```
-- v0.6.0 数据库与种子（需要具备 D1 管理权限与环境变量）：
-```bash
-# 先确保线上 D1 已执行 `lib/database/schema.sql` 的新增建表/索引（按你当前的迁移流程落地）
-# （可选：若你用 wrangler 管理 D1，可参考下面命令；将 <DB> 替换为你的 D1 数据库名称或 ID）
-# WRANGLER_HOME=.wrangler npx wrangler d1 execute <DB> --file=lib/database/schema.sql --remote
-#
-# 同步标签库种子到 D1（依赖 D1_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID）
-bun tsx scripts/init-tags.ts
-```
+## 8. 赛季机制 (Season System)
 
----
+为了保持排位系统的活力与公平性，并提供历史数据回顾功能，可引入赛季制度。
+
+**8.1 静态配置与存储**
+- **赛季元数据**：维护在 `public/config/seasons.json` 中，包含赛季名称、ID、起止时间、状态及说明等所需信息。
+- **历史归档**：赛季结束时，生成的历史快照存储于 `public/data/seasons/archive_{season_id}.json`。客户端直接读取此静态文件展示历史榜单。
+
+**8.2 UI 展示变更**
+- **排行榜 (Leaderboard)**：
+  - 标题旁增加赛季切换下拉框（当前赛季 + 历史赛季列表）。
+  - 显示赛季名称、ID、起止时间、状态及说明等信息。
+  - 切换至历史赛季时，数据源从 API 转为读取对应的静态 JSON 文件。
+- **个人资料卡 (Profile)**：
+  - 在“数据卡高光”标题后方，以 Badge 形式展示当前赛季名称/ID。
+- **模态框**：排位相关界面显示当前赛季标识。
+
+**8.3 赛季结算流程**
+1. **冻结与归档**：
+   - 运行归档脚本，锁定当前榜单。
+   - 提取全服 Top 50（最强）与 Bottom 20（最弱）的角色排行榜所需信息快照，写入静态文件。
+2. **段位重置 (Soft Reset)**：
+   - 参考成熟游戏的设计，将排位分重置到合适的段位。
+3. **新赛季开启**：
+   - 更新 `seasons.json`，标记旧赛季为结束，新赛季为当前。
