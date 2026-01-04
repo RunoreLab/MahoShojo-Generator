@@ -5,11 +5,11 @@ import { queryFromD1 } from './core';
 /**
  * [新增] 获取仪表盘所需的各项统计数据。
  * @description
- * 该函数通过并发执行多个独立的聚合查询来收集核心指标。
- * D1数据库不支持在单次请求中执行多条语句，因此我们使用 Promise.all 来并行处理，以提高性能。
+ * 该函数按模块（核心/排位/标签/大对象/存储）汇总关键指标，并在某些表尚未迁移时自动降级为 0/空值，避免仪表盘崩溃。
+ * D1 单次请求只能执行一条语句，因此每个模块尽量压缩成单条 SELECT（含子查询）以减少请求次数。
  * @returns {Promise<object>} 返回一个包含所有统计数据的对象。
  */
-export async function getDashboardStats(): Promise<{
+export type DashboardStats = {
   totalUsers: number;
   totalDataCards: number;
   pendingReviewCount: number;
@@ -21,84 +21,292 @@ export async function getDashboardStats(): Promise<{
   battleReportGenerationsAbortFailToday: number;
   battleReportGenerationAbortFailRateToday: number;
   serverTimeIso: string;
-}> {
-  try {
-    const serverTimeIso = new Date().toISOString();
-    // 定义所有需要执行的查询
-    const queries = {
-      totalUsers: "SELECT COUNT(id) as total FROM users;",
-      totalDataCards: "SELECT COUNT(id) as total FROM data_cards;",
-      pendingReviewCount: "SELECT COUNT(id) as total FROM data_cards WHERE review_status = 'pending' AND is_public = 1;",
-      bannedUsersCount: "SELECT COUNT(id) as total FROM users WHERE is_banned IS NOT NULL AND is_banned != '';",
-      bannedDataCardsCount: "SELECT COUNT(id) as total FROM data_cards WHERE is_public = -1;",
-      // 注意：D1 使用 strftime 和 'now', 'localtime' 来处理日期
-      newUsersToday: "SELECT COUNT(id) as total FROM users WHERE DATE(created_at) = DATE('now', 'localtime');",
-      newDataCardsToday: "SELECT COUNT(id) as total FROM data_cards WHERE DATE(created_at) = DATE('now', 'localtime');",
-      battleReportGenerationsToday: "SELECT COUNT(id) as total FROM battle_report_generations WHERE DATE(started_at) = DATE('now', 'localtime');",
-      battleReportGenerationsAbortFailToday: "SELECT COUNT(id) as total FROM battle_report_generations WHERE DATE(started_at) = DATE('now', 'localtime') AND status IN ('aborted','failed');",
-    };
+  d1NowUtc: string | null;
+  d1NowLocal: string | null;
+  d1PageCount: number | null;
+  d1PageSize: number | null;
+  d1FreelistCount: number | null;
+  d1EstimatedFileBytes: number | null;
+  d1EstimatedUsedBytes: number | null;
 
-    // 使用 Promise.all 并行执行所有查询
-    const results = await Promise.all(
-      Object.values(queries).map(sql => queryFromD1(sql))
-    );
+  arenaRatingsStrictTotal: number;
+  arenaRatingsFreeTotal: number;
+  arenaRatingEventsPendingTotal: number;
+  arenaRatingEventsTodayTotal: number;
+  arenaRatingEventsAppliedTodayTotal: number;
+  arenaRatingEventsSkippedTodayTotal: number;
+  arenaRatingEventsFailedTodayTotal: number;
+  leaderboardEligibleStrictDataCardTotal: number;
+  leaderboardEligibleFreeDataCardTotal: number;
 
-    // 辅助函数，用于安全地从查询结果中提取计数值
-    const getCount = (result: any): number => {
-      // D1 API的返回结构可能有多层嵌套
-      return result?.result?.[0]?.results?.[0]?.total || 0;
-    };
-    
-    // 将查询结果映射到最终的返回对象
-    const [
-      totalUsersResult,
-      totalDataCardsResult,
-      pendingReviewCountResult,
-      bannedUsersCountResult,
-      bannedDataCardsCountResult,
-      newUsersTodayResult,
-      newDataCardsTodayResult,
-      battleReportGenerationsTodayResult,
-      battleReportGenerationsAbortFailTodayResult,
-    ] = results;
+  dataCardMetricsTotal: number;
+  publicApprovedCharacterCardsTotal: number;
+  publicApprovedCharacterMetricsTotal: number;
+  activeTagsTotal: number;
+  tagAliasesTotal: number;
+  dataCardTagsTotal: number;
 
-    const battleReportGenerationsToday = getCount(battleReportGenerationsTodayResult);
-    const battleReportGenerationsAbortFailToday = getCount(battleReportGenerationsAbortFailTodayResult);
-    const battleReportGenerationAbortFailRateToday = battleReportGenerationsToday > 0
-      ? battleReportGenerationsAbortFailToday / battleReportGenerationsToday
-      : 0;
+  largeObjectsTotal: number;
+  largeObjectsBytesTotal: number;
+  largeObjectsStoredBytesTotal: number;
+  largeObjectsBattleReportOutputTotal: number;
+  largeObjectsBattleReportOutputBytesTotal: number;
+};
 
-    return {
-      totalUsers: getCount(totalUsersResult),
-      totalDataCards: getCount(totalDataCardsResult),
-      pendingReviewCount: getCount(pendingReviewCountResult),
-      bannedUsersCount: getCount(bannedUsersCountResult),
-      bannedDataCardsCount: getCount(bannedDataCardsCountResult),
-      newUsersToday: getCount(newUsersTodayResult),
-      newDataCardsToday: getCount(newDataCardsTodayResult),
-      battleReportGenerationsToday,
-      battleReportGenerationsAbortFailToday,
-      battleReportGenerationAbortFailRateToday,
-      serverTimeIso,
-    };
+type D1Row = Record<string, unknown>;
 
-  } catch (error) {
-    console.error('[Admin] 获取仪表盘统计数据失败:', error);
-    // 在出错时返回一组默认值，避免前端崩溃
-    return {
-      totalUsers: 0,
-      totalDataCards: 0,
-      pendingReviewCount: 0,
-      bannedUsersCount: 0,
-      bannedDataCardsCount: 0,
-      newUsersToday: 0,
-      newDataCardsToday: 0,
-      battleReportGenerationsToday: 0,
-      battleReportGenerationsAbortFailToday: 0,
-      battleReportGenerationAbortFailRateToday: 0,
-      serverTimeIso: new Date().toISOString(),
-    };
+const readFirstRow = (result: any): D1Row => {
+  const row = result?.result?.[0]?.results?.[0];
+  return row && typeof row === 'object' ? (row as D1Row) : {};
+};
+
+const readInt = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.floor(value));
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return 0;
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) return Math.max(0, Math.floor(parsed));
   }
+  return 0;
+};
+
+const readStringOrNull = (value: unknown): string | null => {
+  if (typeof value === 'string') return value;
+  if (value == null) return null;
+  return String(value);
+};
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  const serverTimeIso = new Date().toISOString();
+
+  const stats: DashboardStats = {
+    totalUsers: 0,
+    totalDataCards: 0,
+    pendingReviewCount: 0,
+    bannedUsersCount: 0,
+    bannedDataCardsCount: 0,
+    newUsersToday: 0,
+    newDataCardsToday: 0,
+    battleReportGenerationsToday: 0,
+    battleReportGenerationsAbortFailToday: 0,
+    battleReportGenerationAbortFailRateToday: 0,
+    serverTimeIso,
+    d1NowUtc: null,
+    d1NowLocal: null,
+    d1PageCount: null,
+    d1PageSize: null,
+    d1FreelistCount: null,
+    d1EstimatedFileBytes: null,
+    d1EstimatedUsedBytes: null,
+
+    arenaRatingsStrictTotal: 0,
+    arenaRatingsFreeTotal: 0,
+    arenaRatingEventsPendingTotal: 0,
+    arenaRatingEventsTodayTotal: 0,
+    arenaRatingEventsAppliedTodayTotal: 0,
+    arenaRatingEventsSkippedTodayTotal: 0,
+    arenaRatingEventsFailedTodayTotal: 0,
+    leaderboardEligibleStrictDataCardTotal: 0,
+    leaderboardEligibleFreeDataCardTotal: 0,
+
+    dataCardMetricsTotal: 0,
+    publicApprovedCharacterCardsTotal: 0,
+    publicApprovedCharacterMetricsTotal: 0,
+    activeTagsTotal: 0,
+    tagAliasesTotal: 0,
+    dataCardTagsTotal: 0,
+
+    largeObjectsTotal: 0,
+    largeObjectsBytesTotal: 0,
+    largeObjectsStoredBytesTotal: 0,
+    largeObjectsBattleReportOutputTotal: 0,
+    largeObjectsBattleReportOutputBytesTotal: 0,
+  };
+
+  try {
+    const coreSql = `
+      SELECT
+        (SELECT COUNT(id) FROM users) AS totalUsers,
+        (SELECT COUNT(id) FROM data_cards) AS totalDataCards,
+        (SELECT COUNT(id) FROM data_cards WHERE review_status = 'pending' AND is_public = 1) AS pendingReviewCount,
+        (SELECT COUNT(id) FROM users WHERE is_banned IS NOT NULL AND is_banned != '') AS bannedUsersCount,
+        (SELECT COUNT(id) FROM data_cards WHERE is_public = -1) AS bannedDataCardsCount,
+        (SELECT COUNT(id) FROM users WHERE DATE(created_at) = DATE('now', 'localtime')) AS newUsersToday,
+        (SELECT COUNT(id) FROM data_cards WHERE DATE(created_at) = DATE('now', 'localtime')) AS newDataCardsToday,
+        (SELECT COUNT(id) FROM battle_report_generations WHERE DATE(started_at) = DATE('now', 'localtime')) AS battleReportGenerationsToday,
+        (SELECT COUNT(id) FROM battle_report_generations WHERE DATE(started_at) = DATE('now', 'localtime') AND status IN ('aborted','failed')) AS battleReportGenerationsAbortFailToday,
+        datetime('now') AS d1NowUtc,
+        datetime('now', 'localtime') AS d1NowLocal;
+    `;
+
+    const coreResult = await queryFromD1(coreSql);
+    const row = readFirstRow(coreResult as any);
+
+    stats.totalUsers = readInt(row.totalUsers);
+    stats.totalDataCards = readInt(row.totalDataCards);
+    stats.pendingReviewCount = readInt(row.pendingReviewCount);
+    stats.bannedUsersCount = readInt(row.bannedUsersCount);
+    stats.bannedDataCardsCount = readInt(row.bannedDataCardsCount);
+    stats.newUsersToday = readInt(row.newUsersToday);
+    stats.newDataCardsToday = readInt(row.newDataCardsToday);
+    stats.battleReportGenerationsToday = readInt(row.battleReportGenerationsToday);
+    stats.battleReportGenerationsAbortFailToday = readInt(row.battleReportGenerationsAbortFailToday);
+    stats.d1NowUtc = readStringOrNull(row.d1NowUtc);
+    stats.d1NowLocal = readStringOrNull(row.d1NowLocal);
+
+    stats.battleReportGenerationAbortFailRateToday =
+      stats.battleReportGenerationsToday > 0
+        ? stats.battleReportGenerationsAbortFailToday / stats.battleReportGenerationsToday
+        : 0;
+  } catch (error) {
+    console.error('[Admin] 获取仪表盘核心统计失败:', error);
+  }
+
+  try {
+    const arenaSql = `
+      SELECT
+        (SELECT COUNT(*) FROM arena_ratings WHERE queue = 'strict') AS arenaRatingsStrictTotal,
+        (SELECT COUNT(*) FROM arena_ratings WHERE queue = 'free') AS arenaRatingsFreeTotal,
+        (SELECT COUNT(*) FROM arena_rating_events WHERE status = 'pending') AS arenaRatingEventsPendingTotal,
+        (SELECT COUNT(*) FROM arena_rating_events WHERE DATE(created_at) = DATE('now', 'localtime')) AS arenaRatingEventsTodayTotal,
+        (SELECT COUNT(*) FROM arena_rating_events WHERE DATE(created_at) = DATE('now', 'localtime') AND status = 'applied') AS arenaRatingEventsAppliedTodayTotal,
+        (SELECT COUNT(*) FROM arena_rating_events WHERE DATE(created_at) = DATE('now', 'localtime') AND status = 'skipped') AS arenaRatingEventsSkippedTodayTotal,
+        (SELECT COUNT(*) FROM arena_rating_events WHERE DATE(created_at) = DATE('now', 'localtime') AND status = 'failed') AS arenaRatingEventsFailedTodayTotal,
+        (
+          SELECT COUNT(*)
+          FROM arena_ratings ar
+          JOIN data_cards dc
+            ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
+          WHERE ar.queue = 'strict'
+            AND dc.type = 'character'
+            AND dc.is_public = 1
+            AND dc.review_status = 'approved'
+            AND dc.deleted_at IS NULL
+        ) AS leaderboardEligibleStrictDataCardTotal,
+        (
+          SELECT COUNT(*)
+          FROM arena_ratings ar
+          JOIN data_cards dc
+            ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
+          WHERE ar.queue = 'free'
+            AND dc.type = 'character'
+            AND dc.is_public = 1
+            AND dc.review_status = 'approved'
+            AND dc.deleted_at IS NULL
+        ) AS leaderboardEligibleFreeDataCardTotal;
+    `;
+
+    const arenaResult = await queryFromD1(arenaSql);
+    const row = readFirstRow(arenaResult as any);
+
+    stats.arenaRatingsStrictTotal = readInt(row.arenaRatingsStrictTotal);
+    stats.arenaRatingsFreeTotal = readInt(row.arenaRatingsFreeTotal);
+    stats.arenaRatingEventsPendingTotal = readInt(row.arenaRatingEventsPendingTotal);
+    stats.arenaRatingEventsTodayTotal = readInt(row.arenaRatingEventsTodayTotal);
+    stats.arenaRatingEventsAppliedTodayTotal = readInt(row.arenaRatingEventsAppliedTodayTotal);
+    stats.arenaRatingEventsSkippedTodayTotal = readInt(row.arenaRatingEventsSkippedTodayTotal);
+    stats.arenaRatingEventsFailedTodayTotal = readInt(row.arenaRatingEventsFailedTodayTotal);
+    stats.leaderboardEligibleStrictDataCardTotal = readInt(row.leaderboardEligibleStrictDataCardTotal);
+    stats.leaderboardEligibleFreeDataCardTotal = readInt(row.leaderboardEligibleFreeDataCardTotal);
+  } catch (error) {
+    console.warn('[Admin] arena_ratings/arena_rating_events 未就绪，跳过排位统计:', error);
+  }
+
+  try {
+    const tagsSql = `
+      SELECT
+        (SELECT COUNT(*) FROM data_card_metrics) AS dataCardMetricsTotal,
+        (
+          SELECT COUNT(*)
+          FROM data_cards
+          WHERE type = 'character'
+            AND is_public = 1
+            AND review_status = 'approved'
+            AND deleted_at IS NULL
+        ) AS publicApprovedCharacterCardsTotal,
+        (
+          SELECT COUNT(*)
+          FROM data_card_metrics dcm
+          JOIN data_cards dc
+            ON dc.id = dcm.data_card_id
+          WHERE dc.type = 'character'
+            AND dc.is_public = 1
+            AND dc.review_status = 'approved'
+            AND dc.deleted_at IS NULL
+        ) AS publicApprovedCharacterMetricsTotal,
+        (SELECT COUNT(*) FROM tags WHERE is_active = 1) AS activeTagsTotal,
+        (SELECT COUNT(*) FROM tag_aliases) AS tagAliasesTotal,
+        (SELECT COUNT(*) FROM data_card_tags) AS dataCardTagsTotal;
+    `;
+
+    const tagsResult = await queryFromD1(tagsSql);
+    const row = readFirstRow(tagsResult as any);
+
+    stats.dataCardMetricsTotal = readInt(row.dataCardMetricsTotal);
+    stats.publicApprovedCharacterCardsTotal = readInt(row.publicApprovedCharacterCardsTotal);
+    stats.publicApprovedCharacterMetricsTotal = readInt(row.publicApprovedCharacterMetricsTotal);
+    stats.activeTagsTotal = readInt(row.activeTagsTotal);
+    stats.tagAliasesTotal = readInt(row.tagAliasesTotal);
+    stats.dataCardTagsTotal = readInt(row.dataCardTagsTotal);
+  } catch (error) {
+    console.warn('[Admin] tags/data_card_metrics 未就绪，跳过标签/技术值统计:', error);
+  }
+
+  try {
+    const largeObjectsSql = `
+      SELECT
+        COUNT(*) AS largeObjectsTotal,
+        COALESCE(SUM(bytes), 0) AS largeObjectsBytesTotal,
+        COALESCE(SUM(COALESCE(stored_bytes, bytes)), 0) AS largeObjectsStoredBytesTotal,
+        COALESCE(SUM(CASE WHEN kind = 'battle_report_generation_output' THEN 1 ELSE 0 END), 0) AS largeObjectsBattleReportOutputTotal,
+        COALESCE(SUM(CASE WHEN kind = 'battle_report_generation_output' THEN bytes ELSE 0 END), 0) AS largeObjectsBattleReportOutputBytesTotal
+      FROM large_objects;
+    `;
+
+    const largeObjectsResult = await queryFromD1(largeObjectsSql);
+    const row = readFirstRow(largeObjectsResult as any);
+
+    stats.largeObjectsTotal = readInt(row.largeObjectsTotal);
+    stats.largeObjectsBytesTotal = readInt(row.largeObjectsBytesTotal);
+    stats.largeObjectsStoredBytesTotal = readInt(row.largeObjectsStoredBytesTotal);
+    stats.largeObjectsBattleReportOutputTotal = readInt(row.largeObjectsBattleReportOutputTotal);
+    stats.largeObjectsBattleReportOutputBytesTotal = readInt(row.largeObjectsBattleReportOutputBytesTotal);
+  } catch (error) {
+    console.warn('[Admin] large_objects 未就绪，跳过大对象统计:', error);
+  }
+
+  try {
+    const [pageCountResult, pageSizeResult, freelistCountResult] = await Promise.all([
+      queryFromD1('PRAGMA page_count;'),
+      queryFromD1('PRAGMA page_size;'),
+      queryFromD1('PRAGMA freelist_count;'),
+    ]);
+
+    const pageCountRow = readFirstRow(pageCountResult as any);
+    const pageSizeRow = readFirstRow(pageSizeResult as any);
+    const freelistCountRow = readFirstRow(freelistCountResult as any);
+
+    const pageCount = readInt(pageCountRow.page_count);
+    const pageSize = readInt(pageSizeRow.page_size);
+    const freelistCount = readInt(freelistCountRow.freelist_count);
+
+    stats.d1PageCount = pageCount;
+    stats.d1PageSize = pageSize;
+    stats.d1FreelistCount = freelistCount;
+
+    if (pageCount > 0 && pageSize > 0) {
+      const fileBytes = pageCount * pageSize;
+      const freeBytes = freelistCount * pageSize;
+      const usedBytes = Math.max(0, fileBytes - freeBytes);
+      stats.d1EstimatedFileBytes = fileBytes;
+      stats.d1EstimatedUsedBytes = usedBytes;
+    }
+  } catch (error) {
+    console.warn('[Admin] PRAGMA 不可用，跳过 D1 存储估算:', error);
+  }
+
+  return stats;
 }
 
 /**

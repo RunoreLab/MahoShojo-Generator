@@ -1,9 +1,11 @@
 // pages/admin/index.tsx
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award, Tags, BarChart3, Activity, HardDrive } from 'lucide-react';
+import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award, Tags, BarChart3, Activity, HardDrive, Database, Trophy, Cpu, BookOpen } from 'lucide-react';
+
+import { encyclopediaEntries } from '@/lib/encyclopedia';
 
 /**
  * @fileoverview 后台管理系统的统一入口和数据仪表盘。
@@ -27,8 +29,36 @@ interface DashboardStats {
   battleReportGenerationsAbortFailToday: number;
   battleReportGenerationAbortFailRateToday: number;
   serverTimeIso: string;
-  d1NowUtc: string;
-  d1NowLocal: string;
+  d1NowUtc: string | null;
+  d1NowLocal: string | null;
+  d1PageCount: number | null;
+  d1PageSize: number | null;
+  d1FreelistCount: number | null;
+  d1EstimatedFileBytes: number | null;
+  d1EstimatedUsedBytes: number | null;
+
+  arenaRatingsStrictTotal: number;
+  arenaRatingsFreeTotal: number;
+  arenaRatingEventsPendingTotal: number;
+  arenaRatingEventsTodayTotal: number;
+  arenaRatingEventsAppliedTodayTotal: number;
+  arenaRatingEventsSkippedTodayTotal: number;
+  arenaRatingEventsFailedTodayTotal: number;
+  leaderboardEligibleStrictDataCardTotal: number;
+  leaderboardEligibleFreeDataCardTotal: number;
+
+  dataCardMetricsTotal: number;
+  publicApprovedCharacterCardsTotal: number;
+  publicApprovedCharacterMetricsTotal: number;
+  activeTagsTotal: number;
+  tagAliasesTotal: number;
+  dataCardTagsTotal: number;
+
+  largeObjectsTotal: number;
+  largeObjectsBytesTotal: number;
+  largeObjectsStoredBytesTotal: number;
+  largeObjectsBattleReportOutputTotal: number;
+  largeObjectsBattleReportOutputBytesTotal: number;
 }
 
 interface StatCardProps {
@@ -62,13 +92,20 @@ const AdminHomePage: React.FC = () => {
   // 定义存储统计数据和加载状态的state
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const hasLoadedRef = useRef(false);
   const [lastServerTimeIso, setLastServerTimeIso] = useState<string | null>(null);
   const [lastD1NowLocal, setLastD1NowLocal] = useState<string | null>(null);
 
   // 在组件挂载时通过useEffect获取数据
   useEffect(() => {
     const fetchStats = async () => {
-      setLoading(true);
+      const isInitial = !hasLoadedRef.current;
+      if (isInitial) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
       try {
         const response = await fetch('/api/admin/dashboard-stats');
         if (!response.ok) {
@@ -83,7 +120,11 @@ const AdminHomePage: React.FC = () => {
       } catch (error) {
         console.error(error);
       } finally {
-        setLoading(false);
+        if (isInitial) {
+          hasLoadedRef.current = true;
+          setLoading(false);
+        }
+        setRefreshing(false);
       }
     };
 
@@ -101,6 +142,30 @@ const AdminHomePage: React.FC = () => {
     if (Number.isNaN(date.getTime())) return iso;
     return `${date.toISOString().replace('T', ' ').replace('Z', ' UTC')}`;
   };
+  const formatBytes = (bytes: number | null | undefined) => {
+    if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return '—';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let v = bytes;
+    let u = 0;
+    while (v >= 1024 && u < units.length - 1) {
+      v /= 1024;
+      u += 1;
+    }
+    return `${v.toFixed(u === 0 ? 0 : 2)} ${units[u]}`;
+  };
+
+  const leaderboardEligibleValue = `${stats?.leaderboardEligibleStrictDataCardTotal ?? 0} / ${stats?.leaderboardEligibleFreeDataCardTotal ?? 0}`;
+  const publicApprovedCharacterCards = stats?.publicApprovedCharacterCardsTotal ?? 0;
+  const publicApprovedCharacterMetrics = stats?.publicApprovedCharacterMetricsTotal ?? 0;
+  const publicTechCoverageRate = publicApprovedCharacterCards > 0 ? publicApprovedCharacterMetrics / publicApprovedCharacterCards : 0;
+  const d1EstimatedFileBytes = stats?.d1EstimatedFileBytes ?? null;
+  const d1EstimatedUsedBytes = stats?.d1EstimatedUsedBytes ?? null;
+  const d1FreelistCount = stats?.d1FreelistCount ?? null;
+  const d1PageSize = stats?.d1PageSize ?? null;
+  const d1EstimatedFreeBytes =
+    typeof d1FreelistCount === 'number' && typeof d1PageSize === 'number'
+      ? Math.max(0, d1FreelistCount) * Math.max(0, d1PageSize)
+      : null;
 
   return (
     <>
@@ -123,34 +188,91 @@ const AdminHomePage: React.FC = () => {
                 <span>
                   服务器时间：{formatServerTime(lastServerTimeIso)}
                   {lastD1NowLocal ? `（D1 local: ${lastD1NowLocal}）` : ''}
+                  {refreshing ? '（刷新中...）' : ''}
                 </span>
               </div>
             </div>
             {loading ? (
               <div className="text-center p-8 bg-white rounded-lg shadow-sm">加载中...</div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
-                <StatCard title="待审查内容" value={stats?.pendingReviewCount ?? 0} icon={Clock} color="bg-yellow-500" note="需要管理员尽快处理" />
-                <StatCard title="今日新增用户" value={stats?.newUsersToday ?? 0} icon={UserPlus} color="bg-green-500" />
-                <StatCard title="今日新增档案" value={stats?.newDataCardsToday ?? 0} icon={FilePlus} color="bg-blue-500" />
-                <StatCard
-                  title="今日战报生成"
-                  value={stats?.battleReportGenerationsToday ?? 0}
-                  icon={FileText}
-                  color="bg-purple-600"
-                  note={`中断/失败：${stats?.battleReportGenerationsAbortFailToday ?? 0}（${formatPercent(stats?.battleReportGenerationAbortFailRateToday ?? 0)}）`}
-                />
-                <StatCard
-                  title="今日中断/失败率"
-                  value={formatPercent(stats?.battleReportGenerationAbortFailRateToday ?? 0)}
-                  icon={AlertTriangle}
-                  color="bg-orange-500"
-                  note="（中断+失败）/（生成总数）"
-                />
-                <StatCard title="违规档案总数" value={stats?.bannedDataCardsCount ?? 0} icon={AlertTriangle} color="bg-red-500" />
-                <StatCard title="用户总数" value={stats?.totalUsers ?? 0} icon={Users} color="bg-teal-500" />
-                <StatCard title="档案总数" value={stats?.totalDataCards ?? 0} icon={FileText} color="bg-indigo-500" />
-                <StatCard title="封禁用户数" value={stats?.bannedUsersCount ?? 0} icon={ShieldOff} color="bg-gray-600" />
+              <div className="space-y-8">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
+                  <StatCard title="待审查内容" value={stats?.pendingReviewCount ?? 0} icon={Clock} color="bg-yellow-500" note="需要管理员尽快处理" />
+                  <StatCard title="今日新增用户" value={stats?.newUsersToday ?? 0} icon={UserPlus} color="bg-green-500" />
+                  <StatCard title="今日新增档案" value={stats?.newDataCardsToday ?? 0} icon={FilePlus} color="bg-blue-500" />
+                  <StatCard
+                    title="今日战报生成"
+                    value={stats?.battleReportGenerationsToday ?? 0}
+                    icon={FileText}
+                    color="bg-purple-600"
+                    note={`中断/失败：${stats?.battleReportGenerationsAbortFailToday ?? 0}（${formatPercent(stats?.battleReportGenerationAbortFailRateToday ?? 0)}）`}
+                  />
+                  <StatCard title="违规档案总数" value={stats?.bannedDataCardsCount ?? 0} icon={AlertTriangle} color="bg-red-500" />
+                  <StatCard title="用户总数" value={stats?.totalUsers ?? 0} icon={Users} color="bg-teal-500" />
+                  <StatCard title="档案总数" value={stats?.totalDataCards ?? 0} icon={FileText} color="bg-indigo-500" />
+                  <StatCard title="封禁用户数" value={stats?.bannedUsersCount ?? 0} icon={ShieldOff} color="bg-gray-600" />
+                </div>
+
+                <div>
+                  <h3 className="mb-4 text-lg font-semibold text-gray-700">排位与排行榜</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
+                    <StatCard title="排位记录（严格）" value={stats?.arenaRatingsStrictTotal ?? 0} icon={BarChart3} color="bg-sky-600" note="arena_ratings / strict" />
+                    <StatCard title="排位记录（自由）" value={stats?.arenaRatingsFreeTotal ?? 0} icon={BarChart3} color="bg-cyan-600" note="arena_ratings / free" />
+                    <StatCard title="待处理结算事件" value={stats?.arenaRatingEventsPendingTotal ?? 0} icon={Clock} color="bg-amber-600" note="arena_rating_events / pending" />
+                    <StatCard
+                      title="今日结算事件"
+                      value={stats?.arenaRatingEventsTodayTotal ?? 0}
+                      icon={Activity}
+                      color="bg-rose-600"
+                      note={`应用：${stats?.arenaRatingEventsAppliedTodayTotal ?? 0} · 跳过：${stats?.arenaRatingEventsSkippedTodayTotal ?? 0} · 失败：${stats?.arenaRatingEventsFailedTodayTotal ?? 0}`}
+                    />
+                    <StatCard title="公共榜候选（角色卡）" value={leaderboardEligibleValue} icon={Trophy} color="bg-yellow-600" note="严格 / 自由（公开+已审核+未删除）" />
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="mb-4 text-lg font-semibold text-gray-700">技术值 · 标签 · 百科</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
+                    <StatCard
+                      title="技术值覆盖（公共榜）"
+                      value={formatPercent(publicTechCoverageRate)}
+                      icon={Cpu}
+                      color="bg-violet-600"
+                      note={`已计算：${publicApprovedCharacterMetrics} / ${publicApprovedCharacterCards}`}
+                    />
+                    <StatCard title="可用标签" value={stats?.activeTagsTotal ?? 0} icon={Tags} color="bg-slate-700" note="tags.is_active=1" />
+                    <StatCard title="标签别名" value={stats?.tagAliasesTotal ?? 0} icon={Tags} color="bg-slate-600" note="tag_aliases" />
+                    <StatCard title="标签绑定" value={stats?.dataCardTagsTotal ?? 0} icon={Tags} color="bg-slate-500" note="data_card_tags" />
+                    <StatCard title="百科条目" value={encyclopediaEntries.length} icon={BookOpen} color="bg-indigo-700" note="public/encyclopedia/*.md" />
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="mb-4 text-lg font-semibold text-gray-700">存储与大对象</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
+                    <StatCard
+                      title="D1 估算占用"
+                      value={formatBytes(d1EstimatedUsedBytes)}
+                      icon={Database}
+                      color="bg-gray-800"
+                      note={`总大小：${formatBytes(d1EstimatedFileBytes)} · 空闲：${formatBytes(d1EstimatedFreeBytes)}`}
+                    />
+                    <StatCard
+                      title="R2 索引占用（估算）"
+                      value={formatBytes(stats?.largeObjectsStoredBytesTotal ?? null)}
+                      icon={HardDrive}
+                      color="bg-emerald-700"
+                      note={`large_objects：${stats?.largeObjectsTotal ?? 0} 条 · 战报正文：${stats?.largeObjectsBattleReportOutputTotal ?? 0} 条`}
+                    />
+                    <StatCard
+                      title="战报正文体积（原始）"
+                      value={formatBytes(stats?.largeObjectsBattleReportOutputBytesTotal ?? null)}
+                      icon={FileText}
+                      color="bg-emerald-600"
+                      note="kind=battle_report_generation_output（未压缩估算）"
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </div>
