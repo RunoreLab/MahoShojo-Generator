@@ -9,12 +9,14 @@ export const config = {
 
 type Queue = 'strict' | 'free';
 type Sort = 'rating' | 'tech';
+type SortOrder = 'asc' | 'desc';
 
 type LeaderboardItem = {
   rank: number;
   entityType: 'data_card' | 'preset';
   entityId: string;
   displayName: string;
+  authorName: string | null;
   rating: number;
   games: number;
   wins: number;
@@ -59,6 +61,20 @@ const parseCommaList = (value: string | null): string[] => {
   return Array.from(new Set(parts));
 };
 
+const buildOrderBy = (sort: Sort, order: SortOrder) => {
+  if (sort === 'tech') {
+    if (order === 'asc') {
+      return 'ORDER BY (dcm.tech_score IS NULL) ASC, dcm.tech_score ASC, ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+    }
+    return 'ORDER BY (dcm.tech_score IS NULL) ASC, dcm.tech_score DESC, ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+  }
+
+  if (order === 'asc') {
+    return 'ORDER BY ar.rating ASC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+  }
+  return 'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+};
+
 export default async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
@@ -71,6 +87,7 @@ export default async function handler(req: NextRequest) {
     const url = new URL(req.url);
     const queue: Queue = url.searchParams.get('queue') === 'free' ? 'free' : 'strict';
     const sort: Sort = url.searchParams.get('sort') === 'tech' ? 'tech' : 'rating';
+    const order: SortOrder = url.searchParams.get('order') === 'asc' ? 'asc' : 'desc';
     const limit = Math.max(1, Math.min(100, parseIntParam(url.searchParams.get('limit'), 50)));
     const offset = Math.max(0, parseIntParam(url.searchParams.get('offset'), 0));
     const includePresets = url.searchParams.get('includePresets') === '0' ? 0 : 1;
@@ -182,9 +199,7 @@ export default async function handler(req: NextRequest) {
       }
     }
 
-    const orderBy = sort === 'tech'
-      ? 'ORDER BY (dcm.tech_score IS NULL) ASC, dcm.tech_score DESC, ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC'
-      : 'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+    const orderBy = buildOrderBy(sort, order);
 
     const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
 
@@ -198,6 +213,7 @@ export default async function handler(req: NextRequest) {
         ar.losses as losses,
         ar.draws as draws,
         dc.name as dataCardName,
+        MAX(u.username) as authorName,
         dcm.tech_score as techScore,
         dcm.tech_level as techLevel,
         dcm.is_native as isNative,
@@ -205,6 +221,8 @@ export default async function handler(req: NextRequest) {
       FROM arena_ratings ar
       LEFT JOIN data_cards dc
         ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
+      LEFT JOIN users u
+        ON dc.user_id = u.id
       LEFT JOIN data_card_metrics dcm
         ON ar.entity_type = 'data_card' AND dcm.data_card_id = ar.entity_id
       LEFT JOIN data_card_tags dct
@@ -225,6 +243,7 @@ export default async function handler(req: NextRequest) {
       losses: number;
       draws: number;
       dataCardName: string | null;
+      authorName: string | null;
       techScore: number | null;
       techLevel: string | null;
       isNative: number | null;
@@ -249,6 +268,7 @@ export default async function handler(req: NextRequest) {
         entityType: row.entityType,
         entityId: row.entityId,
         displayName,
+        authorName: typeof row.authorName === 'string' ? row.authorName : null,
         rating,
         games,
         wins: typeof row.wins === 'number' ? row.wins : 0,

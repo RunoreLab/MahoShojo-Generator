@@ -4,7 +4,9 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 
+import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import type { Preset } from '@/lib/presets';
 import type { SeasonsConfig } from '@/lib/seasons';
 import { formatSeasonTitle, getCurrentSeason } from '@/lib/seasons';
@@ -23,6 +25,7 @@ type LeaderboardItem = {
   entityType: 'data_card' | 'preset';
   entityId: string;
   displayName: string;
+  authorName: string | null;
   rating: number;
   games: number;
   wins: number;
@@ -243,6 +246,35 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
           _favoriteCount: typeof result.card.favorite_count === 'number' ? result.card.favorite_count : undefined,
           _usageCount: typeof result.card.usage_count === 'number' ? result.card.usage_count : undefined,
         });
+
+        // 排行榜入口加入参战时也要计入公开卡片的使用数。
+        // 现有口径：同一浏览器仅记 1 次（localStorage 去重）。
+        const cardId = typeof result.card.id === 'string' ? result.card.id : '';
+        const isPublic = result.card.is_public === 1 || result.card.is_public === true;
+        const wasAdded = Boolean(
+          cardId &&
+          useBattleStore
+            .getState()
+            .combatants.some((c) => 'data' in c && (c as any).sourceDataCardId === cardId),
+        );
+        if (wasAdded && isPublic && !isCardUsed(cardId)) {
+          void (async () => {
+            try {
+              const response = await fetch('/api/data-card-stats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cardId, type: 'usage' }),
+              });
+
+              if (response.ok) {
+                const json = (await response.json()) as { success?: boolean };
+                if (json.success) addUsedCard(cardId);
+              }
+            } catch (error) {
+              console.error('增加使用次数失败:', error);
+            }
+          })();
+        }
         return;
       }
 
@@ -615,34 +647,53 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                       <th className="py-2 px-3">操作</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {items.map((item) => {
-                      const isSelected =
-                        item.entityType === 'preset'
-                          ? selectedPresetFilenames.has(item.entityId)
-                          : selectedDataCardIds.has(item.entityId);
-                      const isBusy = addingKey === `${item.entityType}:${item.entityId}`;
-                      return (
-                        <tr key={`${item.entityType}:${item.entityId}`} className="border-b last:border-b-0">
-                          <td className="py-2 px-3 text-gray-500">{item.rank}</td>
-                          <td className="py-2 px-3">
-                            <div className="font-medium text-gray-800">{item.displayName}</div>
-                            <div className="text-xs text-gray-500">{item.entityType === 'preset' ? '预设' : '数据卡'}</div>
-                          </td>
-                          <td className="py-2 px-3"><TierBadge tier={item.tier} /></td>
-                          <td className="py-2 px-3 font-mono">{item.rating}</td>
-                          <td className="py-2 px-3 font-mono">{item.games}</td>
-                          <td className="py-2 px-3 font-mono">{item.wins}/{item.losses}/{item.draws}</td>
-                          <td className="py-2 px-3 font-mono">
-                            {item.techScore == null ? '-' : `${item.techScore} (${item.techLevel ?? '-'})`}
-                          </td>
-                          <td className="py-2 px-3">
-                            {item.isNative == null ? '-' : item.isNative ? '是' : '否'}
-                          </td>
-                          <td className="py-2 px-3">
-                            <button
-                              onClick={() => void handleAddFromLeaderboard(item)}
-                              disabled={isBusy || (isSelected && item.entityType === 'data_card')}
+	                  <tbody>
+	                    {items.map((item) => {
+	                      const isSelected =
+	                        item.entityType === 'preset'
+	                          ? selectedPresetFilenames.has(item.entityId)
+	                          : selectedDataCardIds.has(item.entityId);
+	                      const isBusy = addingKey === `${item.entityType}:${item.entityId}`;
+	                      const authorName =
+	                        item.entityType === 'preset'
+	                          ? '官方'
+	                          : typeof item.authorName === 'string' && item.authorName.trim()
+	                            ? item.authorName.trim()
+	                            : '未知';
+	                      const nativeBadge = item.isNative == null ? (
+	                        <span className="text-gray-500">-</span>
+	                      ) : item.isNative ? (
+	                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200">
+	                          原生
+	                        </span>
+	                      ) : (
+	                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
+	                          非原生
+	                        </span>
+	                      );
+	                      return (
+	                        <tr key={`${item.entityType}:${item.entityId}`} className="border-b last:border-b-0">
+	                          <td className="py-2 px-3 text-gray-500">{item.rank}</td>
+	                          <td className="py-2 px-3">
+	                            <div className="font-medium text-gray-800">{item.displayName}</div>
+	                            <div className="text-xs text-gray-500">
+	                              {item.entityType === 'preset' ? '预设' : '数据卡'} · 作者：{authorName}
+	                            </div>
+	                          </td>
+	                          <td className="py-2 px-3"><TierBadge tier={item.tier} /></td>
+	                          <td className="py-2 px-3 font-mono">{item.rating}</td>
+	                          <td className="py-2 px-3 font-mono">{item.games}</td>
+	                          <td className="py-2 px-3 font-mono">{item.wins}/{item.losses}/{item.draws}</td>
+	                          <td className="py-2 px-3">
+	                            <TechBadge techScore={item.techScore} techLevel={item.techLevel} />
+	                          </td>
+	                          <td className="py-2 px-3">
+	                            {nativeBadge}
+	                          </td>
+	                          <td className="py-2 px-3">
+	                            <button
+	                              onClick={() => void handleAddFromLeaderboard(item)}
+	                              disabled={isBusy || (isSelected && item.entityType === 'data_card')}
                               className={`px-3 py-1 rounded text-xs border ${
                                 isSelected
                                   ? item.entityType === 'preset'

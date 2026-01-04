@@ -37,6 +37,7 @@ import {
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
+import { buildRankedMatchExtraJson, validateRankedMatchTicketForRequest } from '@/lib/arena/ranked-match';
 
 const log = getLogger('api-gen-battle-story');
 const MAX_COMBATANTS = 10;
@@ -97,6 +98,7 @@ async function handler(req: NextRequest): Promise<Response> {
             isDowngrade = false,
             adjudicationEvents,
             storyLength,
+            rankedMatch,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioSourceDataCardId,
@@ -611,6 +613,16 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const recordPromise = (async () => {
             const user = authKey ? await getUserByAuthKey(authKey) : null;
+            const rankedMatchValidation = await validateRankedMatchTicketForRequest({
+                ticket: rankedMatch,
+                userId: user?.id ?? null,
+                combatants,
+                mode,
+                selectedLevel,
+                language,
+                storyLength,
+            });
+            const rankedMatchExtraJson = buildRankedMatchExtraJson(rankedMatchValidation);
 
             const createdId = await createBattleReportGenerationRecord({
                 id: recordId,
@@ -682,6 +694,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    resolvedModelOverride: resolvedModelOverride ?? null,
 	                    readNarrativeHistory: resolvedReadNarrativeHistory,
 	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+                        ...(rankedMatchExtraJson ?? {}),
 	                }),
 	            });
 

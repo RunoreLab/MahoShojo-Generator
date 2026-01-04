@@ -238,6 +238,7 @@ export const useBattleEngine = () => {
   const settings = useBattleSelector((state) => state.settings);
   const adjudicationEvents = useBattleSelector((state) => state.adjudicationEvents);
   const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
+  const rankedMatch = useBattleSelector((state) => state.rankedMatch);
   const setError = useBattleSelector((state) => state.setError);
   const setNewsReport = useBattleSelector((state) => state.setNewsReport);
   const setUpdatedCombatants = useBattleSelector((state) => state.setUpdatedCombatants);
@@ -254,6 +255,7 @@ export const useBattleEngine = () => {
   const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
   const setLastGenerationId = useBattleSelector((state) => state.setLastGenerationId);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
+  const clearRankedMatch = useBattleSelector((state) => state.clearRankedMatch);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
   const { handleResolveRandomPlaceholders } = useBattleActions();
@@ -384,6 +386,7 @@ export const useBattleEngine = () => {
           }))
         : undefined;
 
+      const rankedMatchTicket = rankedMatch?.ticket ?? null;
       const requestBody: Record<string, unknown> = {
         combatants: freshCombatants.map((combatant) => ({
           type: combatant.type,
@@ -418,6 +421,7 @@ export const useBattleEngine = () => {
         isDowngrade: false,
         adjudicationEvents,
         storyLength,
+        ...(rankedMatchTicket ? { rankedMatch: rankedMatchTicket } : {}),
       };
 
       if (
@@ -430,6 +434,10 @@ export const useBattleEngine = () => {
           modelId: userProviderConfig.modelId,
           apiKey: userProviderConfig.apiKey,
         };
+      }
+
+      if (rankedMatchTicket) {
+        clearRankedMatch();
       }
 
       const authHeader = await authStorage.getAuthHeader();
@@ -920,6 +928,7 @@ export const useBattleEngine = () => {
     scenario,
     auxScenarios,
     userProviderConfig,
+    rankedMatch,
     settings,
     selectedLevel,
     selectedLanguage,
@@ -941,6 +950,7 @@ export const useBattleEngine = () => {
 	    setStreamNarrativeHistoryReadCount,
       setLastGenerationId,
 	    setCombatants,
+      clearRankedMatch,
 	    handleResolveRandomPlaceholders,
 	    redirectToArrested,
 	    startCooldown,

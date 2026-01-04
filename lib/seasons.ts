@@ -27,6 +27,7 @@ export type SeasonArchiveItem = {
   entityType: 'data_card' | 'preset';
   entityId: string;
   displayName: string;
+  authorName?: string | null;
   rating: number;
   games: number;
   wins: number;

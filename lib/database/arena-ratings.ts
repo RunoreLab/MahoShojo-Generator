@@ -185,9 +185,45 @@ export const computeEloUpdate = (
 
 const normalizeWinnerToken = (value: string): string => {
   let normalized = value.trim();
+
+  // 去掉常见 Markdown/列表前缀（避免误伤正文，仅作用于“winner 一行/短 token”）
+  normalized = normalized.replace(/^[>\-\*\+\s]+/g, '').trim();
+
+  // 去掉行内 code 标记
+  normalized = normalized.replace(/`/g, '').trim();
+
+  // 仅剥离“成对包裹”的 Markdown 修饰，避免把角色代号中的 "_" 误删（如 I_moly）。
+  for (let i = 0; i < 3; i += 1) {
+    const prev = normalized;
+    normalized = normalized
+      .replace(/^\*\*(.+)\*\*$/u, '$1')
+      .replace(/^__(.+)__$/u, '$1')
+      .replace(/^\*(.+)\*$/u, '$1')
+      .replace(/^_(.+)_$/u, '$1')
+      .replace(/^~~(.+)~~$/u, '$1')
+      .trim();
+    if (normalized === prev) break;
+  }
+
+  normalized = normalized.replace(/[*~]/g, '').trim();
+
+  // 去掉“胜利者/胜者/赢家/winner:” 等标签前缀
+  normalized = normalized.replace(/^(?:胜利者|胜者|赢家|winner)\s*[:：]\s*/i, '').trim();
+
+  // 去掉常见引号/括号包裹
+  normalized = normalized
+    .replace(/^[\s"'“”‘’【】\[\]<>《》]+/g, '')
+    .replace(/[\s"'“”‘’【】\[\]<>《》]+$/g, '')
+    .trim();
+
   normalized = normalized.replace(/\s+/g, ' ').trim();
+
+  // 去掉结尾括号尾注（如：雪绒（P1） / 看守（魔女残骸））
   normalized = normalized.replace(/[（(][^）)]*[）)]\s*$/u, '').trim();
+
+  // 去掉尾部标点/空白
   normalized = normalized.replace(/[。！!？?；;：:、，,.\s]+$/u, '').trim();
+
   return normalized;
 };
 
@@ -200,10 +236,23 @@ export type WinnerParseResult =
 export const parseWinnerSlot = (winnerRaw: string | null, combatantNames: [string, string]): WinnerParseResult => {
   const winner = typeof winnerRaw === 'string' ? winnerRaw.trim() : '';
   if (!winner) return { ok: false, skipReason: 'winner-empty' };
-  if (winner === '平局') return { ok: true, winnerSlot: 0 };
-  if (isMultiWinner(winner)) return { ok: false, skipReason: 'multi-winner' };
+  const maybeMultiWinner = isMultiWinner(winner);
 
   const normalizedWinner = normalizeWinnerToken(winner);
+  if (!normalizedWinner) return { ok: false, skipReason: 'winner-empty' };
+
+  const loweredWinner = normalizedWinner.toLowerCase();
+  if (
+    normalizedWinner === '平局' ||
+    normalizedWinner === '平手' ||
+    normalizedWinner === '打平' ||
+    loweredWinner === 'draw' ||
+    loweredWinner === 'tie' ||
+    loweredWinner === 'tied'
+  ) {
+    return { ok: true, winnerSlot: 0 };
+  }
+
   const normalizedNames = combatantNames.map((name) => normalizeWinnerToken(name));
 
   const matches = normalizedNames
@@ -228,7 +277,7 @@ export const parseWinnerSlot = (winnerRaw: string | null, combatantNames: [strin
     return { ok: true, winnerSlot: (includeMatches[0] === 0 ? 1 : 2) as WinnerSlot };
   }
 
-  return { ok: false, skipReason: 'winner-ambiguous' };
+  return { ok: false, skipReason: maybeMultiWinner ? 'multi-winner' : 'winner-ambiguous' };
 };
 
 export const parseCombatantEntity = (combatant: BattleReportGenerationCombatantRow): ArenaEntity | null => {
@@ -273,6 +322,10 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   if (snapshot.ipAnonymized == null) return false;
   if (snapshot.mode !== 'classic') return false;
   if (snapshot.userId == null) return false;
+
+  // 严格排位：必须由“排位匹配”签发票据并在生成时验证通过。
+  // 缺失/无效都按“宁可漏算”处理为不具备资格（用于禁止 strict 自由挑对手）。
+  if (readExtraJsonBoolean(snapshot.extraJson, 'rankedMatchOk') !== true) return false;
 
   // 严格排位：语言必须为简体中文（zh-CN）。
   if ((snapshot.language ?? '').trim() !== 'zh-CN') return false;
@@ -789,19 +842,15 @@ export async function settleArenaRatingsForGeneration(
     for (const queue of queuesToApply) {
       const eventId = buildArenaRatingEventId(generationId, queue);
 
-      const dedupKey =
-        queue === 'strict'
-          ? (snapshot.userId != null ? { userId: snapshot.userId } : null)
-          : (snapshot.ipAnonymized != null ? { ipAnonymized: snapshot.ipAnonymized } : null);
       if (queue === 'free' && shouldApplyStrict) {
         // strict 命中时同时更新 free：为保持 strict ⊆ free，free 不再额外按 IP 去重。
-        // （strict 已经要求登录，并会单独走 userId + pairKey 去重）
-      } else if (dedupKey) {
+        // 否则可能出现 strict 已结算、但 free 被风控跳过的情况。
+      } else if (queue === 'free' && snapshot.ipAnonymized != null) {
         const deduped = await hasRecentAppliedEventForPair(
           queue,
           pairKey,
-          dedupKey,
-          queue === 'strict' ? STRICT_DEDUP_WINDOW_MS : FREE_DEDUP_WINDOW_MS
+          { ipAnonymized: snapshot.ipAnonymized },
+          FREE_DEDUP_WINDOW_MS
         );
         if (deduped) {
           await insertArenaRatingEvent({
@@ -809,7 +858,7 @@ export async function settleArenaRatingsForGeneration(
             generationId,
             queue,
             status: 'skipped',
-            skipReason: queue === 'strict' ? 'dedup-user-pair' : 'dedup-ip-pair',
+            skipReason: 'dedup-ip-pair',
             userId: snapshot.userId,
             ipAnonymized: snapshot.ipAnonymized,
             pairKey,

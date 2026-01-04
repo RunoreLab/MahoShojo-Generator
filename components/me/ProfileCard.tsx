@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import Badge from '@/components/badge/Badge';
 import BadgeIcon from '@/components/badge/BadgeIcon';
+import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
@@ -330,11 +331,7 @@ export function ProfileCard({
       <div key={`${keyPrefix}-${c.id}`} className="rounded-xl bg-white/10 px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <div className="text-sm font-semibold break-words">{c.name}</div>
-          {techLevel ? (
-            <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/90 whitespace-nowrap">
-              {techLevel}
-            </div>
-          ) : null}
+          {techLevel ? <TechBadge mode="level" techScore={techScore} techLevel={techLevel} className="whitespace-nowrap" /> : null}
           {strict ? <TierBadge tier={strict.tier} /> : null}
           <div className="rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-white/90 whitespace-nowrap">{strictLabel}</div>
           {!c.isPublic ? (
