@@ -53,6 +53,62 @@ export type DashboardStats = {
   largeObjectsBattleReportOutputBytesTotal: number;
 };
 
+export type DashboardStatsSection = 'core' | 'arena' | 'tags' | 'storage';
+
+export type DashboardStatsCore = Pick<
+  DashboardStats,
+  | 'totalUsers'
+  | 'totalDataCards'
+  | 'pendingReviewCount'
+  | 'bannedUsersCount'
+  | 'bannedDataCardsCount'
+  | 'newUsersToday'
+  | 'newDataCardsToday'
+  | 'battleReportGenerationsToday'
+  | 'battleReportGenerationsAbortFailToday'
+  | 'battleReportGenerationAbortFailRateToday'
+  | 'serverTimeIso'
+  | 'd1NowUtc'
+  | 'd1NowLocal'
+>;
+
+export type DashboardStatsArena = Pick<
+  DashboardStats,
+  | 'arenaRatingsStrictTotal'
+  | 'arenaRatingsFreeTotal'
+  | 'arenaRatingEventsPendingTotal'
+  | 'arenaRatingEventsTodayTotal'
+  | 'arenaRatingEventsAppliedTodayTotal'
+  | 'arenaRatingEventsSkippedTodayTotal'
+  | 'arenaRatingEventsFailedTodayTotal'
+  | 'leaderboardEligibleStrictDataCardTotal'
+  | 'leaderboardEligibleFreeDataCardTotal'
+>;
+
+export type DashboardStatsTags = Pick<
+  DashboardStats,
+  | 'dataCardMetricsTotal'
+  | 'publicApprovedCharacterCardsTotal'
+  | 'publicApprovedCharacterMetricsTotal'
+  | 'activeTagsTotal'
+  | 'tagAliasesTotal'
+  | 'dataCardTagsTotal'
+>;
+
+export type DashboardStatsStorage = Pick<
+  DashboardStats,
+  | 'd1PageCount'
+  | 'd1PageSize'
+  | 'd1FreelistCount'
+  | 'd1EstimatedFileBytes'
+  | 'd1EstimatedUsedBytes'
+  | 'largeObjectsTotal'
+  | 'largeObjectsBytesTotal'
+  | 'largeObjectsStoredBytesTotal'
+  | 'largeObjectsBattleReportOutputTotal'
+  | 'largeObjectsBattleReportOutputBytesTotal'
+>;
+
 type D1Row = Record<string, unknown>;
 
 const readFirstRow = (result: any): D1Row => {
@@ -77,10 +133,10 @@ const readStringOrNull = (value: unknown): string | null => {
   return String(value);
 };
 
-export async function getDashboardStats(): Promise<DashboardStats> {
+export async function getDashboardStatsCore(): Promise<DashboardStatsCore> {
   const serverTimeIso = new Date().toISOString();
 
-  const stats: DashboardStats = {
+  const stats: DashboardStatsCore = {
     totalUsers: 0,
     totalDataCards: 0,
     pendingReviewCount: 0,
@@ -94,34 +150,6 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     serverTimeIso,
     d1NowUtc: null,
     d1NowLocal: null,
-    d1PageCount: null,
-    d1PageSize: null,
-    d1FreelistCount: null,
-    d1EstimatedFileBytes: null,
-    d1EstimatedUsedBytes: null,
-
-    arenaRatingsStrictTotal: 0,
-    arenaRatingsFreeTotal: 0,
-    arenaRatingEventsPendingTotal: 0,
-    arenaRatingEventsTodayTotal: 0,
-    arenaRatingEventsAppliedTodayTotal: 0,
-    arenaRatingEventsSkippedTodayTotal: 0,
-    arenaRatingEventsFailedTodayTotal: 0,
-    leaderboardEligibleStrictDataCardTotal: 0,
-    leaderboardEligibleFreeDataCardTotal: 0,
-
-    dataCardMetricsTotal: 0,
-    publicApprovedCharacterCardsTotal: 0,
-    publicApprovedCharacterMetricsTotal: 0,
-    activeTagsTotal: 0,
-    tagAliasesTotal: 0,
-    dataCardTagsTotal: 0,
-
-    largeObjectsTotal: 0,
-    largeObjectsBytesTotal: 0,
-    largeObjectsStoredBytesTotal: 0,
-    largeObjectsBattleReportOutputTotal: 0,
-    largeObjectsBattleReportOutputBytesTotal: 0,
   };
 
   try {
@@ -132,10 +160,31 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         (SELECT COUNT(id) FROM data_cards WHERE review_status = 'pending' AND is_public = 1) AS pendingReviewCount,
         (SELECT COUNT(id) FROM users WHERE is_banned IS NOT NULL AND is_banned != '') AS bannedUsersCount,
         (SELECT COUNT(id) FROM data_cards WHERE is_public = -1) AS bannedDataCardsCount,
-        (SELECT COUNT(id) FROM users WHERE DATE(created_at) = DATE('now', 'localtime')) AS newUsersToday,
-        (SELECT COUNT(id) FROM data_cards WHERE DATE(created_at) = DATE('now', 'localtime')) AS newDataCardsToday,
-        (SELECT COUNT(id) FROM battle_report_generations WHERE DATE(started_at) = DATE('now', 'localtime')) AS battleReportGenerationsToday,
-        (SELECT COUNT(id) FROM battle_report_generations WHERE DATE(started_at) = DATE('now', 'localtime') AND status IN ('aborted','failed')) AS battleReportGenerationsAbortFailToday,
+        (
+          SELECT COUNT(id)
+          FROM users
+          WHERE created_at >= datetime('now', 'localtime', 'start of day')
+            AND created_at < datetime('now', 'localtime', 'start of day', '+1 day')
+        ) AS newUsersToday,
+        (
+          SELECT COUNT(id)
+          FROM data_cards
+          WHERE created_at >= datetime('now', 'localtime', 'start of day')
+            AND created_at < datetime('now', 'localtime', 'start of day', '+1 day')
+        ) AS newDataCardsToday,
+        (
+          SELECT COUNT(id)
+          FROM battle_report_generations
+          WHERE started_at >= datetime('now', 'localtime', 'start of day')
+            AND started_at < datetime('now', 'localtime', 'start of day', '+1 day')
+        ) AS battleReportGenerationsToday,
+        (
+          SELECT COUNT(id)
+          FROM battle_report_generations
+          WHERE started_at >= datetime('now', 'localtime', 'start of day')
+            AND started_at < datetime('now', 'localtime', 'start of day', '+1 day')
+            AND status IN ('aborted','failed')
+        ) AS battleReportGenerationsAbortFailToday,
         datetime('now') AS d1NowUtc,
         datetime('now', 'localtime') AS d1NowLocal;
     `;
@@ -162,6 +211,22 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   } catch (error) {
     console.error('[Admin] 获取仪表盘核心统计失败:', error);
   }
+
+  return stats;
+}
+
+export async function getDashboardStatsArena(): Promise<DashboardStatsArena> {
+  const stats: DashboardStatsArena = {
+    arenaRatingsStrictTotal: 0,
+    arenaRatingsFreeTotal: 0,
+    arenaRatingEventsPendingTotal: 0,
+    arenaRatingEventsTodayTotal: 0,
+    arenaRatingEventsAppliedTodayTotal: 0,
+    arenaRatingEventsSkippedTodayTotal: 0,
+    arenaRatingEventsFailedTodayTotal: 0,
+    leaderboardEligibleStrictDataCardTotal: 0,
+    leaderboardEligibleFreeDataCardTotal: 0,
+  };
 
   try {
     const arenaSql = `
@@ -213,6 +278,19 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     console.warn('[Admin] arena_ratings/arena_rating_events 未就绪，跳过排位统计:', error);
   }
 
+  return stats;
+}
+
+export async function getDashboardStatsTags(): Promise<DashboardStatsTags> {
+  const stats: DashboardStatsTags = {
+    dataCardMetricsTotal: 0,
+    publicApprovedCharacterCardsTotal: 0,
+    publicApprovedCharacterMetricsTotal: 0,
+    activeTagsTotal: 0,
+    tagAliasesTotal: 0,
+    dataCardTagsTotal: 0,
+  };
+
   try {
     const tagsSql = `
       SELECT
@@ -252,6 +330,23 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   } catch (error) {
     console.warn('[Admin] tags/data_card_metrics 未就绪，跳过标签/技术值统计:', error);
   }
+
+  return stats;
+}
+
+export async function getDashboardStatsStorage(): Promise<DashboardStatsStorage> {
+  const stats: DashboardStatsStorage = {
+    d1PageCount: null,
+    d1PageSize: null,
+    d1FreelistCount: null,
+    d1EstimatedFileBytes: null,
+    d1EstimatedUsedBytes: null,
+    largeObjectsTotal: 0,
+    largeObjectsBytesTotal: 0,
+    largeObjectsStoredBytesTotal: 0,
+    largeObjectsBattleReportOutputTotal: 0,
+    largeObjectsBattleReportOutputBytesTotal: 0,
+  };
 
   try {
     const largeObjectsSql = `
@@ -307,6 +402,22 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   }
 
   return stats;
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  const [core, arena, tags, storage] = await Promise.all([
+    getDashboardStatsCore(),
+    getDashboardStatsArena(),
+    getDashboardStatsTags(),
+    getDashboardStatsStorage(),
+  ]);
+
+  return {
+    ...core,
+    ...arena,
+    ...tags,
+    ...storage,
+  };
 }
 
 /**

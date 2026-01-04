@@ -90,49 +90,113 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, color, no
 
 const AdminHomePage: React.FC = () => {
   // 定义存储统计数据和加载状态的state
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  type DashboardSection = 'core' | 'arena' | 'tags' | 'storage';
+  type SectionStatus = 'idle' | 'loading' | 'loaded' | 'error';
+
+  const [stats, setStats] = useState<Partial<DashboardStats>>({});
+  const [sectionStatus, setSectionStatus] = useState<Record<DashboardSection, SectionStatus>>({
+    core: 'idle',
+    arena: 'idle',
+    tags: 'idle',
+    storage: 'idle',
+  });
+  const [sectionError, setSectionError] = useState<Record<DashboardSection, string | null>>({
+    core: null,
+    arena: null,
+    tags: null,
+    storage: null,
+  });
+
+  const [loading, setLoading] = useState(true); // 仅首屏核心统计
+  const [refreshing, setRefreshing] = useState(false); // 仅核心统计的定时刷新提示
   const hasLoadedRef = useRef(false);
+  const controllersRef = useRef<Record<DashboardSection, AbortController | null>>({
+    core: null,
+    arena: null,
+    tags: null,
+    storage: null,
+  });
   const [lastServerTimeIso, setLastServerTimeIso] = useState<string | null>(null);
   const [lastD1NowLocal, setLastD1NowLocal] = useState<string | null>(null);
 
   // 在组件挂载时通过useEffect获取数据
   useEffect(() => {
-    const fetchStats = async () => {
-      const isInitial = !hasLoadedRef.current;
-      if (isInitial) {
-        setLoading(true);
-      } else {
-        setRefreshing(true);
+    const abortInFlight = (section: DashboardSection) => {
+      controllersRef.current[section]?.abort();
+      controllersRef.current[section] = null;
+    };
+
+    const fetchSection = async (section: DashboardSection) => {
+      abortInFlight(section);
+      const controller = new AbortController();
+      controllersRef.current[section] = controller;
+
+      const isInitialCore = section === 'core' && !hasLoadedRef.current;
+      setSectionStatus((prev) => ({ ...prev, [section]: 'loading' }));
+      setSectionError((prev) => ({ ...prev, [section]: null }));
+      if (section === 'core') {
+        if (isInitialCore) setLoading(true);
+        else setRefreshing(true);
       }
+
       try {
-        const response = await fetch('/api/admin/dashboard-stats');
+        const response = await fetch(`/api/admin/dashboard-stats?section=${encodeURIComponent(section)}`, {
+          signal: controller.signal,
+        });
         if (!response.ok) {
           throw new Error('获取统计数据失败');
         }
         const data = await response.json();
         if (data.success) {
-          setStats(data.stats);
-          setLastServerTimeIso(data.stats?.serverTimeIso || null);
-          setLastD1NowLocal(data.stats?.d1NowLocal || null);
+          const partial = (data.stats ?? {}) as Partial<DashboardStats>;
+          setStats((prev) => ({ ...prev, ...partial }));
+          if (section === 'core') {
+            setLastServerTimeIso(typeof partial.serverTimeIso === 'string' ? partial.serverTimeIso : null);
+            setLastD1NowLocal(typeof partial.d1NowLocal === 'string' ? partial.d1NowLocal : null);
+          }
+          setSectionStatus((prev) => ({ ...prev, [section]: 'loaded' }));
         }
       } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') return;
         console.error(error);
+        setSectionStatus((prev) => ({ ...prev, [section]: 'error' }));
+        setSectionError((prev) => ({ ...prev, [section]: error instanceof Error ? error.message : '未知错误' }));
       } finally {
-        if (isInitial) {
-          hasLoadedRef.current = true;
-          setLoading(false);
+        if (controllersRef.current[section] === controller) {
+          controllersRef.current[section] = null;
         }
-        setRefreshing(false);
+        if (section === 'core') {
+          if (isInitialCore) {
+            hasLoadedRef.current = true;
+            setLoading(false);
+          }
+          setRefreshing(false);
+        }
       }
     };
 
-    fetchStats();
+    void fetchSection('core');
+    void fetchSection('arena');
+    void fetchSection('tags');
+    const storageDelayTimer = setTimeout(() => void fetchSection('storage'), 1_200);
 
-    // 为了让"服务器时间"与当日统计更接近实时，这里定时刷新一次（避免频繁请求）
-    const timer = setInterval(fetchStats, 60_000);
-    return () => clearInterval(timer);
+    // 为了让"服务器时间"与当日统计更接近实时，这里定时刷新（避免频繁请求）
+    const coreTimer = setInterval(() => void fetchSection('core'), 60_000);
+    const arenaTimer = setInterval(() => void fetchSection('arena'), 60_000);
+    const tagsTimer = setInterval(() => void fetchSection('tags'), 5 * 60_000);
+    const storageTimer = setInterval(() => void fetchSection('storage'), 10 * 60_000);
+
+    return () => {
+      clearTimeout(storageDelayTimer);
+      clearInterval(coreTimer);
+      clearInterval(arenaTimer);
+      clearInterval(tagsTimer);
+      clearInterval(storageTimer);
+      abortInFlight('core');
+      abortInFlight('arena');
+      abortInFlight('tags');
+      abortInFlight('storage');
+    };
   }, []);
 
   const formatPercent = (rate: number) => `${(Math.max(0, Math.min(1, rate)) * 100).toFixed(1)}%`;
@@ -154,14 +218,32 @@ const AdminHomePage: React.FC = () => {
     return `${v.toFixed(u === 0 ? 0 : 2)} ${units[u]}`;
   };
 
-  const leaderboardEligibleValue = `${stats?.leaderboardEligibleStrictDataCardTotal ?? 0} / ${stats?.leaderboardEligibleFreeDataCardTotal ?? 0}`;
-  const publicApprovedCharacterCards = stats?.publicApprovedCharacterCardsTotal ?? 0;
-  const publicApprovedCharacterMetrics = stats?.publicApprovedCharacterMetricsTotal ?? 0;
-  const publicTechCoverageRate = publicApprovedCharacterCards > 0 ? publicApprovedCharacterMetrics / publicApprovedCharacterCards : 0;
-  const d1EstimatedFileBytes = stats?.d1EstimatedFileBytes ?? null;
-  const d1EstimatedUsedBytes = stats?.d1EstimatedUsedBytes ?? null;
-  const d1FreelistCount = stats?.d1FreelistCount ?? null;
-  const d1PageSize = stats?.d1PageSize ?? null;
+  const arenaReady = sectionStatus.arena === 'loaded';
+  const tagsReady = sectionStatus.tags === 'loaded';
+  const storageReady = sectionStatus.storage === 'loaded';
+
+  const leaderboardEligibleValue = arenaReady
+    ? `${stats.leaderboardEligibleStrictDataCardTotal ?? 0} / ${stats.leaderboardEligibleFreeDataCardTotal ?? 0}`
+    : sectionStatus.arena === 'error'
+      ? '—'
+      : '加载中…';
+
+  const publicApprovedCharacterCards = tagsReady ? (stats.publicApprovedCharacterCardsTotal ?? 0) : null;
+  const publicApprovedCharacterMetrics = tagsReady ? (stats.publicApprovedCharacterMetricsTotal ?? 0) : null;
+  const publicTechCoverageRate =
+    typeof publicApprovedCharacterCards === 'number' && publicApprovedCharacterCards > 0 && typeof publicApprovedCharacterMetrics === 'number'
+      ? publicApprovedCharacterMetrics / publicApprovedCharacterCards
+      : 0;
+  const publicTechCoverageValue = tagsReady
+    ? formatPercent(publicTechCoverageRate)
+    : sectionStatus.tags === 'error'
+      ? '—'
+      : '加载中…';
+
+  const d1EstimatedFileBytes = storageReady ? (stats.d1EstimatedFileBytes ?? null) : null;
+  const d1EstimatedUsedBytes = storageReady ? (stats.d1EstimatedUsedBytes ?? null) : null;
+  const d1FreelistCount = storageReady ? (stats.d1FreelistCount ?? null) : null;
+  const d1PageSize = storageReady ? (stats.d1PageSize ?? null) : null;
   const d1EstimatedFreeBytes =
     typeof d1FreelistCount === 'number' && typeof d1PageSize === 'number'
       ? Math.max(0, d1FreelistCount) * Math.max(0, d1PageSize)
@@ -216,15 +298,39 @@ const AdminHomePage: React.FC = () => {
                 <div>
                   <h3 className="mb-4 text-lg font-semibold text-gray-700">排位与排行榜</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
-                    <StatCard title="排位记录（严格）" value={stats?.arenaRatingsStrictTotal ?? 0} icon={BarChart3} color="bg-sky-600" note="arena_ratings / strict" />
-                    <StatCard title="排位记录（自由）" value={stats?.arenaRatingsFreeTotal ?? 0} icon={BarChart3} color="bg-cyan-600" note="arena_ratings / free" />
-                    <StatCard title="待处理结算事件" value={stats?.arenaRatingEventsPendingTotal ?? 0} icon={Clock} color="bg-amber-600" note="arena_rating_events / pending" />
+                    <StatCard
+                      title="排位记录（严格）"
+                      value={arenaReady ? (stats.arenaRatingsStrictTotal ?? 0) : sectionStatus.arena === 'error' ? '—' : '加载中…'}
+                      icon={BarChart3}
+                      color="bg-sky-600"
+                      note="arena_ratings / strict"
+                    />
+                    <StatCard
+                      title="排位记录（自由）"
+                      value={arenaReady ? (stats.arenaRatingsFreeTotal ?? 0) : sectionStatus.arena === 'error' ? '—' : '加载中…'}
+                      icon={BarChart3}
+                      color="bg-cyan-600"
+                      note="arena_ratings / free"
+                    />
+                    <StatCard
+                      title="待处理结算事件"
+                      value={arenaReady ? (stats.arenaRatingEventsPendingTotal ?? 0) : sectionStatus.arena === 'error' ? '—' : '加载中…'}
+                      icon={Clock}
+                      color="bg-amber-600"
+                      note="arena_rating_events / pending"
+                    />
                     <StatCard
                       title="今日结算事件"
-                      value={stats?.arenaRatingEventsTodayTotal ?? 0}
+                      value={arenaReady ? (stats.arenaRatingEventsTodayTotal ?? 0) : sectionStatus.arena === 'error' ? '—' : '加载中…'}
                       icon={Activity}
                       color="bg-rose-600"
-                      note={`应用：${stats?.arenaRatingEventsAppliedTodayTotal ?? 0} · 跳过：${stats?.arenaRatingEventsSkippedTodayTotal ?? 0} · 失败：${stats?.arenaRatingEventsFailedTodayTotal ?? 0}`}
+                      note={
+                        arenaReady
+                          ? `应用：${stats.arenaRatingEventsAppliedTodayTotal ?? 0} · 跳过：${stats.arenaRatingEventsSkippedTodayTotal ?? 0} · 失败：${stats.arenaRatingEventsFailedTodayTotal ?? 0}`
+                          : sectionStatus.arena === 'error'
+                            ? sectionError.arena || '加载失败'
+                            : '加载中…'
+                      }
                     />
                     <StatCard title="公共榜候选（角色卡）" value={leaderboardEligibleValue} icon={Trophy} color="bg-yellow-600" note="严格 / 自由（公开+已审核+未删除）" />
                   </div>
@@ -235,14 +341,38 @@ const AdminHomePage: React.FC = () => {
                   <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
                     <StatCard
                       title="技术值覆盖（公共榜）"
-                      value={formatPercent(publicTechCoverageRate)}
+                      value={publicTechCoverageValue}
                       icon={Cpu}
                       color="bg-violet-600"
-                      note={`已计算：${publicApprovedCharacterMetrics} / ${publicApprovedCharacterCards}`}
+                      note={
+                        tagsReady
+                          ? `已计算：${publicApprovedCharacterMetrics ?? 0} / ${publicApprovedCharacterCards ?? 0}`
+                          : sectionStatus.tags === 'error'
+                            ? sectionError.tags || '加载失败'
+                            : '加载中…'
+                      }
                     />
-                    <StatCard title="可用标签" value={stats?.activeTagsTotal ?? 0} icon={Tags} color="bg-slate-700" note="tags.is_active=1" />
-                    <StatCard title="标签别名" value={stats?.tagAliasesTotal ?? 0} icon={Tags} color="bg-slate-600" note="tag_aliases" />
-                    <StatCard title="标签绑定" value={stats?.dataCardTagsTotal ?? 0} icon={Tags} color="bg-slate-500" note="data_card_tags" />
+                    <StatCard
+                      title="可用标签"
+                      value={tagsReady ? (stats.activeTagsTotal ?? 0) : sectionStatus.tags === 'error' ? '—' : '加载中…'}
+                      icon={Tags}
+                      color="bg-slate-700"
+                      note="tags.is_active=1"
+                    />
+                    <StatCard
+                      title="标签别名"
+                      value={tagsReady ? (stats.tagAliasesTotal ?? 0) : sectionStatus.tags === 'error' ? '—' : '加载中…'}
+                      icon={Tags}
+                      color="bg-slate-600"
+                      note="tag_aliases"
+                    />
+                    <StatCard
+                      title="标签绑定"
+                      value={tagsReady ? (stats.dataCardTagsTotal ?? 0) : sectionStatus.tags === 'error' ? '—' : '加载中…'}
+                      icon={Tags}
+                      color="bg-slate-500"
+                      note="data_card_tags"
+                    />
                     <StatCard title="百科条目" value={encyclopediaEntries.length} icon={BookOpen} color="bg-indigo-700" note="public/encyclopedia/*.md" />
                   </div>
                 </div>
@@ -252,21 +382,61 @@ const AdminHomePage: React.FC = () => {
                   <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
                     <StatCard
                       title="D1 估算占用"
-                      value={formatBytes(d1EstimatedUsedBytes)}
+                      value={
+                        storageReady
+                          ? formatBytes(d1EstimatedUsedBytes)
+                          : sectionStatus.storage === 'error'
+                            ? '—'
+                            : sectionStatus.storage === 'idle'
+                              ? '稍后加载'
+                              : '加载中…'
+                      }
                       icon={Database}
                       color="bg-gray-800"
-                      note={`总大小：${formatBytes(d1EstimatedFileBytes)} · 空闲：${formatBytes(d1EstimatedFreeBytes)}`}
+                      note={
+                        storageReady
+                          ? `总大小：${formatBytes(d1EstimatedFileBytes)} · 空闲：${formatBytes(d1EstimatedFreeBytes)}`
+                          : sectionStatus.storage === 'error'
+                            ? sectionError.storage || '加载失败'
+                            : sectionStatus.storage === 'idle'
+                              ? '存储统计会在首屏后延迟加载'
+                              : '加载中…'
+                      }
                     />
                     <StatCard
                       title="R2 索引占用（估算）"
-                      value={formatBytes(stats?.largeObjectsStoredBytesTotal ?? null)}
+                      value={
+                        storageReady
+                          ? formatBytes(stats.largeObjectsStoredBytesTotal ?? null)
+                          : sectionStatus.storage === 'error'
+                            ? '—'
+                            : sectionStatus.storage === 'idle'
+                              ? '稍后加载'
+                              : '加载中…'
+                      }
                       icon={HardDrive}
                       color="bg-emerald-700"
-                      note={`large_objects：${stats?.largeObjectsTotal ?? 0} 条 · 战报正文：${stats?.largeObjectsBattleReportOutputTotal ?? 0} 条`}
+                      note={
+                        storageReady
+                          ? `large_objects：${stats.largeObjectsTotal ?? 0} 条 · 战报正文：${stats.largeObjectsBattleReportOutputTotal ?? 0} 条`
+                          : sectionStatus.storage === 'error'
+                            ? sectionError.storage || '加载失败'
+                            : sectionStatus.storage === 'idle'
+                              ? '存储统计会在首屏后延迟加载'
+                              : '加载中…'
+                      }
                     />
                     <StatCard
                       title="战报正文体积（原始）"
-                      value={formatBytes(stats?.largeObjectsBattleReportOutputBytesTotal ?? null)}
+                      value={
+                        storageReady
+                          ? formatBytes(stats.largeObjectsBattleReportOutputBytesTotal ?? null)
+                          : sectionStatus.storage === 'error'
+                            ? '—'
+                            : sectionStatus.storage === 'idle'
+                              ? '稍后加载'
+                              : '加载中…'
+                      }
                       icon={FileText}
                       color="bg-emerald-600"
                       note="kind=battle_report_generation_output（未压缩估算）"

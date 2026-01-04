@@ -1,6 +1,13 @@
 // pages/api/admin/dashboard-stats.ts
 
-import { getDashboardStats } from '@/lib/database/admin';
+import {
+  getDashboardStats,
+  getDashboardStatsArena,
+  getDashboardStatsCore,
+  getDashboardStatsStorage,
+  getDashboardStatsTags,
+  type DashboardStatsSection,
+} from '@/lib/database/admin';
 import type { NextRequest } from 'next/server';
 
 export const runtime = 'edge';
@@ -20,11 +27,23 @@ export default async function handler(req: NextRequest) {
   // 此阶段暂不进行严格的管理员身份验证
 
   try {
-    // 调用我们刚刚创建的数据库函数
-    const stats = await getDashboardStats();
+    const url = new URL(req.url);
+    const sectionRaw = url.searchParams.get('section');
+    const section: DashboardStatsSection | 'all' =
+      sectionRaw === 'core' || sectionRaw === 'arena' || sectionRaw === 'tags' || sectionRaw === 'storage'
+        ? (sectionRaw as DashboardStatsSection)
+        : 'all';
+
+    const stats = await (async () => {
+      if (section === 'core') return await getDashboardStatsCore();
+      if (section === 'arena') return await getDashboardStatsArena();
+      if (section === 'tags') return await getDashboardStatsTags();
+      if (section === 'storage') return await getDashboardStatsStorage();
+      return await getDashboardStats();
+    })();
     
     // 成功获取数据后，返回200 OK响应
-    return new Response(JSON.stringify({ success: true, stats }), {
+    return new Response(JSON.stringify({ success: true, section, stats }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
