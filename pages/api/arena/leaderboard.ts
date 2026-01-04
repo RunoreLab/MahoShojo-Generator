@@ -9,6 +9,7 @@ export const config = {
 
 type Queue = 'strict' | 'free';
 type Sort = 'rating' | 'tech';
+type SortOrder = 'asc' | 'desc';
 
 type LeaderboardItem = {
   rank: number;
@@ -60,6 +61,20 @@ const parseCommaList = (value: string | null): string[] => {
   return Array.from(new Set(parts));
 };
 
+const buildOrderBy = (sort: Sort, order: SortOrder) => {
+  if (sort === 'tech') {
+    if (order === 'asc') {
+      return 'ORDER BY (dcm.tech_score IS NULL) ASC, dcm.tech_score ASC, ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+    }
+    return 'ORDER BY (dcm.tech_score IS NULL) ASC, dcm.tech_score DESC, ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+  }
+
+  if (order === 'asc') {
+    return 'ORDER BY ar.rating ASC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+  }
+  return 'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+};
+
 export default async function handler(req: NextRequest) {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
@@ -72,6 +87,7 @@ export default async function handler(req: NextRequest) {
     const url = new URL(req.url);
     const queue: Queue = url.searchParams.get('queue') === 'free' ? 'free' : 'strict';
     const sort: Sort = url.searchParams.get('sort') === 'tech' ? 'tech' : 'rating';
+    const order: SortOrder = url.searchParams.get('order') === 'asc' ? 'asc' : 'desc';
     const limit = Math.max(1, Math.min(100, parseIntParam(url.searchParams.get('limit'), 50)));
     const offset = Math.max(0, parseIntParam(url.searchParams.get('offset'), 0));
     const includePresets = url.searchParams.get('includePresets') === '0' ? 0 : 1;
@@ -183,9 +199,7 @@ export default async function handler(req: NextRequest) {
       }
     }
 
-    const orderBy = sort === 'tech'
-      ? 'ORDER BY (dcm.tech_score IS NULL) ASC, dcm.tech_score DESC, ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC'
-      : 'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+    const orderBy = buildOrderBy(sort, order);
 
     const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
 
