@@ -1,20 +1,12 @@
 import type { NextRequest } from 'next/server';
 
+import { getDecodedPathParamAfterSegment } from '@/lib/url';
 import { queryFromD1 } from '@/lib/d1';
 import { upsertTag, type TagScope } from '@/lib/database/tags';
 
 export const runtime = 'edge';
 
-const getTagIdFromUrl = (url: string): string | null => {
-  try {
-    const parts = new URL(url).pathname.split('/').filter(Boolean);
-    const idx = parts.findIndex((p) => p === 'tags');
-    if (idx === -1) return null;
-    return parts[idx + 1] || null;
-  } catch {
-    return null;
-  }
-};
+const getTagIdFromUrl = (url: string): string | null => getDecodedPathParamAfterSegment(url, 'tags');
 
 const normalizeScope = (value: unknown): TagScope | null => {
   if (value === 'user' || value === 'system' || value === 'admin') return value;
