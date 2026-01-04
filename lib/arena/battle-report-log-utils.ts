@@ -89,10 +89,6 @@ export function extractWinnerFromText(text: string | null | undefined): string |
     /赢家\s*[:：]\s*([^\n\r]+)\s*/i,
     /winner\s*[:：]\s*([^\n\r]+)\s*/i,
   ];
-  for (const regex of candidates) {
-    const m = text.match(regex);
-    if (m?.[1]) return m[1].trim().slice(0, 80);
-  }
 
   const stripWinnerText = (raw: string): string => {
     return raw
@@ -103,25 +99,61 @@ export function extractWinnerFromText(text: string | null | undefined): string |
   };
 
   const stripMarkdownDecorations = (raw: string): string => {
-    return raw
+    let out = raw
       .replace(/^[>\-\*\+\s]+/g, '')
-      .replace(/[`*_~]/g, '')
-      .replace(/\s+/g, ' ')
+      .replace(/`/g, '')
       .trim();
+
+    // 仅剥离“成对包裹”的 Markdown 修饰，避免把角色代号中的 "_" 误删（如 I_moly）。
+    for (let i = 0; i < 3; i += 1) {
+      const prev = out;
+      out = out
+        .replace(/^\*\*(.+)\*\*$/u, '$1')
+        .replace(/^__(.+)__$/u, '$1')
+        .replace(/^\*(.+)\*$/u, '$1')
+        .replace(/^_(.+)_$/u, '$1')
+        .replace(/^~~(.+)~~$/u, '$1')
+        .trim();
+      if (out === prev) break;
+    }
+
+    out = out.replace(/[*~]/g, '').replace(/\s+/g, ' ').trim();
+    return out;
   };
+
+  const inlineHaystack = text.replace(/[`*~]/g, '');
+  for (const regex of candidates) {
+    const m = inlineHaystack.match(regex);
+    if (m?.[1]) {
+      const cleaned = stripWinnerText(stripMarkdownDecorations(m[1])).slice(0, 120);
+      return cleaned || null;
+    }
+  }
 
   // 兼容常见 Markdown 战报格式：
   // ## 胜利者
   // 白百合
   // （或 - 白百合）
   const lines = text.split(/\r?\n/);
-  const headerIndex = lines.findIndex((line) => /^##\s*(胜利者|胜者|赢家|winner)(?:\s|$)/i.test(line.trim()));
+  const headerIndex = lines.findIndex((line) => {
+    const trimmed = (line ?? '').trim();
+    if (!trimmed) return false;
+    const cleaned = stripMarkdownDecorations(trimmed);
+    return /^#{2,6}\s*(胜利者|胜者|赢家|winner)(?:\s|$)/i.test(cleaned);
+  });
   if (headerIndex >= 0) {
+    // 允许把胜者写在标题同一行：## 胜利者：白百合
+    const headerLine = stripMarkdownDecorations(lines[headerIndex]?.trim() ?? '');
+    const inline = headerLine.match(/^#{2,6}\s*(胜利者|胜者|赢家|winner)\s*[:：]\s*(.+)$/i);
+    if (inline?.[2]) {
+      const cleaned = stripWinnerText(stripMarkdownDecorations(inline[2])).slice(0, 120);
+      return cleaned || null;
+    }
     for (let i = headerIndex + 1; i < lines.length; i++) {
       const raw = (lines[i] ?? '').trim();
       if (!raw) continue;
       if (/^#{1,6}\s+/.test(raw)) return null;
-      const cleaned = stripWinnerText(stripMarkdownDecorations(raw)).slice(0, 80);
+      const cleaned = stripWinnerText(stripMarkdownDecorations(raw)).slice(0, 120);
       return cleaned || null;
     }
   }

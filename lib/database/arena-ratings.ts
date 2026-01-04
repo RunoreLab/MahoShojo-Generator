@@ -151,9 +151,45 @@ export const computeEloUpdate = (
 
 const normalizeWinnerToken = (value: string): string => {
   let normalized = value.trim();
+
+  // 去掉常见 Markdown/列表前缀（避免误伤正文，仅作用于“winner 一行/短 token”）
+  normalized = normalized.replace(/^[>\-\*\+\s]+/g, '').trim();
+
+  // 去掉行内 code 标记
+  normalized = normalized.replace(/`/g, '').trim();
+
+  // 仅剥离“成对包裹”的 Markdown 修饰，避免把角色代号中的 "_" 误删（如 I_moly）。
+  for (let i = 0; i < 3; i += 1) {
+    const prev = normalized;
+    normalized = normalized
+      .replace(/^\*\*(.+)\*\*$/u, '$1')
+      .replace(/^__(.+)__$/u, '$1')
+      .replace(/^\*(.+)\*$/u, '$1')
+      .replace(/^_(.+)_$/u, '$1')
+      .replace(/^~~(.+)~~$/u, '$1')
+      .trim();
+    if (normalized === prev) break;
+  }
+
+  normalized = normalized.replace(/[*~]/g, '').trim();
+
+  // 去掉“胜利者/胜者/赢家/winner:” 等标签前缀
+  normalized = normalized.replace(/^(?:胜利者|胜者|赢家|winner)\s*[:：]\s*/i, '').trim();
+
+  // 去掉常见引号/括号包裹
+  normalized = normalized
+    .replace(/^[\s"'“”‘’【】\[\]<>《》]+/g, '')
+    .replace(/[\s"'“”‘’【】\[\]<>《》]+$/g, '')
+    .trim();
+
   normalized = normalized.replace(/\s+/g, ' ').trim();
+
+  // 去掉结尾括号尾注（如：雪绒（P1） / 看守（魔女残骸））
   normalized = normalized.replace(/[（(][^）)]*[）)]\s*$/u, '').trim();
+
+  // 去掉尾部标点/空白
   normalized = normalized.replace(/[。！!？?；;：:、，,.\s]+$/u, '').trim();
+
   return normalized;
 };
 
@@ -166,10 +202,23 @@ export type WinnerParseResult =
 export const parseWinnerSlot = (winnerRaw: string | null, combatantNames: [string, string]): WinnerParseResult => {
   const winner = typeof winnerRaw === 'string' ? winnerRaw.trim() : '';
   if (!winner) return { ok: false, skipReason: 'winner-empty' };
-  if (winner === '平局') return { ok: true, winnerSlot: 0 };
-  if (isMultiWinner(winner)) return { ok: false, skipReason: 'multi-winner' };
+  const maybeMultiWinner = isMultiWinner(winner);
 
   const normalizedWinner = normalizeWinnerToken(winner);
+  if (!normalizedWinner) return { ok: false, skipReason: 'winner-empty' };
+
+  const loweredWinner = normalizedWinner.toLowerCase();
+  if (
+    normalizedWinner === '平局' ||
+    normalizedWinner === '平手' ||
+    normalizedWinner === '打平' ||
+    loweredWinner === 'draw' ||
+    loweredWinner === 'tie' ||
+    loweredWinner === 'tied'
+  ) {
+    return { ok: true, winnerSlot: 0 };
+  }
+
   const normalizedNames = combatantNames.map((name) => normalizeWinnerToken(name));
 
   const matches = normalizedNames
@@ -194,7 +243,7 @@ export const parseWinnerSlot = (winnerRaw: string | null, combatantNames: [strin
     return { ok: true, winnerSlot: (includeMatches[0] === 0 ? 1 : 2) as WinnerSlot };
   }
 
-  return { ok: false, skipReason: 'winner-ambiguous' };
+  return { ok: false, skipReason: maybeMultiWinner ? 'multi-winner' : 'winner-ambiguous' };
 };
 
 export const parseCombatantEntity = (combatant: BattleReportGenerationCombatantRow): ArenaEntity | null => {

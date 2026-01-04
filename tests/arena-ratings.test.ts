@@ -44,11 +44,25 @@ describe('arena-ratings: Elo / winner parse', () => {
     expect(parsed.winnerSlot).toBe(1);
   });
 
+  test('winner 解析：保留 codename 下划线并可匹配（I_moly（墨澧））', () => {
+    const parsed = parseWinnerSlot('I_moly（墨澧）', ['I_moly', '天子']);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.winnerSlot).toBe(1);
+  });
+
   test('winner 解析：多胜者直接跳过', () => {
     const parsed = parseWinnerSlot('雪绒、鸢', ['雪绒', '鸢']);
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.skipReason).toBe('multi-winner');
+  });
+
+  test('winner 解析：带分隔符但仅命中唯一参战者时可计分（别名/备注场景）', () => {
+    const parsed = parseWinnerSlot('雪绒、别名', ['雪绒', '鸢']);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.winnerSlot).toBe(1);
   });
 
   test('winner 解析：包含式匹配（用于 PVP 胜者行带额外描述）', () => {

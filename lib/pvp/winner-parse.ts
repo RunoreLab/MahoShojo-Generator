@@ -19,11 +19,26 @@ const stripWinnerText = (text: string): string => {
 
 const stripMarkdownDecorations = (text: string): string => {
   // 仅用于“winner 一行”的轻量清理，避免误伤正文内容
-  return text
+  let out = text
     .replace(/^[>\-\*\+\s]+/g, '')
-    .replace(/[`*_~]/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/`/g, '')
     .trim();
+
+  // 仅剥离“成对包裹”的 Markdown 修饰，避免把角色代号中的 "_" 误删（如 I_moly）。
+  for (let i = 0; i < 3; i += 1) {
+    const prev = out;
+    out = out
+      .replace(/^\*\*(.+)\*\*$/u, '$1')
+      .replace(/^__(.+)__$/u, '$1')
+      .replace(/^\*(.+)\*$/u, '$1')
+      .replace(/^_(.+)_$/u, '$1')
+      .replace(/^~~(.+)~~$/u, '$1')
+      .trim();
+    if (out === prev) break;
+  }
+
+  out = out.replace(/[*~]/g, '').replace(/\s+/g, ' ').trim();
+  return out;
 };
 
 const isDrawText = (raw: string): boolean => {
