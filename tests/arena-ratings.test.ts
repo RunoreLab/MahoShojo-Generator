@@ -42,10 +42,16 @@ describe('arena-ratings: Elo / winner parse', () => {
     expect(parsed.skipReason).toBe('multi-winner');
   });
 
+  test('winner 解析：包含式匹配（用于 PVP 胜者行带额外描述）', () => {
+    const parsed = parseWinnerSlot('看守（魔女残骸） (P2)', ['白百合', '看守']);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.winnerSlot).toBe(2);
+  });
+
   test('pair_key 对 A/B 无序一致', () => {
     const a = { entityType: 'data_card' as const, entityId: 'aaa' };
     const b = { entityType: 'preset' as const, entityId: 'bbb.json' };
     expect(buildPairKey(a, b)).toBe(buildPairKey(b, a));
   });
 });
-

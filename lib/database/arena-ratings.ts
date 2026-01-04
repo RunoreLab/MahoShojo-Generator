@@ -148,6 +148,7 @@ export const computeEloUpdate = (
 
 const normalizeWinnerToken = (value: string): string => {
   let normalized = value.trim();
+  normalized = normalized.replace(/\s+/g, ' ').trim();
   normalized = normalized.replace(/[（(][^）)]*[）)]\s*$/u, '').trim();
   normalized = normalized.replace(/[。！!？?；;：:、，,.\s]+$/u, '').trim();
   return normalized;
@@ -172,8 +173,25 @@ export const parseWinnerSlot = (winnerRaw: string | null, combatantNames: [strin
     .map((candidate, index) => (candidate && candidate === normalizedWinner ? index : -1))
     .filter((index) => index !== -1);
 
-  if (matches.length !== 1) return { ok: false, skipReason: 'winner-ambiguous' };
-  return { ok: true, winnerSlot: (matches[0] === 0 ? 1 : 2) as WinnerSlot };
+  if (matches.length === 1) {
+    return { ok: true, winnerSlot: (matches[0] === 0 ? 1 : 2) as WinnerSlot };
+  }
+
+  // 容错：PVP 胜者行可能包含更长的描述（如“看守（魔女残骸） (P2)”）而参战者名仅保存 codename。
+  // 允许做一次“包含式匹配”，但必须只命中唯一候选，避免误判。
+  const includeMatches = normalizedNames
+    .map((candidate, index) => {
+      if (!candidate) return -1;
+      if (candidate === normalizedWinner) return index;
+      if (normalizedWinner.includes(candidate) || candidate.includes(normalizedWinner)) return index;
+      return -1;
+    })
+    .filter((index) => index !== -1);
+  if (includeMatches.length === 1) {
+    return { ok: true, winnerSlot: (includeMatches[0] === 0 ? 1 : 2) as WinnerSlot };
+  }
+
+  return { ok: false, skipReason: 'winner-ambiguous' };
 };
 
 export const parseCombatantEntity = (combatant: BattleReportGenerationCombatantRow): ArenaEntity | null => {

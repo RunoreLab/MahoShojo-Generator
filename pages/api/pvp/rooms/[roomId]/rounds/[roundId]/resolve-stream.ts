@@ -361,10 +361,17 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     ].join('\n');
   };
 
+  const forwardedFor =
+    req.headers.get('cf-connecting-ip')?.trim() ||
+    req.headers.get('x-forwarded-for')?.trim() ||
+    req.headers.get('x-real-ip')?.trim() ||
+    '';
+
   const upstreamRes = await fetch(new URL('/api/arena/generate-stream', origin).toString(), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(forwardedFor ? { 'x-forwarded-for': forwardedFor } : {}),
       ...(authHeader ? { Authorization: authHeader } : {}),
       ...subrequestAuthHeaders,
     },
