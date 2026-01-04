@@ -110,7 +110,7 @@ describe('arena-ratings: 严格排位资格判定', () => {
     readCurrentState: 0,
     combatantCount: 2,
     winner: '甲',
-    extraJson: JSON.stringify({ readNarrativeHistory: false, narrativeHistoryReadCount: 0 }),
+    extraJson: JSON.stringify({ readNarrativeHistory: false, narrativeHistoryReadCount: 0, rankedMatchOk: true }),
   };
 
   const baseCombatants: BattleReportGenerationCombatantRow[] = [buildCombatant('甲', null), buildCombatant('乙', null)];
@@ -128,11 +128,16 @@ describe('arena-ratings: 严格排位资格判定', () => {
   });
 
   test('不满足：extra_json 缺失 readNarrativeHistory（宁可漏算）', () => {
-    expect(isStrictEligible({ ...baseSnapshot, extraJson: JSON.stringify({}) }, baseCombatants)).toBe(false);
+    expect(isStrictEligible({ ...baseSnapshot, extraJson: JSON.stringify({ rankedMatchOk: true }) }, baseCombatants)).toBe(false);
     expect(isStrictEligible({ ...baseSnapshot, extraJson: null }, baseCombatants)).toBe(false);
   });
 
+  test('不满足：未进行排位匹配（rankedMatchOk 缺失/非 true）', () => {
+    expect(isStrictEligible({ ...baseSnapshot, extraJson: JSON.stringify({ readNarrativeHistory: false }) }, baseCombatants)).toBe(false);
+    expect(isStrictEligible({ ...baseSnapshot, extraJson: JSON.stringify({ readNarrativeHistory: false, rankedMatchOk: false }) }, baseCombatants)).toBe(false);
+  });
+
   test('不满足：读取叙事历史开启', () => {
-    expect(isStrictEligible({ ...baseSnapshot, extraJson: JSON.stringify({ readNarrativeHistory: true }) }, baseCombatants)).toBe(false);
+    expect(isStrictEligible({ ...baseSnapshot, extraJson: JSON.stringify({ readNarrativeHistory: true, rankedMatchOk: true }) }, baseCombatants)).toBe(false);
   });
 });
