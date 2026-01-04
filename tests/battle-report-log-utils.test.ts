@@ -46,6 +46,16 @@ describe('battle-report-log-utils', () => {
     expect(extractWinnerFromText('Winner: Homura')).toBe('Homura');
   });
 
+  test('extractWinnerFromText: 支持 Markdown “## 胜利者”段落', () => {
+    const md = ['# 标题', '', '正文', '', '## 胜利者', '', '白百合', '', '## 最终结果', '略'].join('\n');
+    expect(extractWinnerFromText(md)).toBe('白百合');
+  });
+
+  test('extractWinnerFromText: 支持 Markdown 列表样式胜利者', () => {
+    const md = ['## 胜利者', '- 白百合', '', '别的内容'].join('\n');
+    expect(extractWinnerFromText(md)).toBe('白百合');
+  });
+
   test('normalizeUsage: 兼容常见字段', () => {
     expect(normalizeUsage({ promptTokens: 10, completionTokens: 20, totalTokens: 30 })).toEqual({
       promptTokens: 10,
@@ -118,4 +128,3 @@ describe('battle-report-log-utils', () => {
     ]);
   });
 });
-

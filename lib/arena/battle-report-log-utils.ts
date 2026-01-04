@@ -93,6 +93,39 @@ export function extractWinnerFromText(text: string | null | undefined): string |
     const m = text.match(regex);
     if (m?.[1]) return m[1].trim().slice(0, 80);
   }
+
+  const stripWinnerText = (raw: string): string => {
+    return raw
+      .trim()
+      .replace(/^[\s"'“”‘’【】\[\]<>《》]+/g, '')
+      .replace(/[\s"'“”‘’【】\[\]<>《》]+$/g, '')
+      .trim();
+  };
+
+  const stripMarkdownDecorations = (raw: string): string => {
+    return raw
+      .replace(/^[>\-\*\+\s]+/g, '')
+      .replace(/[`*_~]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  // 兼容常见 Markdown 战报格式：
+  // ## 胜利者
+  // 白百合
+  // （或 - 白百合）
+  const lines = text.split(/\r?\n/);
+  const headerIndex = lines.findIndex((line) => /^##\s*(胜利者|胜者|赢家|winner)(?:\s|$)/i.test(line.trim()));
+  if (headerIndex >= 0) {
+    for (let i = headerIndex + 1; i < lines.length; i++) {
+      const raw = (lines[i] ?? '').trim();
+      if (!raw) continue;
+      if (/^#{1,6}\s+/.test(raw)) return null;
+      const cleaned = stripWinnerText(stripMarkdownDecorations(raw)).slice(0, 80);
+      return cleaned || null;
+    }
+  }
+
   return null;
 }
 
