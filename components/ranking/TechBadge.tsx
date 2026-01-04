@@ -3,6 +3,7 @@
 type Props = {
   techScore: number | null;
   techLevel: string | null;
+  mode?: 'full' | 'level';
   className?: string;
 };
 
@@ -15,13 +16,24 @@ const levelClassNameMap: Record<string, string> = {
   L5: 'bg-rose-50 text-rose-800 ring-1 ring-rose-200',
 };
 
-export function TechBadge({ techScore, techLevel, className }: Props) {
-  if (techScore == null) {
+export function TechBadge({ techScore, techLevel, mode = 'full', className }: Props) {
+  if (mode !== 'level' && techScore == null) {
     return <span className={['text-gray-500', className].filter(Boolean).join(' ')}>-</span>;
   }
 
   const level = typeof techLevel === 'string' ? techLevel.trim() : '';
   const levelClassName = level ? (levelClassNameMap[level] ?? 'bg-gray-50 text-gray-700 ring-1 ring-gray-200') : '';
+
+  if (mode === 'level') {
+    if (!level) return <span className={['text-gray-500', className].filter(Boolean).join(' ')}>-</span>;
+    return (
+      <span className={['inline-flex items-center', className].filter(Boolean).join(' ')}>
+        <span className={['inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold font-sans', levelClassName].join(' ')}>
+          {level}
+        </span>
+      </span>
+    );
+  }
 
   return (
     <span className={['inline-flex items-center gap-1.5 font-mono text-gray-900', className].filter(Boolean).join(' ')}>
@@ -34,4 +46,3 @@ export function TechBadge({ techScore, techLevel, className }: Props) {
     </span>
   );
 }
-
