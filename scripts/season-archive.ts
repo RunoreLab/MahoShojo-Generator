@@ -19,6 +19,7 @@ type LeaderboardRow = {
   losses: number;
   draws: number;
   dataCardName: string | null;
+  authorName: string | null;
   techScore: number | null;
   techLevel: string | null;
   isNative: number | null;
@@ -109,6 +110,7 @@ const buildLeaderboardBaseSql = () => {
       ar.losses as losses,
       ar.draws as draws,
       dc.name as dataCardName,
+      MAX(u.username) as authorName,
       dcm.tech_score as techScore,
       dcm.tech_level as techLevel,
       dcm.is_native as isNative,
@@ -116,6 +118,8 @@ const buildLeaderboardBaseSql = () => {
     FROM arena_ratings ar
     LEFT JOIN data_cards dc
       ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
+    LEFT JOIN users u
+      ON dc.user_id = u.id
     LEFT JOIN data_card_metrics dcm
       ON ar.entity_type = 'data_card' AND dcm.data_card_id = ar.entity_id
     LEFT JOIN data_card_tags dct
@@ -183,6 +187,10 @@ const buildItems = async (
       entityType: row.entityType,
       entityId: row.entityId,
       displayName,
+      authorName:
+        row.entityType === 'data_card' && typeof row.authorName === 'string' && row.authorName.trim()
+          ? row.authorName.trim()
+          : null,
       rating,
       games,
       wins: typeof row.wins === 'number' ? row.wins : 0,
