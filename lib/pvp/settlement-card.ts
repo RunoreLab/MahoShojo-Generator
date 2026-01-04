@@ -155,9 +155,10 @@ export function buildPvpSettlementRoundSummary(params: {
   result: PvpSettlementCardRoundResult | null;
   usernameByUserId: Map<number, string>;
   isBotByUserId: Map<number, boolean>;
+  userIdBySeat?: Map<number, number>;
   myUserId: number | null;
 }): PvpSettlementCardRoundSummary {
-  const { roundId, roundIndex, status, result, usernameByUserId, isBotByUserId, myUserId } = params;
+  const { roundId, roundIndex, status, result, usernameByUserId, isBotByUserId, userIdBySeat, myUserId } = params;
 
   const headline =
     (result?.report?.headline && result.report.headline.trim() ? result.report.headline.trim() : null) ??
@@ -165,7 +166,15 @@ export function buildPvpSettlementRoundSummary(params: {
 
   const winnerSeat = typeof result?.winnerSeat === 'number' ? result.winnerSeat : null;
   const winnerUserId = typeof result?.winnerUserId === 'number' ? result.winnerUserId : null;
-  const winnerIsBot = result?.winnerIsBot ?? (winnerUserId != null ? (isBotByUserId.get(winnerUserId) ?? null) : null);
+  const winnerUserIdFromSeat =
+    winnerUserId != null
+      ? winnerUserId
+      : winnerSeat == null
+        ? null
+        : (userIdBySeat?.get(winnerSeat) ?? (result?.combatants ?? []).find((c) => c.seat === winnerSeat)?.userId ?? null);
+
+  const winnerIsBot =
+    result?.winnerIsBot ?? (winnerUserIdFromSeat != null ? (isBotByUserId.get(winnerUserIdFromSeat) ?? null) : null);
   const winnerCharacterName = result?.winnerName ?? null;
 
   const winnerStatus: PvpSettlementCardRoundSummary['winner']['status'] =
@@ -175,8 +184,8 @@ export function buildPvpSettlementRoundSummary(params: {
     winnerStatus === 'draw'
       ? '平局'
       : formatPvpDisplayName({
-          userId: winnerUserId,
-          username: winnerUserId != null ? (usernameByUserId.get(winnerUserId) ?? null) : null,
+          userId: winnerUserIdFromSeat,
+          username: winnerUserIdFromSeat != null ? (usernameByUserId.get(winnerUserIdFromSeat) ?? null) : null,
           isBot: winnerIsBot ?? null,
         });
 
@@ -190,7 +199,7 @@ export function buildPvpSettlementRoundSummary(params: {
     headline,
     winner: {
       seat: winnerSeat,
-      userId: winnerUserId,
+      userId: winnerUserIdFromSeat,
       username: winnerUsername,
       characterName: winnerCharacterName,
       isBot: winnerIsBot,
