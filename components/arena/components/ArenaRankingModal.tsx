@@ -69,8 +69,11 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
   const [excludeTagIds, setExcludeTagIds] = useState<string[]>([]);
   const [isTagFilterExpanded, setIsTagFilterExpanded] = useState(false);
   const [minRating, setMinRating] = useState('');
+  const [maxRating, setMaxRating] = useState('');
   const [minGames, setMinGames] = useState('');
+  const [maxGames, setMaxGames] = useState('');
   const [minTechScore, setMinTechScore] = useState('');
+  const [maxTechScore, setMaxTechScore] = useState('');
   const [offset, setOffset] = useState(0);
   const limit = 30;
   const [addingKey, setAddingKey] = useState<string | null>(null);
@@ -150,8 +153,11 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
       includeTagIds.join(','),
       excludeTagIds.join(','),
       minRating,
+      maxRating,
       minGames,
+      maxGames,
       minTechScore,
+      maxTechScore,
       offset,
     ],
     queryFn: () => {
@@ -165,8 +171,11 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
       if (includeTagIds.length > 0) params.set('tagIds', includeTagIds.join(','));
       if (excludeTagIds.length > 0) params.set('excludeTagIds', excludeTagIds.join(','));
       if (minRating.trim()) params.set('minRating', minRating.trim());
+      if (maxRating.trim()) params.set('maxRating', maxRating.trim());
       if (minGames.trim()) params.set('minGames', minGames.trim());
+      if (maxGames.trim()) params.set('maxGames', maxGames.trim());
       if (minTechScore.trim()) params.set('minTechScore', minTechScore.trim());
+      if (maxTechScore.trim()) params.set('maxTechScore', maxTechScore.trim());
       return fetchJson<{ success: boolean; items: LeaderboardItem[] }>(`/api/arena/leaderboard?${params.toString()}`);
     },
     staleTime: 10_000,
@@ -298,7 +307,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
         <div className="p-5 overflow-auto">
           <div className="grid gap-3 md:grid-cols-6">
             <label className="text-sm text-gray-700">
-              梯子
+              天梯
               <select
                 value={queue}
                 onChange={(e) => {
@@ -355,6 +364,19 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
               />
             </label>
             <label className="text-sm text-gray-700">
+              最高分
+              <input
+                type="number"
+                value={maxRating}
+                onChange={(e) => {
+                  setOffset(0);
+                  setMaxRating(e.target.value);
+                }}
+                className="input-field mt-1"
+                placeholder="如 1600"
+              />
+            </label>
+            <label className="text-sm text-gray-700">
               最少对局
               <input
                 type="number"
@@ -368,6 +390,19 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
               />
             </label>
             <label className="text-sm text-gray-700">
+              最多对局
+              <input
+                type="number"
+                value={maxGames}
+                onChange={(e) => {
+                  setOffset(0);
+                  setMaxGames(e.target.value);
+                }}
+                className="input-field mt-1"
+                placeholder="可留空"
+              />
+            </label>
+            <label className="text-sm text-gray-700">
               最低技术值
               <input
                 type="number"
@@ -375,6 +410,19 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                 onChange={(e) => {
                   setOffset(0);
                   setMinTechScore(e.target.value);
+                }}
+                className="input-field mt-1"
+                placeholder="0-100"
+              />
+            </label>
+            <label className="text-sm text-gray-700">
+              最高技术值
+              <input
+                type="number"
+                value={maxTechScore}
+                onChange={(e) => {
+                  setOffset(0);
+                  setMaxTechScore(e.target.value);
                 }}
                 className="input-field mt-1"
                 placeholder="0-100"
