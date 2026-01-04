@@ -51,6 +51,16 @@ describe('battle-report-log-utils', () => {
     expect(extractWinnerFromText(md)).toBe('白百合');
   });
 
+  test('extractWinnerFromText: 不应吞掉 codename 下划线（如 I_moly）', () => {
+    const md = ['# 标题', '', '正文', '', '## 胜利者', '', 'I_moly（墨澧）', '', '## 最终结果', '略'].join('\n');
+    expect(extractWinnerFromText(md)).toBe('I_moly（墨澧）');
+  });
+
+  test('extractWinnerFromText: 支持内联 Markdown 粗体标签（**胜利者**: ...）', () => {
+    const md = ['- **胜利者**: I_moly（墨澧）', '其他'].join('\n');
+    expect(extractWinnerFromText(md)).toBe('I_moly（墨澧）');
+  });
+
   test('extractWinnerFromText: 支持 Markdown 列表样式胜利者', () => {
     const md = ['## 胜利者', '- 白百合', '', '别的内容'].join('\n');
     expect(extractWinnerFromText(md)).toBe('白百合');
