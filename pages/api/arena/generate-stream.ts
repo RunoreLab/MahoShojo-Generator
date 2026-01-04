@@ -10,8 +10,9 @@ import { AdjudicationResult, NarrativeHistoryEntry } from '@/types/arena';
 import { verifySignature, generateSignature } from '@/lib/signature';
 import { getSystemPrompt } from '@/lib/arena/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
-import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
-import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+	import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
+	import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+	import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
     createBattleReportGenerationRecord,
@@ -689,13 +690,25 @@ async function handler(req: NextRequest): Promise<Response> {
             }
         };
 
-        const reader = originalBody.getReader();
-        const wrappedBody = new ReadableStream<Uint8Array>({
-            async pull(controller) {
-                try {
-                    const { done, value } = await reader.read();
-                    if (done) {
-                        appendText(decoder.decode());
+	        const reader = originalBody.getReader();
+	        const readWithTimeout = createStreamReadWithTimeout({
+	            label: 'api/arena/generate-stream 上游读取',
+	            idleTimeoutMs: 60_000,
+	            totalTimeoutMs: 10 * 60_000,
+	            onTimeout: () => {
+	                try {
+	                    void reader.cancel('timeout');
+	                } catch {
+	                    // ignore
+	                }
+	            },
+	        });
+	        const wrappedBody = new ReadableStream<Uint8Array>({
+	            async pull(controller) {
+	                try {
+	                    const { done, value } = await readWithTimeout(reader);
+	                    if (done) {
+	                        appendText(decoder.decode());
 
                         // 在流式末尾追加一段系统 telemetry 注释，用于前端展示 token 与叙事历史读取条数。
                         const usageForTelemetry = await Promise.race([
@@ -753,16 +766,16 @@ async function handler(req: NextRequest): Promise<Response> {
                     controller.error(streamError);
                     await finalizeOnce('failed', streamError instanceof Error ? streamError.message : 'stream error');
                 }
-            },
-            async cancel(reason) {
-                try {
-                    await reader.cancel(reason);
-                } catch {
-                    // 忽略取消时的二次错误
-                }
-                await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
-            }
-        });
+	            },
+	            async cancel(reason) {
+	                try {
+	                    void reader.cancel(reason);
+	                } catch {
+	                    // 忽略取消时的二次错误
+	                }
+	                await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
+	            }
+	        });
 
         const [clientBody, r2Body] = wrappedBody.tee();
         r2UploadPromise = storeBattleReportGenerationOutputStreamToR2({
