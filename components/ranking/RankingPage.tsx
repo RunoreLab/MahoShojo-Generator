@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
+import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
@@ -28,7 +29,9 @@ type RankingFilters = {
   maxTechScore: string;
 };
 
-type LeaderboardItem = SeasonArchiveItem;
+type LeaderboardItem = SeasonArchiveItem & {
+  authorName?: string | null;
+};
 
 type Tag = {
   id: string;
@@ -802,53 +805,97 @@ export function RankingPage() {
                                   暂无数据
                                 </td>
                               </tr>
-                            ) : (
-                              items.map((item) => {
-                                const winRate = item.games > 0 ? Math.round((item.wins / item.games) * 1000) / 10 : null;
-                                return (
-                                  <tr
-                                    key={`${item.entityType}:${item.entityId}`}
-                                    className="border-b last:border-b-0 hover:bg-gray-50/70"
-                                  >
+	                            ) : (
+	                              items.map((item) => {
+	                                const winRate = item.games > 0 ? Math.round((item.wins / item.games) * 1000) / 10 : null;
+	                                const authorName =
+	                                  item.entityType === 'preset'
+	                                    ? '官方'
+	                                    : typeof item.authorName === 'string' && item.authorName.trim()
+	                                      ? item.authorName.trim()
+	                                      : isHistoryMode
+	                                        ? '—'
+	                                        : '未知';
+	                                const tagPreviewIds = item.tagIds.slice(0, 4);
+	                                const remainingTagCount = Math.max(0, item.tagIds.length - tagPreviewIds.length);
+	                                const nativeBadge = item.isNative == null ? (
+	                                  <span className="text-gray-500">-</span>
+	                                ) : item.isNative ? (
+	                                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200">
+	                                    原生
+	                                  </span>
+	                                ) : (
+	                                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
+	                                    非原生
+	                                  </span>
+	                                );
+	                                return (
+	                                  <tr
+	                                    key={`${item.entityType}:${item.entityId}`}
+	                                    className="border-b last:border-b-0 hover:bg-gray-50/70"
+	                                  >
                                     <td className="px-4 py-3 pr-3 text-gray-500">{item.rank}</td>
-                                    <td className="px-4 py-3 pr-3">
-                                      <div className="min-w-0">
-                                        <div className="truncate font-medium text-gray-900">{item.displayName}</div>
-                                        <div className="mt-0.5 text-xs text-gray-500">
-                                          {item.entityType === 'preset' ? '预设' : '数据卡'}
-                                          <span className="hidden lg:inline"> · id：{item.entityId}</span>
-                                        </div>
-                                      </div>
-                                    </td>
-                                    <td className="px-4 py-3 pr-3"><TierBadge tier={item.tier} /></td>
-                                    <td className="px-4 py-3 pr-3 font-mono text-gray-900">{item.rating}</td>
-                                    <td className="hidden sm:table-cell px-4 py-3 pr-3 font-mono text-gray-900">{item.games}</td>
+	                                    <td className="px-4 py-3 pr-3">
+	                                      <div className="min-w-0">
+	                                        <div className="truncate font-medium text-gray-900">{item.displayName}</div>
+	                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+	                                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
+	                                            {item.entityType === 'preset' ? '预设' : '数据卡'}
+	                                          </span>
+	                                          <span className="min-w-0 truncate">作者：{authorName}</span>
+	                                          <span className="sm:hidden inline-flex items-center gap-1">
+	                                            <span>技术：</span>
+	                                            <TechBadge techScore={item.techScore} techLevel={item.techLevel} className="text-gray-600" />
+	                                          </span>
+	                                          <span className="sm:hidden inline-flex items-center gap-1">
+	                                            <span>原生：</span>
+	                                            {nativeBadge}
+	                                          </span>
+	                                          <span className="hidden lg:inline">id：{item.entityId}</span>
+	                                        </div>
+	                                        {tagPreviewIds.length > 0 ? (
+	                                          <div className="mt-2 hidden sm:flex flex-wrap gap-1.5">
+	                                            {tagPreviewIds.map((tagId) => {
+	                                              const tag = tagById.get(tagId);
+	                                              const label = tag?.name ?? tagId;
+	                                              return (
+	                                                <span
+	                                                  key={tagId}
+	                                                  className="max-w-[10rem] truncate rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800 ring-1 ring-violet-200"
+	                                                  title={tag?.description ?? label}
+	                                                >
+	                                                  {label}
+	                                                </span>
+	                                              );
+	                                            })}
+	                                            {remainingTagCount > 0 ? (
+	                                              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-gray-200">
+	                                                +{remainingTagCount}
+	                                              </span>
+	                                            ) : null}
+	                                          </div>
+	                                        ) : null}
+	                                      </div>
+	                                    </td>
+	                                    <td className="px-4 py-3 pr-3"><TierBadge tier={item.tier} /></td>
+	                                    <td className="px-4 py-3 pr-3 font-mono text-gray-900">{item.rating}</td>
+	                                    <td className="hidden sm:table-cell px-4 py-3 pr-3 font-mono text-gray-900">{item.games}</td>
                                     <td className="hidden md:table-cell px-4 py-3 pr-3 font-mono text-gray-900">
                                       {item.wins}/{item.losses}/{item.draws}
                                     </td>
                                     <td className="hidden lg:table-cell px-4 py-3 pr-3 font-mono text-gray-900">
                                       {winRate == null ? '-' : `${winRate}%`}
                                     </td>
-                                    <td className="hidden sm:table-cell px-4 py-3 pr-3 font-mono text-gray-900">
-                                      {item.techScore == null ? '-' : `${item.techScore}${item.techLevel ? ` (${item.techLevel})` : ''}`}
-                                    </td>
-                                    <td className="hidden sm:table-cell px-4 py-3 pr-3">
-                                      {item.isNative == null ? (
-                                        <span className="text-gray-500">-</span>
-                                      ) : item.isNative ? (
-                                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200">
-                                          原生
-                                        </span>
-                                      ) : (
-                                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
-                                          非原生
-                                        </span>
-                                      )}
-                                    </td>
-                                  </tr>
-                                );
-                              })
-                            )}
+	                                    <td className="hidden sm:table-cell px-4 py-3 pr-3">
+	                                      <TechBadge techScore={item.techScore} techLevel={item.techLevel} />
+	                                    </td>
+	                                    <td className="hidden sm:table-cell px-4 py-3 pr-3">
+	                                      {nativeBadge}
+	                                    </td>
+	                                  </tr>
+	                                );
+	                              })
+	                            )}
                           </tbody>
                         </table>
                       </div>
