@@ -665,10 +665,25 @@ export function PvpRoomPage() {
     | null
     | undefined;
 
+  const latestRoundId = typeof (latestRound as any)?.id === 'string' ? String((latestRound as any).id) : null;
+  const latestRoundStatus = typeof (latestRound as any)?.status === 'string' ? String((latestRound as any).status) : null;
+
+  const latestBattleGenerationId =
+    typeof (latestRound as any)?.battleGenerationId === 'string' ? String((latestRound as any).battleGenerationId).trim() : null;
+
+  const [loadedBattleReportGenerationId, setLoadedBattleReportGenerationId] = useState<string | null>(null);
+  const [loadedBattleReportMarkdown, setLoadedBattleReportMarkdown] = useState('');
+  const [loadedBattleReport, setLoadedBattleReport] = useState<any | null>(null);
+  const [loadedBattleReportError, setLoadedBattleReportError] = useState<string | null>(null);
+
   useEffect(() => {
     setStreamingResolveMarkdown('');
     setStreamingResolveMeta(null);
     setIsStreamingResolve(false);
+    setLoadedBattleReportGenerationId(null);
+    setLoadedBattleReportMarkdown('');
+    setLoadedBattleReport(null);
+    setLoadedBattleReportError(null);
   }, [roomId, latestRound?.id]);
   const score = roomQuery.data?.score;
 
@@ -707,9 +722,77 @@ export function PvpRoomPage() {
     const raw = (latestRoundResult as any)?.streamMeta ?? null;
     return raw && typeof raw === 'object' ? raw : null;
   }, [latestRoundResult]);
-  const reportContentForUi = (isStreamingResolve ? streamingResolveMarkdown : '') || latestRoundReportMarkdown;
+
+  useEffect(() => {
+    const shouldStream = rules?.generationMode === 'stream';
+    if (latestRoundStatus !== 'completed') return;
+    if (!latestBattleGenerationId) return;
+    if (loadedBattleReportGenerationId === latestBattleGenerationId) return;
+    if (isStreamingResolve && streamingResolveMarkdown.trim()) return;
+
+    if (shouldStream) {
+      if (latestRoundReportMarkdown.trim()) return;
+    } else {
+      if ((latestRoundResult as any)?.report) return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoadedBattleReportError(null);
+        const authHeader = await authStorage.getAuthHeader();
+        if (!authHeader) throw new Error('未登录');
+        const res = await fetch(`/api/me/battle-reports/${latestBattleGenerationId}/output`, {
+          method: 'GET',
+          headers: { Authorization: authHeader },
+        });
+        const text = await res.text().catch(() => '');
+        if (!res.ok) throw new Error(text || '加载战报正文失败');
+        if (cancelled) return;
+
+        if (shouldStream) {
+          setLoadedBattleReportMarkdown(text);
+          setLoadedBattleReport(null);
+        } else {
+          try {
+            const parsed = JSON.parse(text);
+            setLoadedBattleReport(parsed);
+          } catch {
+            setLoadedBattleReport(null);
+          }
+          setLoadedBattleReportMarkdown('');
+        }
+
+        setLoadedBattleReportGenerationId(latestBattleGenerationId);
+      } catch (error) {
+        if (cancelled) return;
+        setLoadedBattleReportGenerationId(latestBattleGenerationId);
+        setLoadedBattleReportMarkdown('');
+        setLoadedBattleReport(null);
+        setLoadedBattleReportError(error instanceof Error ? error.message : '加载战报正文失败');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    latestBattleGenerationId,
+    latestRoundStatus,
+    latestRoundId,
+    latestRoundReportMarkdown,
+    latestRoundResult,
+    rules?.generationMode,
+    isStreamingResolve,
+    streamingResolveMarkdown,
+    loadedBattleReportGenerationId,
+  ]);
+
+  const reportContentForUi =
+    (isStreamingResolve ? streamingResolveMarkdown : '') || latestRoundReportMarkdown || loadedBattleReportMarkdown;
   const reportMetaForUi = (isStreamingResolve ? streamingResolveMeta : null) || latestRoundStreamMeta;
-  const hasAnyReportForUi = Boolean(reportContentForUi.trim()) || Boolean(latestRoundResult?.report);
+  const resolvedNonStreamReport = (latestRoundResult as any)?.report ?? loadedBattleReport;
+  const hasAnyReportForUi = Boolean(reportContentForUi.trim()) || Boolean(resolvedNonStreamReport);
 
   const rulesDraftError = useMemo(() => {
     if (!rulesDraft) return null;
@@ -3155,15 +3238,18 @@ export function PvpRoomPage() {
                           setShowImageModal(true);
                         }}
                       />
-                    ) : latestRoundResult?.report ? (
+                    ) : resolvedNonStreamReport ? (
                       <BattleReportCard
-                        report={latestRoundResult.report}
+                        report={resolvedNonStreamReport}
                         mode={rules?.mode as any}
                         onSaveImage={(imageUrl) => {
                           setSavedImageUrl(imageUrl);
                           setShowImageModal(true);
                         }}
                       />
+                    ) : null}
+                    {loadedBattleReportError ? (
+                      <div className="mt-2 text-xs text-red-600">战报正文加载失败：{loadedBattleReportError}</div>
                     ) : null}
                     <div className="text-sm text-gray-700 mt-2 flex items-center justify-between gap-2">
                       <div>

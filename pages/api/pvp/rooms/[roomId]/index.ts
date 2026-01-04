@@ -455,7 +455,12 @@ async function getRoomHandler(req: Request): Promise<Response> {
     submissions: submissions.sort((a: any, b: any) => (a.userId ?? 0) - (b.userId ?? 0)),
     submissionStatus: submissionStatus.sort((a, b) => (a.userId ?? 0) - (b.userId ?? 0)),
     myHand: myHand ? { cards: myHandCardsDetailed, discarded: myHand.discarded, drawPile: myHand.drawPile } : null,
-    latestRound: latestRound ? { id: latestRound.id, index: latestRound.round_index, status: latestRound.status } : null,
+    latestRound: latestRound ? {
+      id: latestRound.id,
+      index: latestRound.round_index,
+      status: latestRound.status,
+      battleGenerationId: typeof (latestRound as any).battle_generation_id === 'string' ? (latestRound as any).battle_generation_id : null,
+    } : null,
     choices: choicesState,
     latestRoundResult,
     winnerVote,

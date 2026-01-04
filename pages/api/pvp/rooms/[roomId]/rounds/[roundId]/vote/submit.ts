@@ -89,10 +89,6 @@ const finalizeRoundWithVote = (rawResultJson: string, input: {
     tied: input.tally.tied,
   };
 
-  if (result?.report?.officialReport && typeof result.report.officialReport === 'object') {
-    result.report.officialReport.winner = winnerName;
-  }
-
   return {
     nextResultJson: JSON.stringify(result),
     winnerUserId,

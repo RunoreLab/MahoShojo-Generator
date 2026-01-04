@@ -45,10 +45,6 @@ const markRoundResultPendingVote = (rawResultJson: string, meta: { createdAt: st
     createdByUserId: meta.createdByUserId,
   };
 
-  if (result?.report?.officialReport && typeof result.report.officialReport === 'object') {
-    result.report.officialReport.winner = '待定（投票中）';
-  }
-
   return JSON.stringify(result);
 };
 
@@ -127,4 +123,3 @@ async function startVoteHandler(req: Request): Promise<Response> {
 }
 
 export default withPvpErrorBoundary(startVoteHandler);
-
