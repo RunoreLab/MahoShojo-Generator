@@ -16,6 +16,10 @@
 
 **魔法少女生成器 (MahoShojo-Generator)** 是一款基于 AI 结构化生成技术，用于创建个性化、可成长的魔法少女及相关角色的 Web 应用。本项目使用 Next.js 15 + React 19 + TypeScript 构建，运行于 Cloudflare Edge Runtime，数据存储于 Cloudflare D1，并利用 Vercel AI SDK 与多种大语言模型（推荐 Gemini 系列）进行交互。
 
+**V0.6.0 版本【排位×技术值×标签×百科×排行榜】更新**：新增“排位分 / 技术值”体系与排行榜页面；竞技场/PVP 对局可在满足资格时计入排位（v0.6.0 默认仅计 1v1，宁可漏算不可错算）；引入“定位标签”与标签库，支持筛选与展示；同时上线可维护的 Markdown 百科（含新手指引与规则说明）。此外，战报等大对象支持外部化存储（可选 R2），减少 D1 体积压力。
+
+**V0.5.1 版本【PVP卡牌对决×个人页/个人资料卡】更新**：上线 PVP 房间卡牌对决（大厅/房间/回合/投票/结算等），并新增个人页与“个人资料卡”生成能力，方便展示个人战报与名片信息。（注：该版本当时未同步更新 README/公告，现补记。）
+
 **V0.5.0 版本【流式生成×屏蔽词机制】更新**：竞技场流式战报升级为 Markdown 文本流（实时输出）；新增“屏蔽词”柔性和谐机制（默认遮罩 `❀` / 可定向替换），避免误触合规风险；同时强化敏感词触发后的“输入备份”，在逮捕页可直接预览与下载，尽量避免丢稿。
 
 **V0.4.3 版本【通用角色扩展】更新**：新增「通用角色」模板，档案馆支持一键切换内容模板并自动生成 Markdown 描述，历战记录与签名在转换中保持独立字段；魔法少女/残兽/情景模板也按需补齐嵌套字段，让空白卡片开箱即用。竞技场（含流式模式）现已兼容通用角色，并提供兜底提示词确保跨模板对战依然精彩。
@@ -41,6 +45,10 @@
     * **自定义**：支持用户引导、分队对抗、指定字数、选择语言。
     * **历战记录**：可选择是否让 AI 参考角色的过往经历。
     * **数据库联动**：内置数据卡选择器支持作者、点赞数、使用数等多维筛选；查看详情即得完整描述，并会自动记录公开卡的使用统计与点赞。
+* **排行榜与排位系统 (v0.6.0)**：对满足资格的 1v1 对局计算排位分并展示榜单；提供“最高值/近期”等筛选与标签维度浏览。
+* **定位标签与百科 (v0.6.0)**：引入标签库（系统维护口径）与数据卡标签选择；新增百科入口（Markdown 可维护），补齐新手指引、排位规则与标签释义。
+* **PVP 卡牌对决 (v0.5.1)**：支持创建/加入房间、回合推进、投票与结算，并可生成对局结算卡（在 v0.6.0 起满足资格时也可计入排位）。
+* **个人中心与个人资料卡 (v0.5.1)**：个人页展示战报与基础信息，并支持生成个人资料卡用于分享。
 * **成长升华**：上传任意模板的设定文件（历战记录可选），可自由切换目标模板（含通用角色）并指定保留字段，AI 会生成“成长后”设定。
 * **情景生成**：通过问卷快速生成用于竞技场“情景模式”的自定义故事场景文件。
 * **角色管理中心**：
@@ -62,8 +70,8 @@
 
 * **框架**: Next.js 15 (Pages Router), React 19
 * **语言**: TypeScript
-* **运行时**: Bun (开发与构建), Cloudflare Edge Runtime (生产)
-* **数据库**: Cloudflare D1
+* **运行时**: Bun (开发与构建), Cloudflare Pages/Workers (生产，Edge Runtime)
+* **数据库**: Cloudflare D1（主库）+ Cloudflare R2（可选：大对象外部化）
 * **AI**: Vercel AI SDK, 支持 OpenAI/Google Gemini 等多种模型 (推荐 `gemini-1.5-flash` 或 `gemini-2.5-flash-lite`)
 * **样式**: Tailwind CSS 4, shadcn/ui (部分)
 * **安全**: Cloudflare Turnstile (验证码)
@@ -137,6 +145,18 @@ npm run build
 npm run start
 ```
 
+### Cloudflare Pages 构建与本地预览（推荐）
+
+本项目线上部署以 Cloudflare Pages/Workers 为准，建议在本地/CI 用 `next-on-pages` 的链路做一次构建检查：
+
+```bash
+# 生成 Cloudflare Pages 产物到 .vercel/output
+bun run build:cf
+
+# 本地用 wrangler 启动 Pages dev（会先 build:cf）
+bun run preview
+```
+
 ## 📋 开发进度
 
 - [x] AI 生成系统接入
@@ -147,8 +167,6 @@ npm run start
 - [x] 图片预加载性能优化
 - [x] 深度问卷生成功能
 - [x] 角色对战故事生成功能
-- [x] 队列系统与请求限流（已删除）
-- [x] 用户排队等待界面（已删除）
 - [x] 扩展预设角色库
 - [x] 加入残兽生成器！魔法少女太多了，有违自然之道
 - [x] 在竞技场中支持残兽参战！
@@ -168,6 +186,11 @@ npm run start
 - [x] 数据卡高级筛选与使用/点赞统计 (v0.4.2)
 - [x] 徽章管理与兑换中心 (v0.4.1+)
 - [x] 密钥找回邮件通道 (v0.4.2)
+- [x] 流式生成升级 + 屏蔽词柔性替换 + 输入备份 (v0.5.0)
+- [x] PVP 卡牌对决 + 个人中心/个人资料卡 (v0.5.1)
+- [x] 排位分 / 技术值 / 排行榜 (v0.6.0)
+- [x] 定位标签 / 标签库 / 标签筛选与展示 (v0.6.0)
+- [x] Markdown 百科（新手指引/规则/标签释义）(v0.6.0)
 - [ ] 角色卡片模板扩展
 - [ ] 将系统通用化，模块化
 
@@ -199,34 +222,44 @@ MahoShojo-Generator/
 │   ├── name.tsx                 # 魔法少女（基于名字）生成页
 │   ├── details.tsx              # 魔法少女（深度问卷）生成页
 │   ├── canshou.tsx              # 残兽生成页
-│   ├── battle.tsx               # 魔法少女竞技场页
-│   ├── sublimation.tsx          # (新) 成长升华页
-│   ├── scenario.tsx             # (新) 情景生成页
-│   ├── character-manager.tsx    # (新) 角色管理页
+│   ├── arena.tsx                # 竞技场（含排位信息展示）
+│   ├── arena-stream.tsx         # 竞技场（流式页面）
+│   ├── battle.tsx               # 竞技场（兼容旧入口）
+│   ├── pvp.tsx                  # PVP 房间大厅
+│   ├── pvp/[roomId].tsx         # PVP 房间页
+│   ├── ranking.tsx              # 排行榜
+│   ├── encyclopedia/index.tsx   # 百科目录
+│   ├── encyclopedia/[slug].tsx  # 百科详情
+│   ├── sublimation.tsx          # 成长升华页
+│   ├── scenario.tsx             # 情景生成页
+│   ├── character-manager.tsx    # 角色管理页
+│   ├── me.tsx                   # 个人中心
 │   ├── arrested.tsx             # 逮捕页
 │   └── api/
-│       ├── generate-magical-girl.ts
-│       ├── generate-magical-girl-details.ts
-│       ├── generate-canshou.ts
-│       ├── generate-battle-story.ts
-│       ├── generate-sublimation.ts      # (新) 升华API
-│       ├── generate-scenario.ts         # (新) 情景生成API
-│       └── verify-origin.ts
+│       ├── arena/*              # 竞技场：生成/流式/榜单等
+│       ├── pvp/*                # PVP：房间/回合/投票/结算等
+│       ├── auth/*               # 登录/注册/找回/校验
+│       ├── me/*                 # 个人资料/战报/卡片等
+│       └── ...                  # 其余业务 API
 ├── lib/
-│   ├── ai.ts                   # AI 集成和类型定义
-│   ├── config.ts               # 环境配置管理
-│   └── signature.ts            # 数据签名与验证
+│   ├── ai/*                     # AI 提供商与封装
+│   ├── database/*               # D1 数据访问与 schema
+│   ├── d1.ts                    # D1 连接与工具
+│   ├── r2.ts                    # R2（大对象外部化，可选）
+│   ├── encyclopedia.ts          # 百科索引与渲染
+│   └── signature.ts             # 数据签名与验证
 ├── components/
-│   ├── MagicalGirlCard.tsx
-│   ├── CanshouCard.tsx
-│   └── BattleReportCard.tsx
+│   └── ...                      # 可复用组件（卡片/模态框/竞技场/PVP/排行榜等）
 ├── public/
-│   ├── questionnaire.json
-│   ├── presets/
-│   ├── random-assets/ # (新) 随机角色素材库
-│   └── ...                     # 其他静态资源
+│   ├── announcements.json       # 站内公告
+│   ├── encyclopedia/*           # 百科 Markdown
+│   ├── presets/                 # 预设数据卡
+│   └── ...                      # 其他静态资源
 ├── types/
 │   └── arena.d.ts              # (新) 竞技场相关类型
+├── config/                      # 运行时配置（如战报存储策略）
+├── scripts/                     # 运维/初始化脚本
+├── tests/                       # bun 测试
 └── ...                         # 配置文件
 ```
 

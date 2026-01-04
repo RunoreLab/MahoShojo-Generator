@@ -296,6 +296,28 @@ CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_room_id ON battle_r
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_match_id ON battle_report_generations(pvp_match_id);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_round_id ON battle_report_generations(pvp_round_id);
 
+-- 大对象索引表（R2 外部化）
+-- 用于把大字段（战报正文、PVP 快照、立绘等）外部化到 R2，并在 D1 内保存可查询的索引。
+CREATE TABLE IF NOT EXISTS large_objects (
+  id TEXT PRIMARY KEY NOT NULL,
+  kind TEXT NOT NULL,                    -- 业务类型（如 battle_report_generation_output）
+  owner_ref_id TEXT NOT NULL,            -- 业务实体ID（如 generationId / roomId / dataCardId）
+  owner_user_id INTEGER,                -- 归属用户（可空）
+  r2_key TEXT NOT NULL,                 -- R2 对象 key（不含 bucket）
+  bytes INTEGER NOT NULL,               -- 原始内容字节量（未压缩）
+  stored_bytes INTEGER,                 -- 存入 R2 的字节量（可空；gzip/流式场景可记录）
+  sha256 TEXT,                          -- 可选：内容 hash（用于去重/校验）
+  content_type TEXT,                    -- 如 application/json; charset=utf-8 / text/markdown; charset=utf-8 / image/webp
+  content_encoding TEXT,                -- 如 gzip
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE(kind, owner_ref_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_large_objects_kind_created_at ON large_objects(kind, created_at);
+CREATE INDEX IF NOT EXISTS idx_large_objects_owner_user_id_created_at ON large_objects(owner_user_id, created_at);
+
 -- 战报生成记录-参战者明细表
 -- 用于记录每条生成记录中每位角色的可查询信息（未来排行榜/统计的关键维度）。
 CREATE TABLE IF NOT EXISTS battle_report_generation_combatants (
@@ -497,3 +519,135 @@ CREATE TABLE IF NOT EXISTS pvp_round_choices (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pvp_round_choices_round_id ON pvp_round_choices(round_id);
+
+-- =================================================================
+-- Arena 排位（v0.6.0）
+-- =================================================================
+
+CREATE TABLE IF NOT EXISTS arena_ratings (
+  entity_type TEXT NOT NULL CHECK(entity_type IN ('data_card', 'preset')),
+  entity_id TEXT NOT NULL,
+  queue TEXT NOT NULL CHECK(queue IN ('strict', 'free')),
+
+  rating INTEGER NOT NULL DEFAULT 1000,
+  games INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0,
+  draws INTEGER NOT NULL DEFAULT 0,
+
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+
+  PRIMARY KEY (entity_type, entity_id, queue)
+);
+
+CREATE INDEX IF NOT EXISTS idx_arena_ratings_queue_rating ON arena_ratings(queue, rating DESC);
+CREATE INDEX IF NOT EXISTS idx_arena_ratings_queue_games ON arena_ratings(queue, games DESC);
+CREATE INDEX IF NOT EXISTS idx_arena_ratings_updated_at ON arena_ratings(updated_at);
+
+CREATE TABLE IF NOT EXISTS arena_rating_events (
+  id TEXT PRIMARY KEY NOT NULL,
+  generation_id TEXT NOT NULL,
+  queue TEXT NOT NULL CHECK(queue IN ('strict', 'free')),
+
+  status TEXT NOT NULL CHECK(status IN ('pending', 'applied', 'skipped', 'failed')),
+  skip_reason TEXT,
+
+  user_id INTEGER,
+  ip_anonymized TEXT,
+
+  pair_key TEXT NOT NULL,
+
+  a_entity_type TEXT NOT NULL CHECK(a_entity_type IN ('data_card', 'preset')),
+  a_entity_id TEXT NOT NULL,
+  b_entity_type TEXT NOT NULL CHECK(b_entity_type IN ('data_card', 'preset')),
+  b_entity_id TEXT NOT NULL,
+
+  winner_slot INTEGER NOT NULL CHECK(winner_slot IN (0, 1, 2)),
+
+  a_before_rating INTEGER,
+  a_after_rating INTEGER,
+  a_delta INTEGER,
+  a_before_games INTEGER,
+  a_after_games INTEGER,
+
+  b_before_rating INTEGER,
+  b_after_rating INTEGER,
+  b_delta INTEGER,
+  b_before_games INTEGER,
+  b_after_games INTEGER,
+
+  details_json TEXT,
+
+  created_at TEXT NOT NULL,
+  applied_at TEXT,
+
+  FOREIGN KEY (generation_id) REFERENCES battle_report_generations(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+
+  UNIQUE (generation_id, queue)
+);
+
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_queue_created_at ON arena_rating_events(queue, created_at);
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_user_pair_created_at ON arena_rating_events(user_id, pair_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_ip_pair_created_at ON arena_rating_events(ip_anonymized, pair_key, created_at);
+
+-- =================================================================
+-- Data Card Metrics（v0.6.0）
+-- =================================================================
+CREATE TABLE IF NOT EXISTS data_card_metrics (
+  data_card_id TEXT PRIMARY KEY NOT NULL,
+  tech_score INTEGER NOT NULL,
+  tech_level TEXT NOT NULL CHECK(tech_level IN ('L0','L1','L2','L3','L4','L5')),
+  is_native BOOLEAN,
+  data_card_updated_at TEXT NOT NULL,
+  details_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (data_card_id) REFERENCES data_cards(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_card_metrics_tech_score ON data_card_metrics(tech_score DESC);
+CREATE INDEX IF NOT EXISTS idx_data_card_metrics_tech_level ON data_card_metrics(tech_level);
+CREATE INDEX IF NOT EXISTS idx_data_card_metrics_is_native ON data_card_metrics(is_native);
+
+-- =================================================================
+-- Tags（v0.6.0）
+-- =================================================================
+CREATE TABLE IF NOT EXISTS tags (
+  id TEXT PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  category TEXT,
+  scope TEXT NOT NULL CHECK(scope IN ('user','system','admin')),
+  is_active BOOLEAN NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tags_scope ON tags(scope);
+CREATE INDEX IF NOT EXISTS idx_tags_is_active ON tags(is_active);
+CREATE INDEX IF NOT EXISTS idx_tags_category ON tags(category);
+
+CREATE TABLE IF NOT EXISTS tag_aliases (
+  alias TEXT PRIMARY KEY NOT NULL,
+  tag_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_tag_aliases_tag_id ON tag_aliases(tag_id);
+
+CREATE TABLE IF NOT EXISTS data_card_tags (
+  data_card_id TEXT NOT NULL,
+  tag_id TEXT NOT NULL,
+  created_by_user_id INTEGER,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (data_card_id, tag_id),
+  FOREIGN KEY (data_card_id) REFERENCES data_cards(id) ON DELETE CASCADE,
+  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_card_tags_tag_id ON data_card_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_data_card_tags_data_card_id ON data_card_tags(data_card_id);

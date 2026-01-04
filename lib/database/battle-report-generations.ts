@@ -243,6 +243,28 @@ export async function createBattleReportGenerationRecord(
   }
 }
 
+export async function updateBattleReportGenerationOutputPreview(
+  generationId: string,
+  outputPreview: string | null
+): Promise<boolean> {
+  const id = typeof generationId === 'string' ? generationId.trim() : '';
+  if (!id) return false;
+
+  try {
+    const nowIso = new Date().toISOString();
+    const result = (await queryFromD1(
+      `UPDATE battle_report_generations
+       SET output_preview = ?, updated_at = ?
+       WHERE id = ?`,
+      [outputPreview, nowIso, id]
+    )) as any;
+    return Boolean(result?.success && result.result?.[0]?.meta?.changes > 0);
+  } catch (error) {
+    console.error('更新 battle_report_generations.output_preview 失败:', error);
+    return false;
+  }
+}
+
 export interface BattleReportGenerationRowLite {
   id: string;
   started_at: string;

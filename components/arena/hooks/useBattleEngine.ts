@@ -15,6 +15,7 @@ import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
+import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 
@@ -251,6 +252,7 @@ export const useBattleEngine = () => {
   const setStreamAiUsage = useBattleSelector((state) => state.setStreamAiUsage);
   const setStreamAiModel = useBattleSelector((state) => state.setStreamAiModel);
   const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
+  const setLastGenerationId = useBattleSelector((state) => state.setLastGenerationId);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
@@ -327,6 +329,7 @@ export const useBattleEngine = () => {
     setStreamAiUsage(null);
     setStreamAiModel(null);
     setStreamNarrativeHistoryReadCount(null);
+    setLastGenerationId(null);
 
     try {
       await handleResolveRandomPlaceholders();
@@ -387,6 +390,7 @@ export const useBattleEngine = () => {
           data: combatant.data,
           isNative: combatant.isValid,
           isPreset: combatant.isPreset,
+          filename: combatant.isPreset ? combatant.filename : null,
           teamId: typeof combatant.teamId === 'number' ? combatant.teamId : null,
           characterGuidance: typeof (combatant as any).characterGuidance === 'string' ? (combatant as any).characterGuidance : null,
           sourceDataCardId: combatant.sourceDataCardId,
@@ -433,6 +437,10 @@ export const useBattleEngine = () => {
       if (authHeader) requestHeaders.Authorization = authHeader;
 
       const applyBattleResult = async (result: BattleApiResponse, origin: 'battle' | 'battle-stream') => {
+        if (typeof result.generationId === 'string' && result.generationId.trim()) {
+          setLastGenerationId(result.generationId.trim());
+        }
+
         const backupItems = buildBattleBackupItems(
           freshCombatants,
           shouldUseScenario ? scenario.content : null,
@@ -537,6 +545,11 @@ export const useBattleEngine = () => {
           if (metaHeader) {
             try {
               const parsed = JSON.parse(decodeURIComponent(metaHeader));
+              const generationId = typeof parsed?.generationId === 'string' ? parsed.generationId.trim() : '';
+              if (generationId) {
+                setLastGenerationId(generationId);
+              }
+
               const reporterInfo = parsed?.reporterInfo;
               if (reporterInfo && typeof reporterInfo === 'object') {
                 const name = typeof reporterInfo.name === 'string' ? reporterInfo.name : '';
@@ -600,6 +613,33 @@ export const useBattleEngine = () => {
           const decoder = new TextDecoder();
           let accumulatedText = '';
           let shouldAbort = false;
+          const shouldTerminateByTelemetry = (text: string) => {
+            const marker = '<!-- MAHOSHOJO_TELEMETRY_META';
+            const trimmed = text.trimEnd();
+            const idx = trimmed.lastIndexOf(marker);
+            if (idx < 0) return false;
+            if (!trimmed.endsWith('-->')) return false;
+            return trimmed.length - idx < 4096;
+          };
+          const readWithTimeout = createStreamReadWithTimeout({
+            label: '战报流式生成',
+            idleTimeoutMs: 60_000,
+            totalTimeoutMs: 10 * 60_000,
+            onTimeout: () => {
+              try {
+                abortController.abort();
+              } catch {
+                // ignore
+              }
+              if (reader) {
+                try {
+                  void reader.cancel('timeout');
+                } catch {
+                  // ignore
+                }
+              }
+            },
+          });
           const streamBackupItems = buildBattleBackupItems(
             freshCombatants,
             shouldUseScenario ? scenario.content : null,
@@ -627,7 +667,7 @@ export const useBattleEngine = () => {
           };
 
           while (true) {
-            const { value, done } = await reader.read();
+            const { value, done } = await readWithTimeout(reader);
             if (done) {
               break;
             }
@@ -672,11 +712,24 @@ export const useBattleEngine = () => {
               setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
 
               shouldAbort = true;
-              await reader.cancel().catch(() => undefined);
+              try {
+                void reader.cancel('sensitive');
+              } catch {
+                // ignore
+              }
               break;
             }
 
             setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+
+            if (shouldTerminateByTelemetry(accumulatedText)) {
+              try {
+                void reader.cancel('telemetry-meta-received');
+              } catch {
+                // ignore
+              }
+              break;
+            }
 
             if (shouldAbort) {
               break;
@@ -813,7 +866,11 @@ export const useBattleEngine = () => {
           return;
         } finally {
           if (reader) {
-            await reader.cancel().catch(() => undefined);
+            try {
+              void reader.cancel();
+            } catch {
+              // ignore
+            }
           }
           abortController.abort();
         }
@@ -882,6 +939,7 @@ export const useBattleEngine = () => {
 	    setStreamAiUsage,
 	    setStreamAiModel,
 	    setStreamNarrativeHistoryReadCount,
+      setLastGenerationId,
 	    setCombatants,
 	    handleResolveRandomPlaceholders,
 	    redirectToArrested,

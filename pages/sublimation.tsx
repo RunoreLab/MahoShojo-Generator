@@ -514,6 +514,12 @@ const SublimationPage: React.FC = () => {
                                 <li>选择目标模板（默认沿用原模板，无匹配时自动切换为通用角色），并可指定需要保留的字段。如果希望借此切换角色模板，建议选择【完全重塑】。</li>
                                 <li>AI 将结合设定、历战记录与可选的成长引导，生成“升华后”的新形态设定。</li>
                             </ol>
+                            <div className="mt-3 flex flex-wrap gap-3 text-xs">
+                                <Link href="/encyclopedia/sublimation" className="text-blue-700 hover:underline">百科：成长升华</Link>
+                                <Link href="/encyclopedia/sensitive-words" className="text-blue-700 hover:underline">敏感词与逮捕（含恢复）</Link>
+                                <Link href="/encyclopedia/shield-words" className="text-blue-700 hover:underline">屏蔽词（和谐替换）</Link>
+                                <Link href="/encyclopedia/archive" className="text-blue-700 hover:underline">档案馆（角色管理）</Link>
+                            </div>
                         </div>
 
                         {/* 文件上传与粘贴区域 */}

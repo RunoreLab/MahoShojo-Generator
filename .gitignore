@@ -51,3 +51,6 @@ next-env.d.ts
 .home/
 .tmp/
 .npm-cache/
+
+.cache/
+.xdg-data/

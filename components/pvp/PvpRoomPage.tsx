@@ -31,24 +31,27 @@ import { authStorage } from '@/lib/auth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useCooldown } from '@/lib/cooldown';
 import { inferTemplate } from '@/lib/data-card-converter';
-import { config as appConfig } from '@/lib/config';
-import { useAuth } from '@/lib/useAuth';
-import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
-import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
-import { formatPvpDisplayName } from '@/lib/pvp/displayName';
-import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
-import { buildPvpScenarioRulesPatch } from '@/lib/pvp/rules-patch';
-import { isLegacyAdjudicatorFormat, mergeAdjudicationEvents } from '@/lib/pvp/adjudication-events';
-import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
-import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
+	import { config as appConfig } from '@/lib/config';
+	import { useAuth } from '@/lib/useAuth';
+	import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+	import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
+	import { formatPvpDisplayName } from '@/lib/pvp/displayName';
+	import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
+	import { buildPvpScenarioRulesPatch } from '@/lib/pvp/rules-patch';
+	import { isLegacyAdjudicatorFormat, mergeAdjudicationEvents } from '@/lib/pvp/adjudication-events';
+	import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
+	import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
+	import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
 
-import type { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 import type { UserBadge } from '@/types/badge';
 import { revokeBlobUrl } from '@/lib/client/blobUrl';
 
-const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
-const RESOLVE_REQUEST_TIMEOUT_MS = 120_000;
-const RESOLVE_STALE_WARNING_SECONDS = Math.floor(RESOLVE_REQUEST_TIMEOUT_MS / 1000);
+	const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
+	const RESOLVE_REQUEST_TIMEOUT_MS = 120_000;
+	const RESOLVE_STALE_WARNING_SECONDS = Math.floor(RESOLVE_REQUEST_TIMEOUT_MS / 1000);
+	const RESOLVE_STREAM_IDLE_TIMEOUT_MS = 60_000;
+	const RESOLVE_STREAM_TOTAL_TIMEOUT_MS = 10 * 60_000;
 
 const getCachedPassword = (roomId: string): string => {
   if (typeof window === 'undefined') return '';
@@ -1103,20 +1106,48 @@ export function PvpRoomPage() {
 
         if (!res.body) throw new Error('无法读取响应流');
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let accumulated = '';
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (!value) continue;
-          accumulated += decoder.decode(value, { stream: true });
-          setStreamingResolveMarkdown(accumulated);
-        }
-        accumulated += decoder.decode();
-        setStreamingResolveMarkdown(accumulated);
-        return { success: true, streamed: true };
-      } finally {
+	        const reader = res.body.getReader();
+	        const decoder = new TextDecoder();
+	        let accumulated = '';
+	        const shouldTerminateByTelemetry = (text: string) => {
+	          const marker = '<!-- MAHOSHOJO_TELEMETRY_META';
+	          const trimmed = text.trimEnd();
+	          const idx = trimmed.lastIndexOf(marker);
+	          if (idx < 0) return false;
+	          if (!trimmed.endsWith('-->')) return false;
+	          return trimmed.length - idx < 4096;
+	        };
+	        const readWithTimeout = createStreamReadWithTimeout({
+	          label: 'PVP 结算流式',
+	          idleTimeoutMs: RESOLVE_STREAM_IDLE_TIMEOUT_MS,
+	          totalTimeoutMs: RESOLVE_STREAM_TOTAL_TIMEOUT_MS,
+	          onTimeout: () => {
+	            try {
+	              void reader.cancel('timeout');
+	            } catch {
+	              // ignore
+	            }
+	          },
+	        });
+	        while (true) {
+	          const { value, done } = await readWithTimeout(reader);
+	          if (done) break;
+	          if (!value) continue;
+	          accumulated += decoder.decode(value, { stream: true });
+	          setStreamingResolveMarkdown(accumulated);
+	          if (shouldTerminateByTelemetry(accumulated)) {
+	            try {
+	              void reader.cancel('telemetry-meta-received');
+	            } catch {
+	              // ignore
+	            }
+	            break;
+	          }
+	        }
+	        accumulated += decoder.decode();
+	        setStreamingResolveMarkdown(accumulated);
+	        return { success: true, streamed: true };
+	      } finally {
         setIsStreamingResolve(false);
       }
     },

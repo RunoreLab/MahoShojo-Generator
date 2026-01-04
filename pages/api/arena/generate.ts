@@ -19,8 +19,10 @@ import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
 import {
     createBattleReportGenerationRecord,
     createBattleReportGenerationCombatants,
+    generateUUID,
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
+    updateBattleReportGenerationOutputPreview,
     getUserByAuthKey
 } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
@@ -33,6 +35,8 @@ import {
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
+import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
 
 const log = getLogger('api-gen-battle-story');
 const MAX_COMBATANTS = 10;
@@ -47,19 +51,25 @@ interface BattleApiResponse {
     adjudicationResults?: AdjudicationResult[];
 }
 
-async function handler(req: NextRequest): Promise<Response> {
-    if (req.method !== 'POST') {
-        return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
-    }
+	async function handler(req: NextRequest): Promise<Response> {
+	    if (req.method !== 'POST') {
+	        return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
+	    }
 
-    const startedAtMs = Date.now();
-    const startedAtIso = new Date(startedAtMs).toISOString();
+	    const startedAtMs = Date.now();
+	    const startedAtIso = new Date(startedAtMs).toISOString();
 
-    try {
-        const body = await req.json();
-        const {
-            combatants,
-            selectedLevel,
+	    try {
+	        const normalizeOptionalString = (value: unknown): string | null => {
+	            if (typeof value !== 'string') return null;
+	            const trimmed = value.trim();
+	            return trimmed ? trimmed : null;
+	        };
+
+	        const body = await req.json();
+	        const {
+	            combatants,
+	            selectedLevel,
             mode = 'classic',
             userGuidance,
             scenario,
@@ -425,7 +435,10 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const recordPromise = (async () => {
             const user = authKey ? await getUserByAuthKey(authKey) : null;
-            const recordId = await createBattleReportGenerationRecord({
+            const recordId = generateUUID();
+
+	            const createdId = await createBattleReportGenerationRecord({
+                id: recordId,
                 startedAt: startedAtIso,
                 endedAt: endedAtIso,
                 durationMs,
@@ -448,9 +461,9 @@ async function handler(req: NextRequest): Promise<Response> {
                     : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
                 scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                 scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
-                language: typeof language === 'string' ? language : null,
-                selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
-                storyLength: typeof storyLength === 'string' ? storyLength : null,
+	                language: normalizeOptionalString(language),
+	                selectedLevel: normalizeOptionalString(selectedLevel),
+	                storyLength: normalizeOptionalString(storyLength),
                 readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                 arenaHistoryReadLimit: resolvedReadArenaHistory
                     ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
@@ -487,26 +500,51 @@ async function handler(req: NextRequest): Promise<Response> {
                 outputPreview,
                 outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
                 outputHasShieldWords: shieldResult.hasShieldWords,
-                extraJson: compactExtraJson({
-                    resolvedModelOverride: resolvedModelOverride ?? null,
-                }),
-            });
+	                extraJson: compactExtraJson({
+	                    resolvedModelOverride: resolvedModelOverride ?? null,
+	                    readNarrativeHistory: resolvedReadNarrativeHistory,
+	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+	                }),
+	            });
 
-            if (recordId && Array.isArray(combatants)) {
+            if (createdId) {
+                const storePromise = (async () => {
+                    const stored = await storeBattleReportGenerationOutputTextToR2({
+                        generationId: recordId,
+                        startedAtIso: startedAtIso,
+                        ownerUserId: user?.id ?? null,
+                        format: 'json',
+                        text: reportJson,
+                    });
+                    if (stored.ok && !stored.persistPreviewInD1) {
+                        await updateBattleReportGenerationOutputPreview(recordId, null);
+                    }
+                })();
+                const executionContext = (req as any).context;
+                if (executionContext?.waitUntil) {
+                    executionContext.waitUntil(storePromise);
+                } else {
+                    await storePromise;
+                }
+            }
+
+            if (createdId && Array.isArray(combatants)) {
                 const toBytes = (value: string) => new TextEncoder().encode(value).length;
                 const rows = combatants.map((c: any, index: number) => {
                     const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
                     const payload = typeof c?.data === 'object' ? JSON.stringify(c.data) : '';
                     const characterGuidance =
                         typeof c?.characterGuidance === 'string' ? c.characterGuidance.trim().slice(0, 100) : '';
+                    const isPreset = typeof c?.isPreset === 'boolean' ? c.isPreset : false;
+                    const presetFilename = isPreset && typeof c?.filename === 'string' ? c.filename.trim() : '';
                     return {
                         generationId: recordId,
                         sortIndex: index,
                         name,
                         type: typeof c?.type === 'string' ? c.type : null,
-                        templateId: typeof c?.data?.templateId === 'string' ? c.data.templateId : null,
+                        templateId: presetFilename || (typeof c?.data?.templateId === 'string' ? c.data.templateId : null),
                         isNative: typeof c?.isNative === 'boolean' ? c.isNative : null,
-                        isPreset: typeof c?.isPreset === 'boolean' ? c.isPreset : null,
+                        isPreset: isPreset ? true : null,
                         teamId: typeof c?.teamId === 'number' ? c.teamId : null,
                         characterGuidance: characterGuidance || null,
                         dataCardId: typeof c?.sourceDataCardId === 'string' ? c.sourceDataCardId : null,
@@ -534,6 +572,14 @@ async function handler(req: NextRequest): Promise<Response> {
                             combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
                         })
                     );
+                }
+            }
+
+            if (createdId) {
+                try {
+                    await settleArenaRatingsForGeneration(recordId);
+                } catch (error) {
+                    log.warn('排位结算失败（非阻塞）', { recordId, error });
                 }
             }
         })();

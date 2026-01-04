@@ -10,7 +10,7 @@ import {
   getUserEquippedBadges,
   getUserProfileByUserId,
 } from '@/lib/d1';
-import { botUserIdForClient, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
+import { botUserIdForClient, parsePvpRoomBotRoster, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { formatPvpDisplayName } from '@/lib/pvp/displayName';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -82,6 +82,8 @@ async function handler(req: Request): Promise<Response> {
 
   const players = await getPvpRoomPlayers(roomId);
   const bots = internal.bots;
+  const botRoster = bots.length > 0 ? [] : parsePvpRoomBotRoster(internal.raw);
+  const displayBots = bots.length > 0 ? bots.map((b) => ({ id: b.id, name: b.name, seat: b.seat })) : botRoster;
 
   const participants = [
     ...players.map((p) => ({
@@ -92,7 +94,7 @@ async function handler(req: Request): Promise<Response> {
       isBot: false,
       botId: null as string | null,
     })),
-    ...bots.map((b) => ({
+    ...displayBots.map((b) => ({
       userId: botUserIdForClient(b.seat),
       username: b.name ?? null,
       prefix: null,
@@ -123,6 +125,13 @@ async function handler(req: Request): Promise<Response> {
     if (typeof p.userId !== 'number' || !Number.isFinite(p.userId)) continue;
     usernameByUserId.set(p.userId, typeof p.username === 'string' && p.username.trim() ? p.username.trim() : `用户${p.userId}`);
     isBotByUserId.set(p.userId, Boolean(p.isBot));
+  }
+
+  const userIdBySeat = new Map<number, number>();
+  for (const p of participants) {
+    if (typeof p.seat !== 'number' || !Number.isFinite(p.seat)) continue;
+    if (typeof p.userId !== 'number' || !Number.isFinite(p.userId)) continue;
+    userIdBySeat.set(Math.floor(p.seat), Math.floor(p.userId));
   }
 
   const allMyBadges = await getUserBadges(auth.user.id);
@@ -191,6 +200,7 @@ async function handler(req: Request): Promise<Response> {
       result,
       usernameByUserId,
       isBotByUserId,
+      userIdBySeat,
       myUserId: auth.user.id,
     });
   });

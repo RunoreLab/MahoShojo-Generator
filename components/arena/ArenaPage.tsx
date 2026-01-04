@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
@@ -9,7 +10,7 @@ import Footer from '@/components/Footer';
 import { qqGroups } from '@/lib/communityGroups';
 import { useAuth } from '@/lib/useAuth';
 import { config as appConfig } from '@/lib/config';
-import { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 
 import { BattleHeader } from './components/BattleHeader';
 import { PresetSelector } from './components/PresetSelector';
@@ -25,10 +26,12 @@ import { BattleResult } from './components/BattleResult';
 import { BattleModeSwitcher } from './components/BattleModeSwitcher';
 import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
 import { ArenaStatistics } from './components/ArenaStatistics';
+import { RankingQuickActions } from './components/RankingQuickActions';
 import { useBattleStore } from './stores/useBattleStore';
 import { BattleStoreState, CombatantData, MAX_AUX_SCENARIOS, MAX_COMBATANTS } from './types';
 import { useBattleActions } from './hooks/useBattleActions';
 import { usePresetQuery, useLanguagesQuery, useStatsQuery } from './hooks/useArenaData';
+import { ArenaRankingModal } from './components/ArenaRankingModal';
 
 export function ArenaPage() {
   const { isAuthenticated } = useAuth();
@@ -37,6 +40,7 @@ export function ArenaPage() {
   const [selectedCombatant, setSelectedCombatant] = useState<CombatantData | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
+  const [showRankingModal, setShowRankingModal] = useState(false);
 
   const combatants = useBattleStore((state: BattleStoreState) => state.combatants);
   const scenario = useBattleStore((state: BattleStoreState) => state.scenario);
@@ -126,6 +130,19 @@ export function ArenaPage() {
         <div className="container">
           <div className="card" style={{ border: '2px solid #ccc', background: '#f9f9f9' }}>
             <BattleHeader />
+            <div className="flex justify-end mt-2">
+              <div className="flex items-center gap-3 text-sm flex-wrap">
+                <button
+                  onClick={() => setShowRankingModal(true)}
+                  className="text-blue-600 hover:underline font-semibold"
+                >
+                  快速查看排行榜
+                </button>
+                <Link href="/ranking" className="text-blue-600 hover:underline">
+                  进入排行榜页
+                </Link>
+              </div>
+            </div>
             <PresetSelector />
             <DatabaseSelector
               onOpenCharacterModal={handleOpenCharacterDataModal}
@@ -138,6 +155,7 @@ export function ArenaPage() {
             <RosterUploader />
             <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />
             <BattleModeSwitcher />
+            <RankingQuickActions />
             {battleMode === 'scenario' && (
               <ScenarioPanel
                 onOpenScenarioModal={handleOpenScenarioDataModal}
@@ -292,6 +310,8 @@ export function ArenaPage() {
           }}
         />
       )}
+
+      <ArenaRankingModal isOpen={showRankingModal} onClose={() => setShowRankingModal(false)} />
     </>
   );
 }

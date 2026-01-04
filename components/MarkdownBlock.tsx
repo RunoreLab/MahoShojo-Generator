@@ -5,14 +5,16 @@ import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
 export type MarkdownBlockVariant = 'light' | 'dark';
+export type MarkdownBlockMode = 'compact' | 'article';
 
 export interface MarkdownBlockProps {
   content: string;
   variant?: MarkdownBlockVariant;
+  mode?: MarkdownBlockMode;
   className?: string;
 }
 
-export function MarkdownBlock({ content, variant = 'dark', className }: MarkdownBlockProps) {
+export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', className }: MarkdownBlockProps) {
   const borderClass = variant === 'light' ? 'border-gray-200' : 'border-white/15';
   const headerBgClass = variant === 'light' ? 'bg-gray-50' : 'bg-white/10';
   const cellBorderClass = variant === 'light' ? 'border-gray-200' : 'border-white/10';
@@ -20,25 +22,50 @@ export function MarkdownBlock({ content, variant = 'dark', className }: Markdown
   const textClass = variant === 'light' ? 'text-gray-800' : 'text-white/90';
   const mutedTextClass = variant === 'light' ? 'text-gray-600' : 'text-white/70';
 
+  const isArticle = mode === 'article';
+  const paragraphClass = isArticle
+    ? `my-3 whitespace-normal break-words leading-7 ${textClass}`
+    : `my-0 whitespace-pre-wrap break-words leading-relaxed ${textClass}`;
+  const unorderedListClass = isArticle
+    ? `my-3 list-disc pl-6 space-y-1 ${textClass}`
+    : `my-1 list-disc pl-5 space-y-1 ${textClass}`;
+  const orderedListClass = isArticle
+    ? `my-3 list-decimal pl-6 space-y-1 ${textClass}`
+    : `my-1 list-decimal pl-5 space-y-1 ${textClass}`;
+  const blockquoteClass = isArticle
+    ? `my-4 border-l-4 ${borderClass} pl-4 text-sm leading-6 ${mutedTextClass} [&>p]:my-1 [&>p]:leading-6`
+    : `my-2 border-l-4 ${borderClass} pl-3 ${mutedTextClass}`;
+  const hrClass = isArticle ? `my-6 ${borderClass}` : `my-3 ${borderClass}`;
+  const preClass = isArticle
+    ? `my-4 overflow-x-auto rounded-lg border ${borderClass} bg-black/10 p-3 text-xs leading-relaxed ${textClass}`
+    : `my-2 overflow-x-auto rounded-lg border ${borderClass} bg-black/10 p-3 text-xs leading-relaxed ${textClass}`;
+
   const components: Components = {
-    h1: ({ children }) => <h3 className={`mt-3 mb-2 text-base font-semibold ${textClass}`}>{children}</h3>,
-    h2: ({ children }) => <h4 className={`mt-3 mb-2 text-sm font-semibold ${textClass}`}>{children}</h4>,
-    h3: ({ children }) => <h5 className={`mt-2 mb-1 text-sm font-semibold ${textClass}`}>{children}</h5>,
-    p: ({ children }) => (
-      <p className={`my-0 whitespace-pre-wrap break-words leading-relaxed ${textClass}`}>{children}</p>
-    ),
-    ul: ({ children }) => <ul className={`my-1 list-disc pl-5 space-y-1 ${textClass}`}>{children}</ul>,
-    ol: ({ children }) => <ol className={`my-1 list-decimal pl-5 space-y-1 ${textClass}`}>{children}</ol>,
+    h1: ({ children }) =>
+      isArticle ? (
+        <h2 className={`mt-8 mb-3 text-lg font-semibold leading-tight first:mt-0 ${textClass}`}>{children}</h2>
+      ) : (
+        <h3 className={`mt-3 mb-2 text-base font-semibold ${textClass}`}>{children}</h3>
+      ),
+    h2: ({ children }) =>
+      isArticle ? (
+        <h3 className={`mt-7 mb-3 text-base font-semibold leading-tight ${textClass}`}>{children}</h3>
+      ) : (
+        <h4 className={`mt-3 mb-2 text-sm font-semibold ${textClass}`}>{children}</h4>
+      ),
+    h3: ({ children }) =>
+      isArticle ? (
+        <h4 className={`mt-5 mb-2 text-sm font-semibold leading-tight ${textClass}`}>{children}</h4>
+      ) : (
+        <h5 className={`mt-2 mb-1 text-sm font-semibold ${textClass}`}>{children}</h5>
+      ),
+    p: ({ children }) => <p className={paragraphClass}>{children}</p>,
+    ul: ({ children }) => <ul className={unorderedListClass}>{children}</ul>,
+    ol: ({ children }) => <ol className={orderedListClass}>{children}</ol>,
     li: ({ children }) => <li className="break-words">{children}</li>,
-    blockquote: ({ children }) => (
-      <blockquote className={`my-2 border-l-4 ${borderClass} pl-3 ${mutedTextClass}`}>{children}</blockquote>
-    ),
-    hr: () => <hr className={`my-3 ${borderClass}`} />,
-    pre: ({ children }) => (
-      <pre className={`my-2 overflow-x-auto rounded-lg border ${borderClass} bg-black/10 p-3 text-xs leading-relaxed ${textClass}`}>
-        {children}
-      </pre>
-    ),
+    blockquote: ({ children }) => <blockquote className={blockquoteClass}>{children}</blockquote>,
+    hr: () => <hr className={hrClass} />,
+    pre: ({ children }) => <pre className={preClass}>{children}</pre>,
     code: ({ inline, className: codeClassName, children, node, ...props }: MarkdownCodeProps) => {
       void node;
 
@@ -91,4 +118,3 @@ export function MarkdownBlock({ content, variant = 'dark', className }: Markdown
     </div>
   );
 }
-

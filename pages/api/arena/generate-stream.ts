@@ -10,14 +10,18 @@ import { AdjudicationResult, NarrativeHistoryEntry } from '@/types/arena';
 import { verifySignature, generateSignature } from '@/lib/signature';
 import { getSystemPrompt } from '@/lib/arena/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
-import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
-import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+	import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
+	import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+	import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
     createBattleReportGenerationRecord,
     createBattleReportGenerationCombatants,
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
+    updateBattleReportGenerationOutputPreview,
+    upsertLargeObjectByOwnerRef,
+    generateUUID,
     getUserByAuthKey
 } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
@@ -33,6 +37,9 @@ import {
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
 import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
+import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
+import { deleteObject } from '@/lib/r2';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
@@ -55,13 +62,19 @@ async function handler(req: NextRequest): Promise<Response> {
 	    let snapshotSelectedLevel: string | null = null;
 	    let snapshotStoryLength: string | null = null;
 	    let snapshotPvpRoomId: string | null = null;
-	    let snapshotPvpMatchId: string | null = null;
-	    let snapshotPvpRoundId: string | null = null;
+        let snapshotPvpMatchId: string | null = null;
+        let snapshotPvpRoundId: string | null = null;
 
-	    try {
-	        const body = await req.json();
-	        const {
-	            combatants,
+        try {
+            const normalizeOptionalString = (value: unknown): string | null => {
+                if (typeof value !== 'string') return null;
+                const trimmed = value.trim();
+                return trimmed ? trimmed : null;
+            };
+
+            const body = await req.json();
+            const {
+                combatants,
             selectedLevel,
             mode = 'classic',
             userGuidance,
@@ -89,17 +102,17 @@ async function handler(req: NextRequest): Promise<Response> {
               forceStreamMeta,
 	        } = body;
 
-          const normalizedAuxScenarios = Array.isArray(auxScenarios)
-              ? auxScenarios.filter((item) => item && typeof item === 'object')
-              : null;
+	          const normalizedAuxScenarios = Array.isArray(auxScenarios)
+	              ? auxScenarios.filter((item) => item && typeof item === 'object')
+	              : null;
           if (normalizedAuxScenarios && normalizedAuxScenarios.length > 10) {
               return new Response(JSON.stringify({ error: '辅助情景最多 10 个' }), { status: 400 });
           }
 
-	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
-	        snapshotLanguage = typeof language === 'string' ? language : null;
-	        snapshotSelectedLevel = typeof selectedLevel === 'string' ? selectedLevel : null;
-	        snapshotStoryLength = typeof storyLength === 'string' ? storyLength : null;
+		        snapshotMode = typeof mode === 'string' ? mode : 'classic';
+		        snapshotLanguage = normalizeOptionalString(language);
+		        snapshotSelectedLevel = normalizeOptionalString(selectedLevel);
+		        snapshotStoryLength = normalizeOptionalString(storyLength);
 
           const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
               if (!value || typeof value !== 'object') return null;
@@ -373,11 +386,13 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            hasUserGuidance: typeof userGuidance === 'string' ? Boolean(userGuidance.trim()) : false,
 	                            hasAdjudicationEvents: Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0,
 	                            hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
-	                            extraJson: {
-	                                errorMessage: 'rejected by sensitive input filter',
-	                                rejectedBy: 'sensitive-input',
-	                            },
-	                        });
+		                            extraJson: compactExtraJson({
+		                                errorMessage: 'rejected by sensitive input filter',
+		                                rejectedBy: 'sensitive-input',
+		                                readNarrativeHistory: resolvedReadNarrativeHistory,
+		                                narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+		                            }),
+		                        });
 	                    } catch (writeError) {
 	                        log.warn('战报生成记录：写入失败（敏感词拒绝）', { writeError });
 	                    }
@@ -445,10 +460,13 @@ async function handler(req: NextRequest): Promise<Response> {
 
         log.info('✅ 流式响应已生成，准备返回');
 
+        const generationId = generateUUID();
+
         const headers = new Headers(streamResponse.headers);
         try {
             const encodedMeta = encodeURIComponent(JSON.stringify({
                 ...streamMeta,
+                generationId,
                 ai: {
                     providerName: aiTelemetry.providerName,
                     providerType: aiTelemetry.providerType,
@@ -470,6 +488,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const ipAnonymized = anonymizeIp(ip);
         const authHeader = req.headers.get('authorization');
         const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+        let r2UploadPromise: Promise<Awaited<ReturnType<typeof storeBattleReportGenerationOutputStreamToR2>>> | null = null;
 
         let outputBytes = 0;
         let outputChars = 0;
@@ -519,7 +538,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 });
                 const inputBytes = new TextEncoder().encode(inputJson).length;
 
-                const recordId = await createBattleReportGenerationRecord({
+                const createdId = await createBattleReportGenerationRecord({
+                    id: generationId,
                     startedAt: startedAtIso,
                     endedAt: endedAtIso,
                     durationMs,
@@ -542,9 +562,9 @@ async function handler(req: NextRequest): Promise<Response> {
                         : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
                     scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                     scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
-                    language: typeof language === 'string' ? language : null,
-                    selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
-                    storyLength: typeof storyLength === 'string' ? storyLength : null,
+	                    language: normalizeOptionalString(language),
+	                    selectedLevel: normalizeOptionalString(selectedLevel),
+	                    storyLength: normalizeOptionalString(storyLength),
                     pvpRoomId: snapshotPvpRoomId,
                     pvpMatchId: snapshotPvpMatchId,
                     pvpRoundId: snapshotPvpRoundId,
@@ -581,29 +601,33 @@ async function handler(req: NextRequest): Promise<Response> {
                     totalTokens: usage?.totalTokens ?? null,
                     cachedTokens: usage?.cachedTokens ?? null,
                     reasoningTokens: usage?.reasoningTokens ?? null,
-                    outputPreview,
-                    outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
-                    outputHasShieldWords: shieldResult.hasShieldWords,
-                    extraJson: compactExtraJson({
-                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
-                    }),
-                });
+	                    outputPreview,
+	                    outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
+	                    outputHasShieldWords: shieldResult.hasShieldWords,
+	                    extraJson: compactExtraJson({
+	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+	                        readNarrativeHistory: resolvedReadNarrativeHistory,
+	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+	                    }),
+	                });
 
-                if (recordId && Array.isArray(combatants) && normalizedStatus !== 'failed') {
+                if (createdId && Array.isArray(combatants) && normalizedStatus !== 'failed') {
                     const toBytes = (value: string) => new TextEncoder().encode(value).length;
                     const rows = combatants.map((c: any, index: number) => {
                         const name = c?.data?.codename || c?.data?.name || `未知角色#${index + 1}`;
                         const payload = typeof c?.data === 'object' ? JSON.stringify(c.data) : '';
                         const characterGuidance =
                             typeof c?.characterGuidance === 'string' ? c.characterGuidance.trim().slice(0, 100) : '';
+                        const isPreset = typeof c?.isPreset === 'boolean' ? c.isPreset : false;
+                        const presetFilename = isPreset && typeof c?.filename === 'string' ? c.filename.trim() : '';
                         return {
-                            generationId: recordId,
+                            generationId: generationId,
                             sortIndex: index,
                             name,
                             type: typeof c?.type === 'string' ? c.type : null,
-                            templateId: typeof c?.data?.templateId === 'string' ? c.data.templateId : null,
+                            templateId: presetFilename || (typeof c?.data?.templateId === 'string' ? c.data.templateId : null),
                             isNative: typeof c?.isNative === 'boolean' ? c.isNative : null,
-                            isPreset: typeof c?.isPreset === 'boolean' ? c.isPreset : null,
+                            isPreset: isPreset ? true : null,
                             teamId: typeof c?.teamId === 'number' ? c.teamId : null,
                             characterGuidance: characterGuidance || null,
                             dataCardId: typeof c?.sourceDataCardId === 'string' ? c.sourceDataCardId : null,
@@ -614,26 +638,56 @@ async function handler(req: NextRequest): Promise<Response> {
                     });
                     const combatantsWrite = await createBattleReportGenerationCombatants(rows);
                     if (!combatantsWrite.ok) {
-                        log.warn('战报生成记录：角色明细写入失败', { recordId, errorMessage: combatantsWrite.errorMessage });
+                        log.warn('战报生成记录：角色明细写入失败', { recordId: generationId, errorMessage: combatantsWrite.errorMessage });
                     }
-                    await updateBattleReportGenerationCombatantsWriteResult(recordId, {
-                        ok: combatantsWrite.ok,
-                        expectedRows: rows.length,
-                        errorMessage: combatantsWrite.errorMessage ?? null,
-                    });
+	                    await updateBattleReportGenerationCombatantsWriteResult(generationId, {
+	                        ok: combatantsWrite.ok,
+	                        expectedRows: rows.length,
+	                        errorMessage: combatantsWrite.errorMessage ?? null,
+	                    });
 
-                    if (!combatantsWrite.ok) {
-                        await updateBattleReportGenerationExtraJson(
-                            recordId,
-                            compactExtraJson({
-                                errorMessage: normalizeErrorMessage(normalizedErrorMessage),
-                                combatantsFallbackReason: 'combatants-table-write-failed',
-                                combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
-                            })
-                        );
-                    }
-                }
-            })();
+		                    if (!combatantsWrite.ok) {
+		                        await updateBattleReportGenerationExtraJson(
+		                            generationId,
+		                            compactExtraJson({
+		                                errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+		                                combatantsFallbackReason: 'combatants-table-write-failed',
+		                                combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
+		                            })
+		                        );
+		                    }
+		                }
+
+	                    if (createdId) {
+	                        try {
+	                            await settleArenaRatingsForGeneration(generationId);
+	                        } catch (error) {
+	                            log.warn('排位结算失败（非阻塞）', { recordId: generationId, error });
+	                        }
+	                    }
+
+	                    const stored = r2UploadPromise ? await r2UploadPromise.catch(() => null) : null;
+		                    if (stored?.ok && stored.r2Key) {
+		                        if (normalizedStatus === 'completed') {
+		                            const indexed = await upsertLargeObjectByOwnerRef({
+                                kind: 'battle_report_generation_output',
+                                ownerRefId: generationId,
+                                ownerUserId: user?.id ?? null,
+                                r2Key: stored.r2Key,
+                                bytes: stored.bytes,
+                                storedBytes: stored.storedBytes,
+                                contentType: stored.contentType,
+                                contentEncoding: stored.contentEncoding,
+                                sha256: null,
+                            });
+                            if (indexed.ok && !stored.persistPreviewInD1) {
+                                await updateBattleReportGenerationOutputPreview(generationId, null);
+                            }
+                        } else {
+		                            await deleteObject(stored.r2Key);
+		                        }
+		                    }
+		            })();
 
             try {
                 if (executionContext?.waitUntil) {
@@ -646,13 +700,25 @@ async function handler(req: NextRequest): Promise<Response> {
             }
         };
 
-        const reader = originalBody.getReader();
-        const wrappedBody = new ReadableStream<Uint8Array>({
-            async pull(controller) {
-                try {
-                    const { done, value } = await reader.read();
-                    if (done) {
-                        appendText(decoder.decode());
+	        const reader = originalBody.getReader();
+	        const readWithTimeout = createStreamReadWithTimeout({
+	            label: 'api/arena/generate-stream 上游读取',
+	            idleTimeoutMs: 60_000,
+	            totalTimeoutMs: 10 * 60_000,
+	            onTimeout: () => {
+	                try {
+	                    void reader.cancel('timeout');
+	                } catch {
+	                    // ignore
+	                }
+	            },
+	        });
+	        const wrappedBody = new ReadableStream<Uint8Array>({
+	            async pull(controller) {
+	                try {
+	                    const { done, value } = await readWithTimeout(reader);
+	                    if (done) {
+	                        appendText(decoder.decode());
 
                         // 在流式末尾追加一段系统 telemetry 注释，用于前端展示 token 与叙事历史读取条数。
                         const usageForTelemetry = await Promise.race([
@@ -710,18 +776,25 @@ async function handler(req: NextRequest): Promise<Response> {
                     controller.error(streamError);
                     await finalizeOnce('failed', streamError instanceof Error ? streamError.message : 'stream error');
                 }
-            },
-            async cancel(reason) {
-                try {
-                    await reader.cancel(reason);
-                } catch {
-                    // 忽略取消时的二次错误
-                }
-                await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
-            }
+	            },
+	            async cancel(reason) {
+	                try {
+	                    void reader.cancel(reason);
+	                } catch {
+	                    // 忽略取消时的二次错误
+	                }
+	                await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
+	            }
+	        });
+
+        const [clientBody, r2Body] = wrappedBody.tee();
+        r2UploadPromise = storeBattleReportGenerationOutputStreamToR2({
+            generationId,
+            startedAtIso,
+            stream: r2Body,
         });
 
-        return new Response(wrappedBody, {
+        return new Response(clientBody, {
             status: streamResponse.status,
             headers,
         });

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 
-import { Preset } from '@/pages/api/get-presets';
+import type { Preset } from '@/lib/presets';
 import { PresetGridPicker } from '@/components/PresetGridPicker';
 
 import { useBattleStore } from '../stores/useBattleStore';
