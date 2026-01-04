@@ -6,6 +6,8 @@ import { useQuery } from '@tanstack/react-query';
 
 import { TierBadge } from '@/components/ranking/TierBadge';
 import type { Preset } from '@/lib/presets';
+import type { SeasonsConfig } from '@/lib/seasons';
+import { formatSeasonTitle, getCurrentSeason } from '@/lib/seasons';
 
 import { useBattleActions } from '../hooks/useBattleActions';
 import { usePresetQuery } from '../hooks/useArenaData';
@@ -108,6 +110,15 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
     staleTime: 60_000,
     enabled: isOpen,
   });
+
+  const seasonsQuery = useQuery({
+    queryKey: ['seasonsConfig'],
+    queryFn: () => fetchJson<SeasonsConfig>('/config/seasons.json'),
+    staleTime: 60_000,
+    enabled: isOpen,
+  });
+
+  const currentSeason = useMemo(() => getCurrentSeason(seasonsQuery.data), [seasonsQuery.data]);
 
   const activeTags = useMemo(
     () => (tagsQuery.data?.tags ?? []).filter((t) => t.isActive),
@@ -286,7 +297,14 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
       <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         <div className="p-5 border-b flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <div className="text-lg font-bold text-gray-800">排位排行榜（可加入参战）</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-lg font-bold text-gray-800">排位排行榜（可加入参战）</div>
+              {currentSeason ? (
+                <span className="rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-800 ring-1 ring-purple-200">
+                  当前赛季：{formatSeasonTitle(currentSeason)}
+                </span>
+              ) : null}
+            </div>
             <div className="mt-1 text-xs text-gray-500">
               这里展示公共榜单（公开 + 已审核）与预设。点击“加入参战”会把角色加入当前对战阵容。
             </div>
