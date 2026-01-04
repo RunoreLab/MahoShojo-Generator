@@ -27,7 +27,7 @@
 
 ### 0.1 已确认的口径（来自本次讨论）
 - 排位分的“对象”统一以 **数据卡 ID（`data_cards.id`）** 为准；预设角色以 **`preset filename`** 作为 ID。
-- strict 排位：**允许自由挑对手**，但 **必须登录才计分**。
+- strict 排位：不再允许自由挑对手，必须先进行「排位匹配」随机匹配对手，且 **必须登录才计分**。
 - free 排位：**不强制登录** 也可计分。
 - 平局：**计入对局数**，并按 Elo 的 `S=0.5` 微调分数。
 - 预设角色：**出现在排行榜里**（与数据库角色卡同榜展示）。
@@ -318,7 +318,7 @@ v0.6.0 推荐采用“事件先行”的两阶段：
 ### 1.9 风控与反刷分（建议至少做基础版）
 排位系统如果不加约束，很容易被“重复生成同一对局”刷分。建议的最低成本风控：
 - strict：**必须登录**才计分（`battle_report_generations.user_id IS NOT NULL`）
-- strict：**同一用户**在一定时间窗内（如 10 分钟）对同一对手组合只计分一次（用 `arena_rating_events` + 组合 key 实现；尤其适配“自由挑对手”）
+- strict：在一定时间窗内（如 10 分钟）尽量不再随机匹配到相同的对手组合（除非候选不足）
 - strict：每日计分上限（例如 strict 每日最多 80 局）
 - free：因为允许匿名，建议至少做“弱风控”（例如按 `ip_anonymized + 对手组合` 限速），否则 free 更像“娱乐分”（可接受但需在 UI/百科中说明）
 
@@ -772,14 +772,14 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 
 1) 排位对象：数据卡 `data_cards.id`；预设用 `preset filename`。
 2) v0.6.0 先按 1v1 计分 MVP（`combatant_count = 2`）。
-3) strict：允许自由挑对手，但必须登录才计分；free：不强制登录。
+3) strict：必须先进行「排位匹配」随机匹配对手，且必须登录才计分；free：不强制登录且仍允许自由挑对手。
 4) PVP 触发的战报：允许计入排位（仍需满足 strict/free eligibility；通常更偏向落在 free）。
 5) 平局：计入对局数，按 Elo 的 `S=0.5` 微调分数。
 6) strict 命中：同时更新 strict 与 free（strict ⊆ free）。
 7) free 天梯：`ip_anonymized IS NULL` 时不计分（为保证 strict ⊆ free，该条件已写入“基础资格”，使该局 strict/free 均跳过）。
 8) 计分允许包含私有卡，但公共榜过滤：仅展示 `data_cards.is_public=1 AND review_status='approved'` + 预设。
 9) 预设角色：出现在排行榜里（与数据库角色卡同榜展示）。
-10) strict 风控：10 分钟同对手组合去重 + strict 每日计分上限 80 局（见 1.9）。
+10) strict 风控：10 分钟内匹配阶段尽量避免同对手组合（除非候选不足） + strict 每日计分上限 80 局（见 1.9）。
 11) 段位阈值：沿用本文默认（900/1100/1300/1600）；初始分 `initial_rating=1000`。
 12) Elo：允许双方 K 不同（非零和）。
 13) 标签库种子：以静态资源入库（推荐 `public/tags.seed.json`），通过脚本同步到 D1（见 3.3.3）。

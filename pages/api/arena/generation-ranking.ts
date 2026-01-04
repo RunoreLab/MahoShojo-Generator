@@ -70,16 +70,60 @@ const computeTier = (rating: number, games: number) => {
 };
 
 const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combatants: BattleReportGenerationCombatantRow[]): string[] => {
+  const parsedExtraJson = (() => {
+    if (typeof snapshot.extraJson !== 'string' || !snapshot.extraJson.trim()) return null;
+    try {
+      return JSON.parse(snapshot.extraJson) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  })();
+
+  const rankedMatchOkRaw = parsedExtraJson?.rankedMatchOk;
+  const rankedMatchOk = typeof rankedMatchOkRaw === 'boolean'
+    ? rankedMatchOkRaw
+    : (typeof rankedMatchOkRaw === 'number' && Number.isFinite(rankedMatchOkRaw) ? rankedMatchOkRaw !== 0 : null);
+  const rankedMatchReason = typeof parsedExtraJson?.rankedMatchReason === 'string'
+    ? parsedExtraJson.rankedMatchReason.trim()
+    : '';
+
+  const readNarrativeHistoryRaw = parsedExtraJson?.readNarrativeHistory;
+  const readNarrativeHistory = typeof readNarrativeHistoryRaw === 'boolean'
+    ? readNarrativeHistoryRaw
+    : (typeof readNarrativeHistoryRaw === 'number' && Number.isFinite(readNarrativeHistoryRaw) ? readNarrativeHistoryRaw !== 0 : null);
+
   const reasons: string[] = [];
   if (snapshot.status !== 'completed') reasons.push('status-not-completed');
   if (snapshot.combatantCount !== 2) reasons.push('combatant-count-not-2');
   if (snapshot.ipAnonymized == null) reasons.push('ip-missing');
   if (snapshot.mode !== 'classic') reasons.push('mode-not-classic');
   if (snapshot.userId == null) reasons.push('need-login');
+  if ((snapshot.language ?? '').trim() !== 'zh-CN') reasons.push('language-not-zh-cn');
+  if (typeof snapshot.selectedLevel === 'string' && snapshot.selectedLevel.trim()) reasons.push('level-not-default');
+  if (rankedMatchOk !== true) {
+    if (rankedMatchReason) {
+      const map: Record<string, string> = {
+        missing: 'ranked-match-missing',
+        'invalid-shape': 'ranked-match-invalid',
+        'invalid-signature': 'ranked-match-invalid',
+        'need-login': 'need-login',
+        'user-mismatch': 'ranked-match-user-mismatch',
+        expired: 'ranked-match-expired',
+        'settings-changed': 'ranked-match-settings-changed',
+        'combatants-not-2': 'combatant-count-not-2',
+        'combatants-unrankable': 'ranked-match-unrankable',
+        'roster-changed': 'ranked-match-roster-changed',
+      };
+      reasons.push(map[rankedMatchReason] ?? `ranked-match:${rankedMatchReason}`);
+    } else {
+      reasons.push('need-ranked-match');
+    }
+  }
   if (snapshot.hasUserGuidance !== 0) reasons.push('has-user-guidance');
   if (snapshot.hasAdjudicationEvents !== 0) reasons.push('has-adjudication-events');
   if (snapshot.readArenaHistory !== 0) reasons.push('read-arena-history');
   if (snapshot.readCurrentState !== 0) reasons.push('read-current-state');
+  if (readNarrativeHistory !== false) reasons.push('read-narrative-history');
   if (combatants.some((c) => typeof c.character_guidance === 'string' && c.character_guidance.trim())) reasons.push('has-character-guidance');
   return reasons;
 };

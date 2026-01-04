@@ -38,6 +38,7 @@ import {
 } from '@/lib/arena/battle-report-log-utils';
 import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
+import { buildRankedMatchExtraJson, validateRankedMatchTicketForRequest } from '@/lib/arena/ranked-match';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
 
@@ -94,6 +95,7 @@ async function handler(req: NextRequest): Promise<Response> {
             narrativeHistory,
             adjudicationEvents,
             storyLength,
+            rankedMatch,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioSourceDataCardId,
@@ -523,6 +525,16 @@ async function handler(req: NextRequest): Promise<Response> {
 
             const recordPromise = (async () => {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
+                const rankedMatchValidation = await validateRankedMatchTicketForRequest({
+                    ticket: rankedMatch,
+                    userId: user?.id ?? null,
+                    combatants,
+                    mode,
+                    selectedLevel,
+                    language,
+                    storyLength,
+                });
+                const rankedMatchExtraJson = buildRankedMatchExtraJson(rankedMatchValidation);
                 const usage = await resolvedUsagePromise;
 
                 const shieldResult = applyShieldWords(outputPreview);
@@ -608,6 +620,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
 	                        readNarrativeHistory: resolvedReadNarrativeHistory,
 	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+                            ...(rankedMatchExtraJson ?? {}),
 	                    }),
 	                });
 
