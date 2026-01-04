@@ -582,6 +582,10 @@ async function confirmHandler(req: Request): Promise<Response> {
     });
   }
 
+  // 结算展示需要保留机器人座位/名称；结束对局后会压缩 rules_json 并移除 _bots（含提交/手牌等大字段）。
+  // 这里提前写入轻量 roster，供 finished 阶段只读接口回退使用。
+  (internal.raw as any)._botRoster = internal.bots.map((b) => ({ id: b.id, name: b.name, seat: b.seat }));
+
   delete (internal.raw as any)._postRound;
   const compactRulesJson = clearPvpRoomRuntimeFromRulesJson(stringifyPvpRoomInternalState(internal));
   const finishOk = await updatePvpRoomCas(roomId, advancingVersion, {

@@ -13,6 +13,12 @@ export type PvpRoomBotState = {
   choicesByRoundId?: Record<string, string>;
 };
 
+export type PvpRoomBotRosterItem = {
+  id: string;
+  name: string;
+  seat: number;
+};
+
 export type PvpRoomInternalState = {
   rules: PvpRoomRules;
   bots: PvpRoomBotState[];
@@ -78,6 +84,21 @@ export const parsePvpRoomInternalState = (rulesJson: string): { internal: PvpRoo
 export const stringifyPvpRoomInternalState = (internal: PvpRoomInternalState): string => {
   const next = { ...(internal.raw || {}), ...(internal.rules as any), _bots: internal.bots } as Record<string, unknown>;
   return JSON.stringify(next);
+};
+
+export const parsePvpRoomBotRoster = (raw: Record<string, unknown> | null | undefined): PvpRoomBotRosterItem[] => {
+  const listRaw = raw && typeof raw === 'object' ? (raw as any)._botRoster : null;
+  if (!Array.isArray(listRaw)) return [];
+  return (listRaw as any[])
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const id = typeof (item as any).id === 'string' ? String((item as any).id).trim() : '';
+      const name = typeof (item as any).name === 'string' ? String((item as any).name).trim() : '';
+      const seat = Number.isFinite((item as any).seat) ? Math.floor((item as any).seat) : null;
+      if (!id || !name || seat == null || seat < 0) return null;
+      return { id, name, seat } satisfies PvpRoomBotRosterItem;
+    })
+    .filter(Boolean) as PvpRoomBotRosterItem[];
 };
 
 export const clearBotsFromRulesJson = (rulesJson: string): string => {

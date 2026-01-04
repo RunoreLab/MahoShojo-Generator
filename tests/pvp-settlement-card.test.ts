@@ -127,6 +127,34 @@ describe('pvp settlement card', () => {
     expect(summary.headline).toBe('月下决斗');
   });
 
+  it('resolves bot winner userId/name by seat for finished rooms', () => {
+    const raw = JSON.stringify({
+      winnerUserId: null,
+      winnerName: '钢铁蔷薇',
+      winnerSeat: 2,
+      winnerIsBot: true,
+      combatants: [
+        { userId: null, seat: 2, isBot: true, snapshotId: 'snap_bot', name: '钢铁蔷薇', type: 'magical-girl' },
+      ],
+      report: { headline: '终局之战' },
+    });
+
+    const result = parsePvpRoundResultJson(raw);
+    const summary = buildPvpSettlementRoundSummary({
+      roundId: 'r6',
+      roundIndex: 6,
+      status: 'completed',
+      result,
+      usernameByUserId: new Map([[-3, '小机器人']]),
+      isBotByUserId: new Map([[-3, true]]),
+      userIdBySeat: new Map([[2, -3]]),
+      myUserId: 1,
+    });
+
+    expect(summary.winner.userId).toBe(-3);
+    expect(summary.winner.username).toBe('小机器人（机器人）');
+  });
+
   it('falls back to first non-empty line when markdown has no heading', () => {
     const raw = JSON.stringify({
       generationMode: 'stream',
