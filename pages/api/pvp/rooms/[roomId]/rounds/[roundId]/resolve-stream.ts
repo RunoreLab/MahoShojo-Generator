@@ -15,6 +15,7 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
+import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
@@ -335,6 +336,17 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   const authHeader = req.headers.get('authorization') || '';
   const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
 
+  const UPSTREAM_TOTAL_TIMEOUT_MS = 10 * 60_000;
+  const upstreamAbortController = new AbortController();
+  const upstreamTimeoutId: ReturnType<typeof setTimeout> = setTimeout(() => upstreamAbortController.abort(), UPSTREAM_TOTAL_TIMEOUT_MS);
+  const clearUpstreamTimeout = () => {
+    try {
+      clearTimeout(upstreamTimeoutId);
+    } catch {
+      // ignore
+    }
+  };
+
   const buildGuidance = () => {
     const mapping = picked.map((p) => `- ${p.token}：${p.snapshot.name}`).join('\n');
     const tokenList = picked.map((p) => `“${p.token}”`).join('、');
@@ -388,9 +400,11 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       ...(customProvider ? { customProvider } : {}),
       pvpContext: { roomId, matchId, roundId },
     }),
+    signal: upstreamAbortController.signal,
   });
 
   if (!upstreamRes.ok) {
+    clearUpstreamTimeout();
     const raw = await upstreamRes.text();
     let shouldRedirect = false;
     let redirectReason: string | null = null;
@@ -483,6 +497,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   if (!upstreamBody) {
     await updatePvpRound(roundId, { status: 'pending' });
     await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
+    clearUpstreamTimeout();
     return json({ error: '无法读取响应流', code: 'STREAM_BODY_MISSING' }, { status: 500 });
   }
 
@@ -501,6 +516,14 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   const reader = upstreamBody.getReader();
   const decoder = new TextDecoder();
   let accumulatedText = '';
+  const shouldTerminateByTelemetry = (text: string) => {
+    const marker = '<!-- MAHOSHOJO_TELEMETRY_META';
+    const trimmed = text.trimEnd();
+    const idx = trimmed.lastIndexOf(marker);
+    if (idx < 0) return false;
+    if (!trimmed.endsWith('-->')) return false;
+    return trimmed.length - idx < 4096;
+  };
 
   const finalizeAndPersist = async (finalText: string) => {
     let winnerIndex: number | null = null;
@@ -699,18 +722,45 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   const wrappedBody = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
+        const readWithTimeout = createStreamReadWithTimeout({
+          label: 'api/pvp/resolve-stream 上游读取',
+          idleTimeoutMs: 60_000,
+          totalTimeoutMs: UPSTREAM_TOTAL_TIMEOUT_MS,
+          onTimeout: () => {
+            try {
+              upstreamAbortController.abort();
+            } catch {
+              // ignore
+            }
+            try {
+              void reader.cancel('timeout');
+            } catch {
+              // ignore
+            }
+          },
+        });
         while (true) {
-          const { value, done } = await reader.read();
+          const { value, done } = await readWithTimeout(reader);
           if (done) break;
           if (!value) continue;
           const chunkText = decoder.decode(value, { stream: true });
           accumulatedText += chunkText;
           controller.enqueue(value);
+          if (shouldTerminateByTelemetry(accumulatedText)) {
+            try {
+              void reader.cancel('telemetry-meta-received');
+            } catch {
+              // ignore
+            }
+            break;
+          }
         }
         accumulatedText += decoder.decode();
         await finalizeAndPersist(accumulatedText);
+        clearUpstreamTimeout();
         controller.close();
       } catch (e) {
+        clearUpstreamTimeout();
         try {
           await updatePvpRound(roundId, { status: 'pending' });
           await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
@@ -721,8 +771,14 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       }
     },
     async cancel() {
+      clearUpstreamTimeout();
       try {
-        await reader.cancel();
+        upstreamAbortController.abort();
+      } catch {
+        // ignore
+      }
+      try {
+        void reader.cancel();
       } catch {
         // ignore
       }

@@ -6,6 +6,7 @@ import { config, AIProvider } from "../config";
 import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { extractUpstreamErrorMessage, enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
+import { createStreamReadWithTimeout } from "@/lib/stream/timeout";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -264,7 +265,19 @@ export async function generateWithStreamAI(
 
                 // 预检流：在返回流之前，先尝试读取第一个 chunk 来验证连接成功
                 const reader = result.textStream.getReader();
-                const firstChunk = await reader.read();
+                const readWithTimeout = createStreamReadWithTimeout({
+                    label: `上游流式(${provider.name}/${selectedModel})`,
+                    idleTimeoutMs: 60_000,
+                    totalTimeoutMs: 10 * 60_000,
+                    onTimeout: () => {
+                        try {
+                            void reader.cancel('timeout');
+                        } catch {
+                            // ignore
+                        }
+                    },
+                });
+                const firstChunk = await readWithTimeout(reader);
 
                 if (firstChunk.done) {
                     // 使用工具函数提取上游错误信息
@@ -281,7 +294,7 @@ export async function generateWithStreamAI(
                         }
                     },
                     async pull(controller) {
-                        const { done, value } = await reader.read();
+                        const { done, value } = await readWithTimeout(reader);
                         if (done) {
                             controller.close();
                         } else {

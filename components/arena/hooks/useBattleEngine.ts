@@ -15,6 +15,7 @@ import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
+import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 
@@ -612,6 +613,33 @@ export const useBattleEngine = () => {
           const decoder = new TextDecoder();
           let accumulatedText = '';
           let shouldAbort = false;
+          const shouldTerminateByTelemetry = (text: string) => {
+            const marker = '<!-- MAHOSHOJO_TELEMETRY_META';
+            const trimmed = text.trimEnd();
+            const idx = trimmed.lastIndexOf(marker);
+            if (idx < 0) return false;
+            if (!trimmed.endsWith('-->')) return false;
+            return trimmed.length - idx < 4096;
+          };
+          const readWithTimeout = createStreamReadWithTimeout({
+            label: '战报流式生成',
+            idleTimeoutMs: 60_000,
+            totalTimeoutMs: 10 * 60_000,
+            onTimeout: () => {
+              try {
+                abortController.abort();
+              } catch {
+                // ignore
+              }
+              if (reader) {
+                try {
+                  void reader.cancel('timeout');
+                } catch {
+                  // ignore
+                }
+              }
+            },
+          });
           const streamBackupItems = buildBattleBackupItems(
             freshCombatants,
             shouldUseScenario ? scenario.content : null,
@@ -639,7 +667,7 @@ export const useBattleEngine = () => {
           };
 
           while (true) {
-            const { value, done } = await reader.read();
+            const { value, done } = await readWithTimeout(reader);
             if (done) {
               break;
             }
@@ -684,11 +712,24 @@ export const useBattleEngine = () => {
               setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
 
               shouldAbort = true;
-              await reader.cancel().catch(() => undefined);
+              try {
+                void reader.cancel('sensitive');
+              } catch {
+                // ignore
+              }
               break;
             }
 
             setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
+
+            if (shouldTerminateByTelemetry(accumulatedText)) {
+              try {
+                void reader.cancel('telemetry-meta-received');
+              } catch {
+                // ignore
+              }
+              break;
+            }
 
             if (shouldAbort) {
               break;
@@ -825,7 +866,11 @@ export const useBattleEngine = () => {
           return;
         } finally {
           if (reader) {
-            await reader.cancel().catch(() => undefined);
+            try {
+              void reader.cancel();
+            } catch {
+              // ignore
+            }
           }
           abortController.abort();
         }
