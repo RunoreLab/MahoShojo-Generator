@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import type { Preset } from '@/lib/presets';
 import type { SeasonsConfig } from '@/lib/seasons';
 import { formatSeasonTitle, getCurrentSeason } from '@/lib/seasons';
@@ -243,6 +244,35 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
           _favoriteCount: typeof result.card.favorite_count === 'number' ? result.card.favorite_count : undefined,
           _usageCount: typeof result.card.usage_count === 'number' ? result.card.usage_count : undefined,
         });
+
+        // 排行榜入口加入参战时也要计入公开卡片的使用数。
+        // 现有口径：同一浏览器仅记 1 次（localStorage 去重）。
+        const cardId = typeof result.card.id === 'string' ? result.card.id : '';
+        const isPublic = result.card.is_public === 1 || result.card.is_public === true;
+        const wasAdded = Boolean(
+          cardId &&
+          useBattleStore
+            .getState()
+            .combatants.some((c) => 'data' in c && (c as any).sourceDataCardId === cardId),
+        );
+        if (wasAdded && isPublic && !isCardUsed(cardId)) {
+          void (async () => {
+            try {
+              const response = await fetch('/api/data-card-stats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cardId, type: 'usage' }),
+              });
+
+              if (response.ok) {
+                const json = (await response.json()) as { success?: boolean };
+                if (json.success) addUsedCard(cardId);
+              }
+            } catch (error) {
+              console.error('增加使用次数失败:', error);
+            }
+          })();
+        }
         return;
       }
 
