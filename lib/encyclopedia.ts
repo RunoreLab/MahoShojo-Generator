@@ -7,6 +7,12 @@ export type EncyclopediaEntry = {
 
 export const encyclopediaEntries: EncyclopediaEntry[] = [
   {
+    slug: 'site-guide',
+    title: '站内功能速览（从生成到对战）',
+    summary: '新手从生成到对战的一页速查：入口、流程、常见问题。',
+    markdownPath: '/encyclopedia/site-guide.md',
+  },
+  {
     slug: 'arena',
     title: '竞技场',
     summary: '竞技场与战报生成的基本概念、模式差异与计分触发点。',
@@ -59,6 +65,12 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     title: '新手攻略（强度直觉）',
     summary: '如何粗略判断对手强度，以及新手学习路线（社区攻略改写）。',
     markdownPath: '/encyclopedia/newbie-guide.md',
+  },
+  {
+    slug: 'scenario-generator',
+    title: '箱庭物语（情景生成器）',
+    summary: '用问卷生成情景 JSON，并在竞技场「情景模式」中使用。',
+    markdownPath: '/encyclopedia/scenario-generator.md',
   },
   {
     slug: 'scenario-advanced',
