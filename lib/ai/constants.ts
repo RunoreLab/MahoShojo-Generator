@@ -289,6 +289,22 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         ]
     },
     {
+        id: 'openrouter',
+        name: 'OpenRouter',
+        description: '海外主流模型聚合平台，贵，但是最稳定。如果它炸了谷歌也就炸了。',
+        docsUrl: 'https://openrouter.ai',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            { value: 'google/gemini-3-pro-preview', label: 'Gemini 3.0 Pro (预览版)', description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。' },
+            { value: 'google/gemini-3-flash-preview', label: 'Gemini 3.0 Flash (预览版)', description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。' },
+            { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Google 旗下上一代的最先进模型系列，性能很棒棒。' },
+            { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。' },
+            { value: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。' },
+        ]
+    },
+    {
         id: 'mystery',
         name: '魔法国度',
         description: '神秘渠道，不定时放送。',
