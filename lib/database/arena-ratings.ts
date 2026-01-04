@@ -24,12 +24,15 @@ export interface ArenaEligibilitySnapshot {
   mode: string | null;
   userId: number | null;
   ipAnonymized: string | null;
+  language: string | null;
+  selectedLevel: string | null;
   hasUserGuidance: number | null;
   hasAdjudicationEvents: number | null;
   readArenaHistory: number | null;
   readCurrentState: number | null;
   combatantCount: number | null;
   winner: string | null;
+  extraJson: string | null;
 }
 
 export const INITIAL_RATING = 1000;
@@ -210,6 +213,26 @@ export const parseCombatantEntity = (combatant: BattleReportGenerationCombatantR
   return null;
 };
 
+const readExtraJsonBoolean = (extraJson: string | null, key: string): boolean | null => {
+  if (typeof extraJson !== 'string' || !extraJson.trim()) return null;
+  try {
+    const parsed = JSON.parse(extraJson) as Record<string, unknown>;
+    const value = parsed?.[key];
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return value !== 0;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+      if (normalized === '1') return true;
+      if (normalized === '0') return false;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants: BattleReportGenerationCombatantRow[]): boolean => {
   if (snapshot.status !== 'completed') return false;
   if (snapshot.combatantCount !== 2) return false;
@@ -217,10 +240,19 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   if (snapshot.mode !== 'classic') return false;
   if (snapshot.userId == null) return false;
 
+  // 严格排位：语言必须为简体中文（zh-CN）。
+  if ((snapshot.language ?? '').trim() !== 'zh-CN') return false;
+
+  // 严格排位：等级必须为默认/未指定（selected_level 为空或 NULL）。
+  if (typeof snapshot.selectedLevel === 'string' && snapshot.selectedLevel.trim()) return false;
+
   if (snapshot.hasUserGuidance !== 0) return false;
   if (snapshot.hasAdjudicationEvents !== 0) return false;
   if (snapshot.readArenaHistory !== 0) return false;
   if (snapshot.readCurrentState !== 0) return false;
+
+  // 严格排位：禁止读取叙事历史。该字段目前落在 extra_json 中；缺失则按“宁可漏算”处理为不具备资格。
+  if (readExtraJsonBoolean(snapshot.extraJson, 'readNarrativeHistory') !== false) return false;
 
   for (const combatant of combatants) {
     if (combatant.character_guidance && combatant.character_guidance.trim()) return false;
@@ -246,12 +278,15 @@ export async function getArenaEligibilitySnapshotByGenerationId(
         mode,
         user_id as userId,
         ip_anonymized as ipAnonymized,
+        language,
+        selected_level as selectedLevel,
         has_user_guidance as hasUserGuidance,
         has_adjudication_events as hasAdjudicationEvents,
         read_arena_history as readArenaHistory,
         read_current_state as readCurrentState,
         combatant_count as combatantCount,
-        winner
+        winner,
+        extra_json as extraJson
       FROM battle_report_generations
       WHERE id = ?`,
       [generationId]

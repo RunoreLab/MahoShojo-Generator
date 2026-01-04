@@ -12,6 +12,8 @@ const buildStrictSetupMissingReasons = (input: {
   battleMode: string;
   readableCombatants: CombatantData[];
   userGuidance: string;
+  selectedLevel: string;
+  selectedLanguage: string;
   readArenaHistory: boolean;
   readCurrentState: boolean;
   readNarrativeHistory: boolean;
@@ -21,10 +23,12 @@ const buildStrictSetupMissingReasons = (input: {
   if (!input.isAuthenticated) reasons.push('需要先登录');
   if (input.battleMode !== 'classic') reasons.push('模式需为「经典」');
   if (input.readableCombatants.length !== 2) reasons.push('参战角色需为 2 位');
+  if (input.selectedLevel.trim()) reasons.push('等级需为「默认」');
+  if (input.selectedLanguage !== 'zh-CN') reasons.push('生成语言需为「简体中文」');
   if (input.userGuidance.trim()) reasons.push('需清空「故事引导」');
   if (input.readArenaHistory) reasons.push('需关闭「读取历战」');
   if (input.readCurrentState) reasons.push('需关闭「读取当前状态」');
-  if (input.readNarrativeHistory) reasons.push('建议关闭「读取叙事历史」');
+  if (input.readNarrativeHistory) reasons.push('需关闭「读取叙事历史」');
   if (input.adjudicationEventCount > 0) reasons.push('需清空「随机判定器事件」');
   if (input.readableCombatants.some((c) => (c.characterGuidance ?? '').trim())) reasons.push('需清空「角色行动引导」');
   return reasons;
@@ -35,6 +39,10 @@ export function RankingQuickActions() {
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const setBattleMode = useBattleSelector((state) => state.setBattleMode);
+  const selectedLevel = useBattleSelector((state) => state.selectedLevel);
+  const setSelectedLevel = useBattleSelector((state) => state.setSelectedLevel);
+  const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
+  const setSelectedLanguage = useBattleSelector((state) => state.setSelectedLanguage);
   const settings = useBattleSelector((state) => state.settings);
   const updateSettings = useBattleSelector((state) => state.updateSettings);
   const adjudicationEvents = useBattleSelector((state) => state.adjudicationEvents);
@@ -58,6 +66,8 @@ export function RankingQuickActions() {
         battleMode,
         readableCombatants,
         userGuidance: settings.userGuidance,
+        selectedLevel,
+        selectedLanguage,
         readArenaHistory: settings.readArenaHistory,
         readCurrentState: settings.readCurrentState,
         readNarrativeHistory: settings.readNarrativeHistory,
@@ -68,6 +78,8 @@ export function RankingQuickActions() {
       battleMode,
       isAuthenticated,
       readableCombatants,
+      selectedLanguage,
+      selectedLevel,
       settings.readArenaHistory,
       settings.readCurrentState,
       settings.readNarrativeHistory,
@@ -79,6 +91,8 @@ export function RankingQuickActions() {
     if (isGenerating) return;
 
     setBattleMode('classic');
+    setSelectedLevel('');
+    setSelectedLanguage('zh-CN');
     updateSettings({
       userGuidance: '',
       readArenaHistory: false,
@@ -89,7 +103,7 @@ export function RankingQuickActions() {
     readableCombatants.forEach((c) => updateCombatantCharacterGuidance(c.filename, ''));
     clearScenario();
     clearAuxScenarios();
-    setError('✅ 已应用严格排位设置：经典模式 / 清空引导 / 关闭读取 / 清空判定与行动引导');
+    setError('✅ 已应用严格排位设置：经典模式 / 默认等级 / 简体中文 / 清空引导 / 关闭读取 / 清空判定与行动引导');
   };
 
   return (
@@ -124,4 +138,3 @@ export function RankingQuickActions() {
     </div>
   );
 }
-

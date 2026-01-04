@@ -69,11 +69,17 @@ async function handler(req: NextRequest): Promise<Response> {
     let snapshotPvpMatchId: string | null = null;
     let snapshotPvpRoundId: string | null = null;
 
-    try {
-        const body = await req.json();
-        const {
-            combatants,
-            selectedLevel,
+	    try {
+	        const normalizeOptionalString = (value: unknown): string | null => {
+	            if (typeof value !== 'string') return null;
+	            const trimmed = value.trim();
+	            return trimmed ? trimmed : null;
+	        };
+
+	        const body = await req.json();
+	        const {
+	            combatants,
+	            selectedLevel,
             mode = 'classic',
             userGuidance,
             scenario,
@@ -97,12 +103,12 @@ async function handler(req: NextRequest): Promise<Response> {
             scenarioSourceDataCardUpdatedAt,
             pvpContext,
             internalGuidance,
-        } = body;
+	        } = body;
 
-        snapshotMode = typeof mode === 'string' ? mode : 'classic';
-        snapshotLanguage = typeof language === 'string' ? language : null;
-        snapshotSelectedLevel = typeof selectedLevel === 'string' ? selectedLevel : null;
-        snapshotStoryLength = typeof storyLength === 'string' ? storyLength : null;
+	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
+	        snapshotLanguage = normalizeOptionalString(language);
+	        snapshotSelectedLevel = normalizeOptionalString(selectedLevel);
+	        snapshotStoryLength = normalizeOptionalString(storyLength);
 
         const parsePvpContext = (value: unknown): { roomId: string; matchId: string; roundId: string } | null => {
             if (!value || typeof value !== 'object') return null;
@@ -450,15 +456,17 @@ async function handler(req: NextRequest): Promise<Response> {
                             hasScenario: Boolean(scenario),
                             hasUserGuidance: typeof userGuidance === 'string' ? Boolean(userGuidance.trim()) : false,
                             hasAdjudicationEvents: Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0,
-                            hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
-                            pvpRoomId: snapshotPvpRoomId,
-                            pvpMatchId: snapshotPvpMatchId,
-                            pvpRoundId: snapshotPvpRoundId,
-                            extraJson: {
-                                errorMessage: 'rejected by sensitive input filter',
-                                rejectedBy: 'sensitive-input',
-                            },
-                        });
+	                            hasTeams: Boolean(teams && typeof teams === 'object' && Object.keys(teams).length > 0),
+	                            pvpRoomId: snapshotPvpRoomId,
+	                            pvpMatchId: snapshotPvpMatchId,
+	                            pvpRoundId: snapshotPvpRoundId,
+	                            extraJson: compactExtraJson({
+	                                errorMessage: 'rejected by sensitive input filter',
+	                                rejectedBy: 'sensitive-input',
+	                                readNarrativeHistory: resolvedReadNarrativeHistory,
+	                                narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+	                            }),
+	                        });
                         return recordId;
                     } catch (writeError) {
                         log.warn('战报生成记录：写入失败（敏感词拒绝）', { writeError });
@@ -628,9 +636,9 @@ async function handler(req: NextRequest): Promise<Response> {
                     : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
                 scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                 scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
-                language: typeof language === 'string' ? language : null,
-                selectedLevel: typeof selectedLevel === 'string' ? selectedLevel : null,
-                storyLength: typeof storyLength === 'string' ? storyLength : null,
+	                language: normalizeOptionalString(language),
+	                selectedLevel: normalizeOptionalString(selectedLevel),
+	                storyLength: normalizeOptionalString(storyLength),
                 readArenaHistory: typeof resolvedReadArenaHistory === 'boolean' ? resolvedReadArenaHistory : null,
                 arenaHistoryReadLimit: resolvedReadArenaHistory
                     ? (Number.isFinite(resolvedHistoryReadLimit) ? (resolvedHistoryReadLimit === Infinity ? null : resolvedHistoryReadLimit) : null)
@@ -667,13 +675,15 @@ async function handler(req: NextRequest): Promise<Response> {
                 outputPreview,
                 outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
                 outputHasShieldWords: shieldResult.hasShieldWords,
-                pvpRoomId: snapshotPvpRoomId,
-                pvpMatchId: snapshotPvpMatchId,
-                pvpRoundId: snapshotPvpRoundId,
-                extraJson: compactExtraJson({
-                    resolvedModelOverride: resolvedModelOverride ?? null,
-                }),
-            });
+	                pvpRoomId: snapshotPvpRoomId,
+	                pvpMatchId: snapshotPvpMatchId,
+	                pvpRoundId: snapshotPvpRoundId,
+	                extraJson: compactExtraJson({
+	                    resolvedModelOverride: resolvedModelOverride ?? null,
+	                    readNarrativeHistory: resolvedReadNarrativeHistory,
+	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
+	                }),
+	            });
 
             if (createdId) {
                 const storePromise = (async () => {

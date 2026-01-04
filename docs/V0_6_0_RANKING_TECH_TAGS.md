@@ -111,12 +111,15 @@
   - 0 个或 >1 个：不计分（`skip_reason='winner-ambiguous'`）
 
 #### 严格排位（Strict）资格（在基础资格之上叠加）
-严格排位的目标是尽量排除“额外操控/额外上下文”，仅限经典模式+无引导/随机判定+不读历战/当前状态（没有额外的操控或输入）。对应到现有字段可落为：
+严格排位的目标是尽量排除“额外操控/额外上下文”，仅限经典模式+无引导/随机判定+不读叙事历史/历战/当前状态（没有额外的操控或输入），并固定输出语言口径。对应到现有字段可落为：
 - `mode = 'classic'`
+- `language = 'zh-CN'`（简体中文）
+- `selected_level IS NULL OR selected_level = ''`（等级为默认/未指定）
 - `has_user_guidance = 0`
 - `has_adjudication_events = 0`
 - `read_arena_history = 0`
 - `read_current_state = 0`
+- `extra_json.readNarrativeHistory = 0`（禁止读取叙事历史；缺失则按“宁可漏算”处理为不具备资格）
 - `battle_report_generation_combatants.character_guidance IS NULL`（或全为空串）
 - `battle_report_generations.user_id IS NOT NULL`（必须登录才计分）
 - v0.6.0 建议再加一条：`combatant_count = 2`（先只做 1v1，减少多人/队伍歧义）
