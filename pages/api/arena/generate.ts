@@ -18,12 +18,13 @@ import { createPromptBuilder, processAdjudicationChain } from '@/lib/arena/logic
 import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
 import {
     createBattleReportGenerationRecord,
-	    createBattleReportGenerationCombatants,
-	    generateUUID,
-	    updateBattleReportGenerationExtraJson,
-	    updateBattleReportGenerationCombatantsWriteResult,
-	    getUserByAuthKey
-	} from '@/lib/d1';
+    createBattleReportGenerationCombatants,
+    generateUUID,
+    updateBattleReportGenerationExtraJson,
+    updateBattleReportGenerationCombatantsWriteResult,
+    updateBattleReportGenerationOutputPreview,
+    getUserByAuthKey
+} from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,
@@ -412,10 +413,10 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const reportJson = JSON.stringify(report);
         const outputBytes = new TextEncoder().encode(reportJson).length;
-        const outputPreviewForScan = buildOutputPreviewForStorage(reportJson);
-        const shieldResult = applyShieldWords(outputPreviewForScan);
+        const outputPreview = buildOutputPreviewForStorage(reportJson);
+        const shieldResult = applyShieldWords(outputPreview);
         const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
-            ? await quickCheck(outputPreviewForScan)
+            ? await quickCheck(outputPreview)
             : { hasSensitiveWords: false };
 
         const inputJson = JSON.stringify({
@@ -490,8 +491,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 totalTokens: usage?.totalTokens ?? null,
                 cachedTokens: usage?.cachedTokens ?? null,
                 reasoningTokens: usage?.reasoningTokens ?? null,
-                // 战报正文已外部化到 R2：D1 不再保存 output_preview（正文或摘要）
-                outputPreview: null,
+                outputPreview,
                 outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
                 outputHasShieldWords: shieldResult.hasShieldWords,
                 extraJson: compactExtraJson({
@@ -508,7 +508,9 @@ async function handler(req: NextRequest): Promise<Response> {
                         format: 'json',
                         text: reportJson,
                     });
-                    void stored;
+                    if (stored.ok && !stored.persistPreviewInD1) {
+                        await updateBattleReportGenerationOutputPreview(recordId, null);
+                    }
                 })();
                 const executionContext = (req as any).context;
                 if (executionContext?.waitUntil) {

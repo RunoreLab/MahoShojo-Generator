@@ -1,15 +1,12 @@
 import {
-  createBattleReportGenerationRecord,
   getPvpCardSnapshotById,
   getPvpEligibleScenarioDataCard,
-  getLargeObjectByOwnerRef,
   getPvpRoomById,
   getPvpRoomHands,
   getPvpRoomMembers,
   getPvpRoomPlayers,
   getPvpRoundById,
   getPvpRoundChoices,
-  generateUUID,
   updatePvpRoomCas,
   updatePvpRound,
   upsertPvpRoomHand,
@@ -17,9 +14,8 @@ import {
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
-import { extractHeadlineFromMarkdown, extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
+import { extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
-import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
@@ -33,7 +29,6 @@ import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { createPvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { extractWinnerLineFromMarkdown, parsePvpWinnerFromText } from '@/lib/pvp/winner-parse';
-import { getObjectText } from '@/lib/r2';
 
 export const runtime = 'edge';
 
@@ -233,24 +228,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     } catch {
       // fall through
     }
-
-    const generationId =
-      typeof (round as any).battle_generation_id === 'string' ? String((round as any).battle_generation_id).trim() : '';
-    if (generationId) {
-      const lo = await getLargeObjectByOwnerRef('battle_report_generation_output', generationId);
-      const key = typeof lo?.r2_key === 'string' ? lo.r2_key : '';
-      if (key) {
-        const r2 = await getObjectText(key);
-        if (r2.success && r2.data?.text) {
-          return new Response(r2.data.text, {
-            status: 200,
-            headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
-          });
-        }
-      }
-    }
-
-    return json({ error: '回合已结算，但战报正文不可用，请稍后重试', code: 'ROUND_ALREADY_RESOLVED' }, { status: 409 });
+    return json({ error: '回合已结算（非流式战报请刷新页面查看）', code: 'ROUND_ALREADY_RESOLVED' }, { status: 409 });
   }
 
   if (room.phase === 'reviewing') {
@@ -447,47 +425,6 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       const report = buildPvpSensitiveArrestWarrantReport({ reason: redirectReason, roomId, matchId, roundId, issuedAt: new Date() });
       const markdown = buildMarkdownFromArrestReport(report);
 
-      // 逮捕令也是战报正文：外部化到 R2，并写入 battle_report_generations（D1 不保存正文/摘要）。
-      const generationId = generateUUID();
-      const startedAtIso = new Date().toISOString();
-      const bytes = new TextEncoder().encode(markdown).byteLength;
-      const stored = await storeBattleReportGenerationOutputTextToR2({
-        generationId,
-        startedAtIso,
-        ownerUserId: auth.user.id,
-        format: 'markdown',
-        text: markdown,
-      });
-      if (stored.ok) {
-        await createBattleReportGenerationRecord({
-          id: generationId,
-          startedAt: startedAtIso,
-          endedAt: startedAtIso,
-          durationMs: 0,
-          status: 'completed',
-          generationMode: 'stream',
-          endpoint: 'api/pvp/resolve-stream(arrest-warrant)',
-          userId: auth.user.id,
-          username: (auth.user as any)?.username ?? null,
-          userPrefix: (auth.user as any)?.prefix ?? null,
-          mode: rules.mode,
-          language: rules.language?.trim() ? rules.language.trim() : null,
-          selectedLevel: rules.selectedLevel ?? null,
-          storyLength: rules.storyLength ?? null,
-          headline: extractHeadlineFromMarkdown(markdown),
-          winner: '平局',
-          outputChars: markdown.length,
-          outputBytes: bytes,
-          outputPreview: null,
-          outputHasSensitiveWords: false,
-          outputHasShieldWords: false,
-          pvpRoomId: roomId,
-          pvpMatchId: matchId,
-          pvpRoundId: roundId,
-        });
-        await updatePvpRound(roundId, { battleGenerationId: generationId });
-      }
-
       const resultJson = JSON.stringify({
         generationMode: 'stream',
         winnerUserId: null,
@@ -496,8 +433,6 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         winnerToken: null,
         winnerIsBot: null,
         winnerStatus: 'final',
-        headline: extractHeadlineFromMarkdown(markdown),
-        battleGenerationId: stored.ok ? generationId : null,
         winnerVote: null,
         rawWinnerText: '平局',
         attempts: 1,
@@ -513,6 +448,8 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
           type: p.snapshot.card_type,
           ...(p.characterGuidance ? { characterGuidance: p.characterGuidance } : {}),
         })),
+        reportMarkdown: markdown,
+        report: report,
         updatedCombatants: [],
       });
 
@@ -574,12 +511,6 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     } catch {
       streamMeta = null;
     }
-  }
-
-  const battleGenerationIdFromMeta =
-    typeof streamMeta?.generationId === 'string' ? String(streamMeta.generationId).trim() : '';
-  if (battleGenerationIdFromMeta) {
-    await updatePvpRound(roundId, { battleGenerationId: battleGenerationIdFromMeta });
   }
 
   const reader = upstreamBody.getReader();
@@ -672,8 +603,6 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       winnerToken: shouldStartWinnerVote ? null : (isDraw || winnerIndex === null ? null : picked[winnerIndex]!.token),
       winnerIsBot: shouldStartWinnerVote ? null : (isDraw || winnerIndex === null ? null : Boolean(picked[winnerIndex]!.isBot)),
       winnerStatus: shouldStartWinnerVote ? 'pending_vote' : 'final',
-      headline: extractHeadlineFromMarkdown(markdownForStorage),
-      battleGenerationId: battleGenerationIdFromMeta || null,
       winnerVote: shouldStartWinnerVote
         ? {
             status: 'open',
@@ -696,6 +625,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         type: p.snapshot.card_type,
         ...(p.characterGuidance ? { characterGuidance: p.characterGuidance } : {}),
       })),
+      reportMarkdown: markdownForStorage,
       streamMeta,
       updatedCombatants: [],
     });

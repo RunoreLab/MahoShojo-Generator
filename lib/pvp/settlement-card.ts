@@ -17,8 +17,6 @@ export type PvpSettlementCardRoundResult = {
   winnerSeat: number | null;
   winnerIsBot: boolean | null;
   winnerStatus?: string | null;
-  battleGenerationId?: string | null;
-  headline?: string | null;
   reportMarkdown?: string | null;
   streamMeta?: any;
   combatants: PvpSettlementCardRoundCombatant[];
@@ -110,8 +108,6 @@ export function parsePvpRoundResultJson(raw: string | null | undefined): PvpSett
     const reportArticleBody = report && typeof report.article === 'object' ? safeString(report.article?.body) : null;
 
     const reportMarkdown = safeString(parsed.reportMarkdown) ?? reportArticleBody;
-    const headlineFromResult = safeString(parsed.headline);
-    const battleGenerationId = safeString(parsed.battleGenerationId);
 
     const streamMeta = parsed.streamMeta && typeof parsed.streamMeta === 'object' ? parsed.streamMeta : null;
     const metaHeadline =
@@ -121,7 +117,6 @@ export function parsePvpRoundResultJson(raw: string | null | undefined): PvpSett
       null;
 
     const resolvedHeadline =
-      (headlineFromResult && headlineFromResult.trim() ? headlineFromResult.trim() : null) ??
       (reportHeadline && reportHeadline.trim() ? reportHeadline.trim() : null) ??
       (metaHeadline && metaHeadline.trim() ? metaHeadline.trim() : null) ??
       extractHeadlineFromMarkdown(reportMarkdown);
@@ -138,8 +133,6 @@ export function parsePvpRoundResultJson(raw: string | null | undefined): PvpSett
       winnerSeat: typeof parsed.winnerSeat === 'number' && Number.isFinite(parsed.winnerSeat) ? Math.floor(parsed.winnerSeat) : null,
       winnerIsBot: parsed.winnerIsBot == null ? null : Boolean(parsed.winnerIsBot),
       winnerStatus: safeString(parsed.winnerStatus),
-      battleGenerationId,
-      headline: resolvedHeadline,
       reportMarkdown,
       streamMeta,
       combatants,
