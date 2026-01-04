@@ -1,12 +1,15 @@
 'use client';
 
 import { useMemo, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import Badge from '@/components/badge/Badge';
 import BadgeIcon from '@/components/badge/BadgeIcon';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
+import type { SeasonsConfig } from '@/lib/seasons';
+import { formatSeasonTitle, getCurrentSeason } from '@/lib/seasons';
 import type { UserBadge } from '@/types/badge';
 import { parseUserPrefix } from '@/lib/user-prefix';
 
@@ -186,6 +189,12 @@ function sanitizeFilename(value: string): string {
   return normalized.replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '_') || 'profile';
 }
 
+const fetchJson = async <T,>(url: string): Promise<T> => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as T;
+};
+
 const formatCount = (value: unknown): string => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
   return value.toLocaleString('zh-CN');
@@ -240,6 +249,13 @@ export function ProfileCard({
   const initials = useMemo(() => getInitials(data.profile.username), [data.profile.username]);
   const generatedAtLabel = useMemo(() => new Date().toLocaleString('zh-CN'), []);
   const parsedPrefix = useMemo(() => parseUserPrefix(data.profile.prefix), [data.profile.prefix]);
+
+  const seasonsQuery = useQuery({
+    queryKey: ['seasonsConfig'],
+    queryFn: () => fetchJson<SeasonsConfig>('/config/seasons.json'),
+    staleTime: 60_000,
+  });
+  const currentSeason = useMemo(() => getCurrentSeason(seasonsQuery.data), [seasonsQuery.data]);
 
   const winRate = useMemo(() => {
     const completed = data.pvp.summary.completedMatches || 0;
@@ -469,7 +485,14 @@ export function ProfileCard({
           </div>
 
           <div className="rounded-2xl bg-black/15 p-4">
-            <div className="text-sm font-semibold">数据卡高光</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-sm font-semibold">数据卡高光</div>
+              {currentSeason ? (
+                <div className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-white/85 ring-1 ring-white/15">
+                  当前赛季：{formatSeasonTitle(currentSeason)}
+                </div>
+              ) : null}
+            </div>
 
             <div className="mt-3">
               <div className="text-xs font-semibold text-white/85">Top 角色卡（2）</div>

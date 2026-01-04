@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "seasons": [
+    {
+      "id": "S0",
+      "name": "公测赛季",
+      "startsAt": "2026-01-04",
+      "endsAt": null,
+      "status": "current",
+      "description": "公开测试用赛季，排位功能可能仍有未发现的问题，因此该赛季的数据仅供参考。如有问题，请及时反馈。"
+    },
+    {
+      "id": "Alpha",
+      "name": "内测赛季",
+      "startsAt": "2026-01-01",
+      "endsAt": "2026-01-04",
+      "status": "history",
+      "description": "内部测试用赛季。",
+      "archivedAt": "2026-01-04T08:35:20.181Z"
+    }
+  ]
+}

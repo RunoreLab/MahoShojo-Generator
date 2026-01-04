@@ -2,10 +2,12 @@
 
 import Head from 'next/head';
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { TierBadge } from '@/components/ranking/TierBadge';
+import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
+import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
 
 type Queue = 'strict' | 'free';
 type Sort = 'rating' | 'tech';
@@ -26,22 +28,7 @@ type RankingFilters = {
   maxTechScore: string;
 };
 
-type LeaderboardItem = {
-  rank: number;
-  entityType: 'data_card' | 'preset';
-  entityId: string;
-  displayName: string;
-  rating: number;
-  games: number;
-  wins: number;
-  losses: number;
-  draws: number;
-  tier: string;
-  techScore: number | null;
-  techLevel: string | null;
-  isNative: boolean | null;
-  tagIds: string[];
-};
+type LeaderboardItem = SeasonArchiveItem;
 
 type Tag = {
   id: string;
@@ -94,6 +81,56 @@ export function RankingPage() {
   const [tagSearch, setTagSearch] = useState('');
   const [isTagFilterExpanded, setIsTagFilterExpanded] = useState(false);
   const limit = 50;
+
+  const seasonsQuery = useQuery({
+    queryKey: ['seasonsConfig'],
+    queryFn: () => fetchJson<SeasonsConfig>('/config/seasons.json'),
+    staleTime: 60_000,
+  });
+
+  const seasons = useMemo(() => {
+    const items = seasonsQuery.data?.seasons ?? [];
+    return Array.isArray(items) ? items : [];
+  }, [seasonsQuery.data?.seasons]);
+
+  const seasonsSorted = useMemo(() => {
+    const list = seasons.slice();
+    list.sort((a, b) => {
+      const aRank = a.status === 'current' ? 0 : 1;
+      const bRank = b.status === 'current' ? 0 : 1;
+      if (aRank !== bRank) return aRank - bRank;
+      const aDate = typeof a.startsAt === 'string' ? a.startsAt : '';
+      const bDate = typeof b.startsAt === 'string' ? b.startsAt : '';
+      return bDate.localeCompare(aDate);
+    });
+    return list;
+  }, [seasons]);
+
+  const currentSeason = useMemo(() => getCurrentSeason(seasonsQuery.data), [seasonsQuery.data]);
+  const [selectedSeasonId, setSelectedSeasonId] = useState<string>('');
+
+  useEffect(() => {
+    if (selectedSeasonId) return;
+    const fallback = currentSeason?.id ?? seasonsSorted[0]?.id ?? '';
+    if (fallback) setSelectedSeasonId(fallback);
+  }, [currentSeason?.id, seasonsSorted, selectedSeasonId]);
+
+  const selectedSeason = useMemo<SeasonMeta | null>(() => {
+    const id = selectedSeasonId.trim();
+    if (!id) return null;
+    return seasons.find((s) => s.id === id) ?? null;
+  }, [seasons, selectedSeasonId]);
+
+  const isHistoryMode = selectedSeason?.status === 'history';
+  const [historyQueue, setHistoryQueue] = useState<Queue>('strict');
+  const [historySection, setHistorySection] = useState<'top' | 'bottom'>('top');
+
+  const archiveQuery = useQuery({
+    queryKey: ['seasonArchive', selectedSeasonId],
+    queryFn: () => fetchJson<SeasonArchive>(seasonArchiveUrl(selectedSeasonId)),
+    enabled: Boolean(selectedSeasonId) && isHistoryMode,
+    staleTime: Infinity,
+  });
 
   const tagsQuery = useQuery({
     queryKey: ['tags'],
@@ -229,12 +266,23 @@ export function RankingPage() {
       return fetchJson<{ success: boolean; items: LeaderboardItem[] }>(`/api/arena/leaderboard?${params.toString()}`);
     },
     staleTime: 10_000,
+    enabled: !isHistoryMode,
   });
 
-  const items = leaderboardQuery.data?.items ?? [];
+  const items = useMemo<LeaderboardItem[]>(() => {
+    if (!isHistoryMode) return leaderboardQuery.data?.items ?? [];
+    const data = archiveQuery.data;
+    if (!data) return [];
+    const board = historyQueue === 'free' ? data.leaderboards.free : data.leaderboards.strict;
+    return historySection === 'bottom' ? board.bottom : board.top;
+  }, [archiveQuery.data, historyQueue, historySection, isHistoryMode, leaderboardQuery.data?.items]);
 
-  const canGoPrev = offset > 0;
-  const canGoNext = items.length >= limit;
+  const listIsLoading = isHistoryMode ? archiveQuery.isLoading : leaderboardQuery.isLoading;
+  const listIsError = isHistoryMode ? archiveQuery.isError : leaderboardQuery.isError;
+  const listError = isHistoryMode ? archiveQuery.error : leaderboardQuery.error;
+
+  const canGoPrev = !isHistoryMode && offset > 0;
+  const canGoNext = !isHistoryMode && items.length >= limit;
   const pageIndex = Math.floor(offset / limit) + 1;
 
   const appliedSummary = useMemo(() => {
@@ -252,6 +300,14 @@ export function RankingPage() {
     return parts.join(' · ');
   }, [appliedFilters]);
 
+  const seasonSummary = useMemo(() => {
+    if (!selectedSeason) return '';
+    if (!isHistoryMode) return appliedSummary;
+    const queueLabel = historyQueue === 'strict' ? '严格天梯' : '自由天梯';
+    const sectionLabel = historySection === 'top' ? 'Top 50' : 'Bottom 20';
+    return `${queueLabel} · ${sectionLabel} · 历史赛季快照`;
+  }, [appliedSummary, historyQueue, historySection, isHistoryMode, selectedSeason]);
+
   return (
     <>
       <Head>
@@ -263,11 +319,56 @@ export function RankingPage() {
           <div className="rounded-2xl bg-white/95 shadow-[0_20px_40px_rgba(0,0,0,0.10)] ring-1 ring-white/50 backdrop-blur">
             <header className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-100 px-6 py-5 sm:px-8">
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                   <h1 className="truncate text-xl font-bold text-gray-900">排位排行榜</h1>
+                  <select
+                    value={selectedSeasonId}
+                    onChange={(e) => {
+                      setSelectedSeasonId(e.target.value);
+                      setOffset(0);
+                    }}
+                    className="input-field h-8 py-1 text-sm"
+                    aria-label="赛季选择"
+                    disabled={seasonsQuery.isLoading || seasonsSorted.length === 0}
+                  >
+                    {seasonsQuery.isLoading ? <option value="">正在加载赛季...</option> : null}
+                    {!seasonsQuery.isLoading && seasonsSorted.length === 0 ? <option value="">暂无赛季配置</option> : null}
+                    {seasonsSorted.map((season) => (
+                      <option key={season.id} value={season.id}>
+                        {formatSeasonTitle(season)}{season.status === 'current' ? ' · 当前' : ' · 历史'}
+                      </option>
+                    ))}
+                  </select>
                   <span className="text-sm text-gray-500">每页 {limit} 条</span>
                 </div>
-                <div className="mt-1 text-sm text-gray-600 line-clamp-2">{appliedSummary}</div>
+                <div className="mt-1 text-sm text-gray-600 line-clamp-2">{seasonSummary || appliedSummary}</div>
+                {selectedSeason ? (
+                  <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50/70 px-4 py-3 text-xs text-gray-600">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="font-medium text-gray-800">赛季</span>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-800 ring-1 ring-gray-200">
+                        {formatSeasonTitle(selectedSeason)}
+                      </span>
+                      <span className="text-gray-500">
+                        {formatYmdSlash(selectedSeason.startsAt)} ~ {selectedSeason.endsAt ? formatYmdSlash(selectedSeason.endsAt) : '未定'}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${
+                          selectedSeason.status === 'current'
+                            ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
+                            : 'bg-gray-100 text-gray-700 ring-gray-200'
+                        }`}
+                      >
+                        {selectedSeason.status === 'current' ? '当前赛季' : '历史赛季'}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">{selectedSeason.description}</div>
+                  </div>
+                ) : seasonsQuery.isError ? (
+                  <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">
+                    赛季配置加载失败：{String(seasonsQuery.error)}
+                  </div>
+                ) : null}
               </div>
               <div className="flex items-center gap-4 text-sm">
                 <Link href="/encyclopedia/ranking" className="text-blue-600 hover:underline">排位说明</Link>
@@ -276,8 +377,8 @@ export function RankingPage() {
             </header>
 
             <div className="px-6 py-6 sm:px-8 sm:py-8">
-              <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
-                <aside className="lg:sticky lg:top-6 lg:self-start">
+              <div className={isHistoryMode ? 'grid gap-6' : 'grid gap-6 lg:grid-cols-[360px_1fr]'}>
+                {!isHistoryMode ? <aside className="lg:sticky lg:top-6 lg:self-start">
                   <div className="rounded-xl border border-gray-200 bg-white p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-sm font-semibold text-gray-900">筛选</div>
@@ -588,49 +689,88 @@ export function RankingPage() {
                       </button>
                     </div>
                   </div>
-                </aside>
+                </aside> : null}
 
                 <main className="min-w-0">
                   <div className="rounded-xl border border-gray-200 bg-white">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
                       <div className="text-sm text-gray-700">
-                        {leaderboardQuery.isLoading ? '正在加载排行榜...' : leaderboardQuery.isError ? '加载失败' : `第 ${pageIndex} 页`}
-                        {leaderboardQuery.isFetching && !leaderboardQuery.isLoading ? (
+                        {listIsLoading ? '正在加载排行榜...' : listIsError ? '加载失败' : isHistoryMode ? (historySection === 'top' ? 'Top 50' : 'Bottom 20') : `第 ${pageIndex} 页`}
+                        {!isHistoryMode && leaderboardQuery.isFetching && !leaderboardQuery.isLoading ? (
                           <span className="ml-2 text-xs text-gray-500">更新中…</span>
                         ) : null}
                       </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <button
-                          type="button"
-                          onClick={() => setOffset((v) => Math.max(0, v - limit))}
-                          disabled={!canGoPrev}
-                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
-                        >
-                          上一页
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setOffset((v) => v + limit)}
-                          disabled={!canGoNext}
-                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
-                        >
-                          下一页
-                        </button>
-                      </div>
+                      {isHistoryMode ? (
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                          <div className="flex overflow-hidden rounded-lg border border-gray-200 bg-white">
+                            <button
+                              type="button"
+                              onClick={() => setHistoryQueue('strict')}
+                              className={`px-3 py-1.5 text-sm transition-colors ${historyQueue === 'strict' ? 'bg-purple-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+                            >
+                              严格
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setHistoryQueue('free')}
+                              className={`px-3 py-1.5 text-sm transition-colors ${historyQueue === 'free' ? 'bg-purple-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+                            >
+                              自由
+                            </button>
+                          </div>
+                          <div className="flex overflow-hidden rounded-lg border border-gray-200 bg-white">
+                            <button
+                              type="button"
+                              onClick={() => setHistorySection('top')}
+                              className={`px-3 py-1.5 text-sm transition-colors ${historySection === 'top' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+                            >
+                              Top 50
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setHistorySection('bottom')}
+                              className={`px-3 py-1.5 text-sm transition-colors ${historySection === 'bottom' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+                            >
+                              Bottom 20
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-sm">
+                          <button
+                            type="button"
+                            onClick={() => setOffset((v) => Math.max(0, v - limit))}
+                            disabled={!canGoPrev}
+                            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
+                          >
+                            上一页
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOffset((v) => v + limit)}
+                            disabled={!canGoNext}
+                            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
+                          >
+                            下一页
+                          </button>
+                        </div>
+                      )}
                     </div>
 
-                    {leaderboardQuery.isError ? (
+                    {listIsError ? (
                       <div className="px-4 py-6">
                         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
                           <div className="font-medium">排行榜加载失败</div>
-                          <div className="mt-1 break-words text-xs text-red-700">{String(leaderboardQuery.error)}</div>
-                          <button
-                            type="button"
-                            onClick={() => void leaderboardQuery.refetch()}
-                            className="mt-3 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700"
-                          >
-                            重试
-                          </button>
+                          <div className="mt-1 break-words text-xs text-red-700">{String(listError)}</div>
+                          {!isHistoryMode ? (
+                            <button
+                              type="button"
+                              onClick={() => void leaderboardQuery.refetch()}
+                              className="mt-3 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700"
+                            >
+                              重试
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     ) : (
@@ -650,10 +790,10 @@ export function RankingPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {leaderboardQuery.isLoading ? (
+                            {listIsLoading ? (
                               <tr>
                                 <td colSpan={9} className="px-4 py-10 text-center text-gray-500">
-                                  正在加载排行榜...
+                                  {isHistoryMode ? '正在加载赛季快照...' : '正在加载排行榜...'}
                                 </td>
                               </tr>
                             ) : items.length === 0 ? (
@@ -714,30 +854,36 @@ export function RankingPage() {
                       </div>
                     )}
 
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3 text-sm">
-                      <div className="text-gray-500">
-                        当前：第 {pageIndex} 页 · 偏移 {offset}（每页 {limit}）
-                        {hasPendingChanges ? <span className="ml-2 text-amber-700">（有未应用更改）</span> : null}
+                    {isHistoryMode ? (
+                      <div className="border-t border-gray-100 px-4 py-3 text-xs text-gray-500">
+                        历史赛季仅展示结算快照（Top 50 / Bottom 20），不支持筛选与分页。
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setOffset((v) => Math.max(0, v - limit))}
-                          disabled={!canGoPrev}
-                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
-                        >
-                          上一页
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setOffset((v) => v + limit)}
-                          disabled={!canGoNext}
-                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
-                        >
-                          下一页
-                        </button>
+                    ) : (
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3 text-sm">
+                        <div className="text-gray-500">
+                          当前：第 {pageIndex} 页 · 偏移 {offset}（每页 {limit}）
+                          {hasPendingChanges ? <span className="ml-2 text-amber-700">（有未应用更改）</span> : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setOffset((v) => Math.max(0, v - limit))}
+                            disabled={!canGoPrev}
+                            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
+                          >
+                            上一页
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOffset((v) => v + limit)}
+                            disabled={!canGoNext}
+                            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
+                          >
+                            下一页
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </main>
               </div>
