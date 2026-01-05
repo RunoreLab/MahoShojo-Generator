@@ -34,6 +34,7 @@ type ApiRating = {
   lastDelta: number | null;
   lastAppliedAt: string | null;
   publicRank: number | null;
+  publicTotal: number | null;
 };
 
 type ApiMetaResponse =
@@ -382,8 +383,11 @@ export default function DataCardDetailsModal({
                               {meta.ratings.strict.lastDelta != null ? (
                                 <span>，Δ{formatSignedDelta(meta.ratings.strict.lastDelta)}</span>
                               ) : null}
-                              {isOwner && meta.ratings.strict.publicRank != null ? (
-                                <span>，公共排名#{meta.ratings.strict.publicRank}</span>
+                              {meta.ratings.strict.publicRank != null ? (
+                                <span>
+                                  ，公共排名#{meta.ratings.strict.publicRank}
+                                  {meta.ratings.strict.publicTotal != null ? `/${meta.ratings.strict.publicTotal}` : ''}
+                                </span>
                               ) : null}
                               ）
                             </span>
@@ -404,8 +408,11 @@ export default function DataCardDetailsModal({
                               {meta.ratings.free.lastDelta != null ? (
                                 <span>，Δ{formatSignedDelta(meta.ratings.free.lastDelta)}</span>
                               ) : null}
-                              {isOwner && meta.ratings.free.publicRank != null ? (
-                                <span>，公共排名#{meta.ratings.free.publicRank}</span>
+                              {meta.ratings.free.publicRank != null ? (
+                                <span>
+                                  ，公共排名#{meta.ratings.free.publicRank}
+                                  {meta.ratings.free.publicTotal != null ? `/${meta.ratings.free.publicTotal}` : ''}
+                                </span>
                               ) : null}
                               ）
                             </span>
