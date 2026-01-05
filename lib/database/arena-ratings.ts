@@ -155,6 +155,13 @@ export const computeEloUpdate = (
 const normalizeWinnerToken = (value: string): string => {
   let normalized = value.trim();
 
+  // 统一 Unicode 形态，尽量降低全角/兼容字符差异对匹配的影响
+  try {
+    normalized = normalized.normalize('NFKC');
+  } catch {
+    // 极少数运行环境可能不支持 normalize；忽略即可
+  }
+
   // 去掉常见 Markdown/列表前缀（避免误伤正文，仅作用于“winner 一行/短 token”）
   normalized = normalized.replace(/^[>\-\*\+\s]+/g, '').trim();
 
@@ -196,7 +203,129 @@ const normalizeWinnerToken = (value: string): string => {
   return normalized;
 };
 
-const isMultiWinner = (winner: string): boolean => /[,，、/&]/u.test(winner);
+const normalizeForSimilarity = (value: string): string => {
+  let normalized = value.trim();
+  try {
+    normalized = normalized.normalize('NFKC');
+  } catch {
+    // ignore
+  }
+  normalized = normalized.toLowerCase();
+  // 尽量消除“符号噪声”，避免相似度被标点/空白稀释
+  normalized = normalized.replace(/[\s"'“”‘’【】\[\]<>《》()（）`~]/gu, '');
+  normalized = normalized.replace(/[。！!？?；;：:、，,./\\/&＋+｜|]/gu, '');
+  return normalized;
+};
+
+const levenshteinDistance = (a: string, b: string): number => {
+  if (a === b) return 0;
+  const aLen = a.length;
+  const bLen = b.length;
+  if (aLen === 0) return bLen;
+  if (bLen === 0) return aLen;
+
+  // 经典 DP：仅保留一行，降低内存占用
+  const prev: number[] = Array.from({ length: bLen + 1 }, (_, i) => i);
+  const curr: number[] = new Array(bLen + 1);
+
+  for (let i = 1; i <= aLen; i += 1) {
+    curr[0] = i;
+    const aChar = a.charCodeAt(i - 1);
+    for (let j = 1; j <= bLen; j += 1) {
+      const cost = aChar === b.charCodeAt(j - 1) ? 0 : 1;
+      const del = prev[j]! + 1;
+      const ins = curr[j - 1]! + 1;
+      const sub = prev[j - 1]! + cost;
+      curr[j] = Math.min(del, ins, sub);
+    }
+    for (let j = 0; j <= bLen; j += 1) prev[j] = curr[j]!;
+  }
+
+  return prev[bLen]!;
+};
+
+const normalizedSimilarity = (a: string, b: string): number => {
+  const aNorm = normalizeForSimilarity(a);
+  const bNorm = normalizeForSimilarity(b);
+  const maxLen = Math.max(aNorm.length, bNorm.length);
+  if (maxLen === 0) return 0;
+  if (aNorm.length < 3 || bNorm.length < 3) return 0;
+  const dist = levenshteinDistance(aNorm, bNorm);
+  return 1 - dist / maxLen;
+};
+
+const pickUniqueSimilarityIndex = (
+  target: string,
+  candidates: string[],
+  options?: { threshold?: number; gap?: number }
+): number | null => {
+  const threshold = options?.threshold ?? 0.67;
+  const gap = options?.gap ?? 0.05;
+
+  const scores = candidates.map((c) => normalizedSimilarity(target, c));
+  let bestIndex = -1;
+  let bestScore = -Infinity;
+  let secondScore = -Infinity;
+
+  for (let i = 0; i < scores.length; i += 1) {
+    const score = scores[i]!;
+    if (score > bestScore) {
+      secondScore = bestScore;
+      bestScore = score;
+      bestIndex = i;
+    } else if (score > secondScore) {
+      secondScore = score;
+    }
+  }
+
+  if (bestIndex < 0) return null;
+  if (bestScore < threshold) return null;
+  if (bestScore - secondScore < gap) return null;
+  if (secondScore >= threshold) return null;
+  return bestIndex;
+};
+
+const MULTI_SEPARATOR_RE = /[,，、/&+|\/／＆＋｜]/u;
+const MULTI_SPLIT_RE = /\s*(?:,|，|、|\/|／|&|＆|\+|＋|\||｜)\s*/u;
+
+const isMultiWinner = (winner: string): boolean => MULTI_SEPARATOR_RE.test(winner);
+
+const hasExplicitMultiWinnerKeyword = (winner: string): boolean => {
+  const text = winner.trim();
+  if (!text) return false;
+  return /共同(?:胜利|获胜|赢)|双赢|都(?:获胜|胜利)/u.test(text);
+};
+
+const splitWinnerParts = (winner: string): string[] => {
+  return winner
+    .split(MULTI_SPLIT_RE)
+    .map((t) => t.trim())
+    .filter(Boolean);
+};
+
+const detectCandidateMention = (winnerText: string, candidate: string, threshold = 0.67): boolean => {
+  const text = normalizeForSimilarity(winnerText);
+  const needle = normalizeForSimilarity(candidate);
+  if (!needle) return false;
+  if (needle.length < 3) return text.includes(needle);
+  if (text.includes(needle)) return true;
+
+  // 在长文本中，按候选名长度做滑窗，避免整段相似度被稀释
+  const baseLen = needle.length;
+  const minLen = Math.max(3, baseLen - 1);
+  const maxLen = baseLen + 1;
+  let best = 0;
+
+  for (let len = minLen; len <= maxLen; len += 1) {
+    for (let i = 0; i + len <= text.length; i += 1) {
+      const sub = text.slice(i, i + len);
+      const score = 1 - levenshteinDistance(sub, needle) / Math.max(sub.length, needle.length);
+      if (score > best) best = score;
+      if (best >= threshold) return true;
+    }
+  }
+  return best >= threshold;
+};
 
 const PRESET_FILENAME_SET = new Set(PRESET_LIST.map((preset) => preset.filename));
 const PRESET_FILENAME_BY_NAME = new Map(PRESET_LIST.map((preset) => [preset.name.trim(), preset.filename]));
@@ -216,7 +345,7 @@ export type WinnerParseResult =
 export const parseWinnerSlot = (winnerRaw: string | null, combatantNames: [string, string]): WinnerParseResult => {
   const winner = typeof winnerRaw === 'string' ? winnerRaw.trim() : '';
   if (!winner) return { ok: false, skipReason: 'winner-empty' };
-  const maybeMultiWinner = isMultiWinner(winner);
+  const maybeMultiWinner = isMultiWinner(winner) || hasExplicitMultiWinnerKeyword(winner);
 
   const normalizedWinner = normalizeWinnerToken(winner);
   if (!normalizedWinner) return { ok: false, skipReason: 'winner-empty' };
@@ -235,26 +364,62 @@ export const parseWinnerSlot = (winnerRaw: string | null, combatantNames: [strin
 
   const normalizedNames = combatantNames.map((name) => normalizeWinnerToken(name));
 
-  const matches = normalizedNames
-    .map((candidate, index) => (candidate && candidate === normalizedWinner ? index : -1))
-    .filter((index) => index !== -1);
+  const matchSingleWinnerToIndex = (winnerToken: string): number | null => {
+    const token = normalizeWinnerToken(winnerToken);
+    if (!token) return null;
 
-  if (matches.length === 1) {
-    return { ok: true, winnerSlot: (matches[0] === 0 ? 1 : 2) as WinnerSlot };
+    const exact = normalizedNames
+      .map((candidate, index) => (candidate && candidate === token ? index : -1))
+      .filter((index) => index !== -1);
+    if (exact.length === 1) return exact[0]!;
+
+    // 容错：winner 可能包含额外描述（如“看守（魔女残骸） (P2)”）
+    const include = normalizedNames
+      .map((candidate, index) => {
+        if (!candidate) return -1;
+        if (candidate === token) return index;
+        if (token.includes(candidate) || candidate.includes(token)) return index;
+        return -1;
+      })
+      .filter((index) => index !== -1);
+    if (include.length === 1) return include[0]!;
+
+    const similarityIndex = pickUniqueSimilarityIndex(token, normalizedNames);
+    return similarityIndex;
+  };
+
+  // 处理“多胜者/共同胜利”类输出：
+  // - 若能在阈值内唯一匹配到 1 名参战者，则计分
+  // - 若命中 2 名参战者（哪怕其中一名仅能通过相似度命中），则视为多胜者，跳过计分
+  if (maybeMultiWinner) {
+    const parts = splitWinnerParts(winner);
+    const matched = new Set<number>();
+    for (const part of parts) {
+      const index = matchSingleWinnerToIndex(part);
+      if (index != null) matched.add(index);
+    }
+
+    const mentionA = detectCandidateMention(winner, combatantNames[0]);
+    const mentionB = detectCandidateMention(winner, combatantNames[1]);
+    if (mentionA && mentionB) {
+      return { ok: false, skipReason: 'multi-winner' };
+    }
+
+    if (matched.size === 1) {
+      const only = [...matched][0]!;
+      return { ok: true, winnerSlot: (only === 0 ? 1 : 2) as WinnerSlot };
+    }
+    if (matched.size > 1) {
+      return { ok: false, skipReason: 'multi-winner' };
+    }
+
+    // 多胜者文本但无法命中任何参战者：按 multi-winner 跳过，避免误判
+    return { ok: false, skipReason: 'multi-winner' };
   }
 
-  // 容错：PVP 胜者行可能包含更长的描述（如“看守（魔女残骸） (P2)”）而参战者名仅保存 codename。
-  // 允许做一次“包含式匹配”，但必须只命中唯一候选，避免误判。
-  const includeMatches = normalizedNames
-    .map((candidate, index) => {
-      if (!candidate) return -1;
-      if (candidate === normalizedWinner) return index;
-      if (normalizedWinner.includes(candidate) || candidate.includes(normalizedWinner)) return index;
-      return -1;
-    })
-    .filter((index) => index !== -1);
-  if (includeMatches.length === 1) {
-    return { ok: true, winnerSlot: (includeMatches[0] === 0 ? 1 : 2) as WinnerSlot };
+  const singleIndex = matchSingleWinnerToIndex(normalizedWinner);
+  if (singleIndex != null) {
+    return { ok: true, winnerSlot: (singleIndex === 0 ? 1 : 2) as WinnerSlot };
   }
 
   return { ok: false, skipReason: maybeMultiWinner ? 'multi-winner' : 'winner-ambiguous' };
