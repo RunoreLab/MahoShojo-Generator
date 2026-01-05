@@ -6,7 +6,7 @@ import DataCard from './DataCard';
 import SortSelector from './SortSelector';
 import DataCardDetailsModal from './DataCardDetailsModal';
 import { useAuth } from '@/lib/useAuth';
-import { dataCardApi, favoritesApi, deckApi } from '@/lib/auth';
+import { authStorage, dataCardApi, favoritesApi, deckApi } from '@/lib/auth';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { ChevronDown, Filter } from 'lucide-react';
@@ -120,6 +120,7 @@ export default function BattleDataModal({
   const { isAuthenticated } = useAuth();
   const isComposingSearchRef = useRef(false);
   const publicFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const metaFetchAbortControllerRef = useRef<AbortController | null>(null);
   const selectingCardIdsRef = useRef<Set<string>>(new Set());
   const isSingleSelectingRef = useRef(false);
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
@@ -139,6 +140,7 @@ export default function BattleDataModal({
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectError, setSelectError] = useState<string | null>(null);
   const cardsPerPage = 12;
+  const [cardMetaById, setCardMetaById] = useState<Record<string, { techScore: number | null; techLevel: string | null; strictTier: string | null }>>({});
 
   // 【新增】高级筛选的状态
   const initialFilters = useMemo<Filters>(() => ({
@@ -844,13 +846,85 @@ export default function BattleDataModal({
     return publicDataCards;
   }, [publicDataCards, activeFilters.roleType, selectedType, currentPage, cardsPerPage]);
 
-  const displayCards = activeTab === 'my'
-    ? paginatedUserCards
-    : activeTab === 'favorites'
-      ? paginatedFavoriteCards
-      : activeTab === 'public'
-        ? publicPaginatedCards
-        : [];
+  const displayCards = useMemo(() => {
+    if (activeTab === 'my') return paginatedUserCards;
+    if (activeTab === 'favorites') return paginatedFavoriteCards;
+    if (activeTab === 'public') return publicPaginatedCards;
+    return [];
+  }, [activeTab, paginatedUserCards, paginatedFavoriteCards, publicPaginatedCards]);
+
+  const displayCardIds = useMemo(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const card of displayCards as any[]) {
+      const id = typeof card?.id === 'string' ? card.id.trim() : '';
+      if (!id) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
+  }, [displayCards]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (isPvpHandTab) return;
+    if (displayCardIds.length === 0) return;
+
+    const pendingIds = displayCardIds.filter((id) => !Object.prototype.hasOwnProperty.call(cardMetaById, id));
+    if (pendingIds.length === 0) return;
+
+    metaFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    metaFetchAbortControllerRef.current = abortController;
+
+    const run = async () => {
+      try {
+        const authHeader = await authStorage.getAuthHeader();
+        const headers: HeadersInit = { 'Content-Type': 'application/json' };
+        if (authHeader) headers.Authorization = authHeader;
+
+        const res = await fetch('/api/data-card-meta-batch', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ dataCardIds: pendingIds }),
+          signal: abortController.signal,
+        });
+        if (!res.ok) return;
+        const json = (await res.json()) as any;
+        if (!json || json.success !== true || typeof json.items !== 'object' || !json.items) return;
+
+        setCardMetaById((prev) => {
+          const next = { ...prev };
+          for (const [id, item] of Object.entries<any>(json.items)) {
+            const metrics = item?.metrics ?? null;
+            const strict = item?.strict ?? null;
+            next[id] = {
+              techScore: typeof metrics?.techScore === 'number' ? metrics.techScore : null,
+              techLevel: typeof metrics?.techLevel === 'string' ? metrics.techLevel : null,
+              strictTier: typeof strict?.tier === 'string' ? strict.tier : null,
+            };
+          }
+          return next;
+        });
+      } catch (error) {
+        if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+          return;
+        }
+        console.warn('加载数据卡技术值/段位失败（降级为不显示）:', error);
+      } finally {
+        if (metaFetchAbortControllerRef.current === abortController) {
+          metaFetchAbortControllerRef.current = null;
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [isOpen, isPvpHandTab, displayCardIds, cardMetaById]);
 
   const publicTotalPages = activeFilters.roleType && selectedType === 'character'
     ? Math.max(1, Math.ceil(publicDataCards.length / cardsPerPage))
@@ -1155,6 +1229,9 @@ export default function BattleDataModal({
 	                        usageCount={card.usage_count}
 	                        likeCount={card.like_count}
 	                        favoriteCount={card.favorite_count}
+                          techScore={cardMetaById[card.id]?.techScore ?? null}
+                          techLevel={cardMetaById[card.id]?.techLevel ?? null}
+                          strictTier={cardMetaById[card.id]?.strictTier ?? null}
 	                        isFavorited={isFavorited}
 	                        canFavorite={enableFavorite}
 	                        isRecommended={card.is_recommended === 1}
