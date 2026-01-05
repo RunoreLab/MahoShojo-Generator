@@ -7,6 +7,7 @@ import Link from 'next/link';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
+import { ErrorMessage } from '@/components/ErrorMessage';
 import { qqGroups } from '@/lib/communityGroups';
 import { useAuth } from '@/lib/useAuth';
 import { config as appConfig } from '@/lib/config';
@@ -200,12 +201,11 @@ export function ArenaPage() {
               </a>
             </div>
             {error && (
-              <div
-                className={`p-4 rounded-md my-4 text-sm whitespace-pre-wrap ${error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+              <ErrorMessage
+                message={error}
+                className={`p-4 rounded-md my-4 text-sm ${error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
                   }`}
-              >
-                {error}
-              </div>
+              />
             )}
           </div>
 

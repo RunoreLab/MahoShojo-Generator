@@ -1,6 +1,6 @@
 # 原生性（签名）
 
-> 作者：末伏之夜  
+> 作者：[末伏之夜](https://github.com/notuhao)  
 > 更新时间：2026-01-03
 
 “原生性”用于区分两类卡：
@@ -27,4 +27,3 @@
 - 技术值：`/encyclopedia/tech-index`
 - 引导与读写状态：`/encyclopedia/guidance`
 - 标签体系（风险提示类）：`/encyclopedia/tags`
-

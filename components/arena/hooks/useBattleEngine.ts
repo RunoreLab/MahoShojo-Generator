@@ -534,14 +534,19 @@ export const useBattleEngine = () => {
             try {
               json = JSON.parse(text);
             } catch {
-              throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+              throw new Error(
+                response.status === 524
+                  ? 'Cloudflare 超时（HTTP 524），请稍后重试。'
+                  : `服务器响应异常（HTTP ${response.status}），可能是服务暂时不可用，请稍后再试。`
+              );
             }
 
             if (json.shouldRedirect) {
               redirectToArrested(json.reason || '使用危险符文');
               return;
             }
-            throw new Error(json.message || json.error || text);
+            const serverMessage = json.message || json.error || text;
+            throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
           }
 
           reader = response.body?.getReader() ?? null;
@@ -895,14 +900,19 @@ export const useBattleEngine = () => {
         try {
           json = JSON.parse(text);
         } catch {
-          throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+          throw new Error(
+            response.status === 524
+              ? 'Cloudflare 超时（HTTP 524），请稍后重试。'
+              : `服务器响应异常（HTTP ${response.status}），可能是服务暂时不可用，请稍后再试。`
+          );
         }
 
         if (json.shouldRedirect) {
           redirectToArrested(json.reason || '使用危险符文');
           return;
         }
-        throw new Error(json.message || json.error || text);
+        const serverMessage = json.message || json.error || text;
+        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
       }
 
       const result: BattleApiResponse = await response.json();
@@ -1031,14 +1041,19 @@ export const useBattleEngine = () => {
         try {
           json = JSON.parse(text);
         } catch {
-          throw new Error(text || '服务器响应异常，可能是服务暂时不可用，请稍后再试。');
+          throw new Error(
+            response.status === 524
+              ? 'Cloudflare 超时（HTTP 524），请稍后重试。'
+              : `服务器响应异常（HTTP ${response.status}），可能是服务暂时不可用，请稍后再试。`
+          );
         }
 
         if (json.shouldRedirect) {
           redirectToArrested(json.reason || '使用危险符文');
           return;
         }
-        throw new Error(json.message || json.error || text);
+        const serverMessage = json.message || json.error || text;
+        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
       }
 
       const result = await response.json();

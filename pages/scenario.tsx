@@ -9,6 +9,7 @@ import { useCooldown } from '../lib/cooldown';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import { ErrorMessage } from '@/components/ErrorMessage';
 
 // 定义引导性问题
 const scenarioQuestions = [
@@ -123,15 +124,16 @@ const ScenarioPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorJson = await response.json().catch(() => ({ message: '服务器响应异常' }));
-        if (errorJson.shouldRedirect) {
+        const errorJson = await response.json().catch(() => null as any);
+        if (errorJson?.shouldRedirect) {
           router.push({
             pathname: '/arrested',
             query: { reason: errorJson.reason || '使用危险符文' }
           });
           return;
         }
-        throw new Error(errorJson.message || errorJson.error || '生成失败');
+        const serverMessage = errorJson?.message || errorJson?.error;
+        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
       }
 
       const result = await response.json();
@@ -263,7 +265,7 @@ const ScenarioPage: React.FC = () => {
             <button onClick={handleGenerate} disabled={isGenerating || isCooldown} className="generate-button mt-4">
               {isCooldown ? `冷却中 (${remainingTime}s)` : isGenerating ? '正在构建舞台...' : '生成情景'}
             </button>
-            {error && <div className="error-message mt-4">{error}</div>}
+            {error && <ErrorMessage message={error} className="error-message mt-4" />}
           </div>
 
           {resultData && (

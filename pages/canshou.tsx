@@ -12,6 +12,7 @@ import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
+import { ErrorMessage } from '@/components/ErrorMessage';
 
 // 定义问卷和问题的类型
 interface Question {
@@ -349,12 +350,13 @@ const CanshouPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        if (errorData.shouldRedirect) {
+        const errorData = await response.json().catch(() => null as any);
+        if (errorData?.shouldRedirect) {
           router.push('/arrested');
           return;
         }
-        throw new Error(errorData.message || '生成失败，服务器返回错误');
+        const serverMessage = errorData?.message || errorData?.error;
+        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
       }
 
       const result: CanshouResultPayload = await response.json();
@@ -699,7 +701,7 @@ const CanshouPage: React.FC = () => {
                   )}
                 </div>
 
-                {error && <div className="error-message">{error}</div>}
+                {error && <ErrorMessage message={error} />}
 
                 <div className="mt-8 text-center">
                   <Link href="/" className="footer-link">返回首页</Link>
