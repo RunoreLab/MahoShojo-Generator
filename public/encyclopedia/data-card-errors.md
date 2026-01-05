@@ -5,6 +5,8 @@
 
 数据卡（角色卡/情景卡/叙事历史等）本质是 JSON 文件。报错大多来自：**文件不是有效 JSON**、**字段不符合格式**、或**来源/签名信息变化**。
 
+如果你不是在“导入文件”，而是在“生成时”看到类似 `格式验证失败`，也可能是 **AI 输出没按结构来**（见：`/encyclopedia/ai-output-format`）。
+
 ## 常见报错长什么样？
 
 - `JSON 解析失败` / `读取文件失败`
@@ -25,3 +27,4 @@
 - 档案馆（角色管理）：`/encyclopedia/archive`
 - 原生性（签名）：`/encyclopedia/native`
 - 情景卡进阶：`/encyclopedia/scenario-advanced`
+- AI 输出格式异常：`/encyclopedia/ai-output-format`

@@ -43,6 +43,18 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     markdownPath: '/encyclopedia/ai-errors.md',
   },
   {
+    slug: 'ai-refusal',
+    title: 'AI 拒答与安全策略提示（不是站内设置）',
+    summary: '“身为语言模型…”“安全策略”等拒答模板语：如何判断归因与合规自救。',
+    markdownPath: '/encyclopedia/ai-refusal.md',
+  },
+  {
+    slug: 'ai-output-format',
+    title: 'AI 输出格式异常（缺字段/夹带解释/校验失败）',
+    summary: '生成完成但结构不合格：校验失败、JSON 解析失败、输出被截断等问题的自救。',
+    markdownPath: '/encyclopedia/ai-output-format.md',
+  },
+  {
     slug: 'data-card-errors',
     title: '数据卡问题：导入/解析/格式校验/签名',
     summary: '导入/解析失败、字段校验、templateId/version 不匹配等问题的排查清单。',

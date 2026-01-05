@@ -58,6 +58,39 @@ const AI_MESSAGE_HINTS = [
   '魔法失效',
 ] as const;
 
+const AI_REFUSAL_MESSAGE_HINTS = [
+  'as a language model',
+  'as an ai language model',
+  'i can’t help',
+  "i can't help",
+  'i cannot help',
+  "i can't assist",
+  'i cannot assist',
+  'cannot help with that',
+  'cannot comply',
+  "can't comply",
+  '身为一个语言模型',
+  '作为一个语言模型',
+  '作为一个ai语言模型',
+  '我没法提供这方面的帮助',
+  '我无法提供这方面的帮助',
+  '你的要求我无法实现',
+  '内容不符合我的安全策略',
+  '不符合我的安全策略',
+  '违反我的安全策略',
+] as const;
+
+const AI_OUTPUT_FORMAT_MESSAGE_HINTS = [
+  '格式验证失败',
+  '格式校验失败',
+  'json 解析失败',
+  'json解析失败',
+  'unexpected token',
+  'invalid json',
+] as const;
+
+const AI_OUTPUT_FORMAT_CONTEXT_HINTS = ['魔法少女', '残兽', '情景', '叙事历史', '通用角色'] as const;
+
 function normalizeMessage(message: string) {
   return message
     .trim()
@@ -107,6 +140,7 @@ export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | n
   if (message.includes('524') && message.includes('timeout')) return 'cloudflare-524-timeout';
   if (message.includes('524') && message.includes('超时')) return 'cloudflare-524-timeout';
 
+  if (includesAny(message, AI_REFUSAL_MESSAGE_HINTS)) return 'ai-refusal';
   if (includesAny(message, RATE_LIMIT_MESSAGE_HINTS)) return 'rate-limit-429';
   if (includesAny(message, NETWORK_MESSAGE_HINTS)) return 'network-errors';
 
@@ -115,6 +149,9 @@ export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | n
   }
   if (message.includes('5xx') || message.includes('服务器内部错误')) return 'cloudflare-errors';
 
+  if (includesAny(message, AI_OUTPUT_FORMAT_MESSAGE_HINTS) && includesAny(message, AI_OUTPUT_FORMAT_CONTEXT_HINTS)) {
+    return 'ai-output-format';
+  }
   if (includesAny(message, DATA_CARD_MESSAGE_HINTS)) return 'data-card-errors';
   if (includesAny(message, AI_MESSAGE_HINTS)) return 'ai-errors';
 
