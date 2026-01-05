@@ -328,13 +328,9 @@ export default function DataCard({
                 <BadgeCheck className="w-3 h-3" /> 推荐
               </span>
             )}
-            {typeof techScore === 'number' ? (
-              <span
-                className="text-xs px-2 py-1 rounded bg-slate-50 text-slate-700 border border-slate-200 flex items-center gap-1"
-                title="技术值"
-              >
-                <span className="font-sans">技术</span>
-                <TechBadge techScore={techScore} techLevel={techLevel} className="text-xs text-slate-800" />
+            {typeof techLevel === 'string' && techLevel.trim() ? (
+              <span title="技术值等级">
+                <TechBadge mode="level" techScore={techScore} techLevel={techLevel} className="whitespace-nowrap" />
               </span>
             ) : null}
             {typeof strictTier === 'string' && strictTier.trim() ? (
