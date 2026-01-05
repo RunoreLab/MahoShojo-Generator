@@ -47,6 +47,7 @@ export function BattleReportCardModal({ isOpen, generationId, report, liveBody, 
         {report ? (
           <BattleReportCard
             report={report}
+            generationId={generationId}
             mode={mode}
             liveBody={typeof liveBody === 'string' ? liveBody : undefined}
             onSaveImage={(url) => {

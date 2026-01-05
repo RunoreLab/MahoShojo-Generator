@@ -7,6 +7,7 @@ import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
+import { RankedMatchReportPanel } from '@/components/ranking/RankedMatchReportPanel';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
@@ -56,13 +57,14 @@ export interface NewsReport {
 
 interface BattleReportCardProps {
   report: NewsReport;
+  generationId?: string | null;
   onSaveImage?: (imageUrl: string) => void;
   // 战斗模式，设为可选以兼容旧功能
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
   liveBody?: string;
 }
 
-const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody }) => {
+const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, generationId, onSaveImage, mode, liveBody }) => {
   const cardRef = useRef<HTMLDivElement>(null);
 
   const headline = typeof report?.headline === 'string' && report.headline.trim() ? report.headline.trim() : '（无标题）';
@@ -334,6 +336,8 @@ ${adjudicationMarkdown}
             />
           )}  
         </div>
+
+        <RankedMatchReportPanel generationId={generationId} />
         
         <div className="result-item">
           <div className="result-value">
