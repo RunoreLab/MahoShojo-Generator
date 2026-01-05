@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 
+import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
+
 export function BattleHeader() {
   return (
     <>
@@ -30,6 +32,14 @@ export function BattleHeader() {
           <li>选择预设、上传设定文件，或使用随机匹配功能添加参战者。</li>
           <li>选择一个模式，然后敬请期待「命运的舞台」上的故事！</li>
         </ol>
+        <EncyclopediaLinks
+          className="mt-3 flex flex-wrap gap-3 text-xs"
+          items={[
+            { slug: 'arena', text: '百科：竞技场' },
+            { slug: 'guidance', text: '引导/裁判事件/读写状态' },
+          ]}
+          linkClassName="text-blue-700 hover:underline"
+        />
       </div>
     </>
   );

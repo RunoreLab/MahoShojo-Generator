@@ -10,6 +10,7 @@ import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 
 // 定义引导性问题
 const scenarioQuestions = [
@@ -177,17 +178,23 @@ const ScenarioPage: React.FC = () => {
       </Head>
       <div className="magic-background-white">
         <div className="container">
-          <div className="card">
-            <div className="text-center mb-4">
-              <div className="flex justify-center items-center" style={{ marginBottom: '1rem' }}>
-                <img src="/scenario-shadow.webp" width={360} height={40} alt="箱庭物语" />
+            <div className="card">
+              <div className="text-center mb-4">
+                <div className="flex justify-center items-center" style={{ marginBottom: '1rem' }}>
+                  <img src="/scenario-shadow.webp" width={360} height={40} alt="箱庭物语" />
+                </div>
+                <p className="subtitle mt-2">情景生成器，创建独一无二的舞台，上演属于你的故事</p>
+                <EncyclopediaLinks
+                  items={[
+                    { slug: 'scenario-generator', text: '百科：箱庭物语（情景生成器）' },
+                    { slug: 'scenario-advanced', text: '百科：情景卡进阶（继承与长线）' },
+                  ]}
+                />
               </div>
-              <p className="subtitle mt-2">情景生成器，创建独一无二的舞台，上演属于你的故事</p>
-            </div>
 
-            <div className="space-y-6">
-              {scenarioQuestions.map(q => (
-                <div key={q.id} className="input-group">
+              <div className="space-y-6">
+                {scenarioQuestions.map(q => (
+                  <div key={q.id} className="input-group">
                   <label htmlFor={q.id} className="input-label">{q.label}</label>
                   <textarea
                     id={q.id}

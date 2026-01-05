@@ -17,6 +17,7 @@ import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBacku
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 
 interface Questionnaire {
   questions: string[];
@@ -682,6 +683,12 @@ const DetailsPage: React.FC = () => {
                   <p className="font-bold">⚠️ 注意事项</p>
                   <p className="mt-1">请勿在问卷中输入任何真实的隐私信息，或任何不适宜、攻击性、不符合公序良俗的内容。所有回答将被用于生成虚拟角色，并且将会被储存在角色信息中。</p>
                 </div>
+                <EncyclopediaLinks
+                  items={[
+                    { slug: 'character-generator', text: '百科：角色生成入口说明' },
+                    { slug: 'archive', text: '百科：档案馆（角色管理）' },
+                  ]}
+                />
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <button
                     onClick={handleStartQuestionnaire}
