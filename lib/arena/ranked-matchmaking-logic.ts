@@ -26,8 +26,22 @@ type PickOptions = {
 
 const clamp01 = (value: number): number => (value <= 0 ? 0 : value >= 1 ? 1 : value);
 
+const defaultRng = (): number => {
+  try {
+    const cryptoObj = (globalThis as any)?.crypto as Crypto | undefined;
+    if (cryptoObj?.getRandomValues) {
+      const buf = new Uint32Array(1);
+      cryptoObj.getRandomValues(buf);
+      return (buf[0] ?? 0) / 4294967296;
+    }
+  } catch {
+    // 忽略，回退到 Math.random
+  }
+  return Math.random();
+};
+
 const safeRng = (rng: (() => number) | undefined): (() => number) =>
-  typeof rng === 'function' ? rng : Math.random;
+  typeof rng === 'function' ? rng : defaultRng;
 
 export const computeMatchmakingWeight = (input: {
   targetRating: number;
