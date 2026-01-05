@@ -7,6 +7,28 @@ describe('error-help', () => {
     expect(inferEncyclopediaSlugForError({ status: 524, message: 'whatever' })).toBe('cloudflare-524-timeout');
   });
 
+  test('infer ai api call error over server 5xx status', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        status: 500,
+        message: '魔法失效了!失败:AI_APICallError：余额不足(request id:2026010518...)(HTTP500)',
+      }),
+    ).toBe('ai-api-call-error');
+  });
+
+  test('infer ai api call error for AI_APICaIIError variant', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        status: 500,
+        message: '魔法失效了!失败:AI_APICaIIError：用户已被封禁(request id:2026010518...)(HTTP500)',
+      }),
+    ).toBe('ai-api-call-error');
+  });
+
+  test('infer by status: 500 (fallback cloudflare errors)', () => {
+    expect(inferEncyclopediaSlugForError({ status: 500, message: 'whatever' })).toBe('cloudflare-errors');
+  });
+
   test('infer by message: HTTP 524', () => {
     expect(inferEncyclopediaSlugForError({ message: '服务器内部错误（HTTP 524）' })).toBe('cloudflare-524-timeout');
   });

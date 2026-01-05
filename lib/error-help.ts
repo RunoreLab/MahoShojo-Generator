@@ -58,6 +58,12 @@ const AI_MESSAGE_HINTS = [
   '魔法失效',
 ] as const;
 
+const AI_API_CALL_ERROR_MESSAGE_HINTS = [
+  'ai_apicallerror',
+  'ai_apicaiierror',
+  'apicallerror',
+] as const;
+
 const AI_REFUSAL_MESSAGE_HINTS = [
   'as a language model',
   'as an ai language model',
@@ -131,25 +137,46 @@ function includesAny(message: string, hints: readonly string[]) {
 }
 
 export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | null {
+  const rawMessage = typeof input.message === 'string' ? input.message : '';
+  const message = rawMessage.trim() ? normalizeMessage(rawMessage) : '';
+  const isAiApiCallError = message ? includesAny(message, AI_API_CALL_ERROR_MESSAGE_HINTS) : false;
+
   const status = input.status ?? null;
+  if (status === 524) return 'cloudflare-524-timeout';
+  if (status === 429) return 'rate-limit-429';
+  if (
+    isAiApiCallError
+    && typeof status === 'number'
+    && (CLOUDFLARE_OTHER_STATUSES.has(status) || SERVER_ERROR_STATUSES.has(status))
+  ) {
+    return 'ai-api-call-error';
+  }
+
   const statusSlug = typeof status === 'number' ? inferSlugFromStatus(status) : null;
   if (statusSlug) return statusSlug;
 
-  const rawMessage = typeof input.message === 'string' ? input.message : '';
   if (!rawMessage.trim()) return null;
 
   const statusFromMessage = extractHttpStatusFromMessage(rawMessage);
   if (typeof statusFromMessage === 'number') {
+    if (statusFromMessage === 524) return 'cloudflare-524-timeout';
+    if (statusFromMessage === 429) return 'rate-limit-429';
+    if (
+      isAiApiCallError
+      && (CLOUDFLARE_OTHER_STATUSES.has(statusFromMessage) || SERVER_ERROR_STATUSES.has(statusFromMessage))
+    ) {
+      return 'ai-api-call-error';
+    }
+
     const inferred = inferSlugFromStatus(statusFromMessage);
     if (inferred) return inferred;
   }
-
-  const message = normalizeMessage(rawMessage);
 
   if (message.includes('cloudflare') && message.includes('524')) return 'cloudflare-524-timeout';
   if (message.includes('524') && message.includes('timeout')) return 'cloudflare-524-timeout';
   if (message.includes('524') && message.includes('超时')) return 'cloudflare-524-timeout';
 
+  if (isAiApiCallError) return 'ai-api-call-error';
   if (includesAny(message, AI_EMPTY_OUTPUT_MESSAGE_HINTS)) return 'ai-empty-output';
   if (message.includes('服务端返回信息') && (message.includes('{}') || message.includes('[]'))) return 'ai-empty-output';
   if (includesAny(message, AI_REFUSAL_MESSAGE_HINTS)) return 'ai-refusal';
