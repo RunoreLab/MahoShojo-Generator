@@ -32,9 +32,11 @@
 
 - **拒答**：输出出现「身为语言模型…」「安全策略…」等模板语（见：`/encyclopedia/ai-refusal`）
 - **格式异常**：输出看起来像正常内容，但结构不合格/被截断，导致校验失败（本页）
+- **空对象/空白**：输出几乎没有信息（`{}` / `[]` / 空白），见：`/encyclopedia/ai-empty-output`
 
 ## 相关条目
 
 - AI 生成失败：`/encyclopedia/ai-errors`
 - AI 拒答与安全策略提示：`/encyclopedia/ai-refusal`
+- AI 返回空对象/空内容：`/encyclopedia/ai-empty-output`
 - 数据卡问题（导入/解析/校验）：`/encyclopedia/data-card-errors`

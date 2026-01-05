@@ -91,6 +91,16 @@ const AI_OUTPUT_FORMAT_MESSAGE_HINTS = [
 
 const AI_OUTPUT_FORMAT_CONTEXT_HINTS = ['魔法少女', '残兽', '情景', '叙事历史', '通用角色'] as const;
 
+const AI_EMPTY_OUTPUT_MESSAGE_HINTS = [
+  '服务端响应为空',
+  '响应为空',
+  '未收到有效内容',
+  '返回空对象',
+  '空对象',
+  'empty response',
+  'empty object',
+] as const;
+
 function normalizeMessage(message: string) {
   return message
     .trim()
@@ -140,6 +150,8 @@ export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | n
   if (message.includes('524') && message.includes('timeout')) return 'cloudflare-524-timeout';
   if (message.includes('524') && message.includes('超时')) return 'cloudflare-524-timeout';
 
+  if (includesAny(message, AI_EMPTY_OUTPUT_MESSAGE_HINTS)) return 'ai-empty-output';
+  if (message.includes('服务端返回信息') && (message.includes('{}') || message.includes('[]'))) return 'ai-empty-output';
   if (includesAny(message, AI_REFUSAL_MESSAGE_HINTS)) return 'ai-refusal';
   if (includesAny(message, RATE_LIMIT_MESSAGE_HINTS)) return 'rate-limit-429';
   if (includesAny(message, NETWORK_MESSAGE_HINTS)) return 'network-errors';

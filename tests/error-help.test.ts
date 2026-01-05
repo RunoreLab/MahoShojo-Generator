@@ -29,6 +29,14 @@ describe('error-help', () => {
     );
   });
 
+  test('infer by message: ai empty output', () => {
+    expect(inferEncyclopediaSlugForError({ message: '服务端响应为空，未收到有效内容。' })).toBe('ai-empty-output');
+  });
+
+  test('infer by message: server returned {}', () => {
+    expect(inferEncyclopediaSlugForError({ message: '✨ 生成失败，服务端返回信息：{}' })).toBe('ai-empty-output');
+  });
+
   test('infer by message: ai', () => {
     expect(inferEncyclopediaSlugForError({ message: 'API Key 无效或已过期' })).toBe('ai-errors');
   });

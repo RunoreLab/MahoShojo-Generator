@@ -49,6 +49,12 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     markdownPath: '/encyclopedia/ai-refusal.md',
   },
   {
+    slug: 'ai-empty-output',
+    title: 'AI 返回空对象/空内容（{} / [] / 空白）',
+    summary: '生成结果变成 {} / [] / 空白：常见原因、如何区分拒答/超时、以及自救步骤。',
+    markdownPath: '/encyclopedia/ai-empty-output.md',
+  },
+  {
     slug: 'ai-output-format',
     title: 'AI 输出格式异常（缺字段/夹带解释/校验失败）',
     summary: '生成完成但结构不合格：校验失败、JSON 解析失败、输出被截断等问题的自救。',
