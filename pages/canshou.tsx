@@ -12,6 +12,8 @@ import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
+import { ErrorMessage } from '@/components/ErrorMessage';
+import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 
 // 定义问卷和问题的类型
 interface Question {
@@ -349,12 +351,13 @@ const CanshouPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        if (errorData.shouldRedirect) {
+        const errorData = await response.json().catch(() => null as any);
+        if (errorData?.shouldRedirect) {
           router.push('/arrested');
           return;
         }
-        throw new Error(errorData.message || '生成失败，服务器返回错误');
+        const serverMessage = errorData?.message || errorData?.error;
+        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
       }
 
       const result: CanshouResultPayload = await response.json();
@@ -468,6 +471,11 @@ const CanshouPage: React.FC = () => {
                   <p className="font-bold">⚠️ 注意事项</p>
                   <p className="mt-1">请勿在问卷中输入任何真实的隐私信息，或任何不适宜、攻击性、不符合公序良俗的内容。所有回答将被用于生成虚拟角色，并且将会被储存在角色信息中。</p>
                 </div>
+                <EncyclopediaLinks
+                  items={[{ slug: 'character-generator', text: '百科：角色生成（/name、/details、/canshou）' }]}
+                  linkClassName="text-blue-200 hover:underline"
+                  labelClassName="text-slate-300"
+                />
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <button onClick={() => setShowIntroduction(false)} className="generate-button text-lg flex-1">开始调查</button>
                   <button
@@ -699,7 +707,7 @@ const CanshouPage: React.FC = () => {
                   )}
                 </div>
 
-                {error && <div className="error-message">{error}</div>}
+                {error && <ErrorMessage message={error} />}
 
                 <div className="mt-8 text-center">
                   <Link href="/" className="footer-link">返回首页</Link>

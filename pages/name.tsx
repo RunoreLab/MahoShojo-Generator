@@ -11,6 +11,8 @@ import { useRouter } from 'next/router';
 import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
+import { ErrorMessage } from '@/components/ErrorMessage';
+import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 
 // 注意：QueueStatus 组件及其相关逻辑已被移除，因为它在Serverless环境下无法正常工作。
 
@@ -99,16 +101,19 @@ async function generateMagicalGirl(inputName: string, language: string): Promise
       body: JSON.stringify({ name: inputName, language: language }),
     });
 
-    if (!response.ok) {
-      const error = await response.json();
+      if (!response.ok) {
+      const error = await response.json().catch(() => null as any);
       // 处理不同的 HTTP 状态码
       if (response.status === 429) {
-        const retryAfter = error.retryAfter || 60;
-        throw new Error(`请求过于频繁！请等待 ${retryAfter} 秒后再试。`);
+        const retryAfter = error?.retryAfter || 60;
+        throw new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`);
+      } else if (response.status === 524) {
+        throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
       } else if (response.status >= 500) {
-        throw new Error('服务器内部错误，当前可能正忙，请稍后重试');
+        throw new Error(`服务器内部错误（HTTP ${response.status}），当前可能正忙，请稍后重试。`);
       } else {
-        throw new Error(error.message || error.error || '生成失败');
+        const serverMessage = error?.message || error?.error;
+        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
       }
     }
 
@@ -301,6 +306,9 @@ export default function Name() {
             <p className="subtitle text-center">
               或者要不要来试试 <Link href="/details" className="footer-link">奇妙妖精大调查</Link>？
             </p>
+            <EncyclopediaLinks
+              items={[{ slug: 'character-generator', text: '百科：角色生成（/name、/details、/canshou）' }]}
+            />
             <div style={{ marginTop: '1rem', marginBottom: '2rem', textAlign: 'center' }}>
               <p style={{ fontSize: '0.8rem', marginTop: '1rem', color: '#999', fontStyle: 'italic' }}>本测试设定来源于小说《下班，然后变成魔法少女》</p>
             </div>
@@ -360,9 +368,7 @@ export default function Name() {
             </div>
 
             {error && (
-              <div className="error-message">
-                {error}
-              </div>
+              <ErrorMessage message={error} />
             )}
 
             {magicalGirl && (

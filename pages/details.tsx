@@ -16,6 +16,8 @@ import { buildMagicalQuestionMeta, type MagicalQuestionMeta } from '@/lib/questi
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
+import { ErrorMessage } from '@/components/ErrorMessage';
+import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 
 interface Questionnaire {
   questions: string[];
@@ -519,22 +521,25 @@ const DetailsPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: '无法解析的服务器错误' }));
+        const errorData = await response.json().catch(() => null as any);
 
         // 处理不同的 HTTP 状态码
-        if (errorData.shouldRedirect) {
+        if (errorData?.shouldRedirect) {
           // 如果API返回需要重定向的标志，则执行跳转
           router.push('/arrested');
           // 返回以停止进一步执行
           return;
         }
         else if (response.status === 429) {
-          const retryAfter = errorData.retryAfter || 60;
-          throw new Error(`请求过于频繁！请等待 ${retryAfter} 秒后再试。`);
+          const retryAfter = errorData?.retryAfter || 60;
+          throw new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`);
+        } else if (response.status === 524) {
+          throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
         } else if (response.status >= 500) {
-          throw new Error('服务器内部错误，当前可能正忙，请稍后重试');
+          throw new Error(`服务器内部错误（HTTP ${response.status}），当前可能正忙，请稍后重试。`);
         } else {
-          throw new Error(errorData.message || errorData.error || '生成失败');
+          const serverMessage = errorData?.message || errorData?.error;
+          throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
         }
       }
 
@@ -678,6 +683,12 @@ const DetailsPage: React.FC = () => {
                   <p className="font-bold">⚠️ 注意事项</p>
                   <p className="mt-1">请勿在问卷中输入任何真实的隐私信息，或任何不适宜、攻击性、不符合公序良俗的内容。所有回答将被用于生成虚拟角色，并且将会被储存在角色信息中。</p>
                 </div>
+                <EncyclopediaLinks
+                  items={[
+                    { slug: 'character-generator', text: '百科：角色生成入口说明' },
+                    { slug: 'archive', text: '百科：档案馆（角色管理）' },
+                  ]}
+                />
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <button
                     onClick={handleStartQuestionnaire}
@@ -946,9 +957,7 @@ const DetailsPage: React.FC = () => {
 
                 {/* 错误信息显示 */}
                 {error && (
-                  <div className="error-message">
-                    {error}
-                  </div>
+                  <ErrorMessage message={error} />
                 )}
 
                 {/* 复制已填写内容 */}

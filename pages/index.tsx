@@ -5,6 +5,7 @@ import Footer from '../components/Footer';
 import { useAuth } from '@/lib/useAuth';
 import { UserWithTitle } from '@/components/UserTitle';
 import { featureCategories, getAllFeatureImages } from '@/config/features';
+import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 
 export default function Home() {
   const [, setImagesLoaded] = useState(false);
@@ -92,6 +93,34 @@ export default function Home() {
             <p className="subtitle text-center mb-4">
               欢迎来到魔法国度！选择一个项目开始玩耍吧！
             </p>
+            <EncyclopediaLinks
+              label="新手推荐："
+              items={[
+                { slug: 'site-guide', text: '站内功能速览（从生成到对战）' },
+                { slug: 'newbie-guide', text: '新手攻略（强度直觉）' },
+              ]}
+            />
+            <div className="mt-4 flex justify-center">
+              <Link
+                href="/encyclopedia"
+                className="group w-full max-w-md rounded-xl border border-blue-200 bg-blue-50/50 px-4 py-3 text-left transition-colors hover:bg-blue-50"
+              >
+                <div className="flex items-center gap-3">
+                  <img
+                    src="/encyclopedia.svg"
+                    width={160}
+                    height={64}
+                    alt="百科"
+                    className="shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-base font-semibold leading-tight text-blue-800">百科目录</div>
+                    <div className="text-xs text-blue-700/80">使用说明 / 规则 / 进阶</div>
+                  </div>
+                  <span className="ml-auto text-xs text-blue-700 group-hover:underline">打开</span>
+                </div>
+              </Link>
+            </div>
 
             {/* 分类功能导航 */}
             <div className="space-y-8">

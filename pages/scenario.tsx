@@ -9,6 +9,8 @@ import { useCooldown } from '../lib/cooldown';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import { ErrorMessage } from '@/components/ErrorMessage';
+import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 
 // 定义引导性问题
 const scenarioQuestions = [
@@ -123,15 +125,16 @@ const ScenarioPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorJson = await response.json().catch(() => ({ message: '服务器响应异常' }));
-        if (errorJson.shouldRedirect) {
+        const errorJson = await response.json().catch(() => null as any);
+        if (errorJson?.shouldRedirect) {
           router.push({
             pathname: '/arrested',
             query: { reason: errorJson.reason || '使用危险符文' }
           });
           return;
         }
-        throw new Error(errorJson.message || errorJson.error || '生成失败');
+        const serverMessage = errorJson?.message || errorJson?.error;
+        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
       }
 
       const result = await response.json();
@@ -175,17 +178,23 @@ const ScenarioPage: React.FC = () => {
       </Head>
       <div className="magic-background-white">
         <div className="container">
-          <div className="card">
-            <div className="text-center mb-4">
-              <div className="flex justify-center items-center" style={{ marginBottom: '1rem' }}>
-                <img src="/scenario-shadow.webp" width={360} height={40} alt="箱庭物语" />
+            <div className="card">
+              <div className="text-center mb-4">
+                <div className="flex justify-center items-center" style={{ marginBottom: '1rem' }}>
+                  <img src="/scenario-shadow.webp" width={360} height={40} alt="箱庭物语" />
+                </div>
+                <p className="subtitle mt-2">情景生成器，创建独一无二的舞台，上演属于你的故事</p>
+                <EncyclopediaLinks
+                  items={[
+                    { slug: 'scenario-generator', text: '百科：箱庭物语（情景生成器）' },
+                    { slug: 'scenario-advanced', text: '百科：情景卡进阶（继承与长线）' },
+                  ]}
+                />
               </div>
-              <p className="subtitle mt-2">情景生成器，创建独一无二的舞台，上演属于你的故事</p>
-            </div>
 
-            <div className="space-y-6">
-              {scenarioQuestions.map(q => (
-                <div key={q.id} className="input-group">
+              <div className="space-y-6">
+                {scenarioQuestions.map(q => (
+                  <div key={q.id} className="input-group">
                   <label htmlFor={q.id} className="input-label">{q.label}</label>
                   <textarea
                     id={q.id}
@@ -263,7 +272,7 @@ const ScenarioPage: React.FC = () => {
             <button onClick={handleGenerate} disabled={isGenerating || isCooldown} className="generate-button mt-4">
               {isCooldown ? `冷却中 (${remainingTime}s)` : isGenerating ? '正在构建舞台...' : '生成情景'}
             </button>
-            {error && <div className="error-message mt-4">{error}</div>}
+            {error && <ErrorMessage message={error} className="error-message mt-4" />}
           </div>
 
           {resultData && (

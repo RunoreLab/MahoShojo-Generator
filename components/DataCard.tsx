@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { Download, Heart, Share, Info, Ban, AlertTriangle, Clock, XCircle, Star, BadgeCheck } from 'lucide-react';
 import { isCardLiked, addLikedCard } from '@/lib/localStorage';
 import { getDataCardStatus } from '@/lib/database/data-cards';
+import { TechBadge } from '@/components/ranking/TechBadge';
+import { TierBadge } from '@/components/ranking/TierBadge';
 
 interface DataCardProps {
   id: string; // Changed from number to string for UUID
@@ -31,6 +33,9 @@ interface DataCardProps {
   canFavorite?: boolean;
   onToggleFavorite?: (nextState: boolean) => Promise<boolean> | boolean;
   isRecommended?: boolean;
+  techScore?: number | null;
+  techLevel?: string | null;
+  strictTier?: string | null;
   hot?: boolean;
   pending?: boolean;
   onReplace?: () => void;
@@ -81,6 +86,9 @@ export default function DataCard({
   canFavorite = false,
   onToggleFavorite,
   isRecommended = false,
+  techScore = null,
+  techLevel = null,
+  strictTier = null,
   hot = false,
   pending = false,
   onReplace,
@@ -320,6 +328,16 @@ export default function DataCard({
                 <BadgeCheck className="w-3 h-3" /> 推荐
               </span>
             )}
+            {typeof techLevel === 'string' && techLevel.trim() ? (
+              <span title="技术值等级">
+                <TechBadge mode="level" techScore={techScore} techLevel={techLevel} className="whitespace-nowrap" />
+              </span>
+            ) : null}
+            {typeof strictTier === 'string' && strictTier.trim() ? (
+              <span title="严格排位段位">
+                <TierBadge tier={strictTier} />
+              </span>
+            ) : null}
           </div>
         </div>
 

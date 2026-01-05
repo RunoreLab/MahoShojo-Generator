@@ -5,6 +5,7 @@ import {
   computeEloUpdate,
   computeKFactor,
   isStrictEligible,
+  parseCombatantEntity,
   parseWinnerSlot,
   type ArenaEligibilitySnapshot,
   type ArenaRatingSnapshot,
@@ -139,5 +140,56 @@ describe('arena-ratings: 严格排位资格判定', () => {
 
   test('不满足：读取叙事历史开启', () => {
     expect(isStrictEligible({ ...baseSnapshot, extraJson: JSON.stringify({ readNarrativeHistory: true, rankedMatchOk: true }) }, baseCombatants)).toBe(false);
+  });
+});
+
+describe('arena-ratings: 参战者 entity 解析', () => {
+  const buildCombatant = (overrides: Partial<BattleReportGenerationCombatantRow>): BattleReportGenerationCombatantRow => ({
+    generation_id: 'gen',
+    sort_index: 0,
+    name: '雪绒',
+    type: null,
+    template_id: null,
+    is_native: null,
+    is_preset: 1,
+    team_id: null,
+    character_guidance: null,
+    data_card_id: null,
+    data_card_updated_at: null,
+    size_chars: null,
+    size_bytes: null,
+    created_at: new Date(0).toISOString(),
+    ...overrides,
+  });
+
+  test('预设：template_id 缺失时使用 name 映射到 filename（避免落库成“雪绒”）', () => {
+    const entity = parseCombatantEntity(buildCombatant({ template_id: null, name: '雪绒' }));
+    expect(entity).toEqual({ entityType: 'preset', entityId: 'M12_greatness_in_simplicity.json' });
+  });
+
+  test('预设：template_id 若误写为 name，也会映射到 filename', () => {
+    const entity = parseCombatantEntity(buildCombatant({ template_id: '雪绒', name: '雪绒' }));
+    expect(entity).toEqual({ entityType: 'preset', entityId: 'M12_greatness_in_simplicity.json' });
+  });
+
+  test('预设：template_id 为 filename 时保持不变', () => {
+    const entity = parseCombatantEntity(buildCombatant({ template_id: 'M12_greatness_in_simplicity.json', name: '雪绒' }));
+    expect(entity).toEqual({ entityType: 'preset', entityId: 'M12_greatness_in_simplicity.json' });
+  });
+
+  test('预设：无法解析时返回 null（宁可漏算，避免生成脏 ID）', () => {
+    const entity = parseCombatantEntity(buildCombatant({ template_id: null, name: '不存在的预设名' }));
+    expect(entity).toBeNull();
+  });
+
+  test('数据卡：data_card_id 优先', () => {
+    const entity = parseCombatantEntity(
+      buildCombatant({
+        is_preset: null,
+        name: '任意名',
+        data_card_id: 'dc_123',
+      })
+    );
+    expect(entity).toEqual({ entityType: 'data_card', entityId: 'dc_123' });
   });
 });

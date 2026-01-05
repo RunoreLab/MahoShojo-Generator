@@ -63,6 +63,23 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
     ul: ({ children }) => <ul className={unorderedListClass}>{children}</ul>,
     ol: ({ children }) => <ol className={orderedListClass}>{children}</ol>,
     li: ({ children }) => <li className="break-words">{children}</li>,
+    a: ({ href, children, ...props }) => {
+      const isExternal = typeof href === 'string' && /^https?:\/\//i.test(href);
+      return (
+        <a
+          href={href}
+          target={isExternal ? '_blank' : undefined}
+          rel={isExternal ? 'noopener noreferrer' : undefined}
+          className={[
+            'underline underline-offset-2 transition-opacity hover:opacity-100',
+            variant === 'light' ? 'text-blue-700 opacity-95' : 'text-blue-200 opacity-90',
+          ].join(' ')}
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    },
     blockquote: ({ children }) => <blockquote className={blockquoteClass}>{children}</blockquote>,
     hr: () => <hr className={hrClass} />,
     pre: ({ children }) => <pre className={preClass}>{children}</pre>,

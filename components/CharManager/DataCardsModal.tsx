@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import DataCard from '../DataCard';
 import EditCardForm from './EditCardForm';
 import DataCardDetailsModal from '../DataCardDetailsModal';
 import { config } from '@/lib/config';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { isHotCard } from '@/lib/constants';
+import { authStorage } from '@/lib/auth';
 
 interface DataCardsModalProps {
   isOpen: boolean;
@@ -49,6 +50,8 @@ export default function DataCardsModal({
 }: DataCardsModalProps) {
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const metaFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const [cardMetaById, setCardMetaById] = useState<Record<string, { techScore: number | null; techLevel: string | null; strictTier: string | null }>>({});
 
   const inferRoleType = (card: any): 'magical-girl' | 'canshou' | 'general' | undefined => {
     if (!card || card.type !== 'character') return undefined;
@@ -81,8 +84,6 @@ export default function DataCardsModal({
     return 'general';
   };
 
-  if (!isOpen) return null;
-
   // 处理查看详情
   const handleViewDetails = (card: any) => {
     setSelectedCard(card);
@@ -94,6 +95,81 @@ export default function DataCardsModal({
     (currentPage - 1) * cardsPerPage,
     currentPage * cardsPerPage
   );
+
+  const paginatedCardIds = useMemo(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const card of paginatedCards as any[]) {
+      const id = typeof card?.id === 'string' ? card.id.trim() : '';
+      if (!id) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
+  }, [paginatedCards]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (paginatedCardIds.length === 0) return;
+
+    const pendingIds = paginatedCardIds.filter((id) => !Object.prototype.hasOwnProperty.call(cardMetaById, id));
+    if (pendingIds.length === 0) return;
+
+    metaFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    metaFetchAbortControllerRef.current = abortController;
+
+    const run = async () => {
+      try {
+        const authHeader = await authStorage.getAuthHeader();
+        const headers: HeadersInit = { 'Content-Type': 'application/json' };
+        if (authHeader) headers.Authorization = authHeader;
+
+        const res = await fetch('/api/data-card-meta-batch', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ dataCardIds: pendingIds }),
+          signal: abortController.signal,
+        });
+
+        if (!res.ok) return;
+        const json = (await res.json()) as any;
+        if (!json || json.success !== true || typeof json.items !== 'object' || !json.items) return;
+
+        setCardMetaById((prev) => {
+          const next = { ...prev };
+          for (const [id, item] of Object.entries<any>(json.items)) {
+            const metrics = item?.metrics ?? null;
+            const strict = item?.strict ?? null;
+            next[id] = {
+              techScore: typeof metrics?.techScore === 'number' ? metrics.techScore : null,
+              techLevel: typeof metrics?.techLevel === 'string' ? metrics.techLevel : null,
+              strictTier: typeof strict?.tier === 'string' ? strict.tier : null,
+            };
+          }
+          return next;
+        });
+      } catch (error) {
+        if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+          return;
+        }
+        console.warn('加载数据卡技术值/段位失败（降级为不显示）:', error);
+      } finally {
+        if (metaFetchAbortControllerRef.current === abortController) {
+          metaFetchAbortControllerRef.current = null;
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [isOpen, paginatedCardIds, cardMetaById]);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -169,6 +245,9 @@ export default function DataCardsModal({
                       likeCount={card.like_count}
                       favoriteCount={card.favorite_count}
                       isRecommended={card.is_recommended === 1}
+                      techScore={cardMetaById[card.id]?.techScore ?? null}
+                      techLevel={cardMetaById[card.id]?.techLevel ?? null}
+                      strictTier={cardMetaById[card.id]?.strictTier ?? null}
                       hot={hot}
                       pending={hasPendingUpdate}
                       author={author}
