@@ -17,7 +17,7 @@ export default function EncyclopediaIndex() {
               <div>
                 <h1 className="text-xl font-bold text-gray-900">百科</h1>
                 <div className="mt-1 text-sm text-gray-600">
-                  {encyclopediaEntries.length} 篇条目 · 适配手机/平板/宽屏阅读
+                  {encyclopediaEntries.length} 篇条目 · 涵盖使用说明 / 规则 / 进阶等内容，助你更好地了解和使用本站功能。如有补充，欢迎提交 PR 或反馈投稿！
                 </div>
               </div>
               <div className="flex items-center gap-4 text-sm">
