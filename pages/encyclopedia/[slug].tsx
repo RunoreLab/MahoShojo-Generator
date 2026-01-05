@@ -5,7 +5,13 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { TagsLibraryPanel } from '@/components/encyclopedia/TagsLibraryPanel';
-import { encyclopediaEntries, getEncyclopediaEntry } from '@/lib/encyclopedia';
+import {
+  encyclopediaEntries,
+  getEncyclopediaCategory,
+  getEncyclopediaEntry,
+  groupEncyclopediaEntries,
+  matchEncyclopediaEntry,
+} from '@/lib/encyclopedia';
 
 export default function EncyclopediaEntryPage() {
   const router = useRouter();
@@ -31,6 +37,21 @@ export default function EncyclopediaEntryPage() {
     while (startIndex < lines.length && lines[startIndex]?.trim() === '') startIndex += 1;
     return lines.slice(startIndex).join('\n');
   }, [content, entry]);
+
+  const [navQuery, setNavQuery] = useState('');
+  const [mobileNavOpen, setMobileNavOpen] = useState(true);
+
+  const filteredNavEntries = useMemo(() => {
+    return encyclopediaEntries.filter((item) => matchEncyclopediaEntry(item, navQuery));
+  }, [navQuery]);
+
+  const groupedNavEntries = useMemo(() => {
+    return groupEncyclopediaEntries(filteredNavEntries);
+  }, [filteredNavEntries]);
+
+  const entryCategory = useMemo(() => {
+    return entry ? getEncyclopediaCategory(entry.categoryId) : null;
+  }, [entry]);
 
   useEffect(() => {
     if (!entry) {
@@ -65,6 +86,100 @@ export default function EncyclopediaEntryPage() {
     };
   }, [entry]);
 
+  const sidebarContent = (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold text-gray-700">条目</div>
+        <Link href="/encyclopedia" className="text-xs text-blue-600 hover:underline">
+          目录
+        </Link>
+      </div>
+
+      <div className="mt-2">
+        <input
+          type="search"
+          value={navQuery}
+          onChange={(e) => setNavQuery(e.target.value)}
+          placeholder="搜索条目…"
+          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm placeholder:text-gray-400 focus:border-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-200"
+        />
+        {navQuery.trim() ? (
+          <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+            <span>匹配 {filteredNavEntries.length} 篇</span>
+            <button
+              type="button"
+              onClick={() => setNavQuery('')}
+              className="rounded-md px-2 py-1 text-gray-600 hover:bg-gray-50"
+            >
+              清除
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {groupedNavEntries.categoriesWithEntries.map(({ category, entries }) => {
+          const open = Boolean(navQuery.trim()) || entry?.categoryId === category.id;
+          return (
+            <details key={category.id} open={open} className="group">
+              <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-2 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
+                <span className="min-w-0 truncate">{category.title}</span>
+                <span className="shrink-0 text-xs text-gray-400 group-open:text-gray-500">
+                  {entries.length}
+                </span>
+              </summary>
+              <div className="mt-1 space-y-1 pl-1">
+                {entries.map((item) => (
+                  <Link
+                    key={item.slug}
+                    href={`/encyclopedia/${item.slug}`}
+                    className={`block rounded-lg px-2 py-1.5 text-sm transition-colors ${
+                      item.slug === entry?.slug
+                        ? 'bg-purple-600 text-white'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {item.title}
+                  </Link>
+                ))}
+              </div>
+            </details>
+          );
+        })}
+
+        {groupedNavEntries.uncategorized.length > 0 ? (
+          <details open={Boolean(navQuery.trim())} className="group">
+            <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-2 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0 truncate">未分类</span>
+              <span className="shrink-0 text-xs text-gray-400 group-open:text-gray-500">
+                {groupedNavEntries.uncategorized.length}
+              </span>
+            </summary>
+            <div className="mt-1 space-y-1 pl-1">
+              {groupedNavEntries.uncategorized.map((item) => (
+                <Link
+                  key={item.slug}
+                  href={`/encyclopedia/${item.slug}`}
+                  className={`block rounded-lg px-2 py-1.5 text-sm transition-colors ${
+                    item.slug === entry?.slug
+                      ? 'bg-purple-600 text-white'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {item.title}
+                </Link>
+              ))}
+            </div>
+          </details>
+        ) : null}
+      </div>
+    </>
+  );
+
+  const sidebarPanel = (
+    <div className="rounded-xl border border-gray-200 bg-white p-3">{sidebarContent}</div>
+  );
+
   return (
     <>
       <Head>
@@ -81,6 +196,13 @@ export default function EncyclopediaEntryPage() {
                   <Link href="/encyclopedia" className="text-sm text-blue-600 hover:underline">返回百科目录</Link>
                 </div>
                 {entry?.summary ? <div className="mt-1 text-sm text-gray-600">{entry.summary}</div> : null}
+                {entryCategory ? (
+                  <div className="mt-2">
+                    <span className="inline-flex items-center rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700 ring-1 ring-purple-100">
+                      分类：{entryCategory.title}
+                    </span>
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex items-center gap-4 text-sm">
@@ -92,47 +214,26 @@ export default function EncyclopediaEntryPage() {
             <div className="px-6 py-6 sm:px-8 sm:py-8">
               <div className="flex flex-col gap-6 lg:flex-row lg:gap-10">
                 <nav className="lg:hidden">
-                  <div className="rounded-xl border border-gray-200 bg-white p-3">
-                    <label className="text-xs font-semibold text-gray-700">条目</label>
-                    <select
-                      value={entry?.slug ?? ''}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        if (!next) return;
-                        void router.push(`/encyclopedia/${next}`);
-                      }}
-                      className="mt-2 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-200"
-                    >
-                      {entry ? null : <option value="">请选择条目…</option>}
-                      {encyclopediaEntries.map((item) => (
-                        <option key={item.slug} value={item.slug}>
-                          {item.title}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="mt-2 text-xs text-gray-500">切换条目后会回到页面顶部，方便从头阅读。</div>
-                  </div>
+                  <details
+                    open={mobileNavOpen}
+                    onToggle={(e) => setMobileNavOpen(e.currentTarget.open)}
+                    className="rounded-xl border border-gray-200 bg-white p-3"
+                  >
+                    <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-gray-800 [&::-webkit-details-marker]:hidden">
+                      <span className="min-w-0 truncate">条目目录</span>
+                      <span className="text-xs font-normal text-gray-500">
+                        {entry ? '切换条目' : '请选择条目'}
+                      </span>
+                    </summary>
+                    <div className="mt-3">{sidebarContent}</div>
+                    <div className="mt-2 text-xs text-gray-500">
+                      小技巧：用上方搜索可快速定位；切换条目后会回到页面顶部，方便从头阅读。
+                    </div>
+                  </details>
                 </nav>
 
                 <aside className="hidden shrink-0 lg:block lg:w-72">
-                  <div className="sticky top-6 rounded-xl border border-gray-200 bg-white p-3">
-                    <div className="text-xs font-semibold text-gray-700">条目</div>
-                    <div className="mt-2 space-y-1">
-                      {encyclopediaEntries.map((item) => (
-                        <Link
-                          key={item.slug}
-                          href={`/encyclopedia/${item.slug}`}
-                          className={`block rounded-lg px-2 py-1.5 text-sm transition-colors ${
-                            item.slug === entry?.slug
-                              ? 'bg-purple-600 text-white'
-                              : 'text-gray-700 hover:bg-gray-50'
-                          }`}
-                        >
-                          {item.title}
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
+                  <div className="sticky top-6">{sidebarPanel}</div>
                 </aside>
 
                 <main className="min-w-0 flex-1">
