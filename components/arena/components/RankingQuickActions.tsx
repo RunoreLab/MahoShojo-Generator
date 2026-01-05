@@ -756,9 +756,9 @@ export function RankingQuickActions() {
             严格排位不允许自由挑选对手；选择一位参战角色后，点击一键匹配随机匹配合适对手。
           </div>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
           <select
-            className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm"
+            className="w-full rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm sm:w-72"
             value={selectedPlayerFilename}
             onChange={(e) => setSelectedPlayerFilename(e.target.value)}
             disabled={isGenerating || isRankedMatching || rankableCombatants.length <= 0}
@@ -774,24 +774,26 @@ export function RankingQuickActions() {
               ))
             )}
           </select>
-          <button
-            type="button"
-            onClick={handleRankedMatch}
-            disabled={isGenerating || isRankedMatching || rankableCombatants.length <= 0}
-            className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-            title="匹配对手（严格排位计分需要先匹配）"
-          >
-            {isRankedMatching ? '匹配中…' : (rankedMatch ? '重新匹配' : '一键匹配')}
-          </button>
-          <button
-            type="button"
-            onClick={handleApplyStrictSetup}
-            disabled={isGenerating || isRankedMatching}
-            className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
-            title="将严格排位相关设置一键安排到位"
-          >
-            严格设置
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRankedMatch}
+              disabled={isGenerating || isRankedMatching || rankableCombatants.length <= 0}
+              className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+              title="匹配对手（严格排位计分需要先匹配）"
+            >
+              {isRankedMatching ? '匹配中…' : (rankedMatch ? '重新匹配' : '一键匹配')}
+            </button>
+            <button
+              type="button"
+              onClick={handleApplyStrictSetup}
+              disabled={isGenerating || isRankedMatching}
+              className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+              title="将严格排位相关设置一键安排到位"
+            >
+              严格设置
+            </button>
+          </div>
         </div>
       </div>
 
