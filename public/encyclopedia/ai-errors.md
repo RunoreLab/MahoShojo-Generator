@@ -46,3 +46,4 @@
 - 524 超时：`/encyclopedia/cloudflare-524-timeout`
 - AI 拒答与安全策略提示：`/encyclopedia/ai-refusal`
 - AI 输出格式异常：`/encyclopedia/ai-output-format`
+- AI 返回空对象/空内容：`/encyclopedia/ai-empty-output`
