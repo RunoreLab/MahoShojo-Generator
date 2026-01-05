@@ -9,6 +9,28 @@ import { useBattleStore } from '../stores/useBattleStore';
 import type { BattleStoreState, CombatantData } from '../types';
 import { getCombatantDisplayName, inferCombatantType, validateCanshouData, validateMagicalGirlData } from '../utils/characterValidator';
 
+const formatTicketExpiresAtInClientTz = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  const ms = Date.parse(trimmed);
+  if (!Number.isFinite(ms)) return trimmed;
+
+  const date = new Date(ms);
+  try {
+    return new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
+  } catch {
+    return date.toLocaleString();
+  }
+};
+
 const removePrivateKeys = (obj: any): any => {
   if (obj === null || typeof obj !== 'object') {
     return obj;
@@ -173,8 +195,13 @@ export function RankingQuickActions() {
   const setRankedMatch = useBattleSelector((state) => state.setRankedMatch);
   const clearRankedMatch = useBattleSelector((state) => state.clearRankedMatch);
 
+  const [isMounted, setIsMounted] = useState(false);
   const [selectedPlayerFilename, setSelectedPlayerFilename] = useState<string>('');
   const [isRankedMatching, setIsRankedMatching] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const readableCombatants = useMemo(
     () => combatants.filter((c): c is CombatantData => 'data' in c),
@@ -477,10 +504,22 @@ export function RankingQuickActions() {
     if (!rankedMatch) return null;
     const ticket = rankedMatch.ticket as any;
     const expiresAt = typeof ticket?.expiresAt === 'string' ? ticket.expiresAt.trim() : '';
+    const expiresAtLocal = isMounted && expiresAt ? formatTicketExpiresAtInClientTz(expiresAt) : '';
     const matchId = typeof ticket?.matchId === 'string' ? ticket.matchId.trim() : '';
-    const show = expiresAt ? `有效期至 ${expiresAt}` : (matchId ? `matchId: ${matchId}` : '已锁定');
-    return <span className="ml-2 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">{show}</span>;
-  }, [rankedMatch]);
+    const show = expiresAtLocal ? `有效期至 ${expiresAtLocal}` : (expiresAt ? '有效期至 …' : (matchId ? `matchId: ${matchId}` : '已锁定'));
+    const tz = isMounted ? Intl.DateTimeFormat().resolvedOptions().timeZone : '';
+    const title = expiresAt
+      ? `有效期（本地时间${tz ? `：${tz}` : ''}）\n${expiresAtLocal || '—'}\n原始值：${expiresAt}`
+      : undefined;
+    return (
+      <span
+        title={title}
+        className="ml-2 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+      >
+        {show}
+      </span>
+    );
+  }, [isMounted, rankedMatch]);
 
   return (
     <div className="mt-4 rounded-lg border border-gray-200 bg-white/70 p-3">
