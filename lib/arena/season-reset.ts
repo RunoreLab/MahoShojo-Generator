@@ -11,11 +11,43 @@ export type SeasonResetOptions = {
   maxStartRating: number;
 };
 
+export type GamesFactorSchedule = {
+  enabled: boolean;
+  gamesMid: number;
+  gamesHigh: number;
+  factorLow: number;
+  factorMid: number;
+  factorHigh: number;
+};
+
+export type InactivityFactorCap = {
+  enabled: boolean;
+  inactiveDays: number;
+  inactiveFactor: number;
+};
+
+export type SeasonResetAdvancedOptions = SeasonResetOptions & {
+  gamesFactor?: GamesFactorSchedule | null;
+  inactivityCap?: InactivityFactorCap | null;
+};
+
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
 const roundToInt = (value: number): number => Math.round(value);
+
+const parseIsoDate = (value: string | null | undefined): Date | null => {
+  const s = typeof value === 'string' ? value.trim() : '';
+  if (!s) return null;
+  const d = new Date(s);
+  return Number.isFinite(d.getTime()) ? d : null;
+};
+
+const diffDays = (a: Date, b: Date): number => {
+  const ms = a.getTime() - b.getTime();
+  return ms / (24 * 60 * 60 * 1000);
+};
 
 const assertValidOptions = (opts: SeasonResetOptions) => {
   if (!isFiniteNumber(opts.baseRating)) throw new Error('baseRating 必须是有限数字');
@@ -56,4 +88,85 @@ export const computeSeasonStartRating = (oldRating: number, opts: SeasonResetOpt
 
   const snapped = raw < base ? ceilToStep(raw, opts.step) : floorToStep(raw, opts.step);
   return clamp(snapped, opts.minStartRating, opts.maxStartRating);
+};
+
+const assertValidGamesFactor = (value: GamesFactorSchedule) => {
+  if (!value.enabled) return;
+  if (!Number.isInteger(value.gamesMid) || value.gamesMid < 0) throw new Error('gamesMid 必须是 >= 0 的整数');
+  if (!Number.isInteger(value.gamesHigh) || value.gamesHigh < value.gamesMid) throw new Error('gamesHigh 必须是 >= gamesMid 的整数');
+  for (const [k, v] of [
+    ['factorLow', value.factorLow],
+    ['factorMid', value.factorMid],
+    ['factorHigh', value.factorHigh],
+  ] as const) {
+    if (!isFiniteNumber(v) || v < 0 || v > 1) throw new Error(`${k} 必须在 [0, 1] 范围内`);
+  }
+};
+
+const assertValidInactivityCap = (value: InactivityFactorCap) => {
+  if (!value.enabled) return;
+  if (!Number.isInteger(value.inactiveDays) || value.inactiveDays < 0) throw new Error('inactiveDays 必须是 >= 0 的整数');
+  if (!isFiniteNumber(value.inactiveFactor) || value.inactiveFactor < 0 || value.inactiveFactor > 1) {
+    throw new Error('inactiveFactor 必须在 [0, 1] 范围内');
+  }
+};
+
+export const pickSeasonResetFactor = (input: {
+  baseFactor: number;
+  games: number;
+  updatedAtIso: string | null;
+  nowIso: string;
+  gamesFactor?: GamesFactorSchedule | null;
+  inactivityCap?: InactivityFactorCap | null;
+}): number => {
+  const baseFactor = isFiniteNumber(input.baseFactor) ? input.baseFactor : 1;
+  let factor = clamp(baseFactor, 0, 1);
+
+  const games = Number.isFinite(input.games) ? Math.max(0, Math.floor(input.games)) : 0;
+
+  if (input.gamesFactor?.enabled) {
+    assertValidGamesFactor(input.gamesFactor);
+    if (games < input.gamesFactor.gamesMid) factor = input.gamesFactor.factorLow;
+    else if (games < input.gamesFactor.gamesHigh) factor = input.gamesFactor.factorMid;
+    else factor = input.gamesFactor.factorHigh;
+  }
+
+  if (input.inactivityCap?.enabled) {
+    assertValidInactivityCap(input.inactivityCap);
+    const now = parseIsoDate(input.nowIso);
+    const updatedAt = parseIsoDate(input.updatedAtIso);
+    if (now && updatedAt) {
+      const days = diffDays(now, updatedAt);
+      if (Number.isFinite(days) && days >= input.inactivityCap.inactiveDays) {
+        factor = Math.min(factor, input.inactivityCap.inactiveFactor);
+      }
+    }
+  }
+
+  return clamp(factor, 0, 1);
+};
+
+export const computeSeasonStartRatingAdvanced = (
+  oldRating: number,
+  snapshot: { games: number; updatedAtIso: string | null },
+  opts: SeasonResetAdvancedOptions,
+  nowIso: string
+): number => {
+  const effectiveFactor = pickSeasonResetFactor({
+    baseFactor: opts.factor,
+    games: snapshot.games,
+    updatedAtIso: snapshot.updatedAtIso,
+    nowIso,
+    gamesFactor: opts.gamesFactor ?? null,
+    inactivityCap: opts.inactivityCap ?? null,
+  });
+
+  return computeSeasonStartRating(oldRating, {
+    policy: opts.policy,
+    baseRating: opts.baseRating,
+    factor: effectiveFactor,
+    step: opts.step,
+    minStartRating: opts.minStartRating,
+    maxStartRating: opts.maxStartRating,
+  });
 };
