@@ -1,5 +1,7 @@
 import { loadEnvConfig } from '@next/env';
 
+import { computeSeasonStartRating, type SeasonResetPolicy } from '@/lib/arena/season-reset';
+
 type Queue = 'strict' | 'free' | 'all';
 
 type QueryFromD1 = (sql: string, params?: unknown[]) => Promise<unknown>;
@@ -50,6 +52,12 @@ const parseNumber = (value: string | undefined, fallback: number): number => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+const parsePolicy = (value: string | undefined): SeasonResetPolicy => {
+  const v = (value ?? '').trim();
+  if (v === 'soft' || v === 'hundreds_toward_base') return v;
+  return 'hundreds_toward_base';
+};
+
 const queryQueueStats = async (queryFromD1: QueryFromD1, queue: Queue) => {
   const where = queue === 'all' ? '' : 'WHERE queue = ?';
   const params: unknown[] = queue === 'all' ? [] : [queue];
@@ -69,10 +77,19 @@ const main = async () => {
   if (args.has('--help') || args.has('-h')) {
     console.log(`[season-soft-reset]
 用法：
-  bun tsx scripts/season-soft-reset.ts [--queue all|strict|free] [--factor 0.5] [--base 1000] [--apply] [--dry-run] [--require-db]
+  bun tsx scripts/season-soft-reset.ts [--queue all|strict|free] [--policy soft|hundreds_toward_base] [--base 1000] [--factor 1] [--step 100] [--min-start 800] [--max-start 1500] [--apply] [--dry-run] [--require-db]
 
-默认策略（Soft Reset）：
-  newRating = round(base + (oldRating - base) * factor)
+默认策略（更像成熟排位的赛季收敛）：
+  policy=hundreds_toward_base（向初始值方向“整档/整百”归位）
+  1) raw = round(base + (oldRating - base) * factor)
+  2) raw < base：向上取整到 step（例如 901→1000）
+     raw >= base：向下取整到 step（例如 1099→1000）
+  3) clamp 到 [minStart, maxStart]
+
+可选策略（旧版）：
+  policy=soft（仅执行 Soft Reset）：
+    newRating = round(base + (oldRating - base) * factor)
+    并 clamp 到 [minStart, maxStart]
   并清空 games / wins / losses / draws（新赛季重新定级）
 `);
     return;
@@ -81,11 +98,26 @@ const main = async () => {
   loadEnvConfig(process.cwd(), process.env.NODE_ENV !== 'production');
 
   const queue = parseQueue(args.get('--queue'));
-  const factor = parseNumber(args.get('--factor'), 0.5);
+  const policy = parsePolicy(args.get('--policy') ?? args.get('--mode'));
   const base = Math.floor(parseNumber(args.get('--base'), 1000));
+  const step = Math.floor(parseNumber(args.get('--step'), 100));
+  const minStart = Math.floor(parseNumber(args.get('--min-start') ?? args.get('--minStart'), 800));
+  const maxStart = Math.floor(parseNumber(args.get('--max-start') ?? args.get('--maxStart'), 1500));
+  const defaultFactor = policy === 'soft' ? 0.5 : 1;
+  const factor = parseNumber(args.get('--factor'), defaultFactor);
   const apply = args.has('--apply') || args.has('--yes') || args.has('-y');
   const dryRun = args.has('--dry-run') || args.has('--dryRun') || !apply;
   const requireDb = args.has('--require-db') || args.has('--requireDb');
+
+  // 统一在脚本入口做一次校验，避免 UPDATE 中途“半写入”。
+  computeSeasonStartRating(base, {
+    policy,
+    baseRating: base,
+    factor,
+    step,
+    minStartRating: minStart,
+    maxStartRating: maxStart,
+  });
 
   if (!hasD1Config()) {
     if (requireDb) throw new Error('缺少 D1 配置（CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID）');
@@ -100,7 +132,9 @@ const main = async () => {
   console.log('[season-soft-reset] 重置前：', before);
 
   if (dryRun) {
-    console.log(`[season-soft-reset] dry-run：queue=${queue} base=${base} factor=${factor}`);
+    console.log(
+      `[season-soft-reset] dry-run：queue=${queue} policy=${policy} base=${base} factor=${factor} step=${step} minStart=${minStart} maxStart=${maxStart}`
+    );
     if (!apply) {
       console.log('[season-soft-reset] 未传入 --apply，已跳过实际更新。');
       console.log('  如需执行写入，请运行：bun tsx scripts/season-soft-reset.ts --apply');
@@ -109,16 +143,53 @@ const main = async () => {
   }
 
   const where = queue === 'all' ? '' : 'WHERE queue = ?';
-  const params: unknown[] = [
-    base,
-    base,
-    factor,
-    nowIso,
-  ];
+
+  const buildRatingExpr = (): { expr: string; params: unknown[] } => {
+    if (policy === 'soft') {
+      return {
+        expr: `(
+  WITH vars(raw, minRating, maxRating) AS (
+    SELECT
+      CAST(ROUND(? + (arena_ratings.rating - ?) * ?) AS INTEGER) AS raw,
+      ? AS minRating,
+      ? AS maxRating
+  )
+  SELECT CAST(MIN(maxRating, MAX(minRating, raw)) AS INTEGER) FROM vars
+)`,
+        params: [base, base, factor, minStart, maxStart],
+      };
+    }
+
+    return {
+      expr: `(
+  WITH vars(raw, step, base, minRating, maxRating) AS (
+    SELECT
+      CAST(ROUND(? + (arena_ratings.rating - ?) * ?) AS INTEGER) AS raw,
+      ? AS step,
+      ? AS base,
+      ? AS minRating,
+      ? AS maxRating
+  )
+  SELECT CAST(
+    MIN(maxRating, MAX(minRating,
+      CASE
+        WHEN raw < base THEN CAST((raw + step - 1) / step AS INTEGER) * step
+        ELSE CAST(raw / step AS INTEGER) * step
+      END
+    )) AS INTEGER
+  )
+  FROM vars
+)`,
+      params: [base, base, factor, step, base, minStart, maxStart],
+    };
+  };
+
+  const { expr: ratingExpr, params: ratingParams } = buildRatingExpr();
+  const params: unknown[] = [...ratingParams, nowIso];
   if (queue !== 'all') params.push(queue);
 
   const updateSql = `UPDATE arena_ratings
-    SET rating = CAST(ROUND(? + (rating - ?) * ?) AS INTEGER),
+    SET rating = ${ratingExpr},
         games = 0,
         wins = 0,
         losses = 0,
@@ -130,7 +201,9 @@ const main = async () => {
 
   const after = await queryQueueStats(queryFromD1, queue);
   console.log('[season-soft-reset] 重置后：', after);
-  console.log(`[season-soft-reset] 完成：changes=${changes} queue=${queue} base=${base} factor=${factor}`);
+  console.log(
+    `[season-soft-reset] 完成：changes=${changes} queue=${queue} policy=${policy} base=${base} factor=${factor} step=${step} minStart=${minStart} maxStart=${maxStart}`
+  );
 };
 
 main().catch((error) => {
