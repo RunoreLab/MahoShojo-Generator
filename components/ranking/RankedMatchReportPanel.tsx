@@ -69,6 +69,7 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
   const [data, setData] = useState<GenerationRankingResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const attemptsRef = useRef(0);
+  const startedAtRef = useRef<number>(0);
   const timeoutRef = useRef<number | null>(null);
 
   const shouldPoll = useMemo(() => {
@@ -79,6 +80,16 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
     if (!strictQueue) return false;
     return strictQueue.eventStatus === 'missing' || strictQueue.eventStatus === 'pending';
   }, [data]);
+
+  const computePollDelayMs = (payload: GenerationRankingResponse | null, attempts: number): number => {
+    // 流式战报的 battle_report_generations 往往在“流结束后”才落库；
+    // 如果只短轮询几次，很容易在长战报（几十秒~数分钟）时错过结算信息。
+    const exp = Math.min(6, Math.max(0, attempts));
+    const base = payload?.success === true && payload.state === 'ready' ? 1200 : 2500;
+    const max = payload?.success === true && payload.state === 'ready' ? 6000 : 15000;
+    const jitter = Math.floor(Math.random() * 250);
+    return Math.min(max, Math.floor(base * Math.pow(2, exp)) + jitter);
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -96,6 +107,7 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
     };
 
     attemptsRef.current = 0;
+    startedAtRef.current = Date.now();
     void run();
 
     return () => {
@@ -106,8 +118,10 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
   useEffect(() => {
     if (!id) return;
     if (!shouldPoll) return;
-    if (attemptsRef.current >= 10) return;
+    // 最长轮询 15 分钟：覆盖长流式生成（最多 10 分钟）+ 异步落库 + 排位结算。
+    if (startedAtRef.current > 0 && Date.now() - startedAtRef.current > 15 * 60_000) return;
 
+    const delayMs = computePollDelayMs(data, attemptsRef.current);
     timeoutRef.current = window.setTimeout(() => {
       attemptsRef.current += 1;
       fetch(`/api/arena/generation-ranking?generationId=${encodeURIComponent(id)}`)
@@ -120,12 +134,12 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
         .catch((e) => {
           setError(e instanceof Error ? e.message : '无法加载排位信息');
         });
-    }, 1200);
+    }, delayMs);
 
     return () => {
       if (timeoutRef.current != null) window.clearTimeout(timeoutRef.current);
     };
-  }, [id, shouldPoll]);
+  }, [id, shouldPoll, data]);
 
   if (!id) return null;
   if (!data) return null;
@@ -193,4 +207,3 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
     </div>
   );
 }
-
