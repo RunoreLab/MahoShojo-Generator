@@ -109,6 +109,8 @@ export const buildPairKey = (a: ArenaEntity, b: ArenaEntity): string => {
 
 export const buildArenaRatingEventId = (generationId: string, queue: ArenaQueue): string => `${generationId}:${queue}`;
 
+const ARENA_RANK_ORDER_BY_SQL = 'rating DESC, games DESC, updated_at DESC, entity_type ASC, entity_id ASC';
+
 export const computeKFactor = (games: number): number => {
   if (!Number.isFinite(games) || games < 0) return 16;
   if (games < 10) return 40;
@@ -381,6 +383,54 @@ const ensureArenaRatingsExist = async (queue: ArenaQueue, entities: [ArenaEntity
   );
 };
 
+type ArenaRankRow = {
+  entity_type: 'data_card' | 'preset';
+  entity_id: string;
+  rank: number;
+  total: number;
+};
+
+const getArenaRanksForEntities = async (
+  queue: ArenaQueue,
+  entities: [ArenaEntity, ArenaEntity],
+): Promise<{ total: number; byEntityKey: Map<string, number> } | null> => {
+  const [a, b] = entities;
+  try {
+    const result = (await queryFromD1(
+      `WITH ordered AS (
+        SELECT
+          entity_type,
+          entity_id,
+          ROW_NUMBER() OVER (ORDER BY ${ARENA_RANK_ORDER_BY_SQL}) AS rank,
+          COUNT(*) OVER () AS total
+        FROM arena_ratings
+        WHERE queue = ?
+      )
+      SELECT entity_type, entity_id, rank, total
+      FROM ordered
+      WHERE (entity_type = ? AND entity_id = ?)
+         OR (entity_type = ? AND entity_id = ?)`,
+      [queue, a.entityType, a.entityId, b.entityType, b.entityId],
+    )) as any;
+    const rows = readD1Rows<ArenaRankRow>(result);
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+
+    const total = typeof rows[0]?.total === 'number' ? rows[0].total : 0;
+    const byEntityKey = new Map<string, number>();
+    rows.forEach((row) => {
+      if (!row) return;
+      if (typeof row.entity_id !== 'string') return;
+      if (typeof row.rank !== 'number') return;
+      byEntityKey.set(buildEntityKey({ entityType: row.entity_type, entityId: row.entity_id }), row.rank);
+    });
+
+    return { total, byEntityKey };
+  } catch (error) {
+    console.warn('读取 arena_ratings 排名失败（降级为不展示）:', { queue, error });
+    return null;
+  }
+};
+
 const getArenaRatings = async (queue: ArenaQueue, entities: [ArenaEntity, ArenaEntity]): Promise<[ArenaRatingSnapshot, ArenaRatingSnapshot] | null> => {
   const [a, b] = entities;
   const result = (await queryFromD1(
@@ -515,6 +565,7 @@ interface ArenaRatingEventRowForApply {
   id: string;
   status: ArenaRatingEventStatus;
   skip_reason: string | null;
+  details_json: string | null;
   a_before_rating: number | null;
   a_after_rating: number | null;
   a_delta: number | null;
@@ -534,6 +585,7 @@ const getArenaRatingEventById = async (eventId: string): Promise<ArenaRatingEven
         id,
         status,
         skip_reason,
+        details_json,
         a_before_rating,
         a_after_rating,
         a_delta,
@@ -554,6 +606,19 @@ const getArenaRatingEventById = async (eventId: string): Promise<ArenaRatingEven
   } catch (error) {
     console.error('读取 arena_rating_events 失败:', { eventId, error });
     return null;
+  }
+};
+
+const updateArenaRatingEventDetailsJson = async (eventId: string, detailsJson: Record<string, unknown>): Promise<void> => {
+  try {
+    await queryFromD1(
+      `UPDATE arena_rating_events
+       SET details_json = ?
+       WHERE id = ?`,
+      [JSON.stringify(detailsJson), eventId],
+    );
+  } catch (error) {
+    console.warn('更新 arena_rating_events.details_json 失败（降级为忽略）:', { eventId, error });
   }
 };
 
@@ -859,7 +924,7 @@ export async function settleArenaRatingsForGeneration(
         b: bEntity,
         winnerSlot,
         detailsJson: {
-          version: 1,
+          version: 2,
         },
       });
 
@@ -907,6 +972,29 @@ export async function settleArenaRatingsForGeneration(
           bCurrent.rating === existingEvent.b_after_rating &&
           bCurrent.games === existingEvent.b_after_games;
         if (alreadyApplied) {
+          const parsedDetails = (() => {
+            const raw = typeof existingEvent.details_json === 'string' ? existingEvent.details_json.trim() : '';
+            if (!raw) return { version: 2 } as Record<string, unknown>;
+            try {
+              const parsed = JSON.parse(raw);
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+              return { version: 2 } as Record<string, unknown>;
+            } catch {
+              return { version: 2 } as Record<string, unknown>;
+            }
+          })();
+          const afterRanks = await getArenaRanksForEntities(queue, [aEntity, bEntity]);
+          if (afterRanks) {
+            const aKey = buildEntityKey(aEntity);
+            const bKey = buildEntityKey(bEntity);
+            parsedDetails.ranks = {
+              orderBy: ARENA_RANK_ORDER_BY_SQL,
+              total: afterRanks.total,
+              a: { after: afterRanks.byEntityKey.get(aKey) ?? null },
+              b: { after: afterRanks.byEntityKey.get(bKey) ?? null },
+            };
+            await updateArenaRatingEventDetailsJson(eventId, parsedDetails);
+          }
           await markArenaRatingEventStatus(eventId, 'applied');
           continue;
         }
@@ -941,7 +1029,7 @@ export async function settleArenaRatingsForGeneration(
           deltaA: existingEvent.a_delta,
           deltaB: existingEvent.b_delta,
           detailsJson: {
-            version: 1,
+            version: 2,
             source: 'event-retry',
           },
         };
@@ -970,7 +1058,7 @@ export async function settleArenaRatingsForGeneration(
           deltaA: elo.deltaA,
           deltaB: elo.deltaB,
           detailsJson: {
-            version: 1,
+            version: 2,
             kA: elo.kA,
             kB: elo.kB,
             expectedA: elo.expectedA,
@@ -979,11 +1067,43 @@ export async function settleArenaRatingsForGeneration(
             scoreB: elo.scoreB,
           },
         };
-        await updateArenaRatingEventComputedFields(eventId, computed);
       }
+
+      const beforeRanks = await getArenaRanksForEntities(queue, [aEntity, bEntity]);
+      if (beforeRanks) {
+        const aKey = buildEntityKey(aEntity);
+        const bKey = buildEntityKey(bEntity);
+        computed.detailsJson.ranks = {
+          orderBy: ARENA_RANK_ORDER_BY_SQL,
+          total: beforeRanks.total,
+          a: { before: beforeRanks.byEntityKey.get(aKey) ?? null },
+          b: { before: beforeRanks.byEntityKey.get(bKey) ?? null },
+        };
+      }
+
+      await updateArenaRatingEventComputedFields(eventId, computed);
 
       const applied = await applyArenaRatingsUpdateIfBothMatch(queue, [aEntity, bEntity], computed);
       if (applied === 'applied' || applied === 'already-applied') {
+        const afterRanks = await getArenaRanksForEntities(queue, [aEntity, bEntity]);
+        if (afterRanks) {
+          const aKey = buildEntityKey(aEntity);
+          const bKey = buildEntityKey(bEntity);
+          const currentRanks = (computed.detailsJson as any)?.ranks as any;
+          computed.detailsJson.ranks = {
+            orderBy: ARENA_RANK_ORDER_BY_SQL,
+            total: afterRanks.total,
+            a: {
+              ...(currentRanks?.a ?? {}),
+              after: afterRanks.byEntityKey.get(aKey) ?? null,
+            },
+            b: {
+              ...(currentRanks?.b ?? {}),
+              after: afterRanks.byEntityKey.get(bKey) ?? null,
+            },
+          };
+          await updateArenaRatingEventDetailsJson(eventId, computed.detailsJson);
+        }
         await markArenaRatingEventStatus(eventId, 'applied');
       } else {
         await markArenaRatingEventStatus(eventId, 'failed', { skipReason: 'rating-conflict' });

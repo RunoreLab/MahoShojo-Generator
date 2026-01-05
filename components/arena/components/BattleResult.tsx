@@ -24,6 +24,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
   const generationMode = useBattleSelector((state) => state.generationMode);
+  const lastGenerationId = useBattleSelector((state) => state.lastGenerationId);
   const streamingMarkdown = useBattleSelector((state) => state.streamingMarkdown);
   const streamReporterInfo = useBattleSelector((state) => state.streamReporterInfo);
   const streamUserGuidance = useBattleSelector((state) => state.streamUserGuidance);
@@ -99,6 +100,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
           <div className="mt-6">
             <StreamingBattleReportCard
               content={streamingMarkdown ?? ''}
+              generationId={typeof lastGenerationId === 'string' ? lastGenerationId : null}
               onSaveImage={onSaveImage}
               mode={battleMode}
               scenarioName={battleMode === 'scenario' ? scenario.fileName ?? undefined : undefined}
@@ -114,7 +116,14 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
           </div>
         ) : null
       ) : (
-        newsReport && <BattleReportCard report={newsReport as NewsReport} onSaveImage={onSaveImage} mode={battleMode} />
+        newsReport && (
+          <BattleReportCard
+            report={newsReport as NewsReport}
+            generationId={typeof lastGenerationId === 'string' ? lastGenerationId : null}
+            onSaveImage={onSaveImage}
+            mode={battleMode}
+          />
+        )
       )}
 
       {hasBattleReport && canWriteUpdates && (
