@@ -23,8 +23,18 @@ describe('error-help', () => {
     expect(inferEncyclopediaSlugForError({ message: 'JSON 解析失败：Unexpected token' })).toBe('data-card-errors');
   });
 
+  test('infer by message: ai output format', () => {
+    expect(inferEncyclopediaSlugForError({ message: '魔法少女格式验证失败: 缺少必需字段 codename' })).toBe(
+      'ai-output-format'
+    );
+  });
+
   test('infer by message: ai', () => {
     expect(inferEncyclopediaSlugForError({ message: 'API Key 无效或已过期' })).toBe('ai-errors');
+  });
+
+  test('infer by message: ai refusal template', () => {
+    expect(inferEncyclopediaSlugForError({ message: '身为一个语言模型，我没法提供这方面的帮助。' })).toBe('ai-refusal');
   });
 
   test('do not infer for trivial input validation', () => {
@@ -37,4 +47,3 @@ describe('error-help', () => {
     expect(help?.title).toContain('524');
   });
 });
-

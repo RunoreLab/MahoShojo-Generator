@@ -27,9 +27,22 @@
 - **检查自定义通道**：重新选择供应商/模型，确认 API Key 没有多余空格
 - **仍然频繁失败**：更可能是网络或 Cloudflare/服务器问题（见下方相关条目）
 
+## 特殊情况：生成“成功”但输出像是在拒答
+
+如果你在输出正文里看到类似：
+
+- 「身为一个语言模型，我没法提供这方面的帮助」
+- 「你的要求我无法实现」
+- 「内容不符合我的安全策略」
+
+这类措辞通常来自**模型提供方的安全策略/拒答模板**，并不是本站刻意写死的固定文案。  
+可先阅读：`/encyclopedia/ai-refusal`
+
 ## 相关条目
 
 - 请求过于频繁（429）：`/encyclopedia/rate-limit-429`
 - 网络问题：`/encyclopedia/network-errors`
 - Cloudflare/服务器错误：`/encyclopedia/cloudflare-errors`
 - 524 超时：`/encyclopedia/cloudflare-524-timeout`
+- AI 拒答与安全策略提示：`/encyclopedia/ai-refusal`
+- AI 输出格式异常：`/encyclopedia/ai-output-format`
