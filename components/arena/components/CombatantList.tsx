@@ -146,6 +146,12 @@ const formatSkipReason = (reason: string | null): string => {
   return map[reason] ?? reason;
 };
 
+const shortenReason = (text: string, maxChars = 18): string => {
+  const chars = Array.from(text);
+  if (chars.length <= maxChars) return text;
+  return `${chars.slice(0, Math.max(0, maxChars)).join('')}…`;
+};
+
 const renderDeltaBadge = (delta: number) => {
   const text = delta >= 0 ? `+${delta}` : String(delta);
   const className =
@@ -524,10 +530,14 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                         return <span className="ml-1 text-gray-500">（结算中）</span>;
                       }
                       if (q.eligible && (q.eventStatus === 'skipped' || q.eventStatus === 'failed')) {
-                        return <span className="ml-1 text-gray-500" title={formatSkipReason(q.skipReason)}>（未计分）</span>;
+                        const reasonText = formatSkipReason(q.skipReason);
+                        const shortText = shortenReason(reasonText);
+                        return <span className="ml-1 text-gray-500" title={reasonText}>（未计分：{shortText}）</span>;
                       }
                       if (!q.eligible) {
-                        return <span className="ml-1 text-gray-500" title={formatIneligibleReasons(q.ineligibleReasons)}>（不计分）</span>;
+                        const reasonText = formatIneligibleReasons(q.ineligibleReasons);
+                        const shortText = shortenReason(reasonText);
+                        return <span className="ml-1 text-gray-500" title={reasonText}>（不计分：{shortText}）</span>;
                       }
                       return null;
                     })()}
@@ -544,10 +554,14 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                         return <span className="ml-1 text-gray-500">（结算中）</span>;
                       }
                       if (q.eligible && (q.eventStatus === 'skipped' || q.eventStatus === 'failed')) {
-                        return <span className="ml-1 text-gray-500" title={formatSkipReason(q.skipReason)}>（未计分）</span>;
+                        const reasonText = formatSkipReason(q.skipReason);
+                        const shortText = shortenReason(reasonText);
+                        return <span className="ml-1 text-gray-500" title={reasonText}>（未计分：{shortText}）</span>;
                       }
                       if (!q.eligible) {
-                        return <span className="ml-1 text-gray-500" title={formatIneligibleReasons(q.ineligibleReasons)}>（不计分）</span>;
+                        const reasonText = formatIneligibleReasons(q.ineligibleReasons);
+                        const shortText = shortenReason(reasonText);
+                        return <span className="ml-1 text-gray-500" title={reasonText}>（不计分：{shortText}）</span>;
                       }
                       return null;
                     })()}

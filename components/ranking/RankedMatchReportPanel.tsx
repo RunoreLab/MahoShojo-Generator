@@ -9,6 +9,7 @@ type Queue = 'strict' | 'free';
 
 type QueueResult = {
   eligible: boolean;
+  ineligibleReasons: string[];
   eventStatus: 'missing' | 'pending' | 'applied' | 'skipped' | 'failed';
   skipReason: string | null;
   rating: number | null;
@@ -23,6 +24,7 @@ type GenerationRankingReady = {
   success: true;
   state: 'ready';
   generationId: string;
+  snapshot?: { extraJson?: string | null } | null;
   participants: Array<{
     displayName: string;
     techScore: number | null;
@@ -42,6 +44,34 @@ const formatRankDelta = (delta: number): { text: string; className: string; titl
   if (delta > 0) return { text: `↑${delta}`, className: 'text-emerald-300', title: `排名提升：${delta}` };
   if (delta < 0) return { text: `↓${Math.abs(delta)}`, className: 'text-red-300', title: `排名下降：${Math.abs(delta)}` };
   return { text: '—', className: 'text-gray-300', title: '排名无变化' };
+};
+
+const formatIneligibleReasons = (reasons: string[]): string => {
+  const map: Record<string, string> = {
+    'status-not-completed': '战报未完成',
+    'combatant-count-not-2': '需 2 人对战',
+    'ip-missing': '无法获取 IP',
+    'mode-not-classic': '需经典模式',
+    'need-login': '需登录',
+    'need-ranked-match': '需先进行排位匹配',
+    'ranked-match-missing': '未进行排位匹配',
+    'ranked-match-invalid': '排位匹配票据无效',
+    'ranked-match-expired': '排位匹配已过期',
+    'ranked-match-settings-changed': '匹配后修改了设置',
+    'ranked-match-roster-changed': '匹配后修改了参战列表',
+    'ranked-match-unrankable': '参战者未登记为数据卡/预设',
+    'ranked-match-user-mismatch': '排位匹配票据与账号不匹配',
+    'language-not-zh-cn': '需简体中文',
+    'level-not-default': '等级非默认',
+    'has-user-guidance': '存在故事引导',
+    'has-adjudication-events': '存在随机判定器事件',
+    'read-arena-history': '开启读取历战',
+    'read-current-state': '开启读取当前状态',
+    'read-narrative-history': '开启读取叙事历史',
+    'has-character-guidance': '存在角色行动引导',
+  };
+  if (!Array.isArray(reasons) || reasons.length === 0) return '未知原因';
+  return reasons.map((r) => map[r] ?? r).join('、');
 };
 
 const formatStrictEventStatus = (status: QueueResult['eventStatus'], skipReason: string | null): string => {
@@ -147,19 +177,41 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
   if (data.state !== 'ready') return null;
 
   const strictEligible = data.participants.some((p) => p.queues.strict.eligible);
-  if (!strictEligible) return null;
+  const strictHasRankedMatchIssue = data.participants.some((p) =>
+    Array.isArray(p.queues.strict.ineligibleReasons) &&
+    p.queues.strict.ineligibleReasons.some((r) => typeof r === 'string' && r.startsWith('ranked-match')),
+  );
+  const hasRankedMatchMeta = (() => {
+    const raw = (data as any)?.snapshot?.extraJson;
+    if (typeof raw !== 'string' || !raw.trim()) return false;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return Boolean(parsed && typeof parsed === 'object' && ('rankedMatchId' in parsed || 'rankedMatchOk' in parsed || 'rankedMatchReason' in parsed));
+    } catch {
+      return raw.includes('rankedMatch');
+    }
+  })();
+  if (!strictEligible && !strictHasRankedMatchIssue && !hasRankedMatchMeta) return null;
 
   const strictQueue = data.participants.find((p) => p.queues.strict.eligible)?.queues.strict ?? null;
   const statusText = strictQueue ? formatStrictEventStatus(strictQueue.eventStatus, strictQueue.skipReason) : '结算中…';
+  const ineligibleText = !strictEligible
+    ? formatIneligibleReasons(Array.from(new Set(data.participants.flatMap((p) => p.queues.strict.ineligibleReasons ?? []))))
+    : null;
 
   return (
     <div className="mt-4 rounded-xl border border-white/15 bg-black/15 p-4">
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-semibold text-gray-100">严格排位</div>
-        <div className="text-xs text-gray-300">{statusText}</div>
+        <div className="text-xs text-gray-300">{strictEligible ? statusText : '不计分'}</div>
       </div>
 
       {error ? <div className="mt-2 text-xs text-red-200">排位信息加载失败：{error}</div> : null}
+      {!strictEligible && ineligibleText ? (
+        <div className="mt-2 text-xs text-gray-200">
+          原因：<span className="text-gray-100">{ineligibleText}</span>
+        </div>
+      ) : null}
 
       <div className="mt-3 grid gap-3">
         {data.participants.map((p, idx) => {
