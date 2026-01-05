@@ -12,6 +12,7 @@ import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 
 // 注意：QueueStatus 组件及其相关逻辑已被移除，因为它在Serverless环境下无法正常工作。
 
@@ -305,6 +306,9 @@ export default function Name() {
             <p className="subtitle text-center">
               或者要不要来试试 <Link href="/details" className="footer-link">奇妙妖精大调查</Link>？
             </p>
+            <EncyclopediaLinks
+              items={[{ slug: 'character-generator', text: '百科：角色生成（/name、/details、/canshou）' }]}
+            />
             <div style={{ marginTop: '1rem', marginBottom: '2rem', textAlign: 'center' }}>
               <p style={{ fontSize: '0.8rem', marginTop: '1rem', color: '#999', fontStyle: 'italic' }}>本测试设定来源于小说《下班，然后变成魔法少女》</p>
             </div>
