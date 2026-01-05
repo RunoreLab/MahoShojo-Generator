@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { computeSeasonStartRating } from '@/lib/arena/season-reset';
+import { computeSeasonStartRating, computeSeasonStartRatingAdvanced } from '@/lib/arena/season-reset';
 
 describe('season-reset: hundreds_toward_base', () => {
   const opts = {
@@ -55,3 +55,84 @@ describe('season-reset: hundreds_toward_base', () => {
   });
 });
 
+describe('season-reset: advanced factor', () => {
+  const baseOpts = {
+    policy: 'hundreds_toward_base' as const,
+    baseRating: 1000,
+    factor: 1,
+    step: 100,
+    minStartRating: 800,
+    maxStartRating: 1500,
+  };
+
+  test('按 games 分段：场次少回收更强', () => {
+    const nowIso = new Date('2026-01-01T00:00:00.000Z').toISOString();
+    const opts = {
+      ...baseOpts,
+      gamesFactor: {
+        enabled: true,
+        gamesMid: 10,
+        gamesHigh: 30,
+        factorLow: 0.4,
+        factorMid: 0.7,
+        factorHigh: 1,
+      },
+    };
+
+    expect(computeSeasonStartRatingAdvanced(1400, { games: 0, updatedAtIso: nowIso }, opts, nowIso)).toBe(
+      computeSeasonStartRating(1400, { ...baseOpts, factor: 0.4 })
+    );
+    expect(computeSeasonStartRatingAdvanced(1400, { games: 10, updatedAtIso: nowIso }, opts, nowIso)).toBe(
+      computeSeasonStartRating(1400, { ...baseOpts, factor: 0.7 })
+    );
+    expect(computeSeasonStartRatingAdvanced(1400, { games: 30, updatedAtIso: nowIso }, opts, nowIso)).toBe(
+      computeSeasonStartRating(1400, { ...baseOpts, factor: 1 })
+    );
+  });
+
+  test('不活跃额外回收：effectiveFactor 取更小值', () => {
+    const nowIso = new Date('2026-01-01T00:00:00.000Z').toISOString();
+    const oldIso = new Date('2025-11-01T00:00:00.000Z').toISOString();
+    const opts = {
+      ...baseOpts,
+      factor: 1,
+      inactivityCap: {
+        enabled: true,
+        inactiveDays: 30,
+        inactiveFactor: 0.5,
+      },
+    };
+
+    expect(computeSeasonStartRatingAdvanced(1300, { games: 30, updatedAtIso: oldIso }, opts, nowIso)).toBe(
+      computeSeasonStartRating(1300, { ...baseOpts, factor: 0.5 })
+    );
+    expect(computeSeasonStartRatingAdvanced(1300, { games: 30, updatedAtIso: nowIso }, opts, nowIso)).toBe(
+      computeSeasonStartRating(1300, { ...baseOpts, factor: 1 })
+    );
+  });
+
+  test('games 分段 + 不活跃叠加：取更小 factor', () => {
+    const nowIso = new Date('2026-01-01T00:00:00.000Z').toISOString();
+    const oldIso = new Date('2025-11-01T00:00:00.000Z').toISOString();
+    const opts = {
+      ...baseOpts,
+      gamesFactor: {
+        enabled: true,
+        gamesMid: 10,
+        gamesHigh: 30,
+        factorLow: 0.8,
+        factorMid: 0.9,
+        factorHigh: 1,
+      },
+      inactivityCap: {
+        enabled: true,
+        inactiveDays: 30,
+        inactiveFactor: 0.5,
+      },
+    };
+
+    expect(computeSeasonStartRatingAdvanced(1400, { games: 0, updatedAtIso: oldIso }, opts, nowIso)).toBe(
+      computeSeasonStartRating(1400, { ...baseOpts, factor: 0.5 })
+    );
+  });
+});
