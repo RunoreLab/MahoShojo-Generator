@@ -32,6 +32,7 @@ type ApiRating = {
   lastDelta: number | null;
   lastAppliedAt: string | null;
   publicRank: number | null;
+  publicTotal: number | null;
 };
 
 type ApiMetrics = {
@@ -218,6 +219,47 @@ export default async function handler(req: NextRequest) {
 
     const ratings: { strict: ApiRating | null; free: ApiRating | null } = { strict: null, free: null };
     try {
+      const publicTotals: Record<Queue, number | null> = { strict: null, free: null };
+      if (cardRow.type === 'character') {
+        const computePublicTotal = async (queue: Queue): Promise<number | null> => {
+          try {
+            const totalResult = (await queryFromD1(
+              `SELECT COUNT(*) as total
+               FROM arena_ratings ar
+               LEFT JOIN data_cards dc
+                 ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
+               WHERE ar.queue = ?
+                 AND (
+                   ar.entity_type = 'preset'
+                   OR (
+                     dc.id IS NOT NULL
+                     AND dc.type = 'character'
+                     AND dc.is_public = 1
+                     AND dc.review_status = 'approved'
+                     AND dc.deleted_at IS NULL
+                   )
+                 )`,
+              [queue],
+            )) as any;
+            const row = readSingleRow<{ total: unknown }>(totalResult);
+            const total =
+              typeof row?.total === 'number'
+                ? row.total
+                : typeof row?.total === 'string'
+                  ? Number(row.total)
+                  : null;
+            return Number.isFinite(total) ? Math.max(0, Math.floor(total as number)) : null;
+          } catch (error) {
+            console.warn('计算公共榜总人数失败（降级为 null）:', error);
+            return null;
+          }
+        };
+
+        // 单卡接口允许多查一次；但避免在循环里重复查
+        publicTotals.strict = await computePublicTotal('strict');
+        publicTotals.free = await computePublicTotal('free');
+      }
+
       const lastEventsByQueue = new Map<Queue, { delta: number; appliedAt: string | null }>();
       if (cardRow.type === 'character') {
         try {
@@ -296,6 +338,7 @@ export default async function handler(req: NextRequest) {
           lastDelta: typeof last?.delta === 'number' ? last.delta : null,
           lastAppliedAt: typeof last?.appliedAt === 'string' ? last.appliedAt : null,
           publicRank: null,
+          publicTotal: row.queue === 'free' ? publicTotals.free : publicTotals.strict,
         };
         if (item.queue === 'strict') ratings.strict = item;
         else ratings.free = item;
