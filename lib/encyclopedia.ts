@@ -13,6 +13,12 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     markdownPath: '/encyclopedia/site-guide.md',
   },
   {
+    slug: 'character-generator',
+    title: '角色生成（/name、/details、/canshou）',
+    summary: '三种角色生成入口的差异、适用场景，以及 /name 结果的兼容性提醒。',
+    markdownPath: '/encyclopedia/character-generator.md',
+  },
+  {
     slug: 'arena',
     title: '竞技场',
     summary: '竞技场与战报生成的基本概念、模式差异与计分触发点。',
@@ -111,7 +117,7 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
   {
     slug: 'pvp',
     title: 'PVP 与计分',
-    summary: 'PVP 战报与排位系统的关系、哪些情况下会被计分。',
+    summary: '房间制卡牌对决：玩法流程、隐私提示，以及计分口径摘要。',
     markdownPath: '/encyclopedia/pvp.md',
   },
 ];

@@ -58,6 +58,7 @@
 
 ## 相关条目
 
+- 角色生成（/name、/details、/canshou）：`/encyclopedia/character-generator`
 - 档案馆（角色管理）：`/encyclopedia/archive`
 - 竞技场：`/encyclopedia/arena`
 - 排位与排行榜：`/encyclopedia/ranking`
@@ -66,4 +67,3 @@
 - 箱庭物语（情景生成器）：`/encyclopedia/scenario-generator`
 - 情景卡进阶（继承与长线）：`/encyclopedia/scenario-advanced`
 - 敏感词与逮捕：`/encyclopedia/sensitive-words`
-
