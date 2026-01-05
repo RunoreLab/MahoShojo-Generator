@@ -4,6 +4,7 @@ import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
 import { PRESET_LIST } from '@/lib/presets';
 import { issueRankedMatchTicket, type RankedMatchEntity } from '@/lib/arena/ranked-match';
 import { INITIAL_RATING, STRICT_DEDUP_WINDOW_MS, buildPairKey } from '@/lib/database/arena-ratings';
+import { STRICT_MATCHMAKING_BANDS, pickStrictMatchmakingCandidate } from '@/lib/arena/ranked-matchmaking-logic';
 
 export const config = {
   runtime: 'edge',
@@ -110,26 +111,6 @@ type Candidate =
 type DataCardCandidate = Extract<Candidate, { kind: 'data_card' }>;
 type PresetCandidate = Extract<Candidate, { kind: 'preset' }>;
 
-const pickWeightedCandidate = (candidates: Candidate[], targetRating: number): Candidate => {
-  const scored = candidates
-    .map((c) => {
-      const diff = Math.abs((Number.isFinite(c.rating) ? c.rating : INITIAL_RATING) - targetRating);
-      const weight = Math.exp(-diff / 150);
-      return { c, weight };
-    })
-    .sort((a, b) => b.weight - a.weight);
-
-  const top = scored.slice(0, Math.max(1, Math.min(30, scored.length)));
-  const sum = top.reduce((acc, item) => acc + item.weight, 0);
-  if (!Number.isFinite(sum) || sum <= 0) return top[0]!.c;
-  let roll = Math.random() * sum;
-  for (const item of top) {
-    roll -= item.weight;
-    if (roll <= 0) return item.c;
-  }
-  return top[top.length - 1]!.c;
-};
-
 const getEntityRating = async (entity: RankedMatchEntity): Promise<{ rating: number; games: number }> => {
   const result = (await queryFromD1(
     `SELECT rating, games
@@ -192,11 +173,11 @@ const loadPresetCandidates = async (): Promise<Map<string, { rating: number; gam
   return map;
 };
 
-const fetchDataCardCandidatesInRange = async (input: {
+const fetchDataCardCandidatesByAbsDiff = async (input: {
   playerId: string;
-  minRating: number;
-  maxRating: number;
   targetRating: number;
+  minAbsDiffInclusive: number;
+  maxAbsDiffInclusive: number;
   limit: number;
 }): Promise<DataCardCandidate[]> => {
   const result = (await queryFromD1(
@@ -225,10 +206,10 @@ const fetchDataCardCandidatesInRange = async (input: {
        AND dc.deleted_at IS NULL
        AND dc.is_public = 1
        AND dc.id <> ?
-       AND COALESCE(ar.rating, ${INITIAL_RATING}) BETWEEN ? AND ?
-     ORDER BY ABS(COALESCE(ar.rating, ${INITIAL_RATING}) - ?) ASC
+       AND ABS(COALESCE(ar.rating, ${INITIAL_RATING}) - ?) BETWEEN ? AND ?
+     ORDER BY COALESCE(ar.games, 0) ASC, ABS(COALESCE(ar.rating, ${INITIAL_RATING}) - ?) ASC, dc.id ASC
      LIMIT ?`,
-    [input.playerId, input.minRating, input.maxRating, input.targetRating, input.limit]
+    [input.playerId, input.targetRating, input.minAbsDiffInclusive, input.maxAbsDiffInclusive, input.targetRating, input.limit]
   )) as any;
 
   const rows = readRows<{
@@ -274,18 +255,19 @@ const fetchDataCardCandidatesInRange = async (input: {
     .filter((item): item is DataCardCandidate => item !== null);
 };
 
-const buildPresetCandidatesInRange = (input: {
+const buildPresetCandidatesInBands = (input: {
   player: RankedMatchEntity;
-  minRating: number;
-  maxRating: number;
+  targetRating: number;
   presetRatings: Map<string, { rating: number; games: number }>;
 }): PresetCandidate[] => {
+  const maxAbsDiff = Math.max(...STRICT_MATCHMAKING_BANDS.map((b) => b.maxDiffInclusive));
   return PRESET_LIST
     .filter((preset) => preset.filename !== input.player.entityId)
     .map((preset) => {
       const stats = input.presetRatings.get(preset.filename) ?? { rating: INITIAL_RATING, games: 0 };
       const rating = stats.rating;
-      if (rating < input.minRating || rating > input.maxRating) return null;
+      const diff = Math.abs((Number.isFinite(rating) ? rating : INITIAL_RATING) - input.targetRating);
+      if (diff > maxAbsDiff) return null;
       return {
         kind: 'preset' as const,
         entity: { entityType: 'preset' as const, entityId: preset.filename },
@@ -395,32 +377,38 @@ export default async function handler(req: NextRequest): Promise<Response> {
     const recentPairKeys = await readRecentPairKeys(user.id, sinceIso);
     const presetRatings = await loadPresetCandidates();
 
-    const windowSteps = [50, 100, 150, 200, 300, 400, 600, 800, 1200, 2000, 5000];
     const tryPick = async (allowRepeat: boolean): Promise<{ picked: Candidate | null; note?: string }> => {
-      for (const step of windowSteps) {
-        const minRating = playerRating.rating - step;
-        const maxRating = playerRating.rating + step;
-        const dataCardCandidates = await fetchDataCardCandidatesInRange({
-          playerId: player.entityType === 'data_card' ? player.entityId : '',
-          minRating,
-          maxRating,
-          targetRating: playerRating.rating,
-          limit: 80,
-        });
-        const presetCandidates = buildPresetCandidatesInRange({ player, minRating, maxRating, presetRatings });
-        const merged = [...dataCardCandidates, ...presetCandidates].filter((c) => {
-          if (c.entity.entityType === player.entityType && c.entity.entityId === player.entityId) return false;
-          if (!allowRepeat) {
-            const pairKey = buildPairKey(player as any, c.entity as any);
-            if (recentPairKeys.has(pairKey)) return false;
-          }
-          return true;
-        });
-        if (merged.length > 0) {
-          return { picked: pickWeightedCandidate(merged, playerRating.rating) };
+      const playerId = player.entityType === 'data_card' ? player.entityId : '';
+
+      const dataCardChunks = await Promise.all(
+        STRICT_MATCHMAKING_BANDS.map((band) =>
+          fetchDataCardCandidatesByAbsDiff({
+            playerId,
+            targetRating: playerRating.rating,
+            minAbsDiffInclusive: band.minDiffInclusive,
+            maxAbsDiffInclusive: band.maxDiffInclusive,
+            limit: band.queryLimit,
+          })
+        )
+      );
+      const dataCardCandidates = dataCardChunks.flat();
+      const presetCandidates = buildPresetCandidatesInBands({ player, targetRating: playerRating.rating, presetRatings });
+
+      const byEntityKey = new Map<string, Candidate>();
+      for (const candidate of [...dataCardCandidates, ...presetCandidates]) {
+        if (candidate.entity.entityType === player.entityType && candidate.entity.entityId === player.entityId) continue;
+        if (!allowRepeat) {
+          const pairKey = buildPairKey(player as any, candidate.entity as any);
+          if (recentPairKeys.has(pairKey)) continue;
         }
+        byEntityKey.set(`${candidate.entity.entityType}:${candidate.entity.entityId}`, candidate);
       }
-      return { picked: null };
+
+      const merged = Array.from(byEntityKey.values());
+      if (merged.length === 0) return { picked: null };
+
+      const picked = pickStrictMatchmakingCandidate(merged, playerRating.rating);
+      return { picked };
     };
 
     const primary = await tryPick(false);
