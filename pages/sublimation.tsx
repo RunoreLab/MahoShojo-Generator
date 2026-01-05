@@ -15,6 +15,7 @@ import Footer from '../components/Footer';
 import BattleDataModal from '../components/BattleDataModal';
 import { useAuth } from '@/lib/useAuth';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import { ErrorMessage } from '@/components/ErrorMessage';
 import {
     inferTemplate,
     TEMPLATE_LABELS,
@@ -396,15 +397,16 @@ const SublimationPage: React.FC = () => {
             });
 
             if (!response.ok) {
-                const errorJson = await response.json().catch(() => ({ message: '服务器响应异常' }));
-                if (errorJson.shouldRedirect) {
+                const errorJson = await response.json().catch(() => null as any);
+                if (errorJson?.shouldRedirect) {
                     router.push({
                         pathname: '/arrested',
                         query: { reason: errorJson.reason || '使用危险符文' }
                     });
                     return;
                 }
-                throw new Error(errorJson.message || errorJson.error || '升华失败');
+                const serverMessage = errorJson?.message || errorJson?.error;
+                throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `升华失败（HTTP ${response.status}）`);
             }
 
             const result: SublimationResponse = await response.json();
@@ -743,7 +745,7 @@ const SublimationPage: React.FC = () => {
                         <button onClick={handleGenerate} disabled={isGenerating || !characterData || isCooldown} className="generate-button mt-4">
                             {isCooldown ? `冷却中 (${remainingTime}s)` : isGenerating ? '升华中...' : '开始升华'}
                         </button>
-                        {error && <div className="error-message mt-4">{error}</div>}
+                        {error && <ErrorMessage message={error} className="error-message mt-4" />}
                     </div>
 
                     {isGenerating && <div className="text-center mt-6">少女蜕变中，请稍后...</div>}

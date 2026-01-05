@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { generateTachieWithProgress, type TachieGenerationResult } from "@/lib/tachie/manager";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 interface TachieGeneratorProps {
   prompt: string;
@@ -277,9 +278,7 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
               )}
             </div>
           ) : (
-            <div className="error-message">
-              {result.error}
-            </div>
+            <ErrorMessage message={result.error ?? "生成失败"} />
           )}
         </div>
       )}

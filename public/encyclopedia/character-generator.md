@@ -1,6 +1,6 @@
 # 角色生成（/name、/details、/canshou）
 
-> 作者：末伏之夜  
+> 作者：[末伏之夜](https://github.com/notuhao)  
 > 更新时间：2026-01-05
 
 本站有三条“生成角色”的入口：它们**目标不同、产物也不同**。选对入口能少踩很多坑。
@@ -67,4 +67,3 @@
 - 竞技场：`/encyclopedia/arena`
 - 成长升华：`/encyclopedia/sublimation`
 - 敏感词与逮捕：`/encyclopedia/sensitive-words`
-

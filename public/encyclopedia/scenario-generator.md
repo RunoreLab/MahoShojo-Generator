@@ -1,6 +1,6 @@
 # 箱庭物语（情景生成器）
 
-> 作者：末伏之夜  
+> 作者：[末伏之夜](https://github.com/notuhao)  
 > 更新时间：2026-01-04
 
 “箱庭物语”会根据你的问卷回答，生成一份结构化的**情景文件（JSON）**，用于竞技场的「情景模式」：它相当于“舞台与剧本钩子”，让角色在同一个明确的场景里展开故事。
@@ -60,4 +60,3 @@
 - 竞技场：`/encyclopedia/arena`
 - 档案馆：`/encyclopedia/archive`
 - 敏感词与逮捕：`/encyclopedia/sensitive-words`
-

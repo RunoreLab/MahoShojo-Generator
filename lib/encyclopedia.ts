@@ -13,6 +13,42 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     markdownPath: '/encyclopedia/site-guide.md',
   },
   {
+    slug: 'network-errors',
+    title: '网络问题（Failed to fetch / 连接中断）',
+    summary: '浏览器请求发不出去/被中断时的自救步骤与排查清单。',
+    markdownPath: '/encyclopedia/network-errors.md',
+  },
+  {
+    slug: 'cloudflare-524-timeout',
+    title: '524 Timeout（Cloudflare 超时）',
+    summary: 'Cloudflare 已连上源站但等待太久：为何发生、如何自救、何时该重试。',
+    markdownPath: '/encyclopedia/cloudflare-524-timeout.md',
+  },
+  {
+    slug: 'cloudflare-errors',
+    title: 'Cloudflare/服务器错误（5xx / 520/522/523…）',
+    summary: '5xx/52x 常见状态码速查：短暂波动 vs 服务端异常，以及排查建议。',
+    markdownPath: '/encyclopedia/cloudflare-errors.md',
+  },
+  {
+    slug: 'rate-limit-429',
+    title: '429 Too Many Requests（请求过于频繁）',
+    summary: '触发限流/冷却时该怎么做，以及官方/自备 Key 的常见差异。',
+    markdownPath: '/encyclopedia/rate-limit-429.md',
+  },
+  {
+    slug: 'ai-errors',
+    title: 'AI 生成失败：常见原因与自救',
+    summary: '高峰期/配置/额度/输入过长等导致的生成失败排查与恢复建议。',
+    markdownPath: '/encyclopedia/ai-errors.md',
+  },
+  {
+    slug: 'data-card-errors',
+    title: '数据卡问题：导入/解析/格式校验/签名',
+    summary: '导入/解析失败、字段校验、templateId/version 不匹配等问题的排查清单。',
+    markdownPath: '/encyclopedia/data-card-errors.md',
+  },
+  {
     slug: 'character-generator',
     title: '角色生成（/name、/details、/canshou）',
     summary: '三种角色生成入口的差异、适用场景，以及 /name 结果的兼容性提醒。',

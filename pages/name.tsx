@@ -11,6 +11,7 @@ import { useRouter } from 'next/router';
 import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
+import { ErrorMessage } from '@/components/ErrorMessage';
 
 // 注意：QueueStatus 组件及其相关逻辑已被移除，因为它在Serverless环境下无法正常工作。
 
@@ -99,16 +100,19 @@ async function generateMagicalGirl(inputName: string, language: string): Promise
       body: JSON.stringify({ name: inputName, language: language }),
     });
 
-    if (!response.ok) {
-      const error = await response.json();
+      if (!response.ok) {
+      const error = await response.json().catch(() => null as any);
       // 处理不同的 HTTP 状态码
       if (response.status === 429) {
-        const retryAfter = error.retryAfter || 60;
-        throw new Error(`请求过于频繁！请等待 ${retryAfter} 秒后再试。`);
+        const retryAfter = error?.retryAfter || 60;
+        throw new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`);
+      } else if (response.status === 524) {
+        throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
       } else if (response.status >= 500) {
-        throw new Error('服务器内部错误，当前可能正忙，请稍后重试');
+        throw new Error(`服务器内部错误（HTTP ${response.status}），当前可能正忙，请稍后重试。`);
       } else {
-        throw new Error(error.message || error.error || '生成失败');
+        const serverMessage = error?.message || error?.error;
+        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
       }
     }
 
@@ -360,9 +364,7 @@ export default function Name() {
             </div>
 
             {error && (
-              <div className="error-message">
-                {error}
-              </div>
+              <ErrorMessage message={error} />
             )}
 
             {magicalGirl && (
