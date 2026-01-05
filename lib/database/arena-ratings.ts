@@ -1,5 +1,6 @@
 import { queryFromD1 } from './core';
 import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGenerationCombatantRow } from './battle-report-generation-combatants';
+import { PRESET_LIST } from '@/lib/presets';
 
 export type ArenaQueue = 'strict' | 'free';
 export type ArenaEntityType = 'data_card' | 'preset';
@@ -195,6 +196,17 @@ const normalizeWinnerToken = (value: string): string => {
 
 const isMultiWinner = (winner: string): boolean => /[,，、/&]/u.test(winner);
 
+const PRESET_FILENAME_SET = new Set(PRESET_LIST.map((preset) => preset.filename));
+const PRESET_FILENAME_BY_NAME = new Map(PRESET_LIST.map((preset) => [preset.name.trim(), preset.filename]));
+
+const resolvePresetEntityId = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (PRESET_FILENAME_SET.has(trimmed)) return trimmed;
+  return PRESET_FILENAME_BY_NAME.get(trimmed) ?? null;
+};
+
 export type WinnerParseResult =
   | { ok: true; winnerSlot: WinnerSlot }
   | { ok: false; skipReason: 'winner-empty' | 'multi-winner' | 'winner-ambiguous' };
@@ -248,11 +260,9 @@ export const parseWinnerSlot = (winnerRaw: string | null, combatantNames: [strin
 
 export const parseCombatantEntity = (combatant: BattleReportGenerationCombatantRow): ArenaEntity | null => {
   if (combatant.is_preset) {
-    const entityId =
-      (typeof combatant.template_id === 'string' && combatant.template_id.trim())
-        ? combatant.template_id.trim()
-        : combatant.name;
-    return { entityType: 'preset', entityId };
+    const resolved = resolvePresetEntityId(combatant.template_id) ?? resolvePresetEntityId(combatant.name);
+    if (!resolved) return null;
+    return { entityType: 'preset', entityId: resolved };
   }
 
   if (typeof combatant.data_card_id === 'string' && combatant.data_card_id.trim()) {
