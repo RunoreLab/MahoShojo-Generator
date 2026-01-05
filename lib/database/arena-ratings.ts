@@ -41,6 +41,13 @@ export const STRICT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const FREE_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const STRICT_DAILY_LIMIT = 80;
 
+export type StrictDailyUsage = {
+  sinceIso: string;
+  used: number;
+  limit: number;
+  exceeded: boolean;
+};
+
 export async function resetStrictArenaRatingForDataCard(dataCardId: string): Promise<void> {
   const id = typeof dataCardId === 'string' ? dataCardId.trim() : '';
   if (!id) return;
@@ -78,8 +85,8 @@ const startOfUtcDayIso = (): string => {
   return start.toISOString();
 };
 
-const hasExceededStrictDailyLimit = async (userId: number): Promise<boolean> => {
-  if (!Number.isFinite(userId) || userId <= 0) return false;
+export const getStrictDailyUsage = async (userId: number): Promise<StrictDailyUsage | null> => {
+  if (!Number.isFinite(userId) || userId <= 0) return null;
   try {
     const sinceIso = startOfUtcDayIso();
     const result = (await queryFromD1(
@@ -93,11 +100,22 @@ const hasExceededStrictDailyLimit = async (userId: number): Promise<boolean> => 
     )) as any;
     const row = readD1Rows<{ count: number }>(result)[0];
     const count = typeof row?.count === 'number' ? row.count : 0;
-    return count >= STRICT_DAILY_LIMIT;
+    const used = Math.max(0, Math.floor(count));
+    return {
+      sinceIso,
+      used,
+      limit: STRICT_DAILY_LIMIT,
+      exceeded: used >= STRICT_DAILY_LIMIT,
+    };
   } catch (error) {
     console.warn('读取 strict 每日计分次数失败（降级为不限制）:', error);
-    return false;
+    return null;
   }
+};
+
+const hasExceededStrictDailyLimit = async (userId: number): Promise<boolean> => {
+  const usage = await getStrictDailyUsage(userId);
+  return usage?.exceeded ?? false;
 };
 
 export const buildEntityKey = (entity: ArenaEntity): string => `${entity.entityType}:${entity.entityId}`;
