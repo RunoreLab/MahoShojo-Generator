@@ -2,7 +2,7 @@
 
 import Head from 'next/head';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { TechBadge } from '@/components/ranking/TechBadge';
@@ -87,6 +87,13 @@ export function RankingPage() {
   const [offset, setOffset] = useState(0);
   const [tagSearch, setTagSearch] = useState('');
   const [isTagFilterExpanded, setIsTagFilterExpanded] = useState(false);
+  const [listSearch, setListSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<LeaderboardItem[] | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [focusRowKey, setFocusRowKey] = useState<string | null>(null);
+  const lastAutoScrolledRowKeyRef = useRef<string | null>(null);
+  const focusTimerRef = useRef<number | null>(null);
   const limit = 50;
 
   const seasonsQuery = useQuery({
@@ -194,6 +201,9 @@ export function RankingPage() {
     const normalizedDraft = normalizeFilters(draftFilters);
     setAppliedFilters(normalizedDraft);
     setOffset(0);
+    setSearchResults(null);
+    setSearchError(null);
+    setFocusRowKey(null);
   };
 
   const resetFilters = () => {
@@ -201,6 +211,9 @@ export function RankingPage() {
     setAppliedFilters(defaultFilters);
     setTagSearch('');
     setOffset(0);
+    setSearchResults(null);
+    setSearchError(null);
+    setFocusRowKey(null);
   };
 
   const toggleTag = (mode: 'include' | 'exclude', tagId: string) => {
@@ -285,6 +298,129 @@ export function RankingPage() {
     const board = historyQueue === 'free' ? data.leaderboards.free : data.leaderboards.strict;
     return historySection === 'bottom' ? board.bottom : board.top;
   }, [archiveQuery.data, historyQueue, historySection, isHistoryMode, leaderboardQuery.data?.items]);
+
+  useEffect(() => {
+    setSearchResults(null);
+    setSearchError(null);
+    setFocusRowKey(null);
+  }, [historyQueue, historySection, isHistoryMode, selectedSeasonId]);
+
+  useEffect(() => {
+    if (focusTimerRef.current != null) {
+      window.clearTimeout(focusTimerRef.current);
+      focusTimerRef.current = null;
+    }
+    lastAutoScrolledRowKeyRef.current = null;
+  }, [focusRowKey]);
+
+  useEffect(() => {
+    return () => {
+      if (focusTimerRef.current != null) {
+        window.clearTimeout(focusTimerRef.current);
+        focusTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!focusRowKey) return;
+    if (lastAutoScrolledRowKeyRef.current === focusRowKey) return;
+
+    const existsInCurrentPage = items.some((item) => `${item.entityType}:${item.entityId}` === focusRowKey);
+    if (!existsInCurrentPage) return;
+
+    lastAutoScrolledRowKeyRef.current = focusRowKey;
+
+    const escaped = focusRowKey.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
+    const selector = `[data-row-key="${escaped}"]`;
+    window.requestAnimationFrame(() => {
+      const el = document.querySelector(selector);
+      if (el instanceof HTMLElement) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+
+    focusTimerRef.current = window.setTimeout(() => {
+      setFocusRowKey(null);
+    }, 6000);
+  }, [focusRowKey, items]);
+
+  const formatAuthorLabel = (item: LeaderboardItem): string => {
+    if (item.entityType === 'preset') return '官方';
+    const author = typeof item.authorName === 'string' ? item.authorName.trim() : '';
+    if (author) return author;
+    return isHistoryMode ? '—' : '未知';
+  };
+
+  const runSearch = async () => {
+    const q = listSearch.trim();
+    setSearchError(null);
+    if (!q) {
+      setSearchResults(null);
+      setFocusRowKey(null);
+      return;
+    }
+
+    if (isHistoryMode) {
+      const qLower = q.toLowerCase();
+      const matched = items.filter((item) => {
+        const author = formatAuthorLabel(item);
+        return (
+          item.displayName.toLowerCase().includes(qLower) ||
+          author.toLowerCase().includes(qLower) ||
+          item.entityId.toLowerCase().includes(qLower)
+        );
+      });
+      setSearchResults(matched);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('q', q);
+      params.set('queue', appliedFilters.queue);
+      params.set('sort', appliedFilters.sort);
+      params.set('order', appliedFilters.order);
+      params.set('limit', '10');
+      params.set('includePresets', appliedFilters.includePresets ? '1' : '0');
+      params.set('isNative', appliedFilters.isNative);
+      if (appliedFilters.includeTagIds.length > 0) params.set('tagIds', appliedFilters.includeTagIds.join(','));
+      if (appliedFilters.excludeTagIds.length > 0) params.set('excludeTagIds', appliedFilters.excludeTagIds.join(','));
+      if (appliedFilters.minRating) params.set('minRating', appliedFilters.minRating);
+      if (appliedFilters.maxRating) params.set('maxRating', appliedFilters.maxRating);
+      if (appliedFilters.minGames) params.set('minGames', appliedFilters.minGames);
+      if (appliedFilters.maxGames) params.set('maxGames', appliedFilters.maxGames);
+      if (appliedFilters.minTechScore) params.set('minTechScore', appliedFilters.minTechScore);
+      if (appliedFilters.maxTechScore) params.set('maxTechScore', appliedFilters.maxTechScore);
+
+      const data = await fetchJson<{ success: boolean; items: LeaderboardItem[]; error?: string }>(
+        `/api/arena/leaderboard/search?${params.toString()}`
+      );
+      if (!data.success) {
+        setSearchResults([]);
+        setSearchError(data.error ?? '搜索失败');
+        return;
+      }
+      setSearchResults(Array.isArray(data.items) ? data.items : []);
+    } catch (err) {
+      setSearchResults([]);
+      setSearchError(String(err));
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const jumpToResult = (item: LeaderboardItem) => {
+    const rowKey = `${item.entityType}:${item.entityId}`;
+    setFocusRowKey(rowKey);
+
+    if (!isHistoryMode) {
+      const rank = typeof item.rank === 'number' ? item.rank : 0;
+      const targetOffset = rank > 0 ? Math.floor((rank - 1) / limit) * limit : 0;
+      setOffset(targetOffset);
+    }
+  };
 
   const listIsLoading = isHistoryMode ? archiveQuery.isLoading : leaderboardQuery.isLoading;
   const listIsError = isHistoryMode ? archiveQuery.isError : leaderboardQuery.isError;
@@ -779,6 +915,100 @@ export function RankingPage() {
                       )}
                     </div>
 
+                    <div className="border-b border-gray-100 px-4 py-3">
+                      <form
+                        className="flex flex-wrap items-center gap-2"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void runSearch();
+                        }}
+                      >
+                        <input
+                          value={listSearch}
+                          onChange={(e) => setListSearch(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setListSearch('');
+                              setSearchResults(null);
+                              setSearchError(null);
+                              setFocusRowKey(null);
+                            }
+                          }}
+                          className="input-field h-9 w-full sm:w-[320px]"
+                          placeholder={isHistoryMode ? '搜索角色名 / 作者 / ID（仅当前列表）' : '搜索角色名 / 作者 / ID（可跳转到全榜位置）'}
+                          aria-label="排行榜搜索"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isSearching || listIsLoading}
+                          className="rounded-lg bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50 disabled:hover:bg-gray-900"
+                        >
+                          {isSearching ? '搜索中…' : '搜索'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setListSearch('');
+                            setSearchResults(null);
+                            setSearchError(null);
+                            setFocusRowKey(null);
+                          }}
+                          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          清空
+                        </button>
+                        <span className="text-xs text-gray-500">
+                          {isHistoryMode
+                            ? '提示：历史赛季榜单只会在当前 Top/Bottom 列表内搜索。'
+                            : '提示：搜索结果会显示该角色在当前筛选条件下的全榜名次，点击即可跳转并高亮定位。'}
+                        </span>
+                      </form>
+
+                      {searchError ? (
+                        <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                          搜索失败：{searchError}
+                        </div>
+                      ) : null}
+
+                      {searchResults ? (
+                        <div className="mt-3">
+                          {searchResults.length === 0 ? (
+                            <div className="text-xs text-gray-500">未找到匹配结果。</div>
+                          ) : (
+                            <div className="grid gap-2">
+                              {searchResults.map((item) => {
+                                const author = formatAuthorLabel(item);
+                                return (
+                                  <button
+                                    key={`search:${item.entityType}:${item.entityId}:${item.rank}`}
+                                    type="button"
+                                    onClick={() => jumpToResult(item)}
+                                    className="flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-left hover:bg-gray-50"
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="truncate text-sm font-semibold text-gray-900">
+                                        #{item.rank} · {item.displayName}
+                                      </div>
+                                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+                                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
+                                          {item.entityType === 'preset' ? '预设' : '数据卡'}
+                                        </span>
+                                        <span className="min-w-0 truncate">作者：{author}</span>
+                                        <span className="hidden sm:inline">分：{item.rating}</span>
+                                        <span className="hidden sm:inline">局：{item.games}</span>
+                                        <span className="hidden md:inline">id：{item.entityId}</span>
+                                      </div>
+                                    </div>
+                                    <span className="text-xs text-gray-500">点击跳转</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
                     {listIsError ? (
                       <div className="px-4 py-6">
                         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -826,15 +1056,10 @@ export function RankingPage() {
                               </tr>
 	                            ) : (
 	                              items.map((item) => {
+                                  const rowKey = `${item.entityType}:${item.entityId}`;
+                                  const isFocused = rowKey === focusRowKey;
 	                                const winRate = item.games > 0 ? Math.round((item.wins / item.games) * 1000) / 10 : null;
-	                                const authorName =
-	                                  item.entityType === 'preset'
-	                                    ? '官方'
-	                                    : typeof item.authorName === 'string' && item.authorName.trim()
-	                                      ? item.authorName.trim()
-	                                      : isHistoryMode
-	                                        ? '—'
-	                                        : '未知';
+	                                const authorName = formatAuthorLabel(item);
 	                                const tagPreviewIds = item.tagIds.slice(0, 4);
 	                                const remainingTagCount = Math.max(0, item.tagIds.length - tagPreviewIds.length);
 	                                const nativeBadge = item.isNative == null ? (
@@ -850,8 +1075,9 @@ export function RankingPage() {
 	                                );
 	                                return (
 	                                  <tr
-	                                    key={`${item.entityType}:${item.entityId}`}
-	                                    className="border-b last:border-b-0 hover:bg-gray-50/70"
+	                                    key={rowKey}
+                                      data-row-key={rowKey}
+	                                    className={`border-b last:border-b-0 ${isFocused ? 'bg-amber-50/80' : 'hover:bg-gray-50/70'}`}
 	                                  >
                                     <td className="px-4 py-3 pr-3 text-gray-500">{item.rank}</td>
 	                                    <td className="px-4 py-3 pr-3">
