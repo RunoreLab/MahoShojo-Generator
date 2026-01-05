@@ -533,6 +533,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     selectedLevel,
                     language,
                     storyLength,
+                    nowMs: startedAtMs,
                 });
                 const rankedMatchExtraJson = buildRankedMatchExtraJson(rankedMatchValidation);
                 const usage = await resolvedUsagePromise;

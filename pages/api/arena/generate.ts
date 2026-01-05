@@ -446,6 +446,7 @@ interface BattleApiResponse {
                 selectedLevel,
                 language,
                 storyLength,
+                nowMs: startedAtMs,
             });
             const rankedMatchExtraJson = buildRankedMatchExtraJson(rankedMatchValidation);
 
