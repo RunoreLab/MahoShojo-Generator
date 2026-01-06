@@ -1,0 +1,178 @@
+#!/usr/bin/env bun
+
+/**
+ * 记者档位徽章发放脚本（含高级档位）
+ *
+ * 默认仅建议 dry-run 预览；若需要实际写入，请去掉 --dry-run。
+ *
+ * 使用：
+ * - bun run scripts/badge/grant-reporter-tiers.ts --dry-run
+ * - bun run scripts/badge/grant-reporter-tiers.ts
+ *
+ * 可选参数：
+ * - --max-tier=<badgeId> 仅发放到指定档位（包含该档位）。例如：--max-tier=excellent_reporter
+ */
+
+import { queryFromD1 } from '@/lib/database/core';
+import { grantBadgeToUser, userHasBadge } from '@/lib/database/badges';
+import { increaseUserSlotCount } from '@/lib/database/users';
+import { REPORTER_TIERS } from './reporter-rules';
+
+type UserTotalsRow = {
+  userId: number;
+  username: string;
+  publicCards: number;
+  totalLikes: number;
+  totalFavorites: number;
+  totalUsage: number;
+};
+
+function parseMaxTierArg(args: string[]): string | null {
+  const flag = args.find((arg) => arg.startsWith('--max-tier='));
+  if (!flag) return null;
+  const [, value] = flag.split('=', 2);
+  return value?.trim() ? value.trim() : null;
+}
+
+function getEffectiveTiers(maxTierBadgeId: string | null) {
+  if (!maxTierBadgeId) return REPORTER_TIERS;
+  const idx = REPORTER_TIERS.findIndex((t) => t.badgeId === maxTierBadgeId);
+  if (idx < 0) {
+    throw new Error(`未知的 --max-tier：${maxTierBadgeId}`);
+  }
+  return REPORTER_TIERS.slice(0, idx + 1);
+}
+
+function isUserQualifiedForTier(user: UserTotalsRow, tier: (typeof REPORTER_TIERS)[number]): boolean {
+  return (
+    user.totalLikes >= tier.minTotalLikes &&
+    user.totalFavorites >= tier.minTotalFavorites &&
+    user.totalUsage >= tier.minTotalUsage
+  );
+}
+
+async function countUsersWithPublicApprovedCards(): Promise<number> {
+  const sql = `
+    SELECT COUNT(DISTINCT user_id) AS count
+    FROM data_cards
+    WHERE is_public = 1
+      AND review_status = 'approved'
+  `;
+  const res = await queryFromD1(sql, []);
+  const row = (res as any).result?.[0]?.results?.[0];
+  return Number(row?.count ?? 0) || 0;
+}
+
+async function loadUserTotals(): Promise<UserTotalsRow[]> {
+  const sql = `
+    SELECT
+      dc.user_id AS user_id,
+      u.username AS username,
+      COUNT(dc.id) AS public_cards,
+      SUM(dc.like_count) AS total_likes,
+      SUM(dc.favorite_count) AS total_favorites,
+      SUM(dc.usage_count) AS total_usage
+    FROM data_cards dc
+    JOIN users u ON u.id = dc.user_id
+    WHERE dc.is_public = 1
+      AND dc.review_status = 'approved'
+    GROUP BY dc.user_id, u.username
+  `;
+
+  const res = await queryFromD1(sql, []);
+  const rows = (res as any).result?.[0]?.results ?? [];
+  return rows.map((row: any) => ({
+    userId: Number(row.user_id ?? 0) || 0,
+    username: String(row.username ?? ''),
+    publicCards: Number(row.public_cards ?? 0) || 0,
+    totalLikes: Number(row.total_likes ?? 0) || 0,
+    totalFavorites: Number(row.total_favorites ?? 0) || 0,
+    totalUsage: Number(row.total_usage ?? 0) || 0,
+  }));
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  const dryRun = args.includes('--dry-run');
+  const maxTier = parseMaxTierArg(args);
+  const tiers = getEffectiveTiers(maxTier);
+
+  console.log('📰 记者档位徽章发放');
+  console.log(`模式: ${dryRun ? 'dry-run（仅预览）' : '执行（写入数据库）'}`);
+  console.log(`档位: ${tiers.map((t) => t.badgeId).join(' → ')}`);
+  console.log('');
+
+  const totalPublicUsers = await countUsersWithPublicApprovedCards();
+  const users = await loadUserTotals();
+
+  console.log(`公开且通过审查的发卡用户：${totalPublicUsers}`);
+  console.log(`可参与计算的用户：${users.length}`);
+  console.log('');
+
+  const summary = {
+    totalUsers: users.length,
+    tiers: Object.fromEntries(tiers.map((t) => [t.badgeId, { qualified: 0, granted: 0, skippedHasBadge: 0 }])) as Record<
+      string,
+      { qualified: number; granted: number; skippedHasBadge: number }
+    >,
+    slotIncreased: 0,
+    errors: 0,
+    dryRun,
+  };
+
+  for (const user of users) {
+    for (const tier of tiers) {
+      if (!isUserQualifiedForTier(user, tier)) continue;
+
+      summary.tiers[tier.badgeId].qualified += 1;
+
+      try {
+        const alreadyHas = await userHasBadge(user.userId, tier.badgeId);
+        if (alreadyHas) {
+          summary.tiers[tier.badgeId].skippedHasBadge += 1;
+          continue;
+        }
+
+        if (dryRun) {
+          summary.tiers[tier.badgeId].granted += 1;
+          summary.slotIncreased += 1;
+          console.log(
+            `[dry-run] 用户 ${user.username} (ID: ${user.userId}) 将授予 ${tier.badgeId}，并增加槽位 +${tier.slotIncrement}`
+          );
+          continue;
+        }
+
+        const granted = await grantBadgeToUser(user.userId, tier.badgeId);
+        if (!granted) {
+          summary.errors += 1;
+          console.error(`❌ 用户 ${user.username} (ID: ${user.userId}) 授予 ${tier.badgeId} 失败`);
+          continue;
+        }
+
+        summary.tiers[tier.badgeId].granted += 1;
+        const increased = await increaseUserSlotCount(user.userId, tier.slotIncrement);
+        if (increased) {
+          summary.slotIncreased += 1;
+        } else {
+          summary.errors += 1;
+          console.error(`❌ 用户 ${user.username} (ID: ${user.userId}) 槽位增加失败（${tier.badgeId}）`);
+        }
+      } catch (error) {
+        summary.errors += 1;
+        console.error(`❌ 处理用户 ${user.username} (ID: ${user.userId}) 档位 ${tier.badgeId} 时出错:`, error);
+      }
+    }
+  }
+
+  console.log('');
+  console.log('━'.repeat(60));
+  console.log('📊 发放统计');
+  console.table(summary);
+
+  if (dryRun) {
+    console.log('Dry-run 模式：未对数据库进行任何修改。');
+  }
+}
+
+main();
+
