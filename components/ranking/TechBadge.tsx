@@ -7,6 +7,10 @@ type Props = {
   className?: string;
 };
 
+const hasTextColorClass = (className?: string) =>
+  typeof className === 'string' &&
+  /(?:^|\s|:)!?text-(?:black|white|transparent|current|inherit|[a-z]+-\d{2,3})(?:\/\d{1,3})?(?=\s|$)/.test(className);
+
 const levelClassNameMap: Record<string, string> = {
   L0: 'bg-gray-100 text-gray-700 ring-1 ring-gray-200',
   L1: 'bg-sky-50 text-sky-800 ring-1 ring-sky-200',
@@ -18,7 +22,8 @@ const levelClassNameMap: Record<string, string> = {
 
 export function TechBadge({ techScore, techLevel, mode = 'full', className }: Props) {
   if (mode !== 'level' && techScore == null) {
-    return <span className={['text-gray-500', className].filter(Boolean).join(' ')}>-</span>;
+    const fallbackTextColor = hasTextColorClass(className) ? null : 'text-gray-500';
+    return <span className={[fallbackTextColor, className].filter(Boolean).join(' ')}>-</span>;
   }
 
   const level = typeof techLevel === 'string' ? techLevel.trim() : '';
@@ -35,8 +40,9 @@ export function TechBadge({ techScore, techLevel, mode = 'full', className }: Pr
     );
   }
 
+  const fallbackTextColor = hasTextColorClass(className) ? null : 'text-gray-900';
   return (
-    <span className={['inline-flex items-center gap-1.5 font-mono text-gray-900', className].filter(Boolean).join(' ')}>
+    <span className={['inline-flex items-center gap-1.5 font-mono', fallbackTextColor, className].filter(Boolean).join(' ')}>
       <span>{techScore}</span>
       {level ? (
         <span className={['inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold font-sans', levelClassName].join(' ')}>
