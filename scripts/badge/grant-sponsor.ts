@@ -11,17 +11,12 @@ if (!EXCELLENT_REPORTER_TIER) {
   throw new Error('缺少优秀记者档位配置：excellent_reporter');
 }
 
-const EXCELLENT_REPORTER_USER_EXISTS = `
+const EXCELLENT_REPORTER_BADGE_EXISTS = `
   EXISTS (
     SELECT 1
-    FROM data_cards dc
-    WHERE dc.user_id = u.id
-      AND dc.is_public = 1
-      AND dc.review_status = 'approved'
-    GROUP BY dc.user_id
-    HAVING SUM(dc.like_count) >= ${EXCELLENT_REPORTER_TIER.minTotalLikes}
-      AND SUM(dc.favorite_count) >= ${EXCELLENT_REPORTER_TIER.minTotalFavorites}
-      AND SUM(dc.usage_count) >= ${EXCELLENT_REPORTER_TIER.minTotalUsage}
+    FROM user_badges ub
+    WHERE ub.user_id = u.id
+      AND ub.badge_id = '${EXCELLENT_REPORTER_TIER.badgeId}'
   )
 `;
 
@@ -64,7 +59,7 @@ async function findUsersWithSlot(): Promise<SlotCandidate[]> {
     FROM users u
     WHERE u.slot_count > 0
       AND NOT (
-        u.slot_count <= ${EXCELLENT_REPORTER_TIER.slotIncrement} AND ${EXCELLENT_REPORTER_USER_EXISTS}
+        u.slot_count <= ${EXCELLENT_REPORTER_TIER.slotIncrement} AND ${EXCELLENT_REPORTER_BADGE_EXISTS}
       )
   `;
   const queryResult = await queryFromD1(query, []);
