@@ -62,6 +62,7 @@ interface DataCardDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
   isOwner?: boolean;
+  adminTagEditor?: boolean;
   card: {
     id: string;
     name: string;
@@ -85,7 +86,10 @@ export default function DataCardDetailsModal({
   card,
   pendingNotice,
   isOwner = false,
+  adminTagEditor = false,
 }: DataCardDetailsModalProps) {
+  const canEditTags = isOwner || adminTagEditor;
+  const [tagScope, setTagScope] = useState<'user' | 'system' | 'admin'>(adminTagEditor ? 'admin' : 'user');
   const [metaNonce, setMetaNonce] = useState(0);
   const [meta, setMeta] = useState<Extract<ApiMetaResponse, { success: true }> | null>(null);
   const [metaLoading, setMetaLoading] = useState(false);
@@ -133,9 +137,8 @@ export default function DataCardDetailsModal({
 
   useEffect(() => {
     if (!meta || isEditingTags) return;
-    const userTagIds = meta.tags.filter((t) => t.scope === 'user').map((t) => t.id);
-    setSelectedTagIds(userTagIds);
-  }, [meta, isEditingTags]);
+    setSelectedTagIds(meta.tags.filter((t) => t.scope === tagScope).map((t) => t.id));
+  }, [meta, isEditingTags, tagScope]);
 
   const visibleTags = useMemo(() => {
     if (!meta?.tags) return [];
@@ -145,7 +148,7 @@ export default function DataCardDetailsModal({
   const formatSignedDelta = (value: number) => (value >= 0 ? `+${value}` : String(value));
 
   const openTagEditor = useCallback(async () => {
-    if (!isOwner) return;
+    if (!canEditTags) return;
     setIsEditingTags(true);
     setSaveTagsError(null);
     if (allTags.length > 0) return;
@@ -163,12 +166,12 @@ export default function DataCardDetailsModal({
     } finally {
       setTagsLoading(false);
     }
-  }, [allTags.length, isOwner]);
+  }, [allTags.length, canEditTags]);
 
   const selectableTags = useMemo(() => {
     const q = tagSearch.trim().toLowerCase();
     return allTags
-      .filter((t) => t.isActive && t.scope === 'user')
+      .filter((t) => t.isActive && t.scope === tagScope)
       .filter((t) => {
         if (!q) return true;
         return (t.name ?? '').toLowerCase().includes(q) || (t.category ?? '').toLowerCase().includes(q);
@@ -179,7 +182,7 @@ export default function DataCardDetailsModal({
         if (category !== 0) return category;
         return a.name.localeCompare(b.name, 'zh-CN');
       });
-  }, [allTags, tagSearch]);
+  }, [allTags, tagScope, tagSearch]);
 
   const groupedSelectableTags = useMemo(() => {
     const map = new Map<string, ApiTag[]>();
@@ -204,24 +207,43 @@ export default function DataCardDetailsModal({
   }, []);
 
   const saveTags = useCallback(async () => {
-    if (!isOwner) return;
     setSavingTags(true);
     setSaveTagsError(null);
     try {
-      const authHeader = await authStorage.getAuthHeader();
-      if (!authHeader) {
-        setSaveTagsError('未登录，无法保存标签');
-        return;
-      }
+      if (tagScope === 'user') {
+        if (!isOwner) {
+          setSaveTagsError('无权修改用户标签');
+          return;
+        }
 
-      await fetchJson('/api/data-card-tags', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: authHeader,
-        },
-        body: JSON.stringify({ dataCardId: card.id, tagIds: selectedTagIds }),
-      });
+        const authHeader = await authStorage.getAuthHeader();
+        if (!authHeader) {
+          setSaveTagsError('未登录，无法保存标签');
+          return;
+        }
+
+        await fetchJson('/api/data-card-tags', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: authHeader,
+          },
+          body: JSON.stringify({ dataCardId: card.id, tagIds: selectedTagIds }),
+        });
+      } else {
+        if (!adminTagEditor) {
+          setSaveTagsError('无权修改管理员/系统标签');
+          return;
+        }
+
+        await fetchJson('/api/admin/data-card-tags', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ dataCardId: card.id, scope: tagScope, tagIds: selectedTagIds }),
+        });
+      }
 
       setIsEditingTags(false);
       setMetaNonce((n) => n + 1);
@@ -230,7 +252,7 @@ export default function DataCardDetailsModal({
     } finally {
       setSavingTags(false);
     }
-  }, [card.id, isOwner, selectedTagIds]);
+  }, [adminTagEditor, card.id, isOwner, selectedTagIds, tagScope]);
 
   if (!isOpen) return null;
 
@@ -425,11 +447,11 @@ export default function DataCardDetailsModal({
 
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-gray-500">标签：</span>
-                      {visibleTags.length === 0 ? (
-                        <span className="text-gray-400">暂无</span>
-                      ) : (
-                        visibleTags.map((tag) => (
-                          <span
+                    {visibleTags.length === 0 ? (
+                      <span className="text-gray-400">暂无</span>
+                    ) : (
+                      visibleTags.map((tag) => (
+                        <span
                             key={tag.id}
                             className="px-2 py-0.5 rounded-full border border-gray-200 bg-white text-gray-700"
                             title={tag.description ?? undefined}
@@ -438,12 +460,12 @@ export default function DataCardDetailsModal({
                           </span>
                         ))
                       )}
-                      {isOwner && (
+                      {canEditTags && (
                         <button
                           onClick={() => void openTagEditor()}
                           className="ml-1 px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
                         >
-                          编辑
+                          {adminTagEditor ? '编辑（管理员/系统）' : '编辑'}
                         </button>
                       )}
                       <a
@@ -462,6 +484,22 @@ export default function DataCardDetailsModal({
                           <div className="text-xs font-medium text-gray-700">
                             选择标签（最多 30 个，当前 {selectedTagCount}）
                           </div>
+                          {adminTagEditor && (
+                            <select
+                              value={tagScope}
+                              onChange={(e) => {
+                                const nextScope = (e.target.value === 'system' ? 'system' : 'admin') as 'system' | 'admin';
+                                setTagScope(nextScope);
+                                setTagSearch('');
+                                setSelectedTagIds(meta ? meta.tags.filter((t) => t.scope === nextScope).map((t) => t.id) : []);
+                              }}
+                              className="px-2 py-1 text-xs rounded border border-gray-200 bg-white"
+                              disabled={savingTags}
+                            >
+                              <option value="admin">管理员标签</option>
+                              <option value="system">系统标签</option>
+                            </select>
+                          )}
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => {
