@@ -2,15 +2,28 @@
 
 import { queryFromD1 } from '@/lib/database/core';
 import { grantBadgeToUser, userHasBadge } from '@/lib/database/badges';
+import { getReporterTierByBadgeId } from './reporter-rules';
 
 type CandidateSource = 'slot_positive' | 'excellent_reporter';
 
-const EXCELLENT_REPORTER_CARD_CONDITIONS = `
-      dc.is_public = 1
+const EXCELLENT_REPORTER_TIER = getReporterTierByBadgeId('excellent_reporter');
+if (!EXCELLENT_REPORTER_TIER) {
+  throw new Error('缺少优秀记者档位配置：excellent_reporter');
+}
+
+const EXCELLENT_REPORTER_USER_EXISTS = `
+  EXISTS (
+    SELECT 1
+    FROM data_cards dc
+    WHERE dc.user_id = u.id
+      AND dc.is_public = 1
       AND dc.review_status = 'approved'
-      AND dc.like_count >= 3
-      AND dc.usage_count >= 20
-    `;
+    GROUP BY dc.user_id
+    HAVING SUM(dc.like_count) >= ${EXCELLENT_REPORTER_TIER.minTotalLikes}
+      AND SUM(dc.favorite_count) >= ${EXCELLENT_REPORTER_TIER.minTotalFavorites}
+      AND SUM(dc.usage_count) >= ${EXCELLENT_REPORTER_TIER.minTotalUsage}
+  )
+`;
 
 interface SlotCandidate {
   user_id: number;
@@ -19,14 +32,14 @@ interface SlotCandidate {
 }
 
 interface ExcellentCandidate extends SlotCandidate {
-  qualified_cards: number;
+  public_cards: number;
 }
 
 interface SponsorCandidate {
   userId: number;
   username: string;
   slotCount: number;
-  qualifiedCards: number;
+  publicCards: number;
   sources: CandidateSource[];
 }
 
@@ -40,7 +53,7 @@ function formatSources(sources: CandidateSource[]): string {
   return sources
     .map(source => {
       if (source === 'slot_positive') return '槽位大于 0';
-      return '满足 excellent_reporter 标准且槽位大于 128';
+      return `满足 excellent_reporter 标准且槽位大于 ${EXCELLENT_REPORTER_TIER.slotIncrement}`;
     })
     .join('、');
 }
@@ -51,12 +64,7 @@ async function findUsersWithSlot(): Promise<SlotCandidate[]> {
     FROM users u
     WHERE u.slot_count > 0
       AND NOT (
-        u.slot_count <= 128 AND EXISTS (
-          SELECT 1
-          FROM data_cards dc
-          WHERE dc.user_id = u.id
-            AND ${EXCELLENT_REPORTER_CARD_CONDITIONS}
-        )
+        u.slot_count <= ${EXCELLENT_REPORTER_TIER.slotIncrement} AND ${EXCELLENT_REPORTER_USER_EXISTS}
       )
   `;
   const queryResult = await queryFromD1(query, []);
@@ -79,21 +87,25 @@ async function findUsersWithSlot(): Promise<SlotCandidate[]> {
 async function findExcellentReporterUsers(): Promise<ExcellentCandidate[]> {
   const query = `
     SELECT
-      dc.user_id,
+      u.id AS user_id,
       u.username,
       u.slot_count,
-      COUNT(dc.id) AS qualified_cards
-    FROM data_cards dc
-    JOIN users u ON u.id = dc.user_id
-    WHERE ${EXCELLENT_REPORTER_CARD_CONDITIONS}
-      AND u.slot_count > 128
-    GROUP BY dc.user_id, u.username, u.slot_count
+      COUNT(dc.id) AS public_cards
+    FROM users u
+    JOIN data_cards dc ON dc.user_id = u.id
+    WHERE dc.is_public = 1
+      AND dc.review_status = 'approved'
+    GROUP BY u.id, u.username, u.slot_count
+    HAVING SUM(dc.like_count) >= ${EXCELLENT_REPORTER_TIER.minTotalLikes}
+      AND SUM(dc.favorite_count) >= ${EXCELLENT_REPORTER_TIER.minTotalFavorites}
+      AND SUM(dc.usage_count) >= ${EXCELLENT_REPORTER_TIER.minTotalUsage}
+      AND u.slot_count > ${EXCELLENT_REPORTER_TIER.slotIncrement}
   `;
 
   const queryResult = await queryFromD1(query, []);
   const result = queryResult as {
     success?: boolean;
-    result?: Array<{ results?: Array<{ user_id?: number; username?: string; slot_count?: number | null; qualified_cards?: number | null }> }>;
+    result?: Array<{ results?: Array<{ user_id?: number; username?: string; slot_count?: number | null; public_cards?: number | null }> }>;
   };
 
   if (!result.success || !result.result || !result.result[0]?.results) {
@@ -104,7 +116,7 @@ async function findExcellentReporterUsers(): Promise<ExcellentCandidate[]> {
     user_id: row.user_id ?? 0,
     username: row.username ?? '',
     slot_count: typeof row.slot_count === 'number' && !Number.isNaN(row.slot_count) ? row.slot_count : 0,
-    qualified_cards: typeof row.qualified_cards === 'number' && !Number.isNaN(row.qualified_cards) ? row.qualified_cards : 0
+    public_cards: typeof row.public_cards === 'number' && !Number.isNaN(row.public_cards) ? row.public_cards : 0
   }));
 }
 
@@ -118,7 +130,7 @@ async function collectCandidates(): Promise<SponsorCandidate[]> {
       userId: user.user_id,
       username: user.username,
       slotCount: user.slot_count,
-      qualifiedCards: 0,
+      publicCards: 0,
       sources: ['slot_positive']
     });
   }
@@ -128,13 +140,13 @@ async function collectCandidates(): Promise<SponsorCandidate[]> {
     if (existing) {
       appendSource(existing, 'excellent_reporter');
       existing.slotCount = user.slot_count;
-      existing.qualifiedCards = Math.max(existing.qualifiedCards, user.qualified_cards);
+      existing.publicCards = Math.max(existing.publicCards, user.public_cards);
     } else {
       candidateMap.set(user.user_id, {
         userId: user.user_id,
         username: user.username,
         slotCount: user.slot_count,
-        qualifiedCards: user.qualified_cards,
+        publicCards: user.public_cards,
         sources: ['excellent_reporter']
       });
     }
@@ -201,8 +213,8 @@ async function processCandidates(candidates: SponsorCandidate[], dryRun: boolean
       if (granted) {
         summary.badgeGranted += 1;
         const extraInfo =
-          candidate.sources.includes('excellent_reporter') && candidate.qualifiedCards > 0
-            ? `，符合 excellent_reporter 条件的卡片数量：${candidate.qualifiedCards}`
+          candidate.sources.includes('excellent_reporter') && candidate.publicCards > 0
+            ? `，公开且通过审查的卡片数量：${candidate.publicCards}`
             : '';
         console.log(
           `用户 ${candidate.username} (ID: ${candidate.userId}) 已成功授予 sponsor 徽章，来源：${formatSources(candidate.sources)}${extraInfo}`
