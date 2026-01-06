@@ -208,10 +208,10 @@ const fetchDataCardCandidatesByAbsDiff = async (input: {
   const result = (await queryFromD1(
     `SELECT
       dc.id as id,
-      COALESCE(ar.rating, ${INITIAL_RATING}) as rating,
-      COALESCE(ar.games, 0) as games
+      ar.rating as rating,
+      ar.games as games
      FROM data_cards dc
-     LEFT JOIN arena_ratings ar
+     INNER JOIN arena_ratings ar
        ON ar.queue = 'strict'
       AND ar.entity_type = 'data_card'
       AND ar.entity_id = dc.id
@@ -220,8 +220,9 @@ const fetchDataCardCandidatesByAbsDiff = async (input: {
        AND dc.is_public = 1
        AND dc.review_status = 'approved'
        AND dc.id <> ?
-       AND ABS(COALESCE(ar.rating, ${INITIAL_RATING}) - ?) BETWEEN ? AND ?
-     ORDER BY ABS(COALESCE(ar.rating, ${INITIAL_RATING}) - ?) ASC, COALESCE(ar.games, 0) ASC, dc.id ASC
+       AND ar.games > 0
+       AND ABS(ar.rating - ?) BETWEEN ? AND ?
+     ORDER BY ABS(ar.rating - ?) ASC, ar.games ASC, dc.id ASC
      LIMIT ?`,
     [input.playerId, input.targetRating, input.minAbsDiffInclusive, input.maxAbsDiffInclusive, input.targetRating, input.limit]
   )) as any;
@@ -474,7 +475,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
         : (picked ? '候选对手较少，已允许在时间窗内重复匹配' : undefined);
 
     if (!picked) {
-      return new Response(JSON.stringify({ success: false, error: '当前没有可匹配的对手（公开角色不足）' } satisfies ApiErrorResponse), {
+      return new Response(JSON.stringify({ success: false, error: '当前没有可匹配的对手（已参加严格排位的公开角色不足）' } satisfies ApiErrorResponse), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
       });
