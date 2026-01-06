@@ -86,6 +86,9 @@ export default async function handler(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const queue: Queue = url.searchParams.get('queue') === 'free' ? 'free' : 'strict';
+    const strictPublicSinceClause = queue === 'strict'
+      ? "AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))"
+      : '';
     const sort: Sort = url.searchParams.get('sort') === 'tech' ? 'tech' : 'rating';
     const order: SortOrder = url.searchParams.get('order') === 'asc' ? 'asc' : 'desc';
     const limit = Math.max(1, Math.min(100, parseIntParam(url.searchParams.get('limit'), 50)));
@@ -123,6 +126,7 @@ export default async function handler(req: NextRequest) {
           AND dc.is_public = 1
           AND dc.review_status = 'approved'
           AND dc.deleted_at IS NULL
+          ${strictPublicSinceClause}
         )
       )`);
     } else {
@@ -132,6 +136,7 @@ export default async function handler(req: NextRequest) {
         AND dc.is_public = 1
         AND dc.review_status = 'approved'
         AND dc.deleted_at IS NULL
+        ${strictPublicSinceClause}
       )`);
     }
 

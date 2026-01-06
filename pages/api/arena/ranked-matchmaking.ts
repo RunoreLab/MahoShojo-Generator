@@ -399,13 +399,20 @@ export default async function handler(req: NextRequest): Promise<Response> {
       }
     } else {
       const result = (await queryFromD1(
-        `SELECT id, type, user_id as userId, is_public as isPublic, deleted_at as deletedAt
+        `SELECT id, type, user_id as userId, is_public as isPublic, review_status as reviewStatus, deleted_at as deletedAt
          FROM data_cards
          WHERE id = ?
          LIMIT 1`,
         [player.entityId]
       )) as any;
-      const row = readRows<{ id: string; type: string; userId: number; isPublic: number | boolean; deletedAt: string | null }>(result)[0];
+      const row = readRows<{
+        id: string;
+        type: string;
+        userId: number;
+        isPublic: number | boolean;
+        reviewStatus: string | null;
+        deletedAt: string | null;
+      }>(result)[0];
       if (!row?.id || row.deletedAt) {
         return new Response(JSON.stringify({ success: false, error: '数据卡不存在或已被删除' } satisfies ApiErrorResponse), {
           status: 404,
@@ -419,8 +426,14 @@ export default async function handler(req: NextRequest): Promise<Response> {
         });
       }
       const isPublic = row.isPublic === 1 || row.isPublic === true;
-      if (!isPublic && row.userId !== user.id) {
-        return new Response(JSON.stringify({ success: false, error: '无权使用该私有数据卡进行排位匹配' } satisfies ApiErrorResponse), {
+      if (!isPublic) {
+        return new Response(JSON.stringify({ success: false, error: '严格排位仅允许使用公开角色卡参与' } satisfies ApiErrorResponse), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (row.reviewStatus !== 'approved') {
+        return new Response(JSON.stringify({ success: false, error: '严格排位仅允许使用已审核通过的公开角色卡' } satisfies ApiErrorResponse), {
           status: 403,
           headers: { 'Content-Type': 'application/json' },
         });

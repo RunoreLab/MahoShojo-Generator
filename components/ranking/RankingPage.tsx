@@ -549,6 +549,11 @@ export function RankingPage() {
                           <option value="free">自由</option>
                         </select>
                       </label>
+                      {draftFilters.queue === 'strict' ? (
+                        <div className="-mt-1 text-xs text-gray-500 sm:col-span-2 lg:col-span-1">
+                          严格榜单仅展示连续公开满 3 天且审核通过的角色卡（预设不受影响）。
+                        </div>
+                      ) : null}
 
                       <label className="text-sm text-gray-700">
                         排序

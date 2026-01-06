@@ -52,11 +52,14 @@ export async function createDataCardWithAuthor(
     
     // 生成 UUID 作为主键
     const uuid = generateUUID();
+
+    const normalizedPublic = typeof isPublic === 'number' ? Math.floor(isPublic) : (isPublic ? 1 : 0);
     
-    const result = await queryFromD1(
-      'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public, review_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [uuid, userId, type, name, description, dataWithAuthor, typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0), reviewStatus]
-    ) as any;
+    const insertSql = normalizedPublic === 1
+      ? 'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public, review_status, public_since) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)'
+      : 'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public, review_status, public_since) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)';
+
+    const result = await queryFromD1(insertSql, [uuid, userId, type, name, description, dataWithAuthor, normalizedPublic, reviewStatus]) as any;
     
     if (result.success && result.result) {
       return { success: true, id: uuid };
@@ -80,11 +83,13 @@ export async function createDataCard(
   try {
     // 生成 UUID 作为主键
     const uuid = generateUUID();
+
+    const normalizedPublic = typeof isPublic === 'number' ? Math.floor(isPublic) : (isPublic ? 1 : 0);
     
-    const result = await queryFromD1(
-      'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [uuid, userId, type, name, description, data, typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0)]
-    ) as any;
+    const insertSql = normalizedPublic === 1
+      ? 'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public, public_since) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)'
+      : 'INSERT INTO data_cards (id, user_id, type, name, description, data, is_public, public_since) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)';
+    const result = await queryFromD1(insertSql, [uuid, userId, type, name, description, data, normalizedPublic]) as any;
     
     if (result.success && result.result) {
       return uuid;
@@ -156,8 +161,16 @@ export async function updateDataCard(
     const params: any[] = [name, description];
     
     if (isPublic !== undefined) {
+      const normalizedPublic = typeof isPublic === 'number' ? Math.floor(isPublic) : (isPublic ? 1 : 0);
       sql += ', is_public = ?';
-      params.push(typeof isPublic === 'number' ? isPublic : (isPublic ? 1 : 0));
+      params.push(normalizedPublic);
+
+      // 仅在公开状态发生变化时更新 public_since：
+      // - 变为公开（1）：记录 CURRENT_TIMESTAMP
+      // - 变为私有/封禁（!=1）：置空
+      // - 未变化：保持原值（避免更新名称/描述时误触发“连续公开时长”门槛）
+      sql += ', public_since = CASE WHEN is_public <> ? THEN (CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END) ELSE public_since END';
+      params.push(normalizedPublic, normalizedPublic);
     }
 
     // [v0.4.2 新增] 如果传入了 reviewStatus，则一并更新

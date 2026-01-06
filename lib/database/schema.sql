@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS data_cards (
   description TEXT,
   data TEXT NOT NULL,
   is_public BOOLEAN NOT NULL DEFAULT 0,  -- 0 = 私有, 1 = 公开
+  public_since DATETIME,                -- 公开起始时间（私有/封禁为 NULL；用于排位榜单“连续公开时长”门槛）
   usage_count INTEGER DEFAULT 0,
   like_count INTEGER DEFAULT 0,
   favorite_count INTEGER DEFAULT 0,
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS data_cards (
 CREATE INDEX idx_data_cards_user_id ON data_cards(user_id);
 CREATE INDEX idx_data_cards_type ON data_cards(type);
 CREATE INDEX idx_data_cards_is_public ON data_cards(is_public);
+CREATE INDEX idx_data_cards_public_since ON data_cards(public_since);
 CREATE INDEX idx_data_cards_usage_count ON data_cards(usage_count);
 CREATE INDEX idx_data_cards_like_count ON data_cards(like_count);
 CREATE INDEX idx_data_cards_favorite_count ON data_cards(favorite_count);

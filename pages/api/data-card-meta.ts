@@ -223,6 +223,9 @@ export default async function handler(req: NextRequest) {
       if (cardRow.type === 'character') {
         const computePublicTotal = async (queue: Queue): Promise<number | null> => {
           try {
+            const strictPublicSinceClause = queue === 'strict'
+              ? "AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))"
+              : '';
             const totalResult = (await queryFromD1(
               `SELECT COUNT(*) as total
                FROM arena_ratings ar
@@ -237,6 +240,7 @@ export default async function handler(req: NextRequest) {
                      AND dc.is_public = 1
                      AND dc.review_status = 'approved'
                      AND dc.deleted_at IS NULL
+                     ${strictPublicSinceClause}
                    )
                  )`,
               [queue],
@@ -346,6 +350,9 @@ export default async function handler(req: NextRequest) {
         // 仅角色卡计算公共榜位置（不影响公共榜展示）
         if (cardRow.type === 'character' && ratingUpdatedAt) {
           try {
+            const strictPublicSinceClause = item.queue === 'strict'
+              ? "AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))"
+              : '';
             const rankResult = (await queryFromD1(
               `SELECT COUNT(*) as higherCount
                FROM arena_ratings ar
@@ -360,6 +367,7 @@ export default async function handler(req: NextRequest) {
                      AND dc.is_public = 1
                      AND dc.review_status = 'approved'
                      AND dc.deleted_at IS NULL
+                     ${strictPublicSinceClause}
                    )
                  )
                  AND (

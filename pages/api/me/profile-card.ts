@@ -335,6 +335,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
                AND dc.is_public = 1
                AND dc.review_status = 'approved'
                AND dc.deleted_at IS NULL
+               AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))
              )
            )
            AND (
@@ -387,6 +388,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
                AND dc.is_public = 1
                AND dc.review_status = 'approved'
                AND dc.deleted_at IS NULL
+               AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))
              )
            )`,
         [queue],
