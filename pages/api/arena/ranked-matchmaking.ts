@@ -41,6 +41,32 @@ const readRows = <T,>(result: unknown): T[] => {
   return Array.isArray(rows) ? (rows as T[]) : [];
 };
 
+const removePrivateKeys = (value: unknown): unknown => {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(removePrivateKeys);
+
+  const obj = value as Record<string, unknown>;
+  const cleaned: Record<string, unknown> = {};
+  for (const key of Object.keys(obj)) {
+    if (key.startsWith('_')) continue;
+    cleaned[key] = removePrivateKeys(obj[key]);
+  }
+  return cleaned;
+};
+
+const stripPrivateKeysFromJsonString = (raw: string): string => {
+  if (typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if (!trimmed) return raw;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    const cleaned = removePrivateKeys(parsed);
+    return JSON.stringify(cleaned);
+  } catch {
+    return raw;
+  }
+};
+
 const normalizeOptionalString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -98,7 +124,6 @@ type Candidate =
       entity: { entityType: 'data_card'; entityId: string };
       rating: number;
       games: number;
-      card: DataCardOpponentCard;
     }
   | {
       kind: 'preset';
@@ -183,16 +208,6 @@ const fetchDataCardCandidatesByAbsDiff = async (input: {
   const result = (await queryFromD1(
     `SELECT
       dc.id as id,
-      dc.name as name,
-      dc.description as description,
-      dc.data as data,
-      dc.is_public as is_public,
-      dc.updated_at as updated_at,
-      dc.created_at as created_at,
-      dc.like_count as like_count,
-      dc.favorite_count as favorite_count,
-      dc.usage_count as usage_count,
-      u.username as username,
       COALESCE(ar.rating, ${INITIAL_RATING}) as rating,
       COALESCE(ar.games, 0) as games
      FROM data_cards dc
@@ -200,30 +215,19 @@ const fetchDataCardCandidatesByAbsDiff = async (input: {
        ON ar.queue = 'strict'
       AND ar.entity_type = 'data_card'
       AND ar.entity_id = dc.id
-     LEFT JOIN users u
-       ON u.id = dc.user_id
      WHERE dc.type = 'character'
        AND dc.deleted_at IS NULL
        AND dc.is_public = 1
+       AND dc.review_status = 'approved'
        AND dc.id <> ?
        AND ABS(COALESCE(ar.rating, ${INITIAL_RATING}) - ?) BETWEEN ? AND ?
-     ORDER BY COALESCE(ar.games, 0) ASC, ABS(COALESCE(ar.rating, ${INITIAL_RATING}) - ?) ASC, dc.id ASC
+     ORDER BY ABS(COALESCE(ar.rating, ${INITIAL_RATING}) - ?) ASC, COALESCE(ar.games, 0) ASC, dc.id ASC
      LIMIT ?`,
     [input.playerId, input.targetRating, input.minAbsDiffInclusive, input.maxAbsDiffInclusive, input.targetRating, input.limit]
   )) as any;
 
   const rows = readRows<{
     id: string;
-    name: string;
-    description: string | null;
-    data: string;
-    is_public: number | boolean | null;
-    updated_at: string | null;
-    created_at: string | null;
-    like_count?: number | null;
-    favorite_count?: number | null;
-    usage_count?: number | null;
-    username: string | null;
     rating: number;
     games: number;
   }>(result);
@@ -237,22 +241,72 @@ const fetchDataCardCandidatesByAbsDiff = async (input: {
         entity: { entityType: 'data_card' as const, entityId: id },
         rating: typeof row.rating === 'number' ? row.rating : INITIAL_RATING,
         games: typeof row.games === 'number' ? row.games : 0,
-        card: {
-          id,
-          name: typeof row.name === 'string' ? row.name : '未命名',
-          description: typeof row.description === 'string' ? row.description : null,
-          data: row.data,
-          is_public: row.is_public ?? null,
-          updated_at: row.updated_at ?? null,
-          created_at: row.created_at ?? null,
-          username: row.username ?? null,
-          like_count: typeof row.like_count === 'number' ? row.like_count : null,
-          favorite_count: typeof row.favorite_count === 'number' ? row.favorite_count : null,
-          usage_count: typeof row.usage_count === 'number' ? row.usage_count : null,
-        },
       };
     })
     .filter((item): item is DataCardCandidate => item !== null);
+};
+
+const fetchOpponentDataCardById = async (dataCardId: string): Promise<DataCardOpponentCard | null> => {
+  const id = typeof dataCardId === 'string' ? dataCardId.trim() : '';
+  if (!id) return null;
+
+  const result = (await queryFromD1(
+    `SELECT
+      dc.id as id,
+      dc.name as name,
+      dc.description as description,
+      dc.data as data,
+      dc.is_public as is_public,
+      dc.updated_at as updated_at,
+      dc.created_at as created_at,
+      dc.like_count as like_count,
+      dc.favorite_count as favorite_count,
+      dc.usage_count as usage_count,
+      u.username as username
+     FROM data_cards dc
+     LEFT JOIN users u
+       ON u.id = dc.user_id
+     WHERE dc.id = ?
+       AND dc.type = 'character'
+       AND dc.deleted_at IS NULL
+       AND dc.is_public = 1
+       AND dc.review_status = 'approved'
+     LIMIT 1`,
+    [id]
+  )) as any;
+
+  const row = readRows<{
+    id: string;
+    name: string;
+    description: string | null;
+    data: string;
+    is_public: number | boolean | null;
+    updated_at: string | null;
+    created_at: string | null;
+    like_count?: number | null;
+    favorite_count?: number | null;
+    usage_count?: number | null;
+    username: string | null;
+  }>(result)[0];
+
+  if (!row?.id) return null;
+
+  const rawData = typeof row.data === 'string' ? row.data : '';
+  const data = stripPrivateKeysFromJsonString(rawData);
+
+  return {
+    id,
+    name: typeof row.name === 'string' ? row.name : '未命名',
+    description: typeof row.description === 'string' ? row.description : null,
+    data,
+    is_public: row.is_public ?? null,
+    updated_at: row.updated_at ?? null,
+    created_at: row.created_at ?? null,
+    username: row.username ?? null,
+    like_count: typeof row.like_count === 'number' ? row.like_count : null,
+    favorite_count: typeof row.favorite_count === 'number' ? row.favorite_count : null,
+    usage_count: typeof row.usage_count === 'number' ? row.usage_count : null,
+  };
 };
 
 const buildPresetCandidatesInBands = (input: {
@@ -398,7 +452,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       for (const candidate of [...dataCardCandidates, ...presetCandidates]) {
         if (candidate.entity.entityType === player.entityType && candidate.entity.entityId === player.entityId) continue;
         if (!allowRepeat) {
-          const pairKey = buildPairKey(player as any, candidate.entity as any);
+          const pairKey = buildPairKey(player, candidate.entity);
           if (recentPairKeys.has(pairKey)) continue;
         }
         byEntityKey.set(`${candidate.entity.entityType}:${candidate.entity.entityId}`, candidate);
@@ -426,6 +480,20 @@ export default async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
+    let opponent: DataCardOpponent | PresetOpponent;
+    if (picked.kind === 'data_card') {
+      const card = await fetchOpponentDataCardById(picked.entity.entityId);
+      if (!card) {
+        return new Response(JSON.stringify({ success: false, error: '匹配到的对手数据卡不可用，请稍后重试' } satisfies ApiErrorResponse), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      opponent = { entityType: 'data_card', card };
+    } else {
+      opponent = { entityType: 'preset', preset: picked.preset };
+    }
+
     const ticketResult = await issueRankedMatchTicket({
       userId: user.id,
       player,
@@ -443,9 +511,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    const response: ApiSuccessResponse = picked.kind === 'data_card'
-      ? { success: true, ticket: ticketResult.ticket, opponent: { entityType: 'data_card', card: picked.card }, ...(note ? { note } : {}) }
-      : { success: true, ticket: ticketResult.ticket, opponent: { entityType: 'preset', preset: picked.preset }, ...(note ? { note } : {}) };
+    const response: ApiSuccessResponse = { success: true, ticket: ticketResult.ticket, opponent, ...(note ? { note } : {}) };
 
     return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
