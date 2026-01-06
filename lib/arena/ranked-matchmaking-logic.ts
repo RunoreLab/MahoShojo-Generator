@@ -21,6 +21,7 @@ type PickOptions = {
   diffScale?: number;
   diffBaseline?: number;
   gamesScale?: number;
+  gamesBaseline?: number;
   bands?: readonly RankedMatchmakingBand[];
 };
 
@@ -51,6 +52,7 @@ export const computeMatchmakingWeight = (input: {
   diffScale?: number;
   diffBaseline?: number;
   gamesScale?: number;
+  gamesBaseline?: number;
 }): number => {
   const diffScaleRaw = input.diffScale;
   const diffScale =
@@ -58,11 +60,15 @@ export const computeMatchmakingWeight = (input: {
 
   const diffBaselineRaw = input.diffBaseline;
   const diffBaseline =
-    typeof diffBaselineRaw === 'number' && Number.isFinite(diffBaselineRaw) ? clamp01(diffBaselineRaw) : 0.20;
+    typeof diffBaselineRaw === 'number' && Number.isFinite(diffBaselineRaw) ? clamp01(diffBaselineRaw) : 0.10;
 
   const gamesScaleRaw = input.gamesScale;
   const gamesScale =
     typeof gamesScaleRaw === 'number' && Number.isFinite(gamesScaleRaw) ? Math.max(1, gamesScaleRaw) : 10;
+
+  const gamesBaselineRaw = input.gamesBaseline;
+  const gamesBaseline =
+    typeof gamesBaselineRaw === 'number' && Number.isFinite(gamesBaselineRaw) ? clamp01(gamesBaselineRaw) : 0.35;
   const rng = safeRng(input.rng);
 
   const target = Number.isFinite(input.targetRating) ? input.targetRating : 0;
@@ -73,8 +79,10 @@ export const computeMatchmakingWeight = (input: {
   const closeness = Math.exp(-diff / diffScale);
   const diffWeight = diffBaseline + (1 - diffBaseline) * closeness;
 
-  // gamesScale 越小，越偏好低局数；使用 sqrt 减缓“新号碾压”倾向，但仍能明显倾斜到低局数。
-  const gamesWeight = 1 / Math.sqrt(1 + games / gamesScale);
+  // gamesScale 越小，越偏好低局数；使用 sqrt 减缓“新号碾压”倾向。
+  // 为避免“低局数压过分差”，将 gamesWeight 压缩到 [gamesBaseline, 1]。
+  const gamesWeightRaw = 1 / Math.sqrt(1 + games / gamesScale);
+  const gamesWeight = gamesBaseline + (1 - gamesBaseline) * gamesWeightRaw;
 
   // 轻微随机扰动：打散“权重接近时总是同一个”的固定性，但不会颠覆整体趋势。
   const noise = 1 + rng() * 0.05;
@@ -135,6 +143,7 @@ export const pickStrictMatchmakingCandidate = <T extends RatedCandidate>(
         diffScale: options.diffScale,
         diffBaseline: options.diffBaseline,
         gamesScale: options.gamesScale,
+        gamesBaseline: options.gamesBaseline,
       })
     );
   }

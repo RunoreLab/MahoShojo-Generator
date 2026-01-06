@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { TechBadge } from '@/components/ranking/TechBadge';
 import { authStorage } from '@/lib/auth';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 
@@ -137,7 +138,7 @@ const formatSkipReason = (reason: string | null): string => {
     'winner-empty': '战报未给出胜者',
     'multi-winner': '胜者包含多人',
     'winner-ambiguous': '胜者无法匹配参战者',
-    'daily-limit': '今日严格排位次数已达上限',
+    'daily-limit': '今日严格排位次数已达上限（按 UTC 00:00/北京时间 08:00 刷新）',
     'dedup-user-pair': '短时间同一对手重复对局（严格去重）',
     'dedup-ip-pair': '短时间同 IP 重复对局（自由去重）',
     'ratings-missing': '排位记录缺失',
@@ -393,11 +394,11 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
     const techLevel = meta?.tech?.techLevel ?? localTech?.techLevel ?? null;
     const techScore = meta?.tech?.techScore ?? localTech?.techScore ?? null;
     const generationParticipant = entityKey ? generationParticipantByEntityKey.get(entityKey) : null;
-    const fallbackTier = generationParticipant?.queues.strict.tier ?? generationParticipant?.queues.free.tier ?? null;
-    const fallbackTierLabel =
+    const generationTier = generationParticipant?.queues.strict.tier ?? generationParticipant?.queues.free.tier ?? null;
+    const generationTierLabel =
       generationParticipant?.queues.strict.tier ? '严格' : (generationParticipant?.queues.free.tier ? '自由' : '');
-    const tierToShow = tierBadge?.tier ?? fallbackTier ?? (isPlaceholder ? null : (entityKey ? '无牌' : '未登记'));
-    const tierLabelToShow = tierBadge?.label ?? fallbackTierLabel;
+    const tierToShow = generationTier ?? tierBadge?.tier ?? (isPlaceholder ? null : (entityKey ? '无牌' : '未登记'));
+    const tierLabelToShow = generationTier ? generationTierLabel : (tierBadge?.label ?? '');
     const typeDisplay = isPlaceholder
       ? combatant.type === 'random-magical-girl'
         ? '(随机魔法少女)'
@@ -449,10 +450,13 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                   {!isPlaceholder && tierToShow && (
                     <span className="flex items-center gap-1">
                       <TierBadge tier={tierToShow} />
+                      {typeof techLevel === 'string' && techLevel.trim() ? (
+                        <TechBadge mode="level" techScore={techScore} techLevel={techLevel} />
+                      ) : null}
                       {tierLabelToShow ? <span className="text-[10px] text-gray-500">({tierLabelToShow})</span> : null}
                     </span>
                   )}
-                </div>
+                  </div>
               </div>
 
               <div className="mt-2 sm:mt-0 flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
@@ -516,10 +520,10 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
               <div className="mt-1 text-xs text-gray-600">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="whitespace-nowrap">
-                    技术值：{typeof techScore === 'number' ? `${techScore} (${techLevel ?? '-'})` : '-'}
+                    技术值：{typeof techScore === 'number' ? techScore : '-'}
                   </span>
                   <span className="whitespace-nowrap">
-                    严格：{meta?.ratings.strict?.rating ?? generationParticipant?.queues.strict.rating ?? '-'}
+                    严格：{generationParticipant?.queues.strict.rating ?? meta?.ratings.strict?.rating ?? '-'}
                     {(() => {
                       const q = generationParticipant?.queues.strict;
                       if (!q) return null;
@@ -543,7 +547,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                     })()}
                   </span>
                   <span className="whitespace-nowrap">
-                    自由：{meta?.ratings.free?.rating ?? generationParticipant?.queues.free.rating ?? '-'}
+                    自由：{generationParticipant?.queues.free.rating ?? meta?.ratings.free?.rating ?? '-'}
                     {(() => {
                       const q = generationParticipant?.queues.free;
                       if (!q) return null;

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { TechBadge } from '@/components/ranking/TechBadge';
@@ -83,7 +84,7 @@ const formatStrictEventStatus = (status: QueueResult['eventStatus'], skipReason:
       'winner-empty': '未给出胜者（跳过计分）',
       'multi-winner': '胜者包含多人（跳过计分）',
       'winner-ambiguous': '胜者无法匹配参战者（跳过计分）',
-      'daily-limit': '今日严格排位次数已达上限（跳过计分）',
+      'daily-limit': '今日严格排位次数已达上限（按 UTC 00:00/北京时间 08:00 刷新；跳过计分）',
       'dedup-user-pair': '短时间同对手重复对局（跳过计分）',
       'ratings-missing': '排位记录缺失（结算失败）',
       'rating-conflict': '并发冲突（结算失败）',
@@ -212,6 +213,9 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
           原因：<span className="text-gray-100">{ineligibleText}</span>
         </div>
       ) : null}
+      <div className="mt-2 text-xs text-gray-200">
+        查看百科：<Link href="/encyclopedia/ranking" className="text-blue-200 hover:underline">排位与排行榜</Link>
+      </div>
 
       <div className="mt-3 grid gap-3">
         {data.participants.map((p, idx) => {
