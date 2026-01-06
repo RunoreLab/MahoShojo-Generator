@@ -4,6 +4,7 @@ import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
 import { getDataCardMetricsByIds, upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
+import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
 
 export const config = {
   runtime: 'edge',
@@ -28,15 +29,6 @@ type ApiMetaBatchItem = {
 type ApiResponse =
   | { success: true; items: Record<string, ApiMetaBatchItem> }
   | { success: false; error: string };
-
-const computeTier = (rating: number, games: number) => {
-  const placementGames = 5;
-  if (games < placementGames || rating < 900) return '无牌';
-  if (rating < 1100) return '白牌';
-  if (rating < 1300) return '字牌';
-  if (rating < 1600) return '花牌';
-  return '权杖';
-};
 
 const uniq = (items: string[]): string[] => {
   const out: string[] = [];
@@ -191,6 +183,11 @@ export default async function handler(req: NextRequest): Promise<Response> {
 
   const strictPlaceholders = accessibleIds.map(() => '?').join(', ');
   try {
+    const strictQueen = await queryArenaPublicQueenEntity(queryFromD1, 'strict').catch((error) => {
+      console.warn('读取女王段位失败（降级为无女王）:', error);
+      return null;
+    });
+
     const strictRows = readRows<{
       entity_id: string;
       rating: number;
@@ -212,7 +209,9 @@ export default async function handler(req: NextRequest): Promise<Response> {
       if (!row?.entity_id) continue;
       const rating = typeof row.rating === 'number' ? row.rating : 0;
       const games = typeof row.games === 'number' ? row.games : 0;
-      strictTierById.set(row.entity_id, computeTier(rating, games));
+      const baseTier = computeArenaBaseTier(rating, games);
+      const isQueen = strictQueen?.entityType === 'data_card' && strictQueen?.entityId === row.entity_id;
+      strictTierById.set(row.entity_id, applyQueenTier(baseTier, isQueen));
     }
 
     for (const row of accessible) {
@@ -241,4 +240,3 @@ export default async function handler(req: NextRequest): Promise<Response> {
     headers: { 'Content-Type': 'application/json' },
   });
 }
-

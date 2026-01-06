@@ -21,6 +21,8 @@ export function TierBadge({ tier, className }: Props) {
         return 'bg-sky-50 text-sky-800 border-sky-200';
       case '花牌':
         return 'bg-pink-50 text-pink-800 border-pink-200';
+      case '女王':
+        return 'bg-gradient-to-r from-fuchsia-200 via-purple-100 to-indigo-50 text-purple-950 border-purple-300 shadow-sm';
       case '权杖':
         return 'bg-gradient-to-r from-amber-200 via-yellow-100 to-amber-50 text-amber-950 border-amber-300 shadow-sm';
       default:
@@ -30,4 +32,3 @@ export function TierBadge({ tier, className }: Props) {
 
   return <span className={[baseClassName, tierClassName, className].filter(Boolean).join(' ')}>{tier}</span>;
 }
-

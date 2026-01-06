@@ -6,10 +6,11 @@ import { getReporterTierByBadgeId } from './reporter-rules';
 
 type CandidateSource = 'slot_positive' | 'excellent_reporter';
 
-const EXCELLENT_REPORTER_TIER = getReporterTierByBadgeId('excellent_reporter');
-if (!EXCELLENT_REPORTER_TIER) {
-  throw new Error('缺少优秀记者档位配置：excellent_reporter');
-}
+const EXCELLENT_REPORTER_TIER = (() => {
+  const tier = getReporterTierByBadgeId('excellent_reporter');
+  if (!tier) throw new Error('缺少优秀记者档位配置：excellent_reporter');
+  return tier;
+})();
 
 const EXCELLENT_REPORTER_BADGE_EXISTS = `
   EXISTS (

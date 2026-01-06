@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 
 import { queryFromD1 } from '@/lib/d1';
 import { PRESET_LIST } from '@/lib/presets';
+import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
 
 export const config = {
   runtime: 'edge',
@@ -41,15 +42,6 @@ const parseOptionalIntParam = (value: string | null): number | null => {
   if (!trimmed) return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? Math.floor(parsed) : null;
-};
-
-const computeTier = (rating: number, games: number) => {
-  const placementGames = 5;
-  if (games < placementGames || rating < 900) return '无牌';
-  if (rating < 1100) return '白牌';
-  if (rating < 1300) return '字牌';
-  if (rating < 1600) return '花牌';
-  return '权杖';
 };
 
 const parseCommaList = (value: string | null): string[] => {
@@ -255,10 +247,21 @@ export default async function handler(req: NextRequest) {
       tagIds: string | null;
     }>;
 
+    const queen = await (async () => {
+      try {
+        return await queryArenaPublicQueenEntity(queryFromD1, queue);
+      } catch (error) {
+        console.warn('读取女王段位失败（降级为无女王）:', error);
+        return null;
+      }
+    })();
+
     const items: LeaderboardItem[] = rows.map((row, index) => {
       const rating = typeof row.rating === 'number' ? row.rating : 0;
       const games = typeof row.games === 'number' ? row.games : 0;
-      const tier = computeTier(rating, games);
+      const baseTier = computeArenaBaseTier(rating, games);
+      const isQueen = queen?.entityType === row.entityType && queen?.entityId === row.entityId;
+      const tier = applyQueenTier(baseTier, isQueen);
 
       const displayName = row.entityType === 'preset'
         ? (presetNameByFilename.get(row.entityId) ?? row.entityId)

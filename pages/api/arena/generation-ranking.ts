@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
 import { queryFromD1 } from '@/lib/d1';
+import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
 import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGenerationCombatantRow } from '@/lib/database/battle-report-generation-combatants';
 import {
   buildEntityKey,
@@ -64,15 +65,6 @@ type ApiResponse =
       generationId: string;
       error: string;
     };
-
-const computeTier = (rating: number, games: number) => {
-  const placementGames = 5;
-  if (games < placementGames || rating < 900) return '无牌';
-  if (rating < 1100) return '白牌';
-  if (rating < 1300) return '字牌';
-  if (rating < 1600) return '花牌';
-  return '权杖';
-};
 
 const ARENA_RANK_ORDER_BY_SQL = 'rating DESC, games DESC, updated_at DESC, entity_type ASC, entity_id ASC';
 
@@ -365,7 +357,7 @@ export default async function handler(req: NextRequest) {
       const key = `${row.queue}:${row.entity_type}:${row.entity_id}`;
       const rating = typeof row.rating === 'number' ? row.rating : 0;
       const games = typeof row.games === 'number' ? row.games : 0;
-      ratingByKey.set(key, { queue: row.queue, rating, games, tier: computeTier(rating, games) });
+      ratingByKey.set(key, { queue: row.queue, rating, games, tier: computeArenaBaseTier(rating, games) });
     });
 
     const readRankRows = async (queue: ApiQueue) => {
@@ -454,7 +446,7 @@ export default async function handler(req: NextRequest) {
         if (entityKey === aKey) {
           if (typeof event.a_after_rating === 'number') qr.rating = event.a_after_rating;
           if (typeof event.a_after_games === 'number') qr.games = event.a_after_games;
-          if (typeof qr.rating === 'number' && typeof qr.games === 'number') qr.tier = computeTier(qr.rating, qr.games);
+          if (typeof qr.rating === 'number' && typeof qr.games === 'number') qr.tier = computeArenaBaseTier(qr.rating, qr.games);
           qr.delta = typeof event.a_delta === 'number' ? event.a_delta : null;
           const before = parsedDetails?.ranks?.a?.before;
           const after = parsedDetails?.ranks?.a?.after;
@@ -466,7 +458,7 @@ export default async function handler(req: NextRequest) {
         if (entityKey === bKey) {
           if (typeof event.b_after_rating === 'number') qr.rating = event.b_after_rating;
           if (typeof event.b_after_games === 'number') qr.games = event.b_after_games;
-          if (typeof qr.rating === 'number' && typeof qr.games === 'number') qr.tier = computeTier(qr.rating, qr.games);
+          if (typeof qr.rating === 'number' && typeof qr.games === 'number') qr.tier = computeArenaBaseTier(qr.rating, qr.games);
           qr.delta = typeof event.b_delta === 'number' ? event.b_delta : null;
           const before = parsedDetails?.ranks?.b?.before;
           const after = parsedDetails?.ranks?.b?.after;
@@ -479,6 +471,37 @@ export default async function handler(req: NextRequest) {
 
     applyEventToParticipants('strict');
     applyEventToParticipants('free');
+
+    const [strictQueen, freeQueen] = await Promise.all([
+      queryArenaPublicQueenEntity(queryFromD1, 'strict').catch((error) => {
+        console.warn('读取女王段位失败（降级为无女王）:', error);
+        return null;
+      }),
+      queryArenaPublicQueenEntity(queryFromD1, 'free').catch((error) => {
+        console.warn('读取女王段位失败（降级为无女王）:', error);
+        return null;
+      }),
+    ]);
+
+    for (const participant of participants) {
+      if ((participant.entityType !== 'data_card' && participant.entityType !== 'preset') || !participant.entityId) continue;
+
+      const entityType = participant.entityType;
+      const entityId = participant.entityId;
+
+      const queues: Array<{ queue: ApiQueue; queen: typeof strictQueen }> = [
+        { queue: 'strict', queen: strictQueen },
+        { queue: 'free', queen: freeQueen },
+      ];
+
+      for (const { queue, queen } of queues) {
+        const qr = participant.queues[queue];
+        if (typeof qr.rating !== 'number' || typeof qr.games !== 'number') continue;
+        const baseTier = computeArenaBaseTier(qr.rating, qr.games);
+        const isQueen = queen?.entityType === entityType && queen?.entityId === entityId;
+        qr.tier = applyQueenTier(baseTier, isQueen);
+      }
+    }
 
     const res: ApiResponse = {
       success: true,

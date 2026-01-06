@@ -5,10 +5,11 @@ import { grantBadgeToUser, userHasBadge } from '@/lib/database/badges';
 import { increaseUserSlotCount } from '@/lib/database/users';
 import { getReporterTierByBadgeId } from './reporter-rules';
 
-const EXCELLENT_REPORTER_TIER = getReporterTierByBadgeId('excellent_reporter');
-if (!EXCELLENT_REPORTER_TIER) {
-  throw new Error('缺少优秀记者档位配置：excellent_reporter');
-}
+const EXCELLENT_REPORTER_TIER = (() => {
+  const tier = getReporterTierByBadgeId('excellent_reporter');
+  if (!tier) throw new Error('缺少优秀记者档位配置：excellent_reporter');
+  return tier;
+})();
 
 interface EligibleUser {
   user_id: number;
