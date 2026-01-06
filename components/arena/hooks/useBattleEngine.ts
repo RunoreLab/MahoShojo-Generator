@@ -387,6 +387,14 @@ export const useBattleEngine = () => {
         : undefined;
 
       const rankedMatchTicket = rankedMatch?.ticket ?? null;
+      const rankedMatchId = rankedMatchTicket?.matchId ?? null;
+      const clearRankedMatchAfterSuccess = () => {
+        if (!rankedMatchId) return;
+        const currentMatchId = useBattleStore.getState().rankedMatch?.ticket?.matchId ?? null;
+        if (!currentMatchId) return;
+        if (currentMatchId !== rankedMatchId) return;
+        clearRankedMatch();
+      };
       const requestBody: Record<string, unknown> = {
         combatants: freshCombatants.map((combatant) => ({
           type: combatant.type,
@@ -434,10 +442,6 @@ export const useBattleEngine = () => {
           modelId: userProviderConfig.modelId,
           apiKey: userProviderConfig.apiKey,
         };
-      }
-
-      if (rankedMatchTicket) {
-        clearRankedMatch();
       }
 
       const authHeader = await authStorage.getAuthHeader();
@@ -854,6 +858,7 @@ export const useBattleEngine = () => {
             console.warn('写入叙事历史失败（已忽略）', error);
           }
 
+          clearRankedMatchAfterSuccess();
           startCooldown();
 
           if (settings.writeArenaHistory || settings.writeCurrentState) {
@@ -916,6 +921,7 @@ export const useBattleEngine = () => {
       }
 
       const result: BattleApiResponse = await response.json();
+      clearRankedMatchAfterSuccess();
 
       if (await applyBattleResult(result, 'battle')) {
         return;
