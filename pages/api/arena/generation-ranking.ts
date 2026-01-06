@@ -28,6 +28,9 @@ type ApiQueueResult = {
   games: number | null;
   tier: string | null;
   delta: number | null;
+  rank: number | null;
+  total: number | null;
+  rankDelta: number | null;
 };
 
 type ApiParticipantResult = {
@@ -37,6 +40,8 @@ type ApiParticipantResult = {
   entityKey: string | null;
   dataCardId: string | null;
   presetId: string | null;
+  techScore: number | null;
+  techLevel: string | null;
   queues: Record<ApiQueue, ApiQueueResult>;
 };
 
@@ -68,6 +73,8 @@ const computeTier = (rating: number, games: number) => {
   if (rating < 1600) return '花牌';
   return '权杖';
 };
+
+const ARENA_RANK_ORDER_BY_SQL = 'rating DESC, games DESC, updated_at DESC, entity_type ASC, entity_id ASC';
 
 const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combatants: BattleReportGenerationCombatantRow[]): string[] => {
   const parsedExtraJson = (() => {
@@ -150,6 +157,9 @@ const buildDefaultQueueResult = (eligible: boolean, ineligibleReasons: string[])
   games: null,
   tier: null,
   delta: null,
+  rank: null,
+  total: null,
+  rankDelta: null,
 });
 
 export default async function handler(req: NextRequest) {
@@ -213,6 +223,8 @@ export default async function handler(req: NextRequest) {
         entityKey,
         dataCardId: typeof combatant.data_card_id === 'string' ? combatant.data_card_id : null,
         presetId: combatant.is_preset === 1 ? (typeof combatant.template_id === 'string' ? combatant.template_id : null) : null,
+        techScore: null,
+        techLevel: null,
         queues: {
           strict: buildDefaultQueueResult(strictEligible, strictIneligibleReasons),
           free: buildDefaultQueueResult(freeEligible, freeIneligibleReasons),
@@ -220,11 +232,43 @@ export default async function handler(req: NextRequest) {
       };
     });
 
+    const dataCardIds = participants
+      .map((p) => (typeof p.dataCardId === 'string' ? p.dataCardId.trim() : ''))
+      .filter(Boolean);
+    if (dataCardIds.length > 0) {
+      const metricsRows = readRows<{ data_card_id: string; tech_score: number; tech_level: string }>(
+        await queryFromD1(
+          `SELECT data_card_id, tech_score, tech_level
+           FROM data_card_metrics
+           WHERE data_card_id IN (${dataCardIds.map(() => '?').join(', ')})`,
+          dataCardIds,
+        ),
+      );
+      const byId = new Map<string, { techScore: number | null; techLevel: string | null }>();
+      metricsRows.forEach((row) => {
+        if (!row) return;
+        const id = typeof row.data_card_id === 'string' ? row.data_card_id : '';
+        if (!id) return;
+        byId.set(id, {
+          techScore: typeof row.tech_score === 'number' ? row.tech_score : null,
+          techLevel: typeof row.tech_level === 'string' ? row.tech_level : null,
+        });
+      });
+      participants.forEach((p) => {
+        if (!p.dataCardId) return;
+        const meta = byId.get(p.dataCardId);
+        if (!meta) return;
+        p.techScore = meta.techScore;
+        p.techLevel = meta.techLevel;
+      });
+    }
+
     const readEventRows = async () =>
       readRows<{
       queue: ApiQueue;
       status: 'pending' | 'applied' | 'skipped' | 'failed';
       skip_reason: string | null;
+      details_json: string | null;
       a_entity_type: 'data_card' | 'preset';
       a_entity_id: string;
       b_entity_type: 'data_card' | 'preset';
@@ -245,6 +289,7 @@ export default async function handler(req: NextRequest) {
             queue,
             status,
             skip_reason,
+            details_json,
             a_entity_type,
             a_entity_id,
             b_entity_type,
@@ -323,6 +368,38 @@ export default async function handler(req: NextRequest) {
       ratingByKey.set(key, { queue: row.queue, rating, games, tier: computeTier(rating, games) });
     });
 
+    const readRankRows = async (queue: ApiQueue) => {
+      if (entitiesForRatings.length === 0) {
+        return [] as Array<{ entity_type: 'data_card' | 'preset'; entity_id: string; rank: number; total: number }>;
+      }
+      const sql = `WITH ordered AS (
+        SELECT
+          entity_type,
+          entity_id,
+          ROW_NUMBER() OVER (ORDER BY ${ARENA_RANK_ORDER_BY_SQL}) AS rank,
+          COUNT(*) OVER () AS total
+        FROM arena_ratings
+        WHERE queue = ?
+      )
+      SELECT entity_type, entity_id, rank, total
+      FROM ordered
+      WHERE ${entitiesForRatings.map(() => `(entity_type = ? AND entity_id = ?)`).join(' OR ')}`;
+      return readRows<{ entity_type: 'data_card' | 'preset'; entity_id: string; rank: number; total: number }>(
+        await queryFromD1(sql, [queue, ...entitiesForRatings.flatMap((e) => [e.entityType, e.entityId])]),
+      );
+    };
+
+    const [strictRankRows, freeRankRows] = await Promise.all([readRankRows('strict'), readRankRows('free')]);
+    const rankByKey = new Map<string, { rank: number; total: number }>();
+    strictRankRows.forEach((row) => {
+      const entityKey = buildEntityKey({ entityType: row.entity_type, entityId: row.entity_id });
+      rankByKey.set(`strict:${entityKey}`, { rank: row.rank, total: row.total });
+    });
+    freeRankRows.forEach((row) => {
+      const entityKey = buildEntityKey({ entityType: row.entity_type, entityId: row.entity_id });
+      rankByKey.set(`free:${entityKey}`, { rank: row.rank, total: row.total });
+    });
+
     const applyEventToParticipants = (queue: ApiQueue) => {
       const event = eventByQueue.get(queue);
       if (!event) {
@@ -337,6 +414,16 @@ export default async function handler(req: NextRequest) {
       const skipReason = typeof event.skip_reason === 'string' ? event.skip_reason : null;
       const aKey = buildEntityKey({ entityType: event.a_entity_type, entityId: event.a_entity_id });
       const bKey = buildEntityKey({ entityType: event.b_entity_type, entityId: event.b_entity_id });
+      const parsedDetails = (() => {
+        const raw = typeof event.details_json === 'string' ? event.details_json.trim() : '';
+        if (!raw) return null;
+        try {
+          const parsed = JSON.parse(raw);
+          return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as any) : null;
+        } catch {
+          return null;
+        }
+      })();
 
       participants.forEach((p) => {
         const qr = p.queues[queue];
@@ -354,6 +441,12 @@ export default async function handler(req: NextRequest) {
           qr.tier = ratingFallback.tier;
         }
 
+        const rankFallback = rankByKey.get(`${queue}:${entityKey}`);
+        if (rankFallback) {
+          qr.rank = rankFallback.rank;
+          qr.total = rankFallback.total;
+        }
+
         if (eventStatus !== 'applied') {
           return;
         }
@@ -363,6 +456,11 @@ export default async function handler(req: NextRequest) {
           if (typeof event.a_after_games === 'number') qr.games = event.a_after_games;
           if (typeof qr.rating === 'number' && typeof qr.games === 'number') qr.tier = computeTier(qr.rating, qr.games);
           qr.delta = typeof event.a_delta === 'number' ? event.a_delta : null;
+          const before = parsedDetails?.ranks?.a?.before;
+          const after = parsedDetails?.ranks?.a?.after;
+          if (typeof before === 'number' && typeof after === 'number') {
+            qr.rankDelta = before - after;
+          }
           return;
         }
         if (entityKey === bKey) {
@@ -370,6 +468,11 @@ export default async function handler(req: NextRequest) {
           if (typeof event.b_after_games === 'number') qr.games = event.b_after_games;
           if (typeof qr.rating === 'number' && typeof qr.games === 'number') qr.tier = computeTier(qr.rating, qr.games);
           qr.delta = typeof event.b_delta === 'number' ? event.b_delta : null;
+          const before = parsedDetails?.ranks?.b?.before;
+          const after = parsedDetails?.ranks?.b?.after;
+          if (typeof before === 'number' && typeof after === 'number') {
+            qr.rankDelta = before - after;
+          }
         }
       });
     };

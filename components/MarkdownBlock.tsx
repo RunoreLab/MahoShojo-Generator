@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
@@ -13,6 +14,13 @@ export interface MarkdownBlockProps {
   mode?: MarkdownBlockMode;
   className?: string;
 }
+
+const getEncyclopediaHrefFromInlineCode = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/encyclopedia/')) return null;
+  const match = trimmed.match(/^\/encyclopedia\/[a-z0-9-]+(?:#[A-Za-z0-9-_]+)?$/);
+  return match ? trimmed : null;
+};
 
 export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', className }: MarkdownBlockProps) {
   const borderClass = variant === 'light' ? 'border-gray-200' : 'border-white/15';
@@ -95,6 +103,28 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
 
       const looksLikeBlock = Boolean(codeClassName && /\blanguage-/.test(codeClassName)) || text.includes('\n');
       const isInline = typeof inline === 'boolean' ? inline : !looksLikeBlock;
+
+      if (isInline) {
+        const encyclopediaHref = getEncyclopediaHrefFromInlineCode(text);
+        if (encyclopediaHref) {
+          return (
+            <Link
+              href={encyclopediaHref}
+              className="inline-flex rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
+              title="打开对应百科条目"
+            >
+              <code
+                className={`font-mono text-xs rounded px-1 py-0.5 ${
+                  variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
+                } underline underline-offset-2 decoration-dotted hover:decoration-solid`}
+                {...props}
+              >
+                {text}
+              </code>
+            </Link>
+          );
+        }
+      }
 
       return isInline ? (
         <code

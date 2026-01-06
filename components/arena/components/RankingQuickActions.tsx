@@ -9,6 +9,28 @@ import { useBattleStore } from '../stores/useBattleStore';
 import type { BattleStoreState, CombatantData } from '../types';
 import { getCombatantDisplayName, inferCombatantType, validateCanshouData, validateMagicalGirlData } from '../utils/characterValidator';
 
+const formatTicketExpiresAtInClientTz = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  const ms = Date.parse(trimmed);
+  if (!Number.isFinite(ms)) return trimmed;
+
+  const date = new Date(ms);
+  try {
+    return new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
+  } catch {
+    return date.toLocaleString();
+  }
+};
+
 const removePrivateKeys = (obj: any): any => {
   if (obj === null || typeof obj !== 'object') {
     return obj;
@@ -35,6 +57,26 @@ const verifyOrigin = async (payload: any): Promise<boolean> => {
   const { isValid } = await response.json();
   return Boolean(isValid);
 };
+
+type StrictPreflightResponse =
+  | {
+      success: true;
+      willCount: boolean;
+      reasons: string[];
+      rankedMatch: {
+        ok: boolean;
+        reason: string | null;
+        matchId: string | null;
+        expiresAt: string | null;
+      };
+      daily: {
+        used: number | null;
+        limit: number;
+        exceeded: boolean | null;
+        sinceIso: string | null;
+      };
+    }
+  | { success: false; error: string };
 
 type RankedMatchmakingResponse =
   | {
@@ -146,6 +188,39 @@ const buildStrictSetupMissingReasons = (input: {
   return reasons;
 };
 
+const formatDurationMmSs = (ms: number): string => {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const mm = Math.floor(total / 60);
+  const ss = total % 60;
+  return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+};
+
+const formatStrictReason = (code: string): string => {
+  const map: Record<string, string> = {
+    'need-login': '需要先登录',
+    'mode-not-classic': '需使用「经典模式」',
+    'combatant-count-not-2': '需 2 人对战',
+    'language-not-zh-cn': '生成语言需为「简体中文」',
+    'level-not-default': '等级需为「默认」',
+    'has-user-guidance': '需清空「故事引导」',
+    'has-adjudication-events': '需清空「随机判定器事件」',
+    'read-arena-history': '需关闭「读取历战」',
+    'read-current-state': '需关闭「读取当前状态」',
+    'read-narrative-history': '需关闭「读取叙事历史」',
+    'has-character-guidance': '需清空「角色行动引导」',
+    'need-ranked-match': '需先进行排位匹配',
+    'ranked-match-missing': '未进行排位匹配',
+    'ranked-match-invalid': '排位匹配票据无效',
+    'ranked-match-expired': '排位匹配已过期（请重新匹配）',
+    'ranked-match-settings-changed': '匹配后修改了设置（请重新匹配）',
+    'ranked-match-roster-changed': '匹配后修改了参战列表（请重新匹配）',
+    'ranked-match-unrankable': '参战者未登记为数据卡/预设',
+    'ranked-match-user-mismatch': '排位匹配票据与账号不匹配',
+    'daily-limit': '今日严格排位计分次数已达上限',
+  };
+  return map[code] ?? code;
+};
+
 export function RankingQuickActions() {
   const { isAuthenticated } = useAuth();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
@@ -173,8 +248,16 @@ export function RankingQuickActions() {
   const setRankedMatch = useBattleSelector((state) => state.setRankedMatch);
   const clearRankedMatch = useBattleSelector((state) => state.clearRankedMatch);
 
+  const [isMounted, setIsMounted] = useState(false);
   const [selectedPlayerFilename, setSelectedPlayerFilename] = useState<string>('');
   const [isRankedMatching, setIsRankedMatching] = useState(false);
+  const [tickNowMs, setTickNowMs] = useState<number>(Date.now());
+  const [strictPreflight, setStrictPreflight] = useState<StrictPreflightResponse | null>(null);
+  const [isCheckingStrictPreflight, setIsCheckingStrictPreflight] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const readableCombatants = useMemo(
     () => combatants.filter((c): c is CombatantData => 'data' in c),
@@ -297,6 +380,127 @@ export function RankingQuickActions() {
     clearRankedMatch();
     setError('⚠️ 你已修改参战列表或设置，本次排位匹配已失效；严格排位将不计分，请重新匹配。');
   }, [clearRankedMatch, currentLockKey, rankedMatch, setError]);
+
+  const rankedMatchTicket = useMemo(() => (rankedMatch?.ticket as any) ?? null, [rankedMatch]);
+
+  const ticketExpiresAt = useMemo(() => {
+    const raw = typeof rankedMatchTicket?.expiresAt === 'string' ? rankedMatchTicket.expiresAt.trim() : '';
+    return raw || null;
+  }, [rankedMatchTicket]);
+
+  const ticketExpiresAtMs = useMemo(() => {
+    if (!ticketExpiresAt) return null;
+    const ms = Date.parse(ticketExpiresAt);
+    return Number.isFinite(ms) ? ms : null;
+  }, [ticketExpiresAt]);
+
+  const ticketMsLeft = useMemo(() => {
+    if (ticketExpiresAtMs == null) return null;
+    return ticketExpiresAtMs - tickNowMs;
+  }, [ticketExpiresAtMs, tickNowMs]);
+
+  const ticketCountdownText = useMemo(() => {
+    if (ticketMsLeft == null) return null;
+    if (ticketMsLeft <= 0) return '已过期';
+    return `剩余 ${formatDurationMmSs(ticketMsLeft)}`;
+  }, [ticketMsLeft]);
+
+  useEffect(() => {
+    if (!ticketExpiresAtMs) return;
+    const interval = window.setInterval(() => setTickNowMs(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [ticketExpiresAtMs]);
+
+  const strictPreflightPayload = useMemo(() => {
+    const minimalCombatants = combatants.map((c) => {
+      if (!c || typeof c !== 'object') return null;
+      if (!('data' in c)) return { placeholder: true };
+      const dataCombatant = c as CombatantData;
+      return {
+        isPreset: Boolean(dataCombatant.isPreset),
+        filename: dataCombatant.filename,
+        sourceDataCardId: dataCombatant.sourceDataCardId,
+        characterGuidance: dataCombatant.characterGuidance,
+      };
+    }).filter(Boolean);
+
+    return {
+      battleMode,
+      selectedLevel,
+      language: selectedLanguage,
+      storyLength,
+      settings: {
+        userGuidance: settings.userGuidance,
+        readArenaHistory: settings.readArenaHistory,
+        readCurrentState: settings.readCurrentState,
+        readNarrativeHistory: settings.readNarrativeHistory,
+      },
+      adjudicationEventCount: Array.isArray(adjudicationEvents) ? adjudicationEvents.length : 0,
+      combatants: minimalCombatants,
+      rankedMatch: rankedMatchTicket,
+    };
+  }, [
+    adjudicationEvents,
+    battleMode,
+    combatants,
+    rankedMatchTicket,
+    selectedLanguage,
+    selectedLevel,
+    settings.readArenaHistory,
+    settings.readCurrentState,
+    settings.readNarrativeHistory,
+    settings.userGuidance,
+    storyLength,
+  ]);
+
+  const strictPreflightKey = useMemo(() => {
+    const matchId = typeof rankedMatchTicket?.matchId === 'string' ? rankedMatchTicket.matchId : '';
+    const expiresAt = typeof rankedMatchTicket?.expiresAt === 'string' ? rankedMatchTicket.expiresAt : '';
+    return JSON.stringify({ currentLockKey, matchId, expiresAt, isAuthenticated });
+  }, [currentLockKey, isAuthenticated, rankedMatchTicket]);
+
+  useEffect(() => {
+    if (!rankedMatch) {
+      setStrictPreflight(null);
+      setIsCheckingStrictPreflight(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      (async () => {
+        try {
+          setIsCheckingStrictPreflight(true);
+          const authHeader = await authStorage.getAuthHeader();
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (authHeader) headers.Authorization = authHeader;
+
+          const res = await fetch('/api/arena/strict-preflight', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(strictPreflightPayload),
+            signal: controller.signal,
+          });
+          const json = (await res.json()) as StrictPreflightResponse;
+          if (!res.ok) {
+            const err = (json as any)?.error || `HTTP ${res.status}`;
+            throw new Error(err);
+          }
+          setStrictPreflight(json);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          setStrictPreflight({ success: false, error: error instanceof Error ? error.message : '无法检查严格排位计分状态' });
+        } finally {
+          if (!controller.signal.aborted) setIsCheckingStrictPreflight(false);
+        }
+      })();
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [rankedMatch, strictPreflightKey, strictPreflightPayload]);
 
   const handleRankedMatch = async () => {
     if (isGenerating || isRankedMatching) return;
@@ -477,10 +681,69 @@ export function RankingQuickActions() {
     if (!rankedMatch) return null;
     const ticket = rankedMatch.ticket as any;
     const expiresAt = typeof ticket?.expiresAt === 'string' ? ticket.expiresAt.trim() : '';
+    const expiresAtLocal = isMounted && expiresAt ? formatTicketExpiresAtInClientTz(expiresAt) : '';
     const matchId = typeof ticket?.matchId === 'string' ? ticket.matchId.trim() : '';
-    const show = expiresAt ? `有效期至 ${expiresAt}` : (matchId ? `matchId: ${matchId}` : '已锁定');
-    return <span className="ml-2 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">{show}</span>;
-  }, [rankedMatch]);
+    const show = expiresAtLocal ? `有效期至 ${expiresAtLocal}` : (expiresAt ? '有效期至 …' : (matchId ? `matchId: ${matchId}` : '已锁定'));
+    const tz = isMounted ? Intl.DateTimeFormat().resolvedOptions().timeZone : '';
+    const title = expiresAt
+      ? `有效期（本地时间${tz ? `：${tz}` : ''}）\n${expiresAtLocal || '—'}\n原始值：${expiresAt}`
+      : undefined;
+    return (
+      <span
+        title={title}
+        className="ml-2 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+      >
+        {show}
+      </span>
+    );
+  }, [isMounted, rankedMatch]);
+
+  const strictIndicator = useMemo(() => {
+    if (strictPreflight?.success === true) {
+      return {
+        willCount: strictPreflight.willCount,
+        reasons: strictPreflight.reasons,
+        daily: strictPreflight.daily,
+        source: 'server' as const,
+      };
+    }
+
+    const reasons: string[] = [];
+    if (!isAuthenticated) reasons.push('need-login');
+    if (battleMode !== 'classic') reasons.push('mode-not-classic');
+    if (combatants.length !== 2) reasons.push('combatant-count-not-2');
+    if (selectedLanguage !== 'zh-CN') reasons.push('language-not-zh-cn');
+    if (selectedLevel.trim()) reasons.push('level-not-default');
+    if (settings.userGuidance.trim()) reasons.push('has-user-guidance');
+    if (settings.readArenaHistory) reasons.push('read-arena-history');
+    if (settings.readCurrentState) reasons.push('read-current-state');
+    if (settings.readNarrativeHistory) reasons.push('read-narrative-history');
+    if (Array.isArray(adjudicationEvents) && adjudicationEvents.length > 0) reasons.push('has-adjudication-events');
+    if (readableCombatants.some((c) => (c.characterGuidance ?? '').trim())) reasons.push('has-character-guidance');
+
+    if (!rankedMatch) {
+      reasons.push('ranked-match-missing');
+    } else if (ticketMsLeft != null && ticketMsLeft <= 0) {
+      reasons.push('ranked-match-expired');
+    }
+
+    return { willCount: reasons.length === 0, reasons, daily: null, source: 'local' as const };
+  }, [
+    adjudicationEvents,
+    battleMode,
+    combatants.length,
+    isAuthenticated,
+    rankedMatch,
+    readableCombatants,
+    selectedLanguage,
+    selectedLevel,
+    settings.readArenaHistory,
+    settings.readCurrentState,
+    settings.readNarrativeHistory,
+    settings.userGuidance,
+    strictPreflight,
+    ticketMsLeft,
+  ]);
 
   return (
     <div className="mt-4 rounded-lg border border-gray-200 bg-white/70 p-3">
@@ -493,9 +756,9 @@ export function RankingQuickActions() {
             严格排位不允许自由挑选对手；选择一位参战角色后，点击一键匹配随机匹配合适对手。
           </div>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
           <select
-            className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm"
+            className="w-full rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm sm:w-72"
             value={selectedPlayerFilename}
             onChange={(e) => setSelectedPlayerFilename(e.target.value)}
             disabled={isGenerating || isRankedMatching || rankableCombatants.length <= 0}
@@ -511,24 +774,26 @@ export function RankingQuickActions() {
               ))
             )}
           </select>
-          <button
-            type="button"
-            onClick={handleRankedMatch}
-            disabled={isGenerating || isRankedMatching || rankableCombatants.length <= 0}
-            className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-            title="匹配对手（严格排位计分需要先匹配）"
-          >
-            {isRankedMatching ? '匹配中…' : (rankedMatch ? '重新匹配' : '一键匹配')}
-          </button>
-          <button
-            type="button"
-            onClick={handleApplyStrictSetup}
-            disabled={isGenerating || isRankedMatching}
-            className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
-            title="将严格排位相关设置一键安排到位"
-          >
-            严格设置
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRankedMatch}
+              disabled={isGenerating || isRankedMatching || rankableCombatants.length <= 0}
+              className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+              title="匹配对手（严格排位计分需要先匹配）"
+            >
+              {isRankedMatching ? '匹配中…' : (rankedMatch ? '重新匹配' : '一键匹配')}
+            </button>
+            <button
+              type="button"
+              onClick={handleApplyStrictSetup}
+              disabled={isGenerating || isRankedMatching}
+              className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+              title="将严格排位相关设置一键安排到位"
+            >
+              严格设置
+            </button>
+          </div>
         </div>
       </div>
 
@@ -540,6 +805,37 @@ export function RankingQuickActions() {
             当前仍缺少：<span className="text-gray-800">{missingReasons.join('、')}</span>
           </span>
         )}
+      </div>
+
+      <div className="mt-2 text-xs">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className={strictIndicator.willCount ? 'text-emerald-700 font-semibold' : 'text-red-700 font-semibold'}>
+            {strictIndicator.willCount ? '严格排位计分：可以' : '严格排位计分：不行'}
+          </span>
+          {ticketCountdownText ? (
+            <span className={ticketMsLeft != null && ticketMsLeft <= 90_000 ? 'text-amber-700' : 'text-gray-600'} title="排位匹配票据有效期（过期后严格排位不计分）">
+              票据{ticketCountdownText}
+            </span>
+          ) : null}
+          {strictIndicator.source === 'server' && strictIndicator.daily?.used != null ? (
+            <span className="text-gray-600" title={strictIndicator.daily.sinceIso ? `按 UTC 统计，自 ${strictIndicator.daily.sinceIso} 起` : undefined}>
+              今日严格：{strictIndicator.daily.used}/{strictIndicator.daily.limit}
+            </span>
+          ) : null}
+          {isCheckingStrictPreflight ? <span className="text-gray-500">检查中…</span> : null}
+        </div>
+        {!strictIndicator.willCount ? (
+          <div className="mt-1 text-gray-600">
+            原因：<span className="text-gray-800">{strictIndicator.reasons.map(formatStrictReason).join('、')}</span>
+          </div>
+        ) : (
+          <div className="mt-1 text-gray-500">
+            备注：最终仍可能因战报未给出/无法识别胜者、或结算异常而跳过计分。
+          </div>
+        )}
+        {strictPreflight?.success === false ? (
+          <div className="mt-1 text-xs text-red-600">严格排位状态检查失败：{strictPreflight.error}</div>
+        ) : null}
       </div>
 
       <div className="mt-2 text-[11px] text-gray-500">

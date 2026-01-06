@@ -34,6 +34,7 @@ type ApiRating = {
   lastDelta: number | null;
   lastAppliedAt: string | null;
   publicRank: number | null;
+  publicTotal: number | null;
 };
 
 type ApiMetaResponse =
@@ -61,7 +62,6 @@ interface DataCardDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
   isOwner?: boolean;
-  adminTagEditor?: boolean;
   card: {
     id: string;
     name: string;
@@ -85,7 +85,6 @@ export default function DataCardDetailsModal({
   card,
   pendingNotice,
   isOwner = false,
-  adminTagEditor = false,
 }: DataCardDetailsModalProps) {
   const [metaNonce, setMetaNonce] = useState(0);
   const [meta, setMeta] = useState<Extract<ApiMetaResponse, { success: true }> | null>(null);
@@ -93,7 +92,6 @@ export default function DataCardDetailsModal({
   const [metaError, setMetaError] = useState<string | null>(null);
 
   const [isEditingTags, setIsEditingTags] = useState(false);
-  const [tagEditScope, setTagEditScope] = useState<'user' | 'system' | 'admin'>('user');
   const [allTags, setAllTags] = useState<ApiTag[]>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
   const [tagsError, setTagsError] = useState<string | null>(null);
@@ -131,8 +129,13 @@ export default function DataCardDetailsModal({
     void reloadMeta(card.id);
     setIsEditingTags(false);
     setSaveTagsError(null);
-    setTagEditScope('user');
   }, [isOpen, card?.id, metaNonce, reloadMeta]);
+
+  useEffect(() => {
+    if (!meta || isEditingTags) return;
+    const userTagIds = meta.tags.filter((t) => t.scope === 'user').map((t) => t.id);
+    setSelectedTagIds(userTagIds);
+  }, [meta, isEditingTags]);
 
   const visibleTags = useMemo(() => {
     if (!meta?.tags) return [];
@@ -141,20 +144,15 @@ export default function DataCardDetailsModal({
 
   const formatSignedDelta = (value: number) => (value >= 0 ? `+${value}` : String(value));
 
-  const openTagEditor = useCallback(async (scope: 'user' | 'system' | 'admin') => {
-    if (scope === 'user' && !isOwner) return;
-    if ((scope === 'system' || scope === 'admin') && !adminTagEditor) return;
+  const openTagEditor = useCallback(async () => {
+    if (!isOwner) return;
     setIsEditingTags(true);
-    setTagEditScope(scope);
     setSaveTagsError(null);
-    setTagSearch('');
-    const current = meta?.tags?.filter((t) => t.scope === scope).map((t) => t.id) ?? [];
-    setSelectedTagIds(current);
     if (allTags.length > 0) return;
     setTagsLoading(true);
     setTagsError(null);
     try {
-      const json = await fetchJson<ApiTagsResponse>('/api/tags?includeInactive=1', { method: 'GET' });
+      const json = await fetchJson<ApiTagsResponse>('/api/tags', { method: 'GET' });
       if (json && (json as any).success === true) {
         setAllTags((json as any).tags ?? []);
       } else {
@@ -165,20 +163,15 @@ export default function DataCardDetailsModal({
     } finally {
       setTagsLoading(false);
     }
-  }, [adminTagEditor, allTags.length, isOwner, meta?.tags]);
+  }, [allTags.length, isOwner]);
 
   const selectableTags = useMemo(() => {
     const q = tagSearch.trim().toLowerCase();
     return allTags
-      .filter((t) => t.scope === tagEditScope)
-      .filter((t) => t.isActive || selectedTagIds.includes(t.id))
+      .filter((t) => t.isActive && t.scope === 'user')
       .filter((t) => {
         if (!q) return true;
-        return (
-          (t.name ?? '').toLowerCase().includes(q) ||
-          (t.id ?? '').toLowerCase().includes(q) ||
-          (t.category ?? '').toLowerCase().includes(q)
-        );
+        return (t.name ?? '').toLowerCase().includes(q) || (t.category ?? '').toLowerCase().includes(q);
       })
       .slice()
       .sort((a, b) => {
@@ -186,7 +179,7 @@ export default function DataCardDetailsModal({
         if (category !== 0) return category;
         return a.name.localeCompare(b.name, 'zh-CN');
       });
-  }, [allTags, selectedTagIds, tagEditScope, tagSearch]);
+  }, [allTags, tagSearch]);
 
   const groupedSelectableTags = useMemo(() => {
     const map = new Map<string, ApiTag[]>();
@@ -211,35 +204,24 @@ export default function DataCardDetailsModal({
   }, []);
 
   const saveTags = useCallback(async () => {
-    if (tagEditScope === 'user' && !isOwner) return;
-    if ((tagEditScope === 'system' || tagEditScope === 'admin') && !adminTagEditor) return;
+    if (!isOwner) return;
     setSavingTags(true);
     setSaveTagsError(null);
     try {
       const authHeader = await authStorage.getAuthHeader();
-      if (tagEditScope === 'user') {
-        if (!authHeader) {
-          setSaveTagsError('未登录，无法保存标签');
-          return;
-        }
-
-        await fetchJson('/api/data-card-tags', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: authHeader,
-          },
-          body: JSON.stringify({ dataCardId: card.id, tagIds: selectedTagIds }),
-        });
-      } else {
-        const headers: HeadersInit = { 'Content-Type': 'application/json' };
-        if (authHeader) headers.Authorization = authHeader;
-        await fetchJson('/api/admin/data-card-tags', {
-          method: 'PUT',
-          headers,
-          body: JSON.stringify({ dataCardId: card.id, scope: tagEditScope, tagIds: selectedTagIds }),
-        });
+      if (!authHeader) {
+        setSaveTagsError('未登录，无法保存标签');
+        return;
       }
+
+      await fetchJson('/api/data-card-tags', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({ dataCardId: card.id, tagIds: selectedTagIds }),
+      });
 
       setIsEditingTags(false);
       setMetaNonce((n) => n + 1);
@@ -248,7 +230,7 @@ export default function DataCardDetailsModal({
     } finally {
       setSavingTags(false);
     }
-  }, [adminTagEditor, card.id, isOwner, selectedTagIds, tagEditScope]);
+  }, [card.id, isOwner, selectedTagIds]);
 
   if (!isOpen) return null;
 
@@ -401,8 +383,11 @@ export default function DataCardDetailsModal({
                               {meta.ratings.strict.lastDelta != null ? (
                                 <span>，Δ{formatSignedDelta(meta.ratings.strict.lastDelta)}</span>
                               ) : null}
-                              {(isOwner || adminTagEditor) && meta.ratings.strict.publicRank != null ? (
-                                <span>，公共排名#{meta.ratings.strict.publicRank}</span>
+                              {meta.ratings.strict.publicRank != null ? (
+                                <span>
+                                  ，公共排名#{meta.ratings.strict.publicRank}
+                                  {meta.ratings.strict.publicTotal != null ? `/${meta.ratings.strict.publicTotal}` : ''}
+                                </span>
                               ) : null}
                               ）
                             </span>
@@ -423,8 +408,11 @@ export default function DataCardDetailsModal({
                               {meta.ratings.free.lastDelta != null ? (
                                 <span>，Δ{formatSignedDelta(meta.ratings.free.lastDelta)}</span>
                               ) : null}
-                              {(isOwner || adminTagEditor) && meta.ratings.free.publicRank != null ? (
-                                <span>，公共排名#{meta.ratings.free.publicRank}</span>
+                              {meta.ratings.free.publicRank != null ? (
+                                <span>
+                                  ，公共排名#{meta.ratings.free.publicRank}
+                                  {meta.ratings.free.publicTotal != null ? `/${meta.ratings.free.publicTotal}` : ''}
+                                </span>
                               ) : null}
                               ）
                             </span>
@@ -443,13 +431,7 @@ export default function DataCardDetailsModal({
                         visibleTags.map((tag) => (
                           <span
                             key={tag.id}
-                            className={`px-2 py-0.5 rounded-full border text-gray-700 ${
-                              tag.scope === 'admin'
-                                ? 'border-amber-200 bg-amber-50'
-                                : tag.scope === 'system'
-                                  ? 'border-red-200 bg-red-50'
-                                  : 'border-gray-200 bg-white'
-                            }`}
+                            className="px-2 py-0.5 rounded-full border border-gray-200 bg-white text-gray-700"
                             title={tag.description ?? undefined}
                           >
                             {tag.name}
@@ -458,27 +440,11 @@ export default function DataCardDetailsModal({
                       )}
                       {isOwner && (
                         <button
-                          onClick={() => void openTagEditor('user')}
+                          onClick={() => void openTagEditor()}
                           className="ml-1 px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
                         >
                           编辑
                         </button>
-                      )}
-                      {adminTagEditor && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => void openTagEditor('admin')}
-                            className="ml-1 px-2 py-0.5 rounded border border-gray-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
-                          >
-                            编辑管理员标签
-                          </button>
-                          <button
-                            onClick={() => void openTagEditor('system')}
-                            className="px-2 py-0.5 rounded border border-gray-200 bg-red-50 text-red-800 hover:bg-red-100"
-                          >
-                            编辑系统标签
-                          </button>
-                        </div>
                       )}
                       <a
                         href="/encyclopedia/tags"
@@ -494,7 +460,7 @@ export default function DataCardDetailsModal({
                       <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
                         <div className="flex items-center justify-between gap-3 flex-wrap">
                           <div className="text-xs font-medium text-gray-700">
-                            选择标签（{tagEditScope === 'user' ? '用户' : tagEditScope === 'admin' ? '管理员' : '系统'} scope，最多 30 个，当前 {selectedTagCount}）
+                            选择标签（最多 30 个，当前 {selectedTagCount}）
                           </div>
                           <div className="flex items-center gap-2">
                             <button
@@ -542,7 +508,7 @@ export default function DataCardDetailsModal({
                                 <div className="mt-2 flex flex-wrap gap-2">
                                   {categoryTags.map((tag) => {
                                     const selected = selectedTagIds.includes(tag.id);
-                                    const disabled = (!selected && isTagLimitReached) || (!selected && !tag.isActive);
+                                    const disabled = !selected && isTagLimitReached;
                                     return (
                                       <button
                                         key={tag.id}

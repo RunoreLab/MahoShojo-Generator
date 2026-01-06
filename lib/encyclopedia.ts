@@ -116,6 +116,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['生成失败', '额度', '配置', '高峰期'],
   },
   {
+    slug: 'ai-api-call-error',
+    title: 'AI_APICallError（上游 AI 接口调用失败）',
+    summary: '当你看到 AI_APICallError：通常是 Key/权限/额度/模型/封禁/繁忙等上游问题导致。',
+    markdownPath: '/encyclopedia/ai-api-call-error.md',
+    categoryId: 'ai',
+    keywords: ['AI_APICallError', 'APICallError', 'request id', 'key', 'quota', '封禁', '模型'],
+  },
+  {
     slug: 'ai-refusal',
     title: 'AI 拒答与安全策略提示（不是站内设置）',
     summary: '“身为语言模型…”“安全策略”等拒答模板语：如何判断归因与合规自救。',

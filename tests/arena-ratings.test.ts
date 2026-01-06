@@ -66,6 +66,20 @@ describe('arena-ratings: Elo / winner parse', () => {
     expect(parsed.winnerSlot).toBe(1);
   });
 
+  test('winner 解析：相似度匹配可消除少量异体字差异（冰川/氷川）', () => {
+    const parsed = parseWinnerSlot('氷川羽真', ['冰川羽真', '对手']);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.winnerSlot).toBe(1);
+  });
+
+  test('winner 解析：多胜者中存在异体字时不应误判为唯一胜者（避免“对手在前就判对手赢”）', () => {
+    const parsed = parseWinnerSlot('对手、氷川羽真', ['对手', '冰川羽真']);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.skipReason).toBe('multi-winner');
+  });
+
   test('winner 解析：包含式匹配（用于 PVP 胜者行带额外描述）', () => {
     const parsed = parseWinnerSlot('看守（魔女残骸） (P2)', ['白百合', '看守']);
     expect(parsed.ok).toBe(true);
