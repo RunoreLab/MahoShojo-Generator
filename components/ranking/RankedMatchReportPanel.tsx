@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { TechBadge } from '@/components/ranking/TechBadge';
@@ -212,6 +213,9 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
           原因：<span className="text-gray-100">{ineligibleText}</span>
         </div>
       ) : null}
+      <div className="mt-2 text-xs text-gray-200">
+        查看百科：<Link href="/encyclopedia/ranking" className="text-blue-200 hover:underline">排位与排行榜</Link>
+      </div>
 
       <div className="mt-3 grid gap-3">
         {data.participants.map((p, idx) => {
