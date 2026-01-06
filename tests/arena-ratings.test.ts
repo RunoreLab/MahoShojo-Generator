@@ -73,6 +73,13 @@ describe('arena-ratings: Elo / winner parse', () => {
     expect(parsed.winnerSlot).toBe(1);
   });
 
+  test('winner 解析：称号导致文本变长时仍可匹配少量异体字差异（冰川/氷川 + 「称号」）', () => {
+    const parsed = parseWinnerSlot('氷川日菜', ['冰川日菜「今日も、君の笑顔が答え」', '对手']);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.winnerSlot).toBe(1);
+  });
+
   test('winner 解析：多胜者中存在异体字时不应误判为唯一胜者（避免“对手在前就判对手赢”）', () => {
     const parsed = parseWinnerSlot('对手、氷川羽真', ['对手', '冰川羽真']);
     expect(parsed.ok).toBe(false);

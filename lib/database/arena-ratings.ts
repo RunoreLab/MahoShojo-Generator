@@ -402,6 +402,17 @@ export const parseWinnerSlot = (winnerRaw: string | null, combatantNames: [strin
       .filter((index) => index !== -1);
     if (include.length === 1) return include[0]!;
 
+    // 容错：参战者名称可能被“称号/前后缀”显著拉长，导致整体相似度被稀释；
+    // 改为在候选名内部做“滑窗相似度/提及”检测，以覆盖异体字 + 称号场景。
+    const mention = normalizedNames
+      .map((candidate, index) => {
+        if (!candidate) return -1;
+        return detectCandidateMention(candidate, token) ? index : -1;
+      })
+      .filter((index) => index !== -1);
+    if (mention.length === 1) return mention[0]!;
+    if (mention.length > 1) return null;
+
     const similarityIndex = pickUniqueSimilarityIndex(token, normalizedNames);
     return similarityIndex;
   };
