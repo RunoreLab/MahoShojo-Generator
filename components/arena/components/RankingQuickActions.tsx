@@ -216,7 +216,7 @@ const formatStrictReason = (code: string): string => {
     'ranked-match-roster-changed': '匹配后修改了参战列表（请重新匹配）',
     'ranked-match-unrankable': '参战者未登记为数据卡/预设',
     'ranked-match-user-mismatch': '排位匹配票据与账号不匹配',
-    'daily-limit': '今日严格排位计分次数已达上限',
+    'daily-limit': '今日严格排位计分次数已达上限（按 UTC 00:00/北京时间 08:00 刷新）',
   };
   return map[code] ?? code;
 };
@@ -818,7 +818,14 @@ export function RankingQuickActions() {
             </span>
           ) : null}
           {strictIndicator.source === 'server' && strictIndicator.daily?.used != null ? (
-            <span className="text-gray-600" title={strictIndicator.daily.sinceIso ? `按 UTC 统计，自 ${strictIndicator.daily.sinceIso} 起` : undefined}>
+            <span
+              className="text-gray-600"
+              title={
+                strictIndicator.daily.sinceIso
+                  ? `按 UTC 统计：每日 UTC 00:00 刷新（北京时间 08:00）；统计起点：${strictIndicator.daily.sinceIso}`
+                  : '按 UTC 统计：每日 UTC 00:00 刷新（北京时间 08:00）'
+              }
+            >
               今日严格：{strictIndicator.daily.used}/{strictIndicator.daily.limit}
             </span>
           ) : null}

@@ -83,7 +83,7 @@ const formatStrictEventStatus = (status: QueueResult['eventStatus'], skipReason:
       'winner-empty': '未给出胜者（跳过计分）',
       'multi-winner': '胜者包含多人（跳过计分）',
       'winner-ambiguous': '胜者无法匹配参战者（跳过计分）',
-      'daily-limit': '今日严格排位次数已达上限（跳过计分）',
+      'daily-limit': '今日严格排位次数已达上限（按 UTC 00:00/北京时间 08:00 刷新；跳过计分）',
       'dedup-user-pair': '短时间同对手重复对局（跳过计分）',
       'ratings-missing': '排位记录缺失（结算失败）',
       'rating-conflict': '并发冲突（结算失败）',

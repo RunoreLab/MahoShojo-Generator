@@ -137,7 +137,7 @@ const formatSkipReason = (reason: string | null): string => {
     'winner-empty': '战报未给出胜者',
     'multi-winner': '胜者包含多人',
     'winner-ambiguous': '胜者无法匹配参战者',
-    'daily-limit': '今日严格排位次数已达上限',
+    'daily-limit': '今日严格排位次数已达上限（按 UTC 00:00/北京时间 08:00 刷新）',
     'dedup-user-pair': '短时间同一对手重复对局（严格去重）',
     'dedup-ip-pair': '短时间同 IP 重复对局（自由去重）',
     'ratings-missing': '排位记录缺失',
