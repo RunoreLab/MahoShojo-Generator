@@ -551,7 +551,7 @@ export function RankingPage() {
                       </label>
                       {draftFilters.queue === 'strict' ? (
                         <div className="-mt-1 text-xs text-gray-500 sm:col-span-2 lg:col-span-1">
-                          严格榜单仅展示连续公开满 3 天且审核通过的角色卡（预设不受影响）。
+                          严格榜单仅展示连续公开满 3 天且审核通过的角色卡（新创建且在 10 分钟内公开的卡可豁免；预设不受影响）。
                         </div>
                       ) : null}
 

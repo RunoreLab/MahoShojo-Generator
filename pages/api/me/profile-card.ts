@@ -322,14 +322,22 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
            AND (
              ar.entity_type = 'preset'
              OR (
-               dc.id IS NOT NULL
-               AND dc.type = 'character'
-               AND dc.is_public = 1
-               AND dc.review_status = 'approved'
-               AND dc.deleted_at IS NULL
-               AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))
-             )
-           )
+                dc.id IS NOT NULL
+                AND dc.type = 'character'
+                AND dc.is_public = 1
+                AND dc.review_status = 'approved'
+                AND dc.deleted_at IS NULL
+               AND (
+                 dc.public_since IS NULL
+                 OR dc.public_since <= datetime('now', '-3 days')
+                 OR (
+                   dc.created_at IS NOT NULL
+                   AND dc.public_since IS NOT NULL
+                   AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
+                 )
+               )
+              )
+            )
            AND (
              ar.rating > ?
              OR (ar.rating = ? AND ar.games > ?)
@@ -375,14 +383,22 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
            AND (
              ar.entity_type = 'preset'
              OR (
-               dc.id IS NOT NULL
-               AND dc.type = 'character'
-               AND dc.is_public = 1
-               AND dc.review_status = 'approved'
-               AND dc.deleted_at IS NULL
-               AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))
-             )
-           )`,
+                dc.id IS NOT NULL
+                AND dc.type = 'character'
+                AND dc.is_public = 1
+                AND dc.review_status = 'approved'
+                AND dc.deleted_at IS NULL
+               AND (
+                 dc.public_since IS NULL
+                 OR dc.public_since <= datetime('now', '-3 days')
+                 OR (
+                   dc.created_at IS NOT NULL
+                   AND dc.public_since IS NOT NULL
+                   AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
+                 )
+               )
+              )
+            )`,
         [queue],
       )) as any;
       const row = readRows<{ total: unknown }>(result)[0];
