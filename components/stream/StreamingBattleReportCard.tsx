@@ -325,7 +325,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             ref={cardRef}
             className="result-card relative"
             style={{
-                background: 'linear-gradient(135deg, #434343 0%, #000000 100%)',
+                background: 'linear-gradient(135deg, #3040a1 0%, #000000 50%, #8B0000 100%)',
                 color: 'white',
                 padding: '1.5rem',
                 borderRadius: '1rem',
@@ -360,7 +360,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                         />
                     )}
                 </div>
-                { scenarioName && <h3 className='ml-2 mb-4 font-bold text-gray-100'>~ {scenarioName.replace(".json", "")} ~</h3> }
+                {scenarioName && <h3 className='ml-2 mb-4 font-bold text-gray-100'>~ {scenarioName.replace(".json", "")} ~</h3>}
 
                 {headline && <h2 className="text-xl font-bold mb-2 mt-2 px-1">{headline}</h2>}
 
@@ -443,13 +443,12 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                                     <p className="text-xs opacity-70">
                                         判定结果:{' '}
                                         <span
-                                            className={`font-bold ${
-                                                result.outcome === '成功' || result.outcome === '大成功'
+                                            className={`font-bold ${result.outcome === '成功' || result.outcome === '大成功'
                                                     ? 'text-green-300'
                                                     : result.outcome === '失败' || result.outcome === '大失败'
                                                         ? 'text-red-300'
                                                         : 'text-blue-300'
-                                            }`}
+                                                }`}
                                         >
                                             {result.outcome}
                                         </span>{' '}
