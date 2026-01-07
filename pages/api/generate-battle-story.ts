@@ -308,7 +308,14 @@ async function handler(req: NextRequest): Promise<Response> {
                 ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
             }
             : undefined;
-        const resolvedModelOverride = customModelOverride ?? (isDowngrade ? "gemini-2.5-flash-lite" : undefined);
+        const isStrictRankedMatchRequest =
+            Boolean(rankedMatch) && typeof rankedMatch === 'object' && (rankedMatch as any).queue === 'strict';
+        const shouldPreferLiteModelInStrict =
+            isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
+        const baseModelOverride = customModelOverride ?? (isDowngrade ? 'gemini-2.5-flash-lite' : undefined);
+        const modelOverrideFallbacks: Array<string | undefined> = shouldPreferLiteModelInStrict
+            ? ['gemini-2.5-flash-lite', 'gemini-2.5-flash']
+            : [baseModelOverride];
 
         const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
         if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > MAX_COMBATANTS) {
@@ -523,12 +530,35 @@ async function handler(req: NextRequest): Promise<Response> {
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,
             maxOutputTokens: 8192,
-            modelOverride: resolvedModelOverride, // 使用轻量模型或自定义覆盖模型
         };
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
         const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
-        const aiResult = await generateWithAI<BattleReportResult, { combatants: any[] }>({ combatants }, generationConfig, aiOptions);
+        let usedModelOverride: string | undefined;
+        let aiResult: BattleReportResult | null = null;
+        let lastModelOverrideError: unknown = null;
+        for (const modelOverride of modelOverrideFallbacks) {
+            try {
+                const attemptConfig: GenerationConfig<BattleReportResult, any> = {
+                    ...generationConfig,
+                    modelOverride,
+                };
+                aiResult = await generateWithAI<BattleReportResult, { combatants: any[] }>({ combatants }, attemptConfig, aiOptions);
+                usedModelOverride = modelOverride;
+                break;
+            } catch (error) {
+                lastModelOverrideError = error;
+                if (modelOverrideFallbacks.length > 1) {
+                    log.warn('模型生成失败，将尝试下一备选', {
+                        modelOverride: modelOverride ?? null,
+                        error,
+                    });
+                }
+            }
+        }
+        if (!aiResult) {
+            throw lastModelOverrideError;
+        }
         const usage = normalizeUsage(aiTelemetry.usage);
         const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 
@@ -692,7 +722,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                pvpMatchId: snapshotPvpMatchId,
 	                pvpRoundId: snapshotPvpRoundId,
 	                extraJson: compactExtraJson({
-	                    resolvedModelOverride: resolvedModelOverride ?? null,
+	                    resolvedModelOverride: usedModelOverride ?? null,
 	                    readNarrativeHistory: resolvedReadNarrativeHistory,
 	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
                         ...(rankedMatchExtraJson ?? {}),
@@ -760,7 +790,7 @@ async function handler(req: NextRequest): Promise<Response> {
                     await updateBattleReportGenerationExtraJson(
                         recordId,
                         compactExtraJson({
-                            resolvedModelOverride: resolvedModelOverride ?? null,
+                            resolvedModelOverride: usedModelOverride ?? null,
                             combatantsFallbackReason: 'combatants-table-write-failed',
                             combatantsFallback: buildCombatantsFallbackForExtraJson(combatants),
                         })

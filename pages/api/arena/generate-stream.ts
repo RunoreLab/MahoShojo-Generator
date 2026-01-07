@@ -446,16 +446,49 @@ async function handler(req: NextRequest): Promise<Response> {
             narrativeHistoryForPrompt,
         )({ combatants });
 
+        const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+        const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+        const isStrictRankedMatchRequest =
+            Boolean(rankedMatch) && typeof rankedMatch === 'object' && (rankedMatch as any).queue === 'strict';
+        const shouldPreferLiteModelInStrict =
+            isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
+        const modelOverrideFallbacks: Array<string | undefined> = customModelOverride
+            ? [customModelOverride]
+            : (shouldPreferLiteModelInStrict
+                ? ['gemini-2.5-flash-lite', 'gemma-3-27b-it', 'gemini-2.5-flash']
+                : [undefined]);
+
         const generationConfig: RawGenerationConfig = {
             prompt: `${systemPrompt}\n\n${prompt}`,
             temperature: 0.9,
             maxOutputTokens: 8192,
-            modelOverride: customModelOverride,
         };
 
-        const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
-        const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
-        const streamResult = await generateWithStreamAI(generationConfig, aiOptions);
+        let usedModelOverride: string | undefined;
+        let streamResult: Awaited<ReturnType<typeof generateWithStreamAI>> | null = null;
+        let lastModelOverrideError: unknown = null;
+        for (const modelOverride of modelOverrideFallbacks) {
+            try {
+                const attemptConfig: RawGenerationConfig = {
+                    ...generationConfig,
+                    modelOverride,
+                };
+                streamResult = await generateWithStreamAI(attemptConfig, aiOptions);
+                usedModelOverride = modelOverride;
+                break;
+            } catch (error) {
+                lastModelOverrideError = error;
+                if (modelOverrideFallbacks.length > 1) {
+                    log.warn('模型生成失败，将尝试下一备选', {
+                        modelOverride: modelOverride ?? null,
+                        error,
+                    });
+                }
+            }
+        }
+        if (!streamResult) {
+            throw lastModelOverrideError;
+        }
         const streamResponse = streamResult.response;
         const usagePromise = streamResult.usagePromise;
         const resolvedUsagePromise = (async () => normalizeUsage(await usagePromise?.catch(() => null)))();
@@ -619,6 +652,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    outputHasShieldWords: shieldResult.hasShieldWords,
 	                    extraJson: compactExtraJson({
 	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+	                        resolvedModelOverride: usedModelOverride ?? null,
 	                        readNarrativeHistory: resolvedReadNarrativeHistory,
 	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
                             ...(rankedMatchExtraJson ?? {}),
