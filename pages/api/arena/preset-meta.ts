@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
 import { queryFromD1 } from '@/lib/d1';
+import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
 
 export const config = {
   runtime: 'edge',
@@ -16,15 +17,6 @@ type ApiRating = {
   losses: number;
   draws: number;
   tier: string;
-};
-
-const computeTier = (rating: number, games: number) => {
-  const placementGames = 5;
-  if (games < placementGames || rating < 900) return '无牌';
-  if (rating < 1100) return '白牌';
-  if (rating < 1300) return '字牌';
-  if (rating < 1600) return '花牌';
-  return '权杖';
 };
 
 export default async function handler(req: NextRequest) {
@@ -45,6 +37,19 @@ export default async function handler(req: NextRequest) {
   }
 
   try {
+    const queenByQueue = await (async () => {
+      try {
+        const [strictQueen, freeQueen] = await Promise.all([
+          queryArenaPublicQueenEntity(queryFromD1, 'strict'),
+          queryArenaPublicQueenEntity(queryFromD1, 'free'),
+        ]);
+        return { strict: strictQueen, free: freeQueen };
+      } catch (error) {
+        console.warn('读取女王段位失败（降级为无女王）:', error);
+        return { strict: null, free: null };
+      }
+    })();
+
     const ratings: { strict: ApiRating | null; free: ApiRating | null } = { strict: null, free: null };
     const res = (await queryFromD1(
       `SELECT queue, rating, games, wins, losses, draws
@@ -68,6 +73,9 @@ export default async function handler(req: NextRequest) {
       const queue = row.queue === 'free' ? 'free' : 'strict';
       const rating = typeof row.rating === 'number' ? row.rating : 0;
       const games = typeof row.games === 'number' ? row.games : 0;
+      const baseTier = computeArenaBaseTier(rating, games);
+      const queen = queue === 'free' ? queenByQueue.free : queenByQueue.strict;
+      const isQueen = queen?.entityType === 'preset' && queen?.entityId === entityId;
       const item: ApiRating = {
         queue,
         rating,
@@ -75,7 +83,7 @@ export default async function handler(req: NextRequest) {
         wins: typeof row.wins === 'number' ? row.wins : 0,
         losses: typeof row.losses === 'number' ? row.losses : 0,
         draws: typeof row.draws === 'number' ? row.draws : 0,
-        tier: computeTier(rating, games),
+        tier: applyQueenTier(baseTier, isQueen),
       };
       if (queue === 'strict') ratings.strict = item;
       else ratings.free = item;
@@ -98,4 +106,3 @@ export default async function handler(req: NextRequest) {
     });
   }
 }
-

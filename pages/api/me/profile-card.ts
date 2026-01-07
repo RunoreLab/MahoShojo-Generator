@@ -13,6 +13,7 @@ import {
   type PvpMatchRoundOutcomeSummary,
   type UserTopDataCardRow,
 } from '@/lib/d1';
+import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { UserBadge } from '@/types/badge';
 
@@ -114,15 +115,6 @@ function normalizeRoundSummary(row: PvpMatchRoundOutcomeSummary): { total: numbe
   const losses = clampInt(record.losses) ?? 0;
   const draws = clampInt(record.draws) ?? 0;
   return { total, wins, losses, draws };
-}
-
-function computeTier(rating: number, games: number) {
-  const placementGames = 5;
-  if (games < placementGames || rating < 900) return '无牌';
-  if (rating < 1100) return '白牌';
-  if (rating < 1300) return '字牌';
-  if (rating < 1600) return '花牌';
-  return '权杖';
 }
 
 const readRows = <T,>(result: any): T[] => {
@@ -335,6 +327,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
                AND dc.is_public = 1
                AND dc.review_status = 'approved'
                AND dc.deleted_at IS NULL
+               AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))
              )
            )
            AND (
@@ -387,6 +380,7 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
                AND dc.is_public = 1
                AND dc.review_status = 'approved'
                AND dc.deleted_at IS NULL
+               AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))
              )
            )`,
         [queue],
@@ -399,11 +393,17 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
   };
 
   const strictPublicTotal = await computePublicTotal('strict');
+  const strictQueen = await queryArenaPublicQueenEntity(queryFromD1, 'strict').catch((error) => {
+    console.warn('读取女王段位失败（降级为无女王）:', error);
+    return null;
+  });
 
   const buildRating = async (row: RatingRow | undefined, publicTotal: number | null): Promise<CardRatingLite> => {
     if (!row) return null;
     if (typeof row.rating !== 'number' || typeof row.games !== 'number') return null;
-    const tier = computeTier(row.rating, row.games);
+    const baseTier = computeArenaBaseTier(row.rating, row.games);
+    const isQueen = strictQueen?.entityType === 'data_card' && strictQueen?.entityId === row.dataCardId;
+    const tier = applyQueenTier(baseTier, isQueen);
     const publicRank = await computePublicRank({
       queue: row.queue,
       rating: row.rating,
