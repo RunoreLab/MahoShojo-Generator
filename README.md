@@ -71,8 +71,9 @@
 ### 环境要求
 
 - Bun (推荐) 或 Node.js 18+
-- AI 提供商 API Key (推荐 Google Gemini)
+- AI 提供商 API Key (推荐使用 Google Gemini 系列)
 - Cloudflare Turnstile Site Key & Secret Key
+- Cloudflare 的一些相关配置（如 D1 数据库绑定）
 
 ### 安装
 
