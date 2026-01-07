@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
+import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
@@ -92,6 +93,7 @@ export function RankingPage() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [focusRowKey, setFocusRowKey] = useState<string | null>(null);
+  const [detailsEntity, setDetailsEntity] = useState<LeaderboardEntityDetailsTarget | null>(null);
   const lastAutoScrolledRowKeyRef = useRef<string | null>(null);
   const focusTimerRef = useRef<number | null>(null);
   const limit = 50;
@@ -549,6 +551,11 @@ export function RankingPage() {
                           <option value="free">自由</option>
                         </select>
                       </label>
+                      {draftFilters.queue === 'strict' ? (
+                        <div className="-mt-1 text-xs text-gray-500 sm:col-span-2 lg:col-span-1">
+                          严格榜单仅展示连续公开满 3 天且审核通过的角色卡（新创建且在 10 分钟内公开的卡可豁免；预设不受影响）。
+                        </div>
+                      ) : null}
 
                       <label className="text-sm text-gray-700">
                         排序
@@ -1082,7 +1089,23 @@ export function RankingPage() {
                                     <td className="px-4 py-3 pr-3 text-gray-500">{item.rank}</td>
 	                                    <td className="px-4 py-3 pr-3">
 	                                      <div className="min-w-0">
-	                                        <div className="truncate font-medium text-gray-900">{item.displayName}</div>
+	                                        <button
+	                                          type="button"
+	                                          onClick={() => {
+	                                            const detailsNotice = `当前榜单：#${item.rank} · 段位 ${item.tier} · 分 ${item.rating} · 局 ${item.games} · W/L/D ${item.wins}/${item.losses}/${item.draws}${winRate == null ? '' : ` · 胜率 ${winRate}%`}`;
+	                                            setDetailsEntity({
+	                                              entityType: item.entityType,
+	                                              entityId: item.entityId,
+	                                              displayName: item.displayName,
+	                                              authorName: item.authorName ?? null,
+	                                              pendingNotice: detailsNotice,
+	                                            });
+	                                          }}
+	                                          className="block w-full truncate text-left font-medium text-gray-900 hover:underline underline-offset-2"
+	                                          aria-label={`查看角色详情：${item.displayName}`}
+	                                        >
+	                                          {item.displayName}
+	                                        </button>
 	                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
 	                                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
 	                                            {item.entityType === 'preset' ? '预设' : '数据卡'}
@@ -1183,6 +1206,12 @@ export function RankingPage() {
           </div>
         </div>
       </div>
+
+      <LeaderboardEntityDetailsModal
+        isOpen={Boolean(detailsEntity)}
+        onClose={() => setDetailsEntity(null)}
+        entity={detailsEntity}
+      />
     </>
   );
 }

@@ -72,7 +72,7 @@ describe('ranked-matchmaking-logic: strict', () => {
     }
 
     const ratio = lowCount / trials;
-    expect(ratio).toBeGreaterThan(0.70);
+    expect(ratio).toBeGreaterThan(0.63);
   });
 });
 

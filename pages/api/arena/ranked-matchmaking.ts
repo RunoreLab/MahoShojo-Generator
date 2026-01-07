@@ -136,6 +136,8 @@ type Candidate =
 type DataCardCandidate = Extract<Candidate, { kind: 'data_card' }>;
 type PresetCandidate = Extract<Candidate, { kind: 'preset' }>;
 
+type CandidatePool = 'played' | 'rated' | 'public';
+
 const getEntityRating = async (entity: RankedMatchEntity): Promise<{ rating: number; games: number }> => {
   const result = (await queryFromD1(
     `SELECT rating, games
@@ -204,25 +206,38 @@ const fetchDataCardCandidatesByAbsDiff = async (input: {
   minAbsDiffInclusive: number;
   maxAbsDiffInclusive: number;
   limit: number;
+  pool: CandidatePool;
 }): Promise<DataCardCandidate[]> => {
+  const joinSql =
+    input.pool === 'public'
+      ? `LEFT JOIN arena_ratings ar
+       ON ar.queue = 'strict'
+      AND ar.entity_type = 'data_card'
+      AND ar.entity_id = dc.id`
+      : `INNER JOIN arena_ratings ar
+       ON ar.queue = 'strict'
+      AND ar.entity_type = 'data_card'
+      AND ar.entity_id = dc.id`;
+
+  const ratingSql = input.pool === 'public' ? `COALESCE(ar.rating, ${INITIAL_RATING})` : `ar.rating`;
+  const gamesSql = input.pool === 'public' ? `COALESCE(ar.games, 0)` : `ar.games`;
+  const extraWhereSql = input.pool === 'played' ? `AND ar.games > 0` : ``;
+
   const result = (await queryFromD1(
     `SELECT
       dc.id as id,
-      ar.rating as rating,
-      ar.games as games
+      ${ratingSql} as rating,
+      ${gamesSql} as games
      FROM data_cards dc
-     INNER JOIN arena_ratings ar
-       ON ar.queue = 'strict'
-      AND ar.entity_type = 'data_card'
-      AND ar.entity_id = dc.id
+     ${joinSql}
      WHERE dc.type = 'character'
        AND dc.deleted_at IS NULL
        AND dc.is_public = 1
        AND dc.review_status = 'approved'
        AND dc.id <> ?
-       AND ar.games > 0
-       AND ABS(ar.rating - ?) BETWEEN ? AND ?
-     ORDER BY ABS(ar.rating - ?) ASC, ar.games ASC, dc.id ASC
+       ${extraWhereSql}
+       AND ABS(${ratingSql} - ?) BETWEEN ? AND ?
+     ORDER BY ABS(${ratingSql} - ?) ASC, ${gamesSql} ASC, dc.id ASC
      LIMIT ?`,
     [input.playerId, input.targetRating, input.minAbsDiffInclusive, input.maxAbsDiffInclusive, input.targetRating, input.limit]
   )) as any;
@@ -314,12 +329,20 @@ const buildPresetCandidatesInBands = (input: {
   player: RankedMatchEntity;
   targetRating: number;
   presetRatings: Map<string, { rating: number; games: number }>;
+  pool: CandidatePool;
 }): PresetCandidate[] => {
   const maxAbsDiff = Math.max(...STRICT_MATCHMAKING_BANDS.map((b) => b.maxDiffInclusive));
   return PRESET_LIST
     .filter((preset) => preset.filename !== input.player.entityId)
     .map((preset) => {
-      const stats = input.presetRatings.get(preset.filename) ?? { rating: INITIAL_RATING, games: 0 };
+      const statsFromDb = input.presetRatings.get(preset.filename);
+      if (input.pool === 'played') {
+        if (!statsFromDb || !(typeof statsFromDb.games === 'number') || statsFromDb.games <= 0) return null;
+      } else if (input.pool === 'rated') {
+        if (!statsFromDb) return null;
+      }
+
+      const stats = statsFromDb ?? { rating: INITIAL_RATING, games: 0 };
       const rating = stats.rating;
       const diff = Math.abs((Number.isFinite(rating) ? rating : INITIAL_RATING) - input.targetRating);
       if (diff > maxAbsDiff) return null;
@@ -399,13 +422,20 @@ export default async function handler(req: NextRequest): Promise<Response> {
       }
     } else {
       const result = (await queryFromD1(
-        `SELECT id, type, user_id as userId, is_public as isPublic, deleted_at as deletedAt
+        `SELECT id, type, user_id as userId, is_public as isPublic, review_status as reviewStatus, deleted_at as deletedAt
          FROM data_cards
          WHERE id = ?
          LIMIT 1`,
         [player.entityId]
       )) as any;
-      const row = readRows<{ id: string; type: string; userId: number; isPublic: number | boolean; deletedAt: string | null }>(result)[0];
+      const row = readRows<{
+        id: string;
+        type: string;
+        userId: number;
+        isPublic: number | boolean;
+        reviewStatus: string | null;
+        deletedAt: string | null;
+      }>(result)[0];
       if (!row?.id || row.deletedAt) {
         return new Response(JSON.stringify({ success: false, error: '数据卡不存在或已被删除' } satisfies ApiErrorResponse), {
           status: 404,
@@ -419,8 +449,14 @@ export default async function handler(req: NextRequest): Promise<Response> {
         });
       }
       const isPublic = row.isPublic === 1 || row.isPublic === true;
-      if (!isPublic && row.userId !== user.id) {
-        return new Response(JSON.stringify({ success: false, error: '无权使用该私有数据卡进行排位匹配' } satisfies ApiErrorResponse), {
+      if (!isPublic) {
+        return new Response(JSON.stringify({ success: false, error: '严格排位仅允许使用公开角色卡参与' } satisfies ApiErrorResponse), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (row.reviewStatus !== 'approved') {
+        return new Response(JSON.stringify({ success: false, error: '严格排位仅允许使用已审核通过的公开角色卡' } satisfies ApiErrorResponse), {
           status: 403,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -432,7 +468,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
     const recentPairKeys = await readRecentPairKeys(user.id, sinceIso);
     const presetRatings = await loadPresetCandidates();
 
-    const tryPick = async (allowRepeat: boolean): Promise<{ picked: Candidate | null; note?: string }> => {
+    const tryPick = async (allowRepeat: boolean, pool: CandidatePool): Promise<{ picked: Candidate | null }> => {
       const playerId = player.entityType === 'data_card' ? player.entityId : '';
 
       const dataCardChunks = await Promise.all(
@@ -443,11 +479,12 @@ export default async function handler(req: NextRequest): Promise<Response> {
             minAbsDiffInclusive: band.minDiffInclusive,
             maxAbsDiffInclusive: band.maxDiffInclusive,
             limit: band.queryLimit,
+            pool,
           })
         )
       );
       const dataCardCandidates = dataCardChunks.flat();
-      const presetCandidates = buildPresetCandidatesInBands({ player, targetRating: playerRating.rating, presetRatings });
+      const presetCandidates = buildPresetCandidatesInBands({ player, targetRating: playerRating.rating, presetRatings, pool });
 
       const byEntityKey = new Map<string, Candidate>();
       for (const candidate of [...dataCardCandidates, ...presetCandidates]) {
@@ -466,16 +503,35 @@ export default async function handler(req: NextRequest): Promise<Response> {
       return { picked };
     };
 
-    const primary = await tryPick(false);
-    const fallback = primary.picked ? null : await tryPick(true);
-    const picked = primary.picked ?? fallback?.picked ?? null;
-    const note =
-      primary.picked
-        ? undefined
-        : (picked ? '候选对手较少，已允许在时间窗内重复匹配' : undefined);
+    const pools: CandidatePool[] = ['played', 'rated', 'public'];
+
+    let picked: Candidate | null = null;
+    const noteParts: string[] = [];
+
+    for (const pool of pools) {
+      const primary = await tryPick(false, pool);
+      const fallback = primary.picked ? null : await tryPick(true, pool);
+      picked = primary.picked ?? fallback?.picked ?? null;
+
+      if (!picked) continue;
+
+      if (pool === 'rated') {
+        noteParts.push('本赛季暂无可匹配对手，已从历史严格排位角色中抽取');
+      } else if (pool === 'public') {
+        noteParts.push('历史严格排位对手不足，已从公开库/预设中抽取');
+      }
+
+      if (!primary.picked) {
+        noteParts.push('候选对手较少，已允许在时间窗内重复匹配');
+      }
+
+      break;
+    }
+
+    const note = noteParts.length > 0 ? noteParts.join('；') : undefined;
 
     if (!picked) {
-      return new Response(JSON.stringify({ success: false, error: '当前没有可匹配的对手（已参加严格排位的公开角色不足）' } satisfies ApiErrorResponse), {
+      return new Response(JSON.stringify({ success: false, error: '当前没有可匹配的对手（公开角色不足）' } satisfies ApiErrorResponse), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
       });

@@ -516,6 +516,11 @@ export function RankingQuickActions() {
       return;
     }
 
+    if (!selectedPlayer.isPreset && selectedPlayer.sourceIsPublic === false) {
+      setError('❌ 严格排位仅允许使用公开角色卡参与（请先将该角色卡设为公开）。');
+      return;
+    }
+
     const playerEntity = selectedPlayer.isPreset
       ? ({ entityType: 'preset', entityId: selectedPlayer.filename } as const)
       : ({ entityType: 'data_card', entityId: (selectedPlayer.sourceDataCardId ?? '').trim() } as const);

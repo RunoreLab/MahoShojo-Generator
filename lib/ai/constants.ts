@@ -38,12 +38,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'default',
                 label: '默认策略',
-                description: '与之前一样的没有变化的调用顺序，默认使用 Gemini 2.5 Pro 模型。'
-            },
-            {
-                value: 'gemini-2.5-pro',
-                label: 'Gemini 2.5 Pro',
-                description: 'Google 旗下的最先进模型系列，性能很棒棒。'
+                description: '与之前一样的没有变化的调用顺序，默认使用 Gemini 2.5 Flash 模型。'
             },
             {
                 value: 'gemini-3-flash-preview',
@@ -105,6 +100,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-2.5-flash-lite',
                 label: 'Gemini 2.5 Flash Lite',
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+            },
+            {
+                value: 'deepseek-chat',
+                label: 'DeepSeek Chat (非流式可能存在问题)',
+                description: 'DeepSeek 最新版本。'
+            },
+            {
+                value: 'deepseek-chat',
+                label: 'DeepSeek Chat (非流式可能存在问题)',
+                description: 'DeepSeek 最新版本。'
             },
             {
                 value: 'doubao-seed-1-6',

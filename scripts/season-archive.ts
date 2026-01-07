@@ -5,6 +5,7 @@ import { loadEnvConfig } from '@next/env';
 
 import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '../lib/seasons';
 import { formatSeasonTitle, isSafeSeasonId } from '../lib/seasons';
+import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '../lib/arena/tier';
 
 type Queue = 'strict' | 'free';
 
@@ -43,15 +44,6 @@ const writeJson = (path: string, data: unknown) => {
 const readRows = <T>(result: unknown): T[] => {
   const rows = (result as any)?.result?.[0]?.results;
   return Array.isArray(rows) ? (rows as T[]) : [];
-};
-
-const computeTier = (rating: number, games: number) => {
-  const placementGames = 5;
-  if (games < placementGames || rating < 900) return '无牌';
-  if (rating < 1100) return '白牌';
-  if (rating < 1300) return '字牌';
-  if (rating < 1600) return '花牌';
-  return '权杖';
 };
 
 const parseArgs = (argv: string[]) => {
@@ -164,7 +156,7 @@ const queryLeaderboardRows = async (
 
 const buildItems = async (
   rows: LeaderboardRow[],
-  options: { rankBase: number },
+  options: { rankBase: number; queen: Awaited<ReturnType<typeof queryArenaPublicQueenEntity>> | null },
 ): Promise<SeasonArchiveItem[]> => {
   const { PRESET_LIST } = await import('../lib/presets');
   const presetNameByFilename = new Map(PRESET_LIST.map((preset) => [preset.filename, preset.name]));
@@ -172,7 +164,9 @@ const buildItems = async (
   return rows.map((row, index) => {
     const rating = typeof row.rating === 'number' ? row.rating : 0;
     const games = typeof row.games === 'number' ? row.games : 0;
-    const tier = computeTier(rating, games);
+    const baseTier = computeArenaBaseTier(rating, games);
+    const isQueen = options.queen?.entityType === row.entityType && options.queen?.entityId === row.entityId;
+    const tier = applyQueenTier(baseTier, isQueen);
 
     const displayName = row.entityType === 'preset'
       ? (presetNameByFilename.get(row.entityId) ?? row.entityId)
@@ -207,6 +201,10 @@ const buildItems = async (
 
 const archiveQueue = async (queryFromD1: QueryFromD1, queue: Queue) => {
   const total = await queryLeaderboardCount(queryFromD1, queue);
+  const queen = await queryArenaPublicQueenEntity(queryFromD1, queue).catch((error) => {
+    console.warn('[season-archive] 读取女王段位失败（降级为无女王）:', error);
+    return null;
+  });
   const topRows = await queryLeaderboardRows(
     queryFromD1,
     queue,
@@ -221,9 +219,9 @@ const archiveQueue = async (queryFromD1: QueryFromD1, queue: Queue) => {
   );
   const bottomRows = bottomRowsRaw.slice().reverse();
 
-  const top = await buildItems(topRows, { rankBase: 1 });
+  const top = await buildItems(topRows, { rankBase: 1, queen });
   const bottomRankBase = Math.max(1, total - bottomRows.length + 1);
-  const bottom = await buildItems(bottomRows, { rankBase: bottomRankBase });
+  const bottom = await buildItems(bottomRows, { rankBase: bottomRankBase, queen });
 
   return { total, top, bottom };
 };

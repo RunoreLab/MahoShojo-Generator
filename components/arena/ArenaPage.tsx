@@ -284,6 +284,7 @@ export function ArenaPage() {
         <DataCardDetailsModal
           isOpen
           onClose={() => setSelectedCombatant(null)}
+          metaCardId={selectedCombatant.sourceDataCardId ? selectedCombatant.sourceDataCardId : null}
           card={{
             id: selectedCombatant.sourceDataCardId || selectedCombatant.filename,
             name:

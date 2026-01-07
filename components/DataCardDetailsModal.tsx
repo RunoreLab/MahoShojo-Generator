@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Info, Star, Heart, Download } from 'lucide-react';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
@@ -63,6 +63,7 @@ interface DataCardDetailsModalProps {
   onClose: () => void;
   isOwner?: boolean;
   adminTagEditor?: boolean;
+  metaCardId?: string | null;
   card: {
     id: string;
     name: string;
@@ -85,6 +86,7 @@ export default function DataCardDetailsModal({
   onClose,
   card,
   pendingNotice,
+  metaCardId,
   isOwner = false,
   adminTagEditor = false,
 }: DataCardDetailsModalProps) {
@@ -94,6 +96,8 @@ export default function DataCardDetailsModal({
   const [meta, setMeta] = useState<Extract<ApiMetaResponse, { success: true }> | null>(null);
   const [metaLoading, setMetaLoading] = useState(false);
   const [metaError, setMetaError] = useState<string | null>(null);
+  const metaRequestIdRef = useRef(0);
+  const metaAbortRef = useRef<AbortController | null>(null);
 
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [allTags, setAllTags] = useState<ApiTag[]>([]);
@@ -105,15 +109,24 @@ export default function DataCardDetailsModal({
   const [saveTagsError, setSaveTagsError] = useState<string | null>(null);
 
   const reloadMeta = useCallback(async (dataCardId: string) => {
+    const requestId = (metaRequestIdRef.current += 1);
+    metaAbortRef.current?.abort();
+    const controller = new AbortController();
+    metaAbortRef.current = controller;
+
     setMetaLoading(true);
     setMetaError(null);
+    setMeta(null);
     try {
       const authHeader = await authStorage.getAuthHeader();
+      if (controller.signal.aborted || requestId !== metaRequestIdRef.current) return;
       const headers: HeadersInit = authHeader ? { Authorization: authHeader } : {};
       const json = await fetchJson<ApiMetaResponse>(`/api/data-card-meta?dataCardId=${encodeURIComponent(dataCardId)}`, {
         method: 'GET',
         headers,
+        signal: controller.signal,
       });
+      if (controller.signal.aborted || requestId !== metaRequestIdRef.current) return;
       if (json && (json as any).success === true) {
         setMeta(json as Extract<ApiMetaResponse, { success: true }>);
       } else {
@@ -121,19 +134,36 @@ export default function DataCardDetailsModal({
         setMetaError((json as any)?.error ?? '无法加载指标');
       }
     } catch (error) {
+      if (controller.signal.aborted || requestId !== metaRequestIdRef.current) return;
       setMeta(null);
       setMetaError(String(error));
     } finally {
+      if (controller.signal.aborted || requestId !== metaRequestIdRef.current) return;
       setMetaLoading(false);
     }
   }, []);
 
+  const resolvedMetaCardId = metaCardId === undefined ? card?.id : metaCardId;
+
   useEffect(() => {
-    if (!isOpen || !card?.id) return;
-    void reloadMeta(card.id);
+    if (!isOpen) return;
+    if (!resolvedMetaCardId) {
+      metaAbortRef.current?.abort();
+      setMeta(null);
+      setMetaError(null);
+      setMetaLoading(false);
+      setIsEditingTags(false);
+      setSaveTagsError(null);
+      return;
+    }
+    void reloadMeta(resolvedMetaCardId);
     setIsEditingTags(false);
     setSaveTagsError(null);
-  }, [isOpen, card?.id, metaNonce, reloadMeta]);
+  }, [isOpen, metaNonce, reloadMeta, resolvedMetaCardId]);
+
+  useEffect(() => {
+    return () => metaAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     if (!meta || isEditingTags) return;

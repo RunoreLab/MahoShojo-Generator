@@ -5,6 +5,7 @@ import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { getTagsForDataCard, type TagScope } from '@/lib/database/tags';
+import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
 
 export const config = {
   runtime: 'edge',
@@ -41,15 +42,6 @@ type ApiMetrics = {
   isNative: boolean | null;
   dataCardUpdatedAt: string;
   isStale: boolean;
-};
-
-const computeTier = (rating: number, games: number) => {
-  const placementGames = 5;
-  if (games < placementGames || rating < 900) return '无牌';
-  if (rating < 1100) return '白牌';
-  if (rating < 1300) return '字牌';
-  if (rating < 1600) return '花牌';
-  return '权杖';
 };
 
 const readSingleRow = <T,>(result: any): T | null => {
@@ -219,10 +211,34 @@ export default async function handler(req: NextRequest) {
 
     const ratings: { strict: ApiRating | null; free: ApiRating | null } = { strict: null, free: null };
     try {
+      const queenByQueue = new Map<Queue, Promise<Awaited<ReturnType<typeof queryArenaPublicQueenEntity>> | null>>();
+      const getQueen = (queue: Queue) => {
+        const normalized: Queue = queue === 'free' ? 'free' : 'strict';
+        const cached = queenByQueue.get(normalized);
+        if (cached) return cached;
+        const promise = queryArenaPublicQueenEntity(queryFromD1, normalized).catch((error) => {
+          console.warn('读取女王段位失败（降级为无女王）:', error);
+          return null;
+        });
+        queenByQueue.set(normalized, promise);
+        return promise;
+      };
+
       const publicTotals: Record<Queue, number | null> = { strict: null, free: null };
       if (cardRow.type === 'character') {
         const computePublicTotal = async (queue: Queue): Promise<number | null> => {
           try {
+            const strictPublicSinceClause = queue === 'strict'
+              ? `AND (
+                dc.public_since IS NULL
+                OR dc.public_since <= datetime('now', '-3 days')
+                OR (
+                  dc.created_at IS NOT NULL
+                  AND dc.public_since IS NOT NULL
+                  AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
+                )
+              )`
+              : '';
             const totalResult = (await queryFromD1(
               `SELECT COUNT(*) as total
                FROM arena_ratings ar
@@ -237,6 +253,7 @@ export default async function handler(req: NextRequest) {
                      AND dc.is_public = 1
                      AND dc.review_status = 'approved'
                      AND dc.deleted_at IS NULL
+                     ${strictPublicSinceClause}
                    )
                  )`,
               [queue],
@@ -323,22 +340,27 @@ export default async function handler(req: NextRequest) {
         updated_at: string;
       }>;
       for (const row of rows) {
+        const queue: Queue = row.queue === 'free' ? 'free' : 'strict';
         const rating = typeof row.rating === 'number' ? row.rating : 0;
         const games = typeof row.games === 'number' ? row.games : 0;
         const ratingUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
-        const last = lastEventsByQueue.get(row.queue === 'free' ? 'free' : 'strict');
+        const last = lastEventsByQueue.get(queue);
+        const baseTier = computeArenaBaseTier(rating, games);
+        const queen = baseTier === '权杖' ? await getQueen(queue) : null;
+        const isQueen = queen?.entityType === 'data_card' && queen?.entityId === dataCardId;
+        const tier = applyQueenTier(baseTier, isQueen);
         const item: ApiRating = {
-          queue: row.queue === 'free' ? 'free' : 'strict',
+          queue,
           rating,
           games,
           wins: typeof row.wins === 'number' ? row.wins : 0,
           losses: typeof row.losses === 'number' ? row.losses : 0,
           draws: typeof row.draws === 'number' ? row.draws : 0,
-          tier: computeTier(rating, games),
+          tier,
           lastDelta: typeof last?.delta === 'number' ? last.delta : null,
           lastAppliedAt: typeof last?.appliedAt === 'string' ? last.appliedAt : null,
           publicRank: null,
-          publicTotal: row.queue === 'free' ? publicTotals.free : publicTotals.strict,
+          publicTotal: queue === 'free' ? publicTotals.free : publicTotals.strict,
         };
         if (item.queue === 'strict') ratings.strict = item;
         else ratings.free = item;
@@ -346,6 +368,17 @@ export default async function handler(req: NextRequest) {
         // 仅角色卡计算公共榜位置（不影响公共榜展示）
         if (cardRow.type === 'character' && ratingUpdatedAt) {
           try {
+            const strictPublicSinceClause = item.queue === 'strict'
+              ? `AND (
+                dc.public_since IS NULL
+                OR dc.public_since <= datetime('now', '-3 days')
+                OR (
+                  dc.created_at IS NOT NULL
+                  AND dc.public_since IS NOT NULL
+                  AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
+                )
+              )`
+              : '';
             const rankResult = (await queryFromD1(
               `SELECT COUNT(*) as higherCount
                FROM arena_ratings ar
@@ -360,6 +393,7 @@ export default async function handler(req: NextRequest) {
                      AND dc.is_public = 1
                      AND dc.review_status = 'approved'
                      AND dc.deleted_at IS NULL
+                     ${strictPublicSinceClause}
                    )
                  )
                  AND (
