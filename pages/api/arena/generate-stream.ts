@@ -455,7 +455,15 @@ async function handler(req: NextRequest): Promise<Response> {
         const modelOverrideFallbacks: Array<string | undefined> = customModelOverride
             ? [customModelOverride]
             : (shouldPreferLiteModelInStrict
-                ? ['gemini-2.5-flash-lite', 'gemma-3-27b-it', 'gemini-2.5-flash']
+                ? [
+                    'gemma-3-27b-it',
+                    'gemini-2.5-flash-lite',
+                    'gemma-3-12b-it',
+                    'gemma-3-4b-it',
+                    'gemma-3-1b-it',
+                    'gemma-3-270m-it',
+                    'gemini-2.5-flash',
+                ]
                 : [undefined]);
 
         const generationConfig: RawGenerationConfig = {
