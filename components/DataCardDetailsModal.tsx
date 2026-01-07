@@ -63,6 +63,7 @@ interface DataCardDetailsModalProps {
   onClose: () => void;
   isOwner?: boolean;
   adminTagEditor?: boolean;
+  metaCardId?: string | null;
   card: {
     id: string;
     name: string;
@@ -85,6 +86,7 @@ export default function DataCardDetailsModal({
   onClose,
   card,
   pendingNotice,
+  metaCardId,
   isOwner = false,
   adminTagEditor = false,
 }: DataCardDetailsModalProps) {
@@ -128,12 +130,22 @@ export default function DataCardDetailsModal({
     }
   }, []);
 
+  const resolvedMetaCardId = metaCardId === undefined ? card?.id : metaCardId;
+
   useEffect(() => {
-    if (!isOpen || !card?.id) return;
-    void reloadMeta(card.id);
+    if (!isOpen) return;
+    if (!resolvedMetaCardId) {
+      setMeta(null);
+      setMetaError(null);
+      setMetaLoading(false);
+      setIsEditingTags(false);
+      setSaveTagsError(null);
+      return;
+    }
+    void reloadMeta(resolvedMetaCardId);
     setIsEditingTags(false);
     setSaveTagsError(null);
-  }, [isOpen, card?.id, metaNonce, reloadMeta]);
+  }, [isOpen, metaNonce, reloadMeta, resolvedMetaCardId]);
 
   useEffect(() => {
     if (!meta || isEditingTags) return;

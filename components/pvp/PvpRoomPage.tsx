@@ -3539,6 +3539,7 @@ export function PvpRoomPage() {
             setDetailsCard(null);
           }}
           card={detailsCard}
+          metaCardId={detailsCard.id.startsWith('preset:') ? null : undefined}
         />
       )}
 

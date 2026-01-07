@@ -1,0 +1,278 @@
+'use client';
+
+import type { ComponentProps } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
+import { PRESET_LIST } from '@/lib/presets';
+
+export type LeaderboardEntityDetailsTarget = {
+  entityType: 'data_card' | 'preset';
+  entityId: string;
+  displayName: string;
+  authorName?: string | null;
+  pendingNotice?: string | null;
+};
+
+type CacheEntry = {
+  card: ComponentProps<typeof DataCardDetailsModal>['card'];
+  metaCardId: string | null | undefined;
+  pendingNotice: string | null;
+};
+
+type PublicDataCardRow = Record<string, unknown>;
+
+const presetByFilename = new Map(PRESET_LIST.map((preset) => [preset.filename, preset]));
+
+const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
+  const res = await fetch(url, init);
+  const json = (await res.json()) as T;
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
+  return json;
+};
+
+const readString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+const readNumber = (value: unknown): number | null => (typeof value === 'number' ? value : null);
+const readBoolean = (value: unknown): boolean | null => (typeof value === 'boolean' ? value : null);
+
+const normalizePublicCardRowToCard = (
+  row: PublicDataCardRow,
+  fallback: { id: string; name: string; author: string },
+): ComponentProps<typeof DataCardDetailsModal>['card'] => {
+  const id = readString(row.id) ?? fallback.id;
+  const name = (readString(row.name) ?? '').trim() || fallback.name;
+  const description = readString(row.description) ?? '';
+  const typeRaw = readString(row.type);
+  const type = typeRaw === 'scenario' || typeRaw === 'history' ? typeRaw : 'character';
+
+  const dataValue = row.data;
+  const data =
+    typeof dataValue === 'string'
+      ? dataValue
+      : JSON.stringify(dataValue ?? {}, null, 2);
+
+  const isPublic =
+    row.is_public === 1 ||
+    row.is_public === true ||
+    readBoolean(row.isPublic) === true;
+
+  const usageCount =
+    readNumber(row.usage_count) ??
+    readNumber(row.usageCount) ??
+    undefined;
+
+  const likeCount =
+    readNumber(row.like_count) ??
+    readNumber(row.likeCount) ??
+    undefined;
+
+  const favoriteCount =
+    readNumber(row.favorite_count) ??
+    readNumber(row.favoriteCount) ??
+    undefined;
+
+  const author =
+    (readString(row.username) ?? '').trim() ||
+    (readString(row.author) ?? '').trim() ||
+    fallback.author;
+
+  const createdAt = readString(row.created_at) ?? readString(row.createdAt) ?? undefined;
+  const updatedAt = readString(row.updated_at) ?? readString(row.updatedAt) ?? undefined;
+
+  return {
+    id,
+    name,
+    description,
+    type,
+    data,
+    isPublic,
+    usageCount,
+    likeCount,
+    favoriteCount,
+    author,
+    createdAt,
+    updatedAt,
+  };
+};
+
+export function LeaderboardEntityDetailsModal(props: {
+  isOpen: boolean;
+  onClose: () => void;
+  entity: LeaderboardEntityDetailsTarget | null;
+}) {
+  const { isOpen, onClose, entity } = props;
+  const [detailsCard, setDetailsCard] = useState<ComponentProps<typeof DataCardDetailsModal>['card'] | null>(null);
+  const [detailsMetaCardId, setDetailsMetaCardId] = useState<string | null | undefined>(undefined);
+  const [detailsPendingNotice, setDetailsPendingNotice] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+
+  const requestIdRef = useRef(0);
+  const cacheRef = useRef<Map<string, CacheEntry>>(new Map());
+
+  const modalTitle = useMemo(() => {
+    if (!entity) return '角色详情';
+    return entity.entityType === 'preset' ? '预设角色详情' : '数据卡详情';
+  }, [entity]);
+
+  useEffect(() => {
+    if (!isOpen || !entity) return;
+
+    const key = `${entity.entityType}:${entity.entityId}`;
+    const cached = cacheRef.current.get(key);
+    if (cached) {
+      setDetailsCard(cached.card);
+      setDetailsMetaCardId(cached.metaCardId);
+      setDetailsPendingNotice(cached.pendingNotice);
+      setIsLoading(false);
+      setError(null);
+      return;
+    }
+
+    const requestId = (requestIdRef.current += 1);
+    const controller = new AbortController();
+
+    setIsLoading(true);
+    setError(null);
+    setDetailsCard(null);
+    setDetailsMetaCardId(undefined);
+    setDetailsPendingNotice(entity.pendingNotice ?? null);
+
+    void (async () => {
+      try {
+        if (entity.entityType === 'data_card') {
+          const result = await fetchJson<{ success: boolean; card?: PublicDataCardRow; error?: string }>(
+            `/api/public-data-cards?id=${encodeURIComponent(entity.entityId)}`,
+            { signal: controller.signal },
+          );
+
+          if (!result.success || !result.card) {
+            throw new Error(result.error ?? '无法读取数据卡');
+          }
+
+          const card = normalizePublicCardRowToCard(result.card, {
+            id: entity.entityId,
+            name: entity.displayName,
+            author:
+              typeof entity.authorName === 'string' && entity.authorName.trim()
+                ? entity.authorName.trim()
+                : '未知',
+          });
+
+          const entry: CacheEntry = {
+            card,
+            metaCardId: undefined,
+            pendingNotice: entity.pendingNotice ?? null,
+          };
+          cacheRef.current.set(key, entry);
+
+          if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+          setDetailsCard(entry.card);
+          setDetailsMetaCardId(entry.metaCardId);
+          setDetailsPendingNotice(entry.pendingNotice);
+          return;
+        }
+
+        const presetMeta = presetByFilename.get(entity.entityId);
+        const response = await fetch(`/presets/${encodeURIComponent(entity.entityId)}`, {
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) {
+          throw new Error(`无法加载预设设定文件（HTTP ${response.status}）`);
+        }
+        const presetData = (await response.json()) as unknown;
+
+        const baseNotice = entity.pendingNotice ?? null;
+        const pendingNotice = baseNotice
+          ? `${baseNotice} · 预设角色不支持标签/指标查询（以排行榜展示为准）`
+          : '预设角色不支持标签/指标查询（以排行榜展示为准）';
+
+        const entry: CacheEntry = {
+          card: {
+            id: `preset:${entity.entityId}`,
+            name: presetMeta?.name ?? entity.displayName,
+            description: presetMeta?.description ?? '系统预设角色',
+            type: 'character',
+            data: JSON.stringify(presetData, null, 2),
+            isPublic: true,
+            author: '官方',
+            usageCount: 0,
+            likeCount: 0,
+            favoriteCount: 0,
+          },
+          metaCardId: null,
+          pendingNotice,
+        };
+        cacheRef.current.set(key, entry);
+
+        if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+        setDetailsCard(entry.card);
+        setDetailsMetaCardId(entry.metaCardId);
+        setDetailsPendingNotice(entry.pendingNotice);
+      } catch (err) {
+        if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+        setIsLoading(false);
+      }
+    })();
+
+    return () => controller.abort();
+  }, [entity, isOpen, retryNonce]);
+
+  if (!isOpen || !entity) return null;
+
+  if (isLoading || !detailsCard) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-base font-semibold text-gray-900">{modalTitle}</div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md px-2 py-1 text-sm text-gray-600 hover:bg-gray-100"
+            >
+              关闭
+            </button>
+          </div>
+          {detailsPendingNotice ? (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {detailsPendingNotice}
+            </div>
+          ) : null}
+          <div className="mt-4 text-sm text-gray-600">
+            {error ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-800">
+                <div>加载失败：{error}</div>
+                <button
+                  type="button"
+                  onClick={() => setRetryNonce((prev) => prev + 1)}
+                  className="mt-2 rounded-md bg-white px-2 py-1 text-xs text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                >
+                  重试
+                </button>
+              </div>
+            ) : (
+              '正在加载角色详情...'
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <DataCardDetailsModal
+      isOpen
+      onClose={onClose}
+      card={detailsCard}
+      pendingNotice={detailsPendingNotice ?? undefined}
+      metaCardId={detailsMetaCardId}
+    />
+  );
+}
+
