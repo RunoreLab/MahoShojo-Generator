@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 
 import { queryFromD1 } from '@/lib/d1';
 import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
+import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGenerationCombatantRow } from '@/lib/database/battle-report-generation-combatants';
 import {
   buildEntityKey,
@@ -91,6 +92,10 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
     ? readNarrativeHistoryRaw
     : (typeof readNarrativeHistoryRaw === 'number' && Number.isFinite(readNarrativeHistoryRaw) ? readNarrativeHistoryRaw !== 0 : null);
 
+  const resolvedModelOverride = typeof parsedExtraJson?.resolvedModelOverride === 'string'
+    ? parsedExtraJson.resolvedModelOverride.trim()
+    : '';
+
   const reasons: string[] = [];
   if (snapshot.status !== 'completed') reasons.push('status-not-completed');
   if (snapshot.combatantCount !== 2) reasons.push('combatant-count-not-2');
@@ -123,6 +128,7 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
   if (snapshot.readArenaHistory !== 0) reasons.push('read-arena-history');
   if (snapshot.readCurrentState !== 0) reasons.push('read-current-state');
   if (readNarrativeHistory !== false) reasons.push('read-narrative-history');
+  if (isStrictRankedModelBlacklisted(resolvedModelOverride)) reasons.push('ai-model-blacklisted');
   if (combatants.some((c) => typeof c.character_guidance === 'string' && c.character_guidance.trim())) reasons.push('has-character-guidance');
   return reasons;
 };

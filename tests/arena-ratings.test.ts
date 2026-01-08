@@ -162,6 +162,27 @@ describe('arena-ratings: 严格排位资格判定', () => {
   test('不满足：读取叙事历史开启', () => {
     expect(isStrictEligible({ ...baseSnapshot, extraJson: JSON.stringify({ readNarrativeHistory: true, rankedMatchOk: true }) }, baseCombatants)).toBe(false);
   });
+
+  test('不满足：使用黑名单模型', () => {
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          extraJson: JSON.stringify({ readNarrativeHistory: false, rankedMatchOk: true, resolvedModelOverride: 'gemma-3-1b-it' }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(false);
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          extraJson: JSON.stringify({ readNarrativeHistory: false, rankedMatchOk: true, resolvedModelOverride: 'gemma-3-270m-it' }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(false);
+  });
 });
 
 describe('arena-ratings: 参战者 entity 解析', () => {

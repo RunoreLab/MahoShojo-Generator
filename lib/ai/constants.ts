@@ -73,12 +73,12 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'gemma-3-4b-it',
                 label: 'Gemma 3 4B IT (仅流式)',
-                description: '更便宜但也更弱的 Gemma 3 指令模型（4B），建议仅作为流式输出的备用选择。'
+                description: '更便宜但也更弱的 Gemma 3 指令模型（4B），这已经有点挑战极限了。'
             },
             {
                 value: 'gemma-3-1b-it',
                 label: 'Gemma 3 1B IT (仅流式)',
-                description: '更便宜但也更弱的 Gemma 3 指令模型（1B），建议仅作为流式输出的备用选择。'
+                description: '更便宜但也更弱的 Gemma 3 指令模型（1B），这真的会有人用吗？！'
             },
             {
                 value: 'gemma-3-270m-it',
@@ -316,12 +316,12 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'gemma-3-4b-it',
                 label: 'Gemma 3 4B IT (仅流式)',
-                description: '更便宜但也更弱的 Gemma 3 指令模型（4B），建议仅用于流式生成的备用通道。'
+                description: '更便宜但也更弱的 Gemma 3 指令模型（4B），这已经有点挑战极限了。'
             },
             {
                 value: 'gemma-3-1b-it',
                 label: 'Gemma 3 1B IT (仅流式)',
-                description: '更便宜但也更弱的 Gemma 3 指令模型（1B），建议仅用于流式生成的备用通道。'
+                description: '更便宜但也更弱的 Gemma 3 指令模型（1B），这真的会有人用吗？！'
             },
             {
                 value: 'gemma-3-270m-it',

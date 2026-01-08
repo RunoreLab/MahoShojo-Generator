@@ -217,6 +217,7 @@ const formatStrictReason = (code: string): string => {
     'ranked-match-unrankable': '参战者未登记为数据卡/预设',
     'ranked-match-user-mismatch': '排位匹配票据与账号不匹配',
     'daily-limit': '今日严格排位计分次数已达上限（按 UTC 00:00/北京时间 08:00 刷新）',
+    'ai-model-blacklisted': '选择了不支持严格排位计分的模型',
   };
   return map[code] ?? code;
 };
@@ -237,6 +238,7 @@ export function RankingQuickActions() {
   const setAdjudicationEvents = useBattleSelector((state) => state.setAdjudicationEvents);
   const combatants = useBattleSelector((state) => state.combatants);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
+  const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
   const updateCombatantCharacterGuidance = useBattleSelector((state) => state.updateCombatantCharacterGuidance);
@@ -438,6 +440,9 @@ export function RankingQuickActions() {
       adjudicationEventCount: Array.isArray(adjudicationEvents) ? adjudicationEvents.length : 0,
       combatants: minimalCombatants,
       rankedMatch: rankedMatchTicket,
+      ...(userProviderConfig && userProviderConfig.modelId !== 'default'
+        ? { customProvider: { providerId: userProviderConfig.providerId, modelId: userProviderConfig.modelId } }
+        : {}),
     };
   }, [
     adjudicationEvents,
@@ -451,6 +456,7 @@ export function RankingQuickActions() {
     settings.readNarrativeHistory,
     settings.userGuidance,
     storyLength,
+    userProviderConfig,
   ]);
 
   const strictPreflightKey = useMemo(() => {
