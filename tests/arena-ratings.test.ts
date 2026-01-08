@@ -168,6 +168,15 @@ describe('arena-ratings: 严格排位资格判定', () => {
       isStrictEligible(
         {
           ...baseSnapshot,
+          extraJson: JSON.stringify({ readNarrativeHistory: false, rankedMatchOk: true, resolvedModelOverride: 'gemma-3-4b-it' }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(false);
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
           extraJson: JSON.stringify({ readNarrativeHistory: false, rankedMatchOk: true, resolvedModelOverride: 'gemma-3-1b-it' }),
         },
         baseCombatants,
