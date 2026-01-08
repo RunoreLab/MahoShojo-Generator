@@ -385,6 +385,9 @@ interface BattleApiResponse {
         if (!aiResult) {
             throw lastModelOverrideError;
         }
+        if (!usedModelOverride && typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim()) {
+            usedModelOverride = aiTelemetry.model.trim();
+        }
         const usage = normalizeUsage(aiTelemetry.usage);
         const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 

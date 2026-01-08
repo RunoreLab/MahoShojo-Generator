@@ -459,9 +459,6 @@ async function handler(req: NextRequest): Promise<Response> {
                     'gemma-3-27b-it',
                     'gemini-2.5-flash-lite',
                     'gemma-3-12b-it',
-                    'gemma-3-4b-it',
-                    'gemma-3-1b-it',
-                    'gemma-3-270m-it',
                     'gemini-2.5-flash',
                 ]
                 : [undefined]);
@@ -496,6 +493,9 @@ async function handler(req: NextRequest): Promise<Response> {
         }
         if (!streamResult) {
             throw lastModelOverrideError;
+        }
+        if (!usedModelOverride && typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim()) {
+            usedModelOverride = aiTelemetry.model.trim();
         }
         const streamResponse = streamResult.response;
         const usagePromise = streamResult.usagePromise;
