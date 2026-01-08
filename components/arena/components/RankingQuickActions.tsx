@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '@/lib/useAuth';
 import { authStorage } from '@/lib/auth';
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import type { BattleStoreState, CombatantData } from '../types';
@@ -172,6 +174,7 @@ const buildStrictSetupMissingReasons = (input: {
   readCurrentState: boolean;
   readNarrativeHistory: boolean;
   adjudicationEventCount: number;
+  userProviderConfigModelId: string | null;
 }): string[] => {
   const reasons: string[] = [];
   if (!input.isAuthenticated) reasons.push('需要先登录');
@@ -185,7 +188,42 @@ const buildStrictSetupMissingReasons = (input: {
   if (input.readNarrativeHistory) reasons.push('需关闭「读取叙事历史」');
   if (input.adjudicationEventCount > 0) reasons.push('需清空「随机判定器事件」');
   if (input.rankableCombatants.some((c) => (c.characterGuidance ?? '').trim())) reasons.push('需清空「角色行动引导」');
+  if (input.userProviderConfigModelId && isStrictRankedModelBlacklisted(input.userProviderConfigModelId)) {
+    reasons.push('需改用支持严格排位计分的 AI 模型');
+  }
   return reasons;
+};
+
+const pickNonBlacklistedModelForProvider = (providerId: string): string | null => {
+  if (providerId === 'system') return 'default';
+
+  const provider = AI_PROVIDER_CATALOG.find((item) => item.id === providerId) ?? null;
+  if (!provider) return null;
+
+  const preferred: string[] = [
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-3-flash-preview',
+    'gemini-3-pro-preview',
+    'google/gemini-2.5-flash-lite',
+    'google/gemini-2.5-flash',
+    'google/gemini-2.0-flash-lite',
+    'google/gemini-2.0-flash',
+    'google/gemini-3-flash-preview',
+    'google/gemini-3-pro-preview',
+  ];
+
+  for (const value of preferred) {
+    const exists = provider.models.some((model) => model.value === value);
+    if (!exists) continue;
+    if (isStrictRankedModelBlacklisted(value)) continue;
+    return value;
+  }
+
+  const firstNonBlacklisted = provider.models.find((model) => !isStrictRankedModelBlacklisted(model.value));
+  return firstNonBlacklisted?.value ?? null;
 };
 
 const formatDurationMmSs = (ms: number): string => {
@@ -239,6 +277,7 @@ export function RankingQuickActions() {
   const combatants = useBattleSelector((state) => state.combatants);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
+  const setUserProviderConfig = useBattleSelector((state) => state.setUserProviderConfig);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
   const updateCombatantCharacterGuidance = useBattleSelector((state) => state.updateCombatantCharacterGuidance);
@@ -299,6 +338,7 @@ export function RankingQuickActions() {
         readCurrentState: settings.readCurrentState,
         readNarrativeHistory: settings.readNarrativeHistory,
         adjudicationEventCount: Array.isArray(adjudicationEvents) ? adjudicationEvents.length : 0,
+        userProviderConfigModelId: userProviderConfig?.modelId ?? null,
       }),
     [
       adjudicationEvents,
@@ -311,11 +351,47 @@ export function RankingQuickActions() {
       settings.readCurrentState,
       settings.readNarrativeHistory,
       settings.userGuidance,
+      userProviderConfig?.modelId,
     ],
   );
 
   const handleApplyStrictSetup = () => {
     if (isGenerating) return;
+
+    const shouldFixBlacklistedModel = Boolean(
+      userProviderConfig && userProviderConfig.modelId !== 'default' && isStrictRankedModelBlacklisted(userProviderConfig.modelId),
+    );
+    let modelFixMessage: string | null = null;
+
+    if (shouldFixBlacklistedModel) {
+      const providerId = userProviderConfig?.providerId || 'system';
+      const pickedModelId = pickNonBlacklistedModelForProvider(providerId);
+      const nextProviderId = pickedModelId ? (providerId === 'system' ? 'system' : providerId) : 'system';
+      const nextModelId = pickedModelId ?? 'default';
+      const nextConfig = {
+        providerId: nextProviderId,
+        modelId: nextModelId,
+        apiKey: nextProviderId === 'system' ? '' : (userProviderConfig?.apiKey ?? ''),
+      };
+
+      setUserProviderConfig(nextConfig);
+      modelFixMessage =
+        nextProviderId === 'system' && nextModelId === 'default'
+          ? '已将 AI 模型恢复为「默认策略」'
+          : `已将 AI 模型切换为「${nextModelId}」`;
+
+      try {
+        window.localStorage.setItem('arena.customProvider.selected', nextProviderId);
+        window.localStorage.setItem(`arena.customProvider.model.${nextProviderId}`, nextModelId);
+        window.dispatchEvent(
+          new CustomEvent('mahoshojo:set-ai-provider-config', {
+            detail: { providerId: nextProviderId, modelId: nextModelId },
+          }),
+        );
+      } catch {
+        // localStorage 在部分隐私模式/受限环境下可能不可用，忽略即可
+      }
+    }
 
     clearRankedMatch();
     setBattleMode('classic');
@@ -331,7 +407,9 @@ export function RankingQuickActions() {
     readableCombatants.forEach((c) => updateCombatantCharacterGuidance(c.filename, ''));
     clearScenario();
     clearAuxScenarios();
-    setError('✅ 已应用严格排位设置：经典模式 / 默认等级 / 简体中文 / 清空引导 / 关闭读取 / 清空判定与行动引导');
+    setError(
+      `✅ 已应用严格排位设置：经典模式 / 默认等级 / 简体中文 / 清空引导 / 关闭读取 / 清空判定与行动引导${modelFixMessage ? ` / ${modelFixMessage}` : ''}`,
+    );
   };
 
   const currentLockKey = useMemo(() => buildRankedMatchLockKey({

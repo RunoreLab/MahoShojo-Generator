@@ -15,6 +15,7 @@ interface AiProviderSelectorProps {
 const STORAGE_SELECTED_PROVIDER = 'arena.customProvider.selected';
 const STORAGE_API_KEY_PREFIX = 'arena.customProvider.apiKey.';
 const STORAGE_MODEL_PREFIX = 'arena.customProvider.model.';
+const PROVIDER_SELECTOR_SYNC_EVENT = 'mahoshojo:set-ai-provider-config';
 
 const getApiKeyStorageKey = (providerId: string) => `${STORAGE_API_KEY_PREFIX}${providerId}`;
 const getModelStorageKey = (providerId: string) => `${STORAGE_MODEL_PREFIX}${providerId}`;
@@ -160,6 +161,60 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
         }
 
         setIsHydrated(true);
+    }, [providerOptions]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        const handler = (event: Event) => {
+            const detail = (event as CustomEvent<Partial<UserAIProviderConfig> | undefined>)?.detail;
+            if (!detail || typeof detail !== 'object') {
+                return;
+            }
+
+            const nextProviderId = typeof detail.providerId === 'string' ? detail.providerId.trim() : '';
+            if (!nextProviderId) {
+                return;
+            }
+
+            const provider = providerOptions.find(item => item.id === nextProviderId) ?? null;
+            if (!provider) {
+                return;
+            }
+
+            const modelFromEvent = typeof detail.modelId === 'string' ? detail.modelId.trim() : '';
+            const apiKeyFromEvent = typeof detail.apiKey === 'string' ? detail.apiKey : null;
+
+            try {
+                window.localStorage.setItem(STORAGE_SELECTED_PROVIDER, nextProviderId);
+                if (apiKeyFromEvent != null) {
+                    window.localStorage.setItem(getApiKeyStorageKey(nextProviderId), apiKeyFromEvent);
+                }
+                if (modelFromEvent) {
+                    const isValidModel = provider.models.some(model => model.value === modelFromEvent);
+                    const safeModel = isValidModel ? modelFromEvent : (provider.models[0]?.value || '');
+                    if (safeModel) {
+                        window.localStorage.setItem(getModelStorageKey(nextProviderId), safeModel);
+                    }
+                }
+            } catch {
+                // localStorage 在部分隐私模式/受限环境下可能不可用，忽略即可
+            }
+
+            setSelectedProviderId(nextProviderId);
+            if (apiKeyFromEvent != null) {
+                setApiKey(apiKeyFromEvent);
+            }
+            if (modelFromEvent) {
+                const isValidModel = provider.models.some(model => model.value === modelFromEvent);
+                setSelectedModel(isValidModel ? modelFromEvent : (provider.models[0]?.value || ''));
+            }
+        };
+
+        window.addEventListener(PROVIDER_SELECTOR_SYNC_EVENT, handler as EventListener);
+        return () => window.removeEventListener(PROVIDER_SELECTOR_SYNC_EVENT, handler as EventListener);
     }, [providerOptions]);
 
     useEffect(() => {
