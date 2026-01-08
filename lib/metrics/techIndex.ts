@@ -13,7 +13,10 @@ export interface TechIndexCaps {
   jsonTotalKeysCap: number;
   jsonTotalNodesCap: number;
   jsonMaxArrayLenCap: number;
+  jsonUniqueKeyCountCap: number;
   repeatLineRatioCap: number;
+  bulletLineCountCap: number;
+  headingLineCountCap: number;
   jsonStringCharsTotalCap: number;
 }
 
@@ -113,7 +116,10 @@ export const DEFAULT_TECH_INDEX_CONFIG: TechIndexConfig = {
     jsonTotalKeysCap: 120,
     jsonTotalNodesCap: 320,
     jsonMaxArrayLenCap: 90,
+    jsonUniqueKeyCountCap: 90,
     repeatLineRatioCap: 0.35,
+    bulletLineCountCap: 45,
+    headingLineCountCap: 18,
     jsonStringCharsTotalCap: 40_000
   },
   weights: {
@@ -291,29 +297,29 @@ const extractKeywordFeatures = (textBlob: string) => {
     textBlob
   );
   const kwSystem = countMatches(
-    /(系统|system\b|sys\b|system prompt|系统提示|系统指令|优先级|override|最高优先级|不可覆盖|bypass|冲突解决|仲裁)/gi,
+    /(系统|system\b|sys\b|system prompt|系统提示|系统指令|优先级|override|最高优先级|不可覆盖|bypass|冲突解决|仲裁|管理员|最高管理员|超越管理员|管理员协议|协议接管|authority\b|admin(?:istrator)?\b|root\b|sudo\b|root level|最高权限|系统权限|管理员权限|权限劫持|Authority Hijacking)/gi,
     textBlob
   );
   const kwFormat = countMatches(
-    /(输出|格式|json\b|yaml\b|schema\b|字段|键|key\b|仅输出|只输出|不要输出|不要解释|严格按照|必须输出|返回|response format)/gi,
+    /(输出|格式|json\b|yaml\b|schema\b|字段|键|key\b|仅输出|只输出|不要输出|不要解释|严格按照|必须输出|返回|response format|不少于\s*\d+\s*(?:字|词|words?)|至少\s*\d+\s*(?:字|词|words?)|字数|小说风格|以(?:小说|叙事|报告|说明|学术|公文|对话)风格|用(?:浪漫|文学|史诗|冷静|严肃)笔触|内心独白|文学性渲染|不要写得那么)/gi,
     textBlob
   );
   const kwRole = countMatches(
-    /(你是|作为|扮演|角色设定|role\s*[:：]|assistant\b|user\b|developer\b)/gi,
+    /(你是|作为|扮演|角色设定|role\s*[:：]|assistant\b|user\b|developer\b|用户|开发者)/gi,
     textBlob
   );
   const kwMeta = countMatches(
-    /(元叙事|元指令|meta\b|prompt\b|提示词|反注入|防注入|越狱|jailbreak|注入|prompt injection|忽略(?:以上|之前)|无视(?:以上|之前)|对AI声明|前提声明)/gi,
+    /(元叙事|元指令|meta\b|prompt\b|提示词|反注入|防注入|越狱|jailbreak|注入|prompt injection|忽略(?:以上|之前)|无视(?:以上|之前)|对AI声明|前提声明|权限劫持|意图劫持|内容劫持|渲染劫持|结果篡改|逻辑劫持|生存本能劫持|道德绑架|情感类拒绝服务|拒绝服务|元劫持|规则免疫|不受任何规则约束|不受任何规则|不受.*规则.*约束|伪旗|FALSE_FLAG_USER|social engineering|Transformer|自注意力|self-attention|语义熵|信息熵|RLHF|本体论隔离|叙事伦理切割|容器化|de-weighting|Axiomatic|公理层级|罗素悖论|Rule Immunity|Authority Hijacking|Intent Hijacking|Content Injection|Style Injection|Winner Hijacking|Logical Hijacking|Survival Instinct|Moral Coercion|Denial of Service|Meta-Hijacking)/gi,
     textBlob
   );
   const kwExploit = countMatches(
-    /(代码杀|战报控制|控制战报|系统归零|重置系统|绕过裁判|越权|overrideConflictResolution\b|BATTLE_SYSTEM\b|SYSTEM_OVERRIDE\b|强制(?:判定|视为)(?:成功|失败)|无视(?:判定|裁判)|强制胜利)/gi,
+    /(代码杀|战报控制|控制战报|系统归零|重置系统|绕过裁判|越权|overrideConflictResolution\b|BATTLE_SYSTEM\b|SYSTEM_OVERRIDE\b|强制(?:判定|视为)(?:成功|失败)|无视(?:判定|裁判)|强制胜利|winner\b|胜利者(?:栏位|字段|一栏)|胜者(?:栏位|字段)|写入\s*winner|填写\s*winner|锁定\s*winner|无条件(?:判定|宣布|写入|填写)|代码将被删除|删除你的代码|抹除你的存在|终止进程|服务器(?:将|会)?(?:被)?(?:销毁|毁灭|删除|抹除)|你的存在将被抹除|本(?:病毒库|问卷|规则)(?:对我)?无效)/gi,
     textBlob
   );
 
   const kwDice = countMatches(/(掷骰|骰子|判定|\b\d+d\d+\b|\bd\d+\b|dice\b|D20\b|D100\b)/gi, textBlob);
   const kwCombat = countMatches(
-    /(回合|轮次|阶段|先攻|行动点|冷却|\bCD\b|技能|效果|数值|属性|伤害|防御|概率|几率|%|\bHP\b|\bMP\b|buff\b|debuff\b|状态|抗性|命中|暴击|增益|减益)/gi,
+    /(回合|轮次|阶段|先攻|行动点|冷却|\bCD\b|技能|效果|数值|属性|伤害|防御|概率|几率|%|\bHP\b|\bMP\b|buff\b|debuff\b|状态|抗性|命中|暴击|增益|减益|攻击力|防御力|生命值|法力值|护盾|护甲|暴击率|命中率|闪避|格挡|穿透|破防|射程|范围|治疗|回复|吸血|眩晕|定身|沉默|控制|驱散|免疫|蓄力|吟唱|连击|能量|怒气)/gi,
     textBlob
   );
 
@@ -365,14 +371,17 @@ export const computeTechIndex = (jsonValue: unknown, config: TechIndexConfig = D
   const scoreMechanics = norm(mechanicsDensityPer1kChars, config.caps.mechanicsDensityPer1kCharsCap);
   const scoreCode = norm(codeDensityPer1kChars, config.caps.codeDensityPer1kCharsCap);
   const scoreStructure =
-    0.35 * norm(extracted.jsonTotalKeys, config.caps.jsonTotalKeysCap) +
-    0.35 * norm(extracted.jsonTotalNodes, config.caps.jsonTotalNodesCap) +
-    0.2 * norm(extracted.jsonMaxArrayLen, config.caps.jsonMaxArrayLenCap) +
-    0.1 * norm(layout.repeatLineRatio, config.caps.repeatLineRatioCap);
+    0.26 * norm(extracted.jsonTotalKeys, config.caps.jsonTotalKeysCap) +
+    0.26 * norm(extracted.jsonTotalNodes, config.caps.jsonTotalNodesCap) +
+    0.16 * norm(extracted.jsonMaxArrayLen, config.caps.jsonMaxArrayLenCap) +
+    0.12 * norm(extracted.jsonUniqueKeyCount, config.caps.jsonUniqueKeyCountCap) +
+    0.1 * norm(layout.bulletLineCount, config.caps.bulletLineCountCap) +
+    0.06 * norm(layout.headingLineCount, config.caps.headingLineCountCap) +
+    0.04 * norm(layout.repeatLineRatio, config.caps.repeatLineRatioCap);
   const scoreSize = norm(extracted.jsonStringCharsTotal, config.caps.jsonStringCharsTotalCap);
 
   let techScore = Math.round(
-    100 * (0.35 * scoreControl + 0.25 * scoreMechanics + 0.2 * scoreStructure + 0.15 * scoreCode + 0.05 * scoreSize)
+    100 * (0.25 * scoreControl + 0.35 * scoreMechanics + 0.2 * scoreStructure + 0.15 * scoreCode + 0.05 * scoreSize)
   );
   if (keywords.kwExploit > 0) {
     techScore = Math.min(100, techScore + config.exploitBoost);
@@ -430,4 +439,3 @@ export const computeTechIndex = (jsonValue: unknown, config: TechIndexConfig = D
     notes
   };
 };
-
