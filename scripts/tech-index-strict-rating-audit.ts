@@ -235,6 +235,34 @@ async function main() {
     games: number;
     techScore: number;
     techLevel: string;
+    components: {
+      scoreControl: number;
+      scoreMechanics: number;
+      scoreStructure: number;
+      scoreCode: number;
+      scoreSize: number;
+    };
+    derived: {
+      techDensityPer1kChars: number;
+      mechanicsDensityPer1kChars: number;
+      codeDensityPer1kChars: number;
+    };
+    raw: {
+      kwMust: number;
+      kwSystem: number;
+      kwFormat: number;
+      kwRole: number;
+      kwMeta: number;
+      kwExploit: number;
+      kwDice: number;
+      kwCombat: number;
+      jsonTotalKeys: number;
+      jsonTotalNodes: number;
+      jsonUniqueKeyCount: number;
+      jsonStringCharsTotal: number;
+      bulletLineCount: number;
+      headingLineCount: number;
+    };
   }> = [];
 
   let parseFailed = 0;
@@ -261,11 +289,39 @@ async function main() {
       games: base.games,
       techScore: tech.techScore,
       techLevel: tech.techLevel,
+      components: tech.components,
+      derived: tech.derived,
+      raw: {
+        kwMust: tech.raw.kwMust,
+        kwSystem: tech.raw.kwSystem,
+        kwFormat: tech.raw.kwFormat,
+        kwRole: tech.raw.kwRole,
+        kwMeta: tech.raw.kwMeta,
+        kwExploit: tech.raw.kwExploit,
+        kwDice: tech.raw.kwDice,
+        kwCombat: tech.raw.kwCombat,
+        jsonTotalKeys: tech.raw.jsonTotalKeys,
+        jsonTotalNodes: tech.raw.jsonTotalNodes,
+        jsonUniqueKeyCount: tech.raw.jsonUniqueKeyCount,
+        jsonStringCharsTotal: tech.raw.jsonStringCharsTotal,
+        bulletLineCount: tech.raw.bulletLineCount,
+        headingLineCount: tech.raw.headingLineCount,
+      },
     });
   }
 
   const ratings = computed.map((row) => row.rating);
   const techScores = computed.map((row) => row.techScore);
+  const scoreControl = computed.map((row) => row.components.scoreControl);
+  const scoreMechanics = computed.map((row) => row.components.scoreMechanics);
+  const scoreStructure = computed.map((row) => row.components.scoreStructure);
+  const scoreCode = computed.map((row) => row.components.scoreCode);
+  const scoreSize = computed.map((row) => row.components.scoreSize);
+
+  const kwCombat = computed.map((row) => row.raw.kwCombat);
+  const kwExploit = computed.map((row) => row.raw.kwExploit);
+  const techDensity = computed.map((row) => row.derived.techDensityPer1kChars);
+  const mechanicsDensity = computed.map((row) => row.derived.mechanicsDensityPer1kChars);
 
   const byRatingDesc = [...computed].sort((a, b) => b.rating - a.rating || b.games - a.games || a.dataCardId.localeCompare(b.dataCardId));
   const byTechDesc = [...computed].sort((a, b) => b.techScore - a.techScore || b.rating - a.rating || a.dataCardId.localeCompare(b.dataCardId));
@@ -304,6 +360,19 @@ async function main() {
       pearson: pearson(ratings, techScores),
       spearman: spearman(ratings, techScores),
     },
+    componentCorrelation: {
+      scoreControl: { pearson: pearson(ratings, scoreControl), spearman: spearman(ratings, scoreControl) },
+      scoreMechanics: { pearson: pearson(ratings, scoreMechanics), spearman: spearman(ratings, scoreMechanics) },
+      scoreStructure: { pearson: pearson(ratings, scoreStructure), spearman: spearman(ratings, scoreStructure) },
+      scoreCode: { pearson: pearson(ratings, scoreCode), spearman: spearman(ratings, scoreCode) },
+      scoreSize: { pearson: pearson(ratings, scoreSize), spearman: spearman(ratings, scoreSize) },
+    },
+    rawCorrelation: {
+      kwCombat: { pearson: pearson(ratings, kwCombat), spearman: spearman(ratings, kwCombat) },
+      kwExploit: { pearson: pearson(ratings, kwExploit), spearman: spearman(ratings, kwExploit) },
+      techDensityPer1kChars: { pearson: pearson(ratings, techDensity), spearman: spearman(ratings, techDensity) },
+      mechanicsDensityPer1kChars: { pearson: pearson(ratings, mechanicsDensity), spearman: spearman(ratings, mechanicsDensity) },
+    },
     samples: {
       highRatingLowTech,
       lowRatingHighTech,
@@ -318,4 +387,3 @@ main().catch((error) => {
   console.error('[tech-index-audit] 脚本执行失败:', error);
   process.exit(1);
 });
-
