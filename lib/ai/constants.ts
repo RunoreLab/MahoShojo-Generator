@@ -364,14 +364,14 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         name: '魔法国度',
         description: '神秘渠道，不定时放送。',
         docsUrl: '',
-        baseUrl: 'https://www.right.codes/codex/v1',
-        type: 'openai',
+        baseUrl: 'https://fmxalteyoxwi.jp-members-1.clawcloudrun.com/proxy/gemini-suda/v1beta',
+        type: 'google',
         mode: 'auto',
         models: [
             {
-                value: 'gpt-5.2',
-                label: 'GPT 5.2 (仅流式)',
-                description: '神秘渠道的 GPT 5.2 模型，随机出现，仅供娱乐。'
+                value: 'gemini-2.5-flash',
+                label: 'Gemini 2.5 Flash',
+                description: '神秘渠道的 Gemini 2.5 Flash 模型，随机出现，仅供娱乐。'
             },
         ]
     },
