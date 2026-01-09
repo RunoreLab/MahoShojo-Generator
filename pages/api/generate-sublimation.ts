@@ -327,15 +327,6 @@ const createGenerationConfig = (
       rules.push(`**称号规则**: 角色名称字段(\`${nameField}\`)必须更新。该字段的结构为 \`{代号/名称}\` 或 \`{代号/名称}「{称号}」\`。你 **不可** 修改 \`{代号/名称}\` 部分，但 **必须** 为其生成或更新一个4个字左右（1~8个字）的 \`{称号}\`，并以「」包裹，以体现其新状态。`);
     }
 
-    if (targetTemplate === 'magical-girl') {
-      const nameRuleTargets = '`magicConstruct.name`、`wonderlandRule.name`、`blooming.name`';
-      if (allowReshapeNames) {
-        rules.push(`**名称重塑**: 本次允许重塑 ${nameRuleTargets}。若你更新这些名字，建议保留原名核心词并追加称号/变体，保持传承感。`);
-      } else {
-        rules.push(`**名称锁定**: ${nameRuleTargets} 为固定字段，禁止修改。`);
-      }
-    }
-
     if (targetTemplate === 'general' && fieldsToGenerate.includes('content')) {
       rules.push('**通用角色设定**: `content` 字段需要完整描述角色的外观、能力、背景、性格、重要经历等关键信息，建议使用结构化 Markdown 段落与小标题。');
     }
