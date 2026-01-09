@@ -23,6 +23,22 @@ import M13_greatness_in_complexity from '@/public/presets/M13_greatness_in_compl
 import M14_centaurea_claw_marks from '@/public/presets/M14_centaurea_claw_marks.json';
 import M15_centaurea_in_heart from '@/public/presets/M15_centaurea_in_heart.json';
 import M90_goose from '@/public/presets/M90_goose.json';
+import U_CS_horde from '@/public/presets/U_CS_horde.json';
+import U_CS_horde_strong from '@/public/presets/U_CS_horde_strong.json';
+import U_CS_horde_tide from '@/public/presets/U_CS_horde_tide.json';
+import U_CS_horde_weak from '@/public/presets/U_CS_horde_weak.json';
+import U_CS_solo from '@/public/presets/U_CS_solo.json';
+import U_CS_solo_boss from '@/public/presets/U_CS_solo_boss.json';
+import U_CS_solo_strong from '@/public/presets/U_CS_solo_strong.json';
+import U_CS_solo_weak from '@/public/presets/U_CS_solo_weak.json';
+import U_MG_solo from '@/public/presets/U_MG_solo.json';
+import U_MG_solo_strong from '@/public/presets/U_MG_solo_strong.json';
+import U_MG_solo_top from '@/public/presets/U_MG_solo_top.json';
+import U_MG_solo_weak from '@/public/presets/U_MG_solo_weak.json';
+import U_MG_team from '@/public/presets/U_MG_team.json';
+import U_MG_team_strong from '@/public/presets/U_MG_team_strong.json';
+import U_MG_team_top from '@/public/presets/U_MG_team_top.json';
+import U_MG_team_weak from '@/public/presets/U_MG_team_weak.json';
 
 const PRESET_DATA_BY_FILENAME: Record<string, unknown> = {
   'C01_egg.json': C01_egg,
@@ -50,6 +66,22 @@ const PRESET_DATA_BY_FILENAME: Record<string, unknown> = {
   'M14_centaurea_claw_marks.json': M14_centaurea_claw_marks,
   'M15_centaurea_in_heart.json': M15_centaurea_in_heart,
   'M90_goose.json': M90_goose,
+  'U_MG_solo.json': U_MG_solo,
+  'U_MG_solo_weak.json': U_MG_solo_weak,
+  'U_MG_solo_strong.json': U_MG_solo_strong,
+  'U_MG_solo_top.json': U_MG_solo_top,
+  'U_MG_team.json': U_MG_team,
+  'U_MG_team_weak.json': U_MG_team_weak,
+  'U_MG_team_strong.json': U_MG_team_strong,
+  'U_MG_team_top.json': U_MG_team_top,
+  'U_CS_solo.json': U_CS_solo,
+  'U_CS_solo_weak.json': U_CS_solo_weak,
+  'U_CS_solo_strong.json': U_CS_solo_strong,
+  'U_CS_solo_boss.json': U_CS_solo_boss,
+  'U_CS_horde.json': U_CS_horde,
+  'U_CS_horde_weak.json': U_CS_horde_weak,
+  'U_CS_horde_strong.json': U_CS_horde_strong,
+  'U_CS_horde_tide.json': U_CS_horde_tide,
 };
 
 export const BUNDLED_PRESET_FILENAMES: string[] = Object.keys(PRESET_DATA_BY_FILENAME);

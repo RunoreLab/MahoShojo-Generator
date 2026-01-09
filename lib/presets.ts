@@ -104,6 +104,55 @@ export const PRESET_LIST: Preset[] = [
     filename: "M90_goose.json",
     type: "magical-girl"
   },
+  // 自由现编（留白预设）
+  {
+    name: "魔法少女",
+    description: "留白模板：外观/魔装/奇境会根据具体情况编写，比较随机。",
+    filename: "U_MG_solo.json",
+    type: "magical-girl"
+  },
+  {
+    name: "弱小的魔法少女",
+    description: "留白模板：更偏新人/负伤/资源不足，能力不稳定但更贴近求生。",
+    filename: "U_MG_solo_weak.json",
+    type: "magical-girl"
+  },
+  {
+    name: "强大的魔法少女",
+    description: "留白模板：更偏经验丰富/体系完整，能快速适配战场并收束战局。",
+    filename: "U_MG_solo_strong.json",
+    type: "magical-girl"
+  },
+  {
+    name: "顶尖魔法少女",
+    description: "留白模板：顶尖层次的魔法少女，例如传说中的“物质界最强”、“最强花牌”。",
+    filename: "U_MG_solo_top.json",
+    type: "magical-girl"
+  },
+  {
+    name: "魔法少女小队",
+    description: "留白模板：成员/分工可变，强调协作与合击的团队作战。",
+    filename: "U_MG_team.json",
+    type: "magical-girl"
+  },
+  {
+    name: "弱小的魔法少女小队",
+    description: "留白模板：临时编队/新人小队，配合不成熟但更有成长空间。",
+    filename: "U_MG_team_weak.json",
+    type: "magical-girl"
+  },
+  {
+    name: "强大的魔法少女小队",
+    description: "留白模板：体系化协作与战术奇境，适合写团队压制与补位反打。",
+    filename: "U_MG_team_strong.json",
+    type: "magical-girl"
+  },
+  {
+    name: "顶尖魔法少女小队",
+    description: "留白模板：近规则级协同，终局感强，适合大战役/主线收束。",
+    filename: "U_MG_team_top.json",
+    type: "magical-girl"
+  },
   // 残兽
   {
     name: "溶腔型-卵",
@@ -152,6 +201,54 @@ export const PRESET_LIST: Preset[] = [
     description: "苍黑残响：由黑曜石和振动空气构成的巨大蝉蛹，使用声音相关的攻击方式。",
     filename: "C08_silent_worm.json",
     type: "canshou"
+  },
+  // 自由现编（留白预设）
+  {
+    name: "残兽",
+    description: "留白模板：概念/形态会根据具体情况编写，比较随机。",
+    filename: "U_CS_solo.json",
+    type: "canshou"
+  },
+  {
+    name: "弱小的残兽",
+    description: "留白模板：偏早期个体与简单概念，适合新人遭遇战或引子事件。",
+    filename: "U_CS_solo_weak.json",
+    type: "canshou"
+  },
+  {
+    name: "强大的残兽",
+    description: "留白模板：更接近系统性灾害，拥有清晰概念与领域倾向。",
+    filename: "U_CS_solo_strong.json",
+    type: "canshou"
+  },
+  {
+    name: "残兽首领",
+    description: "留白模板：具统御与群体链接倾向，适合作为道中BOSS或者统御残兽群。",
+    filename: "U_CS_solo_boss.json",
+    type: "canshou"
+  },
+  {
+    name: "残兽群",
+    description: "留白模板：群体共鸣与协作捕食，适合城市小规模灾害与围猎局。",
+    filename: "U_CS_horde.json",
+    type: "canshou"
+  },
+  {
+    name: "弱小的残兽群",
+    description: "留白模板：规模较小/结构松散，适合混乱与压迫感的铺垫。",
+    filename: "U_CS_horde_weak.json",
+    type: "canshou"
+  },
+  {
+    name: "强大的残兽群",
+    description: "留白模板：层级分工与巢穴化明显，适合攻城式推进与分队被迫抉择。",
+    filename: "U_CS_horde_strong.json",
+    type: "canshou"
+  },
+  {
+    name: "兽潮",
+    description: "留白模板：现象级灾害，战斗往往变为撤离/护送/止损与英雄主义。",
+    filename: "U_CS_horde_tide.json",
+    type: "canshou"
   }
 ];
-
