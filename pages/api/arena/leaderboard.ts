@@ -3,7 +3,6 @@ import type { NextRequest } from 'next/server';
 import { queryFromD1 } from '@/lib/d1';
 import { PRESET_LIST } from '@/lib/presets';
 import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
-import { attachVerifiedNativeFlags } from '@/lib/arena/leaderboard-native';
 
 export const config = {
   runtime: 'edge',
@@ -299,10 +298,7 @@ export default async function handler(req: NextRequest) {
       };
     });
 
-    const executionContext = ((req as any).context ?? null) as any;
-    const itemsWithVerifiedNative = await attachVerifiedNativeFlags(queryFromD1, items, executionContext);
-
-    return new Response(JSON.stringify({ success: true, items: itemsWithVerifiedNative }), {
+    return new Response(JSON.stringify({ success: true, items }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
