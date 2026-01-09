@@ -36,10 +36,10 @@ const isSupportedTargetTemplate = (value: unknown): value is SupportedTargetTemp
 const isSupportedSourceTemplate = (value: unknown): value is DataCardTemplate =>
   typeof value === 'string' && SUPPORTED_SOURCE_TEMPLATES.includes(value as DataCardTemplate);
 
-const getFullPayloadSchema = (target: SupportedTargetTemplate) => {
+const getFullPayloadSchema = (target: SupportedTargetTemplate, options?: { allowReshapeNames?: boolean }) => {
   switch (target) {
     case 'magical-girl':
-      return FullMagicalGirlSublimationPayloadSchema;
+      return FullMagicalGirlSublimationPayloadSchemaFactory(Boolean(options?.allowReshapeNames));
     case 'canshou':
       return FullCanshouSublimationPayloadSchema;
     case 'general':
@@ -60,7 +60,7 @@ const CurrentStateUpdateSchema = z.object({
   summary: z.string().describe('角色当前状态的摘要，1-2句话描述角色身体状况、心境或想法等。')
 }).partial().optional();
 
-const FullMagicalGirlSublimationPayloadSchema = z.object({
+const FullMagicalGirlSublimationPayloadSchemaFactory = (allowReshapeNames: boolean) => z.object({
   codename: z.string().describe("角色的新代号，必须包含原始代号并在后面加上一个「称号」。例如，如果原始代号是'代号'，新代号可以是'代号「称号」'。"),
   appearance: z.object({
     outfit: z.string(),
@@ -69,19 +69,31 @@ const FullMagicalGirlSublimationPayloadSchema = z.object({
     overallLook: z.string(),
   }).describe("根据角色经历更新后的外观描述。"),
   magicConstruct: z.object({
-    name: z.string().describe("魔装的名字(此字段为固定值，不应修改)。"), // 尽管是不可变的，但在完整结构中包含它
+    name: z.string().describe(
+      allowReshapeNames
+        ? "魔装的名字。"
+        : "魔装的名字(此字段为固定值，不应修改)。"
+    ),
     form: z.string().describe("魔装形态的演变。"),
     basicAbilities: z.array(z.string()).describe("基础能力的进化或新增，不得重复。"),
     description: z.string().describe("对魔装当前状态的全新描述。"),
   }),
   wonderlandRule: z.object({
-    name: z.string().describe("奇境的名字(此字段为固定值，不应修改)。"),
+    name: z.string().describe(
+      allowReshapeNames
+        ? "奇境的名字。"
+        : "奇境的名字(此字段为固定值，不应修改)。"
+    ),
     description: z.string(),
     tendency: z.string(),
     activation: z.string(),
   }).describe("奇境规则的改变。"),
   blooming: z.object({
-    name: z.string().describe("繁开的名字(此字段为固定值，不应修改)。"),
+    name: z.string().describe(
+      allowReshapeNames
+        ? "繁开的名字。"
+        : "繁开的名字(此字段为固定值，不应修改)。"
+    ),
     evolvedAbilities: z.array(z.string()),
     evolvedForm: z.string(),
     evolvedOutfit: z.string(),
@@ -216,6 +228,7 @@ const createGenerationConfig = (
   sourceTemplate: InferableTemplate,
   targetTemplate: SupportedTargetTemplate,
   fieldsToPreserve: string[],
+  allowReshapeNames: boolean,
   isDowngrade: boolean = false,
   modelOverride?: string,
   stateOptions?: {
@@ -225,7 +238,7 @@ const createGenerationConfig = (
     writeCurrentState: boolean;
   }
 ): GenerationConfig<any, any> => {
-  const baseSchema = getFullPayloadSchema(targetTemplate);
+  const baseSchema = getFullPayloadSchema(targetTemplate, { allowReshapeNames });
   const schemaKeys = Object.keys(baseSchema.shape);
   const sanitizedFieldsToPreserve = fieldsToPreserve.filter(field => schemaKeys.includes(field));
   const autoSchemaOmissions: string[] = [];
@@ -312,6 +325,15 @@ const createGenerationConfig = (
 
     if (fieldsToGenerate.includes(nameField)) {
       rules.push(`**称号规则**: 角色名称字段(\`${nameField}\`)必须更新。该字段的结构为 \`{代号/名称}\` 或 \`{代号/名称}「{称号}」\`。你 **不可** 修改 \`{代号/名称}\` 部分，但 **必须** 为其生成或更新一个4个字左右（1~8个字）的 \`{称号}\`，并以「」包裹，以体现其新状态。`);
+    }
+
+    if (targetTemplate === 'magical-girl') {
+      const nameRuleTargets = '`magicConstruct.name`、`wonderlandRule.name`、`blooming.name`';
+      if (allowReshapeNames) {
+        rules.push(`**名称重塑**: 本次允许重塑 ${nameRuleTargets}。若你更新这些名字，建议保留原名核心词并追加称号/变体，保持传承感。`);
+      } else {
+        rules.push(`**名称锁定**: ${nameRuleTargets} 为固定字段，禁止修改。`);
+      }
     }
 
     if (targetTemplate === 'general' && fieldsToGenerate.includes('content')) {
@@ -418,27 +440,29 @@ async function handler(req: NextRequest): Promise<Response> {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
-  try {
-    const body = await req.json();
-    const {
-      language = 'zh-CN',
-      userGuidance = '',
-      fieldsToPreserve = [],
-      isDowngrade = false,
-      customProvider: customProviderPayload,
-      targetTemplate: requestedTargetTemplate,
-      sourceTemplate: requestedSourceTemplate,
-      readArenaHistory,
-      writeArenaHistory,
-      readCurrentState,
-      writeCurrentState,
-      ...originalCharacterData
-    } = body;
-    const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean' ? readArenaHistory : true;
-    const resolvedWriteArenaHistory = typeof writeArenaHistory === 'boolean' ? writeArenaHistory : true;
-    const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
-    const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
-    const finalUserGuidance = userGuidance.trim() || null;
+	  try {
+	    const body = await req.json();
+	    const {
+	      language = 'zh-CN',
+	      userGuidance = '',
+	      fieldsToPreserve = [],
+	      isDowngrade = false,
+	      allowReshapeNames = false,
+	      customProvider: customProviderPayload,
+	      targetTemplate: requestedTargetTemplate,
+	      sourceTemplate: requestedSourceTemplate,
+	      readArenaHistory,
+	      writeArenaHistory,
+	      readCurrentState,
+	      writeCurrentState,
+	      ...originalCharacterData
+	    } = body;
+	    const resolvedReadArenaHistory = typeof readArenaHistory === 'boolean' ? readArenaHistory : true;
+	    const resolvedWriteArenaHistory = typeof writeArenaHistory === 'boolean' ? writeArenaHistory : true;
+	    const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
+	    const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
+	    const resolvedAllowReshapeNames = typeof allowReshapeNames === 'boolean' ? allowReshapeNames : false;
+	    const finalUserGuidance = userGuidance.trim() || null;
 
     // 安全检查
     const textToCheck = extractTextForCheck(originalCharacterData) + " " + (finalUserGuidance || '');
@@ -473,8 +497,8 @@ async function handler(req: NextRequest): Promise<Response> {
       baseOutputData = createBlankDataCard(targetTemplate);
     }
 
-    const targetSchema = getFullPayloadSchema(targetTemplate);
-    const schemaKeys = Object.keys(targetSchema.shape);
+	    const targetSchema = getFullPayloadSchema(targetTemplate, { allowReshapeNames: resolvedAllowReshapeNames });
+	    const schemaKeys = Object.keys(targetSchema.shape);
     const sanitizedFieldsToPreserve = Array.isArray(fieldsToPreserve)
       ? (fieldsToPreserve as string[]).filter(field => schemaKeys.includes(field))
       : [];
@@ -530,19 +554,20 @@ async function handler(req: NextRequest): Promise<Response> {
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
 
     const isNative = await verifySignature(originalCharacterData);
-    const generationConfig = createGenerationConfig(
-      originalCharacterData,
-      baseOutputData,
-      language,
-      finalUserGuidance,
-      sourceTemplate,
-      targetTemplate,
-      sanitizedFieldsToPreserve,
-      isDowngrade,
-      customModelOverride,
-      {
-        readArenaHistory: resolvedReadArenaHistory,
-        writeArenaHistory: resolvedWriteArenaHistory,
+	    const generationConfig = createGenerationConfig(
+	      originalCharacterData,
+	      baseOutputData,
+	      language,
+	      finalUserGuidance,
+	      sourceTemplate,
+	      targetTemplate,
+	      sanitizedFieldsToPreserve,
+	      resolvedAllowReshapeNames,
+	      isDowngrade,
+	      customModelOverride,
+	      {
+	        readArenaHistory: resolvedReadArenaHistory,
+	        writeArenaHistory: resolvedWriteArenaHistory,
         readCurrentState: resolvedReadCurrentState,
         writeCurrentState: resolvedWriteCurrentState,
       }
@@ -576,11 +601,15 @@ async function handler(req: NextRequest): Promise<Response> {
     Object.assign(sublimatedData, safeDeepMerge(sublimatedData, updatedDataFromAI));
 
     // 3. 重新应用不可变字段，确保模板关键字段不会被修改
-    if (targetTemplate === 'magical-girl') {
+    if (targetTemplate === 'magical-girl' && !resolvedAllowReshapeNames) {
       const baseMagicName = baseOutputData?.magicConstruct?.name;
+      const baseWonderlandName = baseOutputData?.wonderlandRule?.name;
       const baseBloomingName = baseOutputData?.blooming?.name;
       if (baseMagicName && sublimatedData.magicConstruct) {
         sublimatedData.magicConstruct.name = baseMagicName;
+      }
+      if (baseWonderlandName && sublimatedData.wonderlandRule) {
+        sublimatedData.wonderlandRule.name = baseWonderlandName;
       }
       if (baseBloomingName && sublimatedData.blooming) {
         sublimatedData.blooming.name = baseBloomingName;
