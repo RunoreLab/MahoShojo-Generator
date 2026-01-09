@@ -20,6 +20,7 @@ interface CliOptions {
   publicOnly: boolean;
   approvedOnly: boolean;
   skipSignature: boolean;
+  recomputeNative: boolean;
   writeDetails: boolean;
   noCount: boolean;
 }
@@ -32,6 +33,7 @@ type CandidateRow = {
   updated_at: string;
   data: string;
   metrics_updated_at: string | null;
+  metrics_is_native: number | null;
 };
 
 type D1RowsResult<T> = {
@@ -103,6 +105,7 @@ const parseOptions = (argv: string[]): CliOptions => {
     publicOnly: parseBool(args.get('--public-only'), false),
     approvedOnly: parseBool(args.get('--approved-only'), false),
     skipSignature: parseBool(args.get('--skip-signature'), false),
+    recomputeNative: parseBool(args.get('--recompute-native'), false),
     writeDetails: parseBool(args.get('--write-details'), true),
     noCount: parseBool(args.get('--no-count'), false),
   };
@@ -174,7 +177,8 @@ const fetchCandidateBatch = async (options: CliOptions, afterId: string, limit: 
       dc.review_status,
       dc.updated_at,
       dc.data,
-      dcm.data_card_updated_at as metrics_updated_at
+      dcm.data_card_updated_at as metrics_updated_at,
+      dcm.is_native as metrics_is_native
     FROM data_cards dc
     LEFT JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
     WHERE ${whereSql}
@@ -205,8 +209,14 @@ const processOne = async (row: CandidateRow, options: CliOptions, hasSignatureKe
 
   try {
     const tech = computeTechIndex(parsed);
-    const isNative =
-      options.skipSignature || !hasSignatureKey ? null : await verifySignature(parsed as any).catch(() => null);
+
+    const existingIsNative = row.metrics_is_native === 1 ? true : row.metrics_is_native === 0 ? false : null;
+    const shouldPreserveNative = !options.recomputeNative && row.metrics_updated_at !== null;
+    const isNative = shouldPreserveNative
+      ? existingIsNative
+      : options.skipSignature || !hasSignatureKey
+        ? null
+        : await verifySignature(parsed as any).catch(() => null);
 
     if (options.dryRun) {
       return { ok: true, id: row.id, written: false };
@@ -251,7 +261,7 @@ async function main() {
   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID
 
 可选环境变量：
-  SIGNATURE_SECRET_KEY（启用 is_native 计算；未配置时写入 null）
+  SIGNATURE_SECRET_KEY（用于签名校验；仅在首次写入 is_native 或显式 --recompute-native 时生效）
 
 常用示例：
   bun scripts/backfill-data-card-tech-index.ts --dry-run --limit 20
@@ -270,6 +280,7 @@ Options：
   --public-only            仅处理公开卡
   --approved-only          仅处理已审核通过的卡
   --skip-signature         跳过签名校验（is_native 写 null）
+  --recompute-native       忽略已存在的 is_native，重新校验签名并回填
   --write-details <bool>   是否写入 details_json（默认 true）
   --no-count               跳过“预计处理数量”的 COUNT 查询
 `);
@@ -294,6 +305,7 @@ Options：
         publicOnly: options.publicOnly,
         approvedOnly: options.approvedOnly,
         skipSignature: options.skipSignature,
+        recomputeNative: options.recomputeNative,
         writeDetails: options.writeDetails,
         batchSize: options.batchSize,
         concurrency: options.concurrency,
