@@ -1201,22 +1201,50 @@ export default function BattleDataModal({
 	            ) : displayCards.length === 0 ? (
 	              <div className="text-center text-gray-500 py-8">暂无数据卡</div>
 	            ) : (
-	              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-	                {displayCards.map((card: any) => {
-	                  const isFavorited = favoriteIds.has(card.id);
-	                  const enableFavorite = isAuthenticated && activeTab !== 'my';
-                    const isSelected = selectedIdSet.has(card.id);
-                    const itemDisabled = selectionMode === 'multi' && !isSelected && atLimit;
+		              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+		                {displayCards.map((card: any) => {
+		                  const isFavorited = favoriteIds.has(card.id);
+		                  const enableFavorite = isAuthenticated && activeTab !== 'my';
+	                    const isSelected = selectedIdSet.has(card.id);
+	                    const itemDisabled = selectionMode === 'multi' && !isSelected && atLimit;
+	                    const showQuickToggle = selectionMode === 'multi';
+	                    const isScenarioCard = card.type === 'scenario';
+	                    const quickToggleDisabled = isSelected ? !canToggle : itemDisabled;
+	                    const quickToggleTitle = isSelected
+	                      ? (canToggle ? '移除' : '当前模式不支持移除')
+	                      : (itemDisabled ? '已达到上限' : '加入');
 
-	                  return (
-	                    <div
+		                  return (
+		                    <div
                         key={card.id}
-                        className={`h-full ${itemDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        className={`relative h-full ${itemDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                         onClick={() => {
                           if (itemDisabled) return;
                           void handleSelectCard(card);
                         }}
                       >
+	                      {showQuickToggle && (
+	                        <button
+	                          type="button"
+	                          className={`absolute top-2 right-2 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border-2 text-lg font-bold leading-none shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
+	                            quickToggleDisabled
+	                              ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
+	                              : isSelected
+	                                ? `bg-white/90 ${isScenarioCard ? 'border-green-400 text-green-700 hover:bg-green-50 focus-visible:ring-green-400' : 'border-pink-400 text-pink-700 hover:bg-pink-50 focus-visible:ring-pink-400'}`
+	                                : `border-transparent bg-gradient-to-r ${isScenarioCard ? 'from-emerald-500 to-green-500 focus-visible:ring-green-400' : 'from-pink-500 to-purple-500 focus-visible:ring-pink-400'} text-white hover:opacity-90`
+	                          }`}
+	                          onClick={(e) => {
+	                            e.stopPropagation();
+	                            if (quickToggleDisabled) return;
+	                            void handleSelectCard(card);
+	                          }}
+	                          disabled={quickToggleDisabled}
+	                          title={quickToggleTitle}
+	                          aria-label={quickToggleTitle}
+	                        >
+	                          {isSelected ? '-' : '+'}
+	                        </button>
+	                      )}
 	                      <DataCard
 	                        id={card.id}
 	                        name={card.name}
