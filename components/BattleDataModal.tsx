@@ -1208,7 +1208,6 @@ export default function BattleDataModal({
 	                    const isSelected = selectedIdSet.has(card.id);
 	                    const itemDisabled = selectionMode === 'multi' && !isSelected && atLimit;
 	                    const showQuickToggle = selectionMode === 'multi';
-	                    const isScenarioCard = card.type === 'scenario';
 	                    const quickToggleDisabled = isSelected ? !canToggle : itemDisabled;
 	                    const quickToggleTitle = isSelected
 	                      ? (canToggle ? '移除' : '当前模式不支持移除')
@@ -1230,8 +1229,8 @@ export default function BattleDataModal({
 	                            quickToggleDisabled
 	                              ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
 	                              : isSelected
-	                                ? `bg-white/90 ${isScenarioCard ? 'border-green-400 text-green-700 hover:bg-green-50 focus-visible:ring-green-400' : 'border-pink-400 text-pink-700 hover:bg-pink-50 focus-visible:ring-pink-400'}`
-	                                : `border-transparent bg-gradient-to-r ${isScenarioCard ? 'from-emerald-500 to-green-500 focus-visible:ring-green-400' : 'from-pink-500 to-purple-500 focus-visible:ring-pink-400'} text-white hover:opacity-90`
+	                                ? 'border-transparent bg-red-500 text-white hover:bg-red-600 focus-visible:ring-red-500'
+	                                : 'border-transparent bg-emerald-500 text-white hover:bg-emerald-600 focus-visible:ring-emerald-500'
 	                          }`}
 	                          onClick={(e) => {
 	                            e.stopPropagation();

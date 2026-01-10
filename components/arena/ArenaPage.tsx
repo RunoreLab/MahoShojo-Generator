@@ -51,7 +51,7 @@ export function ArenaPage() {
   const isMatching = useBattleStore((state: BattleStoreState) => state.isMatching);
   const error = useBattleStore((state: BattleStoreState) => state.error);
 
-  const { handleSelectDataCard, handleRandomMatch, handleToggleAuxScenarioDataCard } = useBattleActions();
+  const { handleSelectDataCard, handleRandomMatch, handleToggleAuxScenarioDataCard, handleToggleCombatantDataCard } = useBattleActions();
 
   const { grouped: presetGrouped } = usePresetQuery();
   const { data: languages } = useLanguagesQuery();
@@ -260,9 +260,13 @@ export function ArenaPage() {
         onClose={() => setShowBattleDataModal(false)}
         onSelectCard={(card) => void handleSelectDataCard(card)}
         onToggleCard={
-          dataModalType === 'auxScenario'
-            ? (card, nextSelected) => void handleToggleAuxScenarioDataCard(card, nextSelected)
-            : undefined
+          dataModalType === 'character'
+            ? (card, nextSelected) => void handleToggleCombatantDataCard(card, nextSelected)
+            : (
+              dataModalType === 'auxScenario'
+                ? (card, nextSelected) => void handleToggleAuxScenarioDataCard(card, nextSelected)
+                : undefined
+            )
         }
         selectedType={dataModalType === 'character' ? 'character' : 'scenario'}
         titleOverride={dataModalType === 'auxScenario' ? '选择辅助情景' : undefined}
