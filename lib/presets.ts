@@ -81,6 +81,12 @@ export const PRESET_LIST: Preset[] = [
     type: "magical-girl"
   },
   {
+    name: "雪绒（日常）",
+    description: "大道至简·日常版：短暂放下雪绒的代号，正享受日常生活和果茶的普通（？）少女，雪沫。",
+    filename: "M16_xuemo.json",
+    type: "magical-girl"
+  },
+  {
     name: "千日红",
     description: "大道至繁：星穹的魔女，大道至简的对立面，头脑简单的莽夫之大敌。【强度：超大杯】",
     filename: "M13_greatness_in_complexity.json",
