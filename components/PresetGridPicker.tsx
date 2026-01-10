@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { Download } from 'lucide-react';
 
 import type { Preset } from '@/lib/presets';
 
@@ -66,10 +67,20 @@ export function PresetGridPicker({
             <div
               key={preset.filename}
               onClick={() => !itemDisabled && onToggle(preset)}
-              className={`p-3 border rounded-lg transition-all duration-200 ${
+              className={`relative p-3 border rounded-lg transition-all duration-200 ${
                 itemDisabled ? 'bg-gray-200 border-gray-300 text-gray-500 cursor-not-allowed' : `${bgColor} cursor-pointer`
               }`}
             >
+              <a
+                href={`/presets/${encodeURIComponent(preset.filename)}`}
+                download={preset.filename}
+                onClick={(e) => e.stopPropagation()}
+                title="下载预设 JSON"
+                aria-label={`下载预设：${preset.name}`}
+                className="absolute right-2 top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white/80 text-gray-600 shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-blue-600"
+              >
+                <Download className="h-4 w-4" />
+              </a>
               <p className={`font-semibold ${textColor}`}>{isLoading ? '加载中...' : preset.name}</p>
               <p
                 className={`text-xs mt-1 ${
