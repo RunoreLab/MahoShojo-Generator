@@ -82,7 +82,7 @@ export const PRESET_LIST: Preset[] = [
   },
   {
     name: "雪绒（日常）",
-    description: "大道至简·日常版：短暂放下雪绒的代号，正享受日常生活和果茶的普通（？）少女，雪沫。",
+    description: "大道至简·日常版：短暂放下雪绒的代号，正享受日常生活和果茶的少女，雪沫。",
     filename: "M16_xuemo.json",
     type: "magical-girl"
   },
