@@ -230,7 +230,15 @@ export default async function handler(req: NextRequest) {
         const computePublicTotal = async (queue: Queue): Promise<number | null> => {
           try {
             const strictPublicSinceClause = queue === 'strict'
-              ? "AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))"
+              ? `AND (
+                dc.public_since IS NULL
+                OR dc.public_since <= datetime('now', '-3 days')
+                OR (
+                  dc.created_at IS NOT NULL
+                  AND dc.public_since IS NOT NULL
+                  AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
+                )
+              )`
               : '';
             const totalResult = (await queryFromD1(
               `SELECT COUNT(*) as total
@@ -362,7 +370,15 @@ export default async function handler(req: NextRequest) {
         if (cardRow.type === 'character' && ratingUpdatedAt) {
           try {
             const strictPublicSinceClause = item.queue === 'strict'
-              ? "AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))"
+              ? `AND (
+                dc.public_since IS NULL
+                OR dc.public_since <= datetime('now', '-3 days')
+                OR (
+                  dc.created_at IS NOT NULL
+                  AND dc.public_since IS NOT NULL
+                  AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
+                )
+              )`
               : '';
             const rankResult = (await queryFromD1(
               `SELECT COUNT(*) as higherCount

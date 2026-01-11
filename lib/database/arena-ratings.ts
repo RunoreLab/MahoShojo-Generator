@@ -1,6 +1,7 @@
 import { queryFromD1 } from './core';
 import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGenerationCombatantRow } from './battle-report-generation-combatants';
 import { PRESET_LIST } from '@/lib/presets';
+import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 
 export type ArenaQueue = 'strict' | 'free';
 export type ArenaEntityType = 'data_card' | 'preset';
@@ -522,6 +523,19 @@ const readExtraJsonBoolean = (extraJson: string | null, key: string): boolean | 
   }
 };
 
+const readExtraJsonString = (extraJson: string | null, key: string): string | null => {
+  if (typeof extraJson !== 'string' || !extraJson.trim()) return null;
+  try {
+    const parsed = JSON.parse(extraJson) as Record<string, unknown>;
+    const raw = parsed?.[key];
+    if (typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    return trimmed ? trimmed : null;
+  } catch {
+    return null;
+  }
+};
+
 export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants: BattleReportGenerationCombatantRow[]): boolean => {
   if (snapshot.status !== 'completed') return false;
   if (snapshot.combatantCount !== 2) return false;
@@ -532,6 +546,9 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   // 严格排位：必须由“排位匹配”签发票据并在生成时验证通过。
   // 缺失/无效都按“宁可漏算”处理为不具备资格（用于禁止 strict 自由挑对手）。
   if (readExtraJsonBoolean(snapshot.extraJson, 'rankedMatchOk') !== true) return false;
+
+  // 严格排位：禁止使用黑名单模型（生成逻辑不稳定，不适合作为排位依据）。
+  if (isStrictRankedModelBlacklisted(readExtraJsonString(snapshot.extraJson, 'resolvedModelOverride'))) return false;
 
   // 严格排位：语言必须为简体中文（zh-CN）。
   if ((snapshot.language ?? '').trim() !== 'zh-CN') return false;

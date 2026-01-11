@@ -3,15 +3,12 @@
 import { loadEnvConfig } from '@next/env';
 
 import { queryFromD1 } from '@/lib/d1';
-import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
-import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 
 type DataCardType = 'character' | 'scenario' | 'history';
 
 interface CliOptions {
   dryRun: boolean;
-  force: boolean;
   batchSize: number;
   concurrency: number;
   limit: number | null;
@@ -19,21 +16,13 @@ interface CliOptions {
   type: DataCardType | null;
   publicOnly: boolean;
   approvedOnly: boolean;
-  skipSignature: boolean;
-  recomputeNative: boolean;
-  writeDetails: boolean;
   noCount: boolean;
 }
 
 type CandidateRow = {
   id: string;
-  type: DataCardType;
-  is_public: number;
-  review_status: 'pending' | 'approved' | 'rejected';
-  updated_at: string;
   data: string;
-  metrics_updated_at: string | null;
-  metrics_is_native: number | null;
+  is_native: number | null;
 };
 
 type D1RowsResult<T> = {
@@ -96,17 +85,13 @@ const parseOptions = (argv: string[]): CliOptions => {
 
   return {
     dryRun: parseBool(args.get('--dry-run'), false),
-    force: parseBool(args.get('--force'), false),
-    batchSize: parsePositiveInt(args.get('--batch')) ?? 20,
+    batchSize: parsePositiveInt(args.get('--batch')) ?? 30,
     concurrency: parsePositiveInt(args.get('--concurrency')) ?? 4,
     limit: limitValue,
     startAfterId: (args.get('--start-after') ?? '').trim(),
     type,
     publicOnly: parseBool(args.get('--public-only'), false),
     approvedOnly: parseBool(args.get('--approved-only'), false),
-    skipSignature: parseBool(args.get('--skip-signature'), false),
-    recomputeNative: parseBool(args.get('--recompute-native'), false),
-    writeDetails: parseBool(args.get('--write-details'), true),
     noCount: parseBool(args.get('--no-count'), false),
   };
 };
@@ -114,7 +99,7 @@ const parseOptions = (argv: string[]): CliOptions => {
 const mapWithConcurrency = async <T, R>(
   items: T[],
   concurrency: number,
-  mapper: (item: T, index: number) => Promise<R>
+  mapper: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> => {
   const results: R[] = new Array(items.length);
   const limit = Math.max(1, Math.floor(concurrency));
@@ -144,23 +129,22 @@ const buildBaseWhere = (options: CliOptions): { whereSql: string; params: unknow
   if (options.publicOnly) conditions.push('dc.is_public = 1');
   if (options.approvedOnly) conditions.push("dc.review_status = 'approved'");
 
-  if (!options.force) {
-    conditions.push('(dcm.data_card_id IS NULL OR dcm.data_card_updated_at <> dc.updated_at)');
-  }
+  conditions.push("(dc.data LIKE '%\"signature\"%' OR dcm.is_native = 1)");
 
   return { whereSql: conditions.join(' AND '), params };
 };
 
 const countCandidates = async (options: CliOptions): Promise<number | null> => {
   const { whereSql, params } = buildBaseWhere(options);
-  const sql = `
-    SELECT COUNT(*) as total
-    FROM data_cards dc
-    LEFT JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
-    WHERE ${whereSql}
-      AND dc.id > ?
-  `;
-  const result = (await queryFromD1(sql, [...params, options.startAfterId])) as any;
+  const result = (await queryFromD1(
+    `SELECT COUNT(*) as total
+     FROM data_cards dc
+     INNER JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
+     WHERE ${whereSql}
+       AND dc.id > ?`,
+    [...params, options.startAfterId],
+  )) as any;
+
   const row = readRows<{ total?: unknown }>(result)[0];
   const total = typeof row?.total === 'number' ? row.total : typeof row?.total === 'string' ? Number(row.total) : null;
   return Number.isFinite(total) ? Math.max(0, Math.floor(total as number)) : null;
@@ -168,34 +152,26 @@ const countCandidates = async (options: CliOptions): Promise<number | null> => {
 
 const fetchCandidateBatch = async (options: CliOptions, afterId: string, limit: number): Promise<CandidateRow[]> => {
   const { whereSql, params } = buildBaseWhere(options);
-
-  const sql = `
-    SELECT
-      dc.id,
-      dc.type,
-      dc.is_public,
-      dc.review_status,
-      dc.updated_at,
-      dc.data,
-      dcm.data_card_updated_at as metrics_updated_at,
-      dcm.is_native as metrics_is_native
-    FROM data_cards dc
-    LEFT JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
-    WHERE ${whereSql}
-      AND dc.id > ?
-    ORDER BY dc.id
-    LIMIT ?
-  `;
-
-  const result = await queryFromD1(sql, [...params, afterId, limit]);
+  const result = await queryFromD1(
+    `SELECT dc.id as id, dc.data as data, dcm.is_native as is_native
+     FROM data_cards dc
+     INNER JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
+     WHERE ${whereSql}
+       AND dc.id > ?
+     ORDER BY dc.id
+     LIMIT ?`,
+    [...params, afterId, limit],
+  );
   return readRows<CandidateRow>(result);
 };
 
-type ProcessResult =
-  | { ok: true; id: string; written: boolean }
+type VerifyResult =
+  | { ok: true; id: string; verified: boolean; existing: boolean | null; changed: boolean }
   | { ok: false; id: string; error: string };
 
-const processOne = async (row: CandidateRow, options: CliOptions, hasSignatureKey: boolean): Promise<ProcessResult> => {
+const verifyOne = async (row: CandidateRow): Promise<VerifyResult> => {
+  const existing = row.is_native === 1 ? true : row.is_native === 0 ? false : null;
+
   let parsed: unknown = null;
   try {
     parsed = JSON.parse(row.data) as unknown;
@@ -208,42 +184,39 @@ const processOne = async (row: CandidateRow, options: CliOptions, hasSignatureKe
   }
 
   try {
-    const tech = computeTechIndex(parsed);
-
-    const existingIsNative = row.metrics_is_native === 1 ? true : row.metrics_is_native === 0 ? false : null;
-    const shouldPreserveNative = !options.recomputeNative && row.metrics_updated_at !== null;
-    const isNative = shouldPreserveNative
-      ? existingIsNative
-      : options.skipSignature || !hasSignatureKey
-        ? null
-        : await verifySignature(parsed as any).catch(() => null);
-
-    if (options.dryRun) {
-      return { ok: true, id: row.id, written: false };
-    }
-
-    const ok = await upsertDataCardMetrics({
-      dataCardId: row.id,
-      techScore: tech.techScore,
-      techLevel: tech.techLevel,
-      isNative,
-      dataCardUpdatedAt: row.updated_at,
-      detailsJson: options.writeDetails
-        ? {
-            raw: tech.raw,
-            derived: tech.derived,
-            components: tech.components,
-            notes: tech.notes,
-          }
-        : null,
-    });
-
-    if (!ok) return { ok: false, id: row.id, error: '写入 data_card_metrics 失败' };
-    return { ok: true, id: row.id, written: true };
+    const verified = await verifySignature(parsed as any);
+    return { ok: true, id: row.id, verified, existing, changed: existing !== verified };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, id: row.id, error: message };
   }
+};
+
+const updateIsNativeBatch = async (
+  diffs: Array<{ id: string; isNative: boolean }>,
+): Promise<void> => {
+  if (diffs.length === 0) return;
+
+  const nowIso = new Date().toISOString();
+  const caseParts = diffs.map(() => 'WHEN ? THEN ?').join(' ');
+  const wherePlaceholders = diffs.map(() => '?').join(', ');
+
+  const params: unknown[] = [];
+  for (const diff of diffs) {
+    params.push(diff.id, diff.isNative ? 1 : 0);
+  }
+  params.push(nowIso);
+  for (const diff of diffs) {
+    params.push(diff.id);
+  }
+
+  await queryFromD1(
+    `UPDATE data_card_metrics
+     SET is_native = CASE data_card_id ${caseParts} ELSE is_native END,
+         updated_at = ?
+     WHERE data_card_id IN (${wherePlaceholders})`,
+    params,
+  );
 };
 
 async function main() {
@@ -252,81 +225,71 @@ async function main() {
   const rawArgs = process.argv.slice(2);
   if (rawArgs.includes('--help') || rawArgs.includes('-h')) {
     console.log(`
-批量回填/重算数据卡技术值（tech index）
+批量重算 data_card_metrics.is_native（仅原生性，不重算技术值）
 
 用法：
-  bun scripts/backfill-data-card-tech-index.ts [options]
+  bun scripts/backfill-data-card-native.ts [options]
 
 必需环境变量：
-  CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID
-
-可选环境变量：
-  SIGNATURE_SECRET_KEY（用于签名校验；仅在首次写入 is_native 或显式 --recompute-native 时生效）
+  CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID / SIGNATURE_SECRET_KEY
 
 常用示例：
-  bun scripts/backfill-data-card-tech-index.ts --dry-run --limit 20
-  bun scripts/backfill-data-card-tech-index.ts --batch 10 --concurrency 2
-  bun scripts/backfill-data-card-tech-index.ts --force --write-details false
-  bun scripts/backfill-data-card-tech-index.ts --start-after <dataCardId>
+  bun scripts/backfill-data-card-native.ts --dry-run --limit 50
+  bun scripts/backfill-data-card-native.ts --batch 30 --concurrency 4
+  bun scripts/backfill-data-card-native.ts --type character
 
 Options：
-  --dry-run                仅计算不落库
-  --force                  忽略 updated_at 对比，强制重算所有卡
-  --batch <n>              每批拉取数量（默认 20）
-  --concurrency <n>         并发写入数量（默认 4）
+  --dry-run                仅校验不落库
+  --batch <n>              每批拉取数量（默认 30）
+  --concurrency <n>        并发校验数量（默认 4）
   --limit <n>              最多处理 n 张（默认不限）
   --start-after <id>       仅处理 id 大于该值的卡（断点续跑）
   --type <character|scenario|history>  仅处理指定类型
   --public-only            仅处理公开卡
   --approved-only          仅处理已审核通过的卡
-  --skip-signature         跳过签名校验（is_native 写 null）
-  --recompute-native       忽略已存在的 is_native，重新校验签名并回填
-  --write-details <bool>   是否写入 details_json（默认 true）
   --no-count               跳过“预计处理数量”的 COUNT 查询
 `);
     return;
   }
 
-  const options = parseOptions(rawArgs);
-
   if (!hasD1Config()) {
     throw new Error('缺少 Cloudflare D1 配置：CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID');
   }
 
-  const hasSignatureKey = Boolean(process.env.SIGNATURE_SECRET_KEY);
+  if (!process.env.SIGNATURE_SECRET_KEY) {
+    throw new Error('缺少 SIGNATURE_SECRET_KEY：为避免误把全部卡写为非原生，拒绝执行。');
+  }
 
-  console.log('[backfill-tech-index] 开始批量计算技术值...');
+  const options = parseOptions(rawArgs);
+
+  console.log('[backfill-native] 开始重算 is_native...');
   console.log(
     JSON.stringify(
       {
         dryRun: options.dryRun,
-        force: options.force,
         type: options.type ?? 'all',
         publicOnly: options.publicOnly,
         approvedOnly: options.approvedOnly,
-        skipSignature: options.skipSignature,
-        recomputeNative: options.recomputeNative,
-        writeDetails: options.writeDetails,
         batchSize: options.batchSize,
         concurrency: options.concurrency,
         limit: options.limit ?? 'unlimited',
         startAfterId: options.startAfterId || '(none)',
-        signatureEnabled: hasSignatureKey,
       },
       null,
-      2
-    )
+      2,
+    ),
   );
 
   const total = options.noCount ? null : await countCandidates(options).catch(() => null);
   if (total != null) {
-    console.log(`[backfill-tech-index] 预计需处理 ${total} 张卡。`);
+    console.log(`[backfill-native] 预计需处理 ${total} 张卡。`);
   }
 
   let processed = 0;
-  let written = 0;
+  let changed = 0;
+  let setTrue = 0;
+  let setFalse = 0;
   let errors = 0;
-  const failedIds: string[] = [];
 
   let afterId = options.startAfterId;
   const hardLimit = options.limit ?? Number.POSITIVE_INFINITY;
@@ -340,43 +303,49 @@ Options：
 
     afterId = batch[batch.length - 1]!.id;
 
-    const results = await mapWithConcurrency(batch, options.concurrency, (row) => processOne(row, options, hasSignatureKey));
+    const results = await mapWithConcurrency(batch, options.concurrency, (row) => verifyOne(row));
+    const diffs: Array<{ id: string; isNative: boolean }> = [];
 
     for (const result of results) {
       processed += 1;
-      if (result.ok) {
-        if (result.written) written += 1;
-      } else {
+      if (!result.ok) {
         errors += 1;
-        failedIds.push(result.id);
-        console.warn(`[backfill-tech-index] 处理失败: ${result.id}: ${result.error}`);
+        console.warn(`[backfill-native] 校验失败: ${result.id}: ${result.error}`);
+        continue;
       }
+
+      if (!result.changed) continue;
+      changed += 1;
+      diffs.push({ id: result.id, isNative: result.verified });
+      if (result.verified) setTrue += 1;
+      else setFalse += 1;
+    }
+
+    if (!options.dryRun && diffs.length > 0) {
+      await updateIsNativeBatch(diffs);
     }
 
     const prefix = total != null ? `${processed}/${total}` : String(processed);
-    console.log(`[backfill-tech-index] 进度 ${prefix}，已写入 ${written}，失败 ${errors}（afterId=${afterId}）`);
+    console.log(
+      `[backfill-native] 进度 ${prefix}，变更 ${changed}（true=${setTrue}, false=${setFalse}），失败 ${errors}（afterId=${afterId}）`,
+    );
   }
 
-  console.log('[backfill-tech-index] 完成。');
+  console.log('[backfill-native] 完成。');
   console.table({
     processed,
-    written,
+    changed,
+    setTrue,
+    setFalse,
     errors,
     dryRun: options.dryRun,
-    force: options.force,
     startAfterId: options.startAfterId || null,
     endAfterId: afterId || null,
   });
-
-  if (failedIds.length > 0) {
-    console.log('[backfill-tech-index] 失败的 data_card_id 列表（可用于排查/重跑）：');
-    for (const id of failedIds) {
-      console.log(id);
-    }
-  }
 }
 
 main().catch((error) => {
-  console.error('[backfill-tech-index] 脚本执行失败:', error);
-  process.exit(1);
+  console.error('[backfill-native] 脚本执行失败:', error);
+  process.exitCode = 1;
 });
+

@@ -401,6 +401,29 @@ export const useBattleActions = () => {
     [addAuxScenario, buildAuxScenario, setAuxScenarios, setError]
   );
 
+  const handleToggleCombatantDataCard = useCallback(
+    async (cardData: any, nextSelected: boolean) => {
+      const sourceDataCardId = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+      if (!sourceDataCardId) return;
+
+      if (!nextSelected) {
+        const currentCombatants = useBattleStore.getState().combatants;
+        setCombatants(
+          currentCombatants.filter((combatant) => {
+            if (!('sourceDataCardId' in combatant)) return true;
+            if (typeof combatant.sourceDataCardId !== 'string') return true;
+            return combatant.sourceDataCardId !== sourceDataCardId;
+          })
+        );
+        setError(null);
+        return;
+      }
+
+      await handleSelectDataCard(cardData);
+    },
+    [handleSelectDataCard, setCombatants, setError]
+  );
+
   const handleRandomMatchAuxScenario = useCallback(async () => {
     if (!useBattleStore.getState().scenario.content) {
       setError('❌ 请先选择主情景，再添加辅助情景。');
@@ -567,6 +590,7 @@ export const useBattleActions = () => {
     handleAuxScenarioUpload,
     handleAuxScenarioPaste,
     handleToggleAuxScenarioDataCard,
+    handleToggleCombatantDataCard,
     handleRandomMatchAuxScenario,
     handleSelectDataCard,
     handleResolveRandomPlaceholders,

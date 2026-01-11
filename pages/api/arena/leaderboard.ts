@@ -79,7 +79,15 @@ export default async function handler(req: NextRequest) {
     const url = new URL(req.url);
     const queue: Queue = url.searchParams.get('queue') === 'free' ? 'free' : 'strict';
     const strictPublicSinceClause = queue === 'strict'
-      ? "AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))"
+      ? `AND (
+        dc.public_since IS NULL
+        OR dc.public_since <= datetime('now', '-3 days')
+        OR (
+          dc.created_at IS NOT NULL
+          AND dc.public_since IS NOT NULL
+          AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
+        )
+      )`
       : '';
     const sort: Sort = url.searchParams.get('sort') === 'tech' ? 'tech' : 'rating';
     const order: SortOrder = url.searchParams.get('order') === 'asc' ? 'asc' : 'desc';

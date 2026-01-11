@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 
 import { getUserByAuthKey } from '@/lib/d1';
 import { validateRankedMatchTicketForRequest } from '@/lib/arena/ranked-match';
+import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { getStrictDailyUsage, STRICT_DAILY_LIMIT } from '@/lib/database/arena-ratings';
 
 export const config = {
@@ -62,6 +63,9 @@ export default async function handler(req: NextRequest) {
     const combatants = Array.isArray(body?.combatants) ? body.combatants : null;
     const adjudicationEventCount = readNonNegativeInt(body?.adjudicationEventCount);
 
+    const customProvider = body?.customProvider && typeof body.customProvider === 'object' ? body.customProvider : null;
+    const customModelId = trimString(customProvider?.modelId);
+
     const authHeader = req.headers.get('authorization');
     const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
     const user = authKey ? await getUserByAuthKey(authKey) : null;
@@ -88,6 +92,7 @@ export default async function handler(req: NextRequest) {
     if (readCurrentState) reasons.push('read-current-state');
     if (readNarrativeHistory) reasons.push('read-narrative-history');
     if (adjudicationEventCount > 0) reasons.push('has-adjudication-events');
+    if (customModelId && isStrictRankedModelBlacklisted(customModelId)) reasons.push('ai-model-blacklisted');
     if (
       Array.isArray(combatants) &&
       combatants.some((c) => typeof c?.characterGuidance === 'string' && c.characterGuidance.trim())

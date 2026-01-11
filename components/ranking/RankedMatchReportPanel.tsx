@@ -70,6 +70,7 @@ const formatIneligibleReasons = (reasons: string[]): string => {
     'read-current-state': '开启读取当前状态',
     'read-narrative-history': '开启读取叙事历史',
     'has-character-guidance': '存在角色行动引导',
+    'ai-model-blacklisted': '选择了不支持严格排位计分的模型',
   };
   if (!Array.isArray(reasons) || reasons.length === 0) return '未知原因';
   return reasons.map((r) => map[r] ?? r).join('、');

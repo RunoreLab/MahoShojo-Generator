@@ -160,6 +160,7 @@ const SublimationPage: React.FC = () => {
     // [新增] 用于管理高级选项的状态
     const [fieldsToPreserve, setFieldsToPreserve] = useState<string[]>([]);
     const [isAdvancedVisible, setIsAdvancedVisible] = useState(false);
+    const [allowReshapeNames, setAllowReshapeNames] = useState(false);
     const [isDowngrade] = useState(false); // 是否使用轻量模型
     const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
     const [targetTemplate, setTargetTemplate] = useState<SupportedTargetTemplate>('magical-girl');
@@ -222,6 +223,7 @@ const SublimationPage: React.FC = () => {
             setFileName('粘贴的内容');
             setError(null);
             setResultData(null);
+            setAllowReshapeNames(false);
 
             const inferred = inferTemplate(json);
             setSourceTemplate(inferred);
@@ -322,6 +324,7 @@ const SublimationPage: React.FC = () => {
             setFileName(`${card._cardName || '未命名'}(来自数据库)`); // 使用内部传递的_cardName
             setShowBattleDataModal(false);
             setError(null);
+            setAllowReshapeNames(false);
 
             const inferred = inferTemplate(cleanedCardData);
             setSourceTemplate(inferred);
@@ -369,6 +372,7 @@ const SublimationPage: React.FC = () => {
                 language: selectedLanguage,
                 userGuidance: userGuidance.trim(),
                 fieldsToPreserve: filteredFieldsToPreserve,
+                allowReshapeNames,
                 isDowngrade: isDowngrade,
                 targetTemplate: targetTemplate,
                 readArenaHistory,
@@ -685,6 +689,22 @@ const SublimationPage: React.FC = () => {
                             {isAdvancedVisible && characterData && (
                                 <div className="mt-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
                                     <p className="text-xs text-gray-600 mb-3">勾选你希望<span className="font-bold">保留不变</span>的字段，未勾选的字段将由AI重塑。</p>
+                                    {targetTemplate === 'magical-girl' && (
+                                        <div className="mb-4 rounded-lg border border-purple-200 bg-white/70 p-3">
+                                            <label className="flex items-center text-sm cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={allowReshapeNames}
+                                                    onChange={(event) => setAllowReshapeNames(event.target.checked)}
+                                                    className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                                />
+                                                <span className="ml-2 text-gray-700">重塑名称（魔装 / 奇境 / 繁开）</span>
+                                            </label>
+                                            <p className="text-[11px] text-gray-500 mt-1">
+                                                默认会保留上述 <code>name</code> 字段；开启后允许 AI 也对其进行“改名/追加称号”。
+                                            </p>
+                                        </div>
+                                    )}
                                     {targetTemplate === 'general' && (
                                         <p className="text-xs text-blue-700 mb-3">
                                             提醒：<code>content</code> 字段包含角色的全部设定（外观、能力、背景、经历等）。如需完整改写，请取消勾选。

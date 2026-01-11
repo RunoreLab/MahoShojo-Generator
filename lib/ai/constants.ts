@@ -38,7 +38,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'default',
                 label: '默认策略',
-                description: '与之前一样的没有变化的调用顺序，默认使用 Gemini 2.5 Flash 模型。'
+                description: '常规场景保持原有调用顺序，默认倾向使用 Gemini 2.5 Flash；排位优先使用轻量模型。'
             },
             {
                 value: 'gemini-3-flash-preview',
@@ -59,6 +59,31 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-2.0-flash-exp',
                 label: 'Gemini 2.0 Flash Exp',
                 description: 'Google 旗下的上两代模型，但是真的好快！'
+            },
+            {
+                value: 'gemma-3-27b-it',
+                label: 'Gemma 3 27B IT (仅流式)',
+                description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅作为流式输出的备用选择。'
+            },
+            {
+                value: 'gemma-3-12b-it',
+                label: 'Gemma 3 12B IT (仅流式)',
+                description: '更便宜但也更弱的 Gemma 3 指令模型（12B），建议仅作为流式输出的备用选择。'
+            },
+            {
+                value: 'gemma-3-4b-it',
+                label: 'Gemma 3 4B IT (仅流式)',
+                description: '更便宜但也更弱的 Gemma 3 指令模型（4B），这已经有点挑战极限了。'
+            },
+            {
+                value: 'gemma-3-1b-it',
+                label: 'Gemma 3 1B IT (仅流式)',
+                description: '更便宜但也更弱的 Gemma 3 指令模型（1B），这真的会有人用吗？！'
+            },
+            {
+                value: 'gemma-3-270m-it',
+                label: 'Gemma 3 270M IT (仅流式)',
+                description: '更便宜但也更弱的 Gemma 3 指令模型（270M），这真的会有人用吗？！'
             }
         ]
     },
@@ -100,6 +125,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-2.5-flash-lite',
                 label: 'Gemini 2.5 Flash Lite',
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+            },
+            {
+                value: 'deepseek-chat',
+                label: 'DeepSeek Chat (非流式可能存在问题)',
+                description: 'DeepSeek 最新版本。'
+            },
+            {
+                value: 'deepseek-chat',
+                label: 'DeepSeek Chat (非流式可能存在问题)',
+                description: 'DeepSeek 最新版本。'
             },
             {
                 value: 'doubao-seed-1-6',
@@ -268,6 +303,31 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 label: 'Gemini 2.0 Flash Lite',
                 description: 'Google 早前的轻量版快速模型，速度极快，适合预算敏感或高并发场景。'
             },
+            {
+                value: 'gemma-3-27b-it',
+                label: 'Gemma 3 27B IT (仅流式)',
+                description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅用于流式生成的备用通道。'
+            },
+            {
+                value: 'gemma-3-12b-it',
+                label: 'Gemma 3 12B IT (仅流式)',
+                description: '更便宜但也更弱的 Gemma 3 指令模型（12B），建议仅用于流式生成的备用通道。'
+            },
+            {
+                value: 'gemma-3-4b-it',
+                label: 'Gemma 3 4B IT (仅流式)',
+                description: '更便宜但也更弱的 Gemma 3 指令模型（4B），这已经有点挑战极限了。'
+            },
+            {
+                value: 'gemma-3-1b-it',
+                label: 'Gemma 3 1B IT (仅流式)',
+                description: '更便宜但也更弱的 Gemma 3 指令模型（1B），这真的会有人用吗？！'
+            },
+            {
+                value: 'gemma-3-270m-it',
+                label: 'Gemma 3 270M IT (仅流式)',
+                description: '更便宜但也更弱的 Gemma 3 指令模型（270M），这真的会有人用吗？！'
+            },
         ]
     },
     {
@@ -304,16 +364,15 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         name: '魔法国度',
         description: '神秘渠道，不定时放送。',
         docsUrl: '',
-        baseUrl: 'https://www.right.codes/codex/v1',
-        type: 'openai',
+        baseUrl: 'https://fmxalteyoxwi.jp-members-1.clawcloudrun.com/proxy/gemini-suda/v1beta',
+        type: 'google',
         mode: 'auto',
         models: [
             {
-                value: 'gpt-5.2',
-                label: 'GPT 5.2 (仅流式)',
-                description: '神秘渠道的 GPT 5.2 模型，随机出现，仅供娱乐。'
+                value: 'gemini-2.5-flash',
+                label: 'Gemini 2.5 Flash',
+                description: '神秘渠道的 Gemini 2.5 Flash 模型，随机出现，仅供娱乐。'
             },
         ]
     },
 ];
-

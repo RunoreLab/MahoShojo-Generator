@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 
+import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
@@ -82,6 +83,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
   const [offset, setOffset] = useState(0);
   const limit = 30;
   const [addingKey, setAddingKey] = useState<string | null>(null);
+  const [detailsEntity, setDetailsEntity] = useState<LeaderboardEntityDetailsTarget | null>(null);
 
   const selectedPresetFilenames = useMemo(() => {
     return new Set(
@@ -325,37 +327,38 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="p-5 border-b flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="text-lg font-bold text-gray-800">排位排行榜（可加入参战）</div>
-              {currentSeason ? (
-                <span className="rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-800 ring-1 ring-purple-200">
-                  当前赛季：{formatSeasonTitle(currentSeason)}
-                </span>
-              ) : null}
+    <>
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="p-5 border-b flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-lg font-bold text-gray-800">排位排行榜（可加入参战）</div>
+                {currentSeason ? (
+                  <span className="rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-800 ring-1 ring-purple-200">
+                    当前赛季：{formatSeasonTitle(currentSeason)}
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-1 text-xs text-gray-500">
+                这里展示公共榜单（公开 + 已审核）与预设。点击“加入参战”会把角色加入当前对战阵容。
+              </div>
             </div>
-            <div className="mt-1 text-xs text-gray-500">
-              这里展示公共榜单（公开 + 已审核）与预设。点击“加入参战”会把角色加入当前对战阵容。
+            <div className="flex items-center gap-3 text-sm">
+              <Link href="/ranking" className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">
+                打开完整排行榜页
+              </Link>
+              <button
+                onClick={onClose}
+                className="px-3 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50"
+              >
+                关闭
+              </button>
             </div>
           </div>
-          <div className="flex items-center gap-3 text-sm">
-            <Link href="/ranking" className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">
-              打开完整排行榜页
-            </Link>
-            <button
-              onClick={onClose}
-              className="px-3 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50"
-            >
-              关闭
-            </button>
-          </div>
-        </div>
 
-        <div className="p-5 overflow-auto">
-          <div className="grid gap-3 md:grid-cols-6">
+          <div className="p-5 overflow-auto">
+            <div className="grid gap-3 md:grid-cols-6">
             <label className="text-sm text-gray-700">
               天梯
               <select
@@ -675,7 +678,25 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
 	                        <tr key={`${item.entityType}:${item.entityId}`} className="border-b last:border-b-0">
 	                          <td className="py-2 px-3 text-gray-500">{item.rank}</td>
 	                          <td className="py-2 px-3">
-	                            <div className="font-medium text-gray-800">{item.displayName}</div>
+	                            <button
+	                              type="button"
+	                              onClick={() => {
+	                                const winRate =
+	                                  item.games > 0 ? Math.round((item.wins / item.games) * 1000) / 10 : null;
+	                                const detailsNotice = `当前榜单：#${item.rank} · 段位 ${item.tier} · 分 ${item.rating} · 局 ${item.games} · W/L/D ${item.wins}/${item.losses}/${item.draws}${winRate == null ? '' : ` · 胜率 ${winRate}%`}`;
+	                                setDetailsEntity({
+	                                  entityType: item.entityType,
+	                                  entityId: item.entityId,
+	                                  displayName: item.displayName,
+	                                  authorName: item.authorName,
+	                                  pendingNotice: detailsNotice,
+	                                });
+	                              }}
+	                              className="block w-full text-left font-medium text-gray-800 hover:underline underline-offset-2"
+	                              aria-label={`查看角色详情：${item.displayName}`}
+	                            >
+	                              {item.displayName}
+	                            </button>
 	                            <div className="text-xs text-gray-500">
 	                              {item.entityType === 'preset' ? '预设' : '数据卡'} · 作者：{authorName}
 	                            </div>
@@ -743,8 +764,15 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
               </button>
             </div>
           </div>
+          </div>
         </div>
       </div>
-    </div>
+
+      <LeaderboardEntityDetailsModal
+        isOpen={Boolean(detailsEntity)}
+        onClose={() => setDetailsEntity(null)}
+        entity={detailsEntity}
+      />
+    </>
   );
 }
