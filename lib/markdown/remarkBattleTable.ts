@@ -1,4 +1,5 @@
 import { fromMarkdown } from 'mdast-util-from-markdown';
+import { math } from 'micromark-extension-math';
 import type {
   Parent,
   Paragraph,
@@ -9,6 +10,7 @@ import type {
   TableRow,
   Text,
 } from 'mdast';
+import { mathFromMarkdown } from 'mdast-util-math';
 import type { Plugin } from 'unified';
 import { visit } from 'unist-util-visit';
 
@@ -72,7 +74,10 @@ function parseAlignToken(token: string): Align | undefined {
 }
 
 function parseInlineMarkdown(value: string): PhrasingContent[] {
-  const root = fromMarkdown(value);
+  const root = fromMarkdown(value, {
+    extensions: [math({ singleDollarTextMath: true })],
+    mdastExtensions: [mathFromMarkdown()],
+  });
   const first = root.children[0];
   if (!first || first.type !== 'paragraph') {
     return [{ type: 'text', value } satisfies Text] as PhrasingContent[];
@@ -144,6 +149,14 @@ function paragraphToPlainText(node: Paragraph): string | null {
     if (child.type === 'text') return (child as Text).value;
     if (child.type === 'break') return '\n';
 
+    const maybeMath = child as unknown as { type?: unknown; value?: unknown };
+    if (maybeMath.type === 'inlineMath') {
+      return typeof maybeMath.value === 'string' ? `$${maybeMath.value}$` : '';
+    }
+    if (maybeMath.type === 'math') {
+      return typeof maybeMath.value === 'string' ? `$$${maybeMath.value}$$` : '';
+    }
+
     const maybeParent = child as unknown as { children?: unknown };
     if (Array.isArray(maybeParent.children)) {
       return (maybeParent.children as PhrasingContent[]).map(extract).join('');
@@ -182,4 +195,3 @@ const remarkBattleTable: Plugin<[], Root> = () => {
 };
 
 export default remarkBattleTable;
-

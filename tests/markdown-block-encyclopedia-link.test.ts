@@ -30,5 +30,16 @@ describe('MarkdownBlock', () => {
     expect(html).not.toContain('href="/name"');
     expect(html).toContain('<code');
   });
-});
 
+  test('支持渲染 LaTeX 行内公式（$...$）', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(MarkdownBlock, {
+        content: '公式：$y=ax^2+bx+c$',
+        variant: 'light',
+        mode: 'article',
+      }),
+    );
+
+    expect(html).toContain('katex');
+  });
+});
