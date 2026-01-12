@@ -425,29 +425,28 @@ export default async function handler(req: NextRequest) {
 
       participants.forEach((p) => {
         const qr = p.queues[queue];
+        const entityKey = p.entityKey;
+        if (entityKey) {
+          const ratingFallback = ratingByKey.get(`${queue}:${entityKey}`);
+          if (ratingFallback) {
+            qr.rating = ratingFallback.rating;
+            qr.games = ratingFallback.games;
+            qr.tier = ratingFallback.tier;
+          }
+
+          const rankFallback = rankByKey.get(`${queue}:${entityKey}`);
+          if (rankFallback) {
+            qr.rank = rankFallback.rank;
+            qr.total = rankFallback.total;
+          }
+        }
+
         if (!qr.eligible) return;
         qr.eventStatus = eventStatus;
         qr.skipReason = skipReason;
 
-        const entityKey = p.entityKey;
+        if (eventStatus !== 'applied') return;
         if (!entityKey) return;
-
-        const ratingFallback = ratingByKey.get(`${queue}:${entityKey}`);
-        if (ratingFallback) {
-          qr.rating = ratingFallback.rating;
-          qr.games = ratingFallback.games;
-          qr.tier = ratingFallback.tier;
-        }
-
-        const rankFallback = rankByKey.get(`${queue}:${entityKey}`);
-        if (rankFallback) {
-          qr.rank = rankFallback.rank;
-          qr.total = rankFallback.total;
-        }
-
-        if (eventStatus !== 'applied') {
-          return;
-        }
 
         if (entityKey === aKey) {
           if (typeof event.a_after_rating === 'number') qr.rating = event.a_after_rating;

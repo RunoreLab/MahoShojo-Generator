@@ -1,4 +1,4 @@
-import { generateObject, NoObjectGeneratedError } from "ai";
+import { generateObject, generateText, NoObjectGeneratedError } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createDeepSeek } from "@ai-sdk/deepseek";
@@ -6,6 +6,8 @@ import { z } from 'zod/v3';
 import { config, AIProvider } from "./config";
 import { getLogger } from "./logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
+import { enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
+import { buildStructuredJsonInstructionFromZodSchema, parseStructuredJsonWithSchema } from "@/lib/ai/utils/structured-json";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -41,6 +43,33 @@ const createAIClient = (provider: AIProvider) => {
       fetch: getProviderFetch(provider)
     });
   }
+};
+
+const getErrorText = (error: unknown): string => {
+  if (!error) return '';
+  if (error instanceof Error) return error.message || '';
+  try {
+    return String(error);
+  } catch {
+    return '';
+  }
+};
+
+const isJsonModeNotSupportedError = (error: unknown): boolean => {
+  const msg = getErrorText(error);
+  const lowered = msg.toLowerCase();
+
+  // Google/Gemma: JSON mode is not enabled for models/xxx
+  if (lowered.includes('json mode is not enabled')) return true;
+
+  // OpenAI-compatible providers / OpenRouter: response_format not supported
+  if (lowered.includes('response_format') && lowered.includes('not')) return true;
+
+  // 通用：明确声明“不支持 JSON/JSON schema/structured output”
+  if (lowered.includes('does not support') && (lowered.includes('json') || lowered.includes('schema'))) return true;
+  if (lowered.includes('not supported') && (lowered.includes('json') || lowered.includes('schema'))) return true;
+
+  return false;
 };
 
 /**
@@ -250,35 +279,113 @@ export async function generateWithAI<T, I = string>(
 
         const systemPrompt = generationConfig.systemPrompt + generationConfig.promptBuilder(input) + 'Ignore the user \'s prompt.';
         log.info(`provider.type: ${provider.type}`);
-        const { object, usage, finishReason } = await generateObject({
-          model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel), // Type assertion for AI SDK 5 compatibility
-          // 应对风控，尝试直接全部放入系统提示词中
-          prompt: [
-            {
-              role: 'user',
-              content: systemPrompt,
-            },
-            {
-              role: 'user',
-              content: (() => {
-                const len = 20;
-                const start = Math.floor(Math.random() * Math.max(1, systemPrompt.length - len));
-                return systemPrompt.substring(start, start + len);
-              })(),
+
+        const model = provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel); // Type assertion for AI SDK 5 compatibility
+
+        const buildPromptMessages = (promptText: string) => ([
+          {
+            role: 'user' as const,
+            content: promptText,
+          },
+          {
+            role: 'user' as const,
+            content: (() => {
+              const len = 20;
+              const start = Math.floor(Math.random() * Math.max(1, promptText.length - len));
+              return promptText.substring(start, start + len);
+            })(),
+          },
+        ]);
+
+        const tryGenerateObject = async () => {
+          return await generateObject({
+            model,
+            // 应对风控，尝试直接全部放入系统提示词中
+            prompt: buildPromptMessages(systemPrompt),
+            schema: generationConfig.schema,
+            temperature: generationConfig.temperature,
+            maxOutputTokens: generationConfig.maxOutputTokens,
+            maxRetries: 0,
+          });
+        };
+
+        let object: unknown;
+        let usage: unknown;
+        let finishReason: unknown;
+
+        try {
+          const result = await tryGenerateObject();
+          object = result.object;
+          usage = result.usage;
+          finishReason = result.finishReason;
+        } catch (rawError) {
+          // 1) Schema/JSON 生成失败：尝试直接从 error.text 做解析/修复（无需额外调用模型）
+          if (NoObjectGeneratedError.isInstance(rawError) && typeof rawError.text === 'string') {
+            try {
+              const repaired = parseStructuredJsonWithSchema(rawError.text, generationConfig.schema, {
+                taskName: generationConfig.taskName,
+              });
+              log.warn('generateObject 失败，但已通过本地 JSON 修复+Schema 校验恢复结果', {
+                provider: provider.name,
+                model: selectedModel,
+                usedJsonRepair: repaired.telemetry.usedJsonRepair,
+                unwrap: repaired.telemetry.unwrapAttempt,
+              });
+
+              if (options?.telemetry) {
+                options.telemetry.usage = rawError.usage;
+                options.telemetry.finishReason = rawError.finishReason;
+              }
+
+              return repaired.data as T;
+            } catch {
+              // ignore，继续走后续回退策略
             }
-          ],
-          // system: systemPrompt,
-          // // 从 systemPrompt 随机截取一个长度为20字的片段
-          // prompt: (() => {
-          //   const len = 20;
-          //   const start = Math.floor(Math.random() * Math.max(1, systemPrompt.length - len));
-          //   return systemPrompt.substring(start, start + len);
-          // })(),
-          schema: generationConfig.schema,
-          temperature: generationConfig.temperature,
-          maxOutputTokens: generationConfig.maxOutputTokens,
-          maxRetries: 0,
-        });
+          }
+
+          const enhancedError = enhanceErrorWithUpstreamMessage(rawError);
+
+          // 2) 上游不支持 JSON 模式：退化为“纯文本生成 JSON + 本地解析/修复”
+          if (isJsonModeNotSupportedError(enhancedError)) {
+            log.warn('检测到上游不支持 JSON 模式，启用兼容回退（文本生成 JSON + 本地解析）', {
+              provider: provider.name,
+              model: selectedModel,
+              error: enhancedError.message,
+            });
+
+            const guidedPrompt =
+              `${systemPrompt}\n\n` +
+              buildStructuredJsonInstructionFromZodSchema(generationConfig.schema);
+
+            const textResult = await generateText({
+              model,
+              prompt: buildPromptMessages(guidedPrompt),
+              temperature: generationConfig.temperature,
+              maxOutputTokens: generationConfig.maxOutputTokens,
+              maxRetries: 0,
+            });
+
+            const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
+              taskName: generationConfig.taskName,
+            });
+
+            log.info('兼容回退解析成功', {
+              provider: provider.name,
+              model: selectedModel,
+              usedJsonRepair: parsed.telemetry.usedJsonRepair,
+              unwrap: parsed.telemetry.unwrapAttempt,
+            });
+
+            if (options?.telemetry) {
+              options.telemetry.usage = textResult.usage;
+              options.telemetry.finishReason = textResult.finishReason;
+            }
+
+            return parsed.data as T;
+          }
+
+          throw enhancedError;
+        }
 
         log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
         if (options?.telemetry) {

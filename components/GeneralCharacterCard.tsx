@@ -1,5 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import rehypeKatex from 'rehype-katex';
+import remarkMath from 'remark-math';
 import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { GeneralCharacterData } from '@/lib/schemas/general-character';
@@ -206,7 +208,8 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
           <div className="result-label">角色设定</div>
           <div className="result-value bg-white/95 rounded-xl p-4 shadow-inner text-sm leading-relaxed text-gray-800">
             <ReactMarkdown
-              remarkPlugins={[remarkBattleTable]}
+              remarkPlugins={[remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
+              rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
               components={{
                 h1: ({ children }) => <h1 className="text-2xl font-bold my-3 text-indigo-700">{children}</h1>,
                 h2: ({ children }) => <h2 className="text-xl font-semibold my-3 text-indigo-600">{children}</h2>,

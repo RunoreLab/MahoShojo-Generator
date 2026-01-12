@@ -4,6 +4,7 @@ import { useRouter } from 'next/router';
 import '@/styles/globals.css';
 import '@/styles/blue-theme.css';
 import '@/styles/gradient-buttons.css';
+import 'katex/dist/katex.min.css';
 import { GoogleAnalytics } from '@next/third-parties/google';
 // 1. 引入新组件
 import AnnouncementTicker from '@/components/Announcement/AnnouncementTicker';

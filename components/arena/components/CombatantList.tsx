@@ -5,6 +5,7 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { TechBadge } from '@/components/ranking/TechBadge';
+import { computeEloExpectedScore } from '@/lib/arena/elo';
 import { authStorage } from '@/lib/auth';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 
@@ -42,6 +43,14 @@ type ApiRating = {
   losses: number;
   draws: number;
   tier: string;
+};
+
+type EloWinRatePrediction = {
+  queue: Queue;
+  expectedScore: number;
+  expectedPct: number;
+  selfRating: number;
+  opponentRating: number;
 };
 
 type DataCardMetaResponse = {
@@ -89,6 +98,8 @@ const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   }
   return json;
 };
+
+const toFiniteNumber = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
 
 const buildEntityKeyForCombatant = (combatant: CombatantData): string | null => {
   if (combatant.isPreset) {
@@ -379,6 +390,59 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
     return map;
   }, [generationRankingQuery.data]);
 
+  const eloPredictionByCombatantKey = useMemo(() => {
+    const map = new Map<string, EloWinRatePrediction>();
+
+    if (combatants.length !== 2 || readableCombatants.length !== 2) return map;
+
+    const [player, opponent] = readableCombatants;
+    const playerKey = getCombatantKey(player);
+    const opponentKey = getCombatantKey(opponent);
+
+    const playerEntityKey = buildEntityKeyForCombatant(player);
+    const opponentEntityKey = buildEntityKeyForCombatant(opponent);
+    if (!playerEntityKey || !opponentEntityKey) return map;
+
+    const playerMeta = metaByEntityKey.get(playerEntityKey);
+    const opponentMeta = metaByEntityKey.get(opponentEntityKey);
+
+    const playerParticipant = generationParticipantByEntityKey.get(playerEntityKey);
+    const opponentParticipant = generationParticipantByEntityKey.get(opponentEntityKey);
+
+    const playerStrict = toFiniteNumber(playerParticipant?.queues.strict.rating ?? playerMeta?.ratings.strict?.rating);
+    const opponentStrict = toFiniteNumber(opponentParticipant?.queues.strict.rating ?? opponentMeta?.ratings.strict?.rating);
+    const playerFree = toFiniteNumber(playerParticipant?.queues.free.rating ?? playerMeta?.ratings.free?.rating);
+    const opponentFree = toFiniteNumber(opponentParticipant?.queues.free.rating ?? opponentMeta?.ratings.free?.rating);
+
+    const queueToUse: Queue | null = playerStrict != null && opponentStrict != null ? 'strict' : playerFree != null && opponentFree != null ? 'free' : null;
+    if (!queueToUse) return map;
+
+    const playerRating = queueToUse === 'strict' ? playerStrict : playerFree;
+    const opponentRating = queueToUse === 'strict' ? opponentStrict : opponentFree;
+    if (playerRating == null || opponentRating == null) return map;
+
+    const playerExpectedScore = computeEloExpectedScore(playerRating, opponentRating);
+    const opponentExpectedScore = computeEloExpectedScore(opponentRating, playerRating);
+
+    map.set(playerKey, {
+      queue: queueToUse,
+      expectedScore: playerExpectedScore,
+      expectedPct: Math.round(playerExpectedScore * 100),
+      selfRating: playerRating,
+      opponentRating,
+    });
+
+    map.set(opponentKey, {
+      queue: queueToUse,
+      expectedScore: opponentExpectedScore,
+      expectedPct: Math.round(opponentExpectedScore * 100),
+      selfRating: opponentRating,
+      opponentRating: playerRating,
+    });
+
+    return map;
+  }, [combatants.length, generationParticipantByEntityKey, metaByEntityKey, readableCombatants]);
+
   if (combatants.length === 0) {
     return null;
   }
@@ -571,6 +635,18 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                       return null;
                     })()}
                   </span>
+                  {(() => {
+                    const prediction = eloPredictionByCombatantKey.get(key);
+                    if (!prediction) return null;
+                    const queueLabel = prediction.queue === 'strict' ? '严格' : '自由';
+                    const title = `预计胜率（Elo · ${queueLabel}）：${prediction.expectedPct}%（${prediction.selfRating} vs ${prediction.opponentRating}）`;
+                    return (
+                      <span className="whitespace-nowrap" title={title}>
+                        预计胜率：<span className="font-mono font-semibold text-sky-700">{prediction.expectedPct}%</span>
+                        <span className="ml-1 text-gray-500">（{queueLabel}）</span>
+                      </span>
+                    );
+                  })()}
                 </div>
                 {!entityKey ? (
                   <div className="mt-0.5 text-[11px] text-gray-500">提示：未登记为数据卡/预设时，无法参与排位计分。</div>
