@@ -18,6 +18,7 @@ import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { resetStrictArenaRatingForDataCard } from '@/lib/database/arena-ratings';
+import { autoReviewLatestPendingPublicDataCardsForUser } from '@/lib/review/auto-data-card-review';
 
 export const runtime = 'edge';
 
@@ -191,6 +192,8 @@ export default async function handler(req: Request): Promise<Response> {
 
         // [v0.4.2 核心逻辑] 根据用户豁免状态决定审查状态
         const reviewStatus = user.is_review_exempt === 1 ? 'approved' : 'pending';
+        const normalizedPublic =
+          typeof isPublic === 'number' ? Math.floor(isPublic) : (isPublic ? 1 : 0);
 
         const result = await createDataCardWithAuthor(
           userId,
@@ -199,7 +202,7 @@ export default async function handler(req: Request): Promise<Response> {
           name,
           description || '',
           dataWithAuthorString,
-          isPublic ?? 0,
+          normalizedPublic,
           reviewStatus // 传入新的审查状态
         );
 
@@ -213,12 +216,19 @@ export default async function handler(req: Request): Promise<Response> {
         }
 
         if (result.id) {
-          const metricsPromise = computeAndUpsertMetrics(result.id, dataWithAuthorString);
+          const tasks: Promise<unknown>[] = [computeAndUpsertMetrics(result.id, dataWithAuthorString)];
+          const shouldAutoReview =
+            config.DATA_CARD_AUTO_REVIEW?.enabled && normalizedPublic === 1 && reviewStatus === 'pending';
+          if (shouldAutoReview) {
+            tasks.push(autoReviewLatestPendingPublicDataCardsForUser(userId));
+          }
+
+          const combined = Promise.all(tasks).then(() => undefined);
           const executionContext = (req as any).context;
           if (executionContext?.waitUntil) {
-            executionContext.waitUntil(metricsPromise);
+            executionContext.waitUntil(combined);
           } else {
-            await metricsPromise;
+            await combined;
           }
         }
 
@@ -290,6 +300,20 @@ export default async function handler(req: Request): Promise<Response> {
         const isExempt = user.is_review_exempt === 1;
         const isAdmin = user.is_admin === 1;
         const isPendingOrRejected = currentCard.review_status !== 'approved';
+        const normalizedPublicAfter =
+          isPublic === undefined
+            ? Number(currentCard.is_public) === 1
+              ? 1
+              : 0
+            : typeof isPublic === 'number'
+              ? Math.floor(isPublic)
+              : (isPublic ? 1 : 0);
+        const shouldAutoReview =
+          config.DATA_CARD_AUTO_REVIEW?.enabled &&
+          !isExempt &&
+          !isAdmin &&
+          normalizedPublicAfter === 1 &&
+          currentCard.review_status === 'pending';
 
         // 如果不需要审核（pending/rejected 或 豁免 / 管理员），直接更新主表
         if (isPendingOrRejected || isExempt || isAdmin) {
@@ -321,12 +345,26 @@ export default async function handler(req: Request): Promise<Response> {
               currentCard.type === 'character'
                 ? resetStrictArenaRatingForDataCard(id)
                 : Promise.resolve();
-            const combined = Promise.all([metricsPromise, resetStrictPromise]).then(() => undefined);
+            const combined = Promise.all([
+              metricsPromise,
+              resetStrictPromise,
+              shouldAutoReview ? autoReviewLatestPendingPublicDataCardsForUser(userId) : Promise.resolve(),
+            ]).then(() => undefined);
             const executionContext = (req as any).context;
             if (executionContext?.waitUntil) {
               executionContext.waitUntil(combined);
             } else {
               await combined;
+            }
+          }
+
+          if (!dataChanged && shouldAutoReview) {
+            const executionContext = (req as any).context;
+            const autoReviewPromise = autoReviewLatestPendingPublicDataCardsForUser(userId).then(() => undefined);
+            if (executionContext?.waitUntil) {
+              executionContext.waitUntil(autoReviewPromise);
+            } else {
+              await autoReviewPromise;
             }
           }
 

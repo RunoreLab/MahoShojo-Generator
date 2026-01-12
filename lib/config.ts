@@ -229,6 +229,30 @@ export const config = {
   DEFAULT_DATA_CARD_CAPACITY: 20,
   RECYCLE_BIN_LIMIT: 5,
 
+  // 数据卡自动审查（公开卡）配置
+  DATA_CARD_AUTO_REVIEW: {
+    // 是否启用数据卡自动审查功能（当前开启）
+    enabled: true,
+
+    // 当用户提交一张待审查数据卡时，如队列中还有其他待审查卡，则额外审查其前面 n 张
+    // 也就是审查“最新的 n+1 张”（当前为 1 => 共 2 张）
+    lookbackPendingCount: 1,
+
+    // 打包按批次审查：平时不进行自动审查，待审查数量（含本张）达到阈值 n 时才触发
+    // 当前关闭（即时自动审查）
+    batch: {
+      enabled: false,
+      threshold: 5,
+    },
+
+    // 自动审查优先使用轻量模型
+    modelFallbacks: [
+      'gemma-3-27b-it',
+      'gemini-2.5-flash-lite',
+      'gemma-3-12b-it'
+    ],
+  },
+
   // 魔法少女生成配置
   MAGICAL_GIRL_GENERATION: {
     temperature: 0.8,
