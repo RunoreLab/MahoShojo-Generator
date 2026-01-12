@@ -4,6 +4,7 @@ import type { Preset } from '@/lib/presets';
 import type { StatsData } from '@/pages/api/get-stats';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import type { RankedMatchTicket } from '@/lib/arena/ranked-match';
+import type { EloPredictionV1 } from '@/lib/arena/elo';
 
 export const MAX_COMBATANTS = 10;
 export const MAX_AUX_SCENARIOS = 10;
@@ -117,6 +118,7 @@ export interface BattleApiResponse {
 export interface RankedMatchState {
   ticket: RankedMatchTicket;
   lockKey: string;
+  prediction?: EloPredictionV1 | null;
 }
 
 export interface BattleStoreState {
