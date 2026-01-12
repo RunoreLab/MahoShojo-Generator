@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
 import { PRESET_LIST } from '@/lib/presets';
 import { issueRankedMatchTicket, type RankedMatchEntity } from '@/lib/arena/ranked-match';
+import { computeEloExpectedScore, type EloPredictionV1 } from '@/lib/arena/elo';
 import { INITIAL_RATING, STRICT_DEDUP_WINDOW_MS, buildPairKey } from '@/lib/database/arena-ratings';
 import { STRICT_MATCHMAKING_BANDS, pickStrictMatchmakingCandidate } from '@/lib/arena/ranked-matchmaking-logic';
 
@@ -31,6 +32,7 @@ type ApiSuccessResponse = {
   success: true;
   ticket: unknown;
   opponent: DataCardOpponent | PresetOpponent;
+  prediction?: EloPredictionV1;
   note?: string;
 };
 
@@ -528,8 +530,6 @@ export default async function handler(req: NextRequest): Promise<Response> {
       break;
     }
 
-    const note = noteParts.length > 0 ? noteParts.join('；') : undefined;
-
     if (!picked) {
       return new Response(JSON.stringify({ success: false, error: '当前没有可匹配的对手（公开角色不足）' } satisfies ApiErrorResponse), {
         status: 404,
@@ -568,7 +568,26 @@ export default async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    const response: ApiSuccessResponse = { success: true, ticket: ticketResult.ticket, opponent, ...(note ? { note } : {}) };
+    const prediction: EloPredictionV1 = {
+      method: 'elo',
+      version: 1,
+      player: { rating: playerRating.rating, games: playerRating.games },
+      opponent: { rating: picked.rating, games: picked.games },
+      expectedScore: computeEloExpectedScore(playerRating.rating, picked.rating),
+    };
+
+    const expectedPct = Math.round(prediction.expectedScore * 100);
+    const playerRatingLabel = Math.round(prediction.player.rating);
+    const opponentRatingLabel = Math.round(prediction.opponent.rating);
+    const note = [`预计胜率（Elo）：${expectedPct}%（${playerRatingLabel} vs ${opponentRatingLabel}）`, ...noteParts].join('；');
+
+    const response: ApiSuccessResponse = {
+      success: true,
+      ticket: ticketResult.ticket,
+      opponent,
+      prediction,
+      note,
+    };
 
     return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
