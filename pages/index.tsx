@@ -98,6 +98,7 @@ export default function Home() {
               items={[
                 { slug: 'site-guide', text: '站内功能速览（从生成到对战）' },
                 { slug: 'newbie-guide', text: '新手攻略（强度直觉）' },
+                { slug: 'community-rules', text: '社区守则与竞技场规范（必读）' },
               ]}
             />
             <div className="mt-4 flex justify-center">
