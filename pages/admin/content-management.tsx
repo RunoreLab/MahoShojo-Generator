@@ -7,6 +7,7 @@ import { useRouter } from 'next/router';
 import { debounce } from '@/lib/debounce';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import { AdminTableScroll } from '@/components/admin/AdminTableScroll';
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 
 // 定义数据卡类型接口
 interface DataCard {
@@ -80,10 +81,76 @@ const ContentManagementPage: React.FC = () => {
   const [aiReviewResults, setAiReviewResults] = useState<AiReviewResult[]>([]);
   const [markedActions, setMarkedActions] = useState<Record<string, 'approve' | 'reject'>>({});
   const [aiBatchSize, setAiBatchSize] = useState(20);
-  const [aiModel, setAiModel] = useState('gemini-2.5-flash-lite');
+  const [aiModel, setAiModel] = useState('default');
+  const [availableAiModels, setAvailableAiModels] = useState<string[]>([]);
+  const [availableAiModelsError, setAvailableAiModelsError] = useState<string | null>(null);
   const [externalReviewContent, setExternalReviewContent] = useState(''); // [新增] 外部审查粘贴内容
   const [copyStatus, setCopyStatus] = useState(''); // [新增] 复制按钮状态
   const [aiTargetSnapshotById, setAiTargetSnapshotById] = useState<Record<string, AiTargetSnapshotItem>>({});
+
+  const aiModelLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const provider of AI_PROVIDER_CATALOG) {
+      for (const modelOption of provider.models) {
+        if (!map.has(modelOption.value)) map.set(modelOption.value, modelOption.label);
+      }
+    }
+    return map;
+  }, []);
+
+  const fallbackAiModels = useMemo(() => {
+    const deduped: string[] = [];
+    const seen = new Set<string>();
+    for (const provider of AI_PROVIDER_CATALOG) {
+      for (const modelOption of provider.models) {
+        if (modelOption.value === 'default') continue;
+        if (seen.has(modelOption.value)) continue;
+        seen.add(modelOption.value);
+        deduped.push(modelOption.value);
+      }
+    }
+    return deduped;
+  }, []);
+
+  const resolvedAiModels = useMemo(() => {
+    const base = availableAiModels.length > 0 ? availableAiModels : fallbackAiModels;
+    if (aiModel !== 'default' && aiModel.trim() && !base.includes(aiModel)) {
+      return [aiModel, ...base];
+    }
+    return base;
+  }, [aiModel, availableAiModels, fallbackAiModels]);
+
+  const fetchAvailableAiModels = useCallback(async () => {
+    try {
+      setAvailableAiModelsError(null);
+      const response = await fetch('/api/admin/ai-models');
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || '获取 AI 模型列表失败');
+      }
+      const models: unknown = payload?.models;
+      if (!Array.isArray(models)) {
+        throw new Error('AI 模型列表返回格式异常');
+      }
+      setAvailableAiModels(
+        models
+          .filter((item): item is string => {
+            if (typeof item !== 'string') return false;
+            const trimmed = item.trim();
+            return Boolean(trimmed) && trimmed !== 'default';
+          })
+          .map((item) => item.trim())
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '获取 AI 模型列表失败';
+      setAvailableAiModels([]);
+      setAvailableAiModelsError(message);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchAvailableAiModels();
+  }, [fetchAvailableAiModels]);
 
   const fetchData = useCallback(async (currentFilters: typeof filters) => {
     setLoading(true);
@@ -544,10 +611,12 @@ const ContentManagementPage: React.FC = () => {
 
       setAiTargetSnapshotById(snapshot);
 
+      const modelOverride = aiModel === 'default' ? undefined : aiModel;
+
       const response = await fetch('/api/admin/ai-review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets, model: aiModel }),
+        body: JSON.stringify({ targets, model: modelOverride }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || 'AI审查请求失败');
@@ -708,13 +777,50 @@ ${JSON.stringify(cardsToCopy, null, 2)}
   };
 
   // [新增] 外部审查 - 解析并应用结果
-  const handleParseAndApply = () => {
-      if (!externalReviewContent.trim()) {
-          alert('请将外部 AI 的审查结果粘贴到文本框中。');
-          return;
+  const handleParseAndApply = async () => {
+      const normalizeJsonText = (input: string): string => {
+          const trimmed = input.trim();
+          if (!trimmed) return trimmed;
+
+          const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+          const unfenced = fenced ? fenced[1].trim() : trimmed;
+
+          if (unfenced.startsWith('[') || unfenced.startsWith('{')) return unfenced;
+
+          const arrayStart = unfenced.indexOf('[');
+          const arrayEnd = unfenced.lastIndexOf(']');
+          if (arrayStart >= 0 && arrayEnd > arrayStart) {
+              return unfenced.slice(arrayStart, arrayEnd + 1).trim();
+          }
+
+          return unfenced;
+      };
+
+      const tryReadClipboardText = async (): Promise<string | null> => {
+          if (!navigator.clipboard?.readText) return null;
+          try {
+              return await navigator.clipboard.readText();
+          } catch (error) {
+              console.warn('读取剪贴板失败:', error);
+              return null;
+          }
+      };
+
+      let rawText = externalReviewContent;
+      let sourceLabel = '文本框';
+
+      if (!rawText.trim()) {
+          const clipboardText = await tryReadClipboardText();
+          if (!clipboardText?.trim()) {
+              alert('文本框为空，且无法读取剪贴板内容。请先粘贴外部 AI 返回的 JSON 数组结果。');
+              return;
+          }
+          rawText = clipboardText;
+          sourceLabel = '剪贴板';
       }
+
       try {
-          const parsedResults = JSON.parse(externalReviewContent);
+          const parsedResults = JSON.parse(normalizeJsonText(rawText));
           if (!Array.isArray(parsedResults)) {
               throw new Error('粘贴的内容不是一个有效的 JSON 数组。');
           }
@@ -735,8 +841,11 @@ ${JSON.stringify(cardsToCopy, null, 2)}
 
           setAiReviewResults(validatedResults);
           setExternalReviewContent(''); // 清空文本框
-          alert(`成功解析并加载了 ${validatedResults.length} 条审查建议！`);
+          alert(`成功从${sourceLabel}解析并加载了 ${validatedResults.length} 条审查建议！`);
       } catch (error) {
+          if (sourceLabel === '剪贴板' && !externalReviewContent.trim()) {
+              setExternalReviewContent(rawText);
+          }
           alert(`解析失败: ${error instanceof Error ? error.message : '无效的JSON格式'}`);
           console.error('解析外部审查结果失败:', error);
       }
@@ -1025,23 +1134,16 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                                   <div>
                                     <label className="text-sm font-medium">使用模型</label>
                                     <select value={aiModel} onChange={e => setAiModel(e.target.value)} className="input-field mt-1">
-                                        {/* Google Models */}
-                                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
-                                        <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                                        
-                                        {/* Grok Models */}
-                                        <option value="grok-2">Grok 2</option>
-                                        <option value="grok-3">Grok 3</option>
-                                        <option value="grok-3-fast">Grok 3 Fast</option>
-                                        <option value="grok-3-mini">Grok 3 Mini</option>
-                                        <option value="grok-3-mini-fast">Grok 3 Mini Fast</option>
-                                        <option value="grok-4">Grok 4</option>
-
-                                        {/* Qwen Models */}
-                                        <option value="qwen-plus-latest">Qwen Plus (Latest)</option>
-                                        <option value="qwen-turbo-latest">Qwen Turbo (Latest)</option>
-                                      </select>
+                                      <option value="default">使用系统默认配置（推荐）</option>
+                                      {resolvedAiModels.map(modelId => (
+                                        <option key={modelId} value={modelId}>
+                                          {aiModelLabelMap.get(modelId) ?? modelId}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {availableAiModelsError && availableAiModels.length === 0 && (
+                                      <p className="text-[11px] text-amber-700 mt-1">模型列表获取失败，已回退到内置目录：{availableAiModelsError}</p>
+                                    )}
                                   </div>
                                   <button onClick={handleStartAiReview} disabled={isAiReviewing} className="admin-button-sm bg-indigo-600 hover:bg-indigo-700 text-white self-end">
                                       {isAiReviewing ? '审查中...' : `开始审查`}
@@ -1095,7 +1197,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                               <h3 className="font-semibold mb-2">外部 AI 审查工作流</h3>
                               <button onClick={handleCopyToClipboard} className="admin-button-sm bg-gray-700 hover:bg-gray-800 text-white w-full mb-2">1. 复制内容以供外部审查</button>
                               {copyStatus && <p className="text-xs text-green-600 text-center mb-2">{copyStatus}</p>}
-                              <textarea value={externalReviewContent} onChange={e => setExternalReviewContent(e.target.value)} placeholder="2. 在此处粘贴外部 AI 返回的 JSON 数组结果..." className="input-field w-full h-32 resize-y"></textarea>
+                              <textarea value={externalReviewContent} onChange={e => setExternalReviewContent(e.target.value)} placeholder="2. 在此处粘贴外部 AI 返回的 JSON 数组结果（留空则尝试读取剪贴板）..." className="input-field w-full h-32 resize-y"></textarea>
                               <button onClick={handleParseAndApply} className="admin-button-sm bg-blue-700 hover:bg-blue-800 text-white w-full mt-2">3. 解析并应用建议</button>
                           </div>
                       </div>

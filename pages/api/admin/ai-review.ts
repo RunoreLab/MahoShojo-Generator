@@ -32,6 +32,8 @@ export default async function handler(req: NextRequest) {
 
   try {
     const { cardIds, model, targets } = await req.json();
+    const normalizedModelOverride =
+      typeof model === 'string' && model.trim() && model.trim() !== 'default' ? model.trim() : undefined;
 
     const normalizedTargets: { kind: 'card' | 'update'; id: string; targetId: string }[] = [];
     if (Array.isArray(targets) && targets.length > 0) {
@@ -87,7 +89,7 @@ export default async function handler(req: NextRequest) {
       // Zod 类型与 SDK 泛型定义存在版本不匹配，这里强制断言以保证类型安全由运行时校验负责
       schema: AiReviewResponseSchema as any,
       taskName: "AI内容辅助审查",
-      modelOverride: model, // 允许前端传递模型名称
+      modelOverride: normalizedModelOverride, // 允许前端传递模型名称（default 表示不覆盖）
       maxOutputTokens: 4096,
     };
 
