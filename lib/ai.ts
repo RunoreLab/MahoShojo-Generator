@@ -72,6 +72,16 @@ const isJsonModeNotSupportedError = (error: unknown): boolean => {
   return false;
 };
 
+const shouldForceTextJsonFallback = (modelId: string): boolean => {
+  const normalized = typeof modelId === 'string' ? modelId.toLowerCase() : '';
+
+  // Gemma 系列（尤其是通过 Google Generative Language API）普遍不支持 JSON mode，
+  // 但仍可通过纯文本输出 JSON + 本地解析/修复 的方式完成结构化任务。
+  if (normalized.includes('gemma')) return true;
+
+  return false;
+};
+
 /**
  * 随机打乱数组的函数 (Fisher-Yates shuffle)
  */
@@ -308,6 +318,44 @@ export async function generateWithAI<T, I = string>(
             maxRetries: 0,
           });
         };
+
+        // 0) 预判：某些模型（如 Gemma）不支持 JSON mode，直接走“文本 JSON + 本地解析”避免硬错误与二次请求
+        if (shouldForceTextJsonFallback(selectedModel)) {
+          log.warn('检测到模型可能不支持 JSON mode，直接启用兼容回退（文本生成 JSON + 本地解析）', {
+            provider: provider.name,
+            model: selectedModel,
+          });
+
+          const guidedPrompt =
+            `${systemPrompt}\n\n` +
+            buildStructuredJsonInstructionFromZodSchema(generationConfig.schema);
+
+          const textResult = await generateText({
+            model,
+            prompt: buildPromptMessages(guidedPrompt),
+            temperature: generationConfig.temperature,
+            maxOutputTokens: generationConfig.maxOutputTokens,
+            maxRetries: 0,
+          });
+
+          const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
+            taskName: generationConfig.taskName,
+          });
+
+          log.info('兼容回退解析成功（预判直达）', {
+            provider: provider.name,
+            model: selectedModel,
+            usedJsonRepair: parsed.telemetry.usedJsonRepair,
+            unwrap: parsed.telemetry.unwrapAttempt,
+          });
+
+          if (options?.telemetry) {
+            options.telemetry.usage = textResult.usage;
+            options.telemetry.finishReason = textResult.finishReason;
+          }
+
+          return parsed.data as T;
+        }
 
         let object: unknown;
         let usage: unknown;
