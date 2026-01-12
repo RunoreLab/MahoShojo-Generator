@@ -212,6 +212,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['标签', '筛选', '定位'],
   },
   {
+    slug: 'community-rules',
+    title: '社区守则与竞技场规范（必读）',
+    summary: '交流礼仪、竞技场红线、引用规范与玩法标签等管理组意见汇总。',
+    markdownPath: '/encyclopedia/community-rules.md',
+    categoryId: 'community',
+    keywords: ['社区守则', '竞技场守则', '礼仪', '底线', '引用', '玩法标签', '规范'],
+  },
+  {
     slug: 'code-kill',
     title: '代码杀（概念与礼仪）',
     summary: '“代码杀”是什么、为何是风险提示，以及社群礼仪建议。',
