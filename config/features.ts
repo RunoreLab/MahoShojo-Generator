@@ -64,6 +64,22 @@ export const featureCategories: FeatureCategory[] = [
     ]
   },
   {
+    id: 'utilities',
+    title: '~ 辅助功能 ~',
+    columns: 1,
+    features: [
+      {
+        id: 'free-generator',
+        src: '/free-generator-white.svg',
+        width: 240,
+        height: 100,
+        alt: '自由生成',
+        href: '/free',
+        className: 'free-generator'
+      }
+    ]
+  },
+  {
     id: 'battle',
     title: '~ 对战竞技 ~',
     columns: 1,
