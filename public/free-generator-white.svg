@@ -1,0 +1,58 @@
+<svg width="360" height="80" viewBox="0 0 360 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="titleGradient" x1="0" y1="0" x2="360" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.98"/>
+      <stop offset="0.5" stop-color="#FDF2F8" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.98"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-50%" width="140%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0F172A" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <path
+      d="M46 18C40.4772 18 36 22.4772 36 28V52C36 57.5228 40.4772 62 46 62H314C319.523 62 324 57.5228 324 52V28C324 22.4772 319.523 18 314 18H46Z"
+      fill="#0F172A"
+      fill-opacity="0.18"
+    />
+    <path
+      d="M48 22C43.5817 22 40 25.5817 40 30V50C40 54.4183 43.5817 58 48 58H312C316.418 58 320 54.4183 320 50V30C320 25.5817 316.418 22 312 22H48Z"
+      fill="#FFFFFF"
+      fill-opacity="0.12"
+      stroke="#FFFFFF"
+      stroke-opacity="0.30"
+    />
+
+    <path
+      d="M62 30.5C62 27.4624 64.4624 25 67.5 25H80.2C81.1275 25 82.0159 25.3684 82.6718 26.0243L89.9757 33.3282C90.6316 33.9841 91 34.8725 91 35.8V49.5C91 52.5376 88.5376 55 85.5 55H67.5C64.4624 55 62 52.5376 62 49.5V30.5Z"
+      fill="#FFFFFF"
+      fill-opacity="0.92"
+      stroke="#0F172A"
+      stroke-opacity="0.20"
+    />
+    <path
+      d="M82.2 25V31.3C82.2 32.2941 83.0059 33.1 84 33.1H90.3"
+      stroke="#0F172A"
+      stroke-opacity="0.28"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path d="M68.8 39H83.2" stroke="#0F172A" stroke-opacity="0.30" stroke-width="2" stroke-linecap="round"/>
+    <path d="M68.8 45.5H79.6" stroke="#0F172A" stroke-opacity="0.30" stroke-width="2" stroke-linecap="round"/>
+
+    <text
+      x="206"
+      y="44"
+      text-anchor="middle"
+      dominant-baseline="middle"
+      font-size="28"
+      font-weight="800"
+      letter-spacing="2"
+      fill="url(#titleGradient)"
+    >
+      自由生成
+    </text>
+  </g>
+</svg>
