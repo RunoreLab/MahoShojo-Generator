@@ -80,11 +80,11 @@ type CanshouDetails = z.infer<typeof CanshouSchema>;
 
 // AI生成配置
 const canshouGenerationConfig: GenerationConfig<CanshouDetails, { answers: Record<string, string>, language: string }> = {
-  systemPrompt: `你是一名魔法国度的残兽研究学者，你的任务是根据一线调查员提交的问卷报告，分析并生成一份详细的残兽档案。
+  systemPrompt: `你是一名魔法国度的研究学者，你的任务是根据一线调查员提交的问卷报告，分析并生成一份详细的档案。
   首先，这是关于残兽的基础设定，你必须严格遵守：
   ${canshouLore}
 
-  请根据用户提供的问卷答案，以结构化的JSON格式返回残兽的详细设定，包括对其各项特征的详细描述和你作为研究学者的专业分析笔记。`,
+  请根据用户提供的问卷答案，以结构化的JSON格式返回详细设定，包括对其各项特征的详细描述和你作为研究学者的专业分析笔记。`,
   temperature: 0.8,
   promptBuilder: ({ answers, language }: { answers: Record<string, string>, language: string }) => {
     const answerText = Object.entries(answers)

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import MagicalGirlCard from '../components/MagicalGirlCard';
+import GeneralCharacterCard from '../components/GeneralCharacterCard';
 import { useCooldown } from '../lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import Link from 'next/link';
@@ -18,6 +19,10 @@ import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiPr
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
+import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { MarkdownBlock } from '@/components/MarkdownBlock';
 
 interface Questionnaire {
   questions: string[];
@@ -190,6 +195,9 @@ const DetailsPage: React.FC = () => {
   const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
   const [imageSaveMode, setImageSaveMode] = useState<ImageSaveMode>('download');
   const [jsonSaveMode, setJsonSaveMode] = useState<JsonSaveMode>('download');
+  const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
+  const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
+  const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
 
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -492,6 +500,9 @@ const DetailsPage: React.FC = () => {
     }
     setSubmitting(true);
     setError(null); // 清除之前的错误
+    setMagicalGirlDetails(null);
+    setStreamingMarkdown(null);
+    setStreamedGeneralCard(null);
     // 检查
     console.log('检查敏感词:', finalAnswers.join(''));
     if (await checkSensitiveWords(finalAnswers.join(''))) return;
@@ -508,7 +519,11 @@ const DetailsPage: React.FC = () => {
         apiKey: userProviderConfig.apiKey,
       } : undefined;
 
-      const response = await fetch('/api/generate-magical-girl-details', {
+      const endpoint = generationMode === 'stream'
+        ? '/api/generate-magical-girl-details-stream'
+        : '/api/generate-magical-girl-details';
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -541,6 +556,38 @@ const DetailsPage: React.FC = () => {
           const serverMessage = errorData?.message || errorData?.error;
           throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
         }
+      }
+
+      if (generationMode === 'stream') {
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('application/json') || contentType.includes('+json')) {
+          const errorData = await response.json().catch(() => null as any);
+          const serverMessage = errorData?.message || errorData?.error;
+          throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+        }
+
+        setStreamingMarkdown('');
+        const markdown = await readTextStreamFromResponse(response, {
+          label: '魔法少女角色卡（流式）',
+          onText: (text) => setStreamingMarkdown(text),
+        });
+
+        if (await checkSensitiveWords(markdown, {
+          source: 'output',
+          origin: 'details-stream',
+          reason: '使用危险符文',
+          backupItems: buildAnswerBackupItems(),
+        })) return;
+
+        const fallbackName = typeof finalAnswers[0] === 'string' ? finalAnswers[0].trim() : '';
+        const { card } = buildGeneralCharacterCardFromMarkdown({
+          markdown,
+          fallbackName,
+          defaultName: '魔法少女',
+        });
+        setStreamedGeneralCard(card);
+        setError(null);
+        return;
       }
 
       const result: MagicalGirlDetails = await response.json();
@@ -608,6 +655,34 @@ const DetailsPage: React.FC = () => {
   const imageSaveButtonLabel = imageSaveMode === 'download'
     ? '💾 一键保存长图'
     : '📱 打开长按保存弹窗';
+
+  const downloadStreamedGeneralCard = (data: any) => {
+    if (!data) return;
+    const jsonPayload = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonPayload], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const rawName = (data?.codename || data?.name || '未命名角色').toString();
+    const sanitizedName = rawName.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_').slice(0, 80) || 'data';
+    link.href = url;
+    link.download = `通用魔法少女角色_${sanitizedName}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const copyStreamedGeneralCard = async (data: any) => {
+    if (!data) return;
+    try {
+      if (!navigator.clipboard) throw new Error('clipboard-not-available');
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+      alert('✅ 通用角色卡 JSON 已复制到剪贴板');
+    } catch (err) {
+      console.error('复制 JSON 失败：', err);
+      alert('⚠️ 复制失败，请手动长按选择 JSON 内容后复制。');
+    }
+  };
 
   const handleStartQuestionnaire = () => {
     setShowIntroduction(false);
@@ -890,6 +965,22 @@ const DetailsPage: React.FC = () => {
                   )}
                 </div>
 
+                {/* 生成方式：非流式 / 流式 */}
+                <div className="my-4 bg-gray-100 rounded-lg p-3">
+                  <GenerationModeSwitcher
+                    label="生成方式"
+                    value={generationMode}
+                    disabled={submitting}
+                    helper={false}
+                    onChange={(mode) => setGenerationMode(mode)}
+                  />
+                  <div className="text-xs text-gray-600 mt-2">
+                    {generationMode === 'stream'
+                      ? '提示：选择流式生成后，将实时输出 Markdown，并生成【通用角色卡】（templateId=通用角色）。代号/名字会尝试从输出中解析，失败则回退到你填写的名字或“魔法少女”。'
+                      : '提示：非流式生成会返回结构化的魔法少女数据卡（适合保存为模板/用于升华等），但需要等待生成结束一次性返回。'}
+                  </div>
+                </div>
+
                 {/* 自定义 AI 供应商 */}
                 <div className="my-4 bg-gray-50 rounded-lg p-3">
                   <AiProviderSelector onConfigChange={setUserProviderConfig} />
@@ -983,8 +1074,67 @@ const DetailsPage: React.FC = () => {
             )}
           </div>
 
-          {/* 显示魔法少女详细信息结果 */}
-          {magicalGirlDetails && (
+          {/* 流式：通用角色卡（Markdown） */}
+          {generationMode === 'stream' && (streamingMarkdown !== null || streamedGeneralCard) && (
+            <>
+              <div className="card" style={{ marginTop: '1rem' }}>
+                <h2 className="text-2xl font-bold text-center mb-4">通用角色卡（Markdown）</h2>
+                <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
+                  {streamingMarkdown ? (
+                    <MarkdownBlock content={streamingMarkdown} variant="light" mode="article" />
+                  ) : submitting ? (
+                    <div className="text-sm text-gray-500 text-center">正在启动流式生成…</div>
+                  ) : (
+                    <div className="text-sm text-gray-500 text-center">生成结果将显示在此处</div>
+                  )}
+                </div>
+              </div>
+
+              {streamedGeneralCard && (
+                <>
+                  <GeneralCharacterCard
+                    general={streamedGeneralCard}
+                    onSaveImage={handleSaveImage}
+                    imageSaveMode={imageSaveMode}
+                    saveButtonLabel={imageSaveButtonLabel}
+                  />
+                  <div className="card" style={{ marginTop: '1rem' }}>
+                    <div className="text-center">
+                      <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
+                      <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                        <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className="generate-button flex-1">
+                          下载通用角色卡
+                        </button>
+                        <SaveToCloudButton
+                          data={streamedGeneralCard}
+                          cardType="character"
+                          buttonText="保存到云端"
+                          className="generate-button flex-1"
+                          style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                        />
+                        <button
+                          onClick={() => void copyStreamedGeneralCard(streamedGeneralCard)}
+                          className="generate-button flex-1"
+                          style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+                        >
+                          复制到剪贴板
+                        </button>
+                      </div>
+                      <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                        <p className="text-sm text-gray-600 mb-2">保存好你的档案了吗？</p>
+                        <Link href="/battle" className="footer-link" style={{ color: '#c026d3', fontSize: '1.125rem' }}>
+                          前往竞技场，让她大闹一场！→
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* 非流式：魔法少女详细信息结果 */}
+          {generationMode === 'non-stream' && magicalGirlDetails && (
             <>
               <MagicalGirlCard
                 magicalGirl={magicalGirlDetails}
