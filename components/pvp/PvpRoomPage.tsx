@@ -1458,7 +1458,8 @@ export function PvpRoomPage() {
       return;
     }
     const cleaned = removePrivateKeys(cardData);
-    if (inferTemplate(cleaned) !== 'scenario') {
+    const template = inferTemplate(cleaned);
+    if (template !== 'scenario' && template !== 'general-scenario') {
       setError('❌ 请选择“情景”类型的数据卡。');
       return;
     }
@@ -2585,7 +2586,7 @@ export function PvpRoomPage() {
                                 isGenerating={rulesMutation.isPending || scenarioMutation.isPending}
                                 isMatchingBlocked={isScenarioMatching}
                                 isMatchingScenario={isScenarioMatching}
-                                scenarioFileName={scenarioDraft?.name ?? (typeof roomScenario?.title === 'string' ? roomScenario.title : null)}
+                                scenarioFileName={scenarioDraft?.name ?? (typeof roomScenario?.title === 'string' ? roomScenario.title : (typeof roomScenario?.name === 'string' ? roomScenario.name : null))}
                               />
                               <div className="flex gap-2">
                                 <button

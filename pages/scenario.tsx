@@ -11,6 +11,7 @@ import Footer from '../components/Footer';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
+import { convertDataCard, createBlankDataCard } from '@/lib/data-card-converter';
 
 // 定义引导性问题
 const scenarioQuestions = [
@@ -40,6 +41,7 @@ const ScenarioPage: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultData, setResultData] = useState<any | null>(null);
+  const [generalScenarioDraft, setGeneralScenarioDraft] = useState<any | null>(null);
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
   // 根据是否使用自定义 Key 动态调整冷却时间：官方 60s，自定义 3s
@@ -150,13 +152,13 @@ const ScenarioPage: React.FC = () => {
   };
 
   const downloadJson = (data: any) => {
-    const title = data.title || '自定义情景';
+    const title = data?.title || data?.name || '自定义情景';
     const jsonData = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonData], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `情景_${title}.json`;
+    link.download = `${data?.templateId === '通用情景' ? '通用情景' : '情景'}_${title}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -168,6 +170,22 @@ const ScenarioPage: React.FC = () => {
     navigator.clipboard.writeText(jsonData)
       .then(() => alert('已复制到剪贴板！'))
       .catch(() => alert('复制失败'));
+  };
+
+  const handleCreateBlankGeneralScenario = () => {
+    const blank = createBlankDataCard('general-scenario');
+    setGeneralScenarioDraft(blank);
+  };
+
+  const handleConvertToGeneralScenario = () => {
+    if (!resultData) return;
+    try {
+      const { data: converted } = convertDataCard(resultData, 'general-scenario', 'scenario');
+      setGeneralScenarioDraft(converted);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '转换失败';
+      setError(`✨ 转换失败！${message}`);
+    }
   };
 
   return (
@@ -297,6 +315,81 @@ const ScenarioPage: React.FC = () => {
               </div>
             </div>
           )}
+
+          <div className="card mt-6">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col md:flex-row justify-between gap-2">
+                <h2 className="text-xl font-bold">通用情景卡（Markdown）</h2>
+                <div className="flex gap-2">
+                  <button onClick={handleCreateBlankGeneralScenario} className="generate-button flex-1" style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}>
+                    创建空白通用情景卡
+                  </button>
+                  <button
+                    onClick={handleConvertToGeneralScenario}
+                    disabled={!resultData}
+                    className="generate-button flex-1"
+                    style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
+                  >
+                    将生成结果转为通用情景卡
+                  </button>
+                </div>
+              </div>
+
+              {generalScenarioDraft && (
+                <>
+                  <div className="space-y-4">
+                    <div className="input-group">
+                      <label className="input-label">情景名称</label>
+                      <input
+                        type="text"
+                        value={generalScenarioDraft.name || ''}
+                        onChange={(e) => setGeneralScenarioDraft((prev: any) => ({ ...prev, name: e.target.value }))}
+                        className="input-field"
+                        placeholder="请输入通用情景名称"
+                      />
+                    </div>
+
+                    <div className="input-group">
+                      <label className="input-label">情景内容（Markdown）</label>
+                      <textarea
+                        value={generalScenarioDraft.content || ''}
+                        onChange={(e) => setGeneralScenarioDraft((prev: any) => ({ ...prev, content: e.target.value }))}
+                        className="input-field resize-y"
+                        rows={12}
+                        placeholder="请在此处编写情景设定，建议使用 Markdown 小标题/列表。"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
+                    <pre>{JSON.stringify(generalScenarioDraft, null, 2)}</pre>
+                  </div>
+
+                  <div className="flex flex-col md:flex-row justify-center mt-2">
+                    <button onClick={() => downloadJson(generalScenarioDraft)} className="generate-button flex-1">
+                      下载通用情景卡
+                    </button>
+                    <SaveToCloudButton
+                      data={generalScenarioDraft}
+                      cardType="scenario"
+                      buttonText="保存到云端"
+                      className="generate-button flex-1"
+                      style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                    />
+                    <button onClick={() => copyToClipboard(generalScenarioDraft)} className="generate-button flex-1" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
+                      复制到剪贴板
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {!generalScenarioDraft && (
+                <p className="text-xs text-gray-500">
+                  提示：通用情景卡只有 <code>name</code> 和 <code>content</code> 两个主要字段，适合用 Markdown 维护长线场景。
+                </p>
+              )}
+            </div>
+          </div>
 
           <div className="text-center" style={{ marginTop: '2rem' }}>
             <Link href="/" className="footer-link">返回首页</Link>

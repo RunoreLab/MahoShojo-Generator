@@ -367,7 +367,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            mode: snapshotMode,
 	                            scenarioTitle: typeof scenarioTitle === 'string'
 	                                ? scenarioTitle.trim() || null
-	                                : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+	                                : (typeof scenario?.title === 'string'
+	                                    ? scenario.title.trim()
+	                                    : (typeof scenario?.name === 'string' ? scenario.name.trim() : null)),
 	                            scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
 	                            scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                            language: snapshotLanguage,
@@ -613,7 +615,9 @@ async function handler(req: NextRequest): Promise<Response> {
                     mode,
                     scenarioTitle: typeof scenarioTitle === 'string'
                         ? scenarioTitle.trim() || null
-                        : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+                        : (typeof scenario?.title === 'string'
+                            ? scenario.title.trim()
+                            : (typeof scenario?.name === 'string' ? scenario.name.trim() : null)),
                     scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                     scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                    language: normalizeOptionalString(language),
