@@ -555,7 +555,7 @@ export const useBattleEngine = () => {
 
           reader = response.body?.getReader() ?? null;
           if (!reader) {
-            throw new Error('无法读取响应流，请使用最新版本的现代浏览器。');
+            throw new Error('无法读取响应流，请使用最新版本的浏览器。');
           }
 
           const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
