@@ -267,7 +267,7 @@ const DEFAULT_SCENARIO: ScenarioData = {
 
 const DEFAULT_GENERAL_SCENARIO: GeneralScenarioData = {
   templateId: GENERAL_SCENARIO_TEMPLATE_ID,
-  name: '未命名情景',
+  title: '未命名情景',
   content: '请在此处补充情景设定，建议使用 Markdown 书写。',
 };
 
@@ -482,7 +482,7 @@ function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
 }
 
 function convertToGeneralScenario(data: any, sourceTemplate: InferableTemplate): AssignResult<GeneralScenarioData> {
-  const name = data?.title || data?.name || data?.codename || '未命名情景';
+  const title = data?.title || data?.name || data?.codename || '未命名情景';
   const rest = { ...data };
   delete rest.codename;
   delete rest.name;
@@ -507,7 +507,7 @@ function convertToGeneralScenario(data: any, sourceTemplate: InferableTemplate):
 
   const result: GeneralScenarioData = {
     templateId: GENERAL_SCENARIO_TEMPLATE_ID,
-    name,
+    title,
     content,
   };
 

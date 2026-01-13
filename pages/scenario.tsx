@@ -342,8 +342,8 @@ const ScenarioPage: React.FC = () => {
                       <label className="input-label">情景名称</label>
                       <input
                         type="text"
-                        value={generalScenarioDraft.name || ''}
-                        onChange={(e) => setGeneralScenarioDraft((prev: any) => ({ ...prev, name: e.target.value }))}
+                        value={generalScenarioDraft.title || ''}
+                        onChange={(e) => setGeneralScenarioDraft((prev: any) => ({ ...prev, title: e.target.value }))}
                         className="input-field"
                         placeholder="请输入通用情景名称"
                       />
@@ -385,7 +385,7 @@ const ScenarioPage: React.FC = () => {
 
               {!generalScenarioDraft && (
                 <p className="text-xs text-gray-500">
-                  提示：通用情景卡只有 <code>name</code> 和 <code>content</code> 两个主要字段，适合用 Markdown 维护长线场景。
+                  提示：通用情景卡只有 <code>title</code> 和 <code>content</code> 两个主要字段，适合用 Markdown 维护长线场景。
                 </p>
               )}
             </div>

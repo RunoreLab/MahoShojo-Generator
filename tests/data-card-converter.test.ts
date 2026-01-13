@@ -18,7 +18,7 @@ describe('data-card-converter', () => {
   it('creates a blank general scenario card with default content', () => {
     const blank = createBlankDataCard('general-scenario');
     expect(blank.templateId).toBe('通用情景');
-    expect(blank.name).toBe('未命名情景');
+    expect(blank.title).toBe('未命名情景');
     expect(typeof blank.content).toBe('string');
     expect(blank.content.length).toBeGreaterThan(0);
   });
@@ -86,13 +86,25 @@ describe('data-card-converter', () => {
   it('validateDataCard can detect general scenario type as scenario', () => {
     const generalScenario = {
       templateId: '通用情景',
-      name: '测试情景',
+      title: '测试情景',
       content: '# 舞台\\n- 灯光\\n- 幕布'
     };
     const result = validateDataCard(generalScenario);
     expect(result.success).toBe(true);
     expect(result.type).toBe('scenario');
     expect(inferTemplate(generalScenario)).toBe('general-scenario');
+  });
+
+  it('validateDataCard supports legacy general scenario name field', () => {
+    const legacyGeneralScenario = {
+      templateId: '通用情景',
+      name: '旧版情景',
+      content: '# 旧舞台\\n- 旧灯光\\n- 旧幕布'
+    };
+    const result = validateDataCard(legacyGeneralScenario);
+    expect(result.success).toBe(true);
+    expect(result.type).toBe('scenario');
+    expect(inferTemplate(legacyGeneralScenario)).toBe('general-scenario');
   });
 
   it('keeps general classification even when content is empty string', () => {
@@ -156,7 +168,7 @@ describe('data-card-converter', () => {
 
     const { data: generalScenario } = convertDataCard(scenario, 'general-scenario', 'scenario');
     expect(generalScenario.templateId).toBe('通用情景');
-    expect(generalScenario.name).toBe('雨夜的便利店');
+    expect(generalScenario.title).toBe('雨夜的便利店');
     expect(generalScenario.content).toContain('# scenario_type');
     expect(generalScenario.content).toContain('日常');
   });

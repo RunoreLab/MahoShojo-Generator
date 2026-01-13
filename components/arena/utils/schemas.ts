@@ -9,12 +9,25 @@ const StructuredScenarioSchema = z
   .passthrough();
 
 const GeneralScenarioSchema = z
-  .object({
-    templateId: z.literal(GENERAL_SCENARIO_TEMPLATE_ID),
-    name: z.string().min(1, '缺少 name'),
-    content: z.string(),
-  })
-  .passthrough();
+  .preprocess((input) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+    const record = input as Record<string, unknown>;
+    if (typeof record.title === 'string') return input;
+    if (typeof record.name === 'string') {
+      const { name: legacyName, ...rest } = record;
+      return {
+        ...rest,
+        title: legacyName,
+      };
+    }
+    return input;
+  }, z
+    .object({
+      templateId: z.literal(GENERAL_SCENARIO_TEMPLATE_ID),
+      title: z.string().min(1, '缺少 title'),
+      content: z.string(),
+    })
+    .passthrough());
 
 export const ScenarioSchema = z.union([StructuredScenarioSchema, GeneralScenarioSchema]);
 
