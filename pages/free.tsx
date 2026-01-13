@@ -18,7 +18,6 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
-import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
 
 type FreeSchemaId = 'magical-girl' | 'canshou' | 'scenario' | 'general' | 'general-scenario';
@@ -276,6 +275,7 @@ export default function FreeGeneratorPage() {
           throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
         }
 
+        setStreamingMarkdown('');
         const markdown = await readTextStreamFromResponse(response, {
           label: '自由生成（流式）',
           onText: (text) => setStreamingMarkdown(text),
@@ -353,34 +353,45 @@ export default function FreeGeneratorPage() {
 
       return (
         <>
-          <div className="card" style={{ marginTop: '1rem' }}>
-            <h2 className="text-2xl font-bold text-center mb-4">{title}</h2>
-            <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
-              {streamingMarkdown ? (
-                <MarkdownBlock content={streamingMarkdown} variant="light" mode="article" />
-              ) : submitting ? (
-                <div className="text-sm text-gray-500 text-center">正在启动流式生成…</div>
-              ) : (
-                <div className="text-sm text-gray-500 text-center">生成结果将显示在此处</div>
-              )}
+          {isGeneralScenario ? (
+            <div className="card" style={{ marginTop: '1rem' }}>
+              <h2 className="text-2xl font-bold text-center mb-4">{title}</h2>
+              <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
+                {streamingMarkdown ? (
+                  <MarkdownBlock content={streamingMarkdown} variant="light" mode="article" />
+                ) : submitting ? (
+                  <div className="text-sm text-gray-500 text-center">正在启动流式生成…</div>
+                ) : (
+                  <div className="text-sm text-gray-500 text-center">生成结果将显示在此处</div>
+                )}
+              </div>
+              <p className="mt-3 text-xs text-gray-500">
+                提示：流式模式只输出 Markdown，再由前端转换为通用数据卡；自由生成产物不会包含签名，因此会被视为非原生。
+              </p>
             </div>
-            <p className="mt-3 text-xs text-gray-500">
-              提示：流式模式只输出 Markdown，再由前端转换为通用数据卡；自由生成产物不会包含签名，因此会被视为非原生。
-            </p>
-          </div>
+          ) : (
+            <>
+              {(() => {
+                const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? '';
+                const { card } = buildGeneralCharacterCardFromMarkdown({ markdown, defaultName: '角色' });
+                return <GeneralCharacterCard general={card} isStreaming={submitting} />;
+              })()}
+              <p className="mt-3 text-xs text-gray-500 text-center">
+                提示：流式模式只输出 Markdown，再由前端转换为通用数据卡；自由生成产物不会包含签名，因此会被视为非原生。
+              </p>
+            </>
+          )}
 
           {streamedGeneralCard && (
             <>
-              {streamedGeneralCard.templateId === GENERAL_CHARACTER_TEMPLATE_ID ? (
-                <GeneralCharacterCard general={streamedGeneralCard} />
-              ) : (
+              {streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID ? (
                 <div className="card" style={{ marginTop: '1rem' }}>
                   <h3 className="text-lg font-semibold text-gray-800 mb-3">通用情景卡 JSON</h3>
                   <div className="rounded-lg bg-gray-100 p-4 border border-gray-200 font-mono text-xs overflow-x-auto">
                     <pre>{JSON.stringify(streamedGeneralCard, null, 2)}</pre>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               <div className="card" style={{ marginTop: '1rem' }}>
                 <div className="text-center">
@@ -641,4 +652,3 @@ export default function FreeGeneratorPage() {
     </>
   );
 }
-

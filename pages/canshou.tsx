@@ -18,7 +18,6 @@ import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
-import { MarkdownBlock } from '@/components/MarkdownBlock';
 
 // 定义问卷和问题的类型
 interface Question {
@@ -184,6 +183,19 @@ const CanshouPage: React.FC = () => {
       userAnswers: serverAnswers ?? answers,
     };
   }, [canshouDetails, answers]);
+
+  const streamedGeneralCardForDisplay = useMemo(() => {
+    if (generationMode !== 'stream') return null;
+    const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? null;
+    if (markdown === null) return null;
+
+    const { card } = buildGeneralCharacterCardFromMarkdown({
+      markdown,
+      defaultName: '残兽',
+    });
+
+    return card;
+  }, [generationMode, streamingMarkdown, streamedGeneralCard]);
 
   useEffect(() => {
     fetch('/languages.json')
@@ -681,18 +693,9 @@ const CanshouPage: React.FC = () => {
                   </button>
                 </div>
 
-                {generationMode === 'stream' && streamingMarkdown !== null && (
-                  <div className="my-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3">
-                    <div className="text-xs text-slate-300 mb-2">流式输出预览（通用角色卡 Markdown）</div>
-                    <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-3">
-                      {streamingMarkdown ? (
-                        <MarkdownBlock content={streamingMarkdown} variant="dark" mode="article" />
-                      ) : submitting ? (
-                        <div className="text-xs text-slate-400 text-center">正在启动流式生成…</div>
-                      ) : (
-                        <div className="text-xs text-slate-400 text-center">选择流式并生成后会在此实时输出</div>
-                      )}
-                    </div>
+                {generationMode === 'stream' && streamedGeneralCardForDisplay && (
+                  <div className="my-6">
+                    <GeneralCharacterCard general={streamedGeneralCardForDisplay} isStreaming={submitting} />
                   </div>
                 )}
 
@@ -815,16 +818,6 @@ const CanshouPage: React.FC = () => {
               <>
                 {generationMode === 'stream' && streamedGeneralCard ? (
                   <>
-                    <div className="card" style={{ marginTop: '1rem' }}>
-                      <h2 className="text-2xl font-bold text-center mb-4">通用角色卡（Markdown）</h2>
-                      <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
-                        <MarkdownBlock content={streamedGeneralCard.content} variant="light" mode="article" />
-                      </div>
-                      <p className="mt-3 text-xs text-gray-500">
-                        提示：流式模式生成的是通用角色卡（Markdown），不包含结构化残兽字段；如需升华/结构化字段建议切回非流式。
-                      </p>
-                    </div>
-
                     <GeneralCharacterCard
                       general={streamedGeneralCard}
                       onSaveImage={handleSaveImage}

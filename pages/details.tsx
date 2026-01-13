@@ -22,7 +22,6 @@ import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
-import { MarkdownBlock } from '@/components/MarkdownBlock';
 
 interface Questionnaire {
   questions: string[];
@@ -216,6 +215,20 @@ const DetailsPage: React.FC = () => {
       userAnswers: serverAnswers ?? answers,
     };
   }, [magicalGirlDetails, answers]);
+
+  const streamedGeneralCardForDisplay = useMemo(() => {
+    if (generationMode !== 'stream') return null;
+    const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? null;
+    if (markdown === null) return null;
+
+    const fallbackName = typeof answers[0] === 'string' ? answers[0].trim() : '';
+    const { card } = buildGeneralCharacterCardFromMarkdown({
+      markdown,
+      fallbackName,
+      defaultName: '魔法少女',
+    });
+    return card;
+  }, [generationMode, streamingMarkdown, streamedGeneralCard, answers]);
 
   useEffect(() => {
     fetch('/languages.json')
@@ -1077,27 +1090,18 @@ const DetailsPage: React.FC = () => {
           {/* 流式：通用角色卡（Markdown） */}
           {generationMode === 'stream' && (streamingMarkdown !== null || streamedGeneralCard) && (
             <>
-              <div className="card" style={{ marginTop: '1rem' }}>
-                <h2 className="text-2xl font-bold text-center mb-4">通用角色卡（Markdown）</h2>
-                <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
-                  {streamingMarkdown ? (
-                    <MarkdownBlock content={streamingMarkdown} variant="light" mode="article" />
-                  ) : submitting ? (
-                    <div className="text-sm text-gray-500 text-center">正在启动流式生成…</div>
-                  ) : (
-                    <div className="text-sm text-gray-500 text-center">生成结果将显示在此处</div>
-                  )}
-                </div>
-              </div>
+              {streamedGeneralCardForDisplay && (
+                <GeneralCharacterCard
+                  general={streamedGeneralCardForDisplay}
+                  isStreaming={submitting}
+                  onSaveImage={handleSaveImage}
+                  imageSaveMode={imageSaveMode}
+                  saveButtonLabel={imageSaveButtonLabel}
+                />
+              )}
 
               {streamedGeneralCard && (
                 <>
-                  <GeneralCharacterCard
-                    general={streamedGeneralCard}
-                    onSaveImage={handleSaveImage}
-                    imageSaveMode={imageSaveMode}
-                    saveButtonLabel={imageSaveButtonLabel}
-                  />
                   <div className="card" style={{ marginTop: '1rem' }}>
                     <div className="text-center">
                       <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>

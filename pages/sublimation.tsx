@@ -1,6 +1,6 @@
 // pages/sublimation.tsx
 
-import React, { useState, ChangeEvent, useEffect } from 'react';
+import React, { useState, ChangeEvent, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
@@ -19,11 +19,10 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
-import { MarkdownBlock } from '@/components/MarkdownBlock';
 import {
-    inferTemplate,
-    TEMPLATE_LABELS,
-    type DataCardTemplate,
+	    inferTemplate,
+	    TEMPLATE_LABELS,
+	    type DataCardTemplate,
     type InferableTemplate
 } from '@/lib/data-card-converter';
 import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
@@ -183,6 +182,33 @@ const SublimationPage: React.FC = () => {
     const { isCooldown, startCooldown, remainingTime } = useCooldown(sublimationCooldownKey, sublimationCooldownMs);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
     const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
+
+    const streamedGeneralCardForDisplay = useMemo(() => {
+        if (generationMode !== 'stream') return null;
+        const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? null;
+        if (markdown === null) return null;
+
+        const fallbackName =
+            typeof (characterData as any)?.codename === 'string'
+                ? String((characterData as any).codename).trim()
+                : typeof (characterData as any)?.name === 'string'
+                    ? String((characterData as any).name).trim()
+                    : '';
+
+        const defaultName = sourceTemplate === 'magical-girl'
+            ? '魔法少女'
+            : sourceTemplate === 'canshou'
+                ? '残兽'
+                : '角色';
+
+        const { card } = buildGeneralCharacterCardFromMarkdown({
+            markdown,
+            fallbackName,
+            defaultName,
+        });
+
+        return card;
+    }, [generationMode, streamingMarkdown, streamedGeneralCard, characterData, sourceTemplate]);
 
     useEffect(() => {
         fetch('/languages.json').then(res => res.json()).then(data => setLanguages(data));
@@ -840,46 +866,38 @@ const SublimationPage: React.FC = () => {
 
                     {generationMode === 'stream' && (streamingMarkdown !== null || streamedGeneralCard) && (
                         <>
-                            <div className="card mt-6">
-                                <h3 className="text-lg font-bold text-gray-800 mb-3 text-center">通用角色卡（流式 Markdown）</h3>
-                                <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
-                                    {streamingMarkdown ? (
-                                        <MarkdownBlock content={streamingMarkdown} variant="light" mode="article" />
-                                    ) : isGenerating ? (
-                                        <div className="text-sm text-gray-500 text-center">正在启动流式生成…</div>
-                                    ) : (
-                                        <div className="text-sm text-gray-500 text-center">生成结果将显示在此处</div>
-                                    )}
+                            {streamedGeneralCardForDisplay && (
+                                <div className="card mt-6">
+                                    <GeneralCharacterCard
+                                        general={streamedGeneralCardForDisplay}
+                                        onSaveImage={handleSaveImage}
+                                        isStreaming={isGenerating}
+                                    />
+                                    <p className="mt-3 text-xs text-gray-500 text-center">
+                                        提示：流式模式生成的是通用角色卡（Markdown），不保证与目标模板字段一一对应。
+                                    </p>
                                 </div>
-                                <p className="mt-3 text-xs text-gray-500">
-                                    提示：流式模式生成的是通用角色卡（Markdown），不保证与目标模板字段一一对应。
-                                </p>
-                            </div>
+                            )}
 
                             {streamedGeneralCard && (
-                                <>
-                                    <div className="card mt-6">
-                                        <GeneralCharacterCard general={streamedGeneralCard} onSaveImage={handleSaveImage} />
+                                <div className="card mt-6 text-center">
+                                    <h3 className="text-lg font-bold text-gray-800 mb-3">操作</h3>
+                                    <div className="flex flex-col md:flex-row justify-center">
+                                        <button onClick={() => downloadJson(streamedGeneralCard)} className="generate-button flex-1">
+                                            下载通用角色卡
+                                        </button>
+                                        <SaveToCloudButton
+                                            data={streamedGeneralCard}
+                                            cardType="character"
+                                            buttonText="保存到云端"
+                                            className="generate-button flex-1"
+                                            style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                                        />
+                                        <Link href="/battle" className="generate-button flex-1" style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)', textDecoration: 'none' }}>
+                                            前往竞技场
+                                        </Link>
                                     </div>
-                                    <div className="card mt-6 text-center">
-                                        <h3 className="text-lg font-bold text-gray-800 mb-3">操作</h3>
-                                        <div className="flex flex-col md:flex-row justify-center">
-                                            <button onClick={() => downloadJson(streamedGeneralCard)} className="generate-button flex-1">
-                                                下载通用角色卡
-                                            </button>
-                                            <SaveToCloudButton
-                                                data={streamedGeneralCard}
-                                                cardType="character"
-                                                buttonText="保存到云端"
-                                                className="generate-button flex-1"
-                                                style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
-                                            />
-                                            <Link href="/battle" className="generate-button flex-1" style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)', textDecoration: 'none' }}>
-                                                前往竞技场
-                                            </Link>
-                                        </div>
-                                    </div>
-                                </>
+                                </div>
                             )}
                         </>
                     )}
