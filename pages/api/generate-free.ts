@@ -7,11 +7,11 @@ import { config as appConfig, type AIProvider } from '@/lib/config';
 import { getLogger } from '@/lib/logger';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import {
-  CanshouSchema,
-  GeneralCharacterSchema,
-  GeneralScenarioSchema,
-  MagicalGirlSchema,
-  ScenarioSchema,
+  CanshouSchema as AppCanshouSchema,
+  GeneralCharacterSchema as AppGeneralCharacterSchema,
+  GeneralScenarioSchema as AppGeneralScenarioSchema,
+  MagicalGirlSchema as AppMagicalGirlSchema,
+  ScenarioSchema as AppScenarioSchema,
   GENERAL_CHARACTER_TEMPLATE_ID,
   GENERAL_SCENARIO_TEMPLATE_ID,
 } from '@/lib/schemas';
@@ -41,6 +41,96 @@ const RequestBodySchema = z.object({
   prompt: z.string().min(1),
   language: z.string().optional().default('zh-CN'),
   customProvider: CustomProviderSchema.optional(),
+});
+
+// -----------------------------------------------------------------
+// 自由生成专用 Schema（用于 AI JSON 输出约束）
+// - 目标：确保卡片组件渲染时关键对象一定存在，避免 client-side exception
+// - 特点：字段均带 describe，且关键对象/字段为必需（允许用空字符串/空数组占位）
+// -----------------------------------------------------------------
+
+const FreeMagicalGirlSchema = z.object({
+  codename: z.string().describe('代号：建议使用花名/称号。'),
+  appearance: z.object({
+    outfit: z.string().describe('变身后的服装与衣装描述。若无明确要求可返回空字符串。'),
+    accessories: z.string().describe('饰品细节。若无明确要求可返回空字符串。'),
+    colorScheme: z.string().describe('主色调/配色方案。若无明确要求可返回空字符串。'),
+    overallLook: z.string().describe('整体外观风格（发色/瞳色/体型/神态等）。若无明确要求可返回空字符串。'),
+  }).describe('外观信息。'),
+  magicConstruct: z.object({
+    name: z.string().describe('魔装名称。若无明确要求可返回空字符串。'),
+    form: z.string().describe('魔装形态/外观。若无明确要求可返回空字符串。'),
+    basicAbilities: z.array(z.string()).describe('魔装基础能力列表。若无明确要求可返回空数组。'),
+    description: z.string().describe('魔装详细描述与特色。若无明确要求可返回空字符串。'),
+  }).describe('魔力构装（魔装）。'),
+  wonderlandRule: z.object({
+    name: z.string().describe('奇境规则名称。若无明确要求可返回空字符串。'),
+    description: z.string().describe('规则内容与效果。若无明确要求可返回空字符串。'),
+    tendency: z.string().describe('规则倾向类型。若无明确要求可返回空字符串。'),
+    activation: z.string().describe('规则触发条件/方式。若无明确要求可返回空字符串。'),
+  }).describe('奇境规则。'),
+  blooming: z.object({
+    name: z.string().describe('繁开状态名称。若无明确要求可返回空字符串。'),
+    evolvedAbilities: z.array(z.string()).describe('繁开后的进化能力列表。若无明确要求可返回空数组。'),
+    evolvedForm: z.string().describe('繁开后的魔装形态变化。若无明确要求可返回空字符串。'),
+    evolvedOutfit: z.string().describe('繁开后的衣装样式。若无明确要求可返回空字符串。'),
+    powerLevel: z.string().describe('繁开状态力量等级描述。若无明确要求可返回空字符串。'),
+  }).describe('繁开形态。'),
+  analysis: z.object({
+    personalityAnalysis: z.string().describe('性格分析。若无明确要求可返回空字符串。'),
+    abilityReasoning: z.string().describe('能力设定依据/推理。若无明确要求可返回空字符串。'),
+    coreTraits: z.array(z.string()).describe('核心特质关键词列表。若无明确要求可返回空数组。'),
+    predictionBasis: z.string().describe('预测依据/补充信息。若无明确要求可返回空字符串。'),
+    background: z.object({
+      belief: z.string().describe('信念/愿望/理念。若无明确要求可返回空字符串。'),
+      bonds: z.string().describe('羁绊/关系。若无明确要求可返回空字符串。'),
+    }).optional().describe('背景故事（可选）。'),
+  }).describe('分析与背景。'),
+});
+
+const FreeCanshouSchema = z.object({
+  name: z.string().describe('残兽名称。'),
+  appearance: z.string().describe('外貌形态描述。若无明确要求可返回空字符串。'),
+  materialAndSkin: z.string().describe('材质与表皮描述。若无明确要求可返回空字符串。'),
+  featuresAndAppendages: z.string().describe('特征与附肢描述。若无明确要求可返回空字符串。'),
+  coreConcept: z.string().describe('核心概念。若无明确要求可返回空字符串。'),
+  coreEmotion: z.string().describe('核心情绪/欲望。若无明确要求可返回空字符串。'),
+  evolutionStage: z.string().describe('进化阶段。若无明确要求可返回空字符串。'),
+  attackMethod: z.string().describe('主要攻击方式。若无明确要求可返回空字符串。'),
+  specialAbility: z.string().describe('特殊能力与机制。若无明确要求可返回空字符串。'),
+  origin: z.string().describe('起源故事。若无明确要求可返回空字符串。'),
+  birthEnvironment: z.string().describe('诞生环境。若无明确要求可返回空字符串。'),
+  researcherNotes: z.string().describe('研究员分析/警告/备注。若无明确要求可返回空字符串。'),
+});
+
+const FreeScenarioSchema = z.object({
+  title: z.string().describe('情景标题。'),
+  scenario_type: z.string().describe('情景类型（如：日常/调查/竞技/采访等）。若无明确要求可返回空字符串。'),
+  description: z.string().describe('情景简短描述。若无明确要求可返回空字符串。'),
+  elements: z.object({
+    scene: z.object({
+      time: z.string().describe('故事发生时间。若无明确要求可返回空字符串。'),
+      place: z.string().describe('故事发生地点。若无明确要求可返回空字符串。'),
+      features: z.string().describe('环境特征与陈设。若无明确要求可返回空字符串。'),
+    }).describe('场景信息。'),
+    roles: z.array(z.object({
+      name: z.string().describe('角色名称/身份。'),
+      description: z.string().describe('角色设定/目标/行为准则。'),
+    })).describe('预设 NPC 列表；如不需要可返回空数组。'),
+    events: z.string().describe('核心事件（发生什么、冲突点、互动目标）。若无明确要求可返回空字符串。'),
+    atmosphere: z.string().describe('整体氛围。若无明确要求可返回空字符串。'),
+    development: z.array(z.string()).describe('发展方向列表；如不需要可返回空数组。'),
+  }).describe('情景要素。'),
+});
+
+const FreeGeneralCharacterSchema = z.object({
+  name: z.string().describe('角色名。'),
+  content: z.string().describe('角色设定正文（建议 Markdown）。'),
+});
+
+const FreeGeneralScenarioSchema = z.object({
+  title: z.string().describe('情景名。'),
+  content: z.string().describe('情景设定正文（建议 Markdown）。'),
 });
 
 const buildFieldGuide = (schemaId: FreeSchemaId): string => {
@@ -141,11 +231,28 @@ const buildFieldGuide = (schemaId: FreeSchemaId): string => {
 };
 
 const schemaMap: Record<FreeSchemaId, z.ZodSchema<any>> = {
-  'magical-girl': MagicalGirlSchema,
-  canshou: CanshouSchema,
-  scenario: ScenarioSchema,
-  general: GeneralCharacterSchema,
-  'general-scenario': GeneralScenarioSchema,
+  'magical-girl': FreeMagicalGirlSchema,
+  canshou: FreeCanshouSchema,
+  scenario: FreeScenarioSchema,
+  general: FreeGeneralCharacterSchema,
+  'general-scenario': FreeGeneralScenarioSchema,
+};
+
+const validateForApp = (schemaId: FreeSchemaId, data: any): any => {
+  switch (schemaId) {
+    case 'magical-girl':
+      return AppMagicalGirlSchema.parse(data);
+    case 'canshou':
+      return AppCanshouSchema.parse(data);
+    case 'scenario':
+      return AppScenarioSchema.parse(data);
+    case 'general':
+      return AppGeneralCharacterSchema.parse(data);
+    case 'general-scenario':
+      return AppGeneralScenarioSchema.parse(data);
+    default:
+      return data;
+  }
 };
 
 const sanitizeFreeCard = (schemaId: FreeSchemaId, data: any): any => {
@@ -298,6 +405,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       promptBuilder: (input) => `
 请严格按照我指定的 Schema 输出一个 JSON 对象（只输出 JSON，不要输出解释）。
 你必须遵守 Schema 的字段名与数据类型；不要创建 Schema 中不存在的字段。
+你必须输出 Schema 中的【全部字段】（包含嵌套对象中的字段）。如果用户没有提供信息，请使用空字符串 "" 或空数组 [] 作为占位，不要省略对象结构。
 内容语言：请使用【${input.language}】撰写所有自然语言字段。
 
 ${fieldGuide}
@@ -321,8 +429,9 @@ ${input.prompt}
 
     const result = await generateWithAI({ prompt, language }, generationConfig, providerOptions);
     const sanitized = sanitizeFreeCard(schemaId, result);
+    const validated = validateForApp(schemaId, sanitized);
 
-    return new Response(JSON.stringify(sanitized), {
+    return new Response(JSON.stringify(validated), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -335,4 +444,3 @@ ${input.prompt}
     });
   }
 }
-

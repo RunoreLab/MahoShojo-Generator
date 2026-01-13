@@ -34,6 +34,98 @@ const STREAMABLE_SCHEMA_IDS: FreeSchemaId[] = ['general', 'general-scenario'];
 
 const LOCAL_STORAGE_KEY = 'mahoshojo.free-generator.draft.v1';
 
+const isPlainObject = (value: unknown): value is Record<string, any> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const ensureString = (value: unknown, fallback = ''): string =>
+  typeof value === 'string' ? value : fallback;
+
+const ensureStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return [value];
+  }
+  return [];
+};
+
+const normalizeMagicalGirlForCard = (input: unknown): any => {
+  const record = isPlainObject(input) ? input : {};
+
+  const appearance = isPlainObject(record.appearance) ? record.appearance : {};
+  const magicConstruct = isPlainObject(record.magicConstruct) ? record.magicConstruct : {};
+  const wonderlandRule = isPlainObject(record.wonderlandRule) ? record.wonderlandRule : {};
+  const blooming = isPlainObject(record.blooming) ? record.blooming : {};
+  const analysis = isPlainObject(record.analysis) ? record.analysis : {};
+
+  const backgroundRaw = isPlainObject(analysis.background) ? analysis.background : null;
+  const hasBackground = Boolean(backgroundRaw && (typeof backgroundRaw.belief === 'string' || typeof backgroundRaw.bonds === 'string'));
+
+  return {
+    ...record,
+    codename: ensureString(record.codename, ensureString(record.name, '未命名魔法少女')),
+    appearance: {
+      outfit: ensureString(appearance.outfit),
+      accessories: ensureString(appearance.accessories),
+      colorScheme: ensureString(appearance.colorScheme),
+      overallLook: ensureString(appearance.overallLook),
+    },
+    magicConstruct: {
+      name: ensureString(magicConstruct.name),
+      form: ensureString(magicConstruct.form),
+      basicAbilities: ensureStringArray(magicConstruct.basicAbilities),
+      description: ensureString(magicConstruct.description),
+    },
+    wonderlandRule: {
+      name: ensureString(wonderlandRule.name),
+      description: ensureString(wonderlandRule.description),
+      tendency: ensureString(wonderlandRule.tendency),
+      activation: ensureString(wonderlandRule.activation),
+    },
+    blooming: {
+      name: ensureString(blooming.name),
+      evolvedAbilities: ensureStringArray(blooming.evolvedAbilities),
+      evolvedForm: ensureString(blooming.evolvedForm),
+      evolvedOutfit: ensureString(blooming.evolvedOutfit),
+      powerLevel: ensureString(blooming.powerLevel),
+    },
+    analysis: {
+      personalityAnalysis: ensureString(analysis.personalityAnalysis),
+      abilityReasoning: ensureString(analysis.abilityReasoning),
+      coreTraits: ensureStringArray(analysis.coreTraits),
+      predictionBasis: ensureString(analysis.predictionBasis),
+      ...(hasBackground
+        ? {
+          background: {
+            belief: ensureString(backgroundRaw?.belief),
+            bonds: ensureString(backgroundRaw?.bonds),
+          },
+        }
+        : {}),
+    },
+  };
+};
+
+const normalizeCanshouForCard = (input: unknown): any => {
+  const record = isPlainObject(input) ? input : {};
+  return {
+    ...record,
+    name: ensureString(record.name, ensureString(record.codename, '未命名残兽')),
+    appearance: ensureString(record.appearance),
+    materialAndSkin: ensureString(record.materialAndSkin),
+    featuresAndAppendages: ensureString(record.featuresAndAppendages),
+    coreConcept: ensureString(record.coreConcept),
+    coreEmotion: ensureString(record.coreEmotion),
+    evolutionStage: ensureString(record.evolutionStage),
+    attackMethod: ensureString(record.attackMethod),
+    specialAbility: ensureString(record.specialAbility),
+    origin: ensureString(record.origin),
+    birthEnvironment: ensureString(record.birthEnvironment),
+    researcherNotes: ensureString(record.researcherNotes),
+  };
+};
+
 const buildFieldGuideForUi = (schemaId: FreeSchemaId): string => {
   switch (schemaId) {
     case 'magical-girl':
@@ -411,10 +503,11 @@ export default function FreeGeneratorPage() {
     const kind = selectedOption?.kind ?? 'character';
 
     if (schemaId === 'magical-girl') {
+      const safe = normalizeMagicalGirlForCard(resultData);
       return (
         <>
           <MagicalGirlCard
-            magicalGirl={resultData}
+            magicalGirl={safe}
             gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)"
           />
           <div className="card" style={{ marginTop: '1rem' }}>
@@ -422,7 +515,7 @@ export default function FreeGeneratorPage() {
               <p className="text-xs text-gray-500 mb-3">
                 提示：自由生成产物不会包含签名，因此会被视为非原生卡。
               </p>
-              {renderResultActions(resultData, 'character')}
+              {renderResultActions(safe, 'character')}
             </div>
           </div>
         </>
@@ -430,15 +523,16 @@ export default function FreeGeneratorPage() {
     }
 
     if (schemaId === 'canshou') {
+      const safe = normalizeCanshouForCard(resultData);
       return (
         <>
-          <CanshouCard canshou={resultData} />
+          <CanshouCard canshou={safe} />
           <div className="card" style={{ marginTop: '1rem' }}>
             <div className="text-center">
               <p className="text-xs text-gray-500 mb-3">
                 提示：自由生成产物不会包含签名，因此会被视为非原生卡。
               </p>
-              {renderResultActions(resultData, 'character')}
+              {renderResultActions(safe, 'character')}
             </div>
           </div>
         </>
