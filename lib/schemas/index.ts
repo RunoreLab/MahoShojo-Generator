@@ -120,7 +120,20 @@ export function isGeneralCharacter(data: unknown): data is GeneralCharacterData 
 export function isGeneralScenario(data: unknown): data is GeneralScenarioData {
   if (!data || typeof data !== 'object') return false;
   const record = data as Record<string, unknown>;
-  return record.templateId === GENERAL_SCENARIO_TEMPLATE_ID && typeof record.name === 'string' && typeof record.content === 'string';
+
+  if (record.templateId !== GENERAL_SCENARIO_TEMPLATE_ID) return false;
+  if (typeof record.content !== 'string') return false;
+
+  if (typeof record.title === 'string') return true;
+
+  // 兼容旧版通用情景卡：name -> title（原地升级，便于后续逻辑统一读取 title）
+  if (typeof record.name === 'string') {
+    record.title = record.name;
+    delete record.name;
+    return true;
+  }
+
+  return false;
 }
 
 export function isScenarioCard(data: unknown): data is ScenarioData {

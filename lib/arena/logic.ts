@@ -1,12 +1,12 @@
 import { AdjudicatorEvent, AdjudicationResult, ArenaHistory, CharacterCurrentState, NarrativeHistoryEntry } from '@/types/arena';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas';
 
-const isGeneralScenarioCard = (value: unknown): value is { templateId: string; name: string; content: string } => {
+const isGeneralScenarioCard = (value: unknown): value is { templateId: string; title?: string; name?: string; content: string } => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     const record = value as Record<string, unknown>;
     return record.templateId === GENERAL_SCENARIO_TEMPLATE_ID &&
-        typeof record.name === 'string' &&
-        typeof record.content === 'string';
+        typeof record.content === 'string' &&
+        (typeof record.title === 'string' || typeof record.name === 'string');
 };
 
 const getScenarioTitle = (value: any): string => {
@@ -305,7 +305,7 @@ export const createPromptBuilder = (
     if (mode === 'scenario' && scenario) {
         if (isGeneralScenarioCard(scenario)) {
             const title = getScenarioTitle(scenario);
-            finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架（通用情景 / Markdown）：\n`;
+            finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架：\n`;
             if (title) {
                 finalPrompt += `### ${title}\n`;
             }
@@ -487,7 +487,7 @@ export const createStreamPromptBuilder = (
     if (mode === 'scenario' && scenario) {
         if (isGeneralScenarioCard(scenario)) {
             const title = getScenarioTitle(scenario);
-            finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架（通用情景 / Markdown）：\n`;
+            finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架：\n`;
             if (title) {
                 finalPrompt += `### ${title}\n`;
             }
