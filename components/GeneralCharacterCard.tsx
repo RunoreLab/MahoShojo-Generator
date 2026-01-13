@@ -238,14 +238,13 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
         >
           <img
             src="/logo-white-qrcode.svg"
-            width={240}
-            height={240}
-            alt="MahoShojo Generator"
+            width={280}
+            height={280}
+            alt="Logo"
             style={{
               display: 'block',
-              borderRadius: '12px',
-              background: 'rgba(17, 24, 39, 0.85)',
-              padding: '1rem',
+              maxWidth: '100%',
+              height: 'auto'
             }}
           />
           <GeneratedByUserBadge variant="dark" className="mt-3" />
