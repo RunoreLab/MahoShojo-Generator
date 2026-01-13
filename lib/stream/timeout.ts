@@ -26,6 +26,20 @@ export type CreateStreamReadWithTimeoutOptions = {
   onTimeout?: (error: StreamReadTimeoutError) => void;
 };
 
+const parsePositiveTimeoutMs = (value: string | undefined, fallback: number): number => {
+  if (typeof value !== 'string') return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed <= 0) return fallback;
+  return Math.floor(parsed);
+};
+
+export const STREAM_READ_IDLE_TIMEOUT_MS = parsePositiveTimeoutMs(process.env.NEXT_PUBLIC_STREAM_READ_IDLE_TIMEOUT_MS, 100_000);
+export const STREAM_READ_TOTAL_TIMEOUT_MS = parsePositiveTimeoutMs(
+  process.env.NEXT_PUBLIC_STREAM_READ_TOTAL_TIMEOUT_MS,
+  10 * 60_000
+);
+
 export function createStreamReadWithTimeout(options: CreateStreamReadWithTimeoutOptions) {
   const startedAtMs = Date.now();
   const deadlineAtMs = typeof options.totalTimeoutMs === 'number' ? startedAtMs + Math.max(0, options.totalTimeoutMs) : null;
@@ -65,4 +79,3 @@ export function createStreamReadWithTimeout(options: CreateStreamReadWithTimeout
     }
   };
 }
-

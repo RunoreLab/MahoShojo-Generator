@@ -15,7 +15,7 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
-import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
+import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
@@ -336,7 +336,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   const authHeader = req.headers.get('authorization') || '';
   const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
 
-  const UPSTREAM_TOTAL_TIMEOUT_MS = 10 * 60_000;
+  const UPSTREAM_TOTAL_TIMEOUT_MS = STREAM_READ_TOTAL_TIMEOUT_MS;
   const upstreamAbortController = new AbortController();
   const upstreamTimeoutId: ReturnType<typeof setTimeout> = setTimeout(() => upstreamAbortController.abort(), UPSTREAM_TOTAL_TIMEOUT_MS);
   const clearUpstreamTimeout = () => {
@@ -731,7 +731,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       try {
         const readWithTimeout = createStreamReadWithTimeout({
           label: 'api/pvp/resolve-stream 上游读取',
-          idleTimeoutMs: 60_000,
+          idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
           totalTimeoutMs: UPSTREAM_TOTAL_TIMEOUT_MS,
           onTimeout: () => {
             try {

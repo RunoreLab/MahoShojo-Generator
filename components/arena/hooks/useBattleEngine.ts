@@ -15,7 +15,7 @@ import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
-import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
+import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 
@@ -640,8 +640,8 @@ export const useBattleEngine = () => {
           };
           const readWithTimeout = createStreamReadWithTimeout({
             label: '战报流式生成',
-            idleTimeoutMs: 60_000,
-            totalTimeoutMs: 10 * 60_000,
+            idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+            totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
             onTimeout: () => {
               try {
                 abortController.abort();
