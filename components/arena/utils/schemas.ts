@@ -1,11 +1,22 @@
 import { z } from 'zod/v3';
+import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas';
 
-export const ScenarioSchema = z
+const StructuredScenarioSchema = z
   .object({
     title: z.string().min(1, '缺少 title'),
     elements: z.any(),
   })
   .passthrough();
+
+const GeneralScenarioSchema = z
+  .object({
+    templateId: z.literal(GENERAL_SCENARIO_TEMPLATE_ID),
+    name: z.string().min(1, '缺少 name'),
+    content: z.string(),
+  })
+  .passthrough();
+
+export const ScenarioSchema = z.union([StructuredScenarioSchema, GeneralScenarioSchema]);
 
 export const BattleSettingsSchema = z.object({
   readArenaHistory: z.boolean(),

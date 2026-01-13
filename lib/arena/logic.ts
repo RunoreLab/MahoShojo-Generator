@@ -1,4 +1,21 @@
 import { AdjudicatorEvent, AdjudicationResult, ArenaHistory, CharacterCurrentState, NarrativeHistoryEntry } from '@/types/arena';
+import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas';
+
+const isGeneralScenarioCard = (value: unknown): value is { templateId: string; name: string; content: string } => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const record = value as Record<string, unknown>;
+    return record.templateId === GENERAL_SCENARIO_TEMPLATE_ID &&
+        typeof record.name === 'string' &&
+        typeof record.content === 'string';
+};
+
+const getScenarioTitle = (value: any): string => {
+    const title = typeof value?.title === 'string' ? value.title.trim() : '';
+    if (title) return title;
+    const name = typeof value?.name === 'string' ? value.name.trim() : '';
+    if (name) return name;
+    return '';
+};
 
 export const processAdjudicationChain = (events: AdjudicatorEvent[], depth = 0): AdjudicationResult[] => {
     const allResults: AdjudicationResult[] = [];
@@ -286,15 +303,31 @@ export const createPromptBuilder = (
     }
 
     if (mode === 'scenario' && scenario) {
-        const scenarioForPrompt = { ...scenario };
-        delete scenarioForPrompt.signature;
-        delete scenarioForPrompt.metadata;
-        finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架：\n\`\`\`json\n${JSON.stringify(scenarioForPrompt, null, 2)}\n\`\`\`\n\n`;
+        if (isGeneralScenarioCard(scenario)) {
+            const title = getScenarioTitle(scenario);
+            finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架（通用情景 / Markdown）：\n`;
+            if (title) {
+                finalPrompt += `### ${title}\n`;
+            }
+            finalPrompt += `${scenario.content}\n\n`;
+        } else {
+            const scenarioForPrompt = { ...scenario };
+            delete scenarioForPrompt.signature;
+            delete scenarioForPrompt.metadata;
+            finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架：\n\`\`\`json\n${JSON.stringify(scenarioForPrompt, null, 2)}\n\`\`\`\n\n`;
+        }
     }
 
     if (mode === 'scenario' && Array.isArray(auxScenarios) && auxScenarios.length > 0) {
         finalPrompt += `## 【辅助情景设定（可选）】\n以下为补充情景；请以【情景设定】为最高优先级，若出现冲突请以主情景为准：\n\n`;
         auxScenarios.forEach((aux, index) => {
+            if (isGeneralScenarioCard(aux)) {
+                const title = getScenarioTitle(aux);
+                finalPrompt += `### 辅助情景 #${index + 1}${title ? `：${title}` : ''}\n`;
+                finalPrompt += `${aux.content}\n\n`;
+                return;
+            }
+
             const auxForPrompt: any = { ...aux };
             delete auxForPrompt.signature;
             delete auxForPrompt.metadata;
@@ -452,15 +485,31 @@ export const createStreamPromptBuilder = (
     }
 
     if (mode === 'scenario' && scenario) {
-        const scenarioForPrompt = { ...scenario };
-        delete scenarioForPrompt.signature;
-        delete scenarioForPrompt.metadata;
-        finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架：\n\`\`\`json\n${JSON.stringify(scenarioForPrompt, null, 2)}\n\`\`\`\n\n`;
+        if (isGeneralScenarioCard(scenario)) {
+            const title = getScenarioTitle(scenario);
+            finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架（通用情景 / Markdown）：\n`;
+            if (title) {
+                finalPrompt += `### ${title}\n`;
+            }
+            finalPrompt += `${scenario.content}\n\n`;
+        } else {
+            const scenarioForPrompt = { ...scenario };
+            delete scenarioForPrompt.signature;
+            delete scenarioForPrompt.metadata;
+            finalPrompt += `## 【情景设定】\n这是本次故事必须严格遵守的背景和框架：\n\`\`\`json\n${JSON.stringify(scenarioForPrompt, null, 2)}\n\`\`\`\n\n`;
+        }
     }
 
     if (mode === 'scenario' && Array.isArray(auxScenarios) && auxScenarios.length > 0) {
         finalPrompt += `## 【辅助情景设定（可选）】\n以下为补充情景；请以【情景设定】为最高优先级，若出现冲突请以主情景为准：\n\n`;
         auxScenarios.forEach((aux, index) => {
+            if (isGeneralScenarioCard(aux)) {
+                const title = getScenarioTitle(aux);
+                finalPrompt += `### 辅助情景 #${index + 1}${title ? `：${title}` : ''}\n`;
+                finalPrompt += `${aux.content}\n\n`;
+                return;
+            }
+
             const auxForPrompt: any = { ...aux };
             delete auxForPrompt.signature;
             delete auxForPrompt.metadata;
