@@ -6,7 +6,7 @@ import { config, AIProvider } from "../config";
 import { getLogger } from "../logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { extractUpstreamErrorMessage, enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
-import { createStreamReadWithTimeout } from "@/lib/stream/timeout";
+import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from "@/lib/stream/timeout";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -267,8 +267,8 @@ export async function generateWithStreamAI(
                 const reader = result.textStream.getReader();
                 const readWithTimeout = createStreamReadWithTimeout({
                     label: `上游流式(${provider.name}/${selectedModel})`,
-                    idleTimeoutMs: 60_000,
-                    totalTimeoutMs: 10 * 60_000,
+                    idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+                    totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
                     onTimeout: () => {
                         try {
                             void reader.cancel('timeout');

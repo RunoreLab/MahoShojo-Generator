@@ -15,7 +15,7 @@ import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
-import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
+import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 
@@ -555,7 +555,7 @@ export const useBattleEngine = () => {
 
           reader = response.body?.getReader() ?? null;
           if (!reader) {
-            throw new Error('无法读取响应流，请使用最新版本的现代浏览器。');
+            throw new Error('无法读取响应流，请使用最新版本的浏览器。');
           }
 
           const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
@@ -640,8 +640,8 @@ export const useBattleEngine = () => {
           };
           const readWithTimeout = createStreamReadWithTimeout({
             label: '战报流式生成',
-            idleTimeoutMs: 60_000,
-            totalTimeoutMs: 10 * 60_000,
+            idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+            totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
             onTimeout: () => {
               try {
                 abortController.abort();

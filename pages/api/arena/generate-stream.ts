@@ -12,7 +12,7 @@ import { getSystemPrompt } from '@/lib/arena/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 	import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
 	import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
-	import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
+import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
     createBattleReportGenerationRecord,
@@ -367,7 +367,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            mode: snapshotMode,
 	                            scenarioTitle: typeof scenarioTitle === 'string'
 	                                ? scenarioTitle.trim() || null
-	                                : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+	                                : (typeof scenario?.title === 'string'
+	                                    ? scenario.title.trim()
+	                                    : (typeof scenario?.name === 'string' ? scenario.name.trim() : null)),
 	                            scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
 	                            scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                            language: snapshotLanguage,
@@ -613,7 +615,9 @@ async function handler(req: NextRequest): Promise<Response> {
                     mode,
                     scenarioTitle: typeof scenarioTitle === 'string'
                         ? scenarioTitle.trim() || null
-                        : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
+                        : (typeof scenario?.title === 'string'
+                            ? scenario.title.trim()
+                            : (typeof scenario?.name === 'string' ? scenario.name.trim() : null)),
                     scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
                     scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                    language: normalizeOptionalString(language),
@@ -759,8 +763,8 @@ async function handler(req: NextRequest): Promise<Response> {
 	        const reader = originalBody.getReader();
 	        const readWithTimeout = createStreamReadWithTimeout({
 	            label: 'api/arena/generate-stream 上游读取',
-	            idleTimeoutMs: 60_000,
-	            totalTimeoutMs: 10 * 60_000,
+	            idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+	            totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
 	            onTimeout: () => {
 	                try {
 	                    void reader.cancel('timeout');

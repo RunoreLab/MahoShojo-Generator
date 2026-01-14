@@ -104,7 +104,8 @@ export function PvpLobbyPage() {
 
   const handleSelectScenarioCard = async (cardData: any) => {
     const cleaned = removePrivateKeys(cardData);
-    if (inferTemplate(cleaned) !== 'scenario') {
+    const template = inferTemplate(cleaned);
+    if (template !== 'scenario' && template !== 'general-scenario') {
       setError('❌ 请选择“情景”类型的数据卡。');
       return;
     }

@@ -219,7 +219,7 @@ export const useBattleActions = () => {
       loadingCards.add(targetFilename);
 
       try {
-        if (inferredTemplate === 'scenario') {
+        if (inferredTemplate === 'scenario' || inferredTemplate === 'general-scenario') {
           if (useBattleStore.getState().battleMode !== 'scenario') {
             setError('❌ 情景数据卡只能在情景模式下使用。');
             return;
@@ -344,7 +344,7 @@ export const useBattleActions = () => {
 
       const cleanedCardData = removePrivateKeys(cardData);
       const inferredTemplate = inferTemplate(cleanedCardData);
-      if (inferredTemplate !== 'scenario') {
+      if (inferredTemplate !== 'scenario' && inferredTemplate !== 'general-scenario') {
         setError('❌ 请选择“情景”类型的数据卡。');
         return;
       }
@@ -474,12 +474,13 @@ export const useBattleActions = () => {
         throw new Error(parsed.error.issues[0]?.message || '情景文件缺少必需字段');
       }
       const isNative = await verifyOrigin(parsed.data);
+      const scenarioLabel = (parsed.data as any)?.title || (parsed.data as any)?.name || file.name;
       setScenario({
         content: parsed.data,
         fileName: file.name,
         isNative,
       });
-      appendAdjudicationEvents(parsed.data.adjudicationEvents, parsed.data.title);
+      appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel);
       setError(null);
     },
     [appendAdjudicationEvents, setError, setScenario]
@@ -516,12 +517,13 @@ export const useBattleActions = () => {
         throw new Error(parsed.error.issues[0]?.message || '情景文件缺少必需字段');
       }
       const isNative = await verifyOrigin(parsed.data);
+      const scenarioLabel = (parsed.data as any)?.title || (parsed.data as any)?.name || '粘贴的情景';
       setScenario({
         content: parsed.data,
-        fileName: parsed.data.title || '粘贴的情景',
+        fileName: scenarioLabel,
         isNative,
       });
-      appendAdjudicationEvents(parsed.data.adjudicationEvents, parsed.data.title);
+      appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel);
       setError(null);
     },
     [appendAdjudicationEvents, setError, setScenario]
@@ -544,9 +546,10 @@ export const useBattleActions = () => {
         throw new Error(parsed.error.issues[0]?.message || '情景文件缺少必需字段');
       }
 
+      const scenarioLabel = (parsed.data as any)?.title || (parsed.data as any)?.name || `辅助情景 ${useBattleStore.getState().auxScenarios.length + 1}`;
       const built = await buildAuxScenario({
         rawScenario: parsed.data,
-        fileName: parsed.data.title ? `${parsed.data.title}.json` : '粘贴的辅助情景.json',
+        fileName: scenarioLabel ? `${scenarioLabel}.json` : '粘贴的辅助情景.json',
       });
       addAuxScenario(built);
       setError(null);

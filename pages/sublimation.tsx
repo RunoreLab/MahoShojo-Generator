@@ -1,6 +1,6 @@
 // pages/sublimation.tsx
 
-import React, { useState, ChangeEvent, useEffect } from 'react';
+import React, { useState, ChangeEvent, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
@@ -16,10 +16,13 @@ import BattleDataModal from '../components/BattleDataModal';
 import { useAuth } from '@/lib/useAuth';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import {
-    inferTemplate,
-    TEMPLATE_LABELS,
-    type DataCardTemplate,
+	    inferTemplate,
+	    TEMPLATE_LABELS,
+	    type DataCardTemplate,
     type InferableTemplate
 } from '@/lib/data-card-converter';
 import { GENERAL_CHARACTER_TEMPLATE_ID } from '@/lib/schemas/general-character';
@@ -147,6 +150,9 @@ const SublimationPage: React.FC = () => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [resultData, setResultData] = useState<SublimationResponse | null>(null);
+    const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
+    const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
+    const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
     const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
     const [showImageModal, setShowImageModal] = useState(false);
     const [pastedJson, setPastedJson] = useState('');
@@ -176,6 +182,33 @@ const SublimationPage: React.FC = () => {
     const { isCooldown, startCooldown, remainingTime } = useCooldown(sublimationCooldownKey, sublimationCooldownMs);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
     const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
+
+    const streamedGeneralCardForDisplay = useMemo(() => {
+        if (generationMode !== 'stream') return null;
+        const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? null;
+        if (markdown === null) return null;
+
+        const fallbackName =
+            typeof (characterData as any)?.codename === 'string'
+                ? String((characterData as any).codename).trim()
+                : typeof (characterData as any)?.name === 'string'
+                    ? String((characterData as any).name).trim()
+                    : '';
+
+        const defaultName = sourceTemplate === 'magical-girl'
+            ? '魔法少女'
+            : sourceTemplate === 'canshou'
+                ? '残兽'
+                : '角色';
+
+        const { card } = buildGeneralCharacterCardFromMarkdown({
+            markdown,
+            fallbackName,
+            defaultName,
+        });
+
+        return card;
+    }, [generationMode, streamingMarkdown, streamedGeneralCard, characterData, sourceTemplate]);
 
     useEffect(() => {
         fetch('/languages.json').then(res => res.json()).then(data => setLanguages(data));
@@ -353,6 +386,8 @@ const SublimationPage: React.FC = () => {
         setIsGenerating(true);
         setError(null);
         setResultData(null);
+        setStreamingMarkdown(null);
+        setStreamedGeneralCard(null);
 
         try {
             const textToCheck = extractTextForCheck(characterData) + " " + userGuidance;
@@ -394,7 +429,8 @@ const SublimationPage: React.FC = () => {
                 payload.sourceTemplate = sourceTemplate;
             }
 
-            const response = await fetch('/api/generate-sublimation', {
+            const endpoint = generationMode === 'stream' ? '/api/generate-sublimation-stream' : '/api/generate-sublimation';
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -411,6 +447,44 @@ const SublimationPage: React.FC = () => {
                 }
                 const serverMessage = errorJson?.message || errorJson?.error;
                 throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `升华失败（HTTP ${response.status}）`);
+            }
+
+            if (generationMode === 'stream') {
+                const contentType = (response.headers.get('content-type') || '').toLowerCase();
+                if (contentType.includes('application/json') || contentType.includes('+json')) {
+                    const errorJson = await response.json().catch(() => null as any);
+                    const serverMessage = errorJson?.message || errorJson?.error;
+                    throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `升华失败（HTTP ${response.status}）`);
+                }
+
+                setStreamingMarkdown('');
+                const markdown = await readTextStreamFromResponse(response, {
+                    label: '升华（流式）',
+                    onText: (text) => setStreamingMarkdown(text),
+                });
+
+                const fallbackName =
+                    typeof (characterData as any)?.codename === 'string'
+                        ? String((characterData as any).codename).trim()
+                        : typeof (characterData as any)?.name === 'string'
+                            ? String((characterData as any).name).trim()
+                            : '';
+
+                const defaultName = sourceTemplate === 'magical-girl'
+                    ? '魔法少女'
+                    : sourceTemplate === 'canshou'
+                        ? '残兽'
+                        : '角色';
+
+                const { card } = buildGeneralCharacterCardFromMarkdown({
+                    markdown,
+                    fallbackName,
+                    defaultName,
+                });
+
+                setStreamedGeneralCard(card);
+                startCooldown();
+                return;
             }
 
             const result: SublimationResponse = await response.json();
@@ -751,13 +825,33 @@ const SublimationPage: React.FC = () => {
                             </select>
                         </div>
 
+                        <div className="input-group">
+                            <GenerationModeSwitcher
+                                label="生成方式"
+                                value={generationMode}
+                                disabled={isGenerating}
+                                helper={false}
+                                onChange={(mode) => setGenerationMode(mode)}
+                            />
+                            <p className="text-xs text-gray-500 mt-2">
+                                {generationMode === 'stream'
+                                    ? '提示：选择流式生成后，将实时输出 Markdown，并生成【通用角色卡】（templateId=通用角色）。代号/名字会尝试从输出中解析，失败则回退到原卡名称或“角色”。'
+                                    : '提示：非流式生成会返回结构化数据卡（按目标模板输出），更适合继续升华/编辑。'}
+                            </p>
+                        </div>
+
                         {/* 自定义 AI 模型选择 */}
                         <AiProviderSelector onConfigChange={setUserProviderConfig} />
 
                         {/* 成功提示信息 */}
-                        {!isGenerating && resultData && (
+                        {!isGenerating && generationMode === 'non-stream' && resultData && (
                             <div className="text-center text-sm text-green-600 my-2 font-semibold">
                                 🎉 升华成功！结果已显示在下方，请下滑查看。
+                            </div>
+                        )}
+                        {!isGenerating && generationMode === 'stream' && streamedGeneralCard && (
+                            <div className="text-center text-sm text-green-600 my-2 font-semibold">
+                                🎉 升华成功！已生成通用角色卡（流式），请下滑查看。
                             </div>
                         )}
 
@@ -770,7 +864,45 @@ const SublimationPage: React.FC = () => {
 
                     {isGenerating && <div className="text-center mt-6">少女蜕变中，请稍后...</div>}
 
-                    {resultData && (
+                    {generationMode === 'stream' && (streamingMarkdown !== null || streamedGeneralCard) && (
+                        <>
+                            {streamedGeneralCardForDisplay && (
+                                <div className="card mt-6">
+                                    <GeneralCharacterCard
+                                        general={streamedGeneralCardForDisplay}
+                                        onSaveImage={handleSaveImage}
+                                        isStreaming={isGenerating}
+                                    />
+                                    <p className="mt-3 text-xs text-gray-500 text-center">
+                                        提示：流式模式生成的是通用角色卡（Markdown），不保证与目标模板字段一一对应。
+                                    </p>
+                                </div>
+                            )}
+
+                            {streamedGeneralCard && (
+                                <div className="card mt-6 text-center">
+                                    <h3 className="text-lg font-bold text-gray-800 mb-3">操作</h3>
+                                    <div className="flex flex-col md:flex-row justify-center">
+                                        <button onClick={() => downloadJson(streamedGeneralCard)} className="generate-button flex-1">
+                                            下载通用角色卡
+                                        </button>
+                                        <SaveToCloudButton
+                                            data={streamedGeneralCard}
+                                            cardType="character"
+                                            buttonText="保存到云端"
+                                            className="generate-button flex-1"
+                                            style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                                        />
+                                        <Link href="/battle" className="generate-button flex-1" style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)', textDecoration: 'none' }}>
+                                            前往竞技场
+                                        </Link>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {generationMode === 'non-stream' && resultData && (
                         <>
                             {resultData.unchangedFields && resultData.unchangedFields.length > 0 && (
                                 <div className="card mt-6 bg-blue-50 border border-blue-200">

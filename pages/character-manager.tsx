@@ -261,7 +261,7 @@ const gradientColors: Record<string, { first: string; second: string }> = {
 };
 
 const TEMPLATE_PLACEHOLDER_VALUE = '__unknown__';
-const TEMPLATE_ORDER: DataCardTemplate[] = ['magical-girl', 'canshou', 'general', 'scenario'];
+const TEMPLATE_ORDER: DataCardTemplate[] = ['magical-girl', 'canshou', 'general', 'scenario', 'general-scenario'];
 
 const CharacterManagerPage: React.FC = () => {
     const router = useRouter();
@@ -687,7 +687,11 @@ const CharacterManagerPage: React.FC = () => {
     };
 
     // 检测是否为情景文件
-    const isScenarioData = (data: any): boolean => inferTemplate(data) === 'scenario';
+    const isStructuredScenarioData = (data: any): boolean => inferTemplate(data) === 'scenario';
+    const isScenarioData = (data: any): boolean => {
+        const template = inferTemplate(data);
+        return template === 'scenario' || template === 'general-scenario';
+    };
 
     // 分享数据卡
     const handleShareDataCard = async (card: any) => {
@@ -956,7 +960,7 @@ const CharacterManagerPage: React.FC = () => {
                     setMessage({ type: 'success', text: `成功加载角色: ${data.codename || data.name}` });
                 }
             } else if (isScenarioFile) {
-                setMessage({ type: 'success', text: `成功加载情景: ${data.title}` });
+                setMessage({ type: 'success', text: `成功加载情景: ${data.title || data.name || '未命名情景'}` });
             }
         } catch (err) {
             const text = err instanceof Error ? err.message : '解析JSON失败。';
@@ -1816,7 +1820,7 @@ const CharacterManagerPage: React.FC = () => {
                                 <div className="flex justify-between items-center mb-4">
                                     <h2 className="text-xl font-bold">
                                         {isScenarioData(characterData) ?
-                                            `编辑情景: ${characterData.title}` :
+                                            `编辑情景: ${characterData.title || characterData.name || '未命名情景'}` :
                                             `编辑角色: ${originalData.codename || originalData.name}`
                                         }
                                     </h2>
@@ -1828,7 +1832,7 @@ const CharacterManagerPage: React.FC = () => {
                                 </div>
 
                                 {/* 按文件类型显示不同的编辑界面 */}
-                                {isScenarioData(characterData) ? (
+                                {isStructuredScenarioData(characterData) ? (
                                     <ScenarioEditor
                                         data={characterData}
                                         onChange={handleFieldChange}

@@ -6,13 +6,19 @@ import {
   type GeneralCharacterData,
   GENERAL_CHARACTER_TEMPLATE_ID
 } from './general-character';
+import {
+  GeneralScenarioSchema,
+  type GeneralScenarioData,
+  GENERAL_SCENARIO_TEMPLATE_ID,
+} from './general-scenario';
 import { NarrativeHistorySchema, type NarrativeHistoryData } from './narrative-history';
 
 export type DataCardType = 'character' | 'canshou' | 'general' | 'scenario' | 'history';
-export type DataCardData = CanshouData | MagicalGirlData | GeneralCharacterData | ScenarioData | NarrativeHistoryData;
+export type DataCardData = CanshouData | MagicalGirlData | GeneralCharacterData | ScenarioData | GeneralScenarioData | NarrativeHistoryData;
 
 export type TemplateId =
   | typeof GENERAL_CHARACTER_TEMPLATE_ID
+  | typeof GENERAL_SCENARIO_TEMPLATE_ID
   | '魔法少女/心之花/魔法少女（问卷生成）'
   | '魔法少女/心之花/魔法少女（名字生成）'
   | '魔法少女/心之花/残兽（问卷生成）'
@@ -56,6 +62,7 @@ export function inferCharacterKind(data: unknown): CharacterKind {
 
   const templateId = typeof record.templateId === 'string' ? record.templateId : undefined;
   if (templateId === GENERAL_CHARACTER_TEMPLATE_ID) return 'general';
+  if (templateId === GENERAL_SCENARIO_TEMPLATE_ID) return 'unknown';
   if (templateId && MAGICAL_GIRL_TEMPLATE_IDS.has(templateId)) return 'magical-girl';
   if (templateId && CANSHOU_TEMPLATE_IDS.has(templateId)) return 'canshou';
 
@@ -110,11 +117,31 @@ export function isGeneralCharacter(data: unknown): data is GeneralCharacterData 
   return record.templateId === GENERAL_CHARACTER_TEMPLATE_ID && typeof record.name === 'string' && typeof record.content === 'string';
 }
 
+export function isGeneralScenario(data: unknown): data is GeneralScenarioData {
+  if (!data || typeof data !== 'object') return false;
+  const record = data as Record<string, unknown>;
+
+  if (record.templateId !== GENERAL_SCENARIO_TEMPLATE_ID) return false;
+  if (typeof record.content !== 'string') return false;
+
+  if (typeof record.title === 'string') return true;
+
+  // 兼容旧版通用情景卡：name -> title（原地升级，便于后续逻辑统一读取 title）
+  if (typeof record.name === 'string') {
+    record.title = record.name;
+    delete record.name;
+    return true;
+  }
+
+  return false;
+}
+
 export function isScenarioCard(data: unknown): data is ScenarioData {
   if (!data || typeof data !== 'object') return false;
   const record = data as Record<string, unknown>;
   if (typeof record.title !== 'string') return false;
   if (record.templateId === GENERAL_CHARACTER_TEMPLATE_ID) return false;
+  if (record.templateId === GENERAL_SCENARIO_TEMPLATE_ID) return false;
   if (record.templateId === 'narrative-history') return false;
   return typeof record.elements === 'object' && record.elements !== null;
 }
@@ -179,6 +206,16 @@ export function validateDataCard(content: unknown): ValidationResult {
     };
   }
 
+  // 尝试验证通用情景格式（仍归类为 scenario 数据卡）
+  const generalScenarioResult = GeneralScenarioSchema.safeParse(content);
+  if (generalScenarioResult.success) {
+    return {
+      success: true,
+      data: generalScenarioResult.data,
+      type: 'scenario'
+    };
+  }
+
   // 尝试验证情景格式
   const scenarioResult = ScenarioSchema.safeParse(content);
   if (scenarioResult.success) {
@@ -197,6 +234,13 @@ export function validateDataCard(content: unknown): ValidationResult {
     return {
       success: false,
       error: `叙事历史格式验证失败: ${narrativeHistoryResult.error?.message || '未知错误'}`
+    };
+  }
+
+  if (contentObj?.templateId === GENERAL_SCENARIO_TEMPLATE_ID) {
+    return {
+      success: false,
+      error: `通用情景格式验证失败: ${generalScenarioResult.error?.message || '未知错误'}`
     };
   }
 
@@ -235,6 +279,7 @@ export function validateDataCard(content: unknown): ValidationResult {
     `残兽格式: ${canshouResult.error?.message || '未知错误'}`,
     `通用角色格式: ${generalResult.error?.message || '未知错误'}`,
     `魔法少女格式: ${magicalGirlResult.error?.message || '未知错误'}`,
+    `通用情景格式: ${generalScenarioResult.error?.message || '未知错误'}`,
     `情景格式: ${scenarioResult.error?.message || '未知错误'}`
   ];
 
@@ -250,7 +295,9 @@ export {
   MagicalGirlSchema,
   ScenarioSchema,
   GeneralCharacterSchema,
+  GeneralScenarioSchema,
   NarrativeHistorySchema,
-  GENERAL_CHARACTER_TEMPLATE_ID
+  GENERAL_CHARACTER_TEMPLATE_ID,
+  GENERAL_SCENARIO_TEMPLATE_ID,
 };
-export type { CanshouData, MagicalGirlData, GeneralCharacterData, ScenarioData, NarrativeHistoryData };
+export type { CanshouData, MagicalGirlData, GeneralCharacterData, ScenarioData, GeneralScenarioData, NarrativeHistoryData };

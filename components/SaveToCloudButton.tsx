@@ -17,6 +17,10 @@ interface SaveToCloudButtonProps {
 
 // 检测是否为情景文件
 const isScenarioData = (data: any): boolean => {
+  if (!data) return false;
+  if (data?.templateId === '通用情景' && typeof data?.content === 'string') {
+    return true;
+  }
   return Boolean(data && data.title && data.elements && (data.scenario_type || data.elements.events));
 };
 

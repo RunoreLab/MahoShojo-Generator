@@ -5,6 +5,7 @@ import { useRouter } from 'next/router';
 import { useCooldown } from '../lib/cooldown';
 import Link from 'next/link';
 import CanshouCard, { CanshouDetails } from '../components/CanshouCard';
+import GeneralCharacterCard from '../components/GeneralCharacterCard';
 import { CANSHOU_LORE } from '../lib/canshou-lore';
 import { generateRandomCanshou } from '../lib/random-character-generator';
 import SaveToCloudButton from '../components/SaveToCloudButton';
@@ -14,6 +15,9 @@ import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiPr
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
+import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 
 // 定义问卷和问题的类型
 interface Question {
@@ -162,6 +166,9 @@ const CanshouPage: React.FC = () => {
   const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
   const [imageSaveMode, setImageSaveMode] = useState<ImageSaveMode>('download');
   const [jsonSaveMode, setJsonSaveMode] = useState<JsonSaveMode>('download');
+  const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
+  const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
+  const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
   const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`;
@@ -176,6 +183,19 @@ const CanshouPage: React.FC = () => {
       userAnswers: serverAnswers ?? answers,
     };
   }, [canshouDetails, answers]);
+
+  const streamedGeneralCardForDisplay = useMemo(() => {
+    if (generationMode !== 'stream') return null;
+    const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? null;
+    if (markdown === null) return null;
+
+    const { card } = buildGeneralCharacterCardFromMarkdown({
+      markdown,
+      defaultName: '残兽',
+    });
+
+    return card;
+  }, [generationMode, streamingMarkdown, streamedGeneralCard]);
 
   useEffect(() => {
     fetch('/languages.json')
@@ -328,6 +348,9 @@ const CanshouPage: React.FC = () => {
     }
     setSubmitting(true);
     setError(null);
+    setCanshouDetails(null);
+    setStreamingMarkdown(null);
+    setStreamedGeneralCard(null);
 
     try {
       const customProviderPayload = (
@@ -340,7 +363,8 @@ const CanshouPage: React.FC = () => {
         apiKey: userProviderConfig.apiKey,
       } : undefined;
 
-      const response = await fetch('/api/generate-canshou', {
+      const endpoint = generationMode === 'stream' ? '/api/generate-canshou-stream' : '/api/generate-canshou';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -358,6 +382,30 @@ const CanshouPage: React.FC = () => {
         }
         const serverMessage = errorData?.message || errorData?.error;
         throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+      }
+
+      if (generationMode === 'stream') {
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('application/json') || contentType.includes('+json')) {
+          const errorData = await response.json().catch(() => null as any);
+          const serverMessage = errorData?.message || errorData?.error;
+          throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+        }
+
+        setStreamingMarkdown('');
+        const markdown = await readTextStreamFromResponse(response, {
+          label: '残兽档案（流式）',
+          onText: (text) => setStreamingMarkdown(text),
+        });
+
+        const { card } = buildGeneralCharacterCardFromMarkdown({
+          markdown,
+          defaultName: '残兽',
+        });
+
+        setStreamedGeneralCard(card);
+        startCooldown();
+        return;
       }
 
       const result: CanshouResultPayload = await response.json();
@@ -382,6 +430,36 @@ const CanshouPage: React.FC = () => {
   const imageSaveButtonLabel = imageSaveMode === 'download'
     ? '💾 一键保存长图'
     : '📱 打开长按保存弹窗';
+
+  const downloadStreamedGeneralCard = (data: any) => {
+    if (!data) return;
+    const jsonPayload = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonPayload], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const rawName = (data?.codename || data?.name || '未命名角色').toString();
+    const sanitizedName = rawName.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_').slice(0, 80) || 'data';
+    link.href = url;
+    link.download = `通用残兽角色_${sanitizedName}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const copyStreamedGeneralCard = async (data: any) => {
+    if (!data) return;
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard) {
+        throw new Error('clipboard-not-available');
+      }
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+      alert('✅ 通用角色卡 JSON 已复制到剪贴板');
+    } catch (err) {
+      console.error('复制 JSON 失败：', err);
+      alert('⚠️ 复制失败，请手动长按选择 JSON 内容后复制。');
+    }
+  };
 
   const handleClearDraft = () => {
     if (window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) {
@@ -505,7 +583,7 @@ const CanshouPage: React.FC = () => {
                   <Link href="/" className="footer-link">返回首页</Link>
                 </div>
               </div>
-            ) : !canshouDetails ? (
+            ) : (!canshouDetails && !streamedGeneralCard) ? (
               <>
                 <QuestionNavigator
                   items={navigatorItems}
@@ -614,6 +692,13 @@ const CanshouPage: React.FC = () => {
                     {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '生成中...' : isLastQuestion ? '生成档案' : '下一题'}
                   </button>
                 </div>
+
+                {generationMode === 'stream' && streamedGeneralCardForDisplay && (
+                  <div className="my-6">
+                    <GeneralCharacterCard general={streamedGeneralCardForDisplay} isStreaming={submitting} />
+                  </div>
+                )}
+
                 {/* 多语言支持 */}
                 <div className="my-4 bg-gray-100 rounded-lg p-3">
                   <button
@@ -641,6 +726,22 @@ const CanshouPage: React.FC = () => {
                       </select>
                     </div>
                   )}
+                </div>
+
+                {/* 生成方式：非流式 / 流式 */}
+                <div className="my-4 bg-gray-100 rounded-lg p-3">
+                  <GenerationModeSwitcher
+                    label="生成方式"
+                    value={generationMode}
+                    disabled={submitting}
+                    helper={false}
+                    onChange={(mode) => setGenerationMode(mode)}
+                  />
+                  <div className="text-xs text-gray-600 mt-2">
+                    {generationMode === 'stream'
+                      ? '提示：选择流式生成后，将实时输出 Markdown，并生成【通用角色卡】（templateId=通用角色）。名字会尝试从输出中解析，失败则回退到“残兽”。'
+                      : '提示：非流式生成会返回结构化的残兽数据卡（可直接保存/用于升华），但需要等待生成结束一次性返回。'}
+                  </div>
                 </div>
 
                 {/* 自定义 AI 供应商 */}
@@ -715,114 +816,166 @@ const CanshouPage: React.FC = () => {
               </>
             ) : (
               <>
-                <CanshouCard
-                  canshou={canshouDetails}
-                  onSaveImage={handleSaveImage}
-                  imageSaveMode={imageSaveMode}
-                  saveButtonLabel={imageSaveButtonLabel}
-                />
-                <div className="card" style={{ marginTop: '1rem' }}>
-                  <div className="space-y-5 text-left">
-                    <div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium text-gray-800">设定长图保存方式</span>
-                        <span className="text-xs text-gray-500">推荐：{recommendedImageMode === 'download' ? '一键下载' : '长按保存弹窗'}</span>
-                      </div>
-                      <div className="flex flex-col sm:flex-row gap-2 mt-2">
-                        <button
-                          type="button"
-                          className={preferenceButtonClass(imageSaveMode === 'download')}
-                          onClick={() => setImageSaveMode('download')}
-                        >
-                          一键下载长图
-                          {recommendedImageMode === 'download' && (
-                            <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className={preferenceButtonClass(imageSaveMode === 'modal')}
-                          onClick={() => setImageSaveMode('modal')}
-                        >
-                          长按保存弹窗
-                          {recommendedImageMode === 'modal' && (
-                            <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
-                          )}
-                        </button>
-                      </div>
-                      <p className="mt-2 text-xs text-gray-500">如果当前浏览器阻止下载，可切换为弹窗模式再手动保存。</p>
-                    </div>
+                {generationMode === 'stream' && streamedGeneralCard ? (
+                  <>
+                    <GeneralCharacterCard
+                      general={streamedGeneralCard}
+                      onSaveImage={handleSaveImage}
+                      imageSaveMode={imageSaveMode}
+                      saveButtonLabel={imageSaveButtonLabel}
+                    />
 
-                    <div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium text-gray-800">JSON 保存方式</span>
-                        <span className="text-xs text-gray-500">推荐：{recommendedJsonMode === 'download' ? '直接下载' : '复制 JSON'}</span>
-                      </div>
-                      <div className="flex flex-col sm:flex-row gap-2 mt-2">
-                        <button
-                          type="button"
-                          className={preferenceButtonClass(jsonSaveMode === 'download')}
-                          onClick={() => setJsonSaveMode('download')}
-                        >
-                          直接下载 JSON
-                          {recommendedJsonMode === 'download' && (
-                            <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className={preferenceButtonClass(jsonSaveMode === 'text')}
-                          onClick={() => setJsonSaveMode('text')}
-                        >
-                          复制原始数据
-                          {recommendedJsonMode === 'text' && (
-                            <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
-                          )}
-                        </button>
-                      </div>
-                      <p className="mt-2 text-xs text-gray-500">两种方式都可跨终端使用，可随时切换体验。</p>
-                    </div>
-
-                    <p className="text-xs text-gray-400 text-center">提示：偏好设置仅在当前页面有效，切换不会触发重新生成。</p>
-                  </div>
-                </div>
-                <div className="card" style={{ marginTop: '1rem' }}>
-                  <div className="text-center">
-                    <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
-                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                      {resolvedResultPayload && (
-                        <>
-                          <SaveJsonButton
-                            data={resolvedResultPayload}
-                            mode={jsonSaveMode}
-                            recommendedMode={recommendedJsonMode}
-                          />
+                    <div className="card" style={{ marginTop: '1rem' }}>
+                      <div className="text-center">
+                        <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
+                        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                          <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className="generate-button flex-1">
+                            下载通用角色卡
+                          </button>
                           <SaveToCloudButton
-                            data={resolvedResultPayload}
+                            data={streamedGeneralCard}
+                            cardType="character"
                             buttonText="保存到云端"
+                            className="generate-button flex-1"
                             style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
                           />
-                        </>
-                      )}
+                          <button
+                            onClick={() => void copyStreamedGeneralCard(streamedGeneralCard)}
+                            className="generate-button flex-1"
+                            style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+                          >
+                            复制到剪贴板
+                          </button>
+                        </div>
+                        <button
+                          onClick={handleRegenerate}
+                          disabled={submitting || isCooldown}
+                          className="generate-button"
+                          style={{ marginTop: '0.5rem', backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #d946ef)' }}
+                        >
+                          {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
+                        </button>
+                        <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                          <p className="text-sm text-gray-600 mb-2">保存好你的档案了吗？</p>
+                          <Link href="/battle" className="footer-link" style={{ color: '#c026d3', fontSize: '1.125rem' }}>
+                            前往竞技场，让它大闹一场！→
+                          </Link>
+                        </div>
+                      </div>
                     </div>
-                    <button
-                      onClick={handleRegenerate}
-                      disabled={submitting || isCooldown}
-                      className="generate-button"
-                      style={{ marginTop: '0.5rem', backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #d946ef)' }}
-                    >
-                      {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
-                    </button>
-                    <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
-                      <p className="text-sm text-gray-600 mb-2">
-                        保存好你的档案了吗？
-                      </p>
-                      <Link href="/battle" className="footer-link" style={{ color: '#c026d3', fontSize: '1.125rem' }}>
-                        前往竞技场，让它大闹一场！→
-                      </Link>
+                  </>
+                ) : (
+                  <>
+                    <CanshouCard
+                      canshou={canshouDetails!}
+                      onSaveImage={handleSaveImage}
+                      imageSaveMode={imageSaveMode}
+                      saveButtonLabel={imageSaveButtonLabel}
+                    />
+                    <div className="card" style={{ marginTop: '1rem' }}>
+                      <div className="space-y-5 text-left">
+                        <div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-medium text-gray-800">设定长图保存方式</span>
+                            <span className="text-xs text-gray-500">推荐：{recommendedImageMode === 'download' ? '一键下载' : '长按保存弹窗'}</span>
+                          </div>
+                          <div className="flex flex-col sm:flex-row gap-2 mt-2">
+                            <button
+                              type="button"
+                              className={preferenceButtonClass(imageSaveMode === 'download')}
+                              onClick={() => setImageSaveMode('download')}
+                            >
+                              一键下载长图
+                              {recommendedImageMode === 'download' && (
+                                <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className={preferenceButtonClass(imageSaveMode === 'modal')}
+                              onClick={() => setImageSaveMode('modal')}
+                            >
+                              长按保存弹窗
+                              {recommendedImageMode === 'modal' && (
+                                <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
+                              )}
+                            </button>
+                          </div>
+                          <p className="mt-2 text-xs text-gray-500">如果当前浏览器阻止下载，可切换为弹窗模式再手动保存。</p>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-medium text-gray-800">JSON 保存方式</span>
+                            <span className="text-xs text-gray-500">推荐：{recommendedJsonMode === 'download' ? '直接下载' : '复制 JSON'}</span>
+                          </div>
+                          <div className="flex flex-col sm:flex-row gap-2 mt-2">
+                            <button
+                              type="button"
+                              className={preferenceButtonClass(jsonSaveMode === 'download')}
+                              onClick={() => setJsonSaveMode('download')}
+                            >
+                              直接下载 JSON
+                              {recommendedJsonMode === 'download' && (
+                                <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className={preferenceButtonClass(jsonSaveMode === 'text')}
+                              onClick={() => setJsonSaveMode('text')}
+                            >
+                              复制原始数据
+                              {recommendedJsonMode === 'text' && (
+                                <span className="ml-2 inline-flex items-center rounded-full bg-rose-100 px-2 text-[10px] font-semibold text-rose-600">推荐</span>
+                              )}
+                            </button>
+                          </div>
+                          <p className="mt-2 text-xs text-gray-500">两种方式都可跨终端使用，可随时切换体验。</p>
+                        </div>
+
+                        <p className="text-xs text-gray-400 text-center">提示：偏好设置仅在当前页面有效，切换不会触发重新生成。</p>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                    <div className="card" style={{ marginTop: '1rem' }}>
+                      <div className="text-center">
+                        <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
+                        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                          {resolvedResultPayload && (
+                            <>
+                              <SaveJsonButton
+                                data={resolvedResultPayload}
+                                mode={jsonSaveMode}
+                                recommendedMode={recommendedJsonMode}
+                              />
+                              <SaveToCloudButton
+                                data={resolvedResultPayload}
+                                buttonText="保存到云端"
+                                style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                              />
+                            </>
+                          )}
+                        </div>
+                        <button
+                          onClick={handleRegenerate}
+                          disabled={submitting || isCooldown}
+                          className="generate-button"
+                          style={{ marginTop: '0.5rem', backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #d946ef)' }}
+                        >
+                          {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
+                        </button>
+                        <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                          <p className="text-sm text-gray-600 mb-2">
+                            保存好你的档案了吗？
+                          </p>
+                          <Link href="/battle" className="footer-link" style={{ color: '#c026d3', fontSize: '1.125rem' }}>
+                            前往竞技场，让它大闹一场！→
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
                 <div className="card">
                   <button onClick={() => setShowLore(!showLore)} className="text-lg font-medium text-gray-800 w-full text-left">
                     {showLore ? '▼ ' : '▶ '}残兽设定说明

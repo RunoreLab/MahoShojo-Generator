@@ -9,6 +9,15 @@ import { randomUUID } from '@/lib/crypto';
 
 const log = getLogger('arena-service');
 
+const getScenarioTitle = (scenario: any | null): string | null => {
+    if (!scenario || typeof scenario !== 'object') return null;
+    const title = typeof scenario?.title === 'string' ? scenario.title.trim() : '';
+    if (title) return title;
+    const name = typeof scenario?.name === 'string' ? scenario.name.trim() : '';
+    if (name) return name;
+    return null;
+};
+
 export const applyPostBattleUpdates = async (
     combatants: any[],
     report: NewsReport,
@@ -102,7 +111,7 @@ export const applyPostBattleUpdates = async (
                 metadata: {
                     user_guidance: userGuidance,
                     ...(characterGuidance ? { character_guidance: characterGuidance } : {}),
-                    scenario_title: scenario?.title || null,
+                    scenario_title: getScenarioTitle(scenario),
                     non_native_data_involved: isAnyNonNative,
                 },
             };
@@ -264,7 +273,7 @@ export const redoPostBattleUpdates = async (
                     ...(previous?.metadata ?? {}),
                     user_guidance: userGuidance,
                     ...(characterGuidance ? { character_guidance: characterGuidance } : {}),
-                    scenario_title: scenario?.title || null,
+                    scenario_title: getScenarioTitle(scenario),
                     non_native_data_involved: isAnyNonNative,
                 },
             };

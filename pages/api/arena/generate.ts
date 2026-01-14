@@ -501,12 +501,14 @@ interface BattleApiResponse {
                 userId: user?.id ?? null,
                 username: user?.username ?? null,
                 userPrefix: user?.prefix ?? null,
-                mode,
-                scenarioTitle: typeof scenarioTitle === 'string'
-                    ? scenarioTitle.trim() || null
-                    : (typeof scenario?.title === 'string' ? scenario.title.trim() : null),
-                scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
-                scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
+	                mode,
+	                scenarioTitle: typeof scenarioTitle === 'string'
+	                    ? scenarioTitle.trim() || null
+	                    : (typeof scenario?.title === 'string'
+	                        ? scenario.title.trim()
+	                        : (typeof scenario?.name === 'string' ? scenario.name.trim() : null)),
+	                scenarioDataCardId: typeof scenarioSourceDataCardId === 'string' ? scenarioSourceDataCardId : null,
+	                scenarioDataCardUpdatedAt: typeof scenarioSourceDataCardUpdatedAt === 'string' ? scenarioSourceDataCardUpdatedAt : null,
 	                language: normalizeOptionalString(language),
 	                selectedLevel: normalizeOptionalString(selectedLevel),
 	                storyLength: normalizeOptionalString(storyLength),

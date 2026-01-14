@@ -15,6 +15,14 @@ describe('data-card-converter', () => {
     expect(blank.content.length).toBeGreaterThan(0);
   });
 
+  it('creates a blank general scenario card with default content', () => {
+    const blank = createBlankDataCard('general-scenario');
+    expect(blank.templateId).toBe('通用情景');
+    expect(blank.title).toBe('未命名情景');
+    expect(typeof blank.content).toBe('string');
+    expect(blank.content.length).toBeGreaterThan(0);
+  });
+
   it('converts magical girl data into general character markdown', () => {
     const magical = {
       codename: '星夜绽放',
@@ -75,6 +83,30 @@ describe('data-card-converter', () => {
     expect(inferTemplate(general)).toBe('general');
   });
 
+  it('validateDataCard can detect general scenario type as scenario', () => {
+    const generalScenario = {
+      templateId: '通用情景',
+      title: '测试情景',
+      content: '# 舞台\\n- 灯光\\n- 幕布'
+    };
+    const result = validateDataCard(generalScenario);
+    expect(result.success).toBe(true);
+    expect(result.type).toBe('scenario');
+    expect(inferTemplate(generalScenario)).toBe('general-scenario');
+  });
+
+  it('validateDataCard supports legacy general scenario name field', () => {
+    const legacyGeneralScenario = {
+      templateId: '通用情景',
+      name: '旧版情景',
+      content: '# 旧舞台\\n- 旧灯光\\n- 旧幕布'
+    };
+    const result = validateDataCard(legacyGeneralScenario);
+    expect(result.success).toBe(true);
+    expect(result.type).toBe('scenario');
+    expect(inferTemplate(legacyGeneralScenario)).toBe('general-scenario');
+  });
+
   it('keeps general classification even when content is empty string', () => {
     const minimalGeneral = {
       templateId: '通用角色',
@@ -118,5 +150,26 @@ describe('data-card-converter', () => {
     expect(result.success).toBe(true);
     expect(result.type).toBe('history');
     expect(inferTemplate(history)).toBe('unknown');
+  });
+
+  it('converts structured scenario into general scenario markdown', () => {
+    const scenario = {
+      title: '雨夜的便利店',
+      scenario_type: '日常',
+      description: '一段短暂但值得回味的相遇。',
+      elements: {
+        scene: { time: '深夜', place: '便利店', features: '雨声与霓虹灯' },
+        roles: [],
+        events: '偶遇并交换秘密',
+        atmosphere: '安静',
+        development: ['留下联系方式']
+      }
+    };
+
+    const { data: generalScenario } = convertDataCard(scenario, 'general-scenario', 'scenario');
+    expect(generalScenario.templateId).toBe('通用情景');
+    expect(generalScenario.title).toBe('雨夜的便利店');
+    expect(generalScenario.content).toContain('# scenario_type');
+    expect(generalScenario.content).toContain('日常');
   });
 });

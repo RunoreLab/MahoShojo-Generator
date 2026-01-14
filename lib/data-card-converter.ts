@@ -1,28 +1,33 @@
 import {
   CanshouSchema,
   GeneralCharacterSchema,
+  GeneralScenarioSchema,
   MagicalGirlSchema,
   ScenarioSchema,
   type CanshouData,
   type GeneralCharacterData,
+  type GeneralScenarioData,
   type MagicalGirlData,
   type ScenarioData,
   GENERAL_CHARACTER_TEMPLATE_ID,
+  GENERAL_SCENARIO_TEMPLATE_ID,
   inferCharacterKind,
+  isGeneralScenario,
   isScenarioCard
 } from './schemas';
 import type { CurrentStateData } from './schemas/current-state';
 
 const NON_SUBSTANTIVE_KEYS = new Set(['signature', 'templateId']);
 
-export type DataCardTemplate = 'magical-girl' | 'canshou' | 'general' | 'scenario';
+export type DataCardTemplate = 'magical-girl' | 'canshou' | 'general' | 'scenario' | 'general-scenario';
 export type InferableTemplate = DataCardTemplate | 'unknown';
 
 export const TEMPLATE_LABELS: Record<DataCardTemplate, string> = {
   'magical-girl': '魔法少女',
   canshou: '残兽',
   general: '通用角色',
-  scenario: '情景'
+  scenario: '情景',
+  'general-scenario': '通用情景'
 };
 
 type FieldType =
@@ -260,6 +265,12 @@ const DEFAULT_SCENARIO: ScenarioData = {
   adjudicationEvents: []
 };
 
+const DEFAULT_GENERAL_SCENARIO: GeneralScenarioData = {
+  templateId: GENERAL_SCENARIO_TEMPLATE_ID,
+  title: '未命名情景',
+  content: '请在此处补充情景设定，建议使用 Markdown 书写。',
+};
+
 const DEFAULT_GENERAL: GeneralCharacterData = {
   templateId: GENERAL_CHARACTER_TEMPLATE_ID,
   name: '未命名角色',
@@ -268,13 +279,14 @@ const DEFAULT_GENERAL: GeneralCharacterData = {
 };
 
 export function inferTemplate(data: unknown): InferableTemplate {
+  if (isGeneralScenario(data)) return 'general-scenario';
   const kind = inferCharacterKind(data);
   if (kind !== 'unknown') return kind;
   if (isScenarioCard(data)) return 'scenario';
   return 'unknown';
 }
 
-export function createBlankDataCard(template: DataCardTemplate): MagicalGirlData | CanshouData | GeneralCharacterData | ScenarioData {
+export function createBlankDataCard(template: DataCardTemplate): MagicalGirlData | CanshouData | GeneralCharacterData | ScenarioData | GeneralScenarioData {
   switch (template) {
     case 'magical-girl':
       return JSON.parse(JSON.stringify(DEFAULT_MAGICAL_GIRL));
@@ -282,6 +294,8 @@ export function createBlankDataCard(template: DataCardTemplate): MagicalGirlData
       return JSON.parse(JSON.stringify(DEFAULT_CANSHOU));
     case 'scenario':
       return JSON.parse(JSON.stringify(DEFAULT_SCENARIO));
+    case 'general-scenario':
+      return JSON.parse(JSON.stringify(DEFAULT_GENERAL_SCENARIO));
     case 'general':
     default:
       return JSON.parse(JSON.stringify(DEFAULT_GENERAL));
@@ -467,6 +481,43 @@ function convertToGeneral(data: any): AssignResult<GeneralCharacterData> {
   return { data: GeneralCharacterSchema.parse(result), warnings: [] };
 }
 
+function convertToGeneralScenario(data: any, sourceTemplate: InferableTemplate): AssignResult<GeneralScenarioData> {
+  const title = data?.title || data?.name || data?.codename || '未命名情景';
+  const rest = { ...data };
+  delete rest.codename;
+  delete rest.name;
+  delete rest.title;
+  delete rest.content;
+  delete rest.templateId;
+  delete rest.signature;
+  delete rest.metadata;
+  delete rest.arena_history;
+  delete rest.current_state;
+  delete rest.adjudicationEvents;
+
+  const markdownBase =
+    (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') && typeof data?.content === 'string'
+      ? data.content
+      : '';
+
+  const appendix = toMarkdownContent(rest);
+  const content = markdownBase
+    ? (appendix && appendix !== '暂无附加设定。' ? `${markdownBase.trim()}\n\n---\n\n${appendix}` : markdownBase.trim())
+    : appendix;
+
+  const result: GeneralScenarioData = {
+    templateId: GENERAL_SCENARIO_TEMPLATE_ID,
+    title,
+    content,
+  };
+
+  if (data?.adjudicationEvents) {
+    (result as any).adjudicationEvents = JSON.parse(JSON.stringify(data.adjudicationEvents));
+  }
+
+  return { data: GeneralScenarioSchema.parse(result), warnings: [] };
+}
+
 function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): AssignResult<MagicalGirlData> {
   const base: MagicalGirlData = JSON.parse(JSON.stringify(DEFAULT_MAGICAL_GIRL));
   base.codename = data?.codename || data?.name || data?.title || base.codename;
@@ -475,7 +526,7 @@ function convertToMagicalGirl(data: any, sourceTemplate: InferableTemplate): Ass
   delete source.codename;
   delete source.name;
   delete source.title;
-  if (sourceTemplate === 'general') {
+  if (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') {
     delete source.content;
   }
 
@@ -508,7 +559,7 @@ function convertToCanshou(data: any, sourceTemplate: InferableTemplate): AssignR
   delete source.codename;
   delete source.name;
   delete source.title;
-  if (sourceTemplate === 'general') {
+  if (sourceTemplate === 'general' || sourceTemplate === 'general-scenario') {
     delete source.content;
   }
 
@@ -544,10 +595,18 @@ function convertToScenario(data: any, sourceTemplate: InferableTemplate): Assign
   delete source.templateId;
   delete source.arena_history;
   delete source.current_state;
+  if (sourceTemplate === 'general-scenario') {
+    delete source.content;
+  }
 
   const unmatched = assignWithMeta(source, base as Record<string, any>, SCENARIO_META);
 
-  if (sourceTemplate === 'magical-girl' || sourceTemplate === 'canshou' || sourceTemplate === 'general') {
+  if (sourceTemplate === 'general-scenario') {
+    const markdown = typeof data?.content === 'string'
+      ? data.content
+      : toMarkdownContent({ ...data, templateId: undefined, name: undefined, codename: undefined, title: undefined });
+    base.description = `${base.description?.trim() || ''}\n${markdown}`.trim();
+  } else if (sourceTemplate === 'magical-girl' || sourceTemplate === 'canshou' || sourceTemplate === 'general') {
     const roleName = data?.codename || data?.name || base.title;
     let description = '';
     if (sourceTemplate === 'general') {
@@ -588,6 +647,8 @@ export function convertDataCard(data: any, target: DataCardTemplate, sourceTempl
   switch (target) {
     case 'general':
       return convertToGeneral(sanitized);
+    case 'general-scenario':
+      return convertToGeneralScenario(sanitized, sourceTemplate);
     case 'magical-girl':
       return convertToMagicalGirl(sanitized, sourceTemplate);
     case 'canshou':

@@ -41,7 +41,7 @@ import { inferTemplate } from '@/lib/data-card-converter';
 	import { isLegacyAdjudicatorFormat, mergeAdjudicationEvents } from '@/lib/pvp/adjudication-events';
 	import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
 	import { canViewOtherSubmissions } from '@/lib/pvp/submission-visibility';
-	import { createStreamReadWithTimeout } from '@/lib/stream/timeout';
+	import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
 
 import type { Preset } from '@/lib/presets';
 import type { UserBadge } from '@/types/badge';
@@ -50,8 +50,8 @@ import { revokeBlobUrl } from '@/lib/client/blobUrl';
 	const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
 	const RESOLVE_REQUEST_TIMEOUT_MS = 120_000;
 	const RESOLVE_STALE_WARNING_SECONDS = Math.floor(RESOLVE_REQUEST_TIMEOUT_MS / 1000);
-	const RESOLVE_STREAM_IDLE_TIMEOUT_MS = 60_000;
-	const RESOLVE_STREAM_TOTAL_TIMEOUT_MS = 10 * 60_000;
+	const RESOLVE_STREAM_IDLE_TIMEOUT_MS = STREAM_READ_IDLE_TIMEOUT_MS;
+	const RESOLVE_STREAM_TOTAL_TIMEOUT_MS = STREAM_READ_TOTAL_TIMEOUT_MS;
 
 const getCachedPassword = (roomId: string): string => {
   if (typeof window === 'undefined') return '';
@@ -1458,7 +1458,8 @@ export function PvpRoomPage() {
       return;
     }
     const cleaned = removePrivateKeys(cardData);
-    if (inferTemplate(cleaned) !== 'scenario') {
+    const template = inferTemplate(cleaned);
+    if (template !== 'scenario' && template !== 'general-scenario') {
       setError('❌ 请选择“情景”类型的数据卡。');
       return;
     }
@@ -2585,7 +2586,7 @@ export function PvpRoomPage() {
                                 isGenerating={rulesMutation.isPending || scenarioMutation.isPending}
                                 isMatchingBlocked={isScenarioMatching}
                                 isMatchingScenario={isScenarioMatching}
-                                scenarioFileName={scenarioDraft?.name ?? (typeof roomScenario?.title === 'string' ? roomScenario.title : null)}
+                                scenarioFileName={scenarioDraft?.name ?? (typeof roomScenario?.title === 'string' ? roomScenario.title : (typeof roomScenario?.name === 'string' ? roomScenario.name : null))}
                               />
                               <div className="flex gap-2">
                                 <button
