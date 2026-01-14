@@ -1,3 +1,4 @@
+import { useRouter } from 'next/router';
 import { useMemo, useReducer } from 'react';
 
 import { ErrorMessage } from '@/components/ErrorMessage';
@@ -32,17 +33,22 @@ interface ExportState {
   overwriteExisting: boolean;
   includeCcv3: boolean;
   includeChara: boolean;
+  aiFilling: boolean;
+  aiOverwriteFields: boolean;
   fields: ExportFields;
 }
 
 type ExportAction =
   | { type: 'reset' }
   | { type: 'setError'; message: string }
+  | { type: 'setInlineError'; message: string | null }
   | { type: 'setDataCard'; data: unknown; template: InferableTemplate; fields: ExportFields }
   | { type: 'setBasePng'; bytes: Uint8Array; name: string }
   | { type: 'usePlaceholder' }
   | { type: 'setField'; key: keyof ExportFields; value: string | number | boolean }
   | { type: 'setOption'; key: 'overwriteExisting' | 'includeCcv3' | 'includeChara'; value: boolean }
+  | { type: 'setAiFilling'; value: boolean }
+  | { type: 'setAiOverwriteFields'; value: boolean }
   | { type: 'generating' }
   | { type: 'done' };
 
@@ -73,6 +79,8 @@ const initialState: ExportState = {
   overwriteExisting: true,
   includeCcv3: true,
   includeChara: true,
+  aiFilling: false,
+  aiOverwriteFields: false,
   fields: initialFields,
 };
 
@@ -82,6 +90,8 @@ function reducer(state: ExportState, action: ExportAction): ExportState {
       return { ...initialState };
     case 'setError':
       return { ...state, step: 'error', error: action.message };
+    case 'setInlineError':
+      return { ...state, error: action.message };
     case 'setDataCard':
       return {
         ...state,
@@ -99,6 +109,10 @@ function reducer(state: ExportState, action: ExportAction): ExportState {
       return { ...state, fields: { ...state.fields, [action.key]: action.value } as ExportFields };
     case 'setOption':
       return { ...state, [action.key]: action.value } as ExportState;
+    case 'setAiFilling':
+      return { ...state, aiFilling: action.value };
+    case 'setAiOverwriteFields':
+      return { ...state, aiOverwriteFields: action.value };
     case 'generating':
       return { ...state, step: 'generating', error: null };
     case 'done':
@@ -273,6 +287,7 @@ const safeFileName = (base: string, ext: string): string => {
 };
 
 export function TavernExportPanel() {
+  const router = useRouter();
   const [state, dispatch] = useReducer(reducer, initialState);
 
   const onDataCardSelected = async (file: File | null) => {
@@ -305,6 +320,66 @@ export function TavernExportPanel() {
       .filter(Boolean)
       .slice(0, 50);
   }, [state.fields.tags]);
+
+  const onAiFill = async () => {
+    dispatch({ type: 'setAiFilling', value: true });
+    dispatch({ type: 'setInlineError', message: null });
+
+    const truncate = (value: string, maxChars: number): string => {
+      const trimmed = value.trim();
+      if (trimmed.length <= maxChars) return trimmed;
+      return `${trimmed.slice(0, maxChars)}\n...[已截断]`;
+    };
+
+    try {
+      const response = await fetch('/api/tavern/ai-fill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: (state.fields.name || '').trim() || '未命名角色',
+          description: truncate(state.fields.description || '', 8_000),
+          personality: truncate(state.fields.personality || '', 8_000),
+          scenario: truncate(state.fields.scenario || '', 6_000),
+          tags: tagsArray,
+          language: 'zh-CN',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorJson = await response.json().catch(() => null as any);
+        const redirectReason = errorJson?.reason || errorJson?.message || errorJson?.error;
+        if (errorJson?.shouldRedirect || errorJson?.redirect === '/arrested') {
+          void router.push({
+            pathname: '/arrested',
+            query: { reason: redirectReason || '使用危险符文' },
+          });
+          return;
+        }
+        const serverMessage = errorJson?.message || errorJson?.error;
+        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `AI 补全失败（HTTP ${response.status}）`);
+      }
+
+      const json = (await response.json()) as any;
+      const nextScenario = typeof json?.scenario === 'string' ? json.scenario : '';
+      const nextFirstMes = typeof json?.first_mes === 'string' ? json.first_mes : '';
+      const nextMesExample = typeof json?.mes_example === 'string' ? json.mes_example : '';
+
+      const shouldOverwrite = state.aiOverwriteFields;
+      if (shouldOverwrite || !state.fields.scenario.trim()) {
+        dispatch({ type: 'setField', key: 'scenario', value: nextScenario });
+      }
+      if (shouldOverwrite || !state.fields.firstMes.trim()) {
+        dispatch({ type: 'setField', key: 'firstMes', value: nextFirstMes });
+      }
+      if (shouldOverwrite || !state.fields.mesExample.trim()) {
+        dispatch({ type: 'setField', key: 'mesExample', value: nextMesExample });
+      }
+    } catch (error) {
+      dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : 'AI 补全失败' });
+    } finally {
+      dispatch({ type: 'setAiFilling', value: false });
+    }
+  };
 
   const onGenerate = async () => {
     dispatch({ type: 'generating' });
@@ -339,7 +414,8 @@ export function TavernExportPanel() {
       downloadBlob(blob, safeFileName(state.fields.name || 'tavern-card', 'png'));
       dispatch({ type: 'done' });
     } catch (error) {
-      dispatch({ type: 'setError', message: error instanceof Error ? error.message : '导出失败' });
+      dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '导出失败' });
+      dispatch({ type: 'setAiFilling', value: false });
     }
   };
 
@@ -375,6 +451,40 @@ export function TavernExportPanel() {
             <div className="text-sm text-gray-700">
               已识别数据卡类型：<span className="font-semibold text-pink-700">{state.template}</span>
             </div>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-pink-700">AI 补全文本字段（可选）</div>
+                <div className="mt-1 text-xs text-gray-600">
+                  会把 name/description/personality/scenario/tags 等内容发送到生成接口，返回建议的 scenario/first_mes/mes_example。
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="rounded-xl border border-pink-200 bg-pink-100 px-4 py-2 text-sm font-semibold text-pink-800 hover:bg-pink-200 disabled:opacity-50"
+                disabled={state.step === 'generating' || state.aiFilling}
+                onClick={onAiFill}
+              >
+                {state.aiFilling ? 'AI 生成中…' : 'AI 生成开场白/对话样例'}
+              </button>
+            </div>
+
+            <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+              <input
+                type="checkbox"
+                checked={state.aiOverwriteFields}
+                onChange={(e) => dispatch({ type: 'setAiOverwriteFields', value: e.target.checked })}
+                disabled={state.step === 'generating' || state.aiFilling}
+                className="mt-1"
+              />
+              <div className="min-w-0">
+                <div className="text-sm text-gray-900">覆盖已填写的字段</div>
+                <div className="mt-1 text-xs text-gray-600">默认仅填充空字段；勾选后会覆盖你手动填写的内容。</div>
+              </div>
+            </label>
           </div>
 
           <div className="input-group mt-4">

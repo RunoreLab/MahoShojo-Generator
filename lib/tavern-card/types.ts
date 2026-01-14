@@ -98,6 +98,18 @@ export interface TavernParseResult {
   selected: TavernCardCandidate;
 }
 
+export interface TavernAiAttachment {
+  name: string;
+  type: string;
+  content: string;
+  truncated?: boolean;
+}
+
+export interface TavernAiAttachmentBuildResult {
+  attachment: TavernAiAttachment;
+  warnings: string[];
+}
+
 export interface TavernWriteOptions {
   overwriteExisting?: boolean;
   includeCharaChunk?: boolean;
@@ -138,4 +150,3 @@ export interface TavernCardV3 {
   fav?: boolean;
   tags?: string[];
 }
-
