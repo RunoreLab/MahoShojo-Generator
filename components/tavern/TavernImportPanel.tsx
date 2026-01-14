@@ -1,11 +1,15 @@
 import { useRouter } from 'next/router';
 import { useMemo, useReducer, useState } from 'react';
 
+import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { ErrorMessage } from '@/components/ErrorMessage';
-import { dataCardApi } from '@/lib/auth';
+import SaveToCloudButton from '@/components/SaveToCloudButton';
+import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { createBlankDataCard, type DataCardTemplate } from '@/lib/data-card-converter';
+import { formatKilobytes, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
 import {
+  buildTavernCloudSavePayload,
   buildTavernAiAttachment,
   normalizeTavernCard,
   parseTavernCardFromPngFile,
@@ -18,7 +22,6 @@ import type { CanshouData, GeneralCharacterData, MagicalGirlData } from '@/lib/s
 import { useAuth } from '@/lib/useAuth';
 
 import { TavernCardPreview } from './TavernCardPreview';
-import { TavernCloudSaveModal } from './TavernCloudSaveModal';
 
 type ImportStep = 'idle' | 'parsing' | 'parsed' | 'converting' | 'done' | 'error';
 type ConvertMode = 'rules' | 'ai';
@@ -186,10 +189,9 @@ type WithTavern<T> = T & { _tavern: TavernAttachment };
 export function TavernImportPanel() {
   const router = useRouter();
   const [state, dispatch] = useReducer(reducer, initialState);
-  const { user, isAuthenticated } = useAuth();
-  const [cloudSaveOpen, setCloudSaveOpen] = useState(false);
-  const [cloudSaveError, setCloudSaveError] = useState<string | null>(null);
-  const [cloudSaving, setCloudSaving] = useState(false);
+  const { user } = useAuth();
+  const [cloudPreset, setCloudPreset] = useState<TavernCloudSavePreset>('standard');
+  const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
   const selectedCandidate = useMemo(() => {
     if (!state.parseResult) return null;
@@ -265,6 +267,10 @@ export function TavernImportPanel() {
     const tavernPayload: TavernAttachment = state.keepRaw ? { meta, raw: selectedCandidate.parsed } : { meta };
 
     if (state.convertMode === 'ai') {
+      if (userProviderConfig && userProviderConfig.providerId !== 'system' && !userProviderConfig.apiKey?.trim()) {
+        throw new Error('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
+      }
+
       const schema = state.targetTemplate === 'magical-girl' ? 'magical-girl' : state.targetTemplate === 'canshou' ? 'canshou' : 'general';
 
       const prompt =
@@ -292,23 +298,34 @@ export function TavernImportPanel() {
               ].join('\n');
 
       const aiAttachment = aiAttachmentPreview ?? buildTavernAiAttachment(selectedNormalized);
+      const customProviderPayload = buildCustomProviderPayload(userProviderConfig);
+      const requestBody: Record<string, unknown> = {
+        schema,
+        prompt,
+        language: 'zh-CN',
+        attachments: [
+          {
+            name: aiAttachment.attachment.name,
+            type: aiAttachment.attachment.type,
+            content: aiAttachment.attachment.content,
+            ...(aiAttachment.attachment.truncated ? { truncated: true } : {}),
+          },
+        ],
+        ...(customProviderPayload
+          ? {
+              customProvider: {
+                providerId: customProviderPayload.providerId,
+                modelId: customProviderPayload.modelId,
+                apiKey: customProviderPayload.apiKey.trim(),
+              },
+            }
+          : {}),
+      };
 
       const response = await fetch('/api/generate-free', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          schema,
-          prompt,
-          language: 'zh-CN',
-          attachments: [
-            {
-              name: aiAttachment.attachment.name,
-              type: aiAttachment.attachment.type,
-              content: aiAttachment.attachment.content,
-              ...(aiAttachment.attachment.truncated ? { truncated: true } : {}),
-            },
-          ],
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -407,57 +424,6 @@ export function TavernImportPanel() {
       downloadBlob(blob, safeFileName(selectedNormalized.name, 'json'));
     } catch (error) {
       dispatch({ type: 'parseError', message: error instanceof Error ? error.message : '转换失败' });
-    }
-  };
-
-  const onOpenCloudSave = async () => {
-    if (!isAuthenticated) {
-      alert('请先登录后再保存到云端（档案馆）');
-      return;
-    }
-
-    try {
-      const result = await ensureConverted();
-      if (!result) return;
-      setCloudSaveError(null);
-      setCloudSaveOpen(true);
-    } catch (error) {
-      dispatch({ type: 'parseError', message: error instanceof Error ? error.message : '转换失败' });
-    }
-  };
-
-  const onConfirmCloudSave = async (payload: {
-    preset: TavernCloudSavePreset;
-    name: string;
-    description: string;
-    isPublic: number;
-    data: unknown;
-    estimatedBytes: number;
-  }) => {
-    if (!isAuthenticated || !user) {
-      setCloudSaveError('未登录');
-      return;
-    }
-
-    setCloudSaving(true);
-    setCloudSaveError(null);
-    try {
-      const result = await dataCardApi.createCard('character', payload.name, payload.description, payload.data, payload.isPublic);
-      const redirect = (result as any)?.redirect;
-      if ((result as any)?.error === 'SENSITIVE_WORD_DETECTED' || redirect === '/arrested') {
-        void router.push('/arrested');
-        return;
-      }
-      if ((result as any)?.success) {
-        alert('已保存到档案馆');
-        setCloudSaveOpen(false);
-        return;
-      }
-      setCloudSaveError((result as any)?.error || '保存失败');
-    } catch (error) {
-      setCloudSaveError(error instanceof Error ? error.message : '保存失败，请稍后重试');
-    } finally {
-      setCloudSaving(false);
     }
   };
 
@@ -601,43 +567,122 @@ export function TavernImportPanel() {
               </div>
             </div>
 
+            {state.convertMode === 'ai' ? (
+              <div className="mt-4 rounded-xl border border-pink-100 bg-white/60 p-3">
+                <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                <div className="mt-2 text-xs text-gray-600">
+                  可选：使用自带 API Key 通常冷却更短；API Key 仅存储于浏览器本地（localStorage），不会上传到服务器。
+                </div>
+              </div>
+            ) : null}
+
             <div className="mt-4 grid gap-2 md:grid-cols-2">
               <button type="button" className="generate-button mb-0" disabled={state.step === 'converting'} onClick={onConvertAndDownload}>
                 下载数据卡 JSON
               </button>
-              <button
-                type="button"
-                className="generate-button mb-0"
-                disabled={state.step === 'converting'}
-                onClick={onOpenCloudSave}
-              >
-                保存到云端（档案馆）
-              </button>
+              <div className="flex flex-col gap-2">
+                <SaveToCloudButton
+                  data={state.outputDataCard}
+                  getData={async () => {
+                    if (!user) throw new Error('请先登录后再保存到云端（档案馆）。');
+                    const result = await ensureConverted();
+                    if (!result) throw new Error('尚未生成可保存的数据卡。');
+                    const built = buildTavernCloudSavePayload(
+                      result.output,
+                      { id: user.id, username: user.username },
+                      cloudPreset
+                    );
+                    if ('error' in built) throw new Error(built.error);
+                    if (built.overLimit) {
+                      throw new Error(
+                        `预计写入大小 ${formatKilobytes(built.estimatedBytes)}KB，超过上限 ${formatKilobytes(MAX_DATA_CARD_BYTES)}KB；请切换到“轻量/最小化”预设后重试。`
+                      );
+                    }
+                    return built.data;
+                  }}
+                  cardType="character"
+                  buttonText="保存到云端（档案馆）"
+                  defaultName={defaultCloudCardName}
+                  defaultDescription={defaultCloudCardDescription}
+                  className="generate-button mb-0"
+                />
+              </div>
             </div>
-            <div className="mt-2 text-xs text-gray-600">
-              保存到云端会在写入前预估 300KB 限制并提供降级选项（会强制移除 <code>_tavern.raw</code>）。
+
+            <div className="mt-3 rounded-xl border border-pink-100 bg-white/60 p-3">
+              <div className="text-sm font-semibold text-pink-700">云端写入体积与降级策略（300KB）</div>
+              <div className="mt-2 grid gap-2 md:grid-cols-3">
+                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                  <input
+                    type="radio"
+                    name="tavern-cloud-save-preset"
+                    className="mt-1"
+                    checked={cloudPreset === 'standard'}
+                    onChange={() => setCloudPreset('standard')}
+                    disabled={state.step === 'converting'}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm text-gray-900">标准</div>
+                    <div className="mt-1 text-xs text-gray-600">强制移除 `_tavern.raw`，其余字段保持原样。</div>
+                  </div>
+                </label>
+
+                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                  <input
+                    type="radio"
+                    name="tavern-cloud-save-preset"
+                    className="mt-1"
+                    checked={cloudPreset === 'light'}
+                    onChange={() => setCloudPreset('light')}
+                    disabled={state.step === 'converting'}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm text-gray-900">轻量</div>
+                    <div className="mt-1 text-xs text-gray-600">截断常见大字段（content/description/mes_example 等）。</div>
+                  </div>
+                </label>
+
+                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                  <input
+                    type="radio"
+                    name="tavern-cloud-save-preset"
+                    className="mt-1"
+                    checked={cloudPreset === 'minimal'}
+                    onChange={() => setCloudPreset('minimal')}
+                    disabled={state.step === 'converting'}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm text-gray-900">最小化</div>
+                    <div className="mt-1 text-xs text-gray-600">进一步精简 `_tavern.meta`，并移除 mes_example。</div>
+                  </div>
+                </label>
+              </div>
+
+              {user && state.outputDataCard ? (
+                (() => {
+                  const built = buildTavernCloudSavePayload(state.outputDataCard, { id: user.id, username: user.username }, cloudPreset);
+                  if ('error' in built) {
+                    return <div className="mt-2 text-xs text-red-700">无法估算写入大小：{built.error}</div>;
+                  }
+                  return (
+                    <div className="mt-2 text-xs text-gray-700">
+                      预计写入大小：
+                      <span className={built.overLimit ? 'font-semibold text-red-700' : 'font-semibold text-green-700'}>
+                        {formatKilobytes(built.estimatedBytes)}KB
+                      </span>{' '}
+                      / {formatKilobytes(MAX_DATA_CARD_BYTES)}KB
+                      {built.warnings.length > 0 ? <div className="mt-1 text-amber-700">{built.warnings.join('；')}</div> : null}
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="mt-2 text-xs text-gray-600">提示：点击上方按钮生成输出数据卡后，会在此处展示预计写入大小。</div>
+              )}
             </div>
 
             {state.step === 'done' ? <div className="mt-2 text-xs text-green-700">已生成并开始下载。</div> : null}
           </div>
         </>
-      ) : null}
-
-      {state.outputDataCard ? (
-        <TavernCloudSaveModal
-          isOpen={cloudSaveOpen}
-          onClose={() => {
-            if (cloudSaving) return;
-            setCloudSaveOpen(false);
-          }}
-          user={user}
-          baseDataCard={state.outputDataCard}
-          defaultName={defaultCloudCardName}
-          defaultDescription={defaultCloudCardDescription}
-          saving={cloudSaving}
-          error={cloudSaveError}
-          onSave={onConfirmCloudSave}
-        />
       ) : null}
     </div>
   );

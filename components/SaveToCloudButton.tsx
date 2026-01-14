@@ -9,8 +9,12 @@ import { config } from '@/lib/config';
 
 interface SaveToCloudButtonProps {
   data: any;
+  getData?: () => Promise<any>;
   cardType?: 'character' | 'scenario' | 'history';
   buttonText?: string;
+  defaultName?: string;
+  defaultDescription?: string;
+  defaultIsPublic?: number;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -26,8 +30,12 @@ const isScenarioData = (data: any): boolean => {
 
 export default function SaveToCloudButton({
   data,
+  getData,
   cardType,
   buttonText = "保存到云端",
+  defaultName,
+  defaultDescription,
+  defaultIsPublic = 0,
   className = "generate-button",
   style = {}
 }: SaveToCloudButtonProps) {
@@ -39,6 +47,8 @@ export default function SaveToCloudButton({
   const [isPublic, setIsPublic] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [preparedData, setPreparedData] = useState<any>(null);
   const [userDataCards, setUserDataCards] = useState<any[]>([]);
   const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
   const [showReplaceModal, setShowReplaceModal] = useState(false);
@@ -66,43 +76,67 @@ export default function SaveToCloudButton({
     }
   };
 
-  const handleSaveClick = () => {
+  const resolveData = async (): Promise<any | null> => {
+    if (getData) {
+      setIsPreparing(true);
+      try {
+        const next = await getData();
+        if (!next) return null;
+        setPreparedData(next);
+        return next;
+      } finally {
+        setIsPreparing(false);
+      }
+    }
+
+    if (!data) return null;
+    setPreparedData(data);
+    return data;
+  };
+
+  const handleSaveClick = async () => {
     if (!isAuthenticated) {
       alert('请先登录后再保存到云端');
       return;
     }
     
     // 如果没有数据，则不显示模态框
-    if (!data) {
+    const resolvedData = await resolveData().catch((error) => {
+      console.error("准备保存数据失败:", error);
+      alert(error instanceof Error ? error.message : '准备保存数据失败。');
+      return null;
+    });
+    if (!resolvedData) {
         alert('没有可保存的数据。');
         return;
     }
 
     // 根据数据类型生成默认名称和描述
-    const inferredType = isScenarioData(data) ? 'scenario' : 'character';
+    const inferredType = isScenarioData(resolvedData) ? 'scenario' : 'character';
     const type = cardType ?? inferredType;
-    const defaultName =
+    const inferredName =
       type === 'history'
-        ? (data?.title || data?.name || '叙事历史')
+        ? (resolvedData?.title || resolvedData?.name || '叙事历史')
         : type === 'scenario'
-          ? (data?.title || data?.name || '')
-          : (data?.codename || data?.name || '');
-    const defaultDescription =
+          ? (resolvedData?.title || resolvedData?.name || '')
+          : (resolvedData?.codename || resolvedData?.name || '');
+    const inferredDescription =
       type === 'history' ? '叙事历史数据卡' : `${type === 'character' ? '角色' : '情景'}数据卡`;
 
-    setCardName(defaultName);
-    setCardDescription(defaultDescription);
-    setIsPublic(0);
+    setCardName((defaultName && defaultName.trim()) ? defaultName : inferredName);
+    setCardDescription((defaultDescription && defaultDescription.trim()) ? defaultDescription : inferredDescription);
+    setIsPublic(defaultIsPublic);
     setSaveError(null);
     setShowSaveModal(true);
   };
 
   const handleReplaceConfirm = async (cardId: string, opts: { name?: string; description?: string; isPublic?: number }) => {
-    if (!data) return;
+    const workingData = preparedData ?? data;
+    if (!workingData) return;
     setIsReplacing(true);
     setSaveError(null);
     try {
-      const finalData = { ...data };
+      const finalData = { ...workingData };
       // 敏感词检查
       const textToCheck = `${opts.name || ''} ${opts.description || ''} ${JSON.stringify(finalData)}`;
       const sensitiveWordResult = await quickCheck(textToCheck);
@@ -142,10 +176,15 @@ export default function SaveToCloudButton({
     setSaveError(null);
 
     try {
+      const workingData = preparedData ?? data;
+      if (!workingData) {
+        setSaveError('没有可保存的数据。');
+        return;
+      }
       // 修正：直接使用 props 传入的 data 对象。
       // 该对象由后端 API 生成，已包含了正确的签名状态。
       // 本组件不再负责任何签名相关的逻辑判断。
-      const finalData = { ...data };
+      const finalData = { ...workingData };
       
       // 前端敏感词检查
       const type = cardType ?? (isScenarioData(finalData) ? 'scenario' : 'character');
@@ -187,15 +226,18 @@ export default function SaveToCloudButton({
     }
   };
 
+  const effectiveData = preparedData ?? data;
+  const canOperate = Boolean(data || getData);
+
   return (
     <>
       <button
-        onClick={handleSaveClick}
+        onClick={() => void handleSaveClick()}
         className={className}
         style={style}
-        disabled={!data} // 如果没有数据则禁用
+        disabled={!canOperate || isPreparing} // 如果没有数据且无法动态准备，则禁用
       >
-        {buttonText}
+        {isPreparing ? '准备中...' : buttonText}
       </button>
       <button
         onClick={() => {
@@ -203,15 +245,22 @@ export default function SaveToCloudButton({
             alert('请先登录后再替换到云端');
             return;
           }
-          if (!data) {
-            alert('没有可替换的数据。');
-            return;
-          }
-          setShowReplaceModal(true);
+          void (async () => {
+            const resolvedData = await resolveData().catch((error) => {
+              console.error("准备替换数据失败:", error);
+              alert(error instanceof Error ? error.message : '准备替换数据失败。');
+              return null;
+            });
+            if (!resolvedData) {
+              alert('没有可替换的数据。');
+              return;
+            }
+            setShowReplaceModal(true);
+          })();
         }}
         className={`${className} ml-2`}
         style={{ ...style, backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #f97316)' }}
-        disabled={!data}
+        disabled={!canOperate || isPreparing}
       >
         替换已有
       </button>
@@ -236,7 +285,7 @@ export default function SaveToCloudButton({
         isOpen={showReplaceModal}
         onClose={() => setShowReplaceModal(false)}
         cards={userDataCards}
-        targetType={cardType ?? (isScenarioData(data) ? 'scenario' : 'character')}
+        targetType={cardType ?? (isScenarioData(effectiveData) ? 'scenario' : 'character')}
         onConfirm={handleReplaceConfirm}
         isSaving={isReplacing}
       />

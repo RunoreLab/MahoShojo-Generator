@@ -1,7 +1,10 @@
 import { useRouter } from 'next/router';
 import { useMemo, useReducer, useState } from 'react';
 
+import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import BattleDataModal from '@/components/BattleDataModal';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
 import {
@@ -16,14 +19,13 @@ import {
 } from '@/lib/tavern-card';
 import { useAuth } from '@/lib/useAuth';
 
-import { TavernCloudCardPickerModal, type TavernCloudCardRow } from './TavernCloudCardPickerModal';
-
 type ExportStep = 'idle' | 'ready' | 'generating' | 'done' | 'error';
 
 type ScenarioAttachment = TavernScenarioFragment & {
   id: string;
   fileName: string;
   source: 'cloud' | 'local';
+  sourceDataCardId?: string;
 };
 
 interface ExportFields {
@@ -361,8 +363,10 @@ export function TavernExportPanel() {
   const router = useRouter();
   const [state, dispatch] = useReducer(reducer, initialState);
   const { isAuthenticated } = useAuth();
-  const [cloudPickerOpen, setCloudPickerOpen] = useState(false);
-  const [cloudScenarioPickerOpen, setCloudScenarioPickerOpen] = useState(false);
+  const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
+  const [showCharacterModal, setShowCharacterModal] = useState(false);
+  const [showScenarioModal, setShowScenarioModal] = useState(false);
+  const [isMatching, setIsMatching] = useState<'character' | 'scenario' | null>(null);
 
   const onDataCardSelected = async (file: File | null) => {
     if (!file) return;
@@ -377,40 +381,133 @@ export function TavernExportPanel() {
     }
   };
 
-  const onCloudCardPicked = (card: TavernCloudCardRow) => {
+  const onCloudCardPicked = (payload: any) => {
     try {
-      const json = JSON.parse(card.data) as unknown;
-      const template = inferTemplate(json);
-      const fields = buildDefaultFieldsFromDataCard(template, json);
-      dispatch({ type: 'setDataCard', data: json, template, fields });
-      setCloudPickerOpen(false);
+      const template = inferTemplate(payload);
+      const fields = buildDefaultFieldsFromDataCard(template, payload);
+      dispatch({ type: 'setDataCard', data: payload, template, fields });
+      setShowCharacterModal(false);
     } catch (error) {
       dispatch({ type: 'setInlineError', message: error instanceof Error ? `解析档案馆数据卡失败：${error.message}` : '解析档案馆数据卡失败' });
     }
   };
 
-  const onCloudScenarioPicked = (card: TavernCloudCardRow) => {
+  const onToggleScenarioPicked = (payload: any, nextSelected: boolean) => {
     try {
-      const json = JSON.parse(card.data) as unknown;
-      const fragment = buildTavernScenarioFragment(json, { maxChars: 24_000 });
-      if (!fragment) {
-        throw new Error('该数据卡无法识别为情景卡（支持：通用情景/情景问卷）');
+      const sourceId = typeof payload?._cardId === 'string' ? payload._cardId : '';
+      if (!sourceId) return;
+
+      if (!nextSelected) {
+        for (const item of state.scenarios) {
+          if (item.source === 'cloud' && item.sourceDataCardId === sourceId) {
+            dispatch({ type: 'removeScenario', id: item.id });
+          }
+        }
+        return;
       }
+
+      if (state.scenarios.some((item) => item.source === 'cloud' && item.sourceDataCardId === sourceId)) {
+        return;
+      }
+
+      const fragment = buildTavernScenarioFragment(payload, { maxChars: 24_000 });
+      if (!fragment) throw new Error('该数据卡无法识别为情景卡（支持：通用情景/情景问卷）');
+
+      const cardName = typeof payload?._cardName === 'string' ? payload._cardName : fragment.title;
+
       dispatch({
         type: 'addScenario',
         scenario: {
           ...fragment,
           id: createId('scenario-cloud'),
-          fileName: card.name,
+          fileName: cardName,
           source: 'cloud',
+          sourceDataCardId: sourceId,
         },
       });
-      setCloudScenarioPickerOpen(false);
     } catch (error) {
       dispatch({
         type: 'setInlineError',
         message: error instanceof Error ? `载入情景失败：${error.message}` : '载入情景失败',
       });
+    }
+  };
+
+  const selectedScenarioCardIds = useMemo(() => {
+    return state.scenarios
+      .map((item) => (item.source === 'cloud' ? item.sourceDataCardId : null))
+      .filter((id): id is string => typeof id === 'string' && Boolean(id));
+  }, [state.scenarios]);
+
+  const onRandomMatchCharacter = async () => {
+    if (isMatching !== null) return;
+    setIsMatching('character');
+    dispatch({ type: 'setInlineError', message: null });
+
+    try {
+      const response = await fetch('/api/random-public-card?type=character');
+      const result = await response.json().catch(() => null as any);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || '无法获取随机数据');
+      }
+
+      const card = result.card;
+      const json = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
+      const payload = {
+        ...(json && typeof json === 'object' ? json : {}),
+        _cardId: card.id,
+        _cardName: card.name,
+        _cardDescription: card.description || '',
+        _isPublic: card.is_public,
+        _updatedAt: card.updated_at,
+        _createdAt: card.created_at,
+        _author: card.username || '未知',
+        _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
+        _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
+        _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
+      };
+
+      onCloudCardPicked(payload);
+    } catch (error) {
+      dispatch({ type: 'setInlineError', message: error instanceof Error ? `随机匹配失败：${error.message}` : '随机匹配失败' });
+    } finally {
+      setIsMatching(null);
+    }
+  };
+
+  const onRandomMatchScenario = async () => {
+    if (isMatching !== null) return;
+    setIsMatching('scenario');
+    dispatch({ type: 'setInlineError', message: null });
+
+    try {
+      const response = await fetch('/api/random-public-card?type=scenario');
+      const result = await response.json().catch(() => null as any);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || '无法获取随机数据');
+      }
+
+      const card = result.card;
+      const json = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
+      const payload = {
+        ...(json && typeof json === 'object' ? json : {}),
+        _cardId: card.id,
+        _cardName: card.name,
+        _cardDescription: card.description || '',
+        _isPublic: card.is_public,
+        _updatedAt: card.updated_at,
+        _createdAt: card.created_at,
+        _author: card.username || '未知',
+        _likeCount: typeof card.like_count === 'number' ? card.like_count : undefined,
+        _favoriteCount: typeof card.favorite_count === 'number' ? card.favorite_count : undefined,
+        _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
+      };
+
+      onToggleScenarioPicked(payload, true);
+    } catch (error) {
+      dispatch({ type: 'setInlineError', message: error instanceof Error ? `随机匹配失败：${error.message}` : '随机匹配失败' });
+    } finally {
+      setIsMatching(null);
     }
   };
 
@@ -443,17 +540,33 @@ export function TavernExportPanel() {
     };
 
     try {
+      if (userProviderConfig && userProviderConfig.providerId !== 'system' && !userProviderConfig.apiKey?.trim()) {
+        throw new Error('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
+      }
+
+      const customProviderPayload = buildCustomProviderPayload(userProviderConfig);
+      const requestBody: Record<string, unknown> = {
+        name: (state.fields.name || '').trim() || '未命名角色',
+        description: truncate(state.fields.description || '', 8_000),
+        personality: truncate(state.fields.personality || '', 8_000),
+        scenario: truncate(state.fields.scenario || '', 6_000),
+        tags: tagsArray,
+        language: 'zh-CN',
+        ...(customProviderPayload
+          ? {
+              customProvider: {
+                providerId: customProviderPayload.providerId,
+                modelId: customProviderPayload.modelId,
+                apiKey: customProviderPayload.apiKey.trim(),
+              },
+            }
+          : {}),
+      };
+
       const response = await fetch('/api/tavern/ai-fill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: (state.fields.name || '').trim() || '未命名角色',
-          description: truncate(state.fields.description || '', 8_000),
-          personality: truncate(state.fields.personality || '', 8_000),
-          scenario: truncate(state.fields.scenario || '', 6_000),
-          tags: tagsArray,
-          language: 'zh-CN',
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -576,18 +689,26 @@ export function TavernExportPanel() {
           disabled={state.step === 'generating'}
           onChange={(event) => onDataCardSelected(event.target.files?.[0] ?? null)}
         />
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex flex-col gap-2 md:flex-row md:items-center">
           <button
             type="button"
-            className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
-              isAuthenticated ? 'border-pink-200 bg-pink-50 text-pink-800 hover:bg-pink-100' : 'border-gray-200 bg-gray-50 text-gray-400'
-            }`}
-            disabled={!isAuthenticated || state.step === 'generating'}
-            onClick={() => setCloudPickerOpen(true)}
+            className="rounded-xl border border-pink-200 bg-pink-50 px-4 py-2 text-sm font-semibold text-pink-800 transition-colors hover:bg-pink-100 disabled:opacity-50"
+            disabled={state.step === 'generating'}
+            onClick={() => setShowCharacterModal(true)}
           >
-            从档案馆选择
+            浏览在线角色库
           </button>
-          <div className="text-xs text-gray-600">（需要先登录）</div>
+          <button
+            type="button"
+            className="rounded-xl border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-semibold text-purple-800 transition-colors hover:bg-purple-100 disabled:opacity-50"
+            disabled={state.step === 'generating' || isMatching !== null}
+            onClick={() => void onRandomMatchCharacter()}
+          >
+            {isMatching === 'character' ? '匹配中...' : '随机匹配角色'}
+          </button>
+          <div className="text-xs text-gray-600 md:ml-auto">
+            {isAuthenticated ? '已登录：可访问我的/收藏/私有数据卡。' : '未登录：仅可浏览公开数据卡；登录后可访问我的/收藏。'}
+          </div>
         </div>
       </div>
 
@@ -633,6 +754,13 @@ export function TavernExportPanel() {
                 <div className="mt-1 text-xs text-gray-600">默认仅填充空字段；勾选后会覆盖你手动填写的内容。</div>
               </div>
             </label>
+
+            <details className="mt-3 rounded-xl border border-pink-100 bg-white/60 p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-pink-700">自定义 AI（可选）</summary>
+              <div className="mt-3">
+                <AiProviderSelector onConfigChange={setUserProviderConfig} />
+              </div>
+            </details>
           </div>
 
           <div className="input-group mt-4">
@@ -827,13 +955,20 @@ export function TavernExportPanel() {
               <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
                 <button
                   type="button"
-                  className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
-                    isAuthenticated ? 'border-pink-200 bg-pink-50 text-pink-800 hover:bg-pink-100' : 'border-gray-200 bg-gray-50 text-gray-400'
-                  }`}
-                  disabled={!isAuthenticated || state.step === 'generating'}
-                  onClick={() => setCloudScenarioPickerOpen(true)}
+                  className="rounded-xl border border-pink-200 bg-pink-50 px-4 py-2 text-sm font-semibold text-pink-800 transition-colors hover:bg-pink-100 disabled:opacity-50"
+                  disabled={state.step === 'generating'}
+                  onClick={() => setShowScenarioModal(true)}
                 >
-                  从档案馆选择情景
+                  浏览在线情景库
+                </button>
+
+                <button
+                  type="button"
+                  className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-800 transition-colors hover:bg-teal-100 disabled:opacity-50"
+                  disabled={state.step === 'generating' || isMatching !== null}
+                  onClick={() => void onRandomMatchScenario()}
+                >
+                  {isMatching === 'scenario' ? '匹配中...' : '随机匹配情景'}
                 </button>
 
                 <label className="cursor-pointer rounded-xl border border-pink-200 bg-white/70 px-4 py-2 text-sm font-semibold text-pink-800 hover:bg-pink-50">
@@ -948,7 +1083,7 @@ export function TavernExportPanel() {
                 </div>
               ) : (
                 <div className="mt-3 text-xs text-gray-600">
-                  未添加附加情景：你可以从档案馆选择情景卡，或上传任意情景 JSON（通用情景/情景问卷）。
+                  未添加附加情景：你可以从在线情景库选择情景卡，或上传任意情景 JSON（通用情景/情景问卷）。
                 </div>
               )}
             </div>
@@ -1001,15 +1136,22 @@ export function TavernExportPanel() {
                     onChange={(e) => dispatch({ type: 'setField', key: 'talkativeness', value: Number(e.target.value) })}
                     disabled={state.step === 'generating'}
                   />
+                  <div className="mt-1 text-xs text-gray-600">
+                    SillyTavern 常用的“话多程度”参数。参考值：0.3（更简洁）/ 0.5（中性，默认）/ 0.8（更健谈）。不确定就保持 0.5。
+                  </div>
                 </div>
-                <label className="flex items-center gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
                   <input
                     type="checkbox"
                     checked={state.fields.fav}
                     onChange={(e) => dispatch({ type: 'setField', key: 'fav', value: e.target.checked })}
                     disabled={state.step === 'generating'}
+                    className="mt-1"
                   />
-                  <span className="text-sm text-gray-900">fav</span>
+                  <div className="min-w-0">
+                    <div className="text-sm text-gray-900">fav（收藏标记）</div>
+                    <div className="mt-1 text-xs text-gray-600">通常仅影响 SillyTavern 侧的排序/显示，不影响角色设定；默认不勾选。</div>
+                  </div>
                 </label>
               </div>
             </div>
@@ -1051,20 +1193,23 @@ export function TavernExportPanel() {
         </>
       ) : null}
 
-      <TavernCloudCardPickerModal
-        isOpen={cloudPickerOpen}
-        onClose={() => setCloudPickerOpen(false)}
-        isAuthenticated={isAuthenticated}
-        onPick={onCloudCardPicked}
-        typeFilter="character"
+      <BattleDataModal
+        isOpen={showCharacterModal}
+        onClose={() => setShowCharacterModal(false)}
+        onSelectCard={onCloudCardPicked}
+        selectedType="character"
+        titleOverride="从在线数据库选择角色数据卡"
       />
 
-      <TavernCloudCardPickerModal
-        isOpen={cloudScenarioPickerOpen}
-        onClose={() => setCloudScenarioPickerOpen(false)}
-        isAuthenticated={isAuthenticated}
-        onPick={onCloudScenarioPicked}
-        typeFilter="scenario"
+      <BattleDataModal
+        isOpen={showScenarioModal}
+        onClose={() => setShowScenarioModal(false)}
+        onToggleCard={onToggleScenarioPicked}
+        selectedType="scenario"
+        selectionMode="multi"
+        selectedCardIds={selectedScenarioCardIds}
+        maxSelected={10}
+        titleOverride="从在线数据库选择情景数据卡（可多选）"
       />
     </div>
   );

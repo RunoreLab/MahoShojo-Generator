@@ -1,9 +1,12 @@
 import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
-import { generateWithAI, type GenerationConfig } from '@/lib/ai';
+import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
+import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
+import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
+import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { getLogger } from '@/lib/logger';
 
 const log = getLogger('api-tavern-ai-fill');
@@ -21,6 +24,7 @@ const RequestBodySchema = z.object({
   scenario: z.string().max(20_000).optional().default(''),
   tags: z.array(z.string()).max(50).optional().default([]),
   language: z.string().optional().default('zh-CN'),
+  customProvider: CustomProviderSchema.optional(),
 });
 
 const TavernAiFillSchema = z.object({
@@ -50,7 +54,57 @@ export default async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    const { name, description, personality, scenario, tags, language } = parsedBody.data;
+    const { name, description, personality, scenario, tags, language, customProvider: customProviderPayload } = parsedBody.data;
+
+    // --- 自定义模型配置解析（对齐其他生成接口）---
+    let customProviderOverride: AIProvider | null = null;
+    let customProviderId: string | null = null;
+    let customModelOverride: string | undefined;
+
+    if (customProviderPayload) {
+      const parsedResult = CustomProviderSchema.safeParse(customProviderPayload);
+      if (!parsedResult.success) {
+        log.warn('自定义 AI 供应商配置校验失败', { providerId: (customProviderPayload as any)?.providerId });
+        return new Response(JSON.stringify({ error: '自定义 AI 供应商配置无效' }), { status: 400 });
+      }
+
+      const parsed = parsedResult.data;
+      customProviderId = parsed.providerId;
+      const providerConfig = AI_PROVIDER_CATALOG.find((item) => item.id === parsed.providerId);
+      if (!providerConfig) {
+        return new Response(JSON.stringify({ error: '未知的模型供应商 ID' }), { status: 400 });
+      }
+
+      const modelConfig = providerConfig.models.find((model) => model.value === parsed.modelId);
+      if (!modelConfig) {
+        return new Response(JSON.stringify({ error: '未知的模型 ID' }), { status: 400 });
+      }
+
+      const sanitizedApiKey = parsed.apiKey.trim();
+      if (!sanitizedApiKey && providerConfig.id !== 'system') {
+        return new Response(JSON.stringify({ error: 'API Key 不能为空' }), { status: 400 });
+      }
+
+      const sanitizedBaseUrl = providerConfig.baseUrl?.trim() ?? '';
+      if (!sanitizedBaseUrl) {
+        customModelOverride = modelConfig.value;
+        log.info('检测到 baseUrl 为空的自定义供应商，改用系统默认通道，仅覆盖模型参数', {
+          providerId: providerConfig.id,
+          model: modelConfig.value,
+        });
+      } else {
+        customProviderOverride = {
+          name: providerConfig.name,
+          apiKey: sanitizedApiKey,
+          baseUrl: sanitizedBaseUrl,
+          model: modelConfig.value,
+          type: providerConfig.type,
+          mode: providerConfig.mode || 'auto',
+          retryCount: 1,
+          skipProbability: 0,
+        };
+      }
+    }
 
     const combinedForSafety = JSON.stringify({ name, description, personality, scenario, tags });
     const safetyText =
@@ -104,9 +158,21 @@ ${formatReferenceAttachmentsForPrompt(input.attachments)}
         schema: TavernAiFillSchema,
         taskName: '酒馆导出字段 AI 补全',
         maxOutputTokens: 2048,
+        ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       };
 
-    const result = await generateWithAI({ name, language, attachments: [attachment] }, generationConfig);
+    const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
+    const providerOptions: GenerateWithAIOptions | undefined =
+      customProviderOverride || shouldDisablePolling
+        ? {
+            ...(customProviderOverride ? { providerOverride: customProviderOverride } : {}),
+            ...(shouldDisablePolling
+              ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM }
+              : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
+          }
+        : undefined;
+
+    const result = await generateWithAI({ name, language, attachments: [attachment] }, generationConfig, providerOptions);
 
     return new Response(JSON.stringify(result), {
       status: 200,

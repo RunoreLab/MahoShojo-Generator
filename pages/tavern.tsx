@@ -32,6 +32,28 @@ export default function TavernPage() {
               SillyTavern 角色卡（PNG 内嵌 JSON）导入/导出工具
             </p>
 
+            <div className="mt-4 grid gap-2 md:grid-cols-2">
+              <a
+                href="https://github.com/SillyTavern/SillyTavern"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-xl border border-pink-200 bg-white/70 px-4 py-3 text-center text-sm font-semibold text-pink-700 hover:bg-pink-50"
+              >
+                打开 SillyTavern GitHub（下载/更新）
+              </a>
+              <a
+                href="https://docs.sillytavern.app/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-xl border border-pink-200 bg-white/70 px-4 py-3 text-center text-sm font-semibold text-pink-700 hover:bg-pink-50"
+              >
+                打开 SillyTavern 文档（使用说明）
+              </a>
+            </div>
+            <div className="mt-2 text-center text-xs text-gray-600">
+              提示：本页默认只在浏览器本地解析/写入 PNG 元数据；只有选择 AI 相关功能时才会发起网络请求。
+            </div>
+
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button
                 type="button"
