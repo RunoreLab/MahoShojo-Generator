@@ -19,3 +19,4 @@ export { parseTavernCandidates, selectBestTavernCandidate, parseTavernCardFromPn
 export { normalizeTavernCard } from './normalize';
 export { createTavernV3Card, writeTavernCardToPngBytes, getPlaceholderPngBytes } from './v3';
 export { buildTavernAiAttachment } from './ai';
+export { recommendTavernExportFields } from './recommend';

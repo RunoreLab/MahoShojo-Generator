@@ -4,7 +4,7 @@ import { useMemo, useReducer } from 'react';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
-import { createTavernV3Card, getPlaceholderPngBytes, writeTavernCardToPngBytes } from '@/lib/tavern-card';
+import { createTavernV3Card, getPlaceholderPngBytes, recommendTavernExportFields, writeTavernCardToPngBytes } from '@/lib/tavern-card';
 
 type ExportStep = 'idle' | 'ready' | 'generating' | 'done' | 'error';
 
@@ -144,12 +144,16 @@ const readTavernMeta = (card: unknown): Record<string, unknown> | null => {
 const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unknown): ExportFields => {
   const meta = readTavernMeta(card);
   const metaTags = meta ? safeStringArray(meta['tags']) : [];
+  const recommended = recommendTavernExportFields(template, card, metaTags);
+  const recommendedTags = recommended.tags.join(', ');
 
   if (!isRecord(card)) {
     return { ...initialFields };
   }
 
   const fromMeta = (key: string): string => (meta ? safeString(meta[key]) : '');
+  const fromMetaFirstMes = fromMeta('firstMes') || fromMeta('first_mes');
+  const fromMetaMesExample = fromMeta('mesExample') || fromMeta('mes_example');
 
   if (template === 'magical-girl') {
     const codename = safeString(card['codename']) || safeString(card['name']) || '未命名角色';
@@ -227,9 +231,9 @@ const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unkno
       description: fromMeta('description') || descParts.filter(Boolean).join('\n\n'),
       personality,
       scenario: fromMeta('scenario'),
-      firstMes: fromMeta('firstMes') || fromMeta('first_mes'),
-      mesExample: fromMeta('mesExample') || fromMeta('mes_example'),
-      tags: metaTags.join(', '),
+      firstMes: fromMetaFirstMes || recommended.firstMes || '',
+      mesExample: fromMetaMesExample || recommended.mesExample || '',
+      tags: recommendedTags,
       creatorNotes: fromMeta('creatorNotes') || fromMeta('creator_notes') || DEFAULT_CREATOR_NOTES,
     };
   }
@@ -258,9 +262,9 @@ const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unkno
       description: fromMeta('description') || descParts.filter(Boolean).join('\n\n'),
       personality,
       scenario: fromMeta('scenario'),
-      firstMes: fromMeta('firstMes') || fromMeta('first_mes'),
-      mesExample: fromMeta('mesExample') || fromMeta('mes_example'),
-      tags: metaTags.join(', '),
+      firstMes: fromMetaFirstMes,
+      mesExample: fromMetaMesExample,
+      tags: recommendedTags,
       creatorNotes: fromMeta('creatorNotes') || fromMeta('creator_notes') || DEFAULT_CREATOR_NOTES,
     };
   }
@@ -273,9 +277,9 @@ const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unkno
     description: fromMeta('description') || content,
     personality: fromMeta('personality'),
     scenario: fromMeta('scenario'),
-    firstMes: fromMeta('firstMes') || fromMeta('first_mes'),
-    mesExample: fromMeta('mesExample') || fromMeta('mes_example'),
-    tags: metaTags.join(', '),
+    firstMes: fromMetaFirstMes,
+    mesExample: fromMetaMesExample,
+    tags: recommendedTags,
     creatorNotes: fromMeta('creatorNotes') || fromMeta('creator_notes') || DEFAULT_CREATOR_NOTES,
   };
 };
