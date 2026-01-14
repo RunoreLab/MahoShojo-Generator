@@ -1,5 +1,5 @@
 import { decodeBase64ToBytes } from './base64';
-import { extractPngTextChunks, parsePngChunkRanges } from './png';
+import { extractPngTextChunks } from './png';
 import { isLikelyTavernCard, normalizeTavernCard } from './normalize';
 import type {
   PngTextChunk,
@@ -42,31 +42,6 @@ const createParseError = (
   message: string,
   details?: Record<string, unknown>
 ): TavernParseError => ({ code, message, details });
-
-const detectUnsupportedCompressedTextChunks = (bytes: Uint8Array): string[] => {
-  const warnings: string[] = [];
-  let ranges: ReturnType<typeof parsePngChunkRanges>;
-  try {
-    ranges = parsePngChunkRanges(bytes);
-  } catch {
-    return warnings;
-  }
-
-  for (const range of ranges) {
-    if (range.type === 'zTXt') {
-      warnings.push('检测到 zTXt 压缩文本块：当前版本未启用解压支持，已忽略。');
-      continue;
-    }
-    if (range.type !== 'iTXt') continue;
-    const data = bytes.subarray(range.dataStart, range.dataEnd);
-    const nullIndex = data.indexOf(0);
-    if (nullIndex <= 0) continue;
-    const compressionFlag = data[nullIndex + 1];
-    if (compressionFlag === 1) warnings.push('检测到 iTXt 压缩文本块：当前版本未启用解压支持，已忽略。');
-  }
-
-  return warnings;
-};
 
 export function parseTavernCandidates(chunks: PngTextChunk[]): TavernCardCandidate[] {
   const candidates: TavernCardCandidateWithSize[] = [];
@@ -226,7 +201,6 @@ const buildCandidatesMeta = (chunks: PngTextChunk[]): TavernImportMeta['candidat
 export function parseTavernCardFromPngBytes(bytes: Uint8Array): TavernParseResult | TavernParseError {
   try {
     const warnings: string[] = [];
-    warnings.push(...detectUnsupportedCompressedTextChunks(bytes));
 
     const chunks = extractPngTextChunks(bytes);
     if (chunks.length === 0) {

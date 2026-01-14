@@ -1,5 +1,6 @@
 import type { PngTextChunk, TavernChunkType } from './types';
 import { crc32Concat } from './crc32';
+import { unzlibSync } from 'fflate';
 
 const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -70,6 +71,14 @@ const decodeUtf8 = (bytes: Uint8Array): string => {
   return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
 };
 
+const inflateZlibOrNull = (bytes: Uint8Array): Uint8Array | null => {
+  try {
+    return unzlibSync(bytes);
+  } catch {
+    return null;
+  }
+};
+
 export function extractPngTextChunks(bytes: Uint8Array): PngTextChunk[] {
   const ranges = parsePngChunkRanges(bytes);
   const chunks: PngTextChunk[] = [];
@@ -91,9 +100,6 @@ export function extractPngTextChunks(bytes: Uint8Array): PngTextChunk[] {
       const keyword = asciiFromBytes(data.subarray(0, nullIndex));
       const compressionFlag = data[nullIndex + 1];
       const compressionMethod = data[nullIndex + 2];
-      if (compressionFlag === 1) {
-        continue;
-      }
       if (compressionMethod !== 0) continue;
 
       let cursor = nullIndex + 3;
@@ -104,11 +110,26 @@ export function extractPngTextChunks(bytes: Uint8Array): PngTextChunk[] {
       if (translatedEnd === -1) continue;
       cursor = translatedEnd + 1;
       const payload = data.subarray(cursor);
-      chunks.push({ chunkType, keyword, text: decodeUtf8(payload) });
+      if (compressionFlag === 1) {
+        const inflated = inflateZlibOrNull(payload);
+        if (!inflated) continue;
+        chunks.push({ chunkType, keyword, text: decodeUtf8(inflated) });
+      } else {
+        chunks.push({ chunkType, keyword, text: decodeUtf8(payload) });
+      }
       continue;
     }
 
     if (range.type === 'zTXt') {
+      const nullIndex = data.indexOf(0);
+      if (nullIndex <= 0) continue;
+      const keyword = asciiFromBytes(data.subarray(0, nullIndex));
+      const compressionMethod = data[nullIndex + 1];
+      if (compressionMethod !== 0) continue;
+      const payload = data.subarray(nullIndex + 2);
+      const inflated = inflateZlibOrNull(payload);
+      if (!inflated) continue;
+      chunks.push({ chunkType, keyword, text: decodeUtf8(inflated) });
       continue;
     }
   }
@@ -208,4 +229,3 @@ export function replacePngTextChunks(
   }
   return out;
 }
-
