@@ -99,22 +99,16 @@ const getMagicalGirlStructuredTags = (card: Record<string, unknown>): string[] =
   const tags: string[] = [];
 
   const magicConstruct = isRecord(card.magicConstruct) ? card.magicConstruct : null;
-  const form = magicConstruct ? safeString(magicConstruct.form) : '';
-  if (form) addTag(tags, form);
-
-  const basicAbilities = magicConstruct ? safeStringArray(magicConstruct.basicAbilities).slice(0, 5) : [];
-  for (const ability of basicAbilities) addTag(tags, ability);
+  const magicConstructName = magicConstruct ? safeString(magicConstruct.name) : '';
+  if (magicConstructName) addTag(tags, magicConstructName);
 
   const wonderlandRule = isRecord(card.wonderlandRule) ? card.wonderlandRule : null;
-  const tendency = wonderlandRule ? safeString(wonderlandRule.tendency) : '';
-  if (tendency) addTag(tags, tendency);
+  const wonderlandRuleName = wonderlandRule ? safeString(wonderlandRule.name) : '';
+  if (wonderlandRuleName) addTag(tags, wonderlandRuleName);
 
   const blooming = isRecord(card.blooming) ? card.blooming : null;
-  const powerLevel = blooming ? safeString(blooming.powerLevel) : '';
-  if (powerLevel) addTag(tags, powerLevel);
-
-  const evolvedAbilities = blooming ? safeStringArray(blooming.evolvedAbilities).slice(0, 5) : [];
-  for (const ability of evolvedAbilities) addTag(tags, ability);
+  const bloomingName = blooming ? safeString(blooming.name) : '';
+  if (bloomingName) addTag(tags, bloomingName);
 
   return tags;
 };
@@ -125,10 +119,6 @@ const getCanshouStructuredTags = (card: Record<string, unknown>): string[] => {
   if (stage) addTag(tags, stage);
   const coreConcept = safeString(card.coreConcept);
   if (coreConcept) addTag(tags, coreConcept);
-  const coreEmotion = safeString(card.coreEmotion);
-  if (coreEmotion) addTag(tags, coreEmotion);
-  const origin = safeString(card.origin);
-  if (origin) addTag(tags, origin);
   return tags;
 };
 
