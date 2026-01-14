@@ -74,7 +74,13 @@ const findByKeywordRules = (text: string): string[] => {
 };
 
 const buildMagicalGirlDialogueFromUserAnswers = (answers: string[]): TavernExportRecommendations => {
-  const cleaned = answers.map((answer) => answer.trim());
+  const stripLeadingQuestionNumber = (value: string, index: number): string => {
+    const n = index + 1;
+    const re = new RegExp(`^${n}\\s*[\\.．、\\)）\\]】:：\\-–—]\\s*`);
+    return value.replace(re, '').trim();
+  };
+
+  const cleaned = answers.map((answer, idx) => stripLeadingQuestionNumber(answer.trim(), idx));
   const first = cleaned[0] ? cleaned[0] : '';
 
   const questions: string[] = Array.isArray(magicalQuestionnaire.questions) ? magicalQuestionnaire.questions : [];
@@ -83,7 +89,8 @@ const buildMagicalGirlDialogueFromUserAnswers = (answers: string[]): TavernExpor
   for (let i = 0; i < maxPairs; i += 1) {
     const answer = cleaned[i];
     if (!answer) continue;
-    const question = questions[i] ? String(questions[i]) : `问题 ${i + 1}`;
+    const rawQuestion = questions[i] ? String(questions[i]) : `问题 ${i + 1}`;
+    const question = stripLeadingQuestionNumber(rawQuestion.trim(), i) || rawQuestion.trim();
     pairs.push(`{{user}}: ${question}\n{{char}}: ${answer}`);
   }
 

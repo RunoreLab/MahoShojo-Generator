@@ -9,16 +9,16 @@ describe('tavern-export-recommend', () => {
       magicConstruct: { form: '法杖', basicAbilities: ['治愈', '结界'] },
       wonderlandRule: { tendency: '守护' },
       blooming: { powerLevel: '高' },
-      userAnswers: ['小红', '我会冲上去救她', '我会握住她的手告诉她已经足够好了'],
+      userAnswers: ['1.雪铁龙', '2.我会冲上去救她', '3.我会握住她的手告诉她已经足够好了'],
     };
 
     const result = recommendTavernExportFields('magical-girl', card, []);
     expect(result.tags).toContain('魔法少女');
-    expect(result.tags).toContain('法杖');
-    expect(result.tags).toContain('守护');
-    expect(result.firstMes).toBe('小红');
+    expect(result.tags).not.toContain('法杖');
+    expect(result.firstMes).toBe('雪铁龙');
     expect(result.mesExample).toContain('{{user}}: 你的真实名字是？');
-    expect(result.mesExample).toContain('{{char}}: 小红');
+    expect(result.mesExample).toContain('{{char}}: 雪铁龙');
+    expect(result.mesExample).not.toContain('{{char}}: 1.');
   });
 
   it('能基于残兽字段补全基础标签', () => {
@@ -34,8 +34,7 @@ describe('tavern-export-recommend', () => {
     expect(result.tags).toContain('残兽');
     expect(result.tags).toContain('蛹');
     expect(result.tags).toContain('腐蚀');
-    expect(result.tags).toContain('吞噬欲');
-    expect(result.tags).toContain('野生');
+    expect(result.tags).not.toContain('吞噬欲');
+    expect(result.tags).not.toContain('野生');
   });
 });
-
