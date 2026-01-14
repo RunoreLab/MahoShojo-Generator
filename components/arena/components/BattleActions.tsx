@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { formatDateTime } from '@/lib/constants';
 
 import { useBattleStore } from '../stores/useBattleStore';
@@ -9,26 +10,6 @@ import { useBattleEngine } from '../hooks/useBattleEngine';
 import { BattleStoreState } from '../types';
 import { NarrativeHistoryModal } from './NarrativeHistoryModal';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
-
-const estimateTokens = (text: string): number => {
-  if (!text) return 0;
-  let cjk = 0;
-  let nonCjk = 0;
-  for (const ch of text) {
-    const code = ch.codePointAt(0) ?? 0;
-    if (code <= 0x7f) {
-      nonCjk += 1;
-      continue;
-    }
-    // 粗略识别 CJK：更接近“1 字≈1 token”的直觉；其余按非 CJK 计入分摊
-    if (code >= 0x4e00 && code <= 0x9fff) {
-      cjk += 1;
-    } else {
-      nonCjk += 1;
-    }
-  }
-  return Math.max(1, Math.ceil(cjk + nonCjk / 4));
-};
 
 const normalizeArenaHistoryReadLimitForEstimate = (value: unknown): number | null => {
   if (value === null) return null;
@@ -201,19 +182,6 @@ export function BattleActions() {
     }
   })();
 
-  const estimatedTokens = estimatePayloadText ? estimateTokens(estimatePayloadText) : 0;
-  const MAX_ESTIMATE_TOKENS = 16000;
-  const ratio = MAX_ESTIMATE_TOKENS > 0 ? Math.min(1, estimatedTokens / MAX_ESTIMATE_TOKENS) : 0;
-  const barColor =
-    ratio <= 0.5
-      ? 'bg-emerald-500'
-      : ratio <= 0.75
-        ? 'bg-yellow-500'
-        : ratio <= 0.9
-          ? 'bg-orange-500'
-          : 'bg-red-600';
-  const shouldWarn = estimatedTokens >= 12000;
-
   const getButtonText = () => {
     if (isCooldown) return `记者赶稿中...请等待 ${remainingTime} 秒`;
     if (isGenerating) {
@@ -261,19 +229,10 @@ export function BattleActions() {
         </button>
       </div>
 
-      <div className="mt-2 flex items-center justify-center gap-2">
-        <div className="h-2 w-40 bg-gray-200 rounded-full overflow-hidden" title="估算仅供参考，不等同于真实 Token">
-          <div className={`h-full ${barColor}`} style={{ width: `${Math.round(ratio * 100)}%` }} />
-        </div>
-        <div className="text-xs text-gray-600 tabular-nums" title="估算仅供参考，不等同于真实 Token">
-          ~{estimatedTokens.toLocaleString()} tokens
-        </div>
-      </div>
-      {shouldWarn && (
-        <div className="mt-1 text-xs text-orange-600 text-center">
-          ⚠️ 预计上下文较长，可能更易超时/失败。可尝试关闭“叙事历史读取”或“历战记录读取”，或减少历史条目/参战角色。
-        </div>
-      )}
+      <TokenIndicator
+        text={estimatePayloadText}
+        warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试关闭“叙事历史读取”或“历战记录读取”，或减少历史条目/参战角色。"
+      />
 
       <NarrativeHistoryModal isOpen={showNarrativeModal} onClose={() => setShowNarrativeModal(false)} />
     </>
