@@ -4,8 +4,8 @@ import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
 import { getLogger } from '@/lib/logger';
-import { quickCheck } from '@/lib/sensitive-word-filter';
-import { config as appConfig, type AIProvider } from '@/lib/config';
+import { type AIProvider } from '@/lib/config';
+import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 
@@ -75,16 +75,14 @@ async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    if (appConfig.ENABLE_SENSITIVE_WORD_FILTER) {
-      const checkText = `${JSON.stringify(originalCharacterData)} ${finalUserGuidance}`;
-      const checkResult = await quickCheck(checkText);
-      if (checkResult.hasSensitiveWords) {
-        return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '上传的角色档案或引导内容包含危险符文' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-    }
+    const checkText = `${JSON.stringify(originalCharacterData)} ${finalUserGuidance}`;
+    const safetyResponse = await enforceTextSafety({
+      text: checkText,
+      log,
+      enableAiSafetyCheck: false,
+      sensitiveWordReason: '上传的角色档案或引导内容包含危险符文',
+    });
+    if (safetyResponse) return safetyResponse;
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;

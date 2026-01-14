@@ -7,7 +7,7 @@ import Link from 'next/link';
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
-import { quickCheck } from '@/lib/sensitive-word-filter';
+import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { useCooldown } from '../lib/cooldown';
 import { config as appConfig } from '../lib/config';
 import SaveToCloudButton from '../components/SaveToCloudButton';
@@ -389,15 +389,15 @@ const SublimationPage: React.FC = () => {
         setStreamingMarkdown(null);
         setStreamedGeneralCard(null);
 
-        try {
-            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance;
-            if ((await quickCheck(textToCheck)).hasSensitiveWords) {
-                router.push({
-                    pathname: '/arrested',
-                    query: { reason: '上传的角色档案或引导内容包含危险符文' }
-                });
-                return;
-            }
+	        try {
+	            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance;
+	            const redirectTarget = await getSensitiveWordRedirectTarget(textToCheck, {
+	                reason: '上传的角色档案或引导内容包含危险符文',
+	            });
+	            if (redirectTarget) {
+	                router.push(redirectTarget);
+	                return;
+	            }
 
             const allowedFieldSet = new Set(currentFieldsConfig.map(item => item.id));
             const filteredFieldsToPreserve = fieldsToPreserve.filter(field => allowedFieldSet.has(field));

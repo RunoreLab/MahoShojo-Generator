@@ -8,6 +8,7 @@ import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import { buildPolicySafetyCheckText } from '@/lib/content-safety/server';
 import { NextRequest } from 'next/server';
 import { AdjudicationResult, NarrativeHistoryEntry } from '@/types/arena';
 import { generateSignature, verifySignature } from '@/lib/signature';
@@ -393,26 +394,15 @@ async function handler(req: NextRequest): Promise<Response> {
             inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
         });
 
-        // 2. 根据策略决定哪些内容需要检查 (SRS 3.1.1)
-        const policy = appConfig.SAFETY_CHECK_POLICY;
-        const contentsToAIFlag = inputsToCheck.filter(input => {
-            const checkPolicy = policy[input.type];
-            return checkPolicy === 'all' || (checkPolicy === 'non-native-only' && !input.isNative);
-        });
-
-        const textForFinalCheck: string[] = [];
-
-        // 3. 应用“连坐”机制 (SRS 3.1.2)
-        if (contentsToAIFlag.length > 0 && appConfig.ENABLE_BUNDLE_SAFETY_CHECK) {
-            log.info('触发“连坐”机制，打包所有非原生内容进行检查。');
-            const nonNativeContents = inputsToCheck.filter(i => !i.isNative).map(i => i.content);
-            textForFinalCheck.push(...nonNativeContents);
-        } else {
-            textForFinalCheck.push(...contentsToAIFlag.map(i => i.content));
-        }
-
-        const combinedText = textForFinalCheck.join('\n\n');
-        const needsWorldviewWarning = false;
+	        // 2. 根据策略决定哪些内容需要检查 (SRS 3.1.1)
+	        const { combinedText, usedBundle } = buildPolicySafetyCheckText(inputsToCheck, {
+	            policy: appConfig.SAFETY_CHECK_POLICY,
+	            enableBundle: appConfig.ENABLE_BUNDLE_SAFETY_CHECK,
+	        });
+	        if (usedBundle) {
+	            log.info('触发“连坐”机制，打包所有非原生内容进行检查。');
+	        }
+	        const needsWorldviewWarning = false;
 
         // 4. 执行检查
         if (combinedText) {

@@ -3,11 +3,11 @@
 import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
 import { getLogger } from '../../lib/logger';
-import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import magicalGirlQuestionnaire from '../../public/questionnaire.json';
 import { config as appConfig, type AIProvider } from '../../lib/config';
+import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import {
   convertDataCard,
@@ -455,11 +455,15 @@ async function handler(req: NextRequest): Promise<Response> {
 	    const resolvedAllowReshapeNames = typeof allowReshapeNames === 'boolean' ? allowReshapeNames : false;
 	    const finalUserGuidance = userGuidance.trim() || null;
 
-    // 安全检查
-    const textToCheck = extractTextForCheck(originalCharacterData) + " " + (finalUserGuidance || '');
-    if ((await quickCheck(textToCheck)).hasSensitiveWords) {
-      return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '上传的角色档案或引导内容包含危险符文' }), { status: 400 });
-    }
+	    // 安全检查
+	    const textToCheck = extractTextForCheck(originalCharacterData) + " " + (finalUserGuidance || '');
+	    const safetyResponse = await enforceTextSafety({
+	      text: textToCheck,
+	      log,
+	      enableAiSafetyCheck: false,
+	      sensitiveWordReason: '上传的角色档案或引导内容包含危险符文',
+	    });
+	    if (safetyResponse) return safetyResponse;
 
     const inferredSourceTemplate = inferTemplate(originalCharacterData) as InferableTemplate;
     const bodySourceTemplate = isSupportedSourceTemplate(requestedSourceTemplate) ? requestedSourceTemplate : null;

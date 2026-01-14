@@ -14,7 +14,7 @@ import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 
 import { useCooldown } from '@/lib/cooldown';
-import { quickCheck } from '@/lib/sensitive-word-filter';
+import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
@@ -315,12 +315,11 @@ export default function FreeGeneratorPage() {
     setStreamedGeneralCard(null);
 
     try {
-      const localCheck = await quickCheck(prompt);
-      if (localCheck.hasSensitiveWords) {
-        router.push({
-          pathname: '/arrested',
-          query: { reason: '在自由生成中使用了危险符文' },
-        });
+      const redirectTarget = await getSensitiveWordRedirectTarget(prompt, {
+        reason: '在自由生成中使用了危险符文',
+      });
+      if (redirectTarget) {
+        router.push(redirectTarget);
         return;
       }
 

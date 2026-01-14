@@ -2,11 +2,11 @@
 import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
 import { getLogger } from '../../lib/logger';
-import { quickCheck } from '@/lib/sensitive-word-filter';
 import { NextRequest } from 'next/server';
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { type AIProvider } from '@/lib/config';
+import { enforceTextSafety } from '@/lib/content-safety/server';
 
 const log = getLogger('api-gen-canshou');
 
@@ -117,17 +117,14 @@ async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    // 安全检查：检查用户输入是否包含敏感词
-    const answersString = Object.values(answers).join(' ');
-    const checkResult = await quickCheck(answersString);
-    if (checkResult.hasSensitiveWords) {
-      // 在服务器端记录日志，然后返回一个通用错误给前端，前端将处理跳转
-      log.warn('检测到敏感词，请求被拒绝', { detected: checkResult.detectedWords });
-      return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
+	    // 安全检查：检查用户输入是否包含敏感词
+	    const answersString = Object.values(answers).join(' ');
+	    const safetyResponse = await enforceTextSafety({
+	      text: answersString,
+	      log,
+	      enableAiSafetyCheck: false,
+	    });
+	    if (safetyResponse) return safetyResponse;
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;
