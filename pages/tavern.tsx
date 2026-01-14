@@ -19,8 +19,8 @@ export default function TavernPage() {
       </Head>
 
       <div className="magic-background-white">
-        <div className="container">
-          <div className="card">
+        <div className="container !max-w-[980px]">
+          <div className="card !max-w-none">
             <div className="flex items-center justify-between">
               <h1 className="title mb-0">酒馆生态</h1>
               <Link href="/" className="text-sm text-pink-700 hover:underline">
@@ -32,7 +32,7 @@ export default function TavernPage() {
               SillyTavern 角色卡（PNG 内嵌 JSON）导入/导出工具
             </p>
 
-            <div className="mt-4 grid gap-2 md:grid-cols-2">
+            <div className="mt-4 grid gap-2">
               <a
                 href="https://github.com/SillyTavern/SillyTavern"
                 target="_blank"
@@ -54,7 +54,7 @@ export default function TavernPage() {
               提示：本页默认只在浏览器本地解析/写入 PNG 元数据；只有选择 AI 相关功能时才会发起网络请求。
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="mt-4 grid gap-2">
               <button
                 type="button"
                 className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${

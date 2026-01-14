@@ -1,17 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 
+import BattleDataModal from '@/components/BattleDataModal';
 import Footer from '@/components/Footer';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import TachieGenerator from '@/components/TachieGenerator';
+import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 
 import { useAuth } from '@/lib/useAuth';
-import { dataCardApi } from '@/lib/auth';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { randomUUID } from '@/lib/crypto';
 import { COLOR_GRADIENTS, MainColor } from '@/lib/main-color';
@@ -25,12 +26,12 @@ type TeamMember = {
   label: string;
   data: Record<string, unknown>;
   template: InferableTemplate;
-  source: 'cloud' | 'file' | 'paste';
+  source: 'database' | 'file' | 'paste';
   isNative: boolean | null;
 };
 
 const SOURCE_LABELS: Record<TeamMember['source'], string> = {
-  cloud: '云端',
+  database: '数据库',
   file: '文件',
   paste: '粘贴',
 };
@@ -44,6 +45,22 @@ const parseJson = (raw: string): unknown => {
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'JSON 解析失败');
   }
+};
+
+const removePrivateKeys = (obj: any): any => {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(removePrivateKeys);
+  }
+  const cleaned: any = {};
+  for (const key of Object.keys(obj)) {
+    if (!key.startsWith('_')) {
+      cleaned[key] = removePrivateKeys(obj[key]);
+    }
+  }
+  return cleaned;
 };
 
 const getDisplayNameFromData = (data: Record<string, unknown>, fallback = '未命名角色'): string => {
@@ -91,17 +108,14 @@ const buildTachiePrompt = (data: Record<string, unknown>): string => {
 };
 
 export default function CharacterPartyPage() {
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { isAuthenticated } = useAuth();
   const router = useRouter();
 
   const [notice, setNotice] = useState<Notice>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [outputTemplate, setOutputTemplate] = useState<TeamMergeOutputTemplate>('auto');
-
-  const [cloudCards, setCloudCards] = useState<any[]>([]);
-  const [cloudLoading, setCloudLoading] = useState(false);
-  const [cloudSearch, setCloudSearch] = useState('');
-  const [cloudSortBy, setCloudSortBy] = useState<'likes' | 'usage' | 'favorites' | 'created_at'>('created_at');
+  const [showDatabaseModal, setShowDatabaseModal] = useState(false);
+  const [isDatabaseMatching, setIsDatabaseMatching] = useState<'character' | 'scenario' | null>(null);
 
   const [pasteText, setPasteText] = useState('');
 
@@ -250,27 +264,6 @@ export default function CharacterPartyPage() {
     }
   };
 
-  const handleAddFromCloud = (card: any) => {
-    let payload: unknown = card?.data;
-    if (typeof payload === 'string') {
-      try {
-        payload = JSON.parse(payload);
-      } catch {
-        setNotice({ type: 'error', text: `云端数据卡解析失败：${card?.name || card?.id || '未知卡片'}` });
-        return;
-      }
-    }
-    if (!isPlainObject(payload)) {
-      setNotice({ type: 'error', text: `云端数据卡格式无效：${card?.name || card?.id || '未知卡片'}` });
-      return;
-    }
-
-    const fallbackName = typeof card?.name === 'string' ? card.name : '未命名角色';
-    const displayName = getDisplayNameFromData(payload, fallbackName);
-    addMember(payload, 'cloud', displayName);
-    setNotice({ type: 'success', text: `已加入队伍：${displayName}` });
-  };
-
   const handleFilesSelected = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
@@ -384,54 +377,55 @@ export default function CharacterPartyPage() {
     return `数据卡_角色组队_${sanitizeFileName(base)}.json`;
   }, [mergedData, mergedTemplate]);
 
-  useEffect(() => {
-    if (authLoading) return;
-    if (!isAuthenticated) {
-      setCloudCards([]);
+  const handleSelectDatabaseCharacterCard = (cardData: any) => {
+    const rawName = typeof cardData?._cardName === 'string' ? cardData._cardName.trim() : '';
+    const cleaned = removePrivateKeys(cardData);
+    if (!isPlainObject(cleaned)) {
+      setNotice({ type: 'error', text: '数据卡格式无效，无法加入队伍' });
       return;
     }
 
-    let cancelled = false;
-    setCloudLoading(true);
-    dataCardApi
-      .getCards(cloudSearch.trim() || undefined, cloudSortBy)
-      .then((cards) => {
-        if (cancelled) return;
-        setCloudCards(Array.isArray(cards) ? cards : []);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error('加载云端数据卡失败:', error);
-        setNotice({ type: 'error', text: '加载云端数据卡失败，请稍后重试' });
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setCloudLoading(false);
-      });
+    const inferred = inferTemplate(cleaned);
+    if (inferred === 'scenario' || inferred === 'general-scenario') {
+      setNotice({ type: 'error', text: '当前只支持添加“角色”类型的数据卡' });
+      return;
+    }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [authLoading, isAuthenticated, cloudSearch, cloudSortBy]);
+    const displayName = rawName || getDisplayNameFromData(cleaned);
+    addMember(cleaned, 'database', displayName);
+    setNotice({ type: 'success', text: `已加入队伍：${displayName}` });
+  };
 
-  const cloudCharacterCards = useMemo(() => {
-    return (cloudCards ?? [])
-      .filter((card) => card?.type === 'character')
-      .map((card) => {
-        let payload: unknown = card.data;
-        if (typeof payload === 'string') {
-          try {
-            payload = JSON.parse(payload);
-          } catch {
-            payload = null;
-          }
-        }
-        const obj = isPlainObject(payload) ? payload : null;
-        const tpl = obj ? inferTemplate(obj) : 'unknown';
-        const displayName = obj ? getDisplayNameFromData(obj, typeof card?.name === 'string' ? card.name : '未命名角色') : (card?.name || '未知角色');
-        return { card, payload: obj, template: tpl, displayName };
+  const handleRandomMatchDatabaseCharacter = async () => {
+    if (isDatabaseMatching !== null) return;
+
+    setNotice({ type: 'info', text: '正在从数据库中随机寻找一位公开的角色...' });
+    setIsDatabaseMatching('character');
+
+    try {
+      const response = await fetch('/api/random-public-card?type=character');
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || '无法获取随机角色');
+      }
+
+      const cardData = JSON.parse(result.card.data);
+      handleSelectDatabaseCharacterCard({
+        ...cardData,
+        _cardId: result.card.id,
+        _cardName: result.card.name,
+        _cardDescription: result.card.description || '',
+        _isPublic: result.card.is_public,
+        _updatedAt: result.card.updated_at,
+        _createdAt: result.card.created_at,
+        _author: result.card.username || '未知',
       });
-  }, [cloudCards]);
+    } catch (error) {
+      setNotice({ type: 'error', text: `随机匹配失败：${error instanceof Error ? error.message : '未知错误'}` });
+    } finally {
+      setIsDatabaseMatching(null);
+    }
+  };
 
   const handleSaveImageCallback = (imageUrl: string) => {
     setSavedImageUrl(imageUrl);
@@ -446,8 +440,8 @@ export default function CharacterPartyPage() {
       </Head>
 
       <div className="magic-background-white">
-        <div className="container">
-          <div className="card">
+        <div className="container !max-w-[1100px]">
+          <div className="card !max-w-none">
             <h1 className="title text-center">🧩 角色组队</h1>
             <p className="subtitle text-center">
               把多个角色卡拼接成一张“队伍角色卡”。字符串与数组会自动加上 <code>【角色名/代号】</code> 前缀，缺失字段会被自动忽略。
@@ -466,73 +460,23 @@ export default function CharacterPartyPage() {
               </div>
             )}
 
-            <div className="mt-6 grid gap-6 md:grid-cols-2">
+            <div className="mt-6 grid gap-6">
               <div className="rounded-xl border border-gray-200 bg-white/70 p-4">
-                <div className="text-base font-semibold text-gray-800">1) 从云端添加（可选）</div>
-                <div className="mt-1 text-xs text-gray-600">登录后可直接选择你的云端数据卡加入队伍。</div>
-
-                {!authLoading && !isAuthenticated ? (
-                  <div className="mt-3 text-sm text-gray-700">
-                    你尚未登录，先去 <Link className="footer-link" href="/character-manager">档案馆</Link> 登录后再回来吧。
-                  </div>
-                ) : (
-                  <>
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <input
-                        value={cloudSearch}
-                        onChange={(e) => setCloudSearch(e.target.value)}
-                        placeholder="搜索云端数据卡（名称/描述）"
-                        className="input-field flex-1"
-                        disabled={cloudLoading}
-                      />
-                      <select
-                        value={cloudSortBy}
-                        onChange={(e) => setCloudSortBy(e.target.value as 'likes' | 'usage' | 'favorites' | 'created_at')}
-                        className="input-field sm:w-40"
-                        disabled={cloudLoading}
-                      >
-                        <option value="created_at">最新</option>
-                        <option value="usage">使用</option>
-                        <option value="favorites">收藏</option>
-                        <option value="likes">点赞</option>
-                      </select>
-                    </div>
-
-                    <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white">
-                      {cloudLoading ? (
-                        <div className="p-3 text-sm text-gray-600">加载中...</div>
-                      ) : cloudCharacterCards.length === 0 ? (
-                        <div className="p-3 text-sm text-gray-600">暂无角色数据卡</div>
-                      ) : (
-                        <ul className="divide-y divide-gray-100">
-                          {cloudCharacterCards.map(({ card, payload, template, displayName }) => (
-                            <li key={String(card.id)} className="flex items-start gap-3 p-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm font-semibold text-gray-800">
-                                  {displayName}
-                                </div>
-                                <div className="mt-1 text-xs text-gray-500">
-                                  模板：{template in TEMPLATE_LABELS ? TEMPLATE_LABELS[template as keyof typeof TEMPLATE_LABELS] : '未知'}
-                                </div>
-                                {typeof card.description === 'string' && card.description.trim() ? (
-                                  <div className="mt-1 line-clamp-2 text-xs text-gray-600">{card.description}</div>
-                                ) : null}
-                              </div>
-                              <button
-                                type="button"
-                                className="rounded-lg border border-pink-200 bg-pink-50 px-3 py-1 text-xs font-semibold text-pink-700 hover:bg-pink-100 disabled:opacity-50"
-                                disabled={!payload}
-                                onClick={() => handleAddFromCloud(card)}
-                              >
-                                加入
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  </>
-                )}
+                <DatabaseSelector
+                  className="!mb-0"
+                  title="1) 从数据库添加（可选）"
+                  layout="column"
+                  onOpenCharacterModal={() => setShowDatabaseModal(true)}
+                  onRandomMatchCharacter={() => void handleRandomMatchDatabaseCharacter()}
+                  isAuthenticated={isAuthenticated}
+                  isGenerating={false}
+                  isMatching={isDatabaseMatching}
+                  combatantCount={members.length}
+                  maxCombatants={Number.MAX_SAFE_INTEGER}
+                />
+                <div className="mt-1 text-xs text-gray-600">
+                  提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
+                </div>
               </div>
 
               <div className="rounded-xl border border-gray-200 bg-white/70 p-4">
@@ -712,7 +656,7 @@ export default function CharacterPartyPage() {
                 />
               )}
 
-              <div className="card" style={{ marginTop: '1rem' }}>
+              <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-gray-800 mb-4">后续操作</h3>
                   {teamNativeness.status !== 'empty' ? (
@@ -795,6 +739,13 @@ export default function CharacterPartyPage() {
           <Footer className="footer" />
         </div>
       </div>
+
+      <BattleDataModal
+        isOpen={showDatabaseModal}
+        onClose={() => setShowDatabaseModal(false)}
+        onSelectCard={handleSelectDatabaseCharacterCard}
+        selectedType="character"
+      />
 
       {showImageModal && savedImageUrl ? (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4" onClick={() => setShowImageModal(false)}>

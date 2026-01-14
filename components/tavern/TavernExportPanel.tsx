@@ -932,7 +932,7 @@ export function TavernExportPanel() {
             ) : null}
 
 	          <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-	            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3">
 	              <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
 	                <input
                   type="checkbox"
@@ -971,7 +971,7 @@ export function TavernExportPanel() {
           </div>
 
           <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4">
               <div>
                 <label className="block text-sm font-semibold text-pink-700">name</label>
                 <input
@@ -1035,7 +1035,7 @@ export function TavernExportPanel() {
                 </div>
               </div>
 
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <div className="mt-3 grid gap-2">
                 <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
                   <input
                     type="checkbox"
@@ -1065,7 +1065,7 @@ export function TavernExportPanel() {
                 </label>
               </div>
 
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <div className="mt-3 grid gap-2">
                 <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
                   <input
                     type="checkbox"
@@ -1232,7 +1232,7 @@ export function TavernExportPanel() {
             </div>
           </div>
 
-            <div className="grid gap-4 md:grid-cols-2 mt-4">
+            <div className="grid gap-4 mt-4">
               <div>
                 <label className="block text-sm font-semibold text-pink-700">first_mes</label>
                 <textarea
@@ -1255,7 +1255,7 @@ export function TavernExportPanel() {
               </div>
             </div>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="mt-4 grid gap-4">
               <div>
                 <label className="block text-sm font-semibold text-pink-700">creator_notes</label>
                 <textarea

@@ -12,6 +12,9 @@ interface DatabaseSelectorProps {
   isMatching: 'character' | 'scenario' | null;
   combatantCount: number;
   maxCombatants?: number;
+  className?: string;
+  title?: string;
+  layout?: 'row' | 'column';
 }
 
 export function DatabaseSelector({
@@ -22,22 +25,29 @@ export function DatabaseSelector({
   isMatching,
   combatantCount,
   maxCombatants = MAX_COMBATANTS,
+  className,
+  title = '从数据库选择角色',
+  layout = 'row',
 }: DatabaseSelectorProps) {
+  const rootClassName = ['mb-6', className].filter(Boolean).join(' ');
+  const buttonsClassName = layout === 'column' ? 'flex flex-col gap-2' : 'flex gap-2';
+  const buttonWidthClassName = layout === 'column' ? 'w-full' : 'flex-1';
+
   return (
-    <div className="mb-6">
-      <h3 className="input-label">从数据库选择角色</h3>
-      <div className="flex gap-2">
+    <div className={rootClassName}>
+      <h3 className="input-label">{title}</h3>
+      <div className={buttonsClassName}>
         <button
           onClick={onOpenCharacterModal}
           disabled={isGenerating || combatantCount >= maxCombatants}
-          className="flex-1 px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+          className={`${buttonWidthClassName} px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm`}
         >
           浏览在线角色库
         </button>
         <button
           onClick={onRandomMatchCharacter}
           disabled={isGenerating || isMatching !== null || combatantCount >= maxCombatants}
-          className="flex-1 px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+          className={`${buttonWidthClassName} px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm`}
         >
           {isMatching === 'character' ? '匹配中...' : '随机匹配角色'}
         </button>

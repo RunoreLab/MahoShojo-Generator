@@ -603,7 +603,7 @@ export default function FreeGeneratorPage() {
       return (
         <>
           {isGeneralScenario ? (
-            <div className="card" style={{ marginTop: '1rem' }}>
+            <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
               <h2 className="text-2xl font-bold text-center mb-4">{title}</h2>
               <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
                 {streamingMarkdown ? (
@@ -634,7 +634,7 @@ export default function FreeGeneratorPage() {
           {streamedGeneralCard && (
             <>
               {streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID ? (
-                <div className="card" style={{ marginTop: '1rem' }}>
+                <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
                   <h3 className="text-lg font-semibold text-gray-800 mb-3">通用情景卡 JSON</h3>
                   <div className="rounded-lg bg-gray-100 p-4 border border-gray-200 font-mono text-xs overflow-x-auto">
                     <pre>{JSON.stringify(streamedGeneralCard, null, 2)}</pre>
@@ -642,7 +642,7 @@ export default function FreeGeneratorPage() {
                 </div>
               ) : null}
 
-              <div className="card" style={{ marginTop: '1rem' }}>
+              <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-gray-800 mb-4">后续操作</h3>
                   {renderResultActions(streamedGeneralCard, streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID ? 'scenario' : 'character')}
@@ -667,7 +667,7 @@ export default function FreeGeneratorPage() {
             magicalGirl={safe}
             gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)"
           />
-          <div className="card" style={{ marginTop: '1rem' }}>
+          <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
             <div className="text-center">
               <p className="text-xs text-gray-500 mb-3">
                 提示：自由生成产物不会包含签名，因此会被视为非原生卡。
@@ -684,7 +684,7 @@ export default function FreeGeneratorPage() {
       return (
         <>
           <CanshouCard canshou={safe} />
-          <div className="card" style={{ marginTop: '1rem' }}>
+          <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
             <div className="text-center">
               <p className="text-xs text-gray-500 mb-3">
                 提示：自由生成产物不会包含签名，因此会被视为非原生卡。
@@ -700,7 +700,7 @@ export default function FreeGeneratorPage() {
       return (
         <>
           <GeneralCharacterCard general={resultData} />
-          <div className="card" style={{ marginTop: '1rem' }}>
+          <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
             <div className="text-center">
               {renderResultActions(resultData, 'character')}
             </div>
@@ -712,13 +712,13 @@ export default function FreeGeneratorPage() {
     if (schemaId === 'general-scenario') {
       return (
         <>
-          <div className="card" style={{ marginTop: '1rem' }}>
+          <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
             <h2 className="text-2xl font-bold text-center mb-4">{resultData.title || '通用情景卡'}</h2>
             <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
               <MarkdownBlock content={resultData.content || ''} variant="light" mode="article" />
             </div>
           </div>
-          <div className="card" style={{ marginTop: '1rem' }}>
+          <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
             <h3 className="text-lg font-semibold text-gray-800 mb-3">通用情景卡 JSON</h3>
             <div className="rounded-lg bg-gray-100 p-4 border border-gray-200 font-mono text-xs overflow-x-auto">
               <pre>{JSON.stringify(resultData, null, 2)}</pre>
@@ -733,7 +733,7 @@ export default function FreeGeneratorPage() {
 
     // scenario（结构化）
     return (
-      <div className="card" style={{ marginTop: '1rem' }}>
+      <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
         <h2 className="text-2xl font-bold text-center mb-4">{resultData.title || '结构化情景'}</h2>
         <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
           <pre>{JSON.stringify(resultData, null, 2)}</pre>
@@ -755,8 +755,8 @@ export default function FreeGeneratorPage() {
         <meta name="description" content="自由输入提示词，按指定 Schema 生成任意数据卡（角色/情景）。自由生成产物为非原生。" />
       </Head>
       <div className="magic-background-white">
-        <div className="container">
-          <div className="card">
+        <div className="container !max-w-[980px]">
+          <div className="card !max-w-none">
             <div className="text-center mb-4">
               <h1 className="text-2xl font-bold text-pink-700">自由生成</h1>
               <p className="subtitle mt-2">

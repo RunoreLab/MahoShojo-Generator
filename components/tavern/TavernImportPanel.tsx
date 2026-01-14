@@ -755,7 +755,7 @@ export function TavernImportPanel() {
           <TavernCardPreview normalized={selectedNormalized} warnings={combinedWarnings} />
 
           <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4">
               <div>
                 <label className="block text-sm font-semibold text-pink-700">导入为</label>
                 <select
@@ -801,7 +801,7 @@ export function TavernImportPanel() {
 
             <div className="mt-4">
               <label className="block text-sm font-semibold text-pink-700">转换模式</label>
-              <div className="mt-2 grid gap-2 md:grid-cols-2">
+              <div className="mt-2 grid gap-2">
                 <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/80 p-3">
                   <input
                     type="radio"
@@ -844,7 +844,7 @@ export function TavernImportPanel() {
 
             {state.convertMode === 'ai' ? (
               <div className="mt-4 rounded-xl border border-pink-100 bg-white/60 p-3">
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3">
                   <div className="rounded-xl border border-pink-100 bg-white/70 p-3">
                     <button
                       type="button"
