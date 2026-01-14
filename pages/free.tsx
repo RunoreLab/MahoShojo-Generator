@@ -18,6 +18,7 @@ import { useCooldown } from '@/lib/cooldown';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { USER_PROVIDED_KEY_COOLDOWN_MS, OFFICIAL_KEY_MAX_AI_COOLDOWN_MS } from '@/lib/ai/cooldowns';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt } from '@/lib/ai/attachments';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
@@ -235,7 +236,7 @@ export default function FreeGeneratorPage() {
 
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
-  const freeCooldownMs = isUserCustomKey ? 3000 : 60000;
+  const freeCooldownMs = isUserCustomKey ? USER_PROVIDED_KEY_COOLDOWN_MS : OFFICIAL_KEY_MAX_AI_COOLDOWN_MS;
   const freeCooldownKey = isUserCustomKey ? 'freeCooldown:custom' : 'freeCooldown:system';
   const { isCooldown, startCooldown, remainingTime } = useCooldown(freeCooldownKey, freeCooldownMs);
 

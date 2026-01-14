@@ -10,10 +10,12 @@ import SaveToCloudButton from '@/components/SaveToCloudButton';
 import TachieGenerator from '@/components/TachieGenerator';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
-import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
+import { OFFICIAL_KEY_MAX_AI_COOLDOWN_MS, USER_PROVIDED_KEY_COOLDOWN_MS } from '@/lib/ai/cooldowns';
+import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { downloadBlob } from '@/lib/client/blobUrl';
+import { useCooldown } from '@/lib/cooldown';
 import { createBlankDataCard, type DataCardTemplate } from '@/lib/data-card-converter';
 import { formatKilobytes, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
@@ -55,6 +57,7 @@ type ImportAction =
   | { type: 'reset' }
   | { type: 'parsing' }
   | { type: 'parseError'; message: string }
+  | { type: 'setError'; message: string | null }
   | { type: 'parsed'; result: TavernParseResult }
   | { type: 'selectCandidate'; index: number }
   | { type: 'setTemplate'; template: DataCardTemplate }
@@ -83,6 +86,8 @@ function reducer(state: ImportState, action: ImportAction): ImportState {
       return { ...state, step: 'parsing', error: null, parseResult: null, outputDataCard: null, outputKey: null };
     case 'parseError':
       return { ...state, step: 'error', error: action.message, parseResult: null, outputDataCard: null, outputKey: null };
+    case 'setError':
+      return { ...state, error: action.message };
     case 'parsed':
       return {
         ...state,
@@ -225,6 +230,10 @@ export function TavernImportPanel() {
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
+  const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
+  const tavernAiCooldownMs = isUserCustomKey ? USER_PROVIDED_KEY_COOLDOWN_MS : OFFICIAL_KEY_MAX_AI_COOLDOWN_MS;
+  const tavernAiCooldownKey = isUserCustomKey ? 'tavernConvertCooldown:custom' : 'tavernConvertCooldown:system';
+  const { isCooldown, startCooldown, remainingTime } = useCooldown(tavernAiCooldownKey, tavernAiCooldownMs);
 
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
@@ -467,6 +476,7 @@ export function TavernImportPanel() {
         });
 
         setStreamedGeneralCard(card);
+        startCooldown(tavernAiCooldownMs);
         return { ...card, _tavern: tavernPayload };
       }
 
@@ -492,6 +502,7 @@ export function TavernImportPanel() {
 
       const generated = (await response.json()) as unknown;
       const generatedRecord = typeof generated === 'object' && generated !== null ? (generated as Record<string, unknown>) : {};
+      startCooldown(tavernAiCooldownMs);
       return { ...generatedRecord, _tavern: tavernPayload };
     }
 
@@ -555,6 +566,11 @@ export function TavernImportPanel() {
     if (!outputKey) return null;
     if (state.outputDataCard && state.outputKey === outputKey) {
       return { output: state.outputDataCard, outputKey };
+    }
+
+    if (state.convertMode === 'ai' && isCooldown) {
+      dispatch({ type: 'setError', message: `操作过于频繁，请等待 ${remainingTime} 秒后再试。` });
+      return null;
     }
 
     dispatch({ type: 'converting' });
@@ -886,15 +902,24 @@ export function TavernImportPanel() {
                     onConfigChange={handleAiProviderConfigChange}
                   />
                   <div className="mt-2 text-xs text-gray-600">
-                    可选：使用自带 API Key 通常冷却更短；API Key 仅存储于浏览器本地（localStorage），不会上传到服务器。
+                    可选：使用自有 API Key 冷却统一为 3 秒；使用官方 Key 冷却为 {Math.ceil(OFFICIAL_KEY_MAX_AI_COOLDOWN_MS / 1000)} 秒。API Key 仅存储于浏览器本地（localStorage），不会上传到服务器。
                   </div>
                 </div>
               </div>
             ) : null}
 
             <div className="mt-4">
-              <button type="button" className="generate-button mb-0 w-full" disabled={state.step === 'converting'} onClick={onGenerate}>
-                {state.step === 'converting' ? '生成中…' : '生成角色卡'}
+              <button
+                type="button"
+                className="generate-button mb-0 w-full"
+                disabled={state.step === 'converting' || (state.convertMode === 'ai' && isCooldown)}
+                onClick={onGenerate}
+              >
+                {state.step === 'converting'
+                  ? '生成中…'
+                  : state.convertMode === 'ai' && isCooldown
+                    ? `冷却中 (${remainingTime}s)`
+                    : '生成角色卡'}
               </button>
               <div className="mt-2 text-xs text-gray-600">
                 生成后会在下方展示角色卡预览；你可以保存图片、下载/复制 JSON，或保存到云端（档案馆）。
