@@ -556,7 +556,7 @@ const SublimationPage: React.FC = () => {
         } else if (targetTemplate === 'canshou' && data.name && data.templateId !== GENERAL_CHARACTER_TEMPLATE_ID) {
             return <CanshouCard canshou={data} onSaveImage={handleSaveImage} />;
         } else if (targetTemplate === 'general') {
-            return <GeneralCharacterCard general={data} />;
+            return <GeneralCharacterCard general={data} onSaveImage={handleSaveImage} />;
         }
         return (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
