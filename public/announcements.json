@@ -1,5 +1,13 @@
 [
   {
+    "id": "20260114-v070-creator-tools",
+    "date": "2026-01-14",
+    "title": "✨ v0.7.0 创作者工具箱上线！通用情景卡/自由生成/酒馆生态/组队卡",
+    "publisher": "末伏之夜",
+    "pinned": true,
+    "content": "### ✨ **v0.7.0 更新公告：【创作者工具箱 × 更自由的舞台】** ✨\n\n与 v0.6.0（排位/技术值）偏向“强度党”不同，v0.7.0 将重点放在 **让创作者更自由、更高效地写设定与舞台**。\n\n---\n\n#### 🧩 新增「角色组队卡」（/character-party）\n* 把多张角色卡拼成一张“队伍卡”，适合打包 NPC/小队/组织。\n* 自动为字段加上 `【队员】` 前缀，避免信息混杂；队伍原生性会自动检查。\n\n#### 🎴 新增「通用情景卡（Markdown）」\n* `/scenario` 支持创建/转换通用情景卡：只有 `title + content`，适合长线舞台与规则笔记。\n* 竞技场情景模式现可直接使用通用情景卡作为主情景/辅助情景。\n\n#### 🌊 角色生成支持「流式 / 非流式」切换\n* `/details`、`/canshou` 可按需切换：\n  * 非流式：结构化数据卡（更适合后续升华/结构化玩法）\n  * 流式：实时输出 Markdown，并生成通用角色卡（更适合写长文与快速迭代）\n\n#### 🧪 新增「自由生成」（/free）\n* 任意提示词 + 选择 Schema，生成角色/情景数据卡。\n* 支持“参考附件”注入上下文与流式输出（通用卡）。\n* 注意：自由生成不会生成 `signature`，会被视为非原生卡。\n\n#### 🍺 接入酒馆生态：SillyTavern 导入/导出（/tavern）\n* 支持酒馆 PNG（内嵌 JSON）导入为本站数据卡（规则映射/可选 AI 深度转换）。\n* 支持把本站数据卡导出为酒馆 PNG，并可附带 A.R.E.N.A 世界书与情景拼接。\n\n---\n\n#### 📚 上手教程（建议从这里开始）\n* 通用数据卡（Markdown）：/encyclopedia/general-cards\n* 自由生成（/free）：/encyclopedia/free-generator\n* 角色组队（/character-party）：/encyclopedia/character-party\n* 酒馆生态联动（SillyTavern）：/encyclopedia/tavern-ecosystem\n* 箱庭物语（情景生成器）：/encyclopedia/scenario-generator\n\n如果你在导入/导出、流式生成或兼容性上遇到问题，欢迎在 Discussions 或群内反馈。"
+  },
+  {
     "id": "20260104-v060-ranking-tags-encyclopedia",
     "date": "2026-01-04",
     "title": "✨ v0.6.0 排位/技术值/标签/百科/排行榜上线！",
