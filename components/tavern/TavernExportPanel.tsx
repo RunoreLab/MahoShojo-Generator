@@ -1,10 +1,13 @@
 import { useRouter } from 'next/router';
-import { useMemo, useReducer } from 'react';
+import { useMemo, useReducer, useState } from 'react';
 
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
 import { createTavernV3Card, getPlaceholderPngBytes, recommendTavernExportFields, writeTavernCardToPngBytes } from '@/lib/tavern-card';
+import { useAuth } from '@/lib/useAuth';
+
+import { TavernCloudCardPickerModal, type TavernCloudCardRow } from './TavernCloudCardPickerModal';
 
 type ExportStep = 'idle' | 'ready' | 'generating' | 'done' | 'error';
 
@@ -293,6 +296,8 @@ const safeFileName = (base: string, ext: string): string => {
 export function TavernExportPanel() {
   const router = useRouter();
   const [state, dispatch] = useReducer(reducer, initialState);
+  const { isAuthenticated } = useAuth();
+  const [cloudPickerOpen, setCloudPickerOpen] = useState(false);
 
   const onDataCardSelected = async (file: File | null) => {
     if (!file) return;
@@ -304,6 +309,18 @@ export function TavernExportPanel() {
       dispatch({ type: 'setDataCard', data: json, template, fields });
     } catch (error) {
       dispatch({ type: 'setError', message: error instanceof Error ? error.message : '解析数据卡失败' });
+    }
+  };
+
+  const onCloudCardPicked = (card: TavernCloudCardRow) => {
+    try {
+      const json = JSON.parse(card.data) as unknown;
+      const template = inferTemplate(json);
+      const fields = buildDefaultFieldsFromDataCard(template, json);
+      dispatch({ type: 'setDataCard', data: json, template, fields });
+      setCloudPickerOpen(false);
+    } catch (error) {
+      dispatch({ type: 'setInlineError', message: error instanceof Error ? `解析档案馆数据卡失败：${error.message}` : '解析档案馆数据卡失败' });
     }
   };
 
@@ -445,6 +462,19 @@ export function TavernExportPanel() {
           disabled={state.step === 'generating'}
           onChange={(event) => onDataCardSelected(event.target.files?.[0] ?? null)}
         />
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
+              isAuthenticated ? 'border-pink-200 bg-pink-50 text-pink-800 hover:bg-pink-100' : 'border-gray-200 bg-gray-50 text-gray-400'
+            }`}
+            disabled={!isAuthenticated || state.step === 'generating'}
+            onClick={() => setCloudPickerOpen(true)}
+          >
+            从档案馆选择
+          </button>
+          <div className="text-xs text-gray-600">（需要先登录）</div>
+        </div>
       </div>
 
       {state.error ? <ErrorMessage message={state.error} className="error-message mt-3" /> : null}
@@ -707,6 +737,13 @@ export function TavernExportPanel() {
           </div>
         </>
       ) : null}
+
+      <TavernCloudCardPickerModal
+        isOpen={cloudPickerOpen}
+        onClose={() => setCloudPickerOpen(false)}
+        isAuthenticated={isAuthenticated}
+        onPick={onCloudCardPicked}
+      />
     </div>
   );
 }
