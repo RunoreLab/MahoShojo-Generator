@@ -101,14 +101,18 @@ export default function SaveToCloudButton({
     }
     
     // 如果没有数据，则不显示模态框
+    let hadResolveError = false;
     const resolvedData = await resolveData().catch((error) => {
+      hadResolveError = true;
       console.error("准备保存数据失败:", error);
       alert(error instanceof Error ? error.message : '准备保存数据失败。');
       return null;
     });
     if (!resolvedData) {
+      if (!hadResolveError) {
         alert('没有可保存的数据。');
-        return;
+      }
+      return;
     }
 
     // 根据数据类型生成默认名称和描述
@@ -246,13 +250,17 @@ export default function SaveToCloudButton({
             return;
           }
           void (async () => {
+            let hadResolveError = false;
             const resolvedData = await resolveData().catch((error) => {
+              hadResolveError = true;
               console.error("准备替换数据失败:", error);
               alert(error instanceof Error ? error.message : '准备替换数据失败。');
               return null;
             });
             if (!resolvedData) {
-              alert('没有可替换的数据。');
+              if (!hadResolveError) {
+                alert('没有可替换的数据。');
+              }
               return;
             }
             setShowReplaceModal(true);

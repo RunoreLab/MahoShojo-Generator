@@ -1,9 +1,10 @@
 import { useRouter } from 'next/router';
-import { useMemo, useReducer, useState } from 'react';
+import { useEffect, useMemo, useReducer, useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import BattleDataModal from '@/components/BattleDataModal';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import TachieGenerator from '@/components/TachieGenerator';
 import { TavernAiFillButton } from '@/components/tavern/TavernAiFillButton';
 import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
 import { downloadBlob } from '@/lib/client/blobUrl';
@@ -392,6 +393,8 @@ export function TavernExportPanel() {
   const [showCharacterModal, setShowCharacterModal] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [isMatching, setIsMatching] = useState<'character' | 'scenario' | null>(null);
+  const [tachieImageUrl, setTachieImageUrl] = useState<string | null>(null);
+  const [isApplyingTachie, setIsApplyingTachie] = useState(false);
 
   const onDataCardSelected = async (file: File | null) => {
     if (!file) return;
@@ -553,6 +556,101 @@ export function TavernExportPanel() {
       .filter(Boolean)
       .slice(0, 50);
   }, [state.fields.tags]);
+
+  const tachiePrompt = useMemo(() => {
+    if (!state.dataCard) return '';
+    if (state.template !== 'magical-girl' && state.template !== 'canshou' && state.template !== 'general') return '';
+
+    const record = isRecord(state.dataCard) ? state.dataCard : {};
+
+    if (state.template === 'magical-girl') {
+      const appearance = isRecord(record['appearance']) ? record['appearance'] : {};
+      return `${JSON.stringify(appearance)}, Xiabanmo, 二次元, 魔法少女`;
+    }
+
+    if (state.template === 'canshou') {
+      const appearance = safeString(record['appearance']);
+      const materialAndSkin = safeString(record['materialAndSkin']);
+      const featuresAndAppendages = safeString(record['featuresAndAppendages']);
+      const parts = [appearance, materialAndSkin, featuresAndAppendages].map((item) => item.trim()).filter(Boolean);
+      return `${parts.join(', ')}, Xiabanmo, 二次元`;
+    }
+
+    const name = safeString(record['name']).trim();
+    const content = safeString(record['content']).trim();
+    const head = content.length > 800 ? content.slice(0, 800) : content;
+    return `${name ? `${name}, ` : ''}${head}, Xiabanmo, 二次元, 角色立绘`;
+  }, [state.dataCard, state.template]);
+
+  const tachiePromptKey = useMemo(() => {
+    const text = tachiePrompt.trim();
+    if (!text) return '';
+    let hash = 0;
+    for (let i = 0; i < text.length; i += 1) {
+      hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+    }
+    return `${state.template}-${hash}`;
+  }, [tachiePrompt, state.template]);
+
+  useEffect(() => {
+    setTachieImageUrl(null);
+  }, [tachiePrompt]);
+
+  const blobToPngBytes = async (blob: Blob): Promise<Uint8Array> => {
+    if (blob.type === 'image/png') {
+      return new Uint8Array(await blob.arrayBuffer());
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('立绘图片加载失败（可能是浏览器不支持的格式）'));
+        img.src = objectUrl;
+      });
+
+      const width = image.naturalWidth || image.width || 0;
+      const height = image.naturalHeight || image.height || 0;
+      if (!width || !height) {
+        throw new Error('立绘图片尺寸读取失败');
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('无法创建 Canvas 上下文');
+      ctx.drawImage(image, 0, 0);
+
+      const pngBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((next) => (next ? resolve(next) : reject(new Error('立绘转 PNG 失败'))), 'image/png');
+      });
+
+      return new Uint8Array(await pngBlob.arrayBuffer());
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+
+  const onUseTachieAsBase = async () => {
+    if (!tachieImageUrl) return;
+    setIsApplyingTachie(true);
+    dispatch({ type: 'setInlineError', message: null });
+    try {
+      const response = await fetch(tachieImageUrl);
+      if (!response.ok) {
+        throw new Error(`下载立绘失败（HTTP ${response.status}）`);
+      }
+      const blob = await response.blob();
+      const bytes = await blobToPngBytes(blob);
+      dispatch({ type: 'setBasePng', bytes, name: buildSafeFileName(`${state.fields.name || '角色'}_立绘`, 'png', 'tachie') });
+    } catch (error) {
+      dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '设置底图失败' });
+    } finally {
+      setIsApplyingTachie(false);
+    }
+  };
 
   const onAiFill = async () => {
     dispatch({ type: 'setAiFilling', value: true });
@@ -781,11 +879,11 @@ export function TavernExportPanel() {
             </details>
           </div>
 
-          <div className="input-group mt-4">
-            <label className="input-label" htmlFor="tavern-export-base">
-              选择底图 PNG（可选）
-            </label>
-            <input
+	          <div className="input-group mt-4">
+	            <label className="input-label" htmlFor="tavern-export-base">
+	              选择底图 PNG（可选）
+	            </label>
+	            <input
               id="tavern-export-base"
               type="file"
               accept="image/png"
@@ -802,14 +900,41 @@ export function TavernExportPanel() {
               >
                 使用占位图
               </button>
-              {state.basePngName ? <span>当前底图：{state.basePngName}</span> : <span>未选择底图时将自动使用占位图。</span>}
-            </div>
-          </div>
+	              {state.basePngName ? <span>当前底图：{state.basePngName}</span> : <span>未选择底图时将自动使用占位图。</span>}
+	            </div>
+	          </div>
 
-          <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-            <div className="grid gap-3 md:grid-cols-2">
-              <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                <input
+            {tachiePrompt.trim() ? (
+              <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
+                <div className="text-sm font-semibold text-pink-700">生成立绘（LibLib，可选）</div>
+                <div className="mt-1 text-xs text-gray-600">生成完成后可一键设为底图（会自动转为 PNG）。</div>
+                <div className="mt-3">
+                  <TachieGenerator
+                    key={`tavern-export-tachie-${tachiePromptKey}`}
+                    prompt={tachiePrompt}
+                    onImageUrlChange={setTachieImageUrl}
+                  />
+                </div>
+                <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-pink-200 bg-white/70 px-3 py-2 text-sm font-semibold text-pink-700 hover:bg-pink-50 disabled:opacity-50"
+                    onClick={() => void onUseTachieAsBase()}
+                    disabled={!tachieImageUrl || state.step === 'generating' || isApplyingTachie}
+                  >
+                    {isApplyingTachie ? '处理中...' : '一键设为底图'}
+                  </button>
+                  <div className="text-xs text-gray-600">
+                    {tachieImageUrl ? '已捕获最新立绘，可直接设为底图。' : '尚未生成立绘或未通过审核。'}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+	          <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
+	            <div className="grid gap-3 md:grid-cols-2">
+	              <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+	                <input
                   type="checkbox"
                   className="mt-1"
                   checked={state.overwriteExisting}

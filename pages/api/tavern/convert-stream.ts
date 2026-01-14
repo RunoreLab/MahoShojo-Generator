@@ -57,8 +57,6 @@ const RequestBodySchema = z.object({
   customProvider: CustomProviderSchema.optional(),
 });
 
-const safeString = (value: unknown): string => (typeof value === 'string' ? value : '');
-
 const buildPrompt = (params: { template: Template; language: string; sourceName: string; attachments: AITextAttachment[] }): string => {
   const attachmentSection = formatReferenceAttachmentsForPrompt(params.attachments);
   const sourceName = params.sourceName.trim();
@@ -245,4 +243,3 @@ export default async function handler(req: NextRequest): Promise<Response> {
     });
   }
 }
-

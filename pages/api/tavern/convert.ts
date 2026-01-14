@@ -57,7 +57,6 @@ const AttachmentsSchema = z
   });
 
 const TemplateSchema = z.enum(['magical-girl', 'canshou', 'general']);
-type Template = z.infer<typeof TemplateSchema>;
 
 const RequestBodySchema = z.object({
   template: TemplateSchema,

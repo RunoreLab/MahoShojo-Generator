@@ -110,6 +110,29 @@ function reducer(state: ImportState, action: ImportAction): ImportState {
   }
 }
 
+const isRecord = (value: unknown): value is Record<string, any> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const ensureString = (value: unknown, fallback = ''): string => (typeof value === 'string' ? value : fallback);
+
+const normalizeCanshouForCard = (input: unknown): any => {
+  const record = isRecord(input) ? input : {};
+  return {
+    ...record,
+    name: ensureString(record.name, ensureString(record.codename, '未命名残兽')),
+    coreConcept: ensureString(record.coreConcept),
+    coreEmotion: ensureString(record.coreEmotion),
+    evolutionStage: ensureString(record.evolutionStage),
+    appearance: ensureString(record.appearance),
+    materialAndSkin: ensureString(record.materialAndSkin),
+    featuresAndAppendages: ensureString(record.featuresAndAppendages),
+    attackMethod: ensureString(record.attackMethod),
+    specialAbility: ensureString(record.specialAbility),
+    origin: ensureString(record.origin),
+    birthEnvironment: ensureString(record.birthEnvironment),
+    researcherNotes: ensureString(record.researcherNotes),
+  };
+};
+
 const uniqueStrings = (items: string[]): string[] => {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -283,6 +306,12 @@ export function TavernImportPanel() {
   };
 
   const imageSaveButtonLabel = imageSaveMode === 'download' ? '💾 一键保存长图' : '📱 打开长按保存弹窗';
+
+  const resetGeneratedPreview = () => {
+    setStreamingMarkdown(null);
+    setStreamedGeneralCard(null);
+    setCopyStatus('idle');
+  };
 
   const streamedGeneralCardForDisplay = useMemo(() => {
     if (state.convertMode !== 'ai') return null;
@@ -571,6 +600,70 @@ export function TavernImportPanel() {
     }
   };
 
+  const currentOutputKey = buildOutputKey();
+  const outputDataCard = currentOutputKey && state.outputKey === currentOutputKey ? state.outputDataCard : null;
+  const outputTemplateForPreview: DataCardTemplate =
+    state.convertMode === 'ai' && generationMode === 'stream' ? 'general' : state.targetTemplate;
+
+  const previewDataCard = outputDataCard ?? streamedGeneralCardForDisplay;
+  const isPreviewStreaming = state.convertMode === 'ai' && generationMode === 'stream' && state.step === 'converting';
+
+  const resolvedCloudAuthor = useMemo(() => {
+    if (user && typeof user.id === 'number' && user.username) {
+      return { id: user.id, username: user.username };
+    }
+    return { id: 0, username: '未登录用户' };
+  }, [user]);
+
+  const cloudSavePreview = useMemo(() => {
+    if (!outputDataCard) return null;
+    return buildTavernCloudSavePayload(outputDataCard, resolvedCloudAuthor, cloudPreset, { maxBytes: MAX_DATA_CARD_BYTES });
+  }, [outputDataCard, resolvedCloudAuthor, cloudPreset]);
+
+  const getCloudPayload = async () => {
+    if (!cloudSavePreview) {
+      throw new Error('尚未生成可保存的数据卡');
+    }
+    if ('error' in cloudSavePreview) {
+      throw new Error(cloudSavePreview.error);
+    }
+    if (cloudSavePreview.overLimit) {
+      throw new Error(`数据卡内容过大，最大允许 ${MAX_DATA_CARD_BYTES / 1024}KB，当前预估 ${formatKilobytes(cloudSavePreview.estimatedBytes)}KB`);
+    }
+    return cloudSavePreview.data;
+  };
+
+  const tachiePrompt = useMemo(() => {
+    if (!outputDataCard) return '';
+
+    if (outputTemplateForPreview === 'magical-girl') {
+      const record = isRecord(outputDataCard) ? outputDataCard : {};
+      const appearance = isRecord(record.appearance) ? record.appearance : {};
+      return `${JSON.stringify(appearance)}, Xiabanmo, 二次元, 魔法少女`;
+    }
+
+    if (outputTemplateForPreview === 'canshou') {
+      const safe = normalizeCanshouForCard(outputDataCard);
+      const parts = [safe.appearance, safe.materialAndSkin, safe.featuresAndAppendages].filter((item) => typeof item === 'string' && item.trim());
+      return `${parts.join(', ')}, Xiabanmo, 二次元`;
+    }
+
+    const record = isRecord(outputDataCard) ? outputDataCard : {};
+    const name = ensureString(record.name).trim();
+    const content = ensureString(record.content).trim();
+    const head = content.length > 800 ? content.slice(0, 800) : content;
+    return `${name ? `${name}, ` : ''}${head}, Xiabanmo, 二次元, 角色立绘`;
+  }, [outputDataCard, outputTemplateForPreview]);
+
+  const outputJsonPayload = useMemo(() => {
+    if (!outputDataCard) return null;
+    try {
+      return JSON.stringify(outputDataCard, null, 2);
+    } catch {
+      return null;
+    }
+  }, [outputDataCard]);
+
   return (
     <div className="mt-4">
       <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
@@ -613,7 +706,10 @@ export function TavernImportPanel() {
                       type="radio"
                       name="tavern-candidate"
                       checked={state.selectedCandidateIndex === index}
-                      onChange={() => dispatch({ type: 'selectCandidate', index })}
+                      onChange={() => {
+                        dispatch({ type: 'selectCandidate', index });
+                        resetGeneratedPreview();
+                      }}
                       className="mt-1"
                     />
                     <div className="min-w-0">
@@ -642,7 +738,10 @@ export function TavernImportPanel() {
                 <select
                   className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
                   value={state.targetTemplate}
-                  onChange={(e) => dispatch({ type: 'setTemplate', template: e.target.value as DataCardTemplate })}
+                  onChange={(e) => {
+                    dispatch({ type: 'setTemplate', template: e.target.value as DataCardTemplate });
+                    resetGeneratedPreview();
+                  }}
                   disabled={state.step === 'converting'}
                 >
                   <option value="general">通用角色（最稳，推荐）</option>
@@ -661,7 +760,10 @@ export function TavernImportPanel() {
                     type="checkbox"
                     className="mt-1"
                     checked={state.keepRaw}
-                    onChange={(e) => dispatch({ type: 'setKeepRaw', value: e.target.checked })}
+                    onChange={(e) => {
+                      dispatch({ type: 'setKeepRaw', value: e.target.checked });
+                      resetGeneratedPreview();
+                    }}
                     disabled={state.step === 'converting'}
                   />
                   <div className="min-w-0">
@@ -683,7 +785,10 @@ export function TavernImportPanel() {
                     name="tavern-convert-mode"
                     className="mt-1"
                     checked={state.convertMode === 'rules'}
-                    onChange={() => dispatch({ type: 'setConvertMode', mode: 'rules' })}
+                    onChange={() => {
+                      dispatch({ type: 'setConvertMode', mode: 'rules' });
+                      resetGeneratedPreview();
+                    }}
                     disabled={state.step === 'converting'}
                   />
                   <div className="min-w-0">
@@ -698,7 +803,10 @@ export function TavernImportPanel() {
                     name="tavern-convert-mode"
                     className="mt-1"
                     checked={state.convertMode === 'ai'}
-                    onChange={() => dispatch({ type: 'setConvertMode', mode: 'ai' })}
+                    onChange={() => {
+                      dispatch({ type: 'setConvertMode', mode: 'ai' });
+                      resetGeneratedPreview();
+                    }}
                     disabled={state.step === 'converting'}
                   />
                   <div className="min-w-0">
@@ -713,121 +821,280 @@ export function TavernImportPanel() {
 
             {state.convertMode === 'ai' ? (
               <div className="mt-4 rounded-xl border border-pink-100 bg-white/60 p-3">
-                <AiProviderSelector onConfigChange={setUserProviderConfig} />
-                <div className="mt-2 text-xs text-gray-600">
-                  可选：使用自带 API Key 通常冷却更短；API Key 仅存储于浏览器本地（localStorage），不会上传到服务器。
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-pink-100 bg-white/70 p-3">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between text-left text-sm font-semibold text-pink-700"
+                      onClick={() => setShowLanguageSection(!showLanguageSection)}
+                      disabled={state.step === 'converting'}
+                    >
+                      <span>生成语言</span>
+                      <span className="text-xs">{showLanguageSection ? '▲' : '▼'}</span>
+                    </button>
+                    {showLanguageSection ? (
+                      <div className="mt-3">
+                        <select
+                          className="w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                          value={selectedLanguage}
+                          onChange={(e) => {
+                            setSelectedLanguage(e.target.value);
+                            resetGeneratedPreview();
+                          }}
+                          disabled={state.step === 'converting'}
+                        >
+                          {languages.map((lang) => (
+                            <option key={lang.code} value={lang.code}>
+                              {lang.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-xs text-gray-600">当前：{selectedLanguage}</div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-pink-100 bg-white/70 p-3">
+                    <GenerationModeSwitcher
+                      label="生成方式"
+                      value={generationMode}
+                      disabled={state.step === 'converting'}
+                      helper={false}
+                      onChange={(mode) => {
+                        setGenerationMode(mode);
+                        resetGeneratedPreview();
+                      }}
+                    />
+                    <div className="mt-2 text-xs text-gray-600">
+                      {generationMode === 'stream'
+                        ? '提示：流式生成会实时输出 Markdown，并生成【通用角色卡】；若需要结构化的魔法少女/残兽字段与 userAnswers，请切换为非流式。'
+                        : '提示：非流式生成会返回结构化数据卡（魔法少女/残兽会同时生成 userAnswers），适合后续升华/导出酒馆卡。'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <AiProviderSelector
+                    onConfigChange={(config) => {
+                      setUserProviderConfig(config);
+                      resetGeneratedPreview();
+                    }}
+                  />
+                  <div className="mt-2 text-xs text-gray-600">
+                    可选：使用自带 API Key 通常冷却更短；API Key 仅存储于浏览器本地（localStorage），不会上传到服务器。
+                  </div>
                 </div>
               </div>
             ) : null}
 
-            <div className="mt-4 grid gap-2 md:grid-cols-2">
-              <button type="button" className="generate-button mb-0" disabled={state.step === 'converting'} onClick={onConvertAndDownload}>
-                下载数据卡 JSON
+            <div className="mt-4">
+              <button type="button" className="generate-button mb-0 w-full" disabled={state.step === 'converting'} onClick={onGenerate}>
+                {state.step === 'converting' ? '生成中…' : '生成角色卡'}
               </button>
-              <div className="flex flex-col gap-2">
-                <SaveToCloudButton
-                  data={state.outputDataCard}
-                  getData={async () => {
-                    if (!user) throw new Error('请先登录后再保存到云端（档案馆）。');
-                    const result = await ensureConverted();
-                    if (!result) throw new Error('尚未生成可保存的数据卡。');
-                    const built = buildTavernCloudSavePayload(
-                      result.output,
-                      { id: user.id, username: user.username },
-                      cloudPreset
-                    );
-                    if ('error' in built) throw new Error(built.error);
-                    if (built.overLimit) {
-                      throw new Error(
-                        `预计写入大小 ${formatKilobytes(built.estimatedBytes)}KB，超过上限 ${formatKilobytes(MAX_DATA_CARD_BYTES)}KB；请切换到“轻量/最小化”预设后重试。`
-                      );
-                    }
-                    return built.data;
-                  }}
-                  cardType="character"
-                  buttonText="保存到云端（档案馆）"
-                  defaultName={defaultCloudCardName}
-                  defaultDescription={defaultCloudCardDescription}
-                  className="generate-button mb-0"
-                />
+              <div className="mt-2 text-xs text-gray-600">
+                生成后会在下方展示角色卡预览；你可以保存图片、下载/复制 JSON，或保存到云端（档案馆）。
               </div>
             </div>
-
-            <div className="mt-3 rounded-xl border border-pink-100 bg-white/60 p-3">
-              <div className="text-sm font-semibold text-pink-700">云端写入体积与降级策略（300KB）</div>
-              <div className="mt-2 grid gap-2 md:grid-cols-3">
-                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                  <input
-                    type="radio"
-                    name="tavern-cloud-save-preset"
-                    className="mt-1"
-                    checked={cloudPreset === 'standard'}
-                    onChange={() => setCloudPreset('standard')}
-                    disabled={state.step === 'converting'}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900">标准</div>
-                    <div className="mt-1 text-xs text-gray-600">强制移除 `_tavern.raw`，其余字段保持原样。</div>
-                  </div>
-                </label>
-
-                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                  <input
-                    type="radio"
-                    name="tavern-cloud-save-preset"
-                    className="mt-1"
-                    checked={cloudPreset === 'light'}
-                    onChange={() => setCloudPreset('light')}
-                    disabled={state.step === 'converting'}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900">轻量</div>
-                    <div className="mt-1 text-xs text-gray-600">截断常见大字段（content/description/mes_example 等）。</div>
-                  </div>
-                </label>
-
-                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                  <input
-                    type="radio"
-                    name="tavern-cloud-save-preset"
-                    className="mt-1"
-                    checked={cloudPreset === 'minimal'}
-                    onChange={() => setCloudPreset('minimal')}
-                    disabled={state.step === 'converting'}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900">最小化</div>
-                    <div className="mt-1 text-xs text-gray-600">进一步精简 `_tavern.meta`，并移除 mes_example。</div>
-                  </div>
-                </label>
-              </div>
-
-              {user && state.outputDataCard ? (
-                (() => {
-                  const built = buildTavernCloudSavePayload(state.outputDataCard, { id: user.id, username: user.username }, cloudPreset);
-                  if ('error' in built) {
-                    return <div className="mt-2 text-xs text-red-700">无法估算写入大小：{built.error}</div>;
-                  }
-                  return (
-                    <div className="mt-2 text-xs text-gray-700">
-                      预计写入大小：
-                      <span className={built.overLimit ? 'font-semibold text-red-700' : 'font-semibold text-green-700'}>
-                        {formatKilobytes(built.estimatedBytes)}KB
-                      </span>{' '}
-                      / {formatKilobytes(MAX_DATA_CARD_BYTES)}KB
-                      {built.warnings.length > 0 ? <div className="mt-1 text-amber-700">{built.warnings.join('；')}</div> : null}
-                    </div>
-                  );
-                })()
-              ) : (
-                <div className="mt-2 text-xs text-gray-600">提示：点击上方按钮生成输出数据卡后，会在此处展示预计写入大小。</div>
-              )}
-            </div>
-
-            {state.step === 'done' ? <div className="mt-2 text-xs text-green-700">已生成并开始下载。</div> : null}
           </div>
+
+          {previewDataCard ? (
+            <div className="mt-4">
+              <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
+                <div className="text-sm font-semibold text-pink-700">角色卡预览</div>
+                <div className="mt-3">
+                  {outputTemplateForPreview === 'magical-girl' ? (
+                    <MagicalGirlCard
+                      magicalGirl={previewDataCard as any}
+                      gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)"
+                      onSaveImage={handleSaveImage}
+                      imageSaveMode={imageSaveMode}
+                      saveButtonLabel={imageSaveButtonLabel}
+                    />
+                  ) : outputTemplateForPreview === 'canshou' ? (
+                    <CanshouCard
+                      canshou={normalizeCanshouForCard(previewDataCard)}
+                      onSaveImage={handleSaveImage}
+                      imageSaveMode={imageSaveMode}
+                      saveButtonLabel={imageSaveButtonLabel}
+                    />
+                  ) : (
+                    <GeneralCharacterCard
+                      general={previewDataCard as any}
+                      isStreaming={isPreviewStreaming}
+                      onSaveImage={handleSaveImage}
+                      imageSaveMode={imageSaveMode}
+                      saveButtonLabel={imageSaveButtonLabel}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {outputDataCard ? (
+                <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
+                  <div className="space-y-5 text-left">
+                    <div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium text-gray-800">设定长图保存方式</span>
+                        <span className="text-xs text-gray-500">推荐：{recommendedImageMode === 'download' ? '下载' : '弹窗'}</span>
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <button type="button" className={preferenceButtonClass(imageSaveMode === 'download')} onClick={() => setImageSaveMode('download')}>
+                          💾 一键下载
+                        </button>
+                        <button type="button" className={preferenceButtonClass(imageSaveMode === 'modal')} onClick={() => setImageSaveMode('modal')}>
+                          📱 弹窗长按保存
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs text-gray-500">提示：保存按钮在角色卡最底部；移动端建议弹窗方式。</p>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium text-gray-800">数据卡 JSON 保存方式</span>
+                        <span className="text-xs text-gray-500">推荐：{recommendedJsonMode === 'download' ? '下载' : '复制'}</span>
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <button type="button" className={preferenceButtonClass(jsonSaveMode === 'download')} onClick={() => setJsonSaveMode('download')}>
+                          下载 JSON
+                        </button>
+                        <button type="button" className={preferenceButtonClass(jsonSaveMode === 'text')} onClick={() => setJsonSaveMode('text')}>
+                          复制 JSON
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs text-gray-500">两种方式可随时切换；若你开启了 `_tavern.raw`，JSON 会变大。</p>
+                    </div>
+
+                    <div className="rounded-xl border border-pink-100 bg-white/60 p-3">
+                      <div className="text-sm font-semibold text-pink-700">保存到档案馆（可选）</div>
+                      <div className="mt-2 grid gap-2 md:grid-cols-3">
+                        <button
+                          type="button"
+                          className={preferenceButtonClass(cloudPreset === 'standard')}
+                          onClick={() => setCloudPreset('standard')}
+                        >
+                          标准
+                        </button>
+                        <button type="button" className={preferenceButtonClass(cloudPreset === 'light')} onClick={() => setCloudPreset('light')}>
+                          轻量
+                        </button>
+                        <button type="button" className={preferenceButtonClass(cloudPreset === 'minimal')} onClick={() => setCloudPreset('minimal')}>
+                          极简
+                        </button>
+                      </div>
+
+                      {cloudSavePreview ? (
+                        <div className="mt-3 text-xs text-gray-600">
+                          {'error' in cloudSavePreview ? (
+                            <div className="text-red-600">预估失败：{cloudSavePreview.error}</div>
+                          ) : (
+                            <>
+                              <div>
+                                预估写入大小：{formatKilobytes(cloudSavePreview.estimatedBytes)}KB / {MAX_DATA_CARD_BYTES / 1024}KB
+                                {cloudSavePreview.overLimit ? <span className="ml-2 font-semibold text-red-600">超限</span> : null}
+                              </div>
+                              {cloudSavePreview.warnings.length > 0 ? (
+                                <ul className="mt-2 list-disc space-y-1 pl-5">
+                                  {cloudSavePreview.warnings.map((warning, idx) => (
+                                    <li key={`tavern-cloud-warning-${idx}`}>{warning}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="mt-3 text-xs text-gray-600">生成后会在此处显示体积预估与裁剪提示。</div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+                      {jsonSaveMode === 'download' ? (
+                        <button type="button" onClick={() => void onDownloadJson()} className="generate-button flex-1">
+                          下载数据卡 JSON
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void onCopyJson()}
+                          className="generate-button flex-1"
+                          style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+                        >
+                          {copyStatus === 'success' ? '已复制 ✓' : copyStatus === 'error' ? '复制失败' : '复制数据卡 JSON'}
+                        </button>
+                      )}
+
+                      <SaveToCloudButton
+                        data={outputDataCard}
+                        getData={getCloudPayload}
+                        cardType="character"
+                        buttonText="保存到云端"
+                        defaultName={defaultCloudCardName}
+                        defaultDescription={defaultCloudCardDescription}
+                        className="generate-button flex-1"
+                        style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                      />
+                    </div>
+
+                    {jsonSaveMode === 'text' && outputJsonPayload ? (
+                      <div className="mt-4 rounded-xl border border-pink-100 bg-white/60 p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <span className="text-xs text-gray-600">
+                            {copyStatus === 'success'
+                              ? '✅ JSON 已复制，记得粘贴到编辑器中保存为 .json 文件'
+                              : copyStatus === 'error'
+                                ? '⚠️ 复制遇到问题，可点击文本框全选后手动复制'
+                                : '提示：点击文本框可一键全选；复制后粘贴到文本编辑器保存为 .json。'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => void onCopyJson()}
+                            className="rounded-md border border-indigo-200 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:border-indigo-400 hover:text-indigo-700"
+                          >
+                            复制
+                          </button>
+                        </div>
+                        <textarea
+                          value={outputJsonPayload}
+                          readOnly
+                          className="h-64 w-full rounded-lg border bg-gray-50 p-3 font-mono text-xs text-gray-900"
+                          onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+                        />
+                        <div className="mt-2 text-center text-xs text-gray-400">点击文本框可全选内容</div>
+                      </div>
+                    ) : null}
+
+                    <p className="text-xs text-gray-400 text-center">
+                      提示：云端保存会自动移除大体积字段（如 `_tavern.raw`），并按所选预设裁剪正文；本地下载不受影响。
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 text-sm text-gray-700">生成中…（生成结束后将出现保存/下载选项）</div>
+              )}
+
+              {outputDataCard && tachiePrompt.trim() ? (
+                <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
+                  <div className="text-sm font-semibold text-pink-700">生成立绘（LibLib，可选）</div>
+                  <div className="mt-2 text-xs text-gray-600">提示：立绘生成会直接调用 LibLib API；凭据仅存于本地。</div>
+                  <div className="mt-3">
+                    <TachieGenerator prompt={tachiePrompt} />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </>
       ) : null}
+
+      <ImagePreviewModal
+        isOpen={showImageModal}
+        imageUrl={savedImageUrl}
+        onClose={() => {
+          setShowImageModal(false);
+          setSavedImageUrl(null);
+        }}
+      />
     </div>
   );
 }

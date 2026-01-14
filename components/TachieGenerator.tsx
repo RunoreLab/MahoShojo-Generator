@@ -6,9 +6,11 @@ import { ErrorMessage } from "@/components/ErrorMessage";
 
 interface TachieGeneratorProps {
   prompt: string;
+  onImageUrlChange?: (imageUrl: string | null) => void;
+  onResult?: (result: TachieGenerationResult) => void;
 }
 
-export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
+export default function TachieGenerator({ prompt, onImageUrlChange, onResult }: TachieGeneratorProps) {
   const [accessKey, setAccessKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -71,10 +73,13 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
 
   const handleGenerate = async () => {
     if (!accessKey.trim() || !secretKey.trim()) {
-      setResult({
+      const nextResult = {
         success: false,
         error: "请填写 Access Key 和 Secret Key",
-      });
+      } satisfies TachieGenerationResult;
+      setResult(nextResult);
+      onResult?.(nextResult);
+      onImageUrlChange?.(null);
       return;
     }
 
@@ -83,6 +88,7 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
 
     setIsGenerating(true);
     setResult(null);
+    onImageUrlChange?.(null);
     setProgress(0);
     setProgressStatus("正在提交生成任务...");
 
@@ -97,11 +103,16 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
         setProgressStatus(status);
       });
       setResult(generationResult);
+      onResult?.(generationResult);
+      onImageUrlChange?.(generationResult.success ? (generationResult.imageUrl ?? null) : null);
     } catch (error) {
-      setResult({
+      const nextResult = {
         success: false,
         error: error instanceof Error ? error.message : "生成失败",
-      });
+      } satisfies TachieGenerationResult;
+      setResult(nextResult);
+      onResult?.(nextResult);
+      onImageUrlChange?.(null);
     } finally {
       setIsGenerating(false);
       setProgress(0);
