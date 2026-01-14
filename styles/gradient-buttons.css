@@ -159,6 +159,15 @@
       #fdf2f8 100%);
 }
 
+.tavern-ecosystem .gradient-overlay {
+  background: linear-gradient(45deg,
+      #fff7ed 0%,
+      #fed7aa 25%,
+      #fb7185 50%,
+      #c084fc 75%,
+      #38bdf8 100%);
+}
+
 .card-duel .gradient-overlay {
   /* 优化版：柔和的蓝到粉渐变，中间偏白，适合深色前景 */
   background: linear-gradient(45deg,

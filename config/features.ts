@@ -66,7 +66,7 @@ export const featureCategories: FeatureCategory[] = [
   {
     id: 'utilities',
     title: '~ 辅助功能 ~',
-    columns: 1,
+    columns: 2,
     features: [
       {
         id: 'free-generator',
@@ -76,6 +76,16 @@ export const featureCategories: FeatureCategory[] = [
         alt: '自由生成',
         href: '/free',
         className: 'free-generator'
+      },
+      {
+        id: 'tavern-ecosystem',
+        src: '/tavern-white.svg',
+        width: 240,
+        height: 100,
+        alt: '酒馆生态',
+        href: '/tavern',
+        className: 'tavern-ecosystem',
+        color: 'white'
       }
     ]
   },
