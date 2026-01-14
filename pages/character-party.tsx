@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 
 import Footer from '@/components/Footer';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
@@ -25,6 +26,7 @@ type TeamMember = {
   data: Record<string, unknown>;
   template: InferableTemplate;
   source: 'cloud' | 'file' | 'paste';
+  isNative: boolean | null;
 };
 
 const SOURCE_LABELS: Record<TeamMember['source'], string> = {
@@ -90,6 +92,7 @@ const buildTachiePrompt = (data: Record<string, unknown>): string => {
 
 export default function CharacterPartyPage() {
   const { isAuthenticated, loading: authLoading } = useAuth();
+  const router = useRouter();
 
   const [notice, setNotice] = useState<Notice>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -107,19 +110,144 @@ export default function CharacterPartyPage() {
 
   const [isTachieVisible, setIsTachieVisible] = useState(false);
 
+  const hasNonEmptySignature = (data: Record<string, unknown>): boolean =>
+    typeof data.signature === 'string' && data.signature.trim().length > 0;
+
+  const verifyOrigin = async (data: Record<string, unknown>): Promise<boolean> => {
+    if (!hasNonEmptySignature(data)) return false;
+
+    try {
+      const response = await fetch('/api/verify-origin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) return false;
+      const result = await response.json();
+      return Boolean(result?.isValid);
+    } catch {
+      return false;
+    }
+  };
+
   const addMember = (payload: Record<string, unknown>, source: TeamMember['source'], label?: string) => {
+    const id = randomUUID();
     const inferred = inferTemplate(payload);
     const displayName = (label && label.trim()) ? label.trim() : getDisplayNameFromData(payload);
+
+    const shouldVerifyNative = hasNonEmptySignature(payload);
     setMembers((prev) => [
       ...prev,
       {
-        id: randomUUID(),
+        id,
         label: displayName,
         data: payload,
         template: inferred,
         source,
+        isNative: shouldVerifyNative ? null : false,
       }
     ]);
+
+    if (shouldVerifyNative) {
+      void verifyOrigin(payload).then((isValid) => {
+        setMembers((prev) => prev.map((item) => item.id === id ? { ...item, isNative: isValid } : item));
+      });
+    }
+  };
+
+  const ensureTeamNativeness = async (): Promise<boolean> => {
+    const snapshot = members;
+    if (snapshot.length === 0) return false;
+
+    const verified = await Promise.all(
+      snapshot.map(async (member) => {
+        if (!hasNonEmptySignature(member.data)) {
+          return { id: member.id, isNative: false };
+        }
+        const isValid = await verifyOrigin(member.data);
+        return { id: member.id, isNative: isValid };
+      })
+    );
+
+    setMembers((prev) => prev.map((item) => {
+      const latest = verified.find((row) => row.id === item.id);
+      if (!latest) return item;
+      if (item.isNative === latest.isNative) return item;
+      return { ...item, isNative: latest.isNative };
+    }));
+
+    return verified.every((row) => row.isNative);
+  };
+
+  const prepareMergedDataForExport = async (): Promise<Record<string, unknown> | null> => {
+    if (members.length === 0) return null;
+
+    const base = { ...mergedData };
+    delete base.signature;
+    delete base.isPreset;
+
+    setNotice({ type: 'info', text: '正在检查队伍的原生性...' });
+    const allNative = await ensureTeamNativeness();
+    if (!allNative) {
+      setNotice({ type: 'info', text: '队伍中存在非原生角色，本次输出将不包含原生签名。' });
+      return base;
+    }
+
+    setNotice({ type: 'info', text: '正在请求服务器进行原生性签名认证...' });
+    const response = await fetch('/api/resign-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(base),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      if (errorData?.shouldRedirect) {
+        router.push({
+          pathname: '/arrested',
+          query: { reason: errorData.reason || '编辑内容不合规' }
+        });
+        return null;
+      }
+      throw new Error(errorData?.message || errorData?.error || '签名服务器认证失败');
+    }
+
+    const signed = await response.json();
+    if (!isPlainObject(signed)) {
+      setNotice({ type: 'error', text: '签名服务返回格式异常，已降级为非原生输出。' });
+      return base;
+    }
+
+    const signature = signed.signature;
+    if (typeof signature !== 'string' || !signature.trim()) {
+      delete signed.signature;
+      setNotice({ type: 'info', text: '当前环境未启用签名密钥，本次输出不会包含原生签名。' });
+      return signed;
+    }
+
+    setNotice({ type: 'success', text: '原生性签名认证成功！' });
+    return signed;
+  };
+
+  const handleCopyMergedJson = async () => {
+    try {
+      const exportData = await prepareMergedDataForExport();
+      if (!exportData) return;
+      const ok = await copyTextToClipboard(JSON.stringify(exportData, null, 2));
+      setNotice(ok ? { type: 'success', text: '已复制到剪贴板' } : { type: 'error', text: '复制失败：浏览器不支持或权限不足' });
+    } catch (error) {
+      setNotice({ type: 'error', text: `复制失败：${error instanceof Error ? error.message : '未知错误'}` });
+    }
+  };
+
+  const handleDownloadMergedJson = async () => {
+    try {
+      const exportData = await prepareMergedDataForExport();
+      if (!exportData) return;
+      downloadJson(exportData, mergedFileName);
+    } catch (error) {
+      setNotice({ type: 'error', text: `下载失败：${error instanceof Error ? error.message : '未知错误'}` });
+    }
   };
 
   const handleAddFromCloud = (card: any) => {
@@ -137,8 +265,10 @@ export default function CharacterPartyPage() {
       return;
     }
 
-    addMember(payload, 'cloud', typeof card?.name === 'string' ? card.name : undefined);
-    setNotice({ type: 'success', text: `已加入队伍：${card?.name || getDisplayNameFromData(payload)}` });
+    const fallbackName = typeof card?.name === 'string' ? card.name : '未命名角色';
+    const displayName = getDisplayNameFromData(payload, fallbackName);
+    addMember(payload, 'cloud', displayName);
+    setNotice({ type: 'success', text: `已加入队伍：${displayName}` });
   };
 
   const handleFilesSelected = async (files: FileList | null) => {
@@ -163,7 +293,7 @@ export default function CharacterPartyPage() {
     const failed = results.filter((item) => !item.ok) as Array<{ ok: false; message: string }>;
 
     for (const item of ok) {
-      addMember(item.data, 'file', item.fileName.replace(/\.json$/i, '').trim());
+      addMember(item.data, 'file');
     }
 
     if (failed.length > 0) {
@@ -227,6 +357,14 @@ export default function CharacterPartyPage() {
 
   const mergedData = mergedResult.data;
   const mergedTemplate = mergedResult.template;
+
+  const teamNativeness = useMemo(() => {
+    if (members.length === 0) return { status: 'empty' as const };
+    const allNative = members.every((member) => member.isNative === true);
+    if (allNative) return { status: 'native' as const };
+    const hasPending = members.some((member) => member.isNative === null);
+    return { status: hasPending ? 'checking' as const : 'non-native' as const };
+  }, [members]);
 
   const tachiePrompt = useMemo(() => buildTachiePrompt(mergedData), [mergedData]);
 
@@ -294,11 +432,6 @@ export default function CharacterPartyPage() {
         return { card, payload: obj, template: tpl, displayName };
       });
   }, [cloudCards]);
-
-  const handleCopyMergedJson = async () => {
-    const ok = await copyTextToClipboard(JSON.stringify(mergedData, null, 2));
-    setNotice(ok ? { type: 'success', text: '已复制到剪贴板' } : { type: 'error', text: '复制失败：浏览器不支持或权限不足' });
-  };
 
   const handleSaveImageCallback = (imageUrl: string) => {
     setSavedImageUrl(imageUrl);
@@ -461,6 +594,7 @@ export default function CharacterPartyPage() {
                         <th className="py-2 pr-2">队员标识（用于前缀）</th>
                         <th className="py-2 pr-2">模板</th>
                         <th className="py-2 pr-2">来源</th>
+                        <th className="py-2 pr-2">原生性</th>
                         <th className="py-2 pr-2 text-right">操作</th>
                       </tr>
                     </thead>
@@ -482,6 +616,15 @@ export default function CharacterPartyPage() {
                             {member.template in TEMPLATE_LABELS ? TEMPLATE_LABELS[member.template as keyof typeof TEMPLATE_LABELS] : '未知'}
                           </td>
                           <td className="py-2 pr-2 text-gray-700">{SOURCE_LABELS[member.source]}</td>
+                          <td className="py-2 pr-2 text-gray-700">
+                            {member.isNative === null ? (
+                              <span className="text-xs text-blue-700">验证中...</span>
+                            ) : member.isNative ? (
+                              <span className="text-xs font-semibold text-green-700">原生</span>
+                            ) : (
+                              <span className="text-xs text-gray-500">非原生</span>
+                            )}
+                          </td>
                           <td className="py-2 pl-2">
                             <div className="flex justify-end gap-2">
                               <button
@@ -572,9 +715,20 @@ export default function CharacterPartyPage() {
               <div className="card" style={{ marginTop: '1rem' }}>
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-gray-800 mb-4">后续操作</h3>
+                  {teamNativeness.status !== 'empty' ? (
+                    <div className="mb-3 text-xs">
+                      {teamNativeness.status === 'native' ? (
+                        <span className="text-green-700">✅ 队伍原生性：原生（下载/保存时会自动签名）</span>
+                      ) : teamNativeness.status === 'checking' ? (
+                        <span className="text-blue-700">⏳ 正在验证队伍原生性...</span>
+                      ) : (
+                        <span className="text-gray-600">⚠️ 队伍原生性：非原生（将不会生成原生签名）</span>
+                      )}
+                    </div>
+                  ) : null}
                   <div className="flex flex-col sm:flex-row gap-3 justify-center">
                     <button
-                      onClick={() => downloadJson(mergedData, mergedFileName)}
+                      onClick={() => void handleDownloadMergedJson()}
                       className="generate-button flex-1"
                       disabled={members.length === 0}
                     >
@@ -587,6 +741,7 @@ export default function CharacterPartyPage() {
                     ) : (
                       <SaveToCloudButton
                         data={mergedData}
+                        getData={prepareMergedDataForExport}
                         cardType="character"
                         buttonText="保存到云端"
                         className="generate-button flex-1"
@@ -603,7 +758,7 @@ export default function CharacterPartyPage() {
                     </button>
                   </div>
                   <details className="mt-4 rounded-xl border border-gray-200 bg-white/70 p-3 text-left">
-                    <summary className="cursor-pointer text-sm font-semibold text-gray-700">查看合并后的 JSON</summary>
+                    <summary className="cursor-pointer text-sm font-semibold text-gray-700">查看合并后的 JSON（预览不含原生签名）</summary>
                     <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">
                       {JSON.stringify(mergedData, null, 2)}
                     </pre>
