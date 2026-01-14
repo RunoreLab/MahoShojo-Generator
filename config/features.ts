@@ -78,6 +78,16 @@ export const featureCategories: FeatureCategory[] = [
         className: 'free-generator'
       },
       {
+        id: 'character-party',
+        src: '/party-white.svg',
+        width: 240,
+        height: 100,
+        alt: '角色组队',
+        href: '/character-party',
+        className: 'character-party',
+        color: 'white'
+      },
+      {
         id: 'tavern-ecosystem',
         src: '/tavern-white.svg',
         width: 240,

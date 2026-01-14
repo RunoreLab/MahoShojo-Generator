@@ -59,7 +59,7 @@ const CanshouSchema = z.object({
   name: z.string().describe('残兽的名称，应体现其核心概念和特征'),
   coreConcept: z.string().describe('对残兽核心概念的概括'),
   coreEmotion: z.string().describe('对残兽核心情感/欲望的概括'),
-  evolutionStage: z.string().describe('残兽所处的进化阶段'),
+  evolutionStage: z.string().describe('残兽所处的进化阶段（卵/蠖/蛹/半蜕/蜕/王蜕/羽）'),
   appearance: z.string().describe('外貌形态的详细描述，整合用户输入并进行扩展'),
   materialAndSkin: z.string().describe('材质与表皮的详细描述，整合用户输入并进行扩展'),
   featuresAndAppendages: z.string().describe('特征与附属物的详细描述，整合用户输入并进行扩展'),
@@ -67,7 +67,7 @@ const CanshouSchema = z.object({
   specialAbility: z.string().describe('特殊能力的详细描述和运作机制'),
   origin: z.string().describe('起源故事的详细阐述'),
   birthEnvironment: z.string().describe('诞生环境的详细描述'),
-  researcherNotes: z.string().describe('作为魔法国度残兽研究学者的分析、预测和警告'),
+  researcherNotes: z.string().describe('作为研究员的分析、预测和警告'),
 });
 
 const CustomProviderSchema = z.object({

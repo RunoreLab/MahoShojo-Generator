@@ -168,6 +168,15 @@
       #38bdf8 100%);
 }
 
+.character-party .gradient-overlay {
+  background: linear-gradient(45deg,
+      #e0f2fe 0%,
+      #a7f3d0 25%,
+      #fce7f3 50%,
+      #ddd6fe 75%,
+      #e0f2fe 100%);
+}
+
 .card-duel .gradient-overlay {
   /* 优化版：柔和的蓝到粉渐变，中间偏白，适合深色前景 */
   background: linear-gradient(45deg,
