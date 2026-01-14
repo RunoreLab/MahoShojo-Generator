@@ -4,12 +4,27 @@ import { useMemo, useReducer, useState } from 'react';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
-import { createTavernV3Card, getPlaceholderPngBytes, recommendTavernExportFields, writeTavernCardToPngBytes } from '@/lib/tavern-card';
+import {
+  buildArenaDefaultScenario,
+  buildArenaWorldbook,
+  buildTavernScenarioFragment,
+  createTavernV3Card,
+  getPlaceholderPngBytes,
+  recommendTavernExportFields,
+  writeTavernCardToPngBytes,
+  type TavernScenarioFragment,
+} from '@/lib/tavern-card';
 import { useAuth } from '@/lib/useAuth';
 
 import { TavernCloudCardPickerModal, type TavernCloudCardRow } from './TavernCloudCardPickerModal';
 
 type ExportStep = 'idle' | 'ready' | 'generating' | 'done' | 'error';
+
+type ScenarioAttachment = TavernScenarioFragment & {
+  id: string;
+  fileName: string;
+  source: 'cloud' | 'local';
+};
 
 interface ExportFields {
   name: string;
@@ -36,6 +51,11 @@ interface ExportState {
   overwriteExisting: boolean;
   includeCcv3: boolean;
   includeChara: boolean;
+  autoArenaScenario: boolean;
+  includeArenaWorldbook: boolean;
+  includeScenarioInScenario: boolean;
+  includeScenarioInWorldbook: boolean;
+  scenarios: ScenarioAttachment[];
   aiFilling: boolean;
   aiOverwriteFields: boolean;
   fields: ExportFields;
@@ -49,7 +69,22 @@ type ExportAction =
   | { type: 'setBasePng'; bytes: Uint8Array; name: string }
   | { type: 'usePlaceholder' }
   | { type: 'setField'; key: keyof ExportFields; value: string | number | boolean }
-  | { type: 'setOption'; key: 'overwriteExisting' | 'includeCcv3' | 'includeChara'; value: boolean }
+  | {
+      type: 'setOption';
+      key:
+        | 'overwriteExisting'
+        | 'includeCcv3'
+        | 'includeChara'
+        | 'autoArenaScenario'
+        | 'includeArenaWorldbook'
+        | 'includeScenarioInScenario'
+        | 'includeScenarioInWorldbook';
+      value: boolean;
+    }
+  | { type: 'addScenario'; scenario: ScenarioAttachment }
+  | { type: 'removeScenario'; id: string }
+  | { type: 'moveScenario'; from: number; to: number }
+  | { type: 'clearScenarios' }
   | { type: 'setAiFilling'; value: boolean }
   | { type: 'setAiOverwriteFields'; value: boolean }
   | { type: 'generating' }
@@ -82,6 +117,11 @@ const initialState: ExportState = {
   overwriteExisting: true,
   includeCcv3: true,
   includeChara: true,
+  autoArenaScenario: true,
+  includeArenaWorldbook: true,
+  includeScenarioInScenario: true,
+  includeScenarioInWorldbook: true,
+  scenarios: [],
   aiFilling: false,
   aiOverwriteFields: false,
   fields: initialFields,
@@ -112,6 +152,21 @@ function reducer(state: ExportState, action: ExportAction): ExportState {
       return { ...state, fields: { ...state.fields, [action.key]: action.value } as ExportFields };
     case 'setOption':
       return { ...state, [action.key]: action.value } as ExportState;
+    case 'addScenario':
+      return { ...state, scenarios: [...state.scenarios, action.scenario] };
+    case 'removeScenario':
+      return { ...state, scenarios: state.scenarios.filter((item) => item.id !== action.id) };
+    case 'moveScenario': {
+      const next = [...state.scenarios];
+      if (action.from < 0 || action.from >= next.length) return state;
+      if (action.to < 0 || action.to >= next.length) return state;
+      const [moved] = next.splice(action.from, 1);
+      if (!moved) return state;
+      next.splice(action.to, 0, moved);
+      return { ...state, scenarios: next };
+    }
+    case 'clearScenarios':
+      return { ...state, scenarios: [] };
     case 'setAiFilling':
       return { ...state, aiFilling: action.value };
     case 'setAiOverwriteFields':
@@ -293,11 +348,21 @@ const safeFileName = (base: string, ext: string): string => {
   return `${cleaned}.${ext}`;
 };
 
+const createId = (prefix: string): string => {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return `${prefix}-${crypto.randomUUID()}`;
+  } catch {
+    // ignore
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
 export function TavernExportPanel() {
   const router = useRouter();
   const [state, dispatch] = useReducer(reducer, initialState);
   const { isAuthenticated } = useAuth();
   const [cloudPickerOpen, setCloudPickerOpen] = useState(false);
+  const [cloudScenarioPickerOpen, setCloudScenarioPickerOpen] = useState(false);
 
   const onDataCardSelected = async (file: File | null) => {
     if (!file) return;
@@ -321,6 +386,31 @@ export function TavernExportPanel() {
       setCloudPickerOpen(false);
     } catch (error) {
       dispatch({ type: 'setInlineError', message: error instanceof Error ? `解析档案馆数据卡失败：${error.message}` : '解析档案馆数据卡失败' });
+    }
+  };
+
+  const onCloudScenarioPicked = (card: TavernCloudCardRow) => {
+    try {
+      const json = JSON.parse(card.data) as unknown;
+      const fragment = buildTavernScenarioFragment(json, { maxChars: 24_000 });
+      if (!fragment) {
+        throw new Error('该数据卡无法识别为情景卡（支持：通用情景/情景问卷）');
+      }
+      dispatch({
+        type: 'addScenario',
+        scenario: {
+          ...fragment,
+          id: createId('scenario-cloud'),
+          fileName: card.name,
+          source: 'cloud',
+        },
+      });
+      setCloudScenarioPickerOpen(false);
+    } catch (error) {
+      dispatch({
+        type: 'setInlineError',
+        message: error instanceof Error ? `载入情景失败：${error.message}` : '载入情景失败',
+      });
     }
   };
 
@@ -406,11 +496,34 @@ export function TavernExportPanel() {
     dispatch({ type: 'generating' });
     try {
       const baseBytes = state.basePngBytes ?? getPlaceholderPngBytes();
+
+      const baseScenario = state.fields.scenario.trim();
+      const scenarioParts: string[] = [];
+      if (baseScenario) {
+        scenarioParts.push(baseScenario);
+      } else if (state.autoArenaScenario) {
+        scenarioParts.push(buildArenaDefaultScenario());
+      }
+      if (state.includeScenarioInScenario && state.scenarios.length > 0) {
+        for (const fragment of state.scenarios) {
+          scenarioParts.push(fragment.content);
+        }
+      }
+      const finalScenario = scenarioParts.filter(Boolean).join('\n\n---\n\n').trim();
+
+      const shouldWriteBook = state.includeArenaWorldbook || (state.includeScenarioInWorldbook && state.scenarios.length > 0);
+      const characterBook = shouldWriteBook
+        ? buildArenaWorldbook({
+            includeCore: state.includeArenaWorldbook,
+            scenarioFragments: state.includeScenarioInWorldbook ? state.scenarios : [],
+          })
+        : undefined;
+
       const card = createTavernV3Card({
         name: state.fields.name.trim() || '未命名角色',
         description: state.fields.description,
         personality: state.fields.personality,
-        scenario: state.fields.scenario,
+        scenario: finalScenario,
         first_mes: state.fields.firstMes,
         mes_example: state.fields.mesExample,
         creator_notes: state.fields.creatorNotes,
@@ -418,6 +531,7 @@ export function TavernExportPanel() {
         post_history_instructions: state.fields.postHistoryInstructions,
         tags: tagsArray,
         extensions: { talkativeness: Number(state.fields.talkativeness) || 0.5, fav: Boolean(state.fields.fav) },
+        character_book: characterBook,
       });
 
       const outBytes = writeTavernCardToPngBytes(baseBytes, card, {
@@ -630,16 +744,215 @@ export function TavernExportPanel() {
               />
             </div>
 
-            <div className="mt-4">
-              <label className="block text-sm font-semibold text-pink-700">scenario</label>
-              <textarea
-                className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                value={state.fields.scenario}
-                onChange={(e) => dispatch({ type: 'setField', key: 'scenario', value: e.target.value })}
-                disabled={state.step === 'generating'}
-                rows={3}
-              />
+          <div className="mt-4">
+            <label className="block text-sm font-semibold text-pink-700">scenario</label>
+            <textarea
+              className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+              value={state.fields.scenario}
+              onChange={(e) => dispatch({ type: 'setField', key: 'scenario', value: e.target.value })}
+              disabled={state.step === 'generating'}
+              rows={3}
+            />
+
+            <div className="mt-3 rounded-xl border border-pink-100 bg-white/60 p-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-pink-700">A.R.E.N.A. 世界书 / 情景拼接</div>
+                  <div className="mt-1 text-xs text-gray-600">
+                    可自动附带“魔法少女竞技场 A.R.E.N.A.”世界书，并将你选择的情景卡拼接进 scenario 与世界书（character_book）。
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={state.autoArenaScenario}
+                    onChange={(e) => dispatch({ type: 'setOption', key: 'autoArenaScenario', value: e.target.checked })}
+                    disabled={state.step === 'generating'}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm text-gray-900">scenario 为空时自动填入默认舞台</div>
+                    <div className="mt-1 text-xs text-gray-600">默认舞台为 A.R.E.N.A.（可删改）。</div>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={state.includeArenaWorldbook}
+                    onChange={(e) => dispatch({ type: 'setOption', key: 'includeArenaWorldbook', value: e.target.checked })}
+                    disabled={state.step === 'generating'}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm text-gray-900">附带 A.R.E.N.A. 世界书</div>
+                    <div className="mt-1 text-xs text-gray-600">写入到 SillyTavern 的 character_book。</div>
+                  </div>
+                </label>
+              </div>
+
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={state.includeScenarioInScenario}
+                    onChange={(e) => dispatch({ type: 'setOption', key: 'includeScenarioInScenario', value: e.target.checked })}
+                    disabled={state.step === 'generating'}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm text-gray-900">将附加情景拼接进 scenario</div>
+                    <div className="mt-1 text-xs text-gray-600">会在导出时追加到 scenario 字段末尾。</div>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={state.includeScenarioInWorldbook}
+                    onChange={(e) => dispatch({ type: 'setOption', key: 'includeScenarioInWorldbook', value: e.target.checked })}
+                    disabled={state.step === 'generating'}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-sm text-gray-900">将附加情景写入世界书</div>
+                    <div className="mt-1 text-xs text-gray-600">每个情景会写成一个常驻条目（constant=true）。</div>
+                  </div>
+                </label>
+              </div>
+
+              <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
+                <button
+                  type="button"
+                  className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
+                    isAuthenticated ? 'border-pink-200 bg-pink-50 text-pink-800 hover:bg-pink-100' : 'border-gray-200 bg-gray-50 text-gray-400'
+                  }`}
+                  disabled={!isAuthenticated || state.step === 'generating'}
+                  onClick={() => setCloudScenarioPickerOpen(true)}
+                >
+                  从档案馆选择情景
+                </button>
+
+                <label className="cursor-pointer rounded-xl border border-pink-200 bg-white/70 px-4 py-2 text-sm font-semibold text-pink-800 hover:bg-pink-50">
+                  上传情景文件
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    multiple
+                    className="hidden"
+                    disabled={state.step === 'generating'}
+                    onChange={async (event) => {
+                      const files = event.target.files ? Array.from(event.target.files) : [];
+                      if (files.length === 0) return;
+                      const errors: string[] = [];
+                      for (const file of files) {
+                        try {
+                          const text = await file.text();
+                          const json = JSON.parse(text) as unknown;
+                          const fragment = buildTavernScenarioFragment(json, { maxChars: 24_000 });
+                          if (!fragment) {
+                            throw new Error('无法识别为情景卡（支持：通用情景/情景问卷）');
+                          }
+                          dispatch({
+                            type: 'addScenario',
+                            scenario: {
+                              ...fragment,
+                              id: createId('scenario-local'),
+                              fileName: file.name || fragment.title,
+                              source: 'local',
+                            },
+                          });
+                        } catch (error) {
+                          const message = error instanceof Error ? error.message : '未知错误';
+                          errors.push(`${file.name}: ${message}`);
+                        }
+                      }
+                      if (errors.length > 0) {
+                        dispatch({
+                          type: 'setInlineError',
+                          message: `${errors.length}/${files.length} 个情景导入失败：${errors.join('；')}`,
+                        });
+                      }
+                      event.target.value = '';
+                    }}
+                  />
+                </label>
+
+                {state.scenarios.length > 0 ? (
+                  <button
+                    type="button"
+                    className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    onClick={() => dispatch({ type: 'clearScenarios' })}
+                    disabled={state.step === 'generating'}
+                  >
+                    清空附加情景（{state.scenarios.length}）
+                  </button>
+                ) : null}
+              </div>
+
+              {state.scenarios.length > 0 ? (
+                <div className="mt-3 rounded-xl border border-pink-100 bg-white/70 p-3">
+                  <div className="text-sm font-semibold text-gray-900">已添加的情景（顺序即拼接顺序）</div>
+                  <ul className="mt-2 space-y-2">
+                    {state.scenarios.map((item, index) => {
+                      const canMoveUp = index > 0;
+                      const canMoveDown = index < state.scenarios.length - 1;
+                      return (
+                        <li key={item.id} className="flex items-start justify-between gap-3 rounded-xl border border-pink-50 bg-white/80 p-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-gray-900 truncate">{item.title}</div>
+                            <div className="mt-1 text-xs text-gray-600">
+                              来源：{item.source === 'cloud' ? '档案馆' : '本地'} · 文件：{item.fileName}
+                            </div>
+                            {item.warnings.length > 0 ? (
+                              <div className="mt-1 text-xs text-amber-700">{item.warnings.join('；')}</div>
+                            ) : null}
+                          </div>
+                          <div className="flex shrink-0 flex-col gap-2">
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                className="h-8 w-8 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="上移"
+                                disabled={state.step === 'generating' || !canMoveUp}
+                                onClick={() => dispatch({ type: 'moveScenario', from: index, to: index - 1 })}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                className="h-8 w-8 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="下移"
+                                disabled={state.step === 'generating' || !canMoveDown}
+                                onClick={() => dispatch({ type: 'moveScenario', from: index, to: index + 1 })}
+                              >
+                                ↓
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              className="h-8 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                              disabled={state.step === 'generating'}
+                              onClick={() => dispatch({ type: 'removeScenario', id: item.id })}
+                            >
+                              移除
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : (
+                <div className="mt-3 text-xs text-gray-600">
+                  未添加附加情景：你可以从档案馆选择情景卡，或上传任意情景 JSON（通用情景/情景问卷）。
+                </div>
+              )}
             </div>
+          </div>
 
             <div className="grid gap-4 md:grid-cols-2 mt-4">
               <div>
@@ -743,6 +1056,15 @@ export function TavernExportPanel() {
         onClose={() => setCloudPickerOpen(false)}
         isAuthenticated={isAuthenticated}
         onPick={onCloudCardPicked}
+        typeFilter="character"
+      />
+
+      <TavernCloudCardPickerModal
+        isOpen={cloudScenarioPickerOpen}
+        onClose={() => setCloudScenarioPickerOpen(false)}
+        isAuthenticated={isAuthenticated}
+        onPick={onCloudScenarioPicked}
+        typeFilter="scenario"
       />
     </div>
   );

@@ -19,6 +19,7 @@ interface TavernCloudCardPickerModalProps {
   onClose: () => void;
   isAuthenticated: boolean;
   onPick: (card: TavernCloudCardRow) => void;
+  typeFilter?: TavernCloudCardRow['type'];
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -39,16 +40,25 @@ const asCardRow = (value: unknown): TavernCloudCardRow | null => {
   return { id, type, name, data, description: description ?? undefined, updated_at, deleted_at: deleted_at ?? undefined };
 };
 
-export function TavernCloudCardPickerModal({ isOpen, onClose, isAuthenticated, onPick }: TavernCloudCardPickerModalProps) {
+export function TavernCloudCardPickerModal({ isOpen, onClose, isAuthenticated, onPick, typeFilter = 'character' }: TavernCloudCardPickerModalProps) {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cards, setCards] = useState<TavernCloudCardRow[]>([]);
 
+  const modalTitle = typeFilter === 'scenario' ? '从档案馆选择情景数据卡' : typeFilter === 'history' ? '从档案馆选择叙事历史数据卡' : '从档案馆选择角色数据卡';
+  const modalHint =
+    typeFilter === 'scenario'
+      ? '仅显示“情景”类型；载入后会追加到导出的附加情景列表。'
+      : typeFilter === 'history'
+        ? '仅显示“叙事历史”类型；载入后会交由上层逻辑处理。'
+        : '仅显示“角色”类型；载入后会自动带入导出字段。';
+  const pickLabel = typeFilter === 'scenario' ? '添加' : '载入';
+
   const visibleCards = useMemo(() => {
-    return cards.filter((card) => card.type === 'character' && !card.deleted_at).slice(0, 30);
-  }, [cards]);
+    return cards.filter((card) => card.type === typeFilter && !card.deleted_at).slice(0, 30);
+  }, [cards, typeFilter]);
 
   const fetchCards = useCallback(async (query: string) => {
     setLoading(true);
@@ -120,8 +130,8 @@ export function TavernCloudCardPickerModal({ isOpen, onClose, isAuthenticated, o
         </button>
 
         <div className="pr-8">
-          <h2 className="text-xl font-bold text-gray-900">从档案馆选择角色数据卡</h2>
-          <div className="mt-1 text-xs text-gray-600">仅显示“角色”类型；载入后会自动带入导出字段。</div>
+          <h2 className="text-xl font-bold text-gray-900">{modalTitle}</h2>
+          <div className="mt-1 text-xs text-gray-600">{modalHint}</div>
         </div>
 
         {!isAuthenticated ? (
@@ -184,7 +194,7 @@ export function TavernCloudCardPickerModal({ isOpen, onClose, isAuthenticated, o
                         className="shrink-0 rounded-xl border border-pink-200 bg-pink-50 px-4 py-2 text-sm font-semibold text-pink-800 hover:bg-pink-100"
                         onClick={() => onPick(card)}
                       >
-                        载入
+                        {pickLabel}
                       </button>
                     </li>
                   ))}

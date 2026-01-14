@@ -22,3 +22,7 @@ export { buildTavernAiAttachment } from './ai';
 export { recommendTavernExportFields } from './recommend';
 export type { TavernCloudAuthorInfo, TavernCloudSavePreset, TavernCloudSaveBuildResult } from './cloud';
 export { estimateDataCardBytesAfterAuthorInjection, buildTavernCloudSavePayload } from './cloud';
+export type { TavernScenarioFragment } from './scenario';
+export { buildTavernScenarioFragment } from './scenario';
+export type { TavernCharacterBook } from './worldbook';
+export { DEFAULT_ARENA_WORLDBOOK_NAME, buildArenaDefaultScenario, buildArenaWorldbook } from './worldbook';
