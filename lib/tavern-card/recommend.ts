@@ -207,6 +207,8 @@ export function recommendTavernExportFields(
 ): TavernExportRecommendations {
   const tagList: string[] = [...existingTags];
 
+  addTag(tagList, 'MahoShojo-Generator');
+
   if (!isRecord(dataCard)) {
     return { tags: uniqueStrings(tagList).slice(0, 50) };
   }
@@ -218,7 +220,7 @@ export function recommendTavernExportFields(
     addTag(tagList, '残兽');
     getCanshouStructuredTags(dataCard).forEach((tag) => addTag(tagList, tag));
   } else {
-    addTag(tagList, '角色卡');
+    addTag(tagList, '其他角色卡');
   }
 
   const corpus = buildTextCorpus(template, dataCard).toLowerCase();
