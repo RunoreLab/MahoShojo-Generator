@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 
 import { generateWithAI, LoadBalanceStrategy, type GenerationConfig } from '@/lib/ai';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
@@ -22,11 +23,36 @@ export const config = {
   runtime: 'edge',
 };
 
+const MAX_SAFETY_TEXT_CHARS = 50_000;
+
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),
   apiKey: z.string(),
 });
+
+const AttachmentSchema = z.object({
+  name: z.string().min(1).max(200),
+  type: z.string().optional().default('application/octet-stream'),
+  size: z.number().int().nonnegative().optional(),
+  content: z.string().max(FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsPerFile),
+  truncated: z.boolean().optional(),
+});
+
+const AttachmentsSchema = z
+  .array(AttachmentSchema)
+  .max(FREE_GENERATION_ATTACHMENT_LIMITS.maxCount)
+  .optional()
+  .default([])
+  .superRefine((items, ctx) => {
+    const total = items.reduce((sum, item) => sum + item.content.length, 0);
+    if (total > FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `附件内容总长度超出限制（上限 ${FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal.toLocaleString()} 字符）`,
+      });
+    }
+  });
 
 const FreeSchemaIdSchema = z.enum(['magical-girl', 'canshou', 'scenario', 'general', 'general-scenario']);
 type FreeSchemaId = z.infer<typeof FreeSchemaIdSchema>;
@@ -34,6 +60,7 @@ type FreeSchemaId = z.infer<typeof FreeSchemaIdSchema>;
 const RequestBodySchema = z.object({
   schema: FreeSchemaIdSchema,
   prompt: z.string().min(1),
+  attachments: AttachmentsSchema,
   language: z.string().optional().default('zh-CN'),
   customProvider: CustomProviderSchema.optional(),
 });
@@ -302,13 +329,16 @@ export default async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    const { schema: schemaId, prompt, language, customProvider: customProviderPayload } = parsedBody.data;
+    const { schema: schemaId, prompt, attachments, language, customProvider: customProviderPayload } = parsedBody.data;
 
     // --- 安全检查流程（对齐其他生成接口）---
+    const combinedForSafety = [prompt, ...attachments.map((item) => item.content)].filter((t) => t.trim()).join('\n\n');
+    const safetyText =
+      combinedForSafety.length > MAX_SAFETY_TEXT_CHARS ? combinedForSafety.slice(0, MAX_SAFETY_TEXT_CHARS) : combinedForSafety;
     const safetyResponse = await enforceTextSafety({
-      text: prompt,
+      text: safetyText,
       log,
-      logMeta: { schemaId },
+      logMeta: { schemaId, attachmentsCount: attachments.length, attachmentsChars: combinedForSafety.length },
       sensitiveWordReason: '使用危险符文',
       aiPromptTemplate: 'free',
     });
@@ -367,7 +397,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
     const schema = schemaMap[schemaId];
     const fieldGuide = buildFieldGuide(schemaId);
 
-    const generationConfig: GenerationConfig<any, { prompt: string; language: string }> = {
+    const generationConfig: GenerationConfig<any, { prompt: string; language: string; attachments: AITextAttachment[] }> = {
       systemPrompt: '你的任务是创作具有指定数据结构的内容。',
       temperature: 0.7,
       promptBuilder: (input) => `
@@ -377,6 +407,8 @@ export default async function handler(req: NextRequest): Promise<Response> {
 内容语言：请使用【${input.language}】撰写所有自然语言字段。
 
 ${fieldGuide}
+
+${formatReferenceAttachmentsForPrompt(input.attachments)}
 
 用户提示词：
 ${input.prompt}
@@ -395,7 +427,7 @@ ${input.prompt}
       }
       : undefined;
 
-    const result = await generateWithAI({ prompt, language }, generationConfig, providerOptions);
+    const result = await generateWithAI({ prompt, language, attachments }, generationConfig, providerOptions);
     const sanitized = sanitizeFreeCard(schemaId, result);
     const validated = validateForApp(schemaId, sanitized);
 

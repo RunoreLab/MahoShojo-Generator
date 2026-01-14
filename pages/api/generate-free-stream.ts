@@ -2,6 +2,7 @@ import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
@@ -13,11 +14,36 @@ export const config = {
   runtime: 'edge',
 };
 
+const MAX_SAFETY_TEXT_CHARS = 50_000;
+
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),
   apiKey: z.string(),
 });
+
+const AttachmentSchema = z.object({
+  name: z.string().min(1).max(200),
+  type: z.string().optional().default('application/octet-stream'),
+  size: z.number().int().nonnegative().optional(),
+  content: z.string().max(FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsPerFile),
+  truncated: z.boolean().optional(),
+});
+
+const AttachmentsSchema = z
+  .array(AttachmentSchema)
+  .max(FREE_GENERATION_ATTACHMENT_LIMITS.maxCount)
+  .optional()
+  .default([])
+  .superRefine((items, ctx) => {
+    const total = items.reduce((sum, item) => sum + item.content.length, 0);
+    if (total > FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `附件内容总长度超出限制（上限 ${FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal.toLocaleString()} 字符）`,
+      });
+    }
+  });
 
 const StreamSchemaIdSchema = z.enum(['general', 'general-scenario']);
 type StreamSchemaId = z.infer<typeof StreamSchemaIdSchema>;
@@ -25,11 +51,13 @@ type StreamSchemaId = z.infer<typeof StreamSchemaIdSchema>;
 const RequestBodySchema = z.object({
   schema: StreamSchemaIdSchema,
   prompt: z.string().min(1),
+  attachments: AttachmentsSchema,
   language: z.string().optional().default('zh-CN'),
   customProvider: CustomProviderSchema.optional(),
 });
 
-const buildStreamPrompt = (schemaId: StreamSchemaId, language: string, userPrompt: string): string => {
+const buildStreamPrompt = (schemaId: StreamSchemaId, language: string, userPrompt: string, attachments: AITextAttachment[]): string => {
+  const attachmentsSection = formatReferenceAttachmentsForPrompt(attachments);
   if (schemaId === 'general') {
     return `
 你将根据【用户提示词】生成一份【通用角色卡】的正文内容。
@@ -42,6 +70,8 @@ const buildStreamPrompt = (schemaId: StreamSchemaId, language: string, userPromp
    - 代号：...
    - 名字：...
 5) 正文建议包含：外观、性格、能力与限制、背景与动机、关系与羁绊、战斗风格、常用台词/行为准则（可选）。
+
+${attachmentsSection}
 
 【用户提示词】
 ${userPrompt}
@@ -58,6 +88,8 @@ ${userPrompt}
 4) 在开头 20 行内，尽量给出明确字段（若无法推断可写“未指定”）：
    - 标题：...
 5) 正文建议包含：场景概览、时间、地点、环境特征、预设 NPC（可选）、核心事件、整体氛围、发展方向（多条）。
+
+${attachmentsSection}
 
 【用户提示词】
 ${userPrompt}
@@ -81,12 +113,15 @@ export default async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    const { schema: schemaId, prompt: userPrompt, language, customProvider: customProviderPayload } = parsedBody.data;
+    const { schema: schemaId, prompt: userPrompt, attachments, language, customProvider: customProviderPayload } = parsedBody.data;
 
+    const combinedForSafety = [userPrompt, ...attachments.map((item) => item.content)].filter((t) => t.trim()).join('\n\n');
+    const safetyText =
+      combinedForSafety.length > MAX_SAFETY_TEXT_CHARS ? combinedForSafety.slice(0, MAX_SAFETY_TEXT_CHARS) : combinedForSafety;
     const safetyResponse = await enforceTextSafety({
-      text: userPrompt,
+      text: safetyText,
       log,
-      logMeta: { schemaId },
+      logMeta: { schemaId, attachmentsCount: attachments.length, attachmentsChars: combinedForSafety.length },
       sensitiveWordReason: '使用危险符文',
       aiPromptTemplate: 'free',
     });
@@ -141,7 +176,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       }
     }
 
-    const prompt = buildStreamPrompt(schemaId, language, userPrompt);
+    const prompt = buildStreamPrompt(schemaId, language, userPrompt, attachments);
 
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
     const providerOptions: GenerateWithAIOptions | undefined = (customProviderOverride || shouldDisablePolling)
