@@ -91,9 +91,9 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ options, value, onChange, p
             {isOpen && (
                 <div className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-lg border border-pink-200 bg-white shadow-lg">
                     <div role="listbox">
-                        {options.map(option => (
+                        {options.map((option, index) => (
                             <button
-                                key={option.value}
+                                key={`${option.value}-${index}`}
                                 type="button"
                                 role="option"
                                 aria-selected={option.value === value}
@@ -127,8 +127,14 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
     const [selectedModel, setSelectedModel] = useState<string>('');
     const [apiKey, setApiKey] = useState<string>('');
     const [isHydrated, setIsHydrated] = useState<boolean>(false);
+    const onConfigChangeRef = useRef(onConfigChange);
+    const lastEmittedConfigKeyRef = useRef<string>('');
 
     const activeProvider = providerOptions.find(provider => provider.id === selectedProviderId) ?? null;
+
+    useEffect(() => {
+        onConfigChangeRef.current = onConfigChange;
+    }, [onConfigChange]);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -222,34 +228,54 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
             return;
         }
 
-        window.localStorage.setItem(STORAGE_SELECTED_PROVIDER, selectedProviderId);
-
         if (!activeProvider) {
             setApiKey('');
             setSelectedModel('');
-            onConfigChange(null);
             return;
         }
 
-        const storedApiKey = window.localStorage.getItem(getApiKeyStorageKey(activeProvider.id)) || '';
-        const storedModel = window.localStorage.getItem(getModelStorageKey(activeProvider.id)) || activeProvider.models[0]?.value || '';
+        let storedApiKey = '';
+        let storedModel = activeProvider.models[0]?.value || '';
+
+        try {
+            window.localStorage.setItem(STORAGE_SELECTED_PROVIDER, selectedProviderId);
+            storedApiKey = window.localStorage.getItem(getApiKeyStorageKey(activeProvider.id)) || '';
+            storedModel = window.localStorage.getItem(getModelStorageKey(activeProvider.id)) || storedModel;
+        } catch {
+            // localStorage 在部分隐私模式/受限环境下可能不可用，忽略即可
+        }
 
         setApiKey(storedApiKey);
         setSelectedModel(storedModel);
-    }, [activeProvider, isHydrated, onConfigChange, selectedProviderId]);
+    }, [activeProvider, isHydrated, selectedProviderId]);
 
     useEffect(() => {
-        if (!isHydrated || !activeProvider) {
+        if (!isHydrated) {
+            return;
+        }
+
+        if (!activeProvider) {
+            const configKey = 'null';
+            if (configKey === lastEmittedConfigKeyRef.current) {
+                return;
+            }
+            lastEmittedConfigKeyRef.current = configKey;
+            onConfigChangeRef.current(null);
             return;
         }
 
         const effectiveModel = selectedModel || activeProvider.models[0]?.value || '';
-        onConfigChange({
+        const configKey = `${activeProvider.id}::${effectiveModel}::${apiKey.trim()}`;
+        if (configKey === lastEmittedConfigKeyRef.current) {
+            return;
+        }
+        lastEmittedConfigKeyRef.current = configKey;
+        onConfigChangeRef.current({
             providerId: activeProvider.id,
             modelId: effectiveModel,
             apiKey: apiKey.trim(),
         });
-    }, [activeProvider, apiKey, isHydrated, onConfigChange, selectedModel]);
+    }, [activeProvider, apiKey, isHydrated, selectedModel]);
 
     useEffect(() => {
         if (!isHydrated || !activeProvider || typeof window === 'undefined') {

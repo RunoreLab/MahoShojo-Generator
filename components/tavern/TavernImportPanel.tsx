@@ -1,5 +1,5 @@
 import { useRouter } from 'next/router';
-import { useEffect, useMemo, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import CanshouCard from '@/components/CanshouCard';
@@ -312,6 +312,13 @@ export function TavernImportPanel() {
     setStreamedGeneralCard(null);
     setCopyStatus('idle');
   };
+
+  const handleAiProviderConfigChange = useCallback((config: UserAIProviderConfig | null) => {
+    setUserProviderConfig(config);
+    setStreamingMarkdown(null);
+    setStreamedGeneralCard(null);
+    setCopyStatus('idle');
+  }, []);
 
   const streamedGeneralCardForDisplay = useMemo(() => {
     if (state.convertMode !== 'ai') return null;
@@ -876,10 +883,7 @@ export function TavernImportPanel() {
 
                 <div className="mt-3">
                   <AiProviderSelector
-                    onConfigChange={(config) => {
-                      setUserProviderConfig(config);
-                      resetGeneratedPreview();
-                    }}
+                    onConfigChange={handleAiProviderConfigChange}
                   />
                   <div className="mt-2 text-xs text-gray-600">
                     可选：使用自带 API Key 通常冷却更短；API Key 仅存储于浏览器本地（localStorage），不会上传到服务器。

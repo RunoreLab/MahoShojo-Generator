@@ -132,11 +132,6 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'DeepSeek 最新版本。'
             },
             {
-                value: 'deepseek-chat',
-                label: 'DeepSeek Chat (非流式可能存在问题)',
-                description: 'DeepSeek 最新版本。'
-            },
-            {
                 value: 'doubao-seed-1-6',
                 label: 'Doubao Seed 1.6 (非流式可能存在问题)',
                 description: '字节跳动旗下的大模型。'
