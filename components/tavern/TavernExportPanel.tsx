@@ -4,8 +4,10 @@ import { useMemo, useReducer, useState } from 'react';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import BattleDataModal from '@/components/BattleDataModal';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import { TavernAiFillButton } from '@/components/tavern/TavernAiFillButton';
 import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
 import { downloadBlob } from '@/lib/client/blobUrl';
+import { buildSafeFileName } from '@/lib/client/fileName';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
 import {
   buildArenaDefaultScenario,
@@ -201,6 +203,32 @@ const readTavernMeta = (card: unknown): Record<string, unknown> | null => {
   return isRecord(meta) ? meta : null;
 };
 
+const DEFAULT_CLOUD_CARD_DESCRIPTIONS = new Set(['角色数据卡', '情景数据卡', '叙事历史数据卡']);
+
+const appendCreatorNotes = (base: string, block: string): string => {
+  const left = base.trim();
+  const right = block.trim();
+  if (!right) return left;
+  if (left.includes(right)) return left;
+  if (!left) return right;
+  return `${left}\n\n${right}`;
+};
+
+const buildCreatorNotesWithCloudDescription = (dataCard: unknown, baseCreatorNotes: string): string => {
+  if (!isRecord(dataCard)) return baseCreatorNotes;
+
+  const cloudId = safeString(dataCard['_cardId']).trim();
+  if (!cloudId) return baseCreatorNotes;
+
+  const cloudDescription = safeString(dataCard['_cardDescription']).trim();
+  if (!cloudDescription) return baseCreatorNotes;
+  if (DEFAULT_CLOUD_CARD_DESCRIPTIONS.has(cloudDescription)) return baseCreatorNotes;
+
+  const capped = cloudDescription.replace(/\r\n/g, '\n').slice(0, 800);
+  const block = `【档案馆简介】\n${capped}${cloudDescription.length > 800 ? '\n...[已截断]' : ''}`;
+  return appendCreatorNotes(baseCreatorNotes, block);
+};
+
 const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unknown): ExportFields => {
   const meta = readTavernMeta(card);
   const metaTags = meta ? safeStringArray(meta['tags']) : [];
@@ -214,6 +242,8 @@ const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unkno
   const fromMeta = (key: string): string => (meta ? safeString(meta[key]) : '');
   const fromMetaFirstMes = fromMeta('firstMes') || fromMeta('first_mes');
   const fromMetaMesExample = fromMeta('mesExample') || fromMeta('mes_example');
+  const baseCreatorNotes = fromMeta('creatorNotes') || fromMeta('creator_notes') || DEFAULT_CREATOR_NOTES;
+  const creatorNotes = buildCreatorNotesWithCloudDescription(card, baseCreatorNotes);
 
   if (template === 'magical-girl') {
     const codename = safeString(card['codename']) || safeString(card['name']) || '未命名角色';
@@ -294,7 +324,7 @@ const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unkno
       firstMes: fromMetaFirstMes || recommended.firstMes || '',
       mesExample: fromMetaMesExample || recommended.mesExample || '',
       tags: recommendedTags,
-      creatorNotes: fromMeta('creatorNotes') || fromMeta('creator_notes') || DEFAULT_CREATOR_NOTES,
+      creatorNotes,
     };
   }
 
@@ -325,7 +355,7 @@ const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unkno
       firstMes: fromMetaFirstMes,
       mesExample: fromMetaMesExample,
       tags: recommendedTags,
-      creatorNotes: fromMeta('creatorNotes') || fromMeta('creator_notes') || DEFAULT_CREATOR_NOTES,
+      creatorNotes,
     };
   }
 
@@ -340,14 +370,8 @@ const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unkno
     firstMes: fromMetaFirstMes,
     mesExample: fromMetaMesExample,
     tags: recommendedTags,
-    creatorNotes: fromMeta('creatorNotes') || fromMeta('creator_notes') || DEFAULT_CREATOR_NOTES,
+    creatorNotes,
   };
-};
-
-const safeFileName = (base: string, ext: string): string => {
-  const raw = base.trim() || 'tavern-card';
-  const cleaned = raw.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80);
-  return `${cleaned}.${ext}`;
 };
 
 const createId = (prefix: string): string => {
@@ -659,7 +683,7 @@ export function TavernExportPanel() {
         return copy.buffer;
       };
       const blob = new Blob([toArrayBuffer(outBytes)], { type: 'image/png' });
-      downloadBlob(blob, safeFileName(state.fields.name || 'tavern-card', 'png'));
+      downloadBlob(blob, buildSafeFileName(state.fields.name || 'tavern-card', 'png', 'tavern-card'));
       dispatch({ type: 'done' });
     } catch (error) {
       dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '导出失败' });
@@ -731,14 +755,7 @@ export function TavernExportPanel() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                className="rounded-xl border border-pink-200 bg-pink-100 px-4 py-2 text-sm font-semibold text-pink-800 hover:bg-pink-200 disabled:opacity-50"
-                disabled={state.step === 'generating' || state.aiFilling}
-                onClick={onAiFill}
-              >
-                {state.aiFilling ? 'AI 生成中…' : 'AI 生成开场白/对话样例'}
-              </button>
+              <TavernAiFillButton loading={state.aiFilling} disabled={state.step === 'generating' || state.aiFilling} onClick={onAiFill} />
             </div>
 
             <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">

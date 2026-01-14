@@ -2,6 +2,47 @@ import { getLogger } from '../../logger';
 
 const log = getLogger('ai-error-extraction');
 
+const safeJsonParse = (value: string): unknown | null => {
+    const text = value.trim();
+    if (!text) return null;
+    if (!(text.startsWith('{') || text.startsWith('['))) return null;
+    try {
+        return JSON.parse(text) as unknown;
+    } catch {
+        return null;
+    }
+};
+
+const safeString = (value: unknown): string => {
+    if (typeof value !== 'string') return '';
+    return value;
+};
+
+const extractMessageFromUnknownPayload = (payload: unknown): string => {
+    if (!payload) return '';
+    if (typeof payload === 'string') return payload;
+
+    if (typeof payload === 'object') {
+        const record = payload as Record<string, unknown>;
+
+        const direct = safeString(record.message) || safeString(record.error);
+        if (direct) return direct;
+
+        const error = record.error;
+        if (error && typeof error === 'object') {
+            const errorRecord = error as Record<string, unknown>;
+            const nested = safeString(errorRecord.message) || safeString(errorRecord.error);
+            if (nested) return nested;
+        }
+    }
+
+    try {
+        return String(payload);
+    } catch {
+        return '';
+    }
+};
+
 /**
  * 从 AI SDK 错误对象中提取上游返回的详细错误信息
  *
@@ -68,16 +109,24 @@ export function enhanceErrorWithUpstreamMessage(error: any): Error {
         const errorAny = error as any;
 
         // 检查是否是 AI SDK 的错误对象，尝试提取上游返回的详细错误信息
+        const responseBodyText = safeString(errorAny?.responseBody);
+        const responseBodyJson = responseBodyText ? safeJsonParse(responseBodyText) : null;
+        const responseBodyMessage = responseBodyJson ? extractMessageFromUnknownPayload(responseBodyJson) : '';
+
         const upstreamMessage =
             errorAny?.data?.error?.message ||
             errorAny?.error?.data?.error?.message ||
             errorAny?.responseBody?.error?.message ||
-            errorAny?.cause?.message;
+            responseBodyMessage ||
+            errorAny?.cause?.message ||
+            extractMessageFromUnknownPayload(errorAny?.data);
 
         if (upstreamMessage) {
             // 创建一个新的错误对象，包含上游的详细错误信息
             const errorPrefix = errorAny.name || 'AI_Error';
-            const enhancedError = new Error(`${errorPrefix}: ${upstreamMessage}`);
+            const statusCode = typeof errorAny?.statusCode === 'number' ? errorAny.statusCode : null;
+            const suffix = statusCode ? `（HTTP ${statusCode}）` : '';
+            const enhancedError = new Error(`${errorPrefix}: ${upstreamMessage}${suffix}`);
             // 保留原始错误对象作为 cause
             (enhancedError as any).originalError = error;
             return enhancedError;

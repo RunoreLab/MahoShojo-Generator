@@ -5,6 +5,7 @@ import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiPr
 import { ErrorMessage } from '@/components/ErrorMessage';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
+import { buildSafeFileName } from '@/lib/client/fileName';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { createBlankDataCard, type DataCardTemplate } from '@/lib/data-card-converter';
 import { formatKilobytes, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
@@ -108,12 +109,6 @@ const uniqueStrings = (items: string[]): string[] => {
     out.push(trimmed);
   }
   return out;
-};
-
-const safeFileName = (base: string, ext: string): string => {
-  const raw = base.trim() || 'tavern-card';
-  const cleaned = raw.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80);
-  return `${cleaned}.${ext}`;
 };
 
 const guessTemplate = (result: TavernParseResult): DataCardTemplate => {
@@ -421,7 +416,7 @@ export function TavernImportPanel() {
       const result = await ensureConverted();
       if (!result) return;
       const blob = new Blob([JSON.stringify(result.output, null, 2)], { type: 'application/json' });
-      downloadBlob(blob, safeFileName(selectedNormalized.name, 'json'));
+      downloadBlob(blob, buildSafeFileName(selectedNormalized.name, 'json', 'tavern-card'));
     } catch (error) {
       dispatch({ type: 'parseError', message: error instanceof Error ? error.message : '转换失败' });
     }
