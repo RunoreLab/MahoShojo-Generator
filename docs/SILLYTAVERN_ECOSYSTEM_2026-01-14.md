@@ -85,10 +85,14 @@
   - `tEXt` / keyword = **`chara`**
   - `tEXt` / keyword = **`ccv3`**
 - 两个块的 payload 都是 **Base64 编码的 JSON 字符串**（UTF-8）。
+- 两个块在样本中解码后得到的 JSON **完全一致**（解析时可优先取 `ccv3`，但同时需要容错 `chara`）。
+- 解码后的 JSON 体量约 **82.6 万字符**（原始 Base64 文本约 **119.2 万字符**）。
 - 解码后 JSON 的关键字段：
   - `spec: "chara_card_v3"`
   - `spec_version: "3.0"`
   - `data: { ... }`（包含 `name/description/personality/...`、`extensions`、`character_book` 等）
+
+补充观察：`data.extensions` 中可能包含 `regex_scripts/TavernHelper_scripts` 等字段；在本项目中必须按**不可信纯数据**处理（只展示/导出，不执行）。
 
 这意味着：实际生态中不止 V1/V2，**V3（ccv3 / chara_card_v3）已真实存在且内容体量很大**，并可能同时写入 `chara` 与 `ccv3` 以兼容不同加载器。
 
@@ -158,18 +162,28 @@ interface TavernCardNormalized {
   mesExample?: string;
   tags?: string[];
 
+  // 生态常见的顶层附加信息（不同版本/导出器可能在顶层或 data 中出现）
+  avatar?: string;
+  creator?: string;
+  characterVersion?: string;
+  createDate?: string;
+  talkativeness?: number;
+  fav?: boolean;
+  creatorComment?: string; // 例如顶层 creatorcomment（兼容字段）
+
   // 酒馆生态常见附加信息（不要求齐全）
   creatorNotes?: string;
   systemPrompt?: string;
   postHistoryInstructions?: string;
   alternateGreetings?: string[];
+  groupOnlyGreetings?: string[];
 
   // 以“只读”心态保存：绝不执行其中脚本
   extensions?: Record<string, unknown>;
   characterBook?: unknown;
 
   // 完整原始对象，便于回导或诊断（可选保存）
-  raw: unknown;
+  raw?: unknown;
 }
 ```
 
@@ -178,6 +192,10 @@ interface TavernCardNormalized {
 - 若存在 `data` 且 `data.name` 等字段齐全：优先以 `data.*` 作为 canonical。
 - 否则回退到顶层字段（`name/description/...`）。
 - `tags`：可能出现在 `data.tags` 或顶层 `tags`。
+- `creatorNotes`：优先读 `data.creator_notes`，其次回退到顶层 `creatorcomment`（不同导出器字段名可能不一致）。
+- `talkativeness/fav`：优先读 `data.extensions.*`，其次回退到顶层同名字段。
+- 当同时存在 `ccv3` 与 `chara`，且两者都可解析但内容不一致时：
+  - UI 应显式提示“检测到多个块内容不一致”，并允许用户切换预览与选择导入来源。
 
 ---
 
@@ -210,6 +228,8 @@ PNG 文件结构固定：
 
 > 依赖建议：如需 inflate/deflate，优先引入体积小且浏览器友好的 `pako`；若目前只支持 `tEXt` 也可先不引依赖，但需要在文档/错误提示里说明。
 
+补充：Base64 解码建议使用 `Uint8Array` + `TextDecoder`（或浏览器 `atob` + 二次转码），避免直接处理超大 Unicode 字符串导致的乱码/性能问题。
+
 ### 5.3 写入酒馆卡（导出 PNG）要点
 
 思路：在原 PNG 中插入新的文本 chunk（通常插在 `IEND` 前）：
@@ -227,6 +247,9 @@ PNG 文件结构固定：
 
 - 默认写入 **`ccv3` + `chara`** 双块（与样本一致），提高不同加载器的识别概率。
 - 若用户选择导出为“旧版兼容”，可仅写 `chara`。
+- 导出 JSON 建议同时写入：
+  - `spec/spec_version/data`（V3 主结构）
+  - 顶层 `name/description/personality/...` 副本（兼容部分读取器与生态工具）
 
 ---
 
@@ -250,6 +273,14 @@ PNG 文件结构固定：
 5. 输出处理：
    - 下载 JSON（数据卡）
    - 或“导入到档案馆”（若已有保存 API/流程）
+
+#### 6.1.1 UI 文案建议（导入）
+
+- 顶部提示：**“本页面仅在本地解析 PNG，图片不会上传。”**
+- 识别结果（成功）：**“已识别：SillyTavern `spec/spec_version`，来源块：`ccv3/chara/...`。”**
+- 多块提示（不一致）：**“检测到多个角色卡块内容不一致：建议优先使用 `ccv3`，你也可以切换预览后再导入。”**
+- 安全提示（脚本字段）：**“卡内脚本字段仅作为文本展示/导出，本项目不会执行任何脚本。”**
+- 体积提示（存档）：**“导入到档案馆需满足 300KB 限制；如超限可选择‘轻量导入（不保留 raw / 截断对话样例）’。”**
 
 ### 6.2 自动推荐（启发式）
 
@@ -329,6 +360,12 @@ PNG 文件结构固定：
    - AI 补全（生成 `first_mes/mes_example/scenario` 等）
 5. 生成并下载 PNG
 
+#### 7.1.1 UI 文案建议（导出）
+
+- 顶部提示：**“导出会把角色设定写入 PNG 元数据（tEXt 块）；底图仅作为外观载体。”**
+- 隐私提示：**“请确认不会把隐私信息写入 `creator_notes/system_prompt` 等字段。”**
+- 兼容性提示：**“默认写入 `ccv3 + chara` 双块以提高兼容性；如目标环境较旧可选择‘旧版兼容’。”**
+
 ### 7.2 字段拼接建议（规则模式）
 
 对 “魔法少女/残兽”：
@@ -355,6 +392,46 @@ PNG 文件结构固定：
   - `talkativeness`：中性默认（如 0.5）
   - `fav`：false
   - 其它扩展字段：若源数据卡存在 `_tavern` 且用户勾选“尽量保真”，则合并回填
+
+建议把“最小可用 V3 导出对象”明确出来（实现时以此为默认模板）：
+
+```json
+{
+  "spec": "chara_card_v3",
+  "spec_version": "3.0",
+  "data": {
+    "name": "（必填）",
+    "description": "（选填）",
+    "personality": "（选填）",
+    "scenario": "（选填）",
+    "first_mes": "（选填，强烈建议有）",
+    "mes_example": "（选填）",
+    "creator_notes": "",
+    "system_prompt": "",
+    "post_history_instructions": "",
+    "tags": [],
+    "creator": "github.com/colasama/MahoShojo-Generator",
+    "character_version": "0.6.0",
+    "alternate_greetings": [],
+    "group_only_greetings": [],
+    "extensions": {
+      "talkativeness": 0.5,
+      "fav": false
+    },
+    "character_book": { "name": "", "entries": [] }
+  },
+  "name": "（兼容副本）",
+  "description": "（兼容副本）",
+  "personality": "（兼容副本）",
+  "scenario": "（兼容副本）",
+  "first_mes": "（兼容副本）",
+  "mes_example": "（兼容副本）",
+  "creatorcomment": "",
+  "talkativeness": 0.5,
+  "fav": false,
+  "tags": []
+}
+```
 
 ---
 
@@ -386,6 +463,14 @@ PNG 文件结构固定：
   - raw 需要用户显式开启，或仅本地下载不入库
   - 或者，储存到 R2
 
+补充：本项目已有 `MAX_DATA_CARD_BYTES = 300KB`（见 `lib/data-card-size.ts`）与 `data-cards` 写入前的 UTF-8 字节校验；因此“保存到云端”的 UI 必须在写入前：
+
+- 显示“预计写入大小（含 `_author/_authorId` 注入后）”，并在超限时给出可选降级策略：
+  - 去除/截断 `mes_example`（通常最占体积）
+  - 不保留 `_tavern.raw`
+  - 仅保留 `_tavern.meta`（以及少量可逆字段，如 `spec/specVersion/sourceChunk`）
+- 后续更新可以考虑走“外部化到 R2”的方案（可参考 `docs/STORAGE_OFFLOAD_R2_2026-01-03.md` 的大对象外部化设计），但 MVP 阶段暂不考虑。
+
 ---
 
 ## 9. 实施拆分建议（最小可交付）
@@ -412,6 +497,12 @@ PNG 文件结构固定：
 - 导入后可一键保存到线上数据库
 - 导出可直接从档案馆选择目标角色
 
+### 里程碑 M5：扩展到“情景卡/世界书”（可选）
+
+- 酒馆生态里“情景卡/世界书（lorebook/character_book）”的使用频率很高，本项目已有 `scenario` 与 `general-scenario` 数据卡：
+  - 可考虑新增：酒馆侧情景 JSON ↔ 本项目 `scenario`/`general-scenario` 的互转
+  - 以及把 `character_book` 中的条目导出为本项目的“通用情景/设定附录”（先做到可读与可携带，后续再做结构化）
+
 ---
 
 ## 10. 备注：与现有代码的关联点（便于落地）
@@ -420,6 +511,7 @@ PNG 文件结构固定：
 - 数据卡模板/校验：`lib/schemas/*`、`lib/data-card-converter.ts`
 - AI 生成能力：`pages/api/generate-free.ts`、`pages/api/generate-*-stream.ts`（视具体复用方式选择）
 - 上传/下载交互参考：`pages/character-manager.tsx`、`pages/sublimation.tsx`、`components/arena/components/RosterUploader.tsx`
+- 前端下载工具：`lib/client/blobUrl.ts`（`downloadBlob`）
 
 ---
 
@@ -428,4 +520,3 @@ PNG 文件结构固定：
 1. 以“PNG 解包 → 酒馆卡归一化 → 规则/AI 转换”的三段式架构最稳健，能自然覆盖 V1/V2/V3 差异。
 2. 优先落地 M1/M2（纯前端、无 AI、无入库），即可快速让用户完成生态迁移；AI 与档案馆联动作为后续增量。
 3. 设计上要把“保真”和“体积/持久化成本”分离：默认轻量，用户需要时再保留 raw。
-
