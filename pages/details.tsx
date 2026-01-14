@@ -22,6 +22,7 @@ import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 interface Questionnaire {
   questions: string[];
@@ -567,7 +568,7 @@ const DetailsPage: React.FC = () => {
           throw new Error(`服务器内部错误（HTTP ${response.status}），当前可能正忙，请稍后重试。`);
         } else {
           const serverMessage = errorData?.message || errorData?.error;
-          throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
       }
 
@@ -576,7 +577,7 @@ const DetailsPage: React.FC = () => {
         if (contentType.includes('application/json') || contentType.includes('+json')) {
           const errorData = await response.json().catch(() => null as any);
           const serverMessage = errorData?.message || errorData?.error;
-          throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 
         setStreamingMarkdown('');

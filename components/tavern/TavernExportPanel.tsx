@@ -8,6 +8,7 @@ import { TavernAiFillButton } from '@/components/tavern/TavernAiFillButton';
 import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
 import {
   buildArenaDefaultScenario,
@@ -602,10 +603,10 @@ export function TavernExportPanel() {
             query: { reason: redirectReason || '使用危险符文' },
           });
           return;
-        }
-        const serverMessage = errorJson?.message || errorJson?.error;
-        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `AI 补全失败（HTTP ${response.status}）`);
       }
+      const serverMessage = errorJson?.message || errorJson?.error;
+      throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 补全失败' }));
+    }
 
       const json = (await response.json()) as any;
       const nextScenario = typeof json?.scenario === 'string' ? json.scenario : '';

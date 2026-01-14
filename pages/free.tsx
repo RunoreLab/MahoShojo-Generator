@@ -21,6 +21,7 @@ import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMark
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt } from '@/lib/ai/attachments';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 type FreeSchemaId = 'magical-girl' | 'canshou' | 'scenario' | 'general' | 'general-scenario';
 
@@ -511,7 +512,7 @@ export default function FreeGeneratorPage() {
           return;
         }
         const serverMessage = errorJson?.message || errorJson?.error;
-        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
       if (generationMode === 'stream') {
@@ -519,7 +520,7 @@ export default function FreeGeneratorPage() {
         if (contentType.includes('application/json') || contentType.includes('+json')) {
           const errorJson = await response.json().catch(() => null as any);
           const serverMessage = errorJson?.message || errorJson?.error;
-          throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 
         setStreamingMarkdown('');

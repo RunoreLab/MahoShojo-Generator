@@ -15,6 +15,7 @@ import { convertDataCard, createBlankDataCard } from '@/lib/data-card-converter'
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 // 定义引导性问题
 const scenarioQuestions = [
@@ -152,7 +153,7 @@ const ScenarioPage: React.FC = () => {
           return;
         }
         const serverMessage = errorJson?.message || errorJson?.error;
-        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
       if (generationMode === 'stream') {
@@ -160,7 +161,7 @@ const ScenarioPage: React.FC = () => {
         if (contentType.includes('application/json') || contentType.includes('+json')) {
           const errorJson = await response.json().catch(() => null as any);
           const serverMessage = errorJson?.message || errorJson?.error;
-          throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 
         const markdown = await readTextStreamFromResponse(response, {

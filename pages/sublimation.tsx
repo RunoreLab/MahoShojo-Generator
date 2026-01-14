@@ -19,6 +19,7 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import {
 	    inferTemplate,
 	    TEMPLATE_LABELS,
@@ -446,7 +447,7 @@ const SublimationPage: React.FC = () => {
                     return;
                 }
                 const serverMessage = errorJson?.message || errorJson?.error;
-                throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `升华失败（HTTP ${response.status}）`);
+                throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '升华失败' }));
             }
 
             if (generationMode === 'stream') {
@@ -454,7 +455,7 @@ const SublimationPage: React.FC = () => {
                 if (contentType.includes('application/json') || contentType.includes('+json')) {
                     const errorJson = await response.json().catch(() => null as any);
                     const serverMessage = errorJson?.message || errorJson?.error;
-                    throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `升华失败（HTTP ${response.status}）`);
+                    throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '升华失败' }));
                 }
 
                 setStreamingMarkdown('');

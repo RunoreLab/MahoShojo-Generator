@@ -18,6 +18,7 @@ import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 // 定义问卷和问题的类型
 interface Question {
@@ -381,7 +382,7 @@ const CanshouPage: React.FC = () => {
           return;
         }
         const serverMessage = errorData?.message || errorData?.error;
-        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
       if (generationMode === 'stream') {
@@ -389,7 +390,7 @@ const CanshouPage: React.FC = () => {
         if (contentType.includes('application/json') || contentType.includes('+json')) {
           const errorData = await response.json().catch(() => null as any);
           const serverMessage = errorData?.message || errorData?.error;
-          throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 
         setStreamingMarkdown('');

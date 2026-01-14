@@ -18,6 +18,7 @@ import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateM
 import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -550,7 +551,7 @@ export const useBattleEngine = () => {
               return;
             }
             const serverMessage = json.message || json.error || text;
-            throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+            throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
           }
 
           reader = response.body?.getReader() ?? null;
@@ -917,7 +918,7 @@ export const useBattleEngine = () => {
           return;
         }
         const serverMessage = json.message || json.error || text;
-        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
       const result: BattleApiResponse = await response.json();
@@ -1059,7 +1060,7 @@ export const useBattleEngine = () => {
           return;
         }
         const serverMessage = json.message || json.error || text;
-        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
       const result = await response.json();

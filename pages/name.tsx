@@ -13,6 +13,7 @@ import Footer from '../components/Footer';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 // 注意：QueueStatus 组件及其相关逻辑已被移除，因为它在Serverless环境下无法正常工作。
 
@@ -113,7 +114,7 @@ async function generateMagicalGirl(inputName: string, language: string): Promise
         throw new Error(`服务器内部错误（HTTP ${response.status}），当前可能正忙，请稍后重试。`);
       } else {
         const serverMessage = error?.message || error?.error;
-        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
     }
 
