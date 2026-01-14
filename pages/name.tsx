@@ -6,7 +6,7 @@ import { type AIGeneratedMagicalGirl } from './api/generate-magical-girl';
 import { MainColor } from '../lib/main-color';
 import Link from 'next/link';
 import { useCooldown } from '../lib/cooldown';
-import { quickCheck } from '@/lib/sensitive-word-filter';
+import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { useRouter } from 'next/router';
 import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
@@ -187,10 +187,9 @@ export default function Name() {
       setError('名字太长啦，你怎么回事！');
       return;
     }
-    // 检查敏感词
-    const result = await quickCheck(inputName.trim());
-    if (result.hasSensitiveWords) {
-      router.push('/arrested');
+    const redirectTarget = await getSensitiveWordRedirectTarget(inputName.trim());
+    if (redirectTarget) {
+      router.push(redirectTarget);
       return;
     }
     setIsGenerating(true);

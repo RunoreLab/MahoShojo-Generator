@@ -5,6 +5,7 @@ import questionnaire from '@/public/questionnaire.json';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import { buildPolicySafetyCheckText } from '@/lib/content-safety/server';
 import { NextRequest } from 'next/server';
 import { AdjudicationResult, NarrativeHistoryEntry } from '@/types/arena';
 import { verifySignature, generateSignature } from '@/lib/signature';
@@ -313,24 +314,14 @@ async function handler(req: NextRequest): Promise<Response> {
             inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
         });
 
-        const policy = appConfig.SAFETY_CHECK_POLICY;
-        const contentsToAIFlag = inputsToCheck.filter(input => {
-            const checkPolicy = policy[input.type];
-            return checkPolicy === 'all' || (checkPolicy === 'non-native-only' && !input.isNative);
-        });
-
-        const textForFinalCheck: string[] = [];
-
-        if (contentsToAIFlag.length > 0 && appConfig.ENABLE_BUNDLE_SAFETY_CHECK) {
-            log.info('触发"连坐"机制，打包所有非原生内容进行检查。');
-            const nonNativeContents = inputsToCheck.filter(i => !i.isNative).map(i => i.content);
-            textForFinalCheck.push(...nonNativeContents);
-        } else {
-            textForFinalCheck.push(...contentsToAIFlag.map(i => i.content));
-        }
-
-        const combinedText = textForFinalCheck.join('\n\n');
-        const needsWorldviewWarning = false;
+	        const { combinedText, usedBundle } = buildPolicySafetyCheckText(inputsToCheck, {
+	            policy: appConfig.SAFETY_CHECK_POLICY,
+	            enableBundle: appConfig.ENABLE_BUNDLE_SAFETY_CHECK,
+	        });
+	        if (usedBundle) {
+	            log.info('触发"连坐"机制，打包所有非原生内容进行检查。');
+	        }
+	        const needsWorldviewWarning = false;
 
 	        if (combinedText) {
 	            if (appConfig.ENABLE_SENSITIVE_WORD_FILTER && (await quickCheck(combinedText)).hasSensitiveWords) {

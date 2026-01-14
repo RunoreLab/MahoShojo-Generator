@@ -5,9 +5,9 @@ import { NextRequest } from 'next/server';
 
 import questionnaire from '@/public/questionnaire.json';
 import { getLogger } from '@/lib/logger';
-import { quickCheck } from '@/lib/sensitive-word-filter';
 import { buildMagicalQuestionMeta } from '@/lib/questionnaires';
-import { config as appConfig, type AIProvider } from '@/lib/config';
+import { type AIProvider } from '@/lib/config';
+import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 
@@ -73,15 +73,13 @@ async function handler(req: NextRequest): Promise<Response> {
       normalizedAnswers.push(trimmedAnswer);
     }
 
-    if (appConfig.ENABLE_SENSITIVE_WORD_FILTER) {
-      const checkResult = await quickCheck(normalizedAnswers.join(' '));
-      if (checkResult.hasSensitiveWords) {
-        return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '在问卷中使用了危险符文' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-    }
+    const safetyResponse = await enforceTextSafety({
+      text: normalizedAnswers.join(' '),
+      log,
+      enableAiSafetyCheck: false,
+      sensitiveWordReason: '在问卷中使用了危险符文',
+    });
+    if (safetyResponse) return safetyResponse;
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;

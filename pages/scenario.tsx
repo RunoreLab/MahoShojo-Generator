@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { quickCheck } from '@/lib/sensitive-word-filter';
+import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { useCooldown } from '../lib/cooldown';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
@@ -106,11 +106,11 @@ const ScenarioPage: React.FC = () => {
     }
 
     try {
-      if ((await quickCheck(JSON.stringify(answers))).hasSensitiveWords) {
-        router.push({
-          pathname: '/arrested',
-          query: { reason: '在情景问卷中使用了危险符文' }
-        });
+      const redirectTarget = await getSensitiveWordRedirectTarget(JSON.stringify(answers), {
+        reason: '在情景问卷中使用了危险符文',
+      });
+      if (redirectTarget) {
+        router.push(redirectTarget);
         return;
       }
 
