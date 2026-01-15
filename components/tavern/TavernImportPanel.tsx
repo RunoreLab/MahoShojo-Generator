@@ -27,6 +27,7 @@ import {
   normalizeTavernCard,
   parseTavernCardFromPngFile,
   type TavernCardCandidate,
+  type TavernCardNormalized,
   type TavernCloudSavePreset,
   type TavernImportMeta,
   type TavernParseResult,
@@ -42,6 +43,15 @@ type ConvertMode = 'rules' | 'ai';
 type ImageSaveMode = 'download' | 'modal';
 type JsonSaveMode = 'download' | 'text';
 type DeviceType = 'mobile' | 'desktop' | 'unknown';
+
+type PlaceholderReplaceMode = 'auto' | 'custom';
+
+interface PlaceholderPreference {
+  enabled: boolean;
+  userReplacement: string;
+  charReplacementMode: PlaceholderReplaceMode;
+  customCharReplacement: string;
+}
 
 interface ImportState {
   step: ImportStep;
@@ -197,6 +207,56 @@ const buildGeneralMarkdown = (normalized: TavernParseResult['normalized']): stri
   return lines.join('\n');
 };
 
+const PLACEHOLDER_PREFERENCE_KEY = 'mahoshojo.tavern.import.placeholder.v1';
+const DEFAULT_USER_REPLACEMENT = '【某人】';
+const DEFAULT_CHAR_FALLBACK = '角色';
+
+const replacePlaceholderToken = (input: string, token: string, replacement: string): string => {
+  if (!input.includes(token)) return input;
+  return input.split(token).join(replacement);
+};
+
+const applyPlaceholderReplacement = (
+  value: string | undefined,
+  config: { enabled: boolean; userReplacement: string; charReplacement: string }
+): string | undefined => {
+  if (!config.enabled || typeof value !== 'string') return value;
+  let next = value;
+  next = replacePlaceholderToken(next, '{{user}}', config.userReplacement);
+  next = replacePlaceholderToken(next, '{{char}}', config.charReplacement);
+  return next;
+};
+
+const applyPlaceholderReplacementToList = (
+  value: string[] | undefined,
+  config: { enabled: boolean; userReplacement: string; charReplacement: string }
+): string[] | undefined => {
+  if (!config.enabled || !Array.isArray(value)) return value;
+  return value.map((item) => applyPlaceholderReplacement(item, config) ?? '');
+};
+
+const applyPlaceholderReplacementToNormalized = (
+  normalized: TavernCardNormalized,
+  config: { enabled: boolean; userReplacement: string; charReplacement: string }
+): TavernCardNormalized => {
+  if (!config.enabled) return normalized;
+  return {
+    ...normalized,
+    name: applyPlaceholderReplacement(normalized.name, config) ?? normalized.name,
+    description: applyPlaceholderReplacement(normalized.description, config),
+    personality: applyPlaceholderReplacement(normalized.personality, config),
+    scenario: applyPlaceholderReplacement(normalized.scenario, config),
+    firstMes: applyPlaceholderReplacement(normalized.firstMes, config),
+    mesExample: applyPlaceholderReplacement(normalized.mesExample, config),
+    creatorComment: applyPlaceholderReplacement(normalized.creatorComment, config),
+    creatorNotes: applyPlaceholderReplacement(normalized.creatorNotes, config),
+    systemPrompt: applyPlaceholderReplacement(normalized.systemPrompt, config),
+    postHistoryInstructions: applyPlaceholderReplacement(normalized.postHistoryInstructions, config),
+    alternateGreetings: applyPlaceholderReplacementToList(normalized.alternateGreetings, config),
+    groupOnlyGreetings: applyPlaceholderReplacementToList(normalized.groupOnlyGreetings, config),
+  };
+};
+
 const buildGeneralScenarioMarkdown = (normalized: TavernParseResult['normalized']): string => {
   const title = normalized.name?.trim() || '未命名情景';
   const lines: string[] = [];
@@ -329,6 +389,10 @@ export function TavernImportPanel() {
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [placeholderEnabled, setPlaceholderEnabled] = useState(true);
+  const [userReplacement, setUserReplacement] = useState(DEFAULT_USER_REPLACEMENT);
+  const [charReplacementMode, setCharReplacementMode] = useState<PlaceholderReplaceMode>('auto');
+  const [customCharReplacement, setCustomCharReplacement] = useState('');
 
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
@@ -357,6 +421,38 @@ export function TavernImportPanel() {
     setJsonSaveMode(isMobile ? 'text' : 'download');
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = window.localStorage.getItem(PLACEHOLDER_PREFERENCE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as Partial<PlaceholderPreference>;
+      if (typeof parsed?.enabled === 'boolean') setPlaceholderEnabled(parsed.enabled);
+      if (typeof parsed?.userReplacement === 'string') setUserReplacement(parsed.userReplacement);
+      if (parsed?.charReplacementMode === 'auto' || parsed?.charReplacementMode === 'custom') {
+        setCharReplacementMode(parsed.charReplacementMode);
+      }
+      if (typeof parsed?.customCharReplacement === 'string') setCustomCharReplacement(parsed.customCharReplacement);
+    } catch {
+      // localStorage 可能不可用或内容损坏，忽略
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const payload: PlaceholderPreference = {
+        enabled: placeholderEnabled,
+        userReplacement,
+        charReplacementMode,
+        customCharReplacement,
+      };
+      window.localStorage.setItem(PLACEHOLDER_PREFERENCE_KEY, JSON.stringify(payload));
+    } catch {
+      // localStorage 可能不可用，忽略
+    }
+  }, [placeholderEnabled, userReplacement, charReplacementMode, customCharReplacement]);
+
   const selectedCandidate = useMemo(() => {
     if (!state.parseResult) return null;
     return state.parseResult.candidates[state.selectedCandidateIndex] ?? state.parseResult.selected;
@@ -367,6 +463,25 @@ export function TavernImportPanel() {
     return normalizeTavernCard(selectedCandidate).normalized;
   }, [selectedCandidate]);
 
+  const resolvedCharReplacement = useMemo(() => {
+    if (charReplacementMode === 'custom') return customCharReplacement;
+    const name = (selectedNormalized?.name ?? '').trim();
+    const hasPlaceholder = name.includes('{{user}}') || name.includes('{{char}}');
+    const safeName = hasPlaceholder ? '' : name;
+    return safeName || DEFAULT_CHAR_FALLBACK;
+  }, [charReplacementMode, customCharReplacement, selectedNormalized?.name]);
+
+  const placeholderConfig = useMemo(() => ({
+    enabled: placeholderEnabled,
+    userReplacement,
+    charReplacement: resolvedCharReplacement,
+  }), [placeholderEnabled, userReplacement, resolvedCharReplacement]);
+
+  const normalizedForConvert = useMemo(() => {
+    if (!selectedNormalized) return null;
+    return applyPlaceholderReplacementToNormalized(selectedNormalized, placeholderConfig);
+  }, [selectedNormalized, placeholderConfig]);
+
   const isScenarioTemplate = state.targetTemplate === 'scenario' || state.targetTemplate === 'general-scenario';
   const targetLabel = isScenarioTemplate ? '情景' : '角色';
 
@@ -376,10 +491,10 @@ export function TavernImportPanel() {
   }, [selectedCandidate]);
 
   const aiAttachmentPreview = useMemo(() => {
-    if (!selectedNormalized) return null;
+    if (!normalizedForConvert) return null;
     if (state.convertMode !== 'ai') return null;
-    return buildTavernAiAttachment(selectedNormalized);
-  }, [selectedNormalized, state.convertMode]);
+    return buildTavernAiAttachment(normalizedForConvert);
+  }, [normalizedForConvert, state.convertMode]);
 
   const combinedWarnings = useMemo(() => {
     if (!state.parseResult) return selectionWarnings;
@@ -477,6 +592,10 @@ export function TavernImportPanel() {
       state.targetTemplate,
       state.keepRaw ? 'raw' : 'no-raw',
       state.convertMode,
+      placeholderEnabled ? 'replace=1' : 'replace=0',
+      `user=${userReplacement}`,
+      `charMode=${charReplacementMode}`,
+      charReplacementMode === 'custom' ? `char=${customCharReplacement}` : `char=${resolvedCharReplacement}`,
     ];
 
     if (state.convertMode === 'ai') {
@@ -492,7 +611,7 @@ export function TavernImportPanel() {
   };
 
   const convertToDataCard = async (): Promise<unknown> => {
-    if (!state.parseResult || !selectedCandidate || !selectedNormalized) {
+    if (!state.parseResult || !selectedCandidate || !selectedNormalized || !normalizedForConvert) {
       throw new Error('尚未解析到可用的 SillyTavern 候选块');
     }
 
@@ -504,7 +623,7 @@ export function TavernImportPanel() {
         throw new Error('⚠️ 已选择自定义 AI 供应商，但尚未填写 API Key。');
       }
 
-      const aiAttachment = aiAttachmentPreview ?? buildTavernAiAttachment(selectedNormalized);
+      const aiAttachment = aiAttachmentPreview ?? buildTavernAiAttachment(normalizedForConvert);
       const customProviderPayload = buildCustomProviderPayload(userProviderConfig);
       const requestBody: Record<string, unknown> = {
         template: state.targetTemplate,
@@ -621,15 +740,15 @@ export function TavernImportPanel() {
       const base = createBlankDataCard('general-scenario') as GeneralScenarioData;
       const output: WithTavern<GeneralScenarioData> = {
         ...base,
-        title: selectedNormalized.name || base.title || '未命名情景',
-        content: buildGeneralScenarioMarkdown(selectedNormalized),
+        title: normalizedForConvert.name || base.title || '未命名情景',
+        content: buildGeneralScenarioMarkdown(normalizedForConvert),
         _tavern: tavernPayload,
       };
       return output;
     }
 
     if (state.targetTemplate === 'scenario') {
-      const structured = buildStructuredScenarioFromTavern(selectedNormalized);
+      const structured = buildStructuredScenarioFromTavern(normalizedForConvert);
       const output: WithTavern<ScenarioData> = {
         ...structured,
         _tavern: tavernPayload,
@@ -641,8 +760,8 @@ export function TavernImportPanel() {
       const base = createBlankDataCard('general') as GeneralCharacterData;
       const output: WithTavern<GeneralCharacterData> = {
         ...base,
-        name: selectedNormalized.name,
-        content: buildGeneralMarkdown(selectedNormalized),
+        name: normalizedForConvert.name,
+        content: buildGeneralMarkdown(normalizedForConvert),
         _tavern: tavernPayload,
       };
       return output;
@@ -652,19 +771,19 @@ export function TavernImportPanel() {
       const base = createBlankDataCard('magical-girl') as MagicalGirlData;
       const output: WithTavern<MagicalGirlData> = {
         ...base,
-        codename: selectedNormalized.name,
+        codename: normalizedForConvert.name,
         appearance: {
           ...(base.appearance ?? {}),
-          overallLook: selectedNormalized.description ?? base.appearance?.overallLook ?? '',
+          overallLook: normalizedForConvert.description ?? base.appearance?.overallLook ?? '',
         },
         analysis: {
           ...(base.analysis ?? {}),
-          personalityAnalysis: selectedNormalized.personality ?? base.analysis?.personalityAnalysis ?? '',
+          personalityAnalysis: normalizedForConvert.personality ?? base.analysis?.personalityAnalysis ?? '',
           predictionBasis: [
             base.analysis?.predictionBasis ? String(base.analysis.predictionBasis) : '',
-            selectedNormalized.scenario ? `【场景】\n${selectedNormalized.scenario}` : '',
-            selectedNormalized.firstMes ? `【开场白】\n${selectedNormalized.firstMes}` : '',
-            selectedNormalized.mesExample ? `【对话样例】\n${selectedNormalized.mesExample}` : '',
+            normalizedForConvert.scenario ? `【场景】\n${normalizedForConvert.scenario}` : '',
+            normalizedForConvert.firstMes ? `【开场白】\n${normalizedForConvert.firstMes}` : '',
+            normalizedForConvert.mesExample ? `【对话样例】\n${normalizedForConvert.mesExample}` : '',
           ]
             .filter((part) => part.trim())
             .join('\n\n'),
@@ -677,13 +796,13 @@ export function TavernImportPanel() {
     const base = createBlankDataCard('canshou') as CanshouData;
     const output: WithTavern<CanshouData> = {
       ...base,
-      name: selectedNormalized.name,
-      appearance: selectedNormalized.description ?? base.appearance ?? '',
-      coreEmotion: selectedNormalized.personality ?? base.coreEmotion ?? '',
+      name: normalizedForConvert.name,
+      appearance: normalizedForConvert.description ?? base.appearance ?? '',
+      coreEmotion: normalizedForConvert.personality ?? base.coreEmotion ?? '',
       researcherNotes: [
         base.researcherNotes ? String(base.researcherNotes) : '',
-        selectedNormalized.scenario ? `【场景】\n${selectedNormalized.scenario}` : '',
-        selectedNormalized.mesExample ? `【对话样例】\n${selectedNormalized.mesExample}` : '',
+        normalizedForConvert.scenario ? `【场景】\n${normalizedForConvert.scenario}` : '',
+        normalizedForConvert.mesExample ? `【对话样例】\n${normalizedForConvert.mesExample}` : '',
       ]
         .filter((part) => part.trim())
         .join('\n\n'),
@@ -1099,6 +1218,84 @@ export function TavernImportPanel() {
                 </button>
                 <div className="mt-2 text-xs text-gray-600">
                   生成后会在下方展示{targetLabel}卡预览；你可以保存图片、下载/复制 JSON，或保存到云端（档案馆）。
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-pink-700">占位符替换</label>
+                  <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/80 p-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={placeholderEnabled}
+                      onChange={(e) => {
+                        setPlaceholderEnabled(e.target.checked);
+                        resetGeneratedPreview();
+                      }}
+                      disabled={state.step === 'converting'}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm text-gray-900">
+                        替换 <code>{'{{user}}'}</code> / <code>{'{{char}}'}</code>
+                      </div>
+                      <div className="mt-1 text-xs text-gray-600">
+                        规则映射与 AI 输入都会使用替换后的文本，避免导入后出现角色/用户占位符残留。
+                      </div>
+                    </div>
+                  </label>
+
+                  <div className="mt-3 grid gap-3">
+                    <div>
+                      <div className="text-xs font-semibold text-gray-700">
+                        <code>{'{{user}}'}</code> →
+                      </div>
+                      <input
+                        className="mt-1 w-full rounded-lg border border-pink-100 bg-white/80 px-3 py-2 text-sm text-gray-900"
+                        value={userReplacement}
+                        onChange={(e) => {
+                          setUserReplacement(e.target.value);
+                          resetGeneratedPreview();
+                        }}
+                        disabled={!placeholderEnabled || state.step === 'converting'}
+                      />
+                      <div className="mt-1 text-[11px] text-gray-500">默认：{DEFAULT_USER_REPLACEMENT}</div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between text-xs font-semibold text-gray-700">
+                        <span>
+                          <code>{'{{char}}'}</code> →
+                        </span>
+                        <label className="flex items-center gap-2 text-[11px] font-normal text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={charReplacementMode === 'auto'}
+                            onChange={(e) => {
+                              const nextAuto = e.target.checked;
+                              if (!nextAuto && !customCharReplacement.trim()) {
+                                const fallback = selectedNormalized?.name?.trim() || DEFAULT_CHAR_FALLBACK;
+                                setCustomCharReplacement(fallback);
+                              }
+                              setCharReplacementMode(nextAuto ? 'auto' : 'custom');
+                              resetGeneratedPreview();
+                            }}
+                            disabled={!placeholderEnabled || state.step === 'converting'}
+                          />
+                          使用角色名
+                        </label>
+                      </div>
+                      <input
+                        className="mt-1 w-full rounded-lg border border-pink-100 bg-white/80 px-3 py-2 text-sm text-gray-900"
+                        value={charReplacementMode === 'auto' ? resolvedCharReplacement : customCharReplacement}
+                        onChange={(e) => {
+                          setCustomCharReplacement(e.target.value);
+                          setCharReplacementMode('custom');
+                          resetGeneratedPreview();
+                        }}
+                        disabled={!placeholderEnabled || charReplacementMode === 'auto' || state.step === 'converting'}
+                      />
+                      <div className="mt-1 text-[11px] text-gray-500">默认：角色名（{resolvedCharReplacement}）</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
