@@ -37,6 +37,8 @@ const optionalFields = [
   { label: '发展方向', value: 'elements.development' },
 ];
 
+const SCENARIO_PREFERENCE_KEY = 'mahoshojo.scenario.preferences.v1';
+
 const ScenarioPage: React.FC = () => {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string>>(
@@ -70,6 +72,50 @@ const ScenarioPage: React.FC = () => {
       .then(data => setLanguages(data))
       .catch(err => console.error("Failed to load languages:", err));
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = window.localStorage.getItem(SCENARIO_PREFERENCE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (parsed?.generationMode === 'stream' || parsed?.generationMode === 'non-stream') {
+        setGenerationMode(parsed.generationMode);
+      }
+      if (typeof parsed?.scenarioTitleHint === 'string') {
+        setScenarioTitleHint(parsed.scenarioTitleHint);
+      }
+      if (typeof parsed?.selectedLanguage === 'string') {
+        setSelectedLanguage(parsed.selectedLanguage);
+      }
+      if (typeof parsed?.isAdvancedVisible === 'boolean') {
+        setIsAdvancedVisible(parsed.isAdvancedVisible);
+      }
+      if (Array.isArray(parsed?.fieldsToKeepEmpty)) {
+        const allowed = new Set(optionalFields.map(field => field.value));
+        const filtered = parsed.fieldsToKeepEmpty.filter((value: unknown) => typeof value === 'string' && allowed.has(value));
+        setFieldsToKeepEmpty(filtered);
+      }
+    } catch (error) {
+      console.warn('读取情景生成偏好失败', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const payload = {
+        generationMode,
+        scenarioTitleHint,
+        selectedLanguage,
+        isAdvancedVisible,
+        fieldsToKeepEmpty,
+      };
+      window.localStorage.setItem(SCENARIO_PREFERENCE_KEY, JSON.stringify(payload));
+    } catch {
+      // localStorage 可能不可用，忽略
+    }
+  }, [generationMode, scenarioTitleHint, selectedLanguage, isAdvancedVisible, fieldsToKeepEmpty]);
 
   const handleAnswerChange = (id: string, value: string) => {
     setAnswers(prev => ({ ...prev, [id]: value }));

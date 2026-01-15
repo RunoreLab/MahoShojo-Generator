@@ -61,6 +61,8 @@ const gradientColors: Record<string, { first: string; second: string }> = {
   [MainColor.Green]: { first: '#51cf66', second: '#8ce99a' }
 };
 
+const NAME_PREFERENCE_KEY = 'mahoshojo.name.preferences.v1';
+
 function seedRandom(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -176,6 +178,30 @@ export default function Name() {
       .then(data => setLanguages(data))
       .catch(err => console.error("Failed to load languages:", err));
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = window.localStorage.getItem(NAME_PREFERENCE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (typeof parsed?.selectedLanguage === 'string') {
+        setSelectedLanguage(parsed.selectedLanguage);
+      }
+    } catch (error) {
+      console.warn('读取名称生成偏好失败', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const payload = { selectedLanguage };
+      window.localStorage.setItem(NAME_PREFERENCE_KEY, JSON.stringify(payload));
+    } catch {
+      // localStorage 可能不可用，忽略
+    }
+  }, [selectedLanguage]);
 
   const handleGenerate = async () => {
     if (isCooldown) {

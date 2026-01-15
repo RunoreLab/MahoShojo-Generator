@@ -137,6 +137,7 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommended
 };
 
 const LOCAL_STORAGE_KEY = 'canshouAnswersDraft'; // 定义本地存储的键
+const CANSHOU_PREFERENCE_KEY = 'mahoshojo.canshou.preferences.v1';
 
 const CanshouPage: React.FC = () => {
   const router = useRouter();
@@ -211,9 +212,74 @@ const CanshouPage: React.FC = () => {
     const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(userAgent);
     const detectedType: DeviceType = isMobileDevice ? 'mobile' : 'desktop';
     setDeviceType(detectedType);
-    setImageSaveMode(isMobileDevice ? 'modal' : 'download');
-    setJsonSaveMode(isMobileDevice ? 'text' : 'download');
+    const defaultImageMode: ImageSaveMode = isMobileDevice ? 'modal' : 'download';
+    const defaultJsonMode: JsonSaveMode = isMobileDevice ? 'text' : 'download';
+
+    try {
+      const saved = window.localStorage.getItem(CANSHOU_PREFERENCE_KEY);
+      if (!saved) {
+        setImageSaveMode(defaultImageMode);
+        setJsonSaveMode(defaultJsonMode);
+        return;
+      }
+      const parsed = JSON.parse(saved);
+      if (parsed?.generationMode === 'stream' || parsed?.generationMode === 'non-stream') {
+        setGenerationMode(parsed.generationMode);
+      }
+      if (typeof parsed?.selectedLanguage === 'string') {
+        setSelectedLanguage(parsed.selectedLanguage);
+      }
+      if (parsed?.imageSaveMode === 'download' || parsed?.imageSaveMode === 'modal') {
+        setImageSaveMode(parsed.imageSaveMode);
+      } else {
+        setImageSaveMode(defaultImageMode);
+      }
+      if (parsed?.jsonSaveMode === 'download' || parsed?.jsonSaveMode === 'text') {
+        setJsonSaveMode(parsed.jsonSaveMode);
+      } else {
+        setJsonSaveMode(defaultJsonMode);
+      }
+      if (typeof parsed?.showLanguageSection === 'boolean') {
+        setShowLanguageSection(parsed.showLanguageSection);
+      }
+      if (typeof parsed?.showBulkFillSection === 'boolean') {
+        setShowBulkFillSection(parsed.showBulkFillSection);
+      }
+      if (typeof parsed?.showAnswerReview === 'boolean') {
+        setShowAnswerReview(parsed.showAnswerReview);
+      }
+    } catch (error) {
+      console.warn('读取残兽生成偏好失败', error);
+      setImageSaveMode(defaultImageMode);
+      setJsonSaveMode(defaultJsonMode);
+    }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const payload = {
+        generationMode,
+        selectedLanguage,
+        imageSaveMode,
+        jsonSaveMode,
+        showLanguageSection,
+        showBulkFillSection,
+        showAnswerReview,
+      };
+      window.localStorage.setItem(CANSHOU_PREFERENCE_KEY, JSON.stringify(payload));
+    } catch {
+      // localStorage 可能不可用，忽略
+    }
+  }, [
+    generationMode,
+    selectedLanguage,
+    imageSaveMode,
+    jsonSaveMode,
+    showLanguageSection,
+    showBulkFillSection,
+    showAnswerReview,
+  ]);
 
   // 加载问卷文件
   useEffect(() => {
@@ -964,7 +1030,7 @@ const CanshouPage: React.FC = () => {
                           <p className="mt-2 text-xs text-gray-500">两种方式都可跨终端使用，可随时切换体验。</p>
                         </div>
 
-                        <p className="text-xs text-gray-400 text-center">提示：偏好设置仅在当前页面有效，切换不会触发重新生成。</p>
+                        <p className="text-xs text-gray-400 text-center">提示：偏好设置已保存到浏览器，刷新后仍会保留；切换不会触发重新生成。</p>
                       </div>
                     </div>
                     <div className="card" style={{ marginTop: '1rem' }}>

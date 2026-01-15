@@ -1,6 +1,6 @@
 // pages/sublimation.tsx
 
-import React, { useState, ChangeEvent, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, ChangeEvent, useEffect, useMemo, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
@@ -141,6 +141,7 @@ const getDefaultTargetTemplate = (source: InferableTemplate): SupportedTargetTem
 };
 
 const SUBLIMATION_STATE_PREF_KEY = 'sublimation-history-state-preferences-v1';
+const SUBLIMATION_PREFERENCE_KEY = 'mahoshojo.sublimation.preferences.v1';
 
 
 const SublimationPage: React.FC = () => {
@@ -183,6 +184,7 @@ const SublimationPage: React.FC = () => {
     const { isCooldown, startCooldown, remainingTime } = useCooldown(sublimationCooldownKey, sublimationCooldownMs);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
     const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
+    const hasStoredSublimationPrefsRef = useRef(false);
 
     const streamedGeneralCardForDisplay = useMemo(() => {
         if (generationMode !== 'stream') return null;
@@ -220,6 +222,40 @@ const SublimationPage: React.FC = () => {
     useEffect(() => {
         if (typeof window === 'undefined') return;
         try {
+            const saved = window.localStorage.getItem(SUBLIMATION_PREFERENCE_KEY);
+            if (!saved) return;
+            const parsed = JSON.parse(saved);
+            hasStoredSublimationPrefsRef.current = true;
+            if (parsed?.generationMode === 'stream' || parsed?.generationMode === 'non-stream') {
+                setGenerationMode(parsed.generationMode);
+            }
+            if (typeof parsed?.selectedLanguage === 'string') {
+                setSelectedLanguage(parsed.selectedLanguage);
+            }
+            if (typeof parsed?.userGuidance === 'string') {
+                setUserGuidance(parsed.userGuidance);
+            }
+            if (typeof parsed?.isAdvancedVisible === 'boolean') {
+                setIsAdvancedVisible(parsed.isAdvancedVisible);
+            }
+            if (typeof parsed?.allowReshapeNames === 'boolean') {
+                setAllowReshapeNames(parsed.allowReshapeNames);
+            }
+            if (parsed?.targetTemplate && TARGET_TEMPLATE_OPTIONS.includes(parsed.targetTemplate)) {
+                setTargetTemplate(parsed.targetTemplate);
+            }
+            if (Array.isArray(parsed?.fieldsToPreserve)) {
+                const filtered = parsed.fieldsToPreserve.filter((value: unknown) => typeof value === 'string');
+                setFieldsToPreserve(filtered);
+            }
+        } catch (error) {
+            console.warn('读取升华偏好失败', error);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
             const saved = window.localStorage.getItem(SUBLIMATION_STATE_PREF_KEY);
             if (!saved) return;
             const parsed = JSON.parse(saved);
@@ -242,6 +278,33 @@ const SublimationPage: React.FC = () => {
         };
         window.localStorage.setItem(SUBLIMATION_STATE_PREF_KEY, JSON.stringify(payload));
     }, [readArenaHistory, writeArenaHistory, readCurrentState, writeCurrentState]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const payload = {
+                generationMode,
+                selectedLanguage,
+                userGuidance,
+                isAdvancedVisible,
+                allowReshapeNames,
+                targetTemplate,
+                fieldsToPreserve,
+            };
+            window.localStorage.setItem(SUBLIMATION_PREFERENCE_KEY, JSON.stringify(payload));
+            hasStoredSublimationPrefsRef.current = true;
+        } catch {
+            // localStorage 可能不可用，忽略
+        }
+    }, [
+        generationMode,
+        selectedLanguage,
+        userGuidance,
+        isAdvancedVisible,
+        allowReshapeNames,
+        targetTemplate,
+        fieldsToPreserve,
+    ]);
 
     useEffect(() => {
         setFieldsToPreserve(prev => {
@@ -306,14 +369,19 @@ const SublimationPage: React.FC = () => {
             setFileName('粘贴的内容');
             setError(null);
             setResultData(null);
-            setAllowReshapeNames(false);
 
             const inferred = inferTemplate(json);
             setSourceTemplate(inferred);
 
             const defaultTarget = getDefaultTargetTemplate(inferred);
-            setTargetTemplate(defaultTarget);
-            setFieldsToPreserve(getDefaultPreserveFields(defaultTarget));
+            const nextTarget = hasStoredSublimationPrefsRef.current ? targetTemplate : defaultTarget;
+            setTargetTemplate(nextTarget);
+            const isCrossTemplateSelection = inferred !== nextTarget;
+            if (isCrossTemplateSelection) {
+                setFieldsToPreserve([]);
+            } else if (!hasStoredSublimationPrefsRef.current) {
+                setFieldsToPreserve(getDefaultPreserveFields(nextTarget));
+            }
 
             return true;
         } catch (err) {
@@ -407,13 +475,18 @@ const SublimationPage: React.FC = () => {
             setFileName(`${card._cardName || '未命名'}(来自数据库)`); // 使用内部传递的_cardName
             setShowBattleDataModal(false);
             setError(null);
-            setAllowReshapeNames(false);
 
             const inferred = inferTemplate(cleanedCardData);
             setSourceTemplate(inferred);
             const defaultTarget = getDefaultTargetTemplate(inferred);
-            setTargetTemplate(defaultTarget);
-            setFieldsToPreserve(getDefaultPreserveFields(defaultTarget));
+            const nextTarget = hasStoredSublimationPrefsRef.current ? targetTemplate : defaultTarget;
+            setTargetTemplate(nextTarget);
+            const isCrossTemplateSelection = inferred !== nextTarget;
+            if (isCrossTemplateSelection) {
+                setFieldsToPreserve([]);
+            } else if (!hasStoredSublimationPrefsRef.current) {
+                setFieldsToPreserve(getDefaultPreserveFields(nextTarget));
+            }
 
         } catch (err) {
             setError(`❌ 数据卡加载失败: ${err instanceof Error ? err.message : '未知错误'}`);

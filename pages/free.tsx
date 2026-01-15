@@ -273,12 +273,14 @@ export default function FreeGeneratorPage() {
         generationMode,
         prompt,
         selectedLanguage,
+        showFieldGuide,
+        showLanguageSection,
       };
       window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
     } catch {
       // localStorage 可能不可用，忽略
     }
-  }, [generationMode, prompt, schemaId, selectedLanguage]);
+  }, [generationMode, prompt, schemaId, selectedLanguage, showFieldGuide, showLanguageSection]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -290,6 +292,8 @@ export default function FreeGeneratorPage() {
       if (parsed?.generationMode) setGenerationMode(parsed.generationMode);
       if (typeof parsed?.prompt === 'string') setPrompt(parsed.prompt);
       if (typeof parsed?.selectedLanguage === 'string') setSelectedLanguage(parsed.selectedLanguage);
+      if (typeof parsed?.showFieldGuide === 'boolean') setShowFieldGuide(parsed.showFieldGuide);
+      if (typeof parsed?.showLanguageSection === 'boolean') setShowLanguageSection(parsed.showLanguageSection);
     } catch {
       // 忽略损坏的存档
     }

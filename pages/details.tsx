@@ -164,6 +164,7 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommended
 };
 
 const LOCAL_STORAGE_KEY = 'magicalGirlAnswersDraft'; // 定义本地存储的键
+const DETAILS_PREFERENCE_KEY = 'mahoshojo.details.preferences.v1';
 
 const DetailsPage: React.FC = () => {
   const router = useRouter();
@@ -244,9 +245,79 @@ const DetailsPage: React.FC = () => {
     const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(userAgent);
     const detectedType: DeviceType = isMobileDevice ? 'mobile' : 'desktop';
     setDeviceType(detectedType);
-    setImageSaveMode(isMobileDevice ? 'modal' : 'download');
-    setJsonSaveMode(isMobileDevice ? 'text' : 'download');
+    const defaultImageMode: ImageSaveMode = isMobileDevice ? 'modal' : 'download';
+    const defaultJsonMode: JsonSaveMode = isMobileDevice ? 'text' : 'download';
+
+    try {
+      const saved = window.localStorage.getItem(DETAILS_PREFERENCE_KEY);
+      if (!saved) {
+        setImageSaveMode(defaultImageMode);
+        setJsonSaveMode(defaultJsonMode);
+        return;
+      }
+      const parsed = JSON.parse(saved);
+      if (parsed?.generationMode === 'stream' || parsed?.generationMode === 'non-stream') {
+        setGenerationMode(parsed.generationMode);
+      }
+      if (typeof parsed?.selectedLanguage === 'string') {
+        setSelectedLanguage(parsed.selectedLanguage);
+      }
+      if (parsed?.imageSaveMode === 'download' || parsed?.imageSaveMode === 'modal') {
+        setImageSaveMode(parsed.imageSaveMode);
+      } else {
+        setImageSaveMode(defaultImageMode);
+      }
+      if (parsed?.jsonSaveMode === 'download' || parsed?.jsonSaveMode === 'text') {
+        setJsonSaveMode(parsed.jsonSaveMode);
+      } else {
+        setJsonSaveMode(defaultJsonMode);
+      }
+      if (typeof parsed?.showLanguageSection === 'boolean') {
+        setShowLanguageSection(parsed.showLanguageSection);
+      }
+      if (typeof parsed?.showBulkFillSection === 'boolean') {
+        setShowBulkFillSection(parsed.showBulkFillSection);
+      }
+      if (typeof parsed?.showAnswerReview === 'boolean') {
+        setShowAnswerReview(parsed.showAnswerReview);
+      }
+      if (typeof parsed?.showDetails === 'boolean') {
+        setShowDetails(parsed.showDetails);
+      }
+    } catch (error) {
+      console.warn('读取魔法少女设定偏好失败', error);
+      setImageSaveMode(defaultImageMode);
+      setJsonSaveMode(defaultJsonMode);
+    }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const payload = {
+        generationMode,
+        selectedLanguage,
+        imageSaveMode,
+        jsonSaveMode,
+        showLanguageSection,
+        showBulkFillSection,
+        showAnswerReview,
+        showDetails,
+      };
+      window.localStorage.setItem(DETAILS_PREFERENCE_KEY, JSON.stringify(payload));
+    } catch {
+      // localStorage 可能不可用，忽略
+    }
+  }, [
+    generationMode,
+    selectedLanguage,
+    imageSaveMode,
+    jsonSaveMode,
+    showLanguageSection,
+    showBulkFillSection,
+    showAnswerReview,
+    showDetails,
+  ]);
 
   useEffect(() => {
     // 加载问卷数据
@@ -1243,7 +1314,7 @@ const DetailsPage: React.FC = () => {
                     <p className="mt-2 text-xs text-gray-500">两种方式可随时切换，移动端也可尝试直接下载，桌面端亦能复制备用。</p>
                   </div>
 
-                  <p className="text-xs text-gray-400 text-center">提示：偏好设置仅影响本次会话，切换不会丢失生成结果。</p>
+                  <p className="text-xs text-gray-400 text-center">提示：偏好设置已保存到浏览器，刷新后仍会保留；切换不会丢失生成结果。</p>
                 </div>
               </div>
               {/* 关键解释抽屉 点击展开 点击关闭 */}
