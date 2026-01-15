@@ -191,6 +191,13 @@ export type MagicTavernMessage = {
 export type MagicTavernSession = {
   id: string;
   title: string;
+  titleMeta?: {
+    source: 'auto' | 'manual';
+    generatedAt?: number;
+    providerId?: string;
+    modelId?: string;
+    reason?: 'first-message' | 'manual-edit' | 'import';
+  };
   createdAt: number;
   updatedAt: number;
   roles: MagicTavernRole[];
@@ -502,6 +509,13 @@ export type MagicTavernTachieAsset = {
 export type MagicTavernSession = {
   id: string;
   title: string;
+  titleMeta?: {
+    source: 'auto' | 'manual';
+    generatedAt?: number;
+    providerId?: string;
+    modelId?: string;
+    reason?: 'first-message' | 'manual-edit' | 'import';
+  };
   createdAt: number;
   updatedAt: number;
   roles: MagicTavernRole[];
@@ -619,7 +633,7 @@ export type MagicTavernSession = {
 
 - `POST /api/magic-tavern/generate-stream`：生成主剧情流式输出（JSONL 或 Markdown）。
 - `POST /api/magic-tavern/generate-choices`：仅生成选项（可复用主提示词的“缩略版”）。
-- `POST /api/magic-tavern/summarize`：会话摘要（可选，非 MVP）。
+- `POST /api/magic-tavern/summarize`：会话摘要/标题（可选，非 MVP）。
 
 
 ### 13.8.1 参数校验与安全上限（定稿）
@@ -714,8 +728,8 @@ export type MagicTavernPreset = {
 
 #### `POST /api/magic-tavern/summarize`
 
-**请求体**：`{ sessionId, messages, language }`  
-**响应**：`{ summary: "..." }`
+**请求体**：`{ sessionId, messages, language, mode?: 'summary' | 'title' }`  
+**响应**：`{ summary?: "...", title?: "..." }`
 
 ### 13.11 提示词构建函数（落地建议）
 
@@ -726,6 +740,8 @@ export type MagicTavernPreset = {
 - `buildTavernSummaryPrompt({ messages })`
   - 输出结构建议：**世界状态 / 角色关系 / 关键事件 / 未决事项 / 禁忌**
   - 目标长度：~900 tokens，上限 1,200 tokens
+
+- **上下文过滤**：构建 prompt 时过滤 `status=blocked/error` 或 `safety.action='soft-block'` 的 assistant 消息；仅保留安全文本片段。
 
 > 预设情景仅替换系统层“风格提示词”，主提示词结构保持一致。
 
@@ -823,6 +839,7 @@ export type MagicTavernPreset = {
   3) 从本轮输出缓冲中定位最后安全边界（换行/句号/JSONL 行末），截断并写入消息内容。
   4) 该消息标记 `status='blocked'`，写入 `message.safety`（`blockedBy='output'`、`blockedAt`、`action='soft-block'`）。
   5) 不落库违规片段；保留用户输入与历史不变。
+  6) 被截断/违规片段不得进入后续 prompt、摘要、选项生成或标题生成。
 - **UI 行为**：
   - 提示“本轮输出被安全策略截断”。
   - 提供“重新生成 / 修改输入 / 更换模型或温度 / 切换输出模式”入口。
@@ -835,8 +852,8 @@ export type MagicTavernPreset = {
 
 - **并发原则**：同一会话同时仅允许 1 个生成请求；新请求需等待或先停止当前流。
 - **停止生成**：用户点击停止后 `abort` 请求，保留已生成内容并标记 `status='done'`，记录 `meta.stopReason='user'`。
-- **继续生成**：基于原上下文追加新的 assistant 消息；`sourceMessageId` 指向最近一条用户消息。
-- **重新生成**：仅针对最近一条 assistant 输出；旧消息标记 `revisionOf` 或 `meta.superseded=true`，不影响历史。
+- **继续生成**：仅在用户手动停止或 `status='error'` 时可用；基于原上下文追加新的 assistant 消息；`sourceMessageId` 指向最近一条用户消息；**不得携带上一次未完成/被截断的 assistant 片段**。
+- **重新生成**：仅针对最近一条 assistant 输出；旧消息标记 `revisionOf` 或 `meta.superseded=true`，不影响历史。若旧消息为 `blocked/error/truncated`，重跑时**只使用安全历史 + 对应用户输入**，不传递被截断/失败内容。
 - **选项生成互斥**：`generate-choices` 与主生成流互斥，避免竞争与上下文错乱。
 
 ### 13.19 JSONL 行协议与 Markdown 渲染安全（定稿）
@@ -851,6 +868,59 @@ export type MagicTavernPreset = {
   - 链接自动添加 `rel="noopener noreferrer"`；不自动渲染远程图片。
   - 过长 Markdown 片段在前端分段渲染，避免长文阻塞 UI。
 - **模式切换约束**：输出模式切换仅影响后续消息；历史消息按原格式渲染。
+
+
+### 13.20 标题生成（定稿）
+
+- **触发时机**：首轮 assistant 安全输出完成后自动生成；用户手动改名后不再自动覆盖。
+- **本地优先（推荐）**：不额外调用模型，复用既有逻辑完成标题生成。
+  - Markdown 模式：复用 `extractTitleFromBattleMarkdown` 的策略（首个标题行/首行文本）。
+  - JSONL 模式：取第一条 `dialogue/narration` 的首句；若无有效文本，退回 `scenario.title` 或角色名拼接。
+  - 回退规则：复用 `normalizeTitleFallback` 的处理方式（首行/去除 Markdown 标记）。
+  - 长度控制：展示 ≤ 28 字；存储上限 60 字；超长截断并加省略号。
+- **安全处理**：对标题执行 `quickCheck` + `applyShieldWords`；若命中敏感词则使用过滤后文本或回退到“未命名会话”。
+- **AI 标题（可选增强）**：
+  - 复用 `/api/magic-tavern/summarize`，传 `mode='title'` 与 **安全消息片段**。
+  - **禁止**包含 `blocked/error/truncated` 的 assistant 内容；仅发送安全文本与必要元信息。
+  - 失败回退到本地标题策略。
+
+### 13.21 重新生成 UI 与交互细化（定稿）
+
+- **入口位置**：每条 assistant 消息右上角提供「重新生成 / 继续生成 / 停止」动作；样式复用竞技场按钮规范与 `AiProviderSelector` 的设置面板风格。
+- **可见性规则**：
+  - `status='streaming'`：显示「停止」。
+  - `status='error'`：显示「继续生成 / 重新生成」。
+  - `status='blocked'` 或 `truncatedAt`：仅显示「重新生成」（禁用继续生成）。
+- **操作面板**：点击「重新生成」弹出轻量选项：
+  - 沿用设置（默认）
+  - 调整模型/温度/输出模式（复用 `AiProviderSelector` 与偏好设置）
+  - 说明提示：重新生成会消耗额外 Token
+- **上下文规则**：
+  - 重新生成只使用**安全历史 + 关联用户输入**；不带上一次被截断/失败片段。
+  - 继续生成仅在正常流被手动停止时可用，且不包含未完成片段。
+- **消息标记**：旧消息写入 `meta.superseded=true` 与 `revisionOf`，UI 默认折叠但可展开查看。
+
+### 13.22 埋点与可观测性（定稿）
+
+> 原则：**仅记录操作与性能指标，不记录用户内容与卡片正文**；默认本地统计，若开启线上统计需显式提示用户。
+
+- **复用策略**：
+  - 本地计数：复用 `lib/localStorage.ts` 的存储模式与命名风格。
+  - 线上统计（可选）：若启用 `@vercel/analytics`，仅上报事件名与无敏感维度。
+- **推荐事件**（均不含文本内容）：
+  - `tavern_session_create`（sessionId、presetId、roleCount、scenarioCount）
+  - `tavern_message_send`（sessionId、outputFormat、providerId、modelId）
+  - `tavern_stream_end`（sessionId、status、latencyMs、estimatedTokens）
+  - `tavern_message_blocked_input`（reason、action）
+  - `tavern_message_blocked_output`（action、truncatedAt）
+  - `tavern_regenerate`（reason、settingsChanged）
+  - `tavern_choice_generate`（choiceCount）
+  - `tavern_tachie_generate`（styleId、modelId）
+  - `tavern_title_auto` / `tavern_title_manual`（source）
+- **隐私约束**：
+  - 不上传用户输入、角色卡、情景卡与生成内容。
+  - sessionId 仅作本地关联；如需上报必须先脱敏/哈希。
+  - 埋点失败不影响主流程，异常仅 `console.warn`。
 
 ---
 
@@ -886,6 +956,7 @@ export type MagicTavernPreset = {
 - 无 API Key：检测到未配置 API Key，请先在模型设置中填写。
 - 供应商禁用：魔法酒馆仅支持自备 Key（系统默认通道已禁用）。
 - 内容受限：该内容不符合安全策略，已停止生成。
+- 输出被截断：本轮输出已被安全策略截断，可重新生成或调整输入。
 
 ### 14.5 侧边栏
 
