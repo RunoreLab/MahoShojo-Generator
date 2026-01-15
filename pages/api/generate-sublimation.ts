@@ -225,6 +225,7 @@ const createGenerationConfig = (
   baseOutputData: any,
   language: string,
   userGuidance: string | null,
+  narrativeHistory: string | null,
   sourceTemplate: InferableTemplate,
   targetTemplate: SupportedTargetTemplate,
   fieldsToPreserve: string[],
@@ -309,6 +310,9 @@ const createGenerationConfig = (
     if (userGuidance) {
       guidanceInstruction = `\n## 成长方向引导\n角色可以朝这个方向成长升华：“${userGuidance}”。请在重塑角色时将此作为最重要的参考。`;
     }
+    const narrativeHistorySection = narrativeHistory
+      ? `\n## 叙事历史（用户补充）\n${narrativeHistory}\n`
+      : '\n## 叙事历史（用户补充）\n无（用户未提供叙事历史）。\n';
 
     const rules: string[] = [];
     const fieldsToGenerateText = fieldsToGenerate.length > 0
@@ -332,6 +336,9 @@ const createGenerationConfig = (
     }
 
     rules.push('**生成升华事件**:  你还需要创作一个“升华事件”，简要描述角色是如何从这些经历中收获成长，升华到新状态的。');
+    if (narrativeHistory) {
+      rules.push('**叙事历史参考**: 上述叙事历史为用户补充背景，请据此增强升华动机与细节，不必逐条复述。');
+    }
 
     if (stateOptions?.writeCurrentState === false) {
       rules.push('**当前状态**: 用户禁用了当前状态写入，你不得在输出中新增或修改 `current_state` 字段。');
@@ -372,6 +379,7 @@ ${historyText}
 
 ## 当前状态
 ${currentStateText}
+${narrativeHistorySection}
 ${userAnswersReviewSection}
 
 ## 升华规则 (必须严格遵守)
@@ -436,6 +444,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	    const {
 	      language = 'zh-CN',
 	      userGuidance = '',
+	      narrativeHistory = '',
 	      fieldsToPreserve = [],
 	      isDowngrade = false,
 	      allowReshapeNames = false,
@@ -453,10 +462,13 @@ async function handler(req: NextRequest): Promise<Response> {
 	    const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
 	    const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
 	    const resolvedAllowReshapeNames = typeof allowReshapeNames === 'boolean' ? allowReshapeNames : false;
-	    const finalUserGuidance = userGuidance.trim() || null;
+	    const normalizedUserGuidance = typeof userGuidance === 'string' ? userGuidance.trim() : '';
+	    const finalUserGuidance = normalizedUserGuidance ? normalizedUserGuidance : null;
+	    const normalizedNarrativeHistory = typeof narrativeHistory === 'string' ? narrativeHistory.trim() : '';
+	    const finalNarrativeHistory = normalizedNarrativeHistory ? normalizedNarrativeHistory : null;
 
 	    // 安全检查
-	    const textToCheck = extractTextForCheck(originalCharacterData) + " " + (finalUserGuidance || '');
+	    const textToCheck = extractTextForCheck(originalCharacterData) + " " + normalizedUserGuidance + " " + normalizedNarrativeHistory;
 	    const safetyResponse = await enforceTextSafety({
 	      text: textToCheck,
 	      log,
@@ -549,11 +561,13 @@ async function handler(req: NextRequest): Promise<Response> {
     const shouldDisablePolling = customProviderId !== null && customProviderId !== 'system';
 
     const isNative = await verifySignature(originalCharacterData);
+    const hasNarrativeHistory = Boolean(finalNarrativeHistory);
 	    const generationConfig = createGenerationConfig(
 	      originalCharacterData,
 	      baseOutputData,
 	      language,
 	      finalUserGuidance,
+	      finalNarrativeHistory,
 	      sourceTemplate,
 	      targetTemplate,
 	      sanitizedFieldsToPreserve,
@@ -635,7 +649,11 @@ async function handler(req: NextRequest): Promise<Response> {
         participants: participantsName ? [participantsName] : [],
         winner: participantsName ?? '未知角色',
         impact: aiResult.sublimationEvent.impact,
-        metadata: { user_guidance: finalUserGuidance, scenario_title: null, non_native_data_involved: !isNative || !!finalUserGuidance }
+        metadata: {
+          user_guidance: finalUserGuidance,
+          scenario_title: null,
+          non_native_data_involved: !isNative || !!finalUserGuidance || hasNarrativeHistory
+        }
       });
 
       const nowISO = new Date().toISOString();
@@ -686,10 +704,10 @@ async function handler(req: NextRequest): Promise<Response> {
     }
 
     // 5. 签名逻辑
-    // 默认情况下，有引导的升华会失去原生性
-    let shouldSign = isNative && !finalUserGuidance;
-    // 但是，如果管理员在配置中开启了特例，则即使有引导也进行签名
-    if (isNative && finalUserGuidance && appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING) {
+    // 默认情况下，有引导或叙事历史的升华会失去原生性
+    let shouldSign = isNative && !finalUserGuidance && !hasNarrativeHistory;
+    // 但是，如果管理员在配置中开启了特例，则即使有引导也进行签名（叙事历史除外）
+    if (isNative && finalUserGuidance && appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING && !hasNarrativeHistory) {
       shouldSign = true;
     }
 

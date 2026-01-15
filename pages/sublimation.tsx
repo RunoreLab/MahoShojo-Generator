@@ -181,6 +181,8 @@ const SublimationPage: React.FC = () => {
     const [pastedJson, setPastedJson] = useState('');
     const [isPasteAreaVisible, setIsPasteAreaVisible] = useState(false);
     const [userGuidance, setUserGuidance] = useState('');
+    const [narrativeHistory, setNarrativeHistory] = useState('');
+    const [narrativeHistoryFileName, setNarrativeHistoryFileName] = useState<string | null>(null);
 
     // 数据库选择相关状态
     const [showBattleDataModal, setShowBattleDataModal] = useState(false);
@@ -404,11 +406,15 @@ const SublimationPage: React.FC = () => {
         const isNative = await verifyOrigin(characterData);
         if (!isNative) return false;
         const trimmedGuidance = typeof userGuidance === 'string' ? userGuidance.trim() : '';
+        const trimmedNarrativeHistory = typeof narrativeHistory === 'string' ? narrativeHistory.trim() : '';
+        if (trimmedNarrativeHistory) {
+            return false;
+        }
         if (trimmedGuidance) {
             return appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
         }
         return true;
-    }, [characterData, userGuidance, verifyOrigin]);
+    }, [characterData, userGuidance, narrativeHistory, verifyOrigin]);
 
     const processJsonData = (jsonText: string) => {
         try {
@@ -463,6 +469,28 @@ const SublimationPage: React.FC = () => {
         if (processJsonData(pastedJson)) {
             setPastedJson('');
         }
+    };
+
+    const handleNarrativeFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const text = await file.text();
+        let normalizedText = text;
+        if (file.name.toLowerCase().endsWith('.json')) {
+            try {
+                normalizedText = JSON.stringify(JSON.parse(text), null, 2);
+            } catch {
+                normalizedText = text;
+            }
+        }
+        setNarrativeHistory(normalizedText);
+        setNarrativeHistoryFileName(file.name);
+        event.target.value = '';
+    };
+
+    const handleClearNarrativeHistory = () => {
+        setNarrativeHistory('');
+        setNarrativeHistoryFileName(null);
     };
 
     // 打开角色数据卡选择器
@@ -561,7 +589,7 @@ const SublimationPage: React.FC = () => {
         setStreamedGeneralCard(null);
 
 	        try {
-	            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance;
+	            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance + " " + narrativeHistory;
 	            const redirectTarget = await getSensitiveWordRedirectTarget(textToCheck, {
 	                reason: '上传的角色档案或引导内容包含危险符文',
 	            });
@@ -577,6 +605,7 @@ const SublimationPage: React.FC = () => {
                 ...characterData,
                 language: selectedLanguage,
                 userGuidance: userGuidance.trim(),
+                narrativeHistory: narrativeHistory.trim(),
                 fieldsToPreserve: filteredFieldsToPreserve,
                 allowReshapeNames,
                 isDowngrade: isDowngrade,
@@ -762,14 +791,21 @@ const SublimationPage: React.FC = () => {
     const currentFieldsConfig = PRESERVABLE_FIELDS_CONFIG[targetTemplate];
     const trimmedGuidance = userGuidance.trim();
     const hasGuidance = trimmedGuidance.length > 0;
+    const trimmedNarrativeHistory = narrativeHistory.trim();
+    const hasNarrativeHistory = trimmedNarrativeHistory.length > 0;
     const shouldWarnGuidanceNativeness =
         hasGuidance
+        && !hasNarrativeHistory
         && isSourceNative === true
         && !appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
     const shouldConfirmGuidanceNativeness =
         hasGuidance
+        && !hasNarrativeHistory
         && isSourceNative === true
         && appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
+    const shouldWarnNarrativeNativeness =
+        hasNarrativeHistory
+        && isSourceNative === true;
     const sourceNativenessStatus: NativenessStatus | null = characterData
         ? (isSourceNativeChecking
             ? 'checking'
@@ -810,7 +846,8 @@ const SublimationPage: React.FC = () => {
                             <ol className="list-decimal list-inside space-y-1">
                                 <li>上传任意.json格式的设定文件（部分兼容非规范文件），历战记录 <span className="font-semibold">可选</span>，如存在会增强升华叙事。</li>
                                 <li>选择目标模板（默认沿用原模板，无匹配时自动切换为通用角色），并可指定需要保留的字段。如果希望借此切换角色模板，建议选择【完全重塑】。</li>
-                                <li>AI 将结合设定、历战记录与可选的成长引导，生成“升华后”的新形态设定。</li>
+                                <li>可额外提供叙事历史（手动输入或上传），AI 将结合设定、历战记录与成长引导生成“升华后”的新形态设定。</li>
+                                <li>若提供叙事历史，本次升华结果将标记为<strong>非原生</strong>。</li>
                             </ol>
                             <div className="mt-3 flex flex-wrap gap-3 text-xs">
                                 <Link href="/encyclopedia/sublimation" className="text-blue-700 hover:underline">百科：成长升华</Link>
@@ -922,6 +959,57 @@ const SublimationPage: React.FC = () => {
                             {shouldWarnGuidanceNativeness && (
                                 <p className="text-xs text-yellow-700 mt-1">
                                     ⚠️ 当前素材为原生，提供引导将使升华结果变为“衍生数据”（非原生），并移除原生签名。
+                                </p>
+                            )}
+                        </div>
+
+                        {/* 叙事历史输入框 */}
+                        <div className="input-group">
+                            <label htmlFor="narrative-history" className="input-label">叙事历史（可选）</label>
+                            <textarea
+                                id="narrative-history"
+                                value={narrativeHistory}
+                                onChange={(e) => {
+                                    setNarrativeHistory(e.target.value);
+                                    if (narrativeHistoryFileName) {
+                                        setNarrativeHistoryFileName(null);
+                                    }
+                                }}
+                                placeholder="输入或粘贴角色的叙事历史（可多段文字），也可使用下方上传文件"
+                                className="input-field resize-y h-28"
+                                disabled={isGenerating}
+                            />
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                <input
+                                    id="narrative-history-upload"
+                                    type="file"
+                                    accept=".txt,.md,.json"
+                                    onChange={handleNarrativeFileChange}
+                                    className="text-xs"
+                                    disabled={isGenerating}
+                                />
+                                {narrativeHistoryFileName && (
+                                    <span className="text-gray-500">已加载叙事历史文件: {narrativeHistoryFileName}</span>
+                                )}
+                                {(narrativeHistory || narrativeHistoryFileName) && (
+                                    <button
+                                        type="button"
+                                        onClick={handleClearNarrativeHistory}
+                                        className="text-purple-700 hover:underline"
+                                        disabled={isGenerating}
+                                    >
+                                        清空叙事历史
+                                    </button>
+                                )}
+                            </div>
+                            {shouldWarnNarrativeNativeness && (
+                                <p className="text-xs text-yellow-700 mt-1">
+                                    ⚠️ 已提供叙事历史，本次升华结果将标记为“衍生数据”（非原生），并移除原生签名。
+                                </p>
+                            )}
+                            {!shouldWarnNarrativeNativeness && hasNarrativeHistory && (
+                                <p className="text-xs text-gray-600 mt-1">
+                                    已加入叙事历史，本次升华结果将标记为“衍生数据”（非原生），AI 将据此补充升华背景。
                                 </p>
                             )}
                         </div>

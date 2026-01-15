@@ -54,6 +54,7 @@ async function handler(req: NextRequest): Promise<Response> {
     const {
       language = 'zh-CN',
       userGuidance = '',
+      narrativeHistory = '',
       fieldsToPreserve = [],
       isDowngrade = false,
       allowReshapeNames = false,
@@ -64,6 +65,7 @@ async function handler(req: NextRequest): Promise<Response> {
     } = body ?? {};
 
     const finalUserGuidance = typeof userGuidance === 'string' ? userGuidance.trim().slice(0, 4000) : '';
+    const finalNarrativeHistory = typeof narrativeHistory === 'string' ? narrativeHistory.trim().slice(0, 8000) : '';
     const normalizedFieldsToPreserve = Array.isArray(fieldsToPreserve)
       ? fieldsToPreserve.filter((item: unknown) => typeof item === 'string' && item.trim()).slice(0, 64)
       : [];
@@ -75,7 +77,7 @@ async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    const checkText = `${JSON.stringify(originalCharacterData)} ${finalUserGuidance}`;
+    const checkText = `${JSON.stringify(originalCharacterData)} ${finalUserGuidance} ${finalNarrativeHistory}`;
     const safetyResponse = await enforceTextSafety({
       text: checkText,
       log,
@@ -148,6 +150,7 @@ async function handler(req: NextRequest): Promise<Response> {
       typeof sourceTemplate === 'string' && sourceTemplate.trim() ? `- 来源模板: ${sourceTemplate.trim()}` : null,
       typeof targetTemplate === 'string' && targetTemplate.trim() ? `- 目标模板: ${targetTemplate.trim()}` : null,
       `- 允许重塑名称: ${allowReshapeNames === true ? '是' : '否'}`,
+      `- 叙事历史: ${finalNarrativeHistory ? '已提供' : '未提供'}`,
       normalizedFieldsToPreserve.length > 0 ? `- 勾选保留字段: ${normalizedFieldsToPreserve.join('、')}` : null,
     ].filter(Boolean).join('\n');
 
@@ -174,6 +177,9 @@ ${sourceJson}
 
 【用户引导】
 ${finalUserGuidance || '（无）'}
+
+【叙事历史（用户补充）】
+${finalNarrativeHistory || '（无）'}
 
 【附加提示】
 ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
@@ -209,4 +215,3 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
 }
 
 export default handler;
-
