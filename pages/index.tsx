@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/useAuth';
 import { UserWithTitle } from '@/components/UserTitle';
 import { featureCategories, getAllFeatureImages } from '@/config/features';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
+import { ThemeImage } from '@/components/shared/ThemeImage';
 
 export default function Home() {
   const [, setImagesLoaded] = useState(false);
@@ -55,10 +56,7 @@ export default function Home() {
         <div className="container">
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '2rem' }}>
-              <picture>
-                <source media="(prefers-color-scheme: dark)" srcSet="/logo-white.svg" />
-                <img src="/logo.svg" width={280} height={180} alt="魔法少女生成器" />
-              </picture>
+              <ThemeImage lightSrc="/logo.svg" darkSrc="/logo-white.svg" width={280} height={180} alt="魔法少女生成器" />
             </div>
 
             <div className="flex justify-center mb-4">

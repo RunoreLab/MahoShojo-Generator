@@ -3,15 +3,13 @@
 import Link from 'next/link';
 
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
+import { ThemeImage } from '@/components/shared/ThemeImage';
 
 export function BattleHeader() {
   return (
     <>
       <div className="text-center mb-4">
-        <picture>
-          <source media="(prefers-color-scheme: dark)" srcSet="/arena-white.svg" />
-          <img src="/arena-black.svg" width={320} height={90} alt="魔法少女竞技场" />
-        </picture>
+        <ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />
         <p className="subtitle" style={{ marginBottom: '1rem', marginTop: '1rem' }}>
           能亲眼见到强者之战，这下就算死也会值回票价呀！
         </p>

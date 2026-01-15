@@ -16,6 +16,7 @@ import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { ThemeImage } from '@/components/shared/ThemeImage';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -634,10 +635,7 @@ const CanshouPage: React.FC = () => {
         <div className="container">
           <div className="card">
             <div className="text-center mb-4">
-              <picture>
-                <source media="(prefers-color-scheme: dark)" srcSet="/beast-logo-white.svg" />
-                <img src="/beast-logo.svg" className="w-full px-8" alt="残兽调查" />
-              </picture>
+              <ThemeImage lightSrc="/beast-logo.svg" darkSrc="/beast-logo-white.svg" className="w-full px-8" alt="残兽调查" />
               <p className="text-gray-600 mt-2">{questionnaire.description}</p>
             </div>
 

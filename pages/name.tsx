@@ -14,6 +14,7 @@ import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { ThemeImage } from '@/components/shared/ThemeImage';
 
 // 注意：QueueStatus 组件及其相关逻辑已被移除，因为它在Serverless环境下无法正常工作。
 
@@ -326,10 +327,7 @@ export default function Name() {
         <div className="container">
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '1rem' }}>
-              <picture>
-                <source media="(prefers-color-scheme: dark)" srcSet="/logo-white.svg" />
-                <img src="/logo.svg" width={250} height={160} alt="Logo" />
-              </picture>
+              <ThemeImage lightSrc="/logo.svg" darkSrc="/logo-white.svg" width={250} height={160} alt="Logo" />
             </div>
             <p className="subtitle text-center">你是什么魔法少女呢！</p>
             <p className="subtitle text-center">

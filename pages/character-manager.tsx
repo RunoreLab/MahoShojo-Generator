@@ -15,6 +15,7 @@ import Footer from '../components/Footer';
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
+import { ThemeImage } from '@/components/shared/ThemeImage';
 import { MainColor } from '@/lib/main-color';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, authStorage } from '@/lib/auth';
@@ -1622,10 +1623,7 @@ const CharacterManagerPage: React.FC = () => {
                     <div className="card">
                         <div className="text-center mb-4">
                             <div className="flex justify-center items-center mt-4" style={{ marginBottom: '1rem' }}>
-                                <picture>
-                                    <source media="(prefers-color-scheme: dark)" srcSet="/character-manager-white.svg" />
-                                    <img src="/character-manager.svg" width={320} height={40} alt="角色数据管理" />
-                                </picture>
+                                <ThemeImage lightSrc="/character-manager.svg" darkSrc="/character-manager-white.svg" width={320} height={40} alt="角色数据管理" />
                             </div>
                             <p className="subtitle mt-2">在这里查看、编辑和维护你的角色档案</p>
                             {/* 实验性警告 */}
