@@ -67,6 +67,8 @@ const findByKeywordRules = (text: string): string[] => {
     { tag: '百合向', re: /(百合|gl\b)/i },
     { tag: '国风', re: /(国风|古风|中式|汉服|华风)/i },
     { tag: '武道', re: /(武道|武术|武学|武侠|门派|拳法|剑法|刀法|轻功|内力|真气)/i },
+    { tag: '日系', re: /(日系|日式|和风|日漫|动漫风)/i },
+    { tag: '还原向', re: /(还原向|高还原|高度还原|忠实还原|忠实原作|原作向|还原度)/i },
     { tag: '赛博朋克', re: /(赛博|cyberpunk)/i },
     { tag: '科幻向', re: /(科幻|scifi|science fiction)/i },
     { tag: '奇幻向', re: /(奇幻|fantasy)/i },
