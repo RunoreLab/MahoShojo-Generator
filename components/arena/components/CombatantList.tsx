@@ -740,10 +740,10 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
             <div className="rounded-lg border border-gray-300 bg-white/50">
               <button
                 type="button"
-                className="w-full flex items-center justify-between px-2 py-2"
+                className="w-full flex flex-wrap items-center gap-2 px-2 py-2"
                 onClick={() => setUnassignedCollapsed((v) => !v)}
               >
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
                   <span className="text-xs text-gray-700">{unassignedCollapsed ? '▶' : '▼'}</span>
                   <span className="font-semibold text-sm text-gray-700">未分队</span>
                   <span className="text-xs text-gray-500">({combatantsByTeam.unassigned.length})</span>
@@ -752,7 +752,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                 {teams.length > 0 && (
                   <select
                     defaultValue=""
-                    className="text-xs border border-gray-300 rounded px-1 py-1 bg-white disabled:opacity-50"
+                    className="text-xs border border-gray-300 rounded px-1 py-1 bg-white disabled:opacity-50 w-full sm:w-44 min-w-0 max-w-full truncate sm:ml-auto"
                     disabled={isGenerating || indexedCombatants.every((item) => !item.combatant.teamId)}
                     onChange={(e) => {
                       const value = e.currentTarget.value;
@@ -795,12 +795,12 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
 
             return (
               <div key={team.id} className="rounded-lg border border-gray-300 bg-white/50">
-                <div className="flex items-center justify-between px-2 py-2 gap-2">
-                  <button
-                    type="button"
-                    className="flex items-center gap-2 min-w-0"
-                    onClick={() => toggleTeamCollapsed(team.id)}
-                  >
+              <div className="flex flex-wrap items-center gap-2 px-2 py-2">
+                <button
+                  type="button"
+                  className="flex items-center gap-2 min-w-0 flex-1"
+                  onClick={() => toggleTeamCollapsed(team.id)}
+                >
                     <span className="text-xs text-gray-700">{isCollapsed ? '▶' : '▼'}</span>
                     {editingTeamId === team.id ? (
                       <input
@@ -828,10 +828,10 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                     <span className="text-xs text-gray-500">({members.length})</span>
                   </button>
 
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex w-full sm:w-auto flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:ml-auto min-w-0">
                     <select
                       defaultValue=""
-                      className="text-xs border border-gray-300 rounded px-1 py-1 bg-white disabled:opacity-50"
+                      className="text-xs border border-gray-300 rounded px-1 py-1 bg-white disabled:opacity-50 w-full sm:w-44 min-w-0 max-w-full truncate"
                       disabled={isGenerating || indexedCombatants.length === 0}
                       onChange={(e) => {
                         const value = e.currentTarget.value;
