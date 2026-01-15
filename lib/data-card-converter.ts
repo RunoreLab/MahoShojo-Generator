@@ -15,7 +15,6 @@ import {
   isGeneralScenario,
   isScenarioCard
 } from './schemas';
-import type { CurrentStateData } from './schemas/current-state';
 
 const NON_SUBSTANTIVE_KEYS = new Set(['signature', 'templateId']);
 
@@ -54,11 +53,6 @@ interface UnmatchedField {
   path: string;
   value: unknown;
 }
-
-const createDefaultCurrentState = (): CurrentStateData => ({
-  summary: '当前状态尚未记录，可在战报或编辑器中更新。',
-  fields: [],
-});
 
 const MAGICAL_GIRL_META: Record<string, FieldMeta> = {
   codename: { type: 'string' },
@@ -215,17 +209,6 @@ const DEFAULT_MAGICAL_GIRL: MagicalGirlData = {
     }
   },
   userAnswers: [],
-  current_state: createDefaultCurrentState(),
-  arena_history: {
-    attributes: {
-      world_line_id: '',
-      created_at: '',
-      updated_at: '',
-      sublimation_count: 0,
-      last_sublimation_at: null
-    },
-    entries: []
-  },
   adjudicationEvents: [],
   templateId: '魔法少女/心之花/魔法少女（问卷生成）'
 };
@@ -244,7 +227,6 @@ const DEFAULT_CANSHOU: CanshouData = {
   birthEnvironment: '',
   researcherNotes: '',
   templateId: '魔法少女/心之花/残兽（问卷生成）',
-  current_state: createDefaultCurrentState()
 };
 
 const DEFAULT_SCENARIO: ScenarioData = {
@@ -275,7 +257,6 @@ const DEFAULT_GENERAL: GeneralCharacterData = {
   templateId: GENERAL_CHARACTER_TEMPLATE_ID,
   name: '未命名角色',
   content: '请在此处补充角色设定，建议使用 Markdown 书写。',
-  current_state: createDefaultCurrentState()
 };
 
 export function inferTemplate(data: unknown): InferableTemplate {
