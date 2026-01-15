@@ -26,6 +26,10 @@ body {
   font-family: 'Arial', sans-serif;
 }
 
+.blue-theme {
+  --app-result-card-bg: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+}
+
 body {
   background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
   min-height: 100vh;
@@ -34,6 +38,18 @@ body {
 @media (prefers-color-scheme: dark) {
   html {
     color-scheme: dark;
+  }
+
+  .blue-theme {
+    --app-result-card-bg: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+  }
+
+  .blue-theme .magic-background {
+    background: linear-gradient(135deg, #0b1220 0%, #1f2937 55%, #111827 100%);
+  }
+
+  body {
+    background: linear-gradient(135deg, #0b1220 0%, #0f172a 55%, #111827 100%);
   }
 }
 
@@ -46,14 +62,15 @@ body {
 }
 
 .card {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--app-surface);
   border-radius: 20px;
   padding: 30px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--app-card-shadow);
   margin-top: 100px;
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--app-border);
   max-width: 500px;
+  color: var(--app-text);
 }
 
 @layer components {
@@ -106,18 +123,22 @@ body {
     display: block;
     margin-bottom: 8px;
     font-weight: 600;
-    color: #555;
+    color: var(--app-text-muted);
   }
 
   .input-field {
     width: 100%;
     padding: 15px;
-    border: 2px solid #e0e0e0;
-    color: #333;
+    border: 2px solid var(--app-input-border);
+    color: var(--app-text);
     border-radius: 12px;
     font-size: 16px;
     transition: all 0.3s ease;
-    background: rgba(255, 255, 255, 0.8);
+    background: var(--app-input-bg);
+  }
+
+  .input-field::placeholder {
+    color: var(--app-text-subtle);
   }
 
   .blue-theme .input-field:focus {
@@ -142,7 +163,7 @@ body {
 
   .blue-theme .generate-button:hover {
     transform: translateY(-2px);
-    box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
+    box-shadow: 0 10px 20px rgba(59, 130, 246, 0.35);
   }
 
   .generate-button:disabled {
@@ -152,7 +173,7 @@ body {
   }
 
   .blue-theme .result-card {
-    background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+    background: var(--app-result-card-bg);
     color: white;
     border-radius: 15px;
     padding: 25px;
@@ -253,7 +274,7 @@ body {
   .subtitle {
     text-align: center;
     font-size: 1rem;
-    color: #666;
+    color: var(--app-text-muted);
     margin-bottom: 25px;
     font-style: italic;
   }
@@ -284,7 +305,7 @@ body {
     text-align: center;
     padding: 20px 0;
     margin-top: 30px;
-    color: #666;
+    color: var(--app-text-muted);
     font-size: 14px;
   }
 

@@ -129,7 +129,10 @@ export function ArenaPage() {
       </Head>
       <div className="magic-background-white">
         <div className="container">
-          <div className="card" style={{ border: '2px solid #ccc', background: '#f9f9f9' }}>
+          <div
+            className="card"
+            style={{ border: '2px solid var(--app-border-strong)', background: 'var(--app-surface-90)' }}
+          >
             <BattleHeader />
             <div className="flex justify-end mt-2">
               <div className="flex items-center gap-3 text-sm flex-wrap">
