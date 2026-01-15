@@ -80,6 +80,27 @@ const extractTextForCheck = (data: any): string => {
     return textContent;
 };
 
+type NativenessStatus = 'native' | 'derived' | 'checking' | 'unknown';
+
+const NATIVENESS_BADGE_CONFIG: Record<NativenessStatus, { label: string; className: string }> = {
+    native: { label: '原生数据', className: 'text-green-800 bg-green-100' },
+    derived: { label: '衍生数据', className: 'text-yellow-800 bg-yellow-100' },
+    checking: { label: '原生性校验中', className: 'text-gray-600 bg-gray-100' },
+    unknown: { label: '原生性未知', className: 'text-gray-600 bg-gray-100' },
+};
+
+const NativenessBadge: React.FC<{ status: NativenessStatus }> = ({ status }) => {
+    const config = NATIVENESS_BADGE_CONFIG[status];
+    return (
+        <span className={`px-3 py-1 text-xs font-semibold rounded-full ${config.className}`}>
+            {config.label}
+        </span>
+    );
+};
+
+const hasNativeSignature = (data: any) =>
+    typeof data?.signature === 'string' && data.signature.trim().length > 0;
+
 // API响应和结果状态的类型
 interface SublimationResponse {
     sublimatedData: any;
@@ -177,6 +198,8 @@ const SublimationPage: React.FC = () => {
     const [writeArenaHistory, setWriteArenaHistory] = useState(true);
     const [readCurrentState, setReadCurrentState] = useState(true);
     const [writeCurrentState, setWriteCurrentState] = useState(true);
+    const [isSourceNative, setIsSourceNative] = useState<boolean | null>(null);
+    const [isSourceNativeChecking, setIsSourceNativeChecking] = useState(false);
 
     const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
     const sublimationCooldownMs = isUserCustomKey ? 3000 : 60000;
@@ -328,6 +351,31 @@ const SublimationPage: React.FC = () => {
             return false;
         }
     }, []);
+
+    useEffect(() => {
+        if (!characterData) {
+            setIsSourceNative(null);
+            setIsSourceNativeChecking(false);
+            return;
+        }
+
+        let isActive = true;
+        setIsSourceNative(null);
+        setIsSourceNativeChecking(true);
+        verifyOrigin(characterData)
+            .then((isValid) => {
+                if (!isActive) return;
+                setIsSourceNative(isValid);
+            })
+            .finally(() => {
+                if (!isActive) return;
+                setIsSourceNativeChecking(false);
+            });
+
+        return () => {
+            isActive = false;
+        };
+    }, [characterData, verifyOrigin]);
 
     const resignDataCard = useCallback(async (data: any) => {
         const response = await fetch('/api/resign-data', {
@@ -712,6 +760,35 @@ const SublimationPage: React.FC = () => {
     const targetTemplateLabel = TARGET_TEMPLATE_LABELS[targetTemplate];
     const hasCrossTemplateSelection = Boolean(characterData && sourceTemplate !== targetTemplate);
     const currentFieldsConfig = PRESERVABLE_FIELDS_CONFIG[targetTemplate];
+    const trimmedGuidance = userGuidance.trim();
+    const hasGuidance = trimmedGuidance.length > 0;
+    const shouldWarnGuidanceNativeness =
+        hasGuidance
+        && isSourceNative === true
+        && !appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
+    const shouldConfirmGuidanceNativeness =
+        hasGuidance
+        && isSourceNative === true
+        && appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
+    const sourceNativenessStatus: NativenessStatus | null = characterData
+        ? (isSourceNativeChecking
+            ? 'checking'
+            : isSourceNative === null
+                ? 'unknown'
+                : isSourceNative
+                    ? 'native'
+                    : 'derived')
+        : null;
+    const nonStreamResultNativenessStatus: NativenessStatus | null = resultData?.sublimatedData
+        ? (hasNativeSignature(resultData.sublimatedData) ? 'native' : 'derived')
+        : null;
+    const streamResultNativenessStatus: NativenessStatus | null = streamedGeneralCardForDisplay
+        ? (streamedGeneralCard
+            ? (hasNativeSignature(streamedGeneralCard) ? 'native' : 'derived')
+            : isGenerating
+                ? 'checking'
+                : 'unknown')
+        : null;
 
     return (
         <>
@@ -747,7 +824,12 @@ const SublimationPage: React.FC = () => {
                         <div className="input-group">
                             <label htmlFor="character-upload" className="input-label">上传设定文件</label>
                             <input id="character-upload" type="file" accept=".json" onChange={handleFileChange} className="input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100" />
-                            {fileName && (<p className="text-xs text-gray-500 mt-2">已加载角色: {fileName}</p>)}
+                            {fileName && (
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                    <span className="text-gray-500">已加载角色: {fileName}</span>
+                                    {sourceNativenessStatus && <NativenessBadge status={sourceNativenessStatus} />}
+                                </div>
+                            )}
                         </div>
                         <div className="mb-6">
                             <button onClick={() => setIsPasteAreaVisible(!isPasteAreaVisible)} className="text-purple-700 hover:underline cursor-pointer mb-2 font-semibold">
@@ -834,10 +916,13 @@ const SublimationPage: React.FC = () => {
                         <div className="input-group">
                             <label htmlFor="user-guidance" className="input-label">成长方向引导 (可选)</label>
                             <input id="user-guidance" type="text" value={userGuidance} onChange={(e) => setUserGuidance(e.target.value)} className="input-field" placeholder="输入关键词或一句话 (最多30字)" maxLength={30} disabled={isGenerating} />
-                            {userGuidance && appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING ? (
+                            {shouldConfirmGuidanceNativeness && (
                                 <p className="text-xs text-green-700 mt-1">✅ 管理员已允许引导升华保留原生签名。</p>
-                            ) : (
-                                <p className="text-xs text-yellow-700 mt-1">⚠️ 注意: 提供引导将使生成的角色变为“衍生数据”，并移除其原生签名。</p>
+                            )}
+                            {shouldWarnGuidanceNativeness && (
+                                <p className="text-xs text-yellow-700 mt-1">
+                                    ⚠️ 当前素材为原生，提供引导将使升华结果变为“衍生数据”（非原生），并移除原生签名。
+                                </p>
                             )}
                         </div>
 
@@ -1009,6 +1094,12 @@ const SublimationPage: React.FC = () => {
                         <>
                             {streamedGeneralCardForDisplay && (
                                 <div className="card mt-6">
+                                    {streamResultNativenessStatus && (
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h3 className="text-sm font-semibold text-gray-700">升华结果原生性</h3>
+                                            <NativenessBadge status={streamResultNativenessStatus} />
+                                        </div>
+                                    )}
                                     <GeneralCharacterCard
                                         general={streamedGeneralCardForDisplay}
                                         onSaveImage={handleSaveImage}
@@ -1052,6 +1143,12 @@ const SublimationPage: React.FC = () => {
                                     <ul className="list-disc list-inside text-xs text-blue-600 mt-2 pl-2">
                                         {resultData.unchangedFields.map(field => <li key={field}>{field}</li>)}
                                     </ul>
+                                </div>
+                            )}
+                            {nonStreamResultNativenessStatus && (
+                                <div className="card mt-6 flex items-center justify-between">
+                                    <h3 className="text-sm font-semibold text-gray-700">升华结果原生性</h3>
+                                    <NativenessBadge status={nonStreamResultNativenessStatus} />
                                 </div>
                             )}
                             {renderResultCard()}
