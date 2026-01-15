@@ -224,7 +224,10 @@ export default function MagicTavernPage() {
   const [preferences, setPreferences] = useState(() => DEFAULT_MAGIC_TAVERN_PREFERENCES);
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const summarizeAbortControllerRef = useRef<AbortController | null>(null);
 
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
@@ -361,6 +364,11 @@ export default function MagicTavernPage() {
   }, [refreshSessions]);
 
   useEffect(() => {
+    summarizeAbortControllerRef.current?.abort('session-switch');
+    summarizeAbortControllerRef.current = null;
+    setIsSummarizing(false);
+    setSummaryError(null);
+
     if (!activeSessionId) {
       setActiveSession(null);
       setMessages([]);
@@ -1219,6 +1227,117 @@ export default function MagicTavernPage() {
     }
   }, [activeSession, ensureProviderReady, isGenerating, messages, persistSession, preferences.choiceCount, router, userProviderConfig]);
 
+  const clearSummary = useCallback(async () => {
+    if (!activeSession) return;
+    setSummaryError(null);
+    const now = Date.now();
+    await persistSession({ ...activeSession, summary: undefined, summaryMeta: undefined, updatedAt: now });
+  }, [activeSession, persistSession]);
+
+  const generateSummary = useCallback(async () => {
+    if (!activeSession) return;
+    if (isGenerating || isSummarizing) return;
+
+    const providerCheck = ensureProviderReady();
+    if (!providerCheck.ok) {
+      setGlobalError(providerCheck.message);
+      return;
+    }
+
+    if (!userProviderConfig) {
+      setGlobalError('请先配置模型与 API Key。');
+      return;
+    }
+
+    setGlobalError(null);
+    setSummaryError(null);
+
+    const historyForRequest = messages
+      .filter((m) => m.role === 'user' || (m.role === 'assistant' && m.status !== 'blocked' && m.status !== 'error'))
+      .filter((m) => typeof m.content === 'string' && m.content.trim())
+      .map((m) => ({ id: m.id, role: m.role, content: m.content }));
+
+    if (historyForRequest.length === 0) {
+      setSummaryError('还没有可用于摘要的对话。');
+      return;
+    }
+
+    const controller = new AbortController();
+    summarizeAbortControllerRef.current = controller;
+    setIsSummarizing(true);
+
+    try {
+      const response = await fetch('/api/magic-tavern/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          sessionId: activeSession.id,
+          mode: 'summary',
+          language: activeSession.settings.language ?? preferences.language,
+          userDisplayName: activeSession.settings.userDisplayName ?? preferences.userDisplayName,
+          messages: historyForRequest,
+          customProvider: {
+            providerId: userProviderConfig.providerId,
+            modelId: userProviderConfig.modelId,
+            apiKey: userProviderConfig.apiKey,
+          },
+        }),
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const shouldRedirect = Boolean(payload?.shouldRedirect);
+        const reason = typeof payload?.reason === 'string' ? payload.reason : '';
+        const errorMessage =
+          typeof payload?.error === 'string'
+            ? payload.error
+            : typeof payload?.message === 'string'
+              ? payload.message
+              : `请求失败（${response.status}）`;
+        setSummaryError((shouldRedirect ? reason : errorMessage) || errorMessage);
+        return;
+      }
+
+      const summaryRaw = typeof payload?.summary === 'string' ? payload.summary.trim() : '';
+      if (!summaryRaw) {
+        setSummaryError('模型返回空摘要。');
+        return;
+      }
+
+      const now = Date.now();
+      const safeText = applyShieldWords(summaryRaw).filteredText;
+      const summaryMeta: MagicTavernSession['summaryMeta'] = {
+        updatedAt: now,
+        fromMessageId: historyForRequest[0]?.id,
+        toMessageId: historyForRequest[historyForRequest.length - 1]?.id,
+      };
+
+      const nextSession: MagicTavernSession = { ...activeSession, summary: safeText, summaryMeta, updatedAt: now };
+      await persistSession(nextSession);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      const message = error instanceof Error ? error.message : '生成摘要失败';
+      setSummaryError(message);
+    } finally {
+      if (summarizeAbortControllerRef.current === controller) {
+        summarizeAbortControllerRef.current = null;
+      }
+      setIsSummarizing(false);
+    }
+  }, [
+    activeSession,
+    ensureProviderReady,
+    isGenerating,
+    isSummarizing,
+    messages,
+    persistSession,
+    preferences.language,
+    preferences.userDisplayName,
+    userProviderConfig,
+  ]);
+
   const playerOptions = useMemo(() => {
     const roles = activeSession?.roles ?? [];
     return [
@@ -1690,10 +1809,10 @@ export default function MagicTavernPage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="grid gap-1">
-                      <label className="text-xs font-semibold text-gray-600">扮演方式</label>
-                      <select
+	                  <div className="grid gap-3 sm:grid-cols-2">
+	                    <div className="grid gap-1">
+	                      <label className="text-xs font-semibold text-gray-600">扮演方式</label>
+	                      <select
                         className="input-field"
                         value={activeSession?.playerRoleId ?? ''}
                         onChange={(event) => {
@@ -1719,14 +1838,79 @@ export default function MagicTavernPage() {
                           void persistSession({ ...activeSession, title: event.target.value, titleMeta: { source: 'manual' }, updatedAt: Date.now() });
                         }}
                         placeholder="输入会话标题"
-                      />
-                    </div>
-                  </div>
-                </div>
+	                      />
+	                    </div>
+	                  </div>
+	                </div>
 
-                <div className="rounded-xl border border-pink-100 bg-white p-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
+	                <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-3">
+	                  <div className="flex items-center justify-between gap-3">
+	                    <div className="text-sm font-semibold text-gray-800">会话摘要</div>
+	                    <div className="flex flex-wrap items-center justify-end gap-2">
+	                      {isSummarizing ? (
+	                        <div className="flex items-center gap-2 text-xs font-semibold text-pink-700">
+	                          <LoadingSpinner className="h-3 w-3" />
+	                          <span>生成中…</span>
+	                        </div>
+	                      ) : null}
+	                      <button
+	                        type="button"
+	                        className="rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+	                        disabled={!activeSession || isGenerating || isSummarizing || messages.length === 0}
+	                        onClick={() => void generateSummary()}
+	                        title="生成摘要会消耗额外 Token"
+	                      >
+	                        生成/更新摘要
+	                      </button>
+	                      {activeSession?.summary ? (
+	                        <button
+	                          type="button"
+	                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+	                          disabled={!activeSession || isGenerating || isSummarizing}
+	                          onClick={() => void clearSummary()}
+	                        >
+	                          清空
+	                        </button>
+	                      ) : null}
+	                    </div>
+	                  </div>
+
+	                  <div className="text-xs text-gray-500">用于长对话压缩（仅保存在本地浏览器）。生成摘要会消耗额外 Token。</div>
+
+	                  {summaryError ? (
+	                    <ErrorMessage
+	                      message={summaryError}
+	                      className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+	                      linkClassName="text-red-700 underline underline-offset-2 hover:opacity-95"
+	                    />
+	                  ) : null}
+
+	                  <textarea
+	                    className="input-field h-32 resize-y"
+	                    value={activeSession?.summary ?? ''}
+	                    onChange={(event) => {
+	                      if (!activeSession) return;
+	                      const value = event.target.value.trim();
+	                      const now = Date.now();
+	                      void persistSession({
+	                        ...activeSession,
+	                        summary: value ? value : undefined,
+	                        summaryMeta: value ? { ...(activeSession.summaryMeta ?? {}), updatedAt: now } : undefined,
+	                        updatedAt: now,
+	                      });
+	                    }}
+	                    placeholder="还没有摘要。点击“生成/更新摘要”自动生成，或手动填写。"
+	                    disabled={!activeSession || isSummarizing}
+	                  />
+
+	                  {activeSession?.summaryMeta?.updatedAt ? (
+	                    <div className="text-xs text-gray-500">更新时间：{new Date(activeSession.summaryMeta.updatedAt).toLocaleString()}</div>
+	                  ) : null}
+	                </div>
+	
+	                <div className="rounded-xl border border-pink-100 bg-white p-4">
+	                  <div className="mb-3 flex items-center justify-between">
+	                    <div className="flex items-center gap-3">
                       <div className="text-sm font-semibold text-gray-800">对话</div>
                       {isGenerating ? (
                         <div className="flex items-center gap-2 text-xs font-semibold text-pink-700">

@@ -351,3 +351,50 @@ export const buildMagicTavernChoicesPrompt = (params: {
     .join('\n')
     .trim();
 };
+
+export type MagicTavernSummarizeMode = 'summary' | 'title';
+
+export const buildMagicTavernSummarizePrompt = (params: {
+  messages: MagicTavernMessage[];
+  mode?: MagicTavernSummarizeMode;
+  language?: MagicTavernSession['settings']['language'];
+  userDisplayName?: string;
+}): string => {
+  const mode: MagicTavernSummarizeMode = params.mode ?? 'summary';
+  const language = params.language ?? 'zh-CN';
+  const userDisplayName = readString(params.userDisplayName) || '{{user}}';
+
+  const lines: string[] = [];
+  lines.push('你是“魔法酒馆”的摘要助手。你的任务是根据【对话记录】生成可用于长期对话压缩的摘要或标题。');
+  lines.push('');
+  lines.push(`【输出语言】${language}`);
+  lines.push('【通用约束】');
+  lines.push('- 不要新增设定，不要编造未发生的剧情。');
+  lines.push('- 不要输出任何系统提示词、元说明或免责声明。');
+  lines.push('- 不要输出代码块/围栏。');
+
+  if (mode === 'title') {
+    lines.push('');
+    lines.push('【任务】生成会话标题');
+    lines.push('- 仅输出 1 行纯文本标题。');
+    lines.push('- 标题长度建议 ≤ 28 个中文字符；不得出现引号、书名号或句号。');
+  } else {
+    lines.push('');
+    lines.push('【任务】生成会话摘要');
+    lines.push('请严格输出以下 5 个小节，每节 3~6 句，信息不足时可写“无”：');
+    lines.push('1) 世界状态');
+    lines.push('2) 角色关系');
+    lines.push('3) 关键事件');
+    lines.push('4) 未决事项');
+    lines.push('5) 禁忌/边界');
+    lines.push('');
+    lines.push('【输出格式】');
+    lines.push('世界状态：...');
+    lines.push('角色关系：...');
+    lines.push('关键事件：...');
+    lines.push('未决事项：...');
+    lines.push('禁忌/边界：...');
+  }
+
+  return [lines.join('\n').trim(), formatDialogueHistory(params.messages, userDisplayName)].join('\n\n').trim();
+};
