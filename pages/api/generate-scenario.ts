@@ -39,7 +39,7 @@ const ScenarioSchema = z.object({
     atmosphere: z.string().describe("故事的情感基调和氛围。"),
     development: z.array(z.string()).describe("故事可能的多个发展方向。"),
   }),
-}).describe("一个结构化的情景设定，用于魔法少女竞技场。");
+}).describe("一个结构化的情景设定，用于后续故事。");
 
 
 const CustomProviderSchema = z.object({
