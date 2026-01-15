@@ -7,10 +7,12 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import TachieGenerator from '@/components/TachieGenerator';
 import { TavernAiFillButton } from '@/components/tavern/TavernAiFillButton';
 import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
+import { authStorage } from '@/lib/auth';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
+import { computeTechIndex } from '@/lib/metrics/techIndex';
 import {
   buildArenaDefaultScenario,
   buildArenaWorldbook,
@@ -18,10 +20,11 @@ import {
   createTavernV3Card,
   getPlaceholderPngBytes,
   recommendTavernExportFields,
+  type TavernExportMeta,
   writeTavernCardToPngBytes,
   type TavernScenarioFragment,
 } from '@/lib/tavern-card';
-import { useAuth } from '@/lib/useAuth';
+import { useAuth, type User } from '@/lib/useAuth';
 
 type ExportStep = 'idle' | 'ready' | 'generating' | 'done' | 'error';
 
@@ -30,6 +33,76 @@ type ScenarioAttachment = TavernScenarioFragment & {
   fileName: string;
   source: 'cloud' | 'local';
   sourceDataCardId?: string;
+};
+
+type ApiTag = {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  scope: 'user' | 'system' | 'admin';
+  isActive: boolean;
+};
+
+type ApiMetrics = {
+  techScore: number;
+  techLevel: string;
+  isNative: boolean | null;
+  dataCardUpdatedAt: string;
+  isStale: boolean;
+};
+
+type ApiRating = {
+  queue: 'strict' | 'free';
+  rating: number;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  tier: string;
+  lastDelta: number | null;
+  lastAppliedAt: string | null;
+  publicRank: number | null;
+  publicTotal: number | null;
+};
+
+type ApiMetaResponse =
+  | {
+      success: true;
+      dataCardId: string;
+      tags: ApiTag[];
+      metrics: ApiMetrics | null;
+      ratings: { strict: ApiRating | null; free: ApiRating | null };
+    }
+  | { success: false; error?: string };
+
+type ExportMetaRating = {
+  rating: number;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  tier: string;
+  lastDelta: number | null;
+  lastAppliedAt: string | null;
+  publicRank: number | null;
+  publicTotal: number | null;
+  winRate: number | null;
+};
+
+type ExportMeta = TavernExportMeta & {
+  dataCardId?: string;
+  dataCardName?: string;
+  dataCardDescription?: string;
+  author?: string;
+  isPublic?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  likeCount?: number;
+  favoriteCount?: number;
+  usageCount?: number;
+  techScore?: number | null;
+  ratings?: { strict: ExportMetaRating | null; free: ExportMetaRating | null };
 };
 
 interface ExportFields {
@@ -52,6 +125,7 @@ interface ExportState {
   error: string | null;
   template: InferableTemplate;
   dataCard: unknown | null;
+  exportMeta: ExportMeta | null;
   basePngBytes: Uint8Array | null;
   basePngName: string | null;
   overwriteExisting: boolean;
@@ -71,7 +145,7 @@ type ExportAction =
   | { type: 'reset' }
   | { type: 'setError'; message: string }
   | { type: 'setInlineError'; message: string | null }
-  | { type: 'setDataCard'; data: unknown; template: InferableTemplate; fields: ExportFields }
+  | { type: 'setDataCard'; data: unknown; template: InferableTemplate; fields: ExportFields; meta?: ExportMeta | null }
   | { type: 'setBasePng'; bytes: Uint8Array; name: string }
   | { type: 'usePlaceholder' }
   | { type: 'setField'; key: keyof ExportFields; value: string | number | boolean }
@@ -97,6 +171,7 @@ type ExportAction =
   | { type: 'done' };
 
 const DEFAULT_CREATOR_NOTES = '来源：MahoShojo-Generator / 魔法少女竞技场 A.R.E.N.A.';
+const DEFAULT_TAVERN_CREATOR = 'github.com/colasama/MahoShojo-Generator';
 
 const initialFields: ExportFields = {
   name: '',
@@ -118,6 +193,7 @@ const initialState: ExportState = {
   error: null,
   template: 'unknown',
   dataCard: null,
+  exportMeta: null,
   basePngBytes: null,
   basePngName: null,
   overwriteExisting: true,
@@ -147,6 +223,7 @@ function reducer(state: ExportState, action: ExportAction): ExportState {
         step: 'ready',
         error: null,
         dataCard: action.data,
+        exportMeta: action.meta ?? null,
         template: action.template,
         fields: action.fields,
       };
@@ -197,6 +274,19 @@ const safeStringArray = (value: unknown): string[] => {
   return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean);
 };
 
+const uniqueStrings = (items: string[]): string[] => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+};
+
 const readTavernMeta = (card: unknown): Record<string, unknown> | null => {
   if (!isRecord(card)) return null;
   const tavern = card['_tavern'];
@@ -231,10 +321,14 @@ const buildCreatorNotesWithCloudDescription = (dataCard: unknown, baseCreatorNot
   return appendCreatorNotes(baseCreatorNotes, block);
 };
 
-const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unknown): ExportFields => {
+const buildDefaultFieldsFromDataCard = (
+  template: InferableTemplate,
+  card: unknown,
+  exportMeta?: ExportMeta | null
+): ExportFields => {
   const meta = readTavernMeta(card);
   const metaTags = meta ? safeStringArray(meta['tags']) : [];
-  const recommended = recommendTavernExportFields(template, card, metaTags);
+  const recommended = recommendTavernExportFields(template, card, metaTags, exportMeta ?? undefined);
   const recommendedTags = recommended.tags.join(', ');
 
   if (!isRecord(card)) {
@@ -376,6 +470,205 @@ const buildDefaultFieldsFromDataCard = (template: InferableTemplate, card: unkno
   };
 };
 
+const parseBoolean = (value: unknown): boolean | undefined => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed === 'true' || trimmed === '1') return true;
+    if (trimmed === 'false' || trimmed === '0') return false;
+  }
+  return undefined;
+};
+
+const fetchDataCardMeta = async (dataCardId: string): Promise<Extract<ApiMetaResponse, { success: true }> | null> => {
+  if (!dataCardId) return null;
+  try {
+    const authHeader = await authStorage.getAuthHeader();
+    const headers: HeadersInit = authHeader ? { Authorization: authHeader } : {};
+    const response = await fetch(`/api/data-card-meta?dataCardId=${encodeURIComponent(dataCardId)}`, { method: 'GET', headers });
+    const json = (await response.json()) as ApiMetaResponse;
+    if (!response.ok || !json || (json as any).success !== true) {
+      return null;
+    }
+    return json as Extract<ApiMetaResponse, { success: true }>;
+  } catch {
+    return null;
+  }
+};
+
+const buildExportRating = (rating: ApiRating | null): ExportMetaRating | null => {
+  if (!rating) return null;
+  const total = Number.isFinite(rating.games) ? rating.games : rating.wins + rating.losses + rating.draws;
+  const winRate = total > 0 ? Math.round((rating.wins / total) * 1000) / 10 : null;
+  return {
+    rating: rating.rating,
+    games: rating.games,
+    wins: rating.wins,
+    losses: rating.losses,
+    draws: rating.draws,
+    tier: rating.tier,
+    lastDelta: rating.lastDelta ?? null,
+    lastAppliedAt: rating.lastAppliedAt ?? null,
+    publicRank: rating.publicRank ?? null,
+    publicTotal: rating.publicTotal ?? null,
+    winRate,
+  };
+};
+
+const verifyNativeSignature = async (dataCard: unknown): Promise<boolean> => {
+  if (!dataCard) return false;
+  try {
+    const response = await fetch('/api/verify-origin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dataCard),
+    });
+    if (!response.ok) return false;
+    const json = (await response.json()) as any;
+    return Boolean(json?.isValid);
+  } catch {
+    return false;
+  }
+};
+
+const buildExportMeta = async (dataCard: unknown): Promise<ExportMeta> => {
+  const record = isRecord(dataCard) ? dataCard : {};
+  const dataCardId = safeString(record['_cardId']).trim();
+  const source: ExportMeta['source'] = dataCardId ? 'database' : 'local';
+
+  const meta: ExportMeta = {
+    source,
+    dataCardId: dataCardId || undefined,
+    dataCardName: safeString(record['_cardName']) || safeString(record['name']) || safeString(record['codename']) || undefined,
+    dataCardDescription:
+      safeString(record['_cardDescription']) || safeString(record['description']) || safeString(record['content']) || undefined,
+    author: safeString(record['_author']) || safeString(record['_authorName']) || undefined,
+    isPublic: parseBoolean(record['_isPublic']),
+    createdAt: safeString(record['_createdAt']) || undefined,
+    updatedAt: safeString(record['_updatedAt']) || undefined,
+    likeCount: typeof record['_likeCount'] === 'number' ? record['_likeCount'] : undefined,
+    favoriteCount: typeof record['_favoriteCount'] === 'number' ? record['_favoriteCount'] : undefined,
+    usageCount: typeof record['_usageCount'] === 'number' ? record['_usageCount'] : undefined,
+  };
+
+  const apiMeta = dataCardId ? await fetchDataCardMeta(dataCardId) : null;
+  if (apiMeta) {
+    const apiTags = Array.isArray(apiMeta.tags) ? apiMeta.tags.map((tag) => tag.name).filter(Boolean) : [];
+    if (apiTags.length > 0) meta.tags = uniqueStrings(apiTags);
+
+    if (apiMeta.metrics) {
+      meta.techScore = apiMeta.metrics.techScore;
+      meta.techLevel = apiMeta.metrics.techLevel;
+      if (typeof apiMeta.metrics.isNative === 'boolean') {
+        meta.isNative = apiMeta.metrics.isNative;
+      } else {
+        meta.isNative = await verifyNativeSignature(dataCard);
+      }
+    } else {
+      try {
+        const tech = computeTechIndex(dataCard as any);
+        meta.techScore = tech.techScore;
+        meta.techLevel = tech.techLevel;
+      } catch {
+        meta.techScore = null;
+        meta.techLevel = null;
+      }
+      meta.isNative = await verifyNativeSignature(dataCard);
+    }
+
+    const strictRating = buildExportRating(apiMeta.ratings?.strict ?? null);
+    const freeRating = buildExportRating(apiMeta.ratings?.free ?? null);
+    meta.ratings = { strict: strictRating, free: freeRating };
+    meta.rankTier = strictRating?.tier || freeRating?.tier || undefined;
+  } else {
+    try {
+      const tech = computeTechIndex(dataCard as any);
+      meta.techScore = tech.techScore;
+      meta.techLevel = tech.techLevel;
+    } catch {
+      meta.techScore = null;
+      meta.techLevel = null;
+    }
+
+    meta.isNative = await verifyNativeSignature(dataCard);
+  }
+
+  const embeddedTags = uniqueStrings([
+    ...safeStringArray(record['tags']),
+    ...safeStringArray(readTavernMeta(dataCard)?.['tags']),
+  ]);
+  if (embeddedTags.length > 0) {
+    meta.tags = meta.tags ? uniqueStrings([...meta.tags, ...embeddedTags]) : embeddedTags;
+  }
+
+  return meta;
+};
+
+const buildCreatorField = (exportMeta: ExportMeta | null, user: User | null): string => {
+  const parts: string[] = [DEFAULT_TAVERN_CREATOR];
+  if (user?.username) parts.push(user.username);
+  const author = exportMeta?.author?.trim() ?? '';
+  if (author && author !== '未知' && author.toLowerCase() !== 'unknown') {
+    parts.push(author);
+  }
+  return uniqueStrings(parts).join(' / ');
+};
+
+const buildSourceDataSnapshot = (dataCard: unknown, maxChars: number): { json: string; truncated: boolean } | null => {
+  try {
+    const json = JSON.stringify(dataCard);
+    if (!json) return null;
+    if (json.length <= maxChars) return { json, truncated: false };
+    return { json: `${json.slice(0, maxChars)}\n...[已截断]`, truncated: true };
+  } catch {
+    return null;
+  }
+};
+
+const buildExportExtensions = (dataCard: unknown, exportMeta: ExportMeta | null, user: User | null) => {
+  const exportedAt = new Date().toISOString();
+  const snapshot = buildSourceDataSnapshot(dataCard, 24_000);
+  const source = exportMeta
+    ? {
+        kind: exportMeta.source,
+        dataCardId: exportMeta.dataCardId,
+        name: exportMeta.dataCardName,
+        description: exportMeta.dataCardDescription,
+        author: exportMeta.author,
+        isPublic: exportMeta.isPublic,
+        createdAt: exportMeta.createdAt,
+        updatedAt: exportMeta.updatedAt,
+        stats: {
+          likeCount: exportMeta.likeCount,
+          favoriteCount: exportMeta.favoriteCount,
+          usageCount: exportMeta.usageCount,
+        },
+        tags: exportMeta.tags ? uniqueStrings(exportMeta.tags) : undefined,
+        metrics: {
+          techScore: exportMeta.techScore ?? null,
+          techLevel: exportMeta.techLevel ?? null,
+          isNative: typeof exportMeta.isNative === 'boolean' ? exportMeta.isNative : null,
+        },
+        ratings: exportMeta.ratings ?? undefined,
+        rankTier: exportMeta.rankTier ?? undefined,
+      }
+    : undefined;
+
+  const exporter = user ? { id: user.id, username: user.username } : undefined;
+
+  return {
+    ms_export: {
+      version: 1,
+      exportedAt,
+      exporter,
+      source,
+      sourceDataJson: snapshot?.json,
+      sourceDataTruncated: snapshot?.truncated ? true : undefined,
+    },
+  };
+};
+
 const createId = (prefix: string): string => {
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return `${prefix}-${crypto.randomUUID()}`;
@@ -388,7 +681,7 @@ const createId = (prefix: string): string => {
 export function TavernExportPanel() {
   const router = useRouter();
   const [state, dispatch] = useReducer(reducer, initialState);
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const [showCharacterModal, setShowCharacterModal] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
@@ -402,18 +695,20 @@ export function TavernExportPanel() {
       const text = await file.text();
       const json = JSON.parse(text) as unknown;
       const template = inferTemplate(json);
-      const fields = buildDefaultFieldsFromDataCard(template, json);
-      dispatch({ type: 'setDataCard', data: json, template, fields });
+      const exportMeta = await buildExportMeta(json);
+      const fields = buildDefaultFieldsFromDataCard(template, json, exportMeta);
+      dispatch({ type: 'setDataCard', data: json, template, fields, meta: exportMeta });
     } catch (error) {
       dispatch({ type: 'setError', message: error instanceof Error ? error.message : '解析数据卡失败' });
     }
   };
 
-  const onCloudCardPicked = (payload: any) => {
+  const onCloudCardPicked = async (payload: any) => {
     try {
       const template = inferTemplate(payload);
-      const fields = buildDefaultFieldsFromDataCard(template, payload);
-      dispatch({ type: 'setDataCard', data: payload, template, fields });
+      const exportMeta = await buildExportMeta(payload);
+      const fields = buildDefaultFieldsFromDataCard(template, payload, exportMeta);
+      dispatch({ type: 'setDataCard', data: payload, template, fields, meta: exportMeta });
       setShowCharacterModal(false);
     } catch (error) {
       dispatch({ type: 'setInlineError', message: error instanceof Error ? `解析档案馆数据卡失败：${error.message}` : '解析档案馆数据卡失败' });
@@ -495,7 +790,7 @@ export function TavernExportPanel() {
         _usageCount: typeof card.usage_count === 'number' ? card.usage_count : undefined,
       };
 
-      onCloudCardPicked(payload);
+      await onCloudCardPicked(payload);
     } catch (error) {
       dispatch({ type: 'setInlineError', message: error instanceof Error ? `随机匹配失败：${error.message}` : '随机匹配失败' });
     } finally {
@@ -550,11 +845,11 @@ export function TavernExportPanel() {
   };
 
   const tagsArray = useMemo(() => {
-    return state.fields.tags
+    const raw = state.fields.tags
       .split(/[,\n]/g)
       .map((item) => item.trim())
-      .filter(Boolean)
-      .slice(0, 50);
+      .filter(Boolean);
+    return uniqueStrings(raw).slice(0, 50);
   }, [state.fields.tags]);
 
   const tachiePrompt = useMemo(() => {
@@ -755,6 +1050,8 @@ export function TavernExportPanel() {
           })
         : undefined;
 
+      const creator = buildCreatorField(state.exportMeta, user);
+      const exportExtensions = buildExportExtensions(state.dataCard, state.exportMeta, user);
       const card = createTavernV3Card({
         name: state.fields.name.trim() || '未命名角色',
         description: state.fields.description,
@@ -766,7 +1063,12 @@ export function TavernExportPanel() {
         system_prompt: state.fields.systemPrompt,
         post_history_instructions: state.fields.postHistoryInstructions,
         tags: tagsArray,
-        extensions: { talkativeness: Number(state.fields.talkativeness) || 0.5, fav: Boolean(state.fields.fav) },
+        creator,
+        extensions: {
+          talkativeness: Number(state.fields.talkativeness) || 0.5,
+          fav: Boolean(state.fields.fav),
+          ...exportExtensions,
+        },
         character_book: characterBook,
       });
 

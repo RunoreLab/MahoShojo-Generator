@@ -7,6 +7,14 @@ export interface TavernExportRecommendations {
   mesExample?: string;
 }
 
+export interface TavernExportMeta {
+  source?: 'database' | 'local';
+  tags?: string[];
+  isNative?: boolean | null;
+  techLevel?: string | null;
+  rankTier?: string | null;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 };
@@ -200,9 +208,32 @@ const buildTextCorpus = (template: string, card: Record<string, unknown>): strin
 export function recommendTavernExportFields(
   template: string,
   dataCard: unknown,
-  existingTags: string[] = []
+  existingTags: string[] = [],
+  meta?: TavernExportMeta | null
 ): TavernExportRecommendations {
   const tagList: string[] = [...existingTags];
+
+  const isFromDatabase = meta?.source === 'database';
+  if (isFromDatabase) {
+    const metaTags = safeStringArray(meta?.tags);
+    metaTags.forEach((tag) => addTag(tagList, tag));
+  }
+
+  if (typeof meta?.isNative === 'boolean') {
+    addTag(tagList, meta.isNative ? '原生' : '非原生');
+  }
+
+  const techLevel = safeString(meta?.techLevel);
+  if (techLevel) {
+    addTag(tagList, `技术等级-${techLevel}`);
+  }
+
+  if (isFromDatabase) {
+    const rankTier = safeString(meta?.rankTier);
+    if (rankTier) {
+      addTag(tagList, `段位-${rankTier}`);
+    }
+  }
 
   addTag(tagList, 'MahoShojo-Generator');
 
