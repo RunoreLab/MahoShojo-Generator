@@ -603,7 +603,7 @@ export default function FreeGeneratorPage() {
       return (
         <>
           {isGeneralScenario ? (
-            <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
+            <div className="card !max-w-none">
               <h2 className="text-2xl font-bold text-center mb-4">{title}</h2>
               <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
                 {streamingMarkdown ? (
@@ -634,7 +634,7 @@ export default function FreeGeneratorPage() {
           {streamedGeneralCard && (
             <>
               {streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID ? (
-                <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
+                <div className="card !max-w-none">
                   <h3 className="text-lg font-semibold text-gray-800 mb-3">通用情景卡 JSON</h3>
                   <div className="rounded-lg bg-gray-100 p-4 border border-gray-200 font-mono text-xs overflow-x-auto">
                     <pre>{JSON.stringify(streamedGeneralCard, null, 2)}</pre>
@@ -642,7 +642,7 @@ export default function FreeGeneratorPage() {
                 </div>
               ) : null}
 
-              <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
+              <div className="card !max-w-none">
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-gray-800 mb-4">后续操作</h3>
                   {renderResultActions(streamedGeneralCard, streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID ? 'scenario' : 'character')}
@@ -667,7 +667,7 @@ export default function FreeGeneratorPage() {
             magicalGirl={safe}
             gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)"
           />
-          <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
+          <div className="card !max-w-none">
             <div className="text-center">
               <p className="text-xs text-gray-500 mb-3">
                 提示：自由生成产物不会包含签名，因此会被视为非原生卡。
@@ -684,7 +684,7 @@ export default function FreeGeneratorPage() {
       return (
         <>
           <CanshouCard canshou={safe} />
-          <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
+          <div className="card !max-w-none">
             <div className="text-center">
               <p className="text-xs text-gray-500 mb-3">
                 提示：自由生成产物不会包含签名，因此会被视为非原生卡。
@@ -700,7 +700,7 @@ export default function FreeGeneratorPage() {
       return (
         <>
           <GeneralCharacterCard general={resultData} />
-          <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
+          <div className="card !max-w-none">
             <div className="text-center">
               {renderResultActions(resultData, 'character')}
             </div>
@@ -712,13 +712,13 @@ export default function FreeGeneratorPage() {
     if (schemaId === 'general-scenario') {
       return (
         <>
-          <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
+          <div className="card !max-w-none">
             <h2 className="text-2xl font-bold text-center mb-4">{resultData.title || '通用情景卡'}</h2>
             <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
               <MarkdownBlock content={resultData.content || ''} variant="light" mode="article" />
             </div>
           </div>
-          <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
+          <div className="card !max-w-none">
             <h3 className="text-lg font-semibold text-gray-800 mb-3">通用情景卡 JSON</h3>
             <div className="rounded-lg bg-gray-100 p-4 border border-gray-200 font-mono text-xs overflow-x-auto">
               <pre>{JSON.stringify(resultData, null, 2)}</pre>
@@ -733,7 +733,7 @@ export default function FreeGeneratorPage() {
 
     // scenario（结构化）
     return (
-      <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
+      <div className="card !max-w-none">
         <h2 className="text-2xl font-bold text-center mb-4">{resultData.title || '结构化情景'}</h2>
         <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
           <pre>{JSON.stringify(resultData, null, 2)}</pre>
@@ -748,6 +748,8 @@ export default function FreeGeneratorPage() {
     );
   };
 
+  const resultNode = renderResult();
+
   return (
     <>
       <Head>
@@ -755,209 +757,224 @@ export default function FreeGeneratorPage() {
         <meta name="description" content="自由输入提示词，按指定 Schema 生成任意数据卡（角色/情景）。自由生成产物为非原生。" />
       </Head>
       <div className="magic-background-white">
-        <div className="container !max-w-[980px]">
-          <div className="card !max-w-none">
-            <div className="text-center mb-4">
-              <h1 className="text-2xl font-bold text-pink-700">自由生成</h1>
-              <p className="subtitle mt-2">
-                自由输入任意提示词，选择 Schema 后生成数据卡（角色 / 情景）。自由生成产物将被视为非原生卡（不生成签名）。
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="input-group">
-                <label className="input-label">选择 Schema</label>
-                <select
-                  value={schemaId}
-                  onChange={(e) => setSchemaId(e.target.value as FreeSchemaId)}
-                  className="input-field"
-                  disabled={submitting}
-                >
-                  {schemaOptionsForMode.map(option => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  {SCHEMA_OPTIONS.find(item => item.id === schemaId)?.description}
+        <div className="container !max-w-[980px] lg:!max-w-[1200px]">
+          <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+            <div className="card !max-w-none">
+              <div className="text-center mb-4">
+                <h1 className="text-2xl font-bold text-pink-700">自由生成</h1>
+                <p className="subtitle mt-2">
+                  自由输入任意提示词，选择 Schema 后生成数据卡（角色 / 情景）。自由生成产物将被视为非原生卡（不生成签名）。
                 </p>
               </div>
 
-              <div className="my-2 bg-gray-100 rounded-lg p-3">
-                <button
-                  onClick={() => setShowFieldGuide(!showFieldGuide)}
-                  className="flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-blue-600"
-                >
-                  <span>Schema 字段说明（系统提示词）</span>
-                  <span className="ml-2">{showFieldGuide ? '▼' : '▶'}</span>
-                </button>
-                {showFieldGuide && (
-                  <div className="mt-3 rounded-lg bg-white/80 p-3 border border-gray-200 text-xs text-gray-700 whitespace-pre-wrap">
-                    {fieldGuideText}
-                  </div>
-                )}
-              </div>
-
-              <div className="input-group">
-                <label className="input-label">提示词（任意长度）</label>
-                <textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="在这里写你的完整提示词：你想要的风格、设定、限制、字段填充偏好等都由你决定。"
-                  className="input-field min-h-[10rem] resize-y"
-                  rows={10}
-                  disabled={submitting}
-                />
-                <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-                  <span>字符数：{prompt.length}</span>
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      className="text-blue-600 hover:underline"
-                      onClick={() => {
-                        navigator.clipboard.writeText(prompt).then(() => alert('已复制提示词到剪贴板')).catch(() => alert('复制失败'));
-                      }}
-                      disabled={!prompt.trim()}
-                    >
-                      复制提示词
-                    </button>
-                    <button
-                      type="button"
-                      className="text-red-600 hover:underline"
-                      onClick={handleClearDraft}
-                      disabled={submitting}
-                    >
-                      清空存档
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="my-2 bg-gray-100 rounded-lg p-3">
+              <div className="space-y-4">
                 <div className="input-group">
-                  <label className="input-label" htmlFor="free-attachments-upload">参考附件（可选）</label>
-                  <input
-                    ref={attachmentInputRef}
-                    id="free-attachments-upload"
-                    type="file"
-                    multiple
-                    onChange={(e) => void handleAddAttachments(e.target.files)}
-                    disabled={submitting || isReadingAttachments}
-                    className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
-                  <div className="mt-2 flex items-center justify-between text-xs text-gray-600 flex-wrap gap-2">
-                    <span>
-                      已添加 {attachments.length} 个附件｜累计 {totalAttachmentChars.toLocaleString()} 字符｜已读取大小 {formatBytes(totalAttachmentBytes)}
-                    </span>
-                    <button
-                      type="button"
-                      className="text-red-600 hover:underline"
-                      onClick={handleClearAttachments}
-                      disabled={attachments.length === 0 || submitting || isReadingAttachments}
-                    >
-                      清空附件
-                    </button>
-                  </div>
-                  <p className="mt-2 text-xs text-gray-500">
-                    说明：附件会按“文本”注入提示词供 AI 参考；单文件最多读取 {formatBytes(MAX_ATTACHMENT_BYTES_PER_FILE)} / {MAX_ATTACHMENT_CHARS_PER_FILE.toLocaleString()} 字符，总上限 {formatBytes(MAX_ATTACHMENT_BYTES_TOTAL)} / {MAX_ATTACHMENT_CHARS_TOTAL.toLocaleString()} 字符。
+                  <label className="input-label">选择 Schema</label>
+                  <select
+                    value={schemaId}
+                    onChange={(e) => setSchemaId(e.target.value as FreeSchemaId)}
+                    className="input-field"
+                    disabled={submitting}
+                  >
+                    {schemaOptionsForMode.map(option => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {SCHEMA_OPTIONS.find(item => item.id === schemaId)?.description}
                   </p>
-                  {attachments.length > 0 && (
-                    <div className="mt-3 space-y-2">
-                      {attachments.map((item) => (
-                        <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg bg-white/80 border border-gray-200 px-3 py-2">
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium text-gray-800 truncate" title={item.name}>{item.name}</div>
-                            <div className="text-xs text-gray-500">
-                              {(item.includedBytes < item.size
-                                ? `${formatBytes(item.includedBytes)} / ${formatBytes(item.size)}`
-                                : formatBytes(item.size))}{' '}
-                              · {item.type} · {item.content.length.toLocaleString()} 字符{item.truncated ? ' · 已截断' : ''}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            className="text-xs text-red-600 hover:underline shrink-0"
-                            onClick={() => handleRemoveAttachment(item.id)}
-                            disabled={submitting || isReadingAttachments}
-                          >
-                            移除
-                          </button>
-                        </div>
-                      ))}
+                </div>
+
+                <div className="my-2 bg-gray-100 rounded-lg p-3">
+                  <button
+                    onClick={() => setShowFieldGuide(!showFieldGuide)}
+                    className="flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-blue-600"
+                  >
+                    <span>Schema 字段说明（系统提示词）</span>
+                    <span className="ml-2">{showFieldGuide ? '▼' : '▶'}</span>
+                  </button>
+                  {showFieldGuide && (
+                    <div className="mt-3 rounded-lg bg-white/80 p-3 border border-gray-200 text-xs text-gray-700 whitespace-pre-wrap">
+                      {fieldGuideText}
                     </div>
                   )}
-                  {attachmentError && <div className="mt-3"><ErrorMessage message={attachmentError} /></div>}
+                </div>
+
+                <div className="input-group">
+                  <label className="input-label">提示词（任意长度）</label>
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder="在这里写你的完整提示词：你想要的风格、设定、限制、字段填充偏好等都由你决定。"
+                    className="input-field min-h-[10rem] resize-y"
+                    rows={10}
+                    disabled={submitting}
+                  />
+                  <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                    <span>字符数：{prompt.length}</span>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        className="text-blue-600 hover:underline"
+                        onClick={() => {
+                          navigator.clipboard.writeText(prompt).then(() => alert('已复制提示词到剪贴板')).catch(() => alert('复制失败'));
+                        }}
+                        disabled={!prompt.trim()}
+                      >
+                        复制提示词
+                      </button>
+                      <button
+                        type="button"
+                        className="text-red-600 hover:underline"
+                        onClick={handleClearDraft}
+                        disabled={submitting}
+                      >
+                        清空存档
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="my-2 bg-gray-100 rounded-lg p-3">
+                  <div className="input-group">
+                    <label className="input-label" htmlFor="free-attachments-upload">参考附件（可选）</label>
+                    <input
+                      ref={attachmentInputRef}
+                      id="free-attachments-upload"
+                      type="file"
+                      multiple
+                      onChange={(e) => void handleAddAttachments(e.target.files)}
+                      disabled={submitting || isReadingAttachments}
+                      className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                    <div className="mt-2 flex items-center justify-between text-xs text-gray-600 flex-wrap gap-2">
+                      <span>
+                        已添加 {attachments.length} 个附件｜累计 {totalAttachmentChars.toLocaleString()} 字符｜已读取大小 {formatBytes(totalAttachmentBytes)}
+                      </span>
+                      <button
+                        type="button"
+                        className="text-red-600 hover:underline"
+                        onClick={handleClearAttachments}
+                        disabled={attachments.length === 0 || submitting || isReadingAttachments}
+                      >
+                        清空附件
+                      </button>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">
+                      说明：附件会按“文本”注入提示词供 AI 参考；单文件最多读取 {formatBytes(MAX_ATTACHMENT_BYTES_PER_FILE)} / {MAX_ATTACHMENT_CHARS_PER_FILE.toLocaleString()} 字符，总上限 {formatBytes(MAX_ATTACHMENT_BYTES_TOTAL)} / {MAX_ATTACHMENT_CHARS_TOTAL.toLocaleString()} 字符。
+                    </p>
+                    {attachments.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {attachments.map((item) => (
+                          <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg bg-white/80 border border-gray-200 px-3 py-2">
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-gray-800 truncate" title={item.name}>{item.name}</div>
+                              <div className="text-xs text-gray-500">
+                                {(item.includedBytes < item.size
+                                  ? `${formatBytes(item.includedBytes)} / ${formatBytes(item.size)}`
+                                  : formatBytes(item.size))}{' '}
+                                · {item.type} · {item.content.length.toLocaleString()} 字符{item.truncated ? ' · 已截断' : ''}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="text-xs text-red-600 hover:underline shrink-0"
+                              onClick={() => handleRemoveAttachment(item.id)}
+                              disabled={submitting || isReadingAttachments}
+                            >
+                              移除
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {attachmentError && <div className="mt-3"><ErrorMessage message={attachmentError} /></div>}
+                  </div>
+                </div>
+
+                <div className="my-2 bg-gray-100 rounded-lg p-3">
+                  <GenerationModeSwitcher
+                    label="生成方式"
+                    value={generationMode}
+                    disabled={submitting}
+                    helper={false}
+                    onChange={(mode) => setGenerationMode(mode)}
+                  />
+                  <p className="text-xs text-gray-600 mt-2">
+                    {generationMode === 'stream'
+                      ? '提示：流式生成只支持通用角色/通用情景卡（Markdown），会实时输出正文。'
+                      : '提示：非流式生成会返回结构化 JSON，可生成任意 Schema。'}
+                  </p>
+                </div>
+
+                <div className="my-2 bg-gray-100 rounded-lg p-3">
+                  <button
+                    onClick={() => setShowLanguageSection(!showLanguageSection)}
+                    className="flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-blue-600"
+                  >
+                    <span>生成语言</span>
+                    <span className="ml-2">{showLanguageSection ? '▼' : '▶'}</span>
+                  </button>
+                  {showLanguageSection && (
+                    <div className="mt-3">
+                      <select
+                        id="language-select"
+                        value={selectedLanguage}
+                        onChange={(e) => setSelectedLanguage(e.target.value)}
+                        className="input-field"
+                        disabled={submitting}
+                      >
+                        {languages.map(lang => (
+                          <option key={lang.code} value={lang.code}>{lang.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="my-2 bg-gray-50 rounded-lg p-3">
+                  <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                  <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
+                </div>
+
+                <button
+                  onClick={handleGenerate}
+                  disabled={submitting || isCooldown || isReadingAttachments}
+                  className="generate-button"
+                >
+                  {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '生成中...' : '开始生成'}
+                </button>
+
+                <TokenIndicator
+                  text={tokenEstimateText}
+                  warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试精简提示词或减少/拆分附件。"
+                />
+
+                {error && <ErrorMessage message={error} className="mt-3" />}
+
+                <div className="mt-6 text-center">
+                  <Link href="/" className="footer-link">返回首页</Link>
                 </div>
               </div>
+            </div>
 
-              <div className="my-2 bg-gray-100 rounded-lg p-3">
-                <GenerationModeSwitcher
-                  label="生成方式"
-                  value={generationMode}
-                  disabled={submitting}
-                  helper={false}
-                  onChange={(mode) => setGenerationMode(mode)}
-                />
-                <p className="text-xs text-gray-600 mt-2">
-                  {generationMode === 'stream'
-                    ? '提示：流式生成只支持通用角色/通用情景卡（Markdown），会实时输出正文。'
-                    : '提示：非流式生成会返回结构化 JSON，可生成任意 Schema。'}
-                </p>
-              </div>
-
-              <div className="my-2 bg-gray-100 rounded-lg p-3">
-                <button
-                  onClick={() => setShowLanguageSection(!showLanguageSection)}
-                  className="flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-blue-600"
-                >
-                  <span>生成语言</span>
-                  <span className="ml-2">{showLanguageSection ? '▼' : '▶'}</span>
-                </button>
-                {showLanguageSection && (
-                  <div className="mt-3">
-                    <select
-                      id="language-select"
-                      value={selectedLanguage}
-                      onChange={(e) => setSelectedLanguage(e.target.value)}
-                      className="input-field"
-                      disabled={submitting}
-                    >
-                      {languages.map(lang => (
-                        <option key={lang.code} value={lang.code}>{lang.name}</option>
-                      ))}
-                    </select>
+            <div>
+              {resultNode ? (
+                <div className="space-y-4">{resultNode}</div>
+              ) : (
+                <div className="card !max-w-none hidden lg:block">
+                  <div className="text-center">
+                    <h2 className="text-lg font-semibold text-gray-800">预览区</h2>
+                    <p className="mt-2 text-sm text-gray-600">
+                      点击“开始生成”后，结果会在这里显示，便于在宽屏下边调提示词边对照输出。
+                    </p>
                   </div>
-                )}
-              </div>
-
-              <div className="my-2 bg-gray-50 rounded-lg p-3">
-                <AiProviderSelector onConfigChange={setUserProviderConfig} />
-                <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
-              </div>
-
-              <button
-                onClick={handleGenerate}
-                disabled={submitting || isCooldown || isReadingAttachments}
-                className="generate-button"
-              >
-                {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '生成中...' : '开始生成'}
-              </button>
-
-              <TokenIndicator
-                text={tokenEstimateText}
-                warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试精简提示词或减少/拆分附件。"
-              />
-
-              {error && <ErrorMessage message={error} className="mt-3" />}
-
-              <div className="mt-6 text-center">
-                <Link href="/" className="footer-link">返回首页</Link>
-              </div>
+                </div>
+              )}
             </div>
           </div>
-
-          {renderResult()}
 
           <Footer className="footer" />
         </div>

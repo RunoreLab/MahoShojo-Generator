@@ -460,275 +460,278 @@ export default function CharacterPartyPage() {
               </div>
             )}
 
-            <div className="mt-6 grid gap-6">
-              <div className="rounded-xl border border-gray-200 bg-white/70 p-4">
-                <DatabaseSelector
-                  className="!mb-0"
-                  title="1) 从数据库添加（可选）"
-                  layout="column"
-                  onOpenCharacterModal={() => setShowDatabaseModal(true)}
-                  onRandomMatchCharacter={() => void handleRandomMatchDatabaseCharacter()}
-                  isAuthenticated={isAuthenticated}
-                  isGenerating={false}
-                  isMatching={isDatabaseMatching}
-                  combatantCount={members.length}
-                  maxCombatants={Number.MAX_SAFE_INTEGER}
-                />
-                <div className="mt-1 text-xs text-gray-600">
-                  提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-white/70 p-4">
-                <div className="text-base font-semibold text-gray-800">2) 从本地添加</div>
-                <div className="mt-1 text-xs text-gray-600">支持上传多个 <code>.json</code> 文件或粘贴 JSON 对象数组。</div>
-
-                <div className="input-group mt-3">
-                  <label className="input-label" htmlFor="team-upload-json">上传 JSON 文件（可多选）</label>
-                  <input
-                    id="team-upload-json"
-                    type="file"
-                    accept="application/json"
-                    multiple
-                    className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100"
-                    onChange={(event) => void handleFilesSelected(event.target.files)}
+            <div className="mt-6 grid gap-6 lg:grid-cols-2 lg:items-start">
+              <div className="space-y-6">
+                <div className="rounded-xl border border-gray-200 bg-white/70 p-4">
+                  <DatabaseSelector
+                    className="!mb-0"
+                    title="1) 从数据库添加（可选）"
+                    onOpenCharacterModal={() => setShowDatabaseModal(true)}
+                    onRandomMatchCharacter={() => void handleRandomMatchDatabaseCharacter()}
+                    isAuthenticated={isAuthenticated}
+                    isGenerating={false}
+                    isMatching={isDatabaseMatching}
+                    combatantCount={members.length}
+                    maxCombatants={Number.MAX_SAFE_INTEGER}
                   />
+                  <div className="mt-1 text-xs text-gray-600">
+                    提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
+                  </div>
                 </div>
 
-                <div className="input-group mt-3">
-                  <label className="input-label" htmlFor="team-paste-json">粘贴 JSON（对象或对象数组）</label>
-                  <textarea
-                    id="team-paste-json"
-                    value={pasteText}
-                    onChange={(e) => setPasteText(e.target.value)}
-                    className="input-field h-32 resize-y font-mono text-xs"
-                    placeholder='示例：[{ "codename": "角色A", ... }, { "codename": "角色B", ... }]'
-                  />
-                  <button type="button" className="generate-button mt-2 mb-0" onClick={handlePasteAdd}>
-                    解析并添加
-                  </button>
+                <div className="rounded-xl border border-gray-200 bg-white/70 p-4">
+                  <div className="text-base font-semibold text-gray-800">2) 从本地添加</div>
+                  <div className="mt-1 text-xs text-gray-600">支持上传多个 <code>.json</code> 文件或粘贴 JSON 对象数组。</div>
+
+                  <div className="input-group mt-3">
+                    <label className="input-label" htmlFor="team-upload-json">上传 JSON 文件（可多选）</label>
+                    <input
+                      id="team-upload-json"
+                      type="file"
+                      accept="application/json"
+                      multiple
+                      className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100"
+                      onChange={(event) => void handleFilesSelected(event.target.files)}
+                    />
+                  </div>
+
+                  <div className="input-group mt-3">
+                    <label className="input-label" htmlFor="team-paste-json">粘贴 JSON（对象或对象数组）</label>
+                    <textarea
+                      id="team-paste-json"
+                      value={pasteText}
+                      onChange={(e) => setPasteText(e.target.value)}
+                      className="input-field h-32 resize-y font-mono text-xs"
+                      placeholder='示例：[{ "codename": "角色A", ... }, { "codename": "角色B", ... }]'
+                    />
+                    <button type="button" className="generate-button mt-2 mb-0" onClick={handlePasteAdd}>
+                      解析并添加
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white/70 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-base font-semibold text-gray-800">队员列表</div>
+                      <div className="mt-1 text-xs text-gray-600">顺序会影响合并结果（数组会按队员顺序依次展开）。</div>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                      disabled={members.length === 0}
+                      onClick={() => setMembers([])}
+                    >
+                      清空队伍
+                    </button>
+                  </div>
+
+                  {members.length === 0 ? (
+                    <div className="mt-3 text-sm text-gray-600">暂无队员，先从上方添加角色卡吧。</div>
+                  ) : (
+                    <div className="mt-3 overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-xs text-gray-500">
+                            <th className="py-2 pr-2">#</th>
+                            <th className="py-2 pr-2">队员标识（用于前缀）</th>
+                            <th className="py-2 pr-2">模板</th>
+                            <th className="py-2 pr-2">来源</th>
+                            <th className="py-2 pr-2">原生性</th>
+                            <th className="py-2 pr-2 text-right">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {members.map((member, index) => (
+                            <tr key={member.id}>
+                              <td className="py-2 pr-2 text-gray-500">{index + 1}</td>
+                              <td className="py-2 pr-2">
+                                <input
+                                  value={member.label}
+                                  onChange={(e) => {
+                                    const next = e.target.value;
+                                    setMembers((prev) => prev.map((item) => item.id === member.id ? { ...item, label: next } : item));
+                                  }}
+                                  className="input-field h-9"
+                                />
+                              </td>
+                              <td className="py-2 pr-2 text-gray-700">
+                                {member.template in TEMPLATE_LABELS ? TEMPLATE_LABELS[member.template as keyof typeof TEMPLATE_LABELS] : '未知'}
+                              </td>
+                              <td className="py-2 pr-2 text-gray-700">{SOURCE_LABELS[member.source]}</td>
+                              <td className="py-2 pr-2 text-gray-700">
+                                {member.isNative === null ? (
+                                  <span className="text-xs text-blue-700">验证中...</span>
+                                ) : member.isNative ? (
+                                  <span className="text-xs font-semibold text-green-700">原生</span>
+                                ) : (
+                                  <span className="text-xs text-gray-500">非原生</span>
+                                )}
+                              </td>
+                              <td className="py-2 pl-2">
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                                    disabled={index === 0}
+                                    onClick={() => moveMember(index, -1)}
+                                  >
+                                    上移
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                                    disabled={index === members.length - 1}
+                                    onClick={() => moveMember(index, 1)}
+                                  >
+                                    下移
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
+                                    onClick={() => setMembers((prev) => prev.filter((item) => item.id !== member.id))}
+                                  >
+                                    移除
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white/70 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-base font-semibold text-gray-800">合并设置</div>
+                      <div className="mt-1 text-xs text-gray-600">自动：同模板直接拼接；不同模板会自动转为通用角色卡。</div>
+                    </div>
+                    <select
+                      value={outputTemplate}
+                      onChange={(e) => setOutputTemplate(e.target.value as TeamMergeOutputTemplate)}
+                      className="input-field sm:w-64"
+                      disabled={members.length === 0}
+                    >
+                      <option value="auto">自动（推荐）</option>
+                      <option value="general">强制：通用角色卡（Markdown）</option>
+                      <option value="magical-girl">强制：魔法少女（结构化）</option>
+                      <option value="canshou">强制：残兽（结构化）</option>
+                    </select>
+                  </div>
+
+                  {mergedResult.warnings.length > 0 ? (
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                      <div className="font-semibold">提示</div>
+                      <ul className="mt-2 list-disc space-y-1 pl-5">
+                        {mergedResult.warnings.map((line, idx) => (
+                          <li key={`warn-${idx}`}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </div>
               </div>
-            </div>
 
-            <div className="mt-6 rounded-xl border border-gray-200 bg-white/70 p-4">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-6">
                 <div>
-                  <div className="text-base font-semibold text-gray-800">队员列表</div>
-                  <div className="mt-1 text-xs text-gray-600">顺序会影响合并结果（数组会按队员顺序依次展开）。</div>
+                  <h2 className="text-center text-xl font-bold text-gray-800 mb-4">合并结果预览</h2>
+
+                  {mergedTemplate === 'magical-girl' ? (
+                    <MagicalGirlCard
+                      magicalGirl={mergedData as any}
+                      gradientStyle={gradientStyle}
+                      onSaveImage={handleSaveImageCallback}
+                    />
+                  ) : mergedTemplate === 'canshou' ? (
+                    <CanshouCard
+                      canshou={mergedData as any}
+                      onSaveImage={handleSaveImageCallback}
+                    />
+                  ) : (
+                    <GeneralCharacterCard
+                      general={mergedData as any}
+                      onSaveImage={handleSaveImageCallback}
+                    />
+                  )}
                 </div>
-                <button
-                  type="button"
-                  className="rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                  disabled={members.length === 0}
-                  onClick={() => setMembers([])}
-                >
-                  清空队伍
-                </button>
-              </div>
 
-              {members.length === 0 ? (
-                <div className="mt-3 text-sm text-gray-600">暂无队员，先从上方添加角色卡吧。</div>
-              ) : (
-                <div className="mt-3 overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-xs text-gray-500">
-                        <th className="py-2 pr-2">#</th>
-                        <th className="py-2 pr-2">队员标识（用于前缀）</th>
-                        <th className="py-2 pr-2">模板</th>
-                        <th className="py-2 pr-2">来源</th>
-                        <th className="py-2 pr-2">原生性</th>
-                        <th className="py-2 pr-2 text-right">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {members.map((member, index) => (
-                        <tr key={member.id}>
-                          <td className="py-2 pr-2 text-gray-500">{index + 1}</td>
-                          <td className="py-2 pr-2">
-                            <input
-                              value={member.label}
-                              onChange={(e) => {
-                                const next = e.target.value;
-                                setMembers((prev) => prev.map((item) => item.id === member.id ? { ...item, label: next } : item));
-                              }}
-                              className="input-field h-9"
-                            />
-                          </td>
-                          <td className="py-2 pr-2 text-gray-700">
-                            {member.template in TEMPLATE_LABELS ? TEMPLATE_LABELS[member.template as keyof typeof TEMPLATE_LABELS] : '未知'}
-                          </td>
-                          <td className="py-2 pr-2 text-gray-700">{SOURCE_LABELS[member.source]}</td>
-                          <td className="py-2 pr-2 text-gray-700">
-                            {member.isNative === null ? (
-                              <span className="text-xs text-blue-700">验证中...</span>
-                            ) : member.isNative ? (
-                              <span className="text-xs font-semibold text-green-700">原生</span>
-                            ) : (
-                              <span className="text-xs text-gray-500">非原生</span>
-                            )}
-                          </td>
-                          <td className="py-2 pl-2">
-                            <div className="flex justify-end gap-2">
-                              <button
-                                type="button"
-                                className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                                disabled={index === 0}
-                                onClick={() => moveMember(index, -1)}
-                              >
-                                上移
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                                disabled={index === members.length - 1}
-                                onClick={() => moveMember(index, 1)}
-                              >
-                                下移
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
-                                onClick={() => setMembers((prev) => prev.filter((item) => item.id !== member.id))}
-                              >
-                                移除
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-6 rounded-xl border border-gray-200 bg-white/70 p-4">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="text-base font-semibold text-gray-800">合并设置</div>
-                  <div className="mt-1 text-xs text-gray-600">自动：同模板直接拼接；不同模板会自动转为通用角色卡。</div>
-                </div>
-                <select
-                  value={outputTemplate}
-                  onChange={(e) => setOutputTemplate(e.target.value as TeamMergeOutputTemplate)}
-                  className="input-field sm:w-64"
-                  disabled={members.length === 0}
-                >
-                  <option value="auto">自动（推荐）</option>
-                  <option value="general">强制：通用角色卡（Markdown）</option>
-                  <option value="magical-girl">强制：魔法少女（结构化）</option>
-                  <option value="canshou">强制：残兽（结构化）</option>
-                </select>
-              </div>
-
-              {mergedResult.warnings.length > 0 ? (
-                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                  <div className="font-semibold">提示</div>
-                  <ul className="mt-2 list-disc space-y-1 pl-5">
-                    {mergedResult.warnings.map((line, idx) => (
-                      <li key={`warn-${idx}`}>{line}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="mt-6">
-              <h2 className="text-center text-xl font-bold text-gray-800 mb-4">合并结果预览</h2>
-
-              {mergedTemplate === 'magical-girl' ? (
-                <MagicalGirlCard
-                  magicalGirl={mergedData as any}
-                  gradientStyle={gradientStyle}
-                  onSaveImage={handleSaveImageCallback}
-                />
-              ) : mergedTemplate === 'canshou' ? (
-                <CanshouCard
-                  canshou={mergedData as any}
-                  onSaveImage={handleSaveImageCallback}
-                />
-              ) : (
-                <GeneralCharacterCard
-                  general={mergedData as any}
-                  onSaveImage={handleSaveImageCallback}
-                />
-              )}
-
-              <div className="card !max-w-none" style={{ marginTop: '1rem' }}>
-                <div className="text-center">
-                  <h3 className="text-lg font-medium text-gray-800 mb-4">后续操作</h3>
-                  {teamNativeness.status !== 'empty' ? (
-                    <div className="mb-3 text-xs">
-                      {teamNativeness.status === 'native' ? (
-                        <span className="text-green-700">✅ 队伍原生性：原生（下载/保存时会自动签名）</span>
-                      ) : teamNativeness.status === 'checking' ? (
-                        <span className="text-blue-700">⏳ 正在验证队伍原生性...</span>
+                <div className="card !max-w-none">
+                  <div className="text-center">
+                    <h3 className="text-lg font-medium text-gray-800 mb-4">后续操作</h3>
+                    {teamNativeness.status !== 'empty' ? (
+                      <div className="mb-3 text-xs">
+                        {teamNativeness.status === 'native' ? (
+                          <span className="text-green-700">✅ 队伍原生性：原生（下载/保存时会自动签名）</span>
+                        ) : teamNativeness.status === 'checking' ? (
+                          <span className="text-blue-700">⏳ 正在验证队伍原生性...</span>
+                        ) : (
+                          <span className="text-gray-600">⚠️ 队伍原生性：非原生（将不会生成原生签名）</span>
+                        )}
+                      </div>
+                    ) : null}
+                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                      <button
+                        onClick={() => void handleDownloadMergedJson()}
+                        className="generate-button flex-1"
+                        disabled={members.length === 0}
+                      >
+                        下载 JSON
+                      </button>
+                      {members.length === 0 ? (
+                        <button className="generate-button flex-1" disabled>
+                          保存到云端
+                        </button>
                       ) : (
-                        <span className="text-gray-600">⚠️ 队伍原生性：非原生（将不会生成原生签名）</span>
+                        <SaveToCloudButton
+                          data={mergedData}
+                          getData={prepareMergedDataForExport}
+                          cardType="character"
+                          buttonText="保存到云端"
+                          className="generate-button flex-1"
+                          style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                        />
+                      )}
+                      <button
+                        onClick={() => void handleCopyMergedJson()}
+                        className="generate-button flex-1"
+                        style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+                        disabled={members.length === 0}
+                      >
+                        复制到剪贴板
+                      </button>
+                    </div>
+                    <details className="mt-4 rounded-xl border border-gray-200 bg-white/70 p-3 text-left">
+                      <summary className="cursor-pointer text-sm font-semibold text-gray-700">查看合并后的 JSON（预览不含原生签名）</summary>
+                      <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">
+                        {JSON.stringify(mergedData, null, 2)}
+                      </pre>
+                    </details>
+                  </div>
+                </div>
+
+                <details
+                  className="rounded-xl border border-pink-200 bg-white/70 p-4"
+                  onToggle={(event) => setIsTachieVisible(event.currentTarget.open)}
+                >
+                  <summary
+                    className="cursor-pointer text-sm font-semibold text-pink-700"
+                  >
+                    {isTachieVisible ? '▼' : '▶'} 生成 LibLib 立绘（可选）
+                  </summary>
+                  {isTachieVisible ? (
+                    <div className="mt-3">
+                      {tachiePrompt.trim() ? (
+                        <TachieGenerator prompt={tachiePrompt} />
+                      ) : (
+                        <div className="text-sm text-gray-600">未能从当前队伍卡中提取立绘提示词（通常需要外观字段）。</div>
                       )}
                     </div>
                   ) : null}
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                    <button
-                      onClick={() => void handleDownloadMergedJson()}
-                      className="generate-button flex-1"
-                      disabled={members.length === 0}
-                    >
-                      下载 JSON
-                    </button>
-                    {members.length === 0 ? (
-                      <button className="generate-button flex-1" disabled>
-                        保存到云端
-                      </button>
-                    ) : (
-                      <SaveToCloudButton
-                        data={mergedData}
-                        getData={prepareMergedDataForExport}
-                        cardType="character"
-                        buttonText="保存到云端"
-                        className="generate-button flex-1"
-                        style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
-                      />
-                    )}
-                    <button
-                      onClick={() => void handleCopyMergedJson()}
-                      className="generate-button flex-1"
-                      style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
-                      disabled={members.length === 0}
-                    >
-                      复制到剪贴板
-                    </button>
-                  </div>
-                  <details className="mt-4 rounded-xl border border-gray-200 bg-white/70 p-3 text-left">
-                    <summary className="cursor-pointer text-sm font-semibold text-gray-700">查看合并后的 JSON（预览不含原生签名）</summary>
-                    <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">
-                      {JSON.stringify(mergedData, null, 2)}
-                    </pre>
-                  </details>
-                </div>
+                </details>
               </div>
-
-              <details
-                className="mt-6 rounded-xl border border-pink-200 bg-white/70 p-4"
-                onToggle={(event) => setIsTachieVisible(event.currentTarget.open)}
-              >
-                <summary
-                  className="cursor-pointer text-sm font-semibold text-pink-700"
-                >
-                  {isTachieVisible ? '▼' : '▶'} 生成 LibLib 立绘（可选）
-                </summary>
-                {isTachieVisible ? (
-                  <div className="mt-3">
-                    {tachiePrompt.trim() ? (
-                      <TachieGenerator prompt={tachiePrompt} />
-                    ) : (
-                      <div className="text-sm text-gray-600">未能从当前队伍卡中提取立绘提示词（通常需要外观字段）。</div>
-                    )}
-                  </div>
-                ) : null}
-              </details>
             </div>
 
             <div className="text-center mt-8">
