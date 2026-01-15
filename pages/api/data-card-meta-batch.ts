@@ -15,6 +15,7 @@ type Queue = 'strict';
 type ApiMetrics = {
   techScore: number;
   techLevel: string;
+  isNative: boolean | null;
 };
 
 type ApiStrictRating = {
@@ -128,10 +129,12 @@ export default async function handler(req: NextRequest): Promise<Response> {
   for (const row of accessible) {
     const existing = metricsMap.get(row.id);
     if (existing && existing.data_card_updated_at === row.updated_at) {
+      const isNative = existing.is_native === 1 ? true : existing.is_native === 0 ? false : null;
       items[row.id] = {
         metrics: {
           techScore: existing.tech_score,
           techLevel: existing.tech_level,
+          isNative,
         },
         strict: null,
       };
@@ -157,6 +160,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
         metrics: {
           techScore: tech.techScore,
           techLevel: tech.techLevel,
+          isNative,
         },
         strict: null,
       };

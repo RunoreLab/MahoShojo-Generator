@@ -140,7 +140,7 @@ export default function BattleDataModal({
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectError, setSelectError] = useState<string | null>(null);
   const cardsPerPage = 12;
-  const [cardMetaById, setCardMetaById] = useState<Record<string, { techScore: number | null; techLevel: string | null; strictTier: string | null }>>({});
+  const [cardMetaById, setCardMetaById] = useState<Record<string, { techScore: number | null; techLevel: string | null; strictTier: string | null; isNative: boolean | null }>>({});
 
   // 【新增】高级筛选的状态
   const initialFilters = useMemo<Filters>(() => ({
@@ -903,6 +903,7 @@ export default function BattleDataModal({
               techScore: typeof metrics?.techScore === 'number' ? metrics.techScore : null,
               techLevel: typeof metrics?.techLevel === 'string' ? metrics.techLevel : null,
               strictTier: typeof strict?.tier === 'string' ? strict.tier : null,
+              isNative: typeof metrics?.isNative === 'boolean' ? metrics.isNative : null,
             };
           }
           return next;
@@ -1259,6 +1260,7 @@ export default function BattleDataModal({
                           techScore={cardMetaById[card.id]?.techScore ?? null}
                           techLevel={cardMetaById[card.id]?.techLevel ?? null}
                           strictTier={cardMetaById[card.id]?.strictTier ?? null}
+                          isNative={cardMetaById[card.id]?.isNative ?? null}
 	                        isFavorited={isFavorited}
 	                        canFavorite={enableFavorite}
 	                        isRecommended={card.is_recommended === 1}
