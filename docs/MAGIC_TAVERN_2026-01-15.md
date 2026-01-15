@@ -24,7 +24,7 @@
 - 支持「角色卡 + 情景卡」自由组合，形成可持续互动的剧情会话
 - 用户可选择扮演某个角色，或作为 `{{user}}` （用户名或自行设置）进入对话
 - 情景卡与角色卡解耦（类似竞技场选择机制），可自由搭配
-- 支持“视觉小说式”选项（由 AI 给出多条可选互动）
+- 支持“视觉小说式”选项（由 AI 给出多条可选互动），条数默认 3~4，用户也可以自行设置。
 - 支持“按剧情片段 + 角色”触发立绘生成
 - 所有聊天记录/会话状态保存在浏览器端（IndexedDB/LocalStorage）
 - 禁用官方 API，仅允许用户自备 API Key
@@ -42,7 +42,7 @@
 ## 2. 关键体验与交互流
 
 1. 进入【魔法酒馆】页面
-2. 选择：角色卡（可多选）+ 情景卡（可选）
+2. 选择：角色卡（可多选）+ 情景卡（可选，支持主情景 + 辅助情景）
    - 来源支持：公开数据卡 / 私有数据卡 / 收藏 / 卡组导入 / 本地导入
 3. 选择扮演方式：
    - 作为 `{{user}}` 互动
@@ -190,6 +190,7 @@ export type MagicTavernSession = {
   updatedAt: number;
   roles: MagicTavernRole[];
   scenario?: MagicTavernScenario;
+  auxScenarios?: MagicTavernScenario[];
   playerRoleId?: string | null; // null = {{user}}
   summary?: string; // 长对话压缩用
   settings: {
@@ -270,7 +271,7 @@ IndexedDB 建议分表：
 
 ### M1：基础会话
 - 页面 + 会话列表（IndexedDB）
-- 角色/情景选择 + 人设切换（数据库多选 + 本地导入）
+- 角色/情景选择 + 人设切换（数据库多选 / 卡组导入 / 本地导入）
 - 输入/输出聊天流
 
 ### M2：AI 接入（自备 Key）
@@ -388,6 +389,7 @@ export type MagicTavernSession = {
   updatedAt: number;
   roles: MagicTavernRole[];
   scenario?: MagicTavernScenario;
+  auxScenarios?: MagicTavernScenario[];
   playerRoleId?: string | null;
   summary?: string;
   settings: {
@@ -501,7 +503,58 @@ export type MagicTavernSession = {
 
 ---
 
-## 15. 下一步建议
+## 15. UI 组件复用与交互流程细化（多选 / 卡组 / 本地导入）
+
+### 15.1 复用组件清单与职责
+
+- **`BattleDataModal`**：统一数据库选择入口（公开/私有/收藏/搜索/排序），支持 `selectionMode="multi"`、`selectedType="character|scenario"`、`maxSelected` 限制与“导入卡组”入口（角色专用）。
+- **`DecksModal`**：仅角色卡组导入（`character`），从卡组详情导入可访问的卡片并自动去重。
+- **`ScenarioPickerPanel`**：情景本地导入（文件 + 粘贴），可直接复用。
+- **`RosterUploader`**：角色本地导入（多文件 + 粘贴）。当前耦合 `useBattleStore`，建议抽出无状态 UI 版本供魔法酒馆复用；短期可复制结构与交互文本。
+- **`DatabaseSelector`**：复用按钮样式与交互提示（打开模态 / 随机匹配）。
+
+### 15.2 角色选择流程（多选 + 卡组 + 本地）
+
+1. **打开数据库模态框**：点击“浏览在线角色库” → `BattleDataModal`（`selectionMode="multi"` / `selectedType="character"`）。  
+2. **多选与移除**：点击卡片时 `onToggleCard(card, nextSelected)`；外部已选列表同步展示并支持移除。  
+3. **卡组导入**：模态内点击“导入卡组” → `DecksModal` → 选定卡组后依次加入：
+   - 跳过重复与不可访问卡片（私有/封禁/已删除）。
+   - 若达到 `maxSelected`，停止导入并提示“已达到上限”。  
+4. **本地导入**：使用 `RosterUploader` 样式（多文件 / 粘贴 JSON）：
+   - 解析后过滤非角色卡；无效卡给出错误提示。
+   - 与已选列表去重，保持 `maxSelected` 上限。
+
+**推荐上限**：由于是仅限 BYOK 模式，默认角色数量不限，但应当提供与竞技场/自由生成一致的 tokens 计数器以便用户权衡成本。当然，也可以修改并设置一个上限。
+
+### 15.3 情景选择流程（多选 + 本地）
+
+1. **打开数据库模态框**：点击“浏览在线情景库” → `BattleDataModal`（`selectionMode="multi"` / `selectedType="scenario"`）。  
+2. **主情景 + 辅助情景**：
+   - 首个选择为“主情景”；后续选择进入“辅助情景列表”。  
+   - 支持将任一辅助情景“设为主情景”，并维护顺序。  
+   - 辅助情景上限同样无限，但也可设置上限。  
+3. **本地导入**：通过 `ScenarioPickerPanel` 上传/粘贴：
+   - 若当前无主情景，则设为主情景。
+   - 若已有主情景，弹出小提示：加入为辅助 / 替换主情景。
+
+### 15.4 选择数据映射（Magic Tavern 模型）
+
+- 角色卡：  
+  - `source`：公开 → `public`；私有 → `cloud`；本地 → `local`。  
+  - `dataCardId` / `templateId` / `signature`：来自 payload 解析。  
+  - `isNative`：沿用既有判定逻辑（如 signature 或 native 标记）。  
+- 情景卡：  
+  - 与角色卡一致；主情景存入 `session.scenario`，辅助情景存入 `session.auxScenarios`（与 prompt 拼接策略保持一致）。
+
+### 15.5 交互提示与异常处理
+
+- **未登录**：模态框隐藏“私有/收藏”Tab，并提示“登录后可访问私有数据卡”。  
+- **超出上限**：在卡片上禁用“加入”，并在顶部提示“已达上限”。  
+- **类型不匹配**：解析后若非角色/情景卡，提示“类型不匹配，已跳过”。  
+
+---
+
+## 16. 下一步建议
 
 1. **输出模式落地**：定义 JSONL schema（narration / dialogue / choices）与 Markdown fallback 规则；在 UI 中给出清晰的模式差异说明。
 2. **数据选择复用**：接入 `BattleDataModal` 多选 + `DecksModal` 卡组导入 + `RosterUploader` / `ScenarioPickerPanel` 本地导入，并复用竞技场的筛选与权限提示。
