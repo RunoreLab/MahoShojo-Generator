@@ -1,6 +1,6 @@
 // pages/sublimation.tsx
 
-import React, { useState, ChangeEvent, useEffect, useMemo } from 'react';
+import React, { useState, ChangeEvent, useEffect, useMemo, useCallback } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
@@ -250,6 +250,55 @@ const SublimationPage: React.FC = () => {
         });
     }, [targetTemplate]);
 
+    const verifyOrigin = useCallback(async (data: any): Promise<boolean> => {
+        try {
+            const response = await fetch('/api/verify-origin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+            if (!response.ok) return false;
+            const result = await response.json().catch(() => null as any);
+            return Boolean(result?.isValid);
+        } catch (error) {
+            console.warn('原生性校验失败，将按非原生处理', error);
+            return false;
+        }
+    }, []);
+
+    const resignDataCard = useCallback(async (data: any) => {
+        const response = await fetch('/api/resign-data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null as any);
+            if (errorData?.shouldRedirect) {
+                router.push({
+                    pathname: '/arrested',
+                    query: { reason: errorData.reason || '编辑内容不合规' }
+                });
+                return null;
+            }
+            throw new Error(errorData?.message || '签名服务器认证失败');
+        }
+
+        return response.json();
+    }, [router]);
+
+    const shouldResignStreamedCard = useCallback(async () => {
+        if (!characterData) return false;
+        const isNative = await verifyOrigin(characterData);
+        if (!isNative) return false;
+        const trimmedGuidance = typeof userGuidance === 'string' ? userGuidance.trim() : '';
+        if (trimmedGuidance) {
+            return appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
+        }
+        return true;
+    }, [characterData, userGuidance, verifyOrigin]);
+
     const processJsonData = (jsonText: string) => {
         try {
             const json = JSON.parse(jsonText);
@@ -483,7 +532,25 @@ const SublimationPage: React.FC = () => {
                     defaultName,
                 });
 
-                setStreamedGeneralCard(card);
+                let signedCard = card;
+                let hasSignError = false;
+                try {
+                    const shouldSign = await shouldResignStreamedCard();
+                    if (shouldSign) {
+                        const result = await resignDataCard(card);
+                        if (!result) return;
+                        signedCard = result;
+                    }
+                } catch (err) {
+                    const message = err instanceof Error ? err.message : '签名失败';
+                    setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+                    hasSignError = true;
+                }
+
+                setStreamedGeneralCard(signedCard);
+                if (!hasSignError) {
+                    setError(null);
+                }
                 startCooldown();
                 return;
             }

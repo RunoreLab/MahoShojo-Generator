@@ -398,7 +398,7 @@ const DetailsPage: React.FC = () => {
     }
   };
 
-  const redirectToArrested = (reason?: string, withBackup?: boolean) => {
+  const redirectToArrested = useCallback((reason?: string, withBackup?: boolean) => {
     const query: Record<string, string> = {};
     if (reason) query.reason = reason;
     if (withBackup) query.backup = '1';
@@ -407,7 +407,7 @@ const DetailsPage: React.FC = () => {
     } else {
       router.push('/arrested');
     }
-  };
+  }, [router]);
 
   const resignDataCard = useCallback(async (data: any) => {
     const response = await fetch('/api/resign-data', {
