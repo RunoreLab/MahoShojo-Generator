@@ -5,6 +5,7 @@ import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from '
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import BattleDataModal from '@/components/BattleDataModal';
+import { ErrorMessage } from '@/components/ErrorMessage';
 import Footer from '@/components/Footer';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 
@@ -201,6 +202,13 @@ const buildScenarioFromLocalJson = (card: Record<string, unknown>, meta: { fileN
 const sortSessionsByUpdatedAtDesc = (items: MagicTavernSession[]): MagicTavernSession[] => {
   return [...items].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 };
+
+const LoadingSpinner = ({ className = 'h-3 w-3' }: { className?: string }) => (
+  <span
+    className={`inline-block ${className} animate-spin rounded-full border-2 border-pink-200 border-t-pink-600`}
+    aria-hidden="true"
+  />
+);
 
 export default function MagicTavernPage() {
   const router = useRouter();
@@ -538,6 +546,283 @@ export default function MagicTavernPage() {
     return { ok: true };
   }, [userProviderConfig]);
 
+  type MagicTavernHistoryMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string };
+
+  const runGenerateStream = useCallback(
+    async (params: {
+      session: MagicTavernSession;
+      historyForRequest: MagicTavernHistoryMessage[];
+      outputFormat: MagicTavernOutputFormat;
+      assistantMessageId: string;
+      assistantMessage: MagicTavernMessage;
+      arrestedBackupInput?: string;
+    }) => {
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      setIsGenerating(true);
+
+      let streamedRawSoFar = '';
+      let streamedSafeSoFar = '';
+      let outputBlockedAt: number | null = null;
+      let outputSafetyTruncatedAt: number | null = null;
+      let safetyCheckTimer: ReturnType<typeof setTimeout> | null = null;
+      let safetyCheckInFlight = false;
+
+      try {
+        const response = await fetch('/api/magic-tavern/generate-stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            sessionId: params.session.id,
+            messages: params.historyForRequest,
+            roles: params.session.roles ?? [],
+            scenario: params.session.scenario ?? null,
+            auxScenarios: params.session.auxScenarios ?? [],
+            playerRoleId: params.session.playerRoleId ?? null,
+            settings: {
+              ...params.session.settings,
+              providerId: userProviderConfig?.providerId,
+              modelId: userProviderConfig?.modelId,
+              userDisplayName: params.session.settings.userDisplayName,
+            },
+            customProvider: {
+              providerId: userProviderConfig?.providerId,
+              modelId: userProviderConfig?.modelId,
+              apiKey: userProviderConfig?.apiKey,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          const shouldRedirect = Boolean(payload?.shouldRedirect);
+          if (shouldRedirect) {
+            const reason = typeof payload?.reason === 'string' ? payload.reason : '使用危险符文';
+
+            if (params.arrestedBackupInput) {
+              persistArrestedBackup({
+                triggerSource: 'input',
+                reason,
+                origin: '/magic-tavern',
+                items: [
+                  {
+                    label: '魔法酒馆输入',
+                    filename: 'magic-tavern-input.txt',
+                    mimeType: 'text/plain',
+                    content: params.arrestedBackupInput,
+                  },
+                ],
+              });
+            }
+
+            const blockedMessage: MagicTavernMessage = {
+              ...params.assistantMessage,
+              status: 'blocked',
+              safety: { status: 'blocked', blockedBy: 'server', blockedAt: Date.now(), action: 'redirect' },
+              error: { code: `${response.status}`, message: reason },
+            };
+
+            setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? blockedMessage : m)));
+            await putMagicTavernMessage(blockedMessage);
+
+            await router.push('/arrested');
+            return;
+          }
+
+          const errorMessage =
+            typeof payload?.error === 'string'
+              ? payload.error
+              : typeof payload?.message === 'string'
+                ? payload.message
+                : `请求失败（${response.status}）`;
+
+          const errorMessageRecord: MagicTavernMessage = {
+            ...params.assistantMessage,
+            status: 'error',
+            error: { code: `${response.status}`, message: errorMessage },
+          };
+
+          setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? errorMessageRecord : m)));
+          await putMagicTavernMessage(errorMessageRecord);
+          return;
+        }
+
+        setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? { ...m, content: '', status: 'streaming' } : m)));
+
+        const scheduleSafetyCheck = () => {
+          if (outputBlockedAt) return;
+          if (safetyCheckTimer) return;
+          safetyCheckTimer = setTimeout(() => {
+            safetyCheckTimer = null;
+            void runSafetyCheck();
+          }, 120);
+        };
+
+        const runSafetyCheck = async () => {
+          if (outputBlockedAt) return;
+          if (safetyCheckInFlight) {
+            scheduleSafetyCheck();
+            return;
+          }
+
+          safetyCheckInFlight = true;
+          const snapshot = streamedRawSoFar;
+          try {
+            const result = await quickCheck(snapshot);
+            if (outputBlockedAt) return;
+
+            if (result.hasSensitiveWords) {
+              const { safeRaw, truncatedAt } = truncateUnsafeOutputText(snapshot, result, params.outputFormat);
+              const safeText = applyShieldWords(safeRaw).filteredText;
+              streamedSafeSoFar = safeText;
+              outputBlockedAt = Date.now();
+              outputSafetyTruncatedAt = truncatedAt;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === params.assistantMessageId ? { ...m, content: safeText, status: 'blocked' } : m))
+              );
+              controller.abort('output-safety');
+              return;
+            }
+
+            const safePreview = applyShieldWords(snapshot).filteredText;
+            streamedSafeSoFar = safePreview;
+            setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? { ...m, content: safePreview } : m)));
+          } finally {
+            safetyCheckInFlight = false;
+            if (!outputBlockedAt && streamedRawSoFar !== snapshot) scheduleSafetyCheck();
+          }
+        };
+
+        const streamedText = await readTextStreamFromResponse(response, {
+          label: '魔法酒馆',
+          onText: (accumulated) => {
+            streamedRawSoFar = accumulated;
+            scheduleSafetyCheck();
+          },
+        });
+
+        if (safetyCheckTimer) {
+          clearTimeout(safetyCheckTimer);
+          safetyCheckTimer = null;
+        }
+
+        let status: MagicTavernMessage['status'] = outputBlockedAt ? 'blocked' : 'done';
+        let safeText = streamedSafeSoFar;
+
+        if (!outputBlockedAt) {
+          const sensitive = await quickCheck(streamedText);
+          if (sensitive.hasSensitiveWords) {
+            const truncated = truncateUnsafeOutputText(streamedText, sensitive, params.outputFormat);
+            safeText = applyShieldWords(truncated.safeRaw).filteredText;
+            status = 'blocked';
+            outputBlockedAt = Date.now();
+            outputSafetyTruncatedAt = truncated.truncatedAt;
+          } else {
+            safeText = applyShieldWords(streamedText).filteredText;
+            status = 'done';
+          }
+        }
+
+        const parsed = params.outputFormat === 'jsonl' ? parseMagicTavernJsonl(safeText) : { segments: undefined, choices: null };
+
+        const finalAssistant: MagicTavernMessage = {
+          ...params.assistantMessage,
+          content: safeText,
+          status,
+          ...(params.outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+          ...(status === 'blocked'
+            ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: outputBlockedAt ?? Date.now(), action: 'soft-block' } }
+            : { safety: { status: 'ok' } }),
+          ...(status === 'blocked' && typeof outputSafetyTruncatedAt === 'number' ? { truncatedAt: outputSafetyTruncatedAt } : {}),
+        };
+
+        setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
+        await putMagicTavernMessage(finalAssistant);
+
+        const shouldAutoTitle = !params.session.titleMeta || params.session.titleMeta.source === 'auto';
+        if (shouldAutoTitle && (params.session.title === '新会话' || params.session.title === '未命名会话')) {
+          const nextTitle = deriveMagicTavernTitle({
+            outputFormat: params.outputFormat,
+            content: safeText,
+            segments: params.outputFormat === 'jsonl' ? parsed.segments : undefined,
+            scenarioTitle: params.session.scenario?.title,
+            roleNames: (params.session.roles ?? []).map((r) => r.name),
+          });
+          const titleFiltered = applyShieldWords(nextTitle).filteredText;
+
+          await persistSession({
+            ...params.session,
+            title: titleFiltered,
+            titleMeta: {
+              source: 'auto',
+              generatedAt: Date.now(),
+              providerId: userProviderConfig?.providerId,
+              modelId: userProviderConfig?.modelId,
+              reason: 'first-message',
+            },
+          });
+        } else {
+          await persistSession({ ...params.session, updatedAt: Date.now() });
+        }
+      } catch (error) {
+        if (safetyCheckTimer) {
+          clearTimeout(safetyCheckTimer);
+          safetyCheckTimer = null;
+        }
+
+        if (error instanceof Error && error.name === 'AbortError') {
+          const reason = controller.signal.reason;
+          const rawSnapshot = streamedRawSoFar;
+
+          if (outputBlockedAt || reason === 'output-safety') {
+            const currentText = streamedSafeSoFar || applyShieldWords(rawSnapshot).filteredText;
+            const parsed = params.outputFormat === 'jsonl' ? parseMagicTavernJsonl(currentText) : { segments: undefined, choices: null };
+            const finalAssistant: MagicTavernMessage = {
+              ...params.assistantMessage,
+              content: currentText,
+              status: 'blocked',
+              ...(params.outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+              safety: { status: 'blocked', blockedBy: 'output', blockedAt: outputBlockedAt ?? Date.now(), action: 'soft-block' },
+              ...(typeof outputSafetyTruncatedAt === 'number' ? { truncatedAt: outputSafetyTruncatedAt } : {}),
+            };
+            setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
+            await putMagicTavernMessage(finalAssistant);
+            return;
+          }
+
+          const sensitive = await quickCheck(rawSnapshot);
+          const safeText = sensitive.hasSensitiveWords
+            ? applyShieldWords(truncateUnsafeOutputText(rawSnapshot, sensitive, params.outputFormat).safeRaw).filteredText
+            : applyShieldWords(rawSnapshot).filteredText;
+          const status: MagicTavernMessage['status'] = sensitive.hasSensitiveWords ? 'blocked' : 'done';
+          const parsed = params.outputFormat === 'jsonl' ? parseMagicTavernJsonl(safeText) : { segments: undefined, choices: null };
+          const finalAssistant: MagicTavernMessage = {
+            ...params.assistantMessage,
+            content: safeText,
+            status,
+            ...(params.outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+            ...(status === 'blocked'
+              ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: Date.now(), action: 'soft-block' } }
+              : { safety: { status: 'ok' } }),
+          };
+          setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
+          await putMagicTavernMessage(finalAssistant);
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : '生成失败';
+        const errorRecord: MagicTavernMessage = { ...params.assistantMessage, status: 'error', error: { code: 'exception', message } };
+        setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? errorRecord : m)));
+        await putMagicTavernMessage(errorRecord);
+      } finally {
+        abortControllerRef.current = null;
+        setIsGenerating(false);
+      }
+    },
+    [persistSession, router, userProviderConfig]
+  );
+
   const sendMessage = useCallback(
     async (text: string) => {
       if (!activeSession) return;
@@ -592,7 +877,7 @@ export default function MagicTavernPage() {
         createdAt: now + 1,
         status: 'streaming',
         sourceMessageId: userMessage.id,
-        meta: { outputFormat: sessionOutputFormat },
+        meta: { kind: 'reply', outputFormat: sessionOutputFormat },
       };
 
       const nextMessages = [...messages, userMessage, assistantMessage];
@@ -609,257 +894,76 @@ export default function MagicTavernPage() {
         .filter((m) => m.role === 'user' || (m.role === 'assistant' && m.status !== 'blocked' && m.status !== 'error'))
         .map((m) => ({ id: m.id, role: m.role, content: m.content }));
 
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-      setIsGenerating(true);
-
-      const outputFormat = sessionOutputFormat;
-      let streamedRawSoFar = '';
-      let streamedSafeSoFar = '';
-      let outputBlockedAt: number | null = null;
-      let outputSafetyTruncatedAt: number | null = null;
-      let safetyCheckTimer: ReturnType<typeof setTimeout> | null = null;
-      let safetyCheckInFlight = false;
-      try {
-        const response = await fetch('/api/magic-tavern/generate-stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            sessionId: activeSession.id,
-            messages: historyForRequest,
-            roles: activeSession.roles ?? [],
-            scenario: activeSession.scenario ?? null,
-            auxScenarios: activeSession.auxScenarios ?? [],
-            playerRoleId: activeSession.playerRoleId ?? null,
-            settings: {
-              ...activeSession.settings,
-              providerId: userProviderConfig?.providerId,
-              modelId: userProviderConfig?.modelId,
-              userDisplayName: activeSession.settings.userDisplayName,
-            },
-            customProvider: {
-              providerId: userProviderConfig?.providerId,
-              modelId: userProviderConfig?.modelId,
-              apiKey: userProviderConfig?.apiKey,
-            },
-          }),
-        });
-
-        if (!response.ok) {
-          const payload = await response.json().catch(() => null);
-          const shouldRedirect = Boolean(payload?.shouldRedirect);
-          if (shouldRedirect) {
-            persistArrestedBackup({
-              triggerSource: 'input',
-              reason: typeof payload?.reason === 'string' ? payload.reason : '使用危险符文',
-              origin: '/magic-tavern',
-              items: [
-                {
-                  label: '魔法酒馆输入',
-                  filename: 'magic-tavern-input.txt',
-                  mimeType: 'text/plain',
-                  content: trimmed,
-                },
-              ],
-            });
-            await router.push('/arrested');
-            return;
-          }
-
-          const errorMessage =
-            typeof payload?.error === 'string'
-              ? payload.error
-              : typeof payload?.message === 'string'
-                ? payload.message
-                : `请求失败（${response.status}）`;
-
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMessageId ? { ...m, status: 'error', error: { code: `${response.status}`, message: errorMessage } } : m))
-          );
-          await putMagicTavernMessage({
-            ...assistantMessage,
-            status: 'error',
-            error: { code: `${response.status}`, message: errorMessage },
-          });
-          return;
-        }
-
-        setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, content: '', status: 'streaming' } : m)));
-
-        const scheduleSafetyCheck = () => {
-          if (outputBlockedAt) return;
-          if (safetyCheckTimer) return;
-          safetyCheckTimer = setTimeout(() => {
-            safetyCheckTimer = null;
-            void runSafetyCheck();
-          }, 120);
-        };
-
-        const runSafetyCheck = async () => {
-          if (outputBlockedAt) return;
-          if (safetyCheckInFlight) {
-            scheduleSafetyCheck();
-            return;
-          }
-
-          safetyCheckInFlight = true;
-          const snapshot = streamedRawSoFar;
-          try {
-            const result = await quickCheck(snapshot);
-            if (outputBlockedAt) return;
-
-            if (result.hasSensitiveWords) {
-              const { safeRaw, truncatedAt } = truncateUnsafeOutputText(snapshot, result, outputFormat);
-              const safeText = applyShieldWords(safeRaw).filteredText;
-              streamedSafeSoFar = safeText;
-              outputBlockedAt = Date.now();
-              outputSafetyTruncatedAt = truncatedAt;
-              setMessages((prev) =>
-                prev.map((m) => (m.id === assistantMessageId ? { ...m, content: safeText, status: 'blocked' } : m))
-              );
-              controller.abort('output-safety');
-              return;
-            }
-
-            const safePreview = applyShieldWords(snapshot).filteredText;
-            streamedSafeSoFar = safePreview;
-            setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, content: safePreview } : m)));
-          } finally {
-            safetyCheckInFlight = false;
-            if (!outputBlockedAt && streamedRawSoFar !== snapshot) scheduleSafetyCheck();
-          }
-        };
-
-        const streamedText = await readTextStreamFromResponse(response, {
-          label: '魔法酒馆',
-          onText: (accumulated) => {
-            streamedRawSoFar = accumulated;
-            scheduleSafetyCheck();
-          },
-        });
-
-        if (safetyCheckTimer) {
-          clearTimeout(safetyCheckTimer);
-          safetyCheckTimer = null;
-        }
-
-        let status: MagicTavernMessage['status'] = outputBlockedAt ? 'blocked' : 'done';
-        let safeText = streamedSafeSoFar;
-
-        if (!outputBlockedAt) {
-          const sensitive = await quickCheck(streamedText);
-          if (sensitive.hasSensitiveWords) {
-            const truncated = truncateUnsafeOutputText(streamedText, sensitive, outputFormat);
-            safeText = applyShieldWords(truncated.safeRaw).filteredText;
-            status = 'blocked';
-            outputBlockedAt = Date.now();
-            outputSafetyTruncatedAt = truncated.truncatedAt;
-          } else {
-            safeText = applyShieldWords(streamedText).filteredText;
-            status = 'done';
-          }
-        }
-
-        const parsed = outputFormat === 'jsonl' ? parseMagicTavernJsonl(safeText) : { segments: undefined, choices: null };
-
-        const finalAssistant: MagicTavernMessage = {
-          ...assistantMessage,
-          content: safeText,
-          status,
-          ...(outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-          ...(status === 'blocked'
-            ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: outputBlockedAt ?? Date.now(), action: 'soft-block' } }
-            : { safety: { status: 'ok' } }),
-          ...(status === 'blocked' && typeof outputSafetyTruncatedAt === 'number' ? { truncatedAt: outputSafetyTruncatedAt } : {}),
-        };
-
-        setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
-        await putMagicTavernMessage(finalAssistant);
-
-        const shouldAutoTitle = !activeSession.titleMeta || activeSession.titleMeta.source === 'auto';
-        if (shouldAutoTitle && (activeSession.title === '新会话' || activeSession.title === '未命名会话')) {
-          const nextTitle = deriveMagicTavernTitle({
-            outputFormat,
-            content: safeText,
-            segments: outputFormat === 'jsonl' ? parsed.segments : undefined,
-            scenarioTitle: activeSession.scenario?.title,
-            roleNames: (activeSession.roles ?? []).map((r) => r.name),
-          });
-          const titleFiltered = applyShieldWords(nextTitle).filteredText;
-
-          await persistSession({
-            ...updatedSession,
-            title: titleFiltered,
-            titleMeta: {
-              source: 'auto',
-              generatedAt: Date.now(),
-              providerId: userProviderConfig?.providerId,
-              modelId: userProviderConfig?.modelId,
-              reason: 'first-message',
-            },
-          });
-        } else {
-          await persistSession({ ...updatedSession, updatedAt: Date.now() });
-        }
-      } catch (error) {
-        if (safetyCheckTimer) {
-          clearTimeout(safetyCheckTimer);
-          safetyCheckTimer = null;
-        }
-
-        if (error instanceof Error && error.name === 'AbortError') {
-          const reason = controller.signal.reason;
-          const rawSnapshot = streamedRawSoFar;
-
-          if (outputBlockedAt || reason === 'output-safety') {
-            const currentText = streamedSafeSoFar || applyShieldWords(rawSnapshot).filteredText;
-            const parsed = outputFormat === 'jsonl' ? parseMagicTavernJsonl(currentText) : { segments: undefined, choices: null };
-            const finalAssistant: MagicTavernMessage = {
-              ...assistantMessage,
-              content: currentText,
-              status: 'blocked',
-              ...(outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-              safety: { status: 'blocked', blockedBy: 'output', blockedAt: outputBlockedAt ?? Date.now(), action: 'soft-block' },
-              ...(typeof outputSafetyTruncatedAt === 'number' ? { truncatedAt: outputSafetyTruncatedAt } : {}),
-            };
-            setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
-            await putMagicTavernMessage(finalAssistant);
-            return;
-          }
-
-          const sensitive = await quickCheck(rawSnapshot);
-          const safeText = sensitive.hasSensitiveWords
-            ? applyShieldWords(truncateUnsafeOutputText(rawSnapshot, sensitive, outputFormat).safeRaw).filteredText
-            : applyShieldWords(rawSnapshot).filteredText;
-          const status: MagicTavernMessage['status'] = sensitive.hasSensitiveWords ? 'blocked' : 'done';
-          const parsed = outputFormat === 'jsonl' ? parseMagicTavernJsonl(safeText) : { segments: undefined, choices: null };
-          const finalAssistant: MagicTavernMessage = {
-            ...assistantMessage,
-            content: safeText,
-            status,
-            ...(outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-            ...(status === 'blocked'
-              ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: Date.now(), action: 'soft-block' } }
-              : { safety: { status: 'ok' } }),
-          };
-          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
-          await putMagicTavernMessage(finalAssistant);
-          return;
-        }
-
-        const message = error instanceof Error ? error.message : '生成失败';
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantMessageId ? { ...m, status: 'error', error: { code: 'exception', message } } : m))
-        );
-        await putMagicTavernMessage({ ...assistantMessage, status: 'error', error: { code: 'exception', message } });
-      } finally {
-        abortControllerRef.current = null;
-        setIsGenerating(false);
-      }
+      await runGenerateStream({
+        session: updatedSession,
+        historyForRequest,
+        outputFormat: sessionOutputFormat,
+        assistantMessageId,
+        assistantMessage,
+        arrestedBackupInput: trimmed,
+      });
     },
-    [activeSession, ensureProviderReady, isGenerating, messages, persistSession, router, userProviderConfig]
+    [activeSession, ensureProviderReady, isGenerating, messages, persistSession, router, runGenerateStream]
   );
+
+  const continueGeneration = useCallback(async () => {
+    if (!activeSession) return;
+    if (isGenerating) return;
+
+    const providerCheck = ensureProviderReady();
+    if (!providerCheck.ok) {
+      setGlobalError(providerCheck.message);
+      return;
+    }
+
+    setGlobalError(null);
+
+    const now = Date.now();
+    const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTavernOutputFormat;
+
+    const assistantMessageId = createUuid();
+    const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
+    const kind = messages.length === 0 ? 'opening' : 'continue';
+
+    const assistantMessage: MagicTavernMessage = {
+      id: assistantMessageId,
+      sessionId: activeSession.id,
+      role: 'assistant',
+      content: '',
+      createdAt: now,
+      status: 'streaming',
+      ...(lastUserMessageId ? { sourceMessageId: lastUserMessageId } : {}),
+      meta: { kind, outputFormat: sessionOutputFormat },
+    };
+
+    const nextMessages = [...messages, assistantMessage];
+    setMessages(nextMessages);
+    await putMagicTavernMessage(assistantMessage);
+
+    const updatedSession: MagicTavernSession = { ...activeSession, updatedAt: now };
+    await persistSession(updatedSession);
+
+    const baseHistory = messages
+      .filter((m) => m.role === 'user' || (m.role === 'assistant' && m.status !== 'blocked' && m.status !== 'error'))
+      .map((m) => ({ id: m.id, role: m.role, content: m.content }));
+
+    const systemInstruction: MagicTavernHistoryMessage = {
+      id: createUuid(),
+      role: 'system',
+      content:
+        kind === 'opening'
+          ? '【任务】请先生成故事开场：描写场景/氛围，安排角色登场，并给出可供玩家回应的钩子。'
+          : '【任务】请在不等待玩家新输入的情况下，继续推进下一小节剧情。',
+    };
+
+    await runGenerateStream({
+      session: updatedSession,
+      historyForRequest: [...baseHistory, systemInstruction],
+      outputFormat: sessionOutputFormat,
+      assistantMessageId,
+      assistantMessage,
+    });
+  }, [activeSession, ensureProviderReady, isGenerating, messages, persistSession, runGenerateStream]);
 
   const generateChoices = useCallback(async () => {
     if (!activeSession) return;
@@ -934,6 +1038,15 @@ export default function MagicTavernPage() {
         const payload = await response.json().catch(() => null);
         const shouldRedirect = Boolean(payload?.shouldRedirect);
         if (shouldRedirect) {
+          const reason = typeof payload?.reason === 'string' ? payload.reason : '使用危险符文';
+          const blockedMessage: MagicTavernMessage = {
+            ...assistantMessage,
+            status: 'blocked',
+            safety: { status: 'blocked', blockedBy: 'server', blockedAt: Date.now(), action: 'redirect' },
+            error: { code: `${response.status}`, message: reason },
+          };
+          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? blockedMessage : m)));
+          await putMagicTavernMessage(blockedMessage);
           await router.push('/arrested');
           return;
         }
@@ -1034,6 +1147,71 @@ export default function MagicTavernPage() {
     ];
   }, [activeSession?.roles, activeSession?.settings.userDisplayName, preferences.userDisplayName]);
 
+  const renderAssistantFooter = (message: MagicTavernMessage) => {
+    if (message.role !== 'assistant') return null;
+
+    if (message.status === 'streaming') {
+      return (
+        <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+          <LoadingSpinner />
+          <span>生成中…</span>
+        </div>
+      );
+    }
+
+    if (message.status === 'blocked') {
+      const blockedBy = message.safety?.blockedBy;
+      const hint =
+        blockedBy === 'server'
+          ? '该内容不符合安全策略，已被拦截。'
+          : '本轮输出被安全策略截断（可尝试修改输入或重新生成）。';
+      return (
+        <div className="mt-2 text-xs text-amber-700">
+          <span>{hint}</span>
+          <Link href="/encyclopedia/sensitive-words" className="ml-2 underline underline-offset-2 hover:opacity-90">
+            查看百科：敏感词与逮捕
+          </Link>
+        </div>
+      );
+    }
+
+    if (message.status === 'error') {
+      const rawCode = message.error?.code ?? '';
+      const status = /^\d{3}$/.test(rawCode) ? Number(rawCode) : null;
+      const kind =
+        message.meta && typeof message.meta === 'object' && typeof (message.meta as any).kind === 'string'
+          ? String((message.meta as any).kind)
+          : '';
+
+      const title =
+        kind === 'choices'
+          ? '生成选项失败'
+          : kind === 'opening'
+            ? '生成开场失败'
+            : kind === 'continue'
+              ? '继续生成失败'
+              : '生成失败';
+
+      const lines: string[] = [`❌ ${title}`];
+      if (status) lines.push(`HTTP：${status}`);
+      else if (rawCode) lines.push(`错误码：${rawCode}`);
+      if (message.error?.message?.trim()) lines.push(`原因：${message.error.message.trim()}`);
+
+      return (
+        <div className="mt-2">
+          <ErrorMessage
+            message={lines.join('\n')}
+            status={status}
+            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+            linkClassName="text-red-700 underline underline-offset-2 hover:opacity-95"
+          />
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   const renderMessage = (message: MagicTavernMessage) => {
     const isUser = message.role === 'user';
     const bubbleClass = isUser ? 'bg-pink-600 text-white' : 'bg-white border border-pink-100 text-gray-800';
@@ -1081,14 +1259,7 @@ export default function MagicTavernPage() {
             }
             return null;
           })}
-          {message.status === 'blocked' && (
-            <div className="text-xs text-amber-700">本轮输出被安全策略截断（可尝试修改输入或重新生成）。</div>
-          )}
-          {message.status === 'error' && (
-            <div className="text-xs text-red-600">
-              生成失败：{message.error?.message || '未知错误'}
-            </div>
-          )}
+          {renderAssistantFooter(message)}
         </div>
       );
     }
@@ -1101,6 +1272,7 @@ export default function MagicTavernPage() {
       return (
         <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
           <MarkdownBlock content={message.content || ''} variant="light" mode="article" />
+          {renderAssistantFooter(message)}
         </div>
       );
     }
@@ -1108,12 +1280,7 @@ export default function MagicTavernPage() {
     return (
       <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
         <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
-        {message.status === 'blocked' && (
-          <div className="mt-2 text-xs text-amber-700">本轮输出被安全策略截断（可尝试修改输入或重新生成）。</div>
-        )}
-        {message.status === 'error' && (
-          <div className="mt-2 text-xs text-red-600">生成失败：{message.error?.message || '未知错误'}</div>
-        )}
+        {renderAssistantFooter(message)}
       </div>
     );
   };
@@ -1139,7 +1306,13 @@ export default function MagicTavernPage() {
             </div>
 
             {globalError && (
-              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{globalError}</div>
+              <div className="mt-4">
+                <ErrorMessage
+                  message={globalError}
+                  className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                  linkClassName="text-red-700 underline underline-offset-2 hover:opacity-95"
+                />
+              </div>
             )}
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[320px_1fr]">
@@ -1473,7 +1646,15 @@ export default function MagicTavernPage() {
 
                 <div className="rounded-xl border border-pink-100 bg-white p-4">
                   <div className="mb-3 flex items-center justify-between">
-                    <div className="text-sm font-semibold text-gray-800">对话</div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm font-semibold text-gray-800">对话</div>
+                      {isGenerating ? (
+                        <div className="flex items-center gap-2 text-xs font-semibold text-pink-700">
+                          <LoadingSpinner className="h-3 w-3" />
+                          <span>生成中…</span>
+                        </div>
+                      ) : null}
+                    </div>
                     {isGenerating ? (
                       <button
                         type="button"
@@ -1515,12 +1696,21 @@ export default function MagicTavernPage() {
                         {activeSession?.settings.outputFormat === 'markdown'
                           ? '提示：Markdown 模式不会稳定解析选项/角色分段。'
                           : '提示：JSONL 模式可解析旁白/对白/选项。'}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          className="rounded-lg border border-pink-200 bg-white px-3 py-2 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          disabled={!activeSession || isGenerating}
+	                      </div>
+	                      <div className="flex items-center gap-2">
+	                        <button
+	                          type="button"
+	                          className="rounded-lg border border-pink-200 bg-white px-3 py-2 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+	                          disabled={!activeSession || isGenerating}
+	                          onClick={() => void continueGeneration()}
+	                          title={messages.length === 0 ? '让 AI 根据角色/情景生成开场内容（会消耗 Token）' : '无需输入，继续推进剧情（会消耗 Token）'}
+	                        >
+	                          {messages.length === 0 ? '生成开场' : '继续生成'}
+	                        </button>
+	                        <button
+	                          type="button"
+	                          className="rounded-lg border border-pink-200 bg-white px-3 py-2 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+	                          disabled={!activeSession || isGenerating}
                           onClick={() => void generateChoices()}
                           title="根据当前剧情生成下一步行动选项"
                         >
