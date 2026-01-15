@@ -1,5 +1,5 @@
 // pages/canshou.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useCooldown } from '../lib/cooldown';
@@ -324,6 +324,25 @@ const CanshouPage: React.FC = () => {
     setTimeout(() => proceedToNext(option), 100);
   };
 
+  const resignDataCard = useCallback(async (data: any) => {
+    const response = await fetch('/api/resign-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null as any);
+      if (errorData?.shouldRedirect) {
+        router.push('/arrested');
+        return null;
+      }
+      throw new Error(errorData?.message || '签名服务器认证失败');
+    }
+
+    return response.json();
+  }, [router]);
+
   const handleNavigateToQuestion = (index: number) => {
     if (!questionnaire) return;
     if (index === currentQuestionIndex || index < 0 || index >= questionnaire.questions.length) return;
@@ -404,7 +423,17 @@ const CanshouPage: React.FC = () => {
           defaultName: '残兽',
         });
 
-        setStreamedGeneralCard(card);
+        let signedCard = card;
+        try {
+          const result = await resignDataCard(card);
+          if (!result) return;
+          signedCard = result;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '签名失败';
+          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+        }
+
+        setStreamedGeneralCard(signedCard);
         startCooldown();
         return;
       }

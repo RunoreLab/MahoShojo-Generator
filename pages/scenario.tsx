@@ -1,6 +1,6 @@
 // pages/scenario.tsx
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -74,6 +74,44 @@ const ScenarioPage: React.FC = () => {
   const handleAnswerChange = (id: string, value: string) => {
     setAnswers(prev => ({ ...prev, [id]: value }));
   };
+
+  const verifyOrigin = useCallback(async (data: any): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/verify-origin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) return false;
+      const result = await response.json().catch(() => null as any);
+      return Boolean(result?.isValid);
+    } catch (err) {
+      console.warn('原生性校验失败，将按非原生处理', err);
+      return false;
+    }
+  }, []);
+
+  const resignDataCard = useCallback(async (data: any) => {
+    const response = await fetch('/api/resign-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null as any);
+      if (errorData?.shouldRedirect) {
+        router.push({
+          pathname: '/arrested',
+          query: { reason: errorData.reason || '编辑内容不合规' }
+        });
+        return null;
+      }
+      throw new Error(errorData?.message || '签名服务器认证失败');
+    }
+
+    return response.json();
+  }, [router]);
 
   // 处理留空字段复选框的点击事件
   const handleOptionalFieldChange = (fieldValue: string) => {
@@ -177,7 +215,17 @@ const ScenarioPage: React.FC = () => {
           defaultTitle: '情景',
         });
 
-        setGeneralScenarioDraft(card);
+        let signedCard = card;
+        try {
+          const result = await resignDataCard(card);
+          if (!result) return;
+          signedCard = result;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '签名失败';
+          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+        }
+
+        setGeneralScenarioDraft(signedCard);
         startCooldown();
         return;
       }
@@ -220,16 +268,29 @@ const ScenarioPage: React.FC = () => {
     setGeneralScenarioDraft(blank);
   };
 
-  const handleConvertToGeneralScenario = () => {
+  const handleConvertToGeneralScenario = useCallback(async () => {
     if (!resultData) return;
     try {
       const { data: converted } = convertDataCard(resultData, 'general-scenario', 'scenario');
-      setGeneralScenarioDraft(converted);
+      let finalConverted = converted;
+      const shouldResign = await verifyOrigin(resultData);
+      if (shouldResign) {
+        try {
+          const signed = await resignDataCard(converted);
+          if (!signed) return;
+          finalConverted = signed;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '签名失败';
+          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+        }
+      }
+
+      setGeneralScenarioDraft(finalConverted);
     } catch (err) {
       const message = err instanceof Error ? err.message : '转换失败';
       setError(`✨ 转换失败！${message}`);
     }
-  };
+  }, [resultData, resignDataCard, verifyOrigin]);
 
   return (
     <>
@@ -396,7 +457,7 @@ const ScenarioPage: React.FC = () => {
                     创建空白通用情景卡
                   </button>
                   <button
-                    onClick={handleConvertToGeneralScenario}
+                    onClick={() => void handleConvertToGeneralScenario()}
                     disabled={!resultData}
                     className="generate-button flex-1"
                     style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
