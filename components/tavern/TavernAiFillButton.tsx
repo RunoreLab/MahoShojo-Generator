@@ -3,10 +3,13 @@ import React from 'react';
 export interface TavernAiFillButtonProps {
   loading: boolean;
   disabled: boolean;
+  cooldownSeconds?: number;
   onClick: () => void;
 }
 
-export function TavernAiFillButton({ loading, disabled, onClick }: TavernAiFillButtonProps) {
+export function TavernAiFillButton({ loading, disabled, cooldownSeconds, onClick }: TavernAiFillButtonProps) {
+  const isCooldown = typeof cooldownSeconds === 'number' && cooldownSeconds > 0;
+  const label = loading ? 'AI 生成中…' : isCooldown ? `冷却中 (${cooldownSeconds}s)` : 'AI 生成';
   return (
     <button
       type="button"
@@ -15,8 +18,7 @@ export function TavernAiFillButton({ loading, disabled, onClick }: TavernAiFillB
       disabled={disabled}
       onClick={onClick}
     >
-      {loading ? 'AI 生成中…' : 'AI 生成开场白/对话样例'}
+      {label}
     </button>
   );
 }
-

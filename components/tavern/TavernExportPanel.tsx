@@ -6,11 +6,13 @@ import BattleDataModal from '@/components/BattleDataModal';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import TachieGenerator from '@/components/TachieGenerator';
 import { TavernAiFillButton } from '@/components/tavern/TavernAiFillButton';
-import { buildCustomProviderPayload } from '@/lib/ai/custom-provider';
+import { OFFICIAL_KEY_MAX_AI_COOLDOWN_MS, USER_PROVIDED_KEY_COOLDOWN_MS } from '@/lib/ai/cooldowns';
+import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { authStorage } from '@/lib/auth';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { useCooldown } from '@/lib/cooldown';
 import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import {
@@ -695,6 +697,10 @@ export function TavernExportPanel() {
   const [isMatching, setIsMatching] = useState<'character' | 'scenario' | null>(null);
   const [tachieImageUrl, setTachieImageUrl] = useState<string | null>(null);
   const [isApplyingTachie, setIsApplyingTachie] = useState(false);
+  const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
+  const tavernAiCooldownMs = isUserCustomKey ? USER_PROVIDED_KEY_COOLDOWN_MS : OFFICIAL_KEY_MAX_AI_COOLDOWN_MS;
+  const tavernAiCooldownKey = isUserCustomKey ? 'tavernAiFillCooldown:custom' : 'tavernAiFillCooldown:system';
+  const { isCooldown, startCooldown, remainingTime } = useCooldown(tavernAiCooldownKey, tavernAiCooldownMs);
 
   const onDataCardSelected = async (file: File | null) => {
     if (!file) return;
@@ -957,6 +963,11 @@ export function TavernExportPanel() {
   };
 
   const onAiFill = async () => {
+    if (isCooldown) {
+      dispatch({ type: 'setInlineError', message: `操作过于频繁，请等待 ${remainingTime} 秒后再试。` });
+      return;
+    }
+
     dispatch({ type: 'setAiFilling', value: true });
     dispatch({ type: 'setInlineError', message: null });
 
@@ -1005,10 +1016,10 @@ export function TavernExportPanel() {
             query: { reason: redirectReason || '使用危险符文' },
           });
           return;
+        }
+        const serverMessage = errorJson?.message || errorJson?.error;
+        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 补全失败' }));
       }
-      const serverMessage = errorJson?.message || errorJson?.error;
-      throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 补全失败' }));
-    }
 
       const json = (await response.json()) as any;
       const nextScenario = typeof json?.scenario === 'string' ? json.scenario : '';
@@ -1025,6 +1036,8 @@ export function TavernExportPanel() {
       if (shouldOverwrite || !state.fields.mesExample.trim()) {
         dispatch({ type: 'setField', key: 'mesExample', value: nextMesExample });
       }
+
+      startCooldown(tavernAiCooldownMs);
     } catch (error) {
       dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : 'AI 补全失败' });
     } finally {
@@ -1535,7 +1548,12 @@ export function TavernExportPanel() {
                     </div>
                   </div>
 
-                  <TavernAiFillButton loading={state.aiFilling} disabled={state.step === 'generating' || state.aiFilling} onClick={onAiFill} />
+                  <TavernAiFillButton
+                    loading={state.aiFilling}
+                    disabled={state.step === 'generating' || state.aiFilling || isCooldown}
+                    cooldownSeconds={remainingTime}
+                    onClick={onAiFill}
+                  />
                 </div>
 
                 <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
@@ -1556,6 +1574,10 @@ export function TavernExportPanel() {
                   <summary className="cursor-pointer text-sm font-semibold text-pink-700">自定义 AI（可选）</summary>
                   <div className="mt-3">
                     <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                    <div className="mt-2 text-xs text-gray-600">
+                      可选：使用自有 API Key 冷却统一为 {Math.ceil(USER_PROVIDED_KEY_COOLDOWN_MS / 1000)} 秒；使用官方 Key 冷却为{' '}
+                      {Math.ceil(OFFICIAL_KEY_MAX_AI_COOLDOWN_MS / 1000)} 秒。API Key 仅存储于浏览器本地（localStorage），不会上传到服务器。
+                    </div>
                   </div>
                 </details>
               </div>
