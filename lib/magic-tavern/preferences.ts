@@ -4,7 +4,7 @@ const STORAGE_KEY = 'magic-tavern:preferences';
 
 export const DEFAULT_MAGIC_TAVERN_PREFERENCES: MagicTavernPreferences = {
   outputFormat: 'jsonl',
-  enableChoices: true,
+  enableChoices: false,
   choiceCount: 3,
   language: 'zh-CN',
   userDisplayName: '旅人',
@@ -66,4 +66,3 @@ export function patchMagicTavernPreferences(patch: Partial<MagicTavernPreference
   writeMagicTavernPreferences(next);
   return next;
 }
-
