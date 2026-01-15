@@ -555,6 +555,27 @@ export type MagicTavernSession = {
 - **角色一致性**：每次输出必须包含角色名与 `speakerId`，避免角色混乱。
 - **上下文拼接顺序**：系统层 → 安全与世界观 → 情景 → 角色 → 会话摘要 → 最近消息（滑窗）。
 
+#### 13.4.1 角色/情景字段白名单（定稿）
+
+- 角色卡（魔法少女）：codename；appearance.outfit/accessories/colorScheme/overallLook；magicConstruct.name/form/basicAbilities/description；wonderlandRule.name/description/tendency/activation；blooming.name/evolvedAbilities/evolvedForm/evolvedOutfit/powerLevel；analysis.personalityAnalysis/abilityReasoning/coreTraits/predictionBasis/background.belief/background.bonds。
+- 角色卡（残兽）：name；appearance；materialAndSkin；featuresAndAppendages；coreConcept；coreEmotion；evolutionStage；attackMethod；specialAbility；origin；birthEnvironment；researcherNotes。
+- 角色卡（通用角色）：name；content（原文 Markdown）。
+- 情景卡：title；scenario_type；description；elements.scene.time/place/features；elements.atmosphere；elements.events；elements.development（≤12 条）；elements.roles（≤12 条，name/description）。
+- 通用情景：title + content（原文 Markdown）。
+- 永不注入：signature/templateId/userAnswers/arena_history/current_state/adjudicationEvents/任何 `_` 前缀字段，仅保留给缓存/追溯与 UI 展示。
+- 截断规则：单字段字符串默认截断 2,000 字；数组默认截断 12 项；单张卡片拼接文本上限 12,000 字，超限追加“...[已截断]”。
+
+#### 13.4.2 玩家角色约束（定稿）
+
+- 当 `playerRoleId` 指向角色时：系统提示增加“玩家扮演该角色，AI 不得代替该角色发言或做决定”，输出中禁止该角色 `dialogue`；必要时仅可用 `narration` 描述其动作结果。
+- 选项模式下：`choices` 必须是“玩家可选行动”，不包含其他角色主导的行为或结局。
+- 当 `playerRoleId=null` 时：用户为 `{{user}}`，AI 仍不得替用户直接下结论或宣告“已决定”，但可用旁白描述“可能的结果/环境反馈”。
+
+#### 13.4.3 输出语言控制（定稿）
+
+- `settings.language` 为空则默认 `zh-CN`；非空时在系统提示中明确“输出语言=...”，并保持选项/旁白/角色对白一致。
+
+
 ### 13.5 IndexedDB 版本策略与清理
 
 - **版本化**：建议 `magic-tavern:v1`，升级时提供 migration（仅新增字段时容错）。
@@ -584,6 +605,16 @@ export type MagicTavernSession = {
 - `POST /api/magic-tavern/generate-stream`：生成主剧情流式输出（JSONL 或 Markdown）。
 - `POST /api/magic-tavern/generate-choices`：仅生成选项（可复用主提示词的“缩略版”）。
 - `POST /api/magic-tavern/summarize`：会话摘要（可选，非 MVP）。
+
+
+### 13.8.1 参数校验与安全上限（定稿）
+
+- 前端不设硬上限；服务端设置安全上限以防异常负载与滥用。
+- `roles` ≤ 20；`auxScenarios` ≤ 12；`messages` ≤ 200（仅保留最近窗口后再传）。
+- 单条 `message.content` ≤ 8,000 字；单张卡片拼接文本 ≤ 12,000 字；合并文本 ≤ 200,000 字（超出直接 400）。
+- `choiceCount` 2~4；`temperature` 0~1.2；`outputFormat` 仅允许 `jsonl`/`markdown`。
+- `providerId`/`modelId` 必须命中 `AI_PROVIDER_CATALOG`，并强制 `providerId !== system`。
+
 
 ### 13.9 预设情景（竞技场复刻包）
 
@@ -756,6 +787,15 @@ export type MagicTavernPreset = {
   - “清理本角色缓存 / 清理全部缓存 / 清理过期缓存”
   - 清理后同步删除 IndexedDB 记录与 Blob
 
+
+### 13.16 本地配置与草稿键（定稿）
+
+- `localStorage` 键：
+  - `magic-tavern:provider`：AiProviderSelector 专用（providerId/modelId/apiKey）。
+  - `magic-tavern:preferences`：outputFormat/enableChoices/choiceCount/language/lastPresetId/lastWorldbookPresetId。
+  - `magic-tavern:recent-session`：最近打开的 sessionId（便于恢复）。
+- 草稿输入：优先存入 IndexedDB（随会话扩展字段），或使用 `magic-tavern:drafts:{sessionId}` 兜底（刷新可恢复）。
+
 ---
 
 ## 14. 文案草案（页面与交互）
@@ -872,9 +912,61 @@ export type MagicTavernPreset = {
 
 ---
 
-## 17. 仍需完善的设计清单（待确认）
 
-1. **SillyTavern 互转实测校验**：需用最新版本样例验证字段映射（JSONL 结构、时间字段、额外字段保留策略）。  
-2. **摘要质量调优**：摘要模板的稳定性与“漏关键信息”风险评估（可在灰度期加入提示词 A/B）。  
-3. **Token 估算对齐**：不同供应商模型的上下文上限与 Token 估算偏差需要实测校准。  
-4. **分支 UI 细节**：分支链展示、命名、清理交互在设计稿中最终定稿。  
+## 17. 设计补齐（已定稿）
+
+### 17.1 SillyTavern JSONL 互转映射
+
+**导入读取字段优先级**
+- 内容：`mes` → `content` → `text`。
+- 角色：`is_user=true` → `user`；否则 `assistant`。`speakerName` 优先 `name`，再退化 `character`/`character_name`/`speaker`。
+- 时间：`send_date`（ISO 或 number）→ `created_at` → `timestamp`。数字 > 10^12 视为毫秒，否则视为秒。
+- 其余字段：原样放入 `message.meta.source`（保留 `rawLine` 以便排查）。
+
+**导出字段**
+- `name`：`role=user` 时为 `{{user}}` 或玩家角色名；`assistant` 时为 `speakerName`，为空则 `Narrator`。
+- `is_user`：`role === 'user'`。
+- `mes`：`content`。
+- `send_date`：ISO 字符串。
+- `extra.magic_tavern`：保留 `speakerId/segments/choices/tachieId/revisionOf` 等字段以便回导。
+
+**校验策略**
+- 每行 JSON 解析失败直接跳过并记录 warning。
+- 导入后做一次“空内容过滤 + 角色名归一”。
+- 最小自测：导入 → 导出 → 再导入，确保消息条数与前 50 条内容一致。
+
+### 17.2 摘要模板与质量守护
+
+**摘要系统提示词模板（示意）**
+```text
+请用简洁中文总结对话，严格包含以下 5 个小节：
+1) 世界状态
+2) 角色关系
+3) 关键事件
+4) 未决事项
+5) 禁忌/边界
+每节 3-6 句，避免新增设定，不要编造未发生的剧情。
+```
+
+- 若生成结果缺失某个小节，则保留上一版 summary 并提示“摘要需补齐”。
+- 每次摘要写入 `summaryMeta`（from/to/messageCount/tokenCount）用于回溯。
+
+### 17.3 Token 估算对齐策略
+
+- 使用 `estimateTokensFromText` 作为基础估算器。
+- 供应商倍率（默认，可后续调优）：`openai=1.0`、`anthropic=1.1`、`google=1.05`、`deepseek=1.0`、未知 `1.2`。
+- UI 标注“估算值 ±20%”，避免用户误解为精确值。
+- 若流式返回包含 usage 信息，记录到本地日志用于后续校准。
+
+### 17.4 分支 UI 细节
+
+- 会话标题右侧展示“分支”徽标，副标题显示“从第 N 轮分支”。
+- 侧边栏：父会话与分支会话以缩进/连线区分；允许一键返回父会话。
+- 分支视图入口：会话详情页提供“查看分支链”弹窗，仅展示父 → 子路径。
+- 删除分支：不影响父会话；若父会话已不存在则仅删除本分支并提示。
+
+### 17.5 实施验证清单（不阻塞开发）
+
+- 收集最新 SillyTavern JSONL 样例跑导入/导出回归，补齐字段差异。
+- 通过真实调用记录校准 Token 估算倍率。
+
