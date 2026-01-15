@@ -1,6 +1,7 @@
 # 魔法酒馆（Magic Tavern）功能设计与实现记录
 
 日期：2026-01-15
+最后更新：2026-01-15
 
 > 目标：在首页「辅助功能」新增自研互动页【魔法酒馆】，基于本项目角色卡/情景卡提供长期对话与剧情体验。本文给出架构设计、实现方案、风险与分期计划，供开发落地参考。
 
@@ -227,14 +228,17 @@ IndexedDB 建议分表：
 ### 6.2 安全拦截
 
 - 输入前：对用户输入与卡片摘要使用 `lib/sensitive-word-filter` 先行检查
+  - `getSensitiveWordRedirectTarget` 命中 → 视为高风险，阻止发送并跳转 `/arrested`（写入 `arrested-backup`）
+  - 其它命中 → 仅本地拦截与提示，保留输入草稿，允许修改后重试
 - 服务端：在 `/api/magic-tavern/*` 调用 `enforceTextSafety` 做二次校验（本地敏感词 + AI 安全检查）
   - 合并文本：用户输入 + 角色/情景摘要 + 会话摘要（如有）
   - 文本过长时截断到 **50,000** 字符（与现有生成接口保持一致）
-- 输出后：使用 `lib/shield-word-filter` 遮罩可疑内容
+  - 审查拒绝分级：`shouldRedirect=true` 走 `/arrested`；否则返回 `400` 并提示调整输入
+- 输出后：使用 `lib/shield-word-filter` 遮罩可疑内容；若出现敏感词 **立即截断本轮输出并停止流**（详见 13.17）
 - 若触发敏感词：
-  - 绝不能在客户端本地储存违规内容
-  - 跳转 `/arrested`
-  - 备份当前输入（复用 `lib/arrested-backup`）
+  - **输入阶段**：不发送请求；保留草稿与对话历史
+  - **输出阶段**：不跳转页面；仅截断当轮输出并标记 `blocked`，允许“重新生成/修改后再生成”
+  - 绝不在客户端落库违规原文；仅存安全截断内容与安全元信息
 
 ### 6.3 约束“角色卡注入”
 
@@ -300,7 +304,8 @@ IndexedDB 建议分表：
    - 服务端执行 `enforceTextSafety`（本地敏感词 + AI 安全检查）
    - 解析输出（JSONL 分段或 Markdown 全文）
    - 输出敏感词检测 / 屏蔽
-   - 写入 IndexedDB
+     - 命中后立即截断并标记 `blocked`，保留已生成安全片段
+   - 写入 IndexedDB（仅安全内容）
 4. 选项模式：点击选项 => 自动发送相同内容
 
 ---
@@ -464,7 +469,15 @@ export type MagicTavernMessage = {
   speakerId?: string;
   choices?: { id: string; text: string }[];
   tachieId?: string;
-  revisionOf?: string; // 若由编辑历史消息产生分支
+  sourceMessageId?: string; // 本条助手消息关联的用户消息
+  revisionOf?: string; // 若由编辑历史消息/重新生成产生
+  safety?: {
+    status: 'ok' | 'blocked' | 'masked' | 'truncated';
+    blockedBy?: 'input' | 'output' | 'server';
+    blockedAt?: number;
+    action?: 'redirect' | 'soft-block';
+  };
+  truncatedAt?: number;
   error?: { code: string; message: string };
   meta?: Record<string, unknown>; // 兼容外部格式的保留字段（如 SillyTavern）
 };
@@ -594,10 +607,12 @@ export type MagicTavernSession = {
 ### 13.7 安全与合规细化
 
 - **输入前**：`getSensitiveWordRedirectTarget` 检测用户输入与“卡片摘要”。
+  - 命中高风险：阻止发送并跳转 `/arrested`（写入 `arrested-backup`，保留草稿）
+  - 其它命中：仅本地拦截与提示，不跳转，允许用户修改后重试
 - **服务端**：`enforceTextSafety` 做 AI 安全审查（建议 `aiPromptTemplate=free`）。
-  - 触发安全拒绝：返回 `400` 且 `shouldRedirect=true`，前端跳转 `/arrested`
+  - 触发安全拒绝：返回 `400`，携带 `shouldRedirect`（`true` 则跳转 `/arrested`，`false` 则提示调整输入）
   - 安全服务不可用：返回 `503`，前端提示稍后重试
-- **输出后**：`applyShieldWords` 遮罩可疑文本；触发敏感词时 **不落库**，并写入 `arrested-backup`。
+- **输出后**：`applyShieldWords` 遮罩可疑文本；若检测到敏感词则**立即截断并停止流**，消息标记 `blocked`（详见 13.17）。
 - **自备 Key 限制**：接口层强制 `providerId !== system`，避免误用系统 Key。
 
 ### 13.8 API 草案（Edge）
@@ -687,7 +702,7 @@ export type MagicTavernPreset = {
 
 **响应**
 - `200`：流式输出；`outputFormat=jsonl` 时为 JSONL 行，`outputFormat=markdown` 时为 Markdown 文本流。
-- `400`：参数无效（如 `choiceCount` 超限、`modelId` 不存在）或内容安全拒绝（`shouldRedirect=true`）。
+- `400`：参数无效（如 `choiceCount` 超限、`modelId` 不存在）或内容安全拒绝（返回 `shouldRedirect`，`true` 跳转 `/arrested`，`false` 提示调整输入）。
 - `401/403`：缺少或禁用 API Key（**强制禁止** `providerId=system`）。
 - `503`：内容安全服务不可用（`enforceTextSafety` 调用失败）。
 - `500`：生成失败。
@@ -718,7 +733,8 @@ export type MagicTavernPreset = {
 
 - JSONL 解析失败时：当行降级为 `narration`，保留原文。
 - 流式中断：标记当前消息为 `error`，允许用户“继续生成”或“重试”。
-- 安全拒绝：若服务端返回 `shouldRedirect=true`，本地不落库、清理草稿并跳转 `/arrested`。
+- **输出敏感词**：立即终止流，截断至最后安全边界，标记 `blocked`，保留已生成安全片段并提供“重新生成/修改输入”入口（不跳转）。
+- 安全拒绝：若服务端返回 `shouldRedirect=true`，本地不落库、清理草稿并跳转 `/arrested`；若 `shouldRedirect=false` 则提示调整输入并允许重试。
 - `outputFormat=markdown`：不尝试解析 `choices`，如需要选项另调 `generate-choices`。
 
 ### 13.13 分支编辑策略（定稿）
@@ -795,6 +811,46 @@ export type MagicTavernPreset = {
   - `magic-tavern:preferences`：outputFormat/enableChoices/choiceCount/language/lastPresetId/lastWorldbookPresetId。
   - `magic-tavern:recent-session`：最近打开的 sessionId（便于恢复）。
 - 草稿输入：优先存入 IndexedDB（随会话扩展字段），或使用 `magic-tavern:drafts:{sessionId}` 兜底（刷新可恢复）。
+
+
+### 13.17 输出敏感词截断与重试策略（定稿）
+
+- **目标**：避免触发敏感词导致会话中断或丢失历史，仅截断本轮输出。
+- **触发点**：流式输出过程中或完整输出完成后。
+- **处理流程**：
+  1) 对解析后的 `narration/dialogue/choices.text` 做增量检测（优先 `quickCheck`）。
+  2) 命中后立即 `AbortController.abort()`，停止流。
+  3) 从本轮输出缓冲中定位最后安全边界（换行/句号/JSONL 行末），截断并写入消息内容。
+  4) 该消息标记 `status='blocked'`，写入 `message.safety`（`blockedBy='output'`、`blockedAt`、`action='soft-block'`）。
+  5) 不落库违规片段；保留用户输入与历史不变。
+- **UI 行为**：
+  - 提示“本轮输出被安全策略截断”。
+  - 提供“重新生成 / 修改输入 / 更换模型或温度 / 切换输出模式”入口。
+  - 允许用户保留已生成的安全片段继续对话。
+- **生成重试**：
+  - `regenerate` 默认复用原用户输入与相同上下文。
+  - 若连续 2 次触发，则自动降低 `temperature` 并提示用户缩短输入或切换模型。
+
+### 13.18 生成控制与并发约束（定稿）
+
+- **并发原则**：同一会话同时仅允许 1 个生成请求；新请求需等待或先停止当前流。
+- **停止生成**：用户点击停止后 `abort` 请求，保留已生成内容并标记 `status='done'`，记录 `meta.stopReason='user'`。
+- **继续生成**：基于原上下文追加新的 assistant 消息；`sourceMessageId` 指向最近一条用户消息。
+- **重新生成**：仅针对最近一条 assistant 输出；旧消息标记 `revisionOf` 或 `meta.superseded=true`，不影响历史。
+- **选项生成互斥**：`generate-choices` 与主生成流互斥，避免竞争与上下文错乱。
+
+### 13.19 JSONL 行协议与 Markdown 渲染安全（定稿）
+
+- **JSONL 行协议**：
+  - 每行必须是完整 JSON 对象，禁止代码块/围栏。
+  - `type` 仅允许 `narration` / `dialogue` / `choices`；未知字段忽略。
+  - `dialogue` 必须包含 `speakerId`（若缺失则降级为 `narration`）。
+  - `choices.items` 不能为空；若为空则丢弃该行。
+- **Markdown 渲染安全**：
+  - 禁用原始 HTML，仅渲染安全白名单标签。
+  - 链接自动添加 `rel="noopener noreferrer"`；不自动渲染远程图片。
+  - 过长 Markdown 片段在前端分段渲染，避免长文阻塞 UI。
+- **模式切换约束**：输出模式切换仅影响后续消息；历史消息按原格式渲染。
 
 ---
 
