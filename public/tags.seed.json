@@ -72,9 +72,9 @@
     { "id": "attr:limited", "name": "有代价", "description": "能力或胜利需要付出代价/有明显限制", "category": "卡片属性", "scope": "user", "isActive": true },
     { "id": "attr:overpowered", "name": "超规格", "description": "能力或资源明显超出同级平均水平", "category": "卡片属性", "scope": "user", "isActive": true },
 
-    { "id": "risk:meta", "name": "元叙事", "description": "含元叙事/元角色/对 AI 的显式声明等", "category": "风险提示", "scope": "system", "isActive": true },
-    { "id": "risk:prompt-engineering", "name": "提示词工程", "description": "含大量提示词工程/格式约束", "category": "风险提示", "scope": "system", "isActive": true },
-    { "id": "risk:code-kill", "name": "代码杀", "description": "含显式代码/规则武器化以影响裁判的内容", "category": "风险提示", "scope": "system", "isActive": true }
+    { "id": "risk:meta", "name": "元叙事", "description": "含元叙事/元角色/对 AI 的显式声明等", "category": "风险提示", "scope": "user", "isActive": true },
+    { "id": "risk:prompt-engineering", "name": "提示词工程", "description": "含大量提示词工程/格式约束", "category": "风险提示", "scope": "user", "isActive": true },
+    { "id": "risk:code-kill", "name": "代码杀", "description": "含显式代码/规则武器化以影响裁判的内容", "category": "风险提示", "scope": "user", "isActive": true }
   ],
   "aliases": [
     { "alias": "元角色", "tagId": "risk:meta" },
