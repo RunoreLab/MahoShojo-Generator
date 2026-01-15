@@ -272,8 +272,11 @@ export const buildMagicTavernMainPrompt = (params: {
   if (outputFormat === 'jsonl') {
     systemLines.push('- 仅输出 JSONL（每行一个 JSON 对象），禁止输出代码块/围栏/解释。');
     systemLines.push('- type 仅允许 narration/dialogue/choices。');
+    systemLines.push('- narration：{"type":"narration","text":"..."}（必须使用 text，禁止使用 content）。');
+    systemLines.push('- dialogue：{"type":"dialogue","speakerId":"...","speakerName":"...","text":"..."}。');
+    systemLines.push('- choices：{"type":"choices","items":[{"id":"c1","text":"..."},...]}。');
     systemLines.push('- dialogue 必须包含 speakerId（来自角色 id），并尽量包含 speakerName。');
-    systemLines.push('- choices 仅在需要时输出一行，items 长度为 2~4。');
+    systemLines.push('- choices 仅在需要时输出一行，items 长度为 2~4，每项必须包含 id/text。');
   } else {
     systemLines.push('- 仅输出 Markdown 故事正文，不要输出 JSONL。');
   }
@@ -342,7 +345,7 @@ export const buildMagicTavernChoicesPrompt = (params: {
     base,
     '',
     '【任务】你将仅生成“下一步玩家可选行动”的 choices，不要输出 narration 或 dialogue。',
-    `【输出要求】仅输出 1 行 JSON：{"type":"choices","items":[...]}，items 长度必须为 ${choiceCount}。`,
+    `【输出要求】仅输出 1 行 JSON：{"type":"choices","items":[{"id":"c1","text":"..."},...]}，items 长度必须为 ${choiceCount}。`,
     '【输出限制】禁止输出代码块、解释、标题或多余换行。',
   ]
     .join('\n')

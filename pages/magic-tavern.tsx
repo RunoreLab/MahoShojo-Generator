@@ -255,8 +255,88 @@ export default function MagicTavernPage() {
   const refreshActiveSession = useCallback(async (sessionId: string) => {
     const session = await getMagicTavernSession(sessionId);
     setActiveSession(session);
-    const nextMessages = await listMagicTavernMessages(sessionId);
-    setMessages(nextMessages);
+    const nextMessagesRaw = await listMagicTavernMessages(sessionId);
+
+    const patchedMessages = nextMessagesRaw.map((message) => {
+      if (message.role !== 'assistant') return message;
+      const metaOutputFormat =
+        message.meta && typeof message.meta === 'object' && typeof (message.meta as any).outputFormat === 'string'
+          ? String((message.meta as any).outputFormat)
+          : null;
+      const content = message.content || '';
+      const looksJsonl =
+        metaOutputFormat === 'jsonl' ||
+        content.trim().startsWith('```jsonl') ||
+        content.trim().startsWith('{"type"') ||
+        content.includes('\n{"type"');
+      if (!looksJsonl) return message;
+
+      const parsed = parseMagicTavernJsonl(content);
+      if (!Array.isArray(parsed.segments) || parsed.segments.length === 0) return message;
+
+      const storedSegments = Array.isArray(message.segments) ? message.segments : null;
+      const storedHasMeaningfulSegment = storedSegments
+        ? storedSegments.some((seg) => {
+          if (seg.type === 'choices') return Array.isArray(seg.items) && seg.items.length > 0;
+          const text = typeof (seg as any)?.text === 'string' ? String((seg as any).text).trim() : '';
+          if (!text) return false;
+          if (text.startsWith('```') || text.startsWith('~~~')) return false;
+          if (text.startsWith('{') || text.startsWith('[')) return false;
+          return true;
+        })
+        : false;
+
+      if (storedHasMeaningfulSegment) return message;
+
+      return {
+        ...message,
+        segments: parsed.segments,
+        ...(parsed.choices ? { choices: parsed.choices } : {}),
+      };
+    });
+
+    setMessages(patchedMessages);
+
+    const dirtyMessages = patchedMessages.filter((m, idx) => m !== nextMessagesRaw[idx]);
+    if (dirtyMessages.length > 0) {
+      await Promise.all(dirtyMessages.map((message) => putMagicTavernMessage(message)));
+    }
+
+    if (
+      session &&
+      typeof session.title === 'string' &&
+      session.title.trim().toLowerCase() === 'jsonl' &&
+      (!session.titleMeta || session.titleMeta.source === 'auto')
+    ) {
+      const firstAssistant = patchedMessages.find((message) => message.role === 'assistant' && message.content.trim());
+      if (firstAssistant) {
+        const outputFormat = (session.settings.outputFormat ?? 'jsonl') as MagicTavernOutputFormat;
+        const nextTitle = deriveMagicTavernTitle({
+          outputFormat,
+          content: firstAssistant.content,
+          segments: outputFormat === 'jsonl' ? firstAssistant.segments : undefined,
+          scenarioTitle: session.scenario?.title,
+          roleNames: (session.roles ?? []).map((role) => role.name),
+        });
+        const titleFiltered = applyShieldWords(nextTitle).filteredText;
+        if (titleFiltered && titleFiltered !== session.title) {
+          const updatedSession: MagicTavernSession = {
+            ...session,
+            title: titleFiltered,
+            titleMeta: {
+              ...(session.titleMeta ?? {}),
+              source: 'auto',
+              generatedAt: Date.now(),
+              reason: session.titleMeta?.reason ?? 'first-message',
+            },
+            updatedAt: Date.now(),
+          };
+          await putMagicTavernSession(updatedSession);
+          setActiveSession(updatedSession);
+          setSessions((prev) => sortSessionsByUpdatedAtDesc([updatedSession, ...prev.filter((item) => item.id !== updatedSession.id)]));
+        }
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -1692,15 +1772,15 @@ export default function MagicTavernPage() {
                       disabled={!activeSession || isGenerating}
                     />
                     <div className="flex items-center justify-between gap-3">
-                      <div className="text-xs text-gray-500">
+                      <div className="min-w-0 flex-1 text-xs text-gray-500">
                         {activeSession?.settings.outputFormat === 'markdown'
                           ? '提示：Markdown 模式不会稳定解析选项/角色分段。'
                           : '提示：JSONL 模式可解析旁白/对白/选项。'}
 	                      </div>
-	                      <div className="flex items-center gap-2">
+	                      <div className="flex flex-none items-center gap-2">
 	                        <button
 	                          type="button"
-	                          className="rounded-lg border border-pink-200 bg-white px-3 py-2 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+	                          className="flex-none whitespace-nowrap rounded-lg border border-pink-200 bg-white px-3 py-2 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
 	                          disabled={!activeSession || isGenerating}
 	                          onClick={() => void continueGeneration()}
 	                          title={messages.length === 0 ? '让 AI 根据角色/情景生成开场内容（会消耗 Token）' : '无需输入，继续推进剧情（会消耗 Token）'}
@@ -1709,7 +1789,7 @@ export default function MagicTavernPage() {
 	                        </button>
 	                        <button
 	                          type="button"
-	                          className="rounded-lg border border-pink-200 bg-white px-3 py-2 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+	                          className="flex-none whitespace-nowrap rounded-lg border border-pink-200 bg-white px-3 py-2 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
 	                          disabled={!activeSession || isGenerating}
                           onClick={() => void generateChoices()}
                           title="根据当前剧情生成下一步行动选项"
@@ -1718,7 +1798,7 @@ export default function MagicTavernPage() {
                         </button>
                         <button
                           type="button"
-                          className="generate-button m-0"
+                          className="flex-none whitespace-nowrap rounded-lg bg-pink-600 px-4 py-2 text-xs font-semibold text-white hover:bg-pink-700 disabled:cursor-not-allowed disabled:opacity-50"
                           disabled={!activeSession || isGenerating || !draft.trim()}
                           onClick={() => void sendMessage(draft)}
                         >

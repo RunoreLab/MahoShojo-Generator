@@ -14,6 +14,25 @@ const clampTitle = (text: string, maxChars: number): string => {
   return normalized.length > maxChars ? `${normalized.slice(0, maxChars)}…` : normalized;
 };
 
+const isBadTitleLine = (line: string): boolean => {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) return true;
+  if (/^jsonl$/i.test(trimmed)) return true;
+  // JSON 片段或数组行通常不是好标题
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return true;
+  return false;
+};
+
+const pickFirstTitleCandidateFromContent = (content: string): string => {
+  const lines = content
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const candidate = lines.find((line) => !isBadTitleLine(line));
+  return candidate ?? '';
+};
+
 export const deriveMagicTavernTitle = (params: {
   outputFormat: 'jsonl' | 'markdown';
   content: string;
@@ -26,19 +45,19 @@ export const deriveMagicTavernTitle = (params: {
   if (params.outputFormat === 'markdown') {
     const lines = content.split('\n').map((l) => l.trim()).filter(Boolean);
     const h1 = lines.find((line) => line.startsWith('# '));
-    const title = clampTitle(h1 ? h1.slice(2) : (lines[0] ?? ''), 60);
+    const firstLine = lines.find((line) => !isBadTitleLine(line)) ?? '';
+    const title = clampTitle(h1 ? h1.slice(2) : firstLine, 60);
     if (title) return title;
   } else {
     const segments = Array.isArray(params.segments) ? params.segments : [];
-    const firstText =
-      segments.find((seg) => seg.type === 'dialogue' || seg.type === 'narration')
-        ? (() => {
-          const seg = segments.find((s) => s.type === 'dialogue' || s.type === 'narration') as any;
-          return typeof seg?.text === 'string' ? seg.text : '';
-        })()
-        : '';
+    const firstSeg = segments.find((seg) => {
+      if (seg.type !== 'dialogue' && seg.type !== 'narration') return false;
+      const text = typeof (seg as any)?.text === 'string' ? String((seg as any).text) : '';
+      return !isBadTitleLine(text);
+    }) as any;
+    const firstText = typeof firstSeg?.text === 'string' ? firstSeg.text : '';
 
-    const candidate = firstText || content.split('\n').map((l) => l.trim()).filter(Boolean)[0] || '';
+    const candidate = firstText || pickFirstTitleCandidateFromContent(content);
     const title = clampTitle(candidate, 60);
     if (title) return title;
   }
@@ -52,4 +71,3 @@ export const deriveMagicTavernTitle = (params: {
 
   return '未命名会话';
 };
-
