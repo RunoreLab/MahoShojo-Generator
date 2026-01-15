@@ -27,7 +27,12 @@ type TeamMember = {
   data: Record<string, unknown>;
   template: InferableTemplate;
   source: 'database' | 'file' | 'paste';
+  dataCardId?: string;
   isNative: boolean | null;
+};
+
+type AddMemberOptions = {
+  dataCardId?: string;
 };
 
 const SOURCE_LABELS: Record<TeamMember['source'], string> = {
@@ -144,7 +149,12 @@ export default function CharacterPartyPage() {
     }
   };
 
-  const addMember = (payload: Record<string, unknown>, source: TeamMember['source'], label?: string) => {
+  const addMember = (
+    payload: Record<string, unknown>,
+    source: TeamMember['source'],
+    label?: string,
+    options?: AddMemberOptions,
+  ) => {
     const id = randomUUID();
     const inferred = inferTemplate(payload);
     const displayName = (label && label.trim()) ? label.trim() : getDisplayNameFromData(payload);
@@ -158,6 +168,7 @@ export default function CharacterPartyPage() {
         data: payload,
         template: inferred,
         source,
+        dataCardId: options?.dataCardId,
         isNative: shouldVerifyNative ? null : false,
       }
     ]);
@@ -377,8 +388,22 @@ export default function CharacterPartyPage() {
     return `数据卡_角色组队_${sanitizeFileName(base)}.json`;
   }, [mergedData, mergedTemplate]);
 
+  const selectedDatabaseCardIds = useMemo(() => {
+    const ids = new Set<string>();
+    members.forEach((member) => {
+      if (member.source !== 'database') return;
+      if (typeof member.dataCardId === 'string' && member.dataCardId.trim()) {
+        ids.add(member.dataCardId);
+      }
+    });
+    return Array.from(ids);
+  }, [members]);
+
+  const selectedDatabaseCardIdSet = useMemo(() => new Set(selectedDatabaseCardIds), [selectedDatabaseCardIds]);
+
   const handleSelectDatabaseCharacterCard = (cardData: any) => {
     const rawName = typeof cardData?._cardName === 'string' ? cardData._cardName.trim() : '';
+    const cardId = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
     const cleaned = removePrivateKeys(cardData);
     if (!isPlainObject(cleaned)) {
       setNotice({ type: 'error', text: '数据卡格式无效，无法加入队伍' });
@@ -392,8 +417,24 @@ export default function CharacterPartyPage() {
     }
 
     const displayName = rawName || getDisplayNameFromData(cleaned);
-    addMember(cleaned, 'database', displayName);
+    if (cardId && selectedDatabaseCardIdSet.has(cardId)) {
+      setNotice({ type: 'info', text: `已在队伍中：${displayName}` });
+      return;
+    }
+    addMember(cleaned, 'database', displayName, { dataCardId: cardId || undefined });
     setNotice({ type: 'success', text: `已加入队伍：${displayName}` });
+  };
+
+  const handleToggleDatabaseCharacterCard = (cardData: any, nextSelected: boolean) => {
+    const cardId = typeof cardData?._cardId === 'string' ? cardData._cardId : '';
+    if (nextSelected) {
+      handleSelectDatabaseCharacterCard(cardData);
+      return;
+    }
+    if (!cardId) return;
+    setMembers((prev) => prev.filter((item) => item.dataCardId !== cardId));
+    const displayName = typeof cardData?._cardName === 'string' ? cardData._cardName.trim() : '';
+    setNotice({ type: 'info', text: displayName ? `已从队伍移除：${displayName}` : '已从队伍移除角色' });
   };
 
   const handleRandomMatchDatabaseCharacter = async () => {
@@ -746,8 +787,10 @@ export default function CharacterPartyPage() {
       <BattleDataModal
         isOpen={showDatabaseModal}
         onClose={() => setShowDatabaseModal(false)}
-        onSelectCard={handleSelectDatabaseCharacterCard}
+        onToggleCard={handleToggleDatabaseCharacterCard}
         selectedType="character"
+        selectionMode="multi"
+        selectedCardIds={selectedDatabaseCardIds}
       />
 
       {showImageModal && savedImageUrl ? (
