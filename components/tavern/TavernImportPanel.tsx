@@ -998,112 +998,112 @@ export function TavernImportPanel() {
                       </div>
 
                       <div className="rounded-xl border border-pink-100 bg-white/60 p-3">
-                      <div className="text-sm font-semibold text-pink-700">保存到档案馆（可选）</div>
-                      <div className="mt-2 grid gap-2 md:grid-cols-3">
-                        <button
-                          type="button"
-                          className={preferenceButtonClass(cloudPreset === 'standard')}
-                          onClick={() => setCloudPreset('standard')}
-                        >
-                          标准
-                        </button>
-                        <button type="button" className={preferenceButtonClass(cloudPreset === 'light')} onClick={() => setCloudPreset('light')}>
-                          轻量
-                        </button>
-                        <button type="button" className={preferenceButtonClass(cloudPreset === 'minimal')} onClick={() => setCloudPreset('minimal')}>
-                          极简
-                        </button>
+                        <div className="text-sm font-semibold text-pink-700">保存到档案馆（可选）</div>
+                        <div className="mt-2 grid gap-2 md:grid-cols-3">
+                          <button
+                            type="button"
+                            className={preferenceButtonClass(cloudPreset === 'standard')}
+                            onClick={() => setCloudPreset('standard')}
+                          >
+                            标准
+                          </button>
+                          <button type="button" className={preferenceButtonClass(cloudPreset === 'light')} onClick={() => setCloudPreset('light')}>
+                            轻量
+                          </button>
+                          <button type="button" className={preferenceButtonClass(cloudPreset === 'minimal')} onClick={() => setCloudPreset('minimal')}>
+                            极简
+                          </button>
+                        </div>
+
+                        {cloudSavePreview ? (
+                          <div className="mt-3 text-xs text-gray-600">
+                            {'error' in cloudSavePreview ? (
+                              <div className="text-red-600">预估失败：{cloudSavePreview.error}</div>
+                            ) : (
+                              <>
+                                <div>
+                                  预估写入大小：{formatKilobytes(cloudSavePreview.estimatedBytes)}KB / {MAX_DATA_CARD_BYTES / 1024}KB
+                                  {cloudSavePreview.overLimit ? <span className="ml-2 font-semibold text-red-600">超限</span> : null}
+                                </div>
+                                {cloudSavePreview.warnings.length > 0 ? (
+                                  <ul className="mt-2 list-disc space-y-1 pl-5">
+                                    {cloudSavePreview.warnings.map((warning, idx) => (
+                                      <li key={`tavern-cloud-warning-${idx}`}>{warning}</li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="mt-3 text-xs text-gray-600">生成后会在此处显示体积预估与裁剪提示。</div>
+                        )}
                       </div>
 
-                      {cloudSavePreview ? (
-                        <div className="mt-3 text-xs text-gray-600">
-                          {'error' in cloudSavePreview ? (
-                            <div className="text-red-600">预估失败：{cloudSavePreview.error}</div>
-                          ) : (
-                            <>
-                              <div>
-                                预估写入大小：{formatKilobytes(cloudSavePreview.estimatedBytes)}KB / {MAX_DATA_CARD_BYTES / 1024}KB
-                                {cloudSavePreview.overLimit ? <span className="ml-2 font-semibold text-red-600">超限</span> : null}
-                              </div>
-                              {cloudSavePreview.warnings.length > 0 ? (
-                                <ul className="mt-2 list-disc space-y-1 pl-5">
-                                  {cloudSavePreview.warnings.map((warning, idx) => (
-                                    <li key={`tavern-cloud-warning-${idx}`}>{warning}</li>
-                                  ))}
-                                </ul>
-                              ) : null}
-                            </>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="mt-3 text-xs text-gray-600">生成后会在此处显示体积预估与裁剪提示。</div>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
-                      {jsonSaveMode === 'download' ? (
-                        <button type="button" onClick={() => void onDownloadJson()} className="generate-button flex-1">
-                          下载数据卡 JSON
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => void onCopyJson()}
-                          className="generate-button flex-1"
-                          style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
-                        >
-                          {copyStatus === 'success' ? '已复制 ✓' : copyStatus === 'error' ? '复制失败' : '复制数据卡 JSON'}
-                        </button>
-                      )}
-
-                      <SaveToCloudButton
-                        data={outputDataCard}
-                        getData={getCloudPayload}
-                        cardType="character"
-                        buttonText="保存到云端"
-                        defaultName={defaultCloudCardName}
-                        defaultDescription={defaultCloudCardDescription}
-                        className="generate-button flex-1"
-                        style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
-                      />
-                    </div>
-
-                    {jsonSaveMode === 'text' && outputJsonPayload ? (
-                      <div className="mt-4 rounded-xl border border-pink-100 bg-white/60 p-3">
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <span className="text-xs text-gray-600">
-                            {copyStatus === 'success'
-                              ? '✅ JSON 已复制，记得粘贴到编辑器中保存为 .json 文件'
-                              : copyStatus === 'error'
-                                ? '⚠️ 复制遇到问题，可点击文本框全选后手动复制'
-                                : '提示：点击文本框可一键全选；复制后粘贴到文本编辑器保存为 .json。'}
-                          </span>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+                        {jsonSaveMode === 'download' ? (
+                          <button type="button" onClick={() => void onDownloadJson()} className="generate-button flex-1">
+                            下载数据卡 JSON
+                          </button>
+                        ) : (
                           <button
                             type="button"
                             onClick={() => void onCopyJson()}
-                            className="rounded-md border border-indigo-200 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:border-indigo-400 hover:text-indigo-700"
+                            className="generate-button flex-1"
+                            style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
                           >
-                            复制
+                            {copyStatus === 'success' ? '已复制 ✓' : copyStatus === 'error' ? '复制失败' : '复制数据卡 JSON'}
                           </button>
-                        </div>
-                        <textarea
-                          value={outputJsonPayload}
-                          readOnly
-                          className="h-64 w-full rounded-lg border bg-gray-50 p-3 font-mono text-xs text-gray-900"
-                          onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-                        />
-                        <div className="mt-2 text-center text-xs text-gray-400">点击文本框可全选内容</div>
-                      </div>
-                    ) : null}
+                        )}
 
-                    <p className="text-xs text-gray-400 text-center">
-                      提示：云端保存会自动移除大体积字段（如 `_tavern.raw`），并按所选预设裁剪正文；本地下载不受影响。
-                    </p>
+                        <SaveToCloudButton
+                          data={outputDataCard}
+                          getData={getCloudPayload}
+                          cardType="character"
+                          buttonText="保存到云端"
+                          defaultName={defaultCloudCardName}
+                          defaultDescription={defaultCloudCardDescription}
+                          className="generate-button flex-1"
+                          style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                        />
+                      </div>
+
+                      {jsonSaveMode === 'text' && outputJsonPayload ? (
+                        <div className="mt-4 rounded-xl border border-pink-100 bg-white/60 p-3">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <span className="text-xs text-gray-600">
+                              {copyStatus === 'success'
+                                ? '✅ JSON 已复制，记得粘贴到编辑器中保存为 .json 文件'
+                                : copyStatus === 'error'
+                                  ? '⚠️ 复制遇到问题，可点击文本框全选后手动复制'
+                                  : '提示：点击文本框可一键全选；复制后粘贴到文本编辑器保存为 .json。'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void onCopyJson()}
+                              className="rounded-md border border-indigo-200 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:border-indigo-400 hover:text-indigo-700"
+                            >
+                              复制
+                            </button>
+                          </div>
+                          <textarea
+                            value={outputJsonPayload}
+                            readOnly
+                            className="h-64 w-full rounded-lg border bg-gray-50 p-3 font-mono text-xs text-gray-900"
+                            onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+                          />
+                          <div className="mt-2 text-center text-xs text-gray-400">点击文本框可全选内容</div>
+                        </div>
+                      ) : null}
+
+                      <p className="text-xs text-gray-400 text-center">
+                        提示：云端保存会自动移除大体积字段（如 `_tavern.raw`），并按所选预设裁剪正文；本地下载不受影响。
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="mt-3 text-sm text-gray-700">生成中…（生成结束后将出现保存/下载选项）</div>
-              )}
+                ) : (
+                  <div className="mt-3 text-sm text-gray-700">生成中…（生成结束后将出现保存/下载选项）</div>
+                )}
 
               {outputDataCard && tachiePrompt.trim() ? (
                 <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
@@ -1116,6 +1116,7 @@ export function TavernImportPanel() {
               ) : null}
             </div>
           ) : null}
+          </div>
         </div>
       ) : null}
 
