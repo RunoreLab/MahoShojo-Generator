@@ -65,6 +65,8 @@ const findByKeywordRules = (text: string): string[] => {
     { tag: '悬疑向', re: /(悬疑|谜团|调查|线索)/i },
     { tag: '恐怖向', re: /(恐怖|惊悚|怪谈|诡异)/i },
     { tag: '百合向', re: /(百合|gl\b)/i },
+    { tag: '国风', re: /(国风|古风|中式|汉服|华风)/i },
+    { tag: '武道', re: /(武道|武术|武学|武侠|门派|拳法|剑法|刀法|轻功|内力|真气)/i },
     { tag: '赛博朋克', re: /(赛博|cyberpunk)/i },
     { tag: '科幻向', re: /(科幻|scifi|science fiction)/i },
     { tag: '奇幻向', re: /(奇幻|fantasy)/i },
