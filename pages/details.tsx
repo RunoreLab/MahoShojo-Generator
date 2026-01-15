@@ -1,6 +1,6 @@
 // pages/details.tsx
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import MagicalGirlCard from '../components/MagicalGirlCard';
@@ -409,6 +409,25 @@ const DetailsPage: React.FC = () => {
     }
   };
 
+  const resignDataCard = useCallback(async (data: any) => {
+    const response = await fetch('/api/resign-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null as any);
+      if (errorData?.shouldRedirect) {
+        redirectToArrested(errorData.reason || '编辑内容不合规');
+        return null;
+      }
+      throw new Error(errorData?.message || '签名服务器认证失败');
+    }
+
+    return response.json();
+  }, [redirectToArrested]);
+
   const buildAnswerBackupItems = (): ArrestedBackupDraftItem[] => {
     if (!answers.length) return [];
     return [
@@ -599,8 +618,22 @@ const DetailsPage: React.FC = () => {
           fallbackName,
           defaultName: '魔法少女',
         });
-        setStreamedGeneralCard(card);
-        setError(null);
+        let signedCard = card;
+        let hasSignError = false;
+        try {
+          const result = await resignDataCard(card);
+          if (!result) return;
+          signedCard = result;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '签名失败';
+          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+          hasSignError = true;
+        }
+
+        setStreamedGeneralCard(signedCard);
+        if (!hasSignError) {
+          setError(null);
+        }
         return;
       }
 
