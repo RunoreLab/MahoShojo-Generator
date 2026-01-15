@@ -1155,503 +1155,511 @@ export function TavernExportPanel() {
             </div>
           </div>
 
-          <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-              <div>
-                <div className="text-sm font-semibold text-pink-700">AI 补全文本字段（可选）</div>
-                <div className="mt-1 text-xs text-gray-600">
-                  会把 name/description/personality/scenario/tags 等内容发送到生成接口，返回建议的 scenario/first_mes/mes_example。
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+            <div className="space-y-4">
+              <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
+                <div className="grid gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-pink-700">name</label>
+                    <input
+                      className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                      value={state.fields.name}
+                      onChange={(e) => dispatch({ type: 'setField', key: 'name', value: e.target.value })}
+                      disabled={state.step === 'generating'}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-pink-700">tags（逗号或换行分隔）</label>
+                    <input
+                      className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                      value={state.fields.tags}
+                      onChange={(e) => dispatch({ type: 'setField', key: 'tags', value: e.target.value })}
+                      disabled={state.step === 'generating'}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <TavernAiFillButton loading={state.aiFilling} disabled={state.step === 'generating' || state.aiFilling} onClick={onAiFill} />
-            </div>
-
-            <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-              <input
-                type="checkbox"
-                checked={state.aiOverwriteFields}
-                onChange={(e) => dispatch({ type: 'setAiOverwriteFields', value: e.target.checked })}
-                disabled={state.step === 'generating' || state.aiFilling}
-                className="mt-1"
-              />
-              <div className="min-w-0">
-                <div className="text-sm text-gray-900">覆盖已填写的字段</div>
-                <div className="mt-1 text-xs text-gray-600">默认仅填充空字段；勾选后会覆盖你手动填写的内容。</div>
-              </div>
-            </label>
-
-            <details className="mt-3 rounded-xl border border-pink-100 bg-white/60 p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-pink-700">自定义 AI（可选）</summary>
-              <div className="mt-3">
-                <AiProviderSelector onConfigChange={setUserProviderConfig} />
-              </div>
-            </details>
-          </div>
-
-	          <div className="input-group mt-4">
-	            <label className="input-label" htmlFor="tavern-export-base">
-	              选择底图 PNG（可选）
-	            </label>
-	            <input
-              id="tavern-export-base"
-              type="file"
-              accept="image/png"
-              className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={state.step === 'generating'}
-              onChange={(event) => onBasePngSelected(event.target.files?.[0] ?? null)}
-            />
-            <div className="mt-2 flex items-center gap-2 text-xs text-gray-600">
-              <button
-                type="button"
-                className="rounded-lg border border-pink-200 bg-white/70 px-3 py-1 text-pink-700 hover:bg-pink-50"
-                onClick={() => dispatch({ type: 'usePlaceholder' })}
-                disabled={state.step === 'generating'}
-              >
-                使用占位图
-              </button>
-	              {state.basePngName ? <span>当前底图：{state.basePngName}</span> : <span>未选择底图时将自动使用占位图。</span>}
-	            </div>
-	          </div>
-
-            {tachiePrompt.trim() ? (
-              <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-                <div className="text-sm font-semibold text-pink-700">生成立绘（LibLib，可选）</div>
-                <div className="mt-1 text-xs text-gray-600">生成完成后可一键设为底图（会自动转为 PNG）。</div>
-                <div className="mt-3">
-                  <TachieGenerator
-                    key={`tavern-export-tachie-${tachiePromptKey}`}
-                    prompt={tachiePrompt}
-                    onImageUrlChange={setTachieImageUrl}
+                <div className="mt-4">
+                  <label className="block text-sm font-semibold text-pink-700">description</label>
+                  <textarea
+                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                    value={state.fields.description}
+                    onChange={(e) => dispatch({ type: 'setField', key: 'description', value: e.target.value })}
+                    disabled={state.step === 'generating'}
+                    rows={6}
                   />
                 </div>
-                <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
-                  <button
-                    type="button"
-                    className="rounded-lg border border-pink-200 bg-white/70 px-3 py-2 text-sm font-semibold text-pink-700 hover:bg-pink-50 disabled:opacity-50"
-                    onClick={() => void onUseTachieAsBase()}
-                    disabled={!tachieImageUrl || state.step === 'generating' || isApplyingTachie}
-                  >
-                    {isApplyingTachie ? '处理中...' : '一键设为底图'}
-                  </button>
-                  <div className="text-xs text-gray-600">
-                    {tachieImageUrl ? '已捕获最新立绘，可直接设为底图。' : '尚未生成立绘或未通过审核。'}
+
+                <div className="mt-4">
+                  <label className="block text-sm font-semibold text-pink-700">personality</label>
+                  <textarea
+                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                    value={state.fields.personality}
+                    onChange={(e) => dispatch({ type: 'setField', key: 'personality', value: e.target.value })}
+                    disabled={state.step === 'generating'}
+                    rows={4}
+                  />
+                </div>
+
+                <div className="mt-4">
+                  <label className="block text-sm font-semibold text-pink-700">scenario</label>
+                  <textarea
+                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                    value={state.fields.scenario}
+                    onChange={(e) => dispatch({ type: 'setField', key: 'scenario', value: e.target.value })}
+                    disabled={state.step === 'generating'}
+                    rows={3}
+                  />
+
+                  <div className="mt-3 rounded-xl border border-pink-100 bg-white/60 p-3">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <div className="text-sm font-semibold text-pink-700">A.R.E.N.A. 世界书 / 情景拼接</div>
+                        <div className="mt-1 text-xs text-gray-600">
+                          可自动附带“魔法少女竞技场 A.R.E.N.A.”世界书，并将你选择的情景卡拼接进 scenario 与世界书（character_book）。
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={state.autoArenaScenario}
+                          onChange={(e) => dispatch({ type: 'setOption', key: 'autoArenaScenario', value: e.target.checked })}
+                          disabled={state.step === 'generating'}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-sm text-gray-900">scenario 为空时自动填入默认舞台</div>
+                          <div className="mt-1 text-xs text-gray-600">默认舞台为 A.R.E.N.A.（可删改）。</div>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={state.includeArenaWorldbook}
+                          onChange={(e) => dispatch({ type: 'setOption', key: 'includeArenaWorldbook', value: e.target.checked })}
+                          disabled={state.step === 'generating'}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-sm text-gray-900">附带 A.R.E.N.A. 世界书</div>
+                          <div className="mt-1 text-xs text-gray-600">写入到 SillyTavern 的 character_book。</div>
+                        </div>
+                      </label>
+                    </div>
+
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={state.includeScenarioInScenario}
+                          onChange={(e) => dispatch({ type: 'setOption', key: 'includeScenarioInScenario', value: e.target.checked })}
+                          disabled={state.step === 'generating'}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-sm text-gray-900">将附加情景拼接进 scenario</div>
+                          <div className="mt-1 text-xs text-gray-600">会在导出时追加到 scenario 字段末尾。</div>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={state.includeScenarioInWorldbook}
+                          onChange={(e) => dispatch({ type: 'setOption', key: 'includeScenarioInWorldbook', value: e.target.checked })}
+                          disabled={state.step === 'generating'}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-sm text-gray-900">将附加情景写入世界书</div>
+                          <div className="mt-1 text-xs text-gray-600">每个情景会写成一个常驻条目（constant=true）。</div>
+                        </div>
+                      </label>
+                    </div>
+
+                    <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
+                      <button
+                        type="button"
+                        className="rounded-xl border border-pink-200 bg-pink-50 px-4 py-2 text-sm font-semibold text-pink-800 transition-colors hover:bg-pink-100 disabled:opacity-50"
+                        disabled={state.step === 'generating'}
+                        onClick={() => setShowScenarioModal(true)}
+                      >
+                        浏览在线情景库
+                      </button>
+
+                      <button
+                        type="button"
+                        className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-800 transition-colors hover:bg-teal-100 disabled:opacity-50"
+                        disabled={state.step === 'generating' || isMatching !== null}
+                        onClick={() => void onRandomMatchScenario()}
+                      >
+                        {isMatching === 'scenario' ? '匹配中...' : '随机匹配情景'}
+                      </button>
+
+                      <label className="cursor-pointer rounded-xl border border-pink-200 bg-white/70 px-4 py-2 text-sm font-semibold text-pink-800 hover:bg-pink-50">
+                        上传情景文件
+                        <input
+                          type="file"
+                          accept="application/json,.json"
+                          multiple
+                          className="hidden"
+                          disabled={state.step === 'generating'}
+                          onChange={async (event) => {
+                            const files = event.target.files ? Array.from(event.target.files) : [];
+                            if (files.length === 0) return;
+                            const errors: string[] = [];
+                            for (const file of files) {
+                              try {
+                                const text = await file.text();
+                                const json = JSON.parse(text) as unknown;
+                                const fragment = buildTavernScenarioFragment(json, { maxChars: 24_000 });
+                                if (!fragment) {
+                                  throw new Error('无法识别为情景卡（支持：通用情景/情景问卷）');
+                                }
+                                dispatch({
+                                  type: 'addScenario',
+                                  scenario: {
+                                    ...fragment,
+                                    id: createId('scenario-local'),
+                                    fileName: file.name || fragment.title,
+                                    source: 'local',
+                                  },
+                                });
+                              } catch (error) {
+                                const message = error instanceof Error ? error.message : '未知错误';
+                                errors.push(`${file.name}: ${message}`);
+                              }
+                            }
+                            if (errors.length > 0) {
+                              dispatch({
+                                type: 'setInlineError',
+                                message: `${errors.length}/${files.length} 个情景导入失败：${errors.join('；')}`,
+                              });
+                            }
+                            event.target.value = '';
+                          }}
+                        />
+                      </label>
+
+                      {state.scenarios.length > 0 ? (
+                        <button
+                          type="button"
+                          className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                          onClick={() => dispatch({ type: 'clearScenarios' })}
+                          disabled={state.step === 'generating'}
+                        >
+                          清空附加情景（{state.scenarios.length}）
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {state.scenarios.length > 0 ? (
+                      <div className="mt-3 rounded-xl border border-pink-100 bg-white/70 p-3">
+                        <div className="text-sm font-semibold text-gray-900">已添加的情景（顺序即拼接顺序）</div>
+                        <ul className="mt-2 space-y-2">
+                          {state.scenarios.map((item, index) => {
+                            const canMoveUp = index > 0;
+                            const canMoveDown = index < state.scenarios.length - 1;
+                            return (
+                              <li key={item.id} className="flex items-start justify-between gap-3 rounded-xl border border-pink-50 bg-white/80 p-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-gray-900 truncate">{item.title}</div>
+                                  <div className="mt-1 text-xs text-gray-600">
+                                    来源：{item.source === 'cloud' ? '档案馆' : '本地'} · 文件：{item.fileName}
+                                  </div>
+                                  {item.warnings.length > 0 ? (
+                                    <div className="mt-1 text-xs text-amber-700">{item.warnings.join('；')}</div>
+                                  ) : null}
+                                </div>
+                                <div className="flex shrink-0 flex-col gap-2">
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      className="h-8 w-8 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                      title="上移"
+                                      disabled={state.step === 'generating' || !canMoveUp}
+                                      onClick={() => dispatch({ type: 'moveScenario', from: index, to: index - 1 })}
+                                    >
+                                      ↑
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="h-8 w-8 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                      title="下移"
+                                      disabled={state.step === 'generating' || !canMoveDown}
+                                      onClick={() => dispatch({ type: 'moveScenario', from: index, to: index + 1 })}
+                                    >
+                                      ↓
+                                    </button>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="h-8 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    disabled={state.step === 'generating'}
+                                    onClick={() => dispatch({ type: 'removeScenario', id: item.id })}
+                                  >
+                                    移除
+                                  </button>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    ) : (
+                      <div className="mt-3 text-xs text-gray-600">
+                        未添加附加情景：你可以从在线情景库选择情景卡，或上传任意情景 JSON（通用情景/情景问卷）。
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
-            ) : null}
 
-	          <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-            <div className="grid gap-3 md:grid-cols-2">
-	              <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-	                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={state.overwriteExisting}
-                  onChange={(e) => dispatch({ type: 'setOption', key: 'overwriteExisting', value: e.target.checked })}
-                  disabled={state.step === 'generating'}
-                />
-                <div className="min-w-0">
-                  <div className="text-sm text-gray-900">覆盖已有酒馆块（推荐）</div>
-                  <div className="mt-1 text-xs text-gray-600">避免重复块导致导入结果不确定。</div>
-                </div>
-              </label>
-
-              <div className="grid gap-2">
-                <label className="flex items-center gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                  <input
-                    type="checkbox"
-                    checked={state.includeCcv3}
-                    onChange={(e) => dispatch({ type: 'setOption', key: 'includeCcv3', value: e.target.checked })}
-                    disabled={state.step === 'generating'}
-                  />
-                  <span className="text-sm text-gray-900">写入 ccv3</span>
-                </label>
-                <label className="flex items-center gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                  <input
-                    type="checkbox"
-                    checked={state.includeChara}
-                    onChange={(e) => dispatch({ type: 'setOption', key: 'includeChara', value: e.target.checked })}
-                    disabled={state.step === 'generating'}
-                  />
-                  <span className="text-sm text-gray-900">写入 chara（旧版兼容）</span>
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-            <div className="grid gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-pink-700">name</label>
-                <input
-                  className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                  value={state.fields.name}
-                  onChange={(e) => dispatch({ type: 'setField', key: 'name', value: e.target.value })}
-                  disabled={state.step === 'generating'}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-pink-700">tags（逗号或换行分隔）</label>
-                <input
-                  className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                  value={state.fields.tags}
-                  onChange={(e) => dispatch({ type: 'setField', key: 'tags', value: e.target.value })}
-                  disabled={state.step === 'generating'}
-                />
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <label className="block text-sm font-semibold text-pink-700">description</label>
-              <textarea
-                className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                value={state.fields.description}
-                onChange={(e) => dispatch({ type: 'setField', key: 'description', value: e.target.value })}
-                disabled={state.step === 'generating'}
-                rows={6}
-              />
-            </div>
-
-            <div className="mt-4">
-              <label className="block text-sm font-semibold text-pink-700">personality</label>
-              <textarea
-                className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                value={state.fields.personality}
-                onChange={(e) => dispatch({ type: 'setField', key: 'personality', value: e.target.value })}
-                disabled={state.step === 'generating'}
-                rows={4}
-              />
-            </div>
-
-          <div className="mt-4">
-            <label className="block text-sm font-semibold text-pink-700">scenario</label>
-            <textarea
-              className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-              value={state.fields.scenario}
-              onChange={(e) => dispatch({ type: 'setField', key: 'scenario', value: e.target.value })}
-              disabled={state.step === 'generating'}
-              rows={3}
-            />
-
-            <div className="mt-3 rounded-xl border border-pink-100 bg-white/60 p-3">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="grid gap-4">
                 <div>
-                  <div className="text-sm font-semibold text-pink-700">A.R.E.N.A. 世界书 / 情景拼接</div>
-                  <div className="mt-1 text-xs text-gray-600">
-                    可自动附带“魔法少女竞技场 A.R.E.N.A.”世界书，并将你选择的情景卡拼接进 scenario 与世界书（character_book）。
-                  </div>
+                  <label className="block text-sm font-semibold text-pink-700">first_mes</label>
+                  <textarea
+                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                    value={state.fields.firstMes}
+                    onChange={(e) => dispatch({ type: 'setField', key: 'firstMes', value: e.target.value })}
+                    disabled={state.step === 'generating'}
+                    rows={4}
+                  />
                 </div>
-              </div>
-
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={state.autoArenaScenario}
-                    onChange={(e) => dispatch({ type: 'setOption', key: 'autoArenaScenario', value: e.target.checked })}
-                    disabled={state.step === 'generating'}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900">scenario 为空时自动填入默认舞台</div>
-                    <div className="mt-1 text-xs text-gray-600">默认舞台为 A.R.E.N.A.（可删改）。</div>
-                  </div>
-                </label>
-
-                <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={state.includeArenaWorldbook}
-                    onChange={(e) => dispatch({ type: 'setOption', key: 'includeArenaWorldbook', value: e.target.checked })}
-                    disabled={state.step === 'generating'}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900">附带 A.R.E.N.A. 世界书</div>
-                    <div className="mt-1 text-xs text-gray-600">写入到 SillyTavern 的 character_book。</div>
-                  </div>
-                </label>
-              </div>
-
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={state.includeScenarioInScenario}
-                    onChange={(e) => dispatch({ type: 'setOption', key: 'includeScenarioInScenario', value: e.target.checked })}
-                    disabled={state.step === 'generating'}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900">将附加情景拼接进 scenario</div>
-                    <div className="mt-1 text-xs text-gray-600">会在导出时追加到 scenario 字段末尾。</div>
-                  </div>
-                </label>
-
-                <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={state.includeScenarioInWorldbook}
-                    onChange={(e) => dispatch({ type: 'setOption', key: 'includeScenarioInWorldbook', value: e.target.checked })}
-                    disabled={state.step === 'generating'}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900">将附加情景写入世界书</div>
-                    <div className="mt-1 text-xs text-gray-600">每个情景会写成一个常驻条目（constant=true）。</div>
-                  </div>
-                </label>
-              </div>
-
-              <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
-                <button
-                  type="button"
-                  className="rounded-xl border border-pink-200 bg-pink-50 px-4 py-2 text-sm font-semibold text-pink-800 transition-colors hover:bg-pink-100 disabled:opacity-50"
-                  disabled={state.step === 'generating'}
-                  onClick={() => setShowScenarioModal(true)}
-                >
-                  浏览在线情景库
-                </button>
-
-                <button
-                  type="button"
-                  className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-800 transition-colors hover:bg-teal-100 disabled:opacity-50"
-                  disabled={state.step === 'generating' || isMatching !== null}
-                  onClick={() => void onRandomMatchScenario()}
-                >
-                  {isMatching === 'scenario' ? '匹配中...' : '随机匹配情景'}
-                </button>
-
-                <label className="cursor-pointer rounded-xl border border-pink-200 bg-white/70 px-4 py-2 text-sm font-semibold text-pink-800 hover:bg-pink-50">
-                  上传情景文件
-                  <input
-                    type="file"
-                    accept="application/json,.json"
-                    multiple
-                    className="hidden"
-                    disabled={state.step === 'generating'}
-                    onChange={async (event) => {
-                      const files = event.target.files ? Array.from(event.target.files) : [];
-                      if (files.length === 0) return;
-                      const errors: string[] = [];
-                      for (const file of files) {
-                        try {
-                          const text = await file.text();
-                          const json = JSON.parse(text) as unknown;
-                          const fragment = buildTavernScenarioFragment(json, { maxChars: 24_000 });
-                          if (!fragment) {
-                            throw new Error('无法识别为情景卡（支持：通用情景/情景问卷）');
-                          }
-                          dispatch({
-                            type: 'addScenario',
-                            scenario: {
-                              ...fragment,
-                              id: createId('scenario-local'),
-                              fileName: file.name || fragment.title,
-                              source: 'local',
-                            },
-                          });
-                        } catch (error) {
-                          const message = error instanceof Error ? error.message : '未知错误';
-                          errors.push(`${file.name}: ${message}`);
-                        }
-                      }
-                      if (errors.length > 0) {
-                        dispatch({
-                          type: 'setInlineError',
-                          message: `${errors.length}/${files.length} 个情景导入失败：${errors.join('；')}`,
-                        });
-                      }
-                      event.target.value = '';
-                    }}
-                  />
-                </label>
-
-                {state.scenarios.length > 0 ? (
-                  <button
-                    type="button"
-                    className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    onClick={() => dispatch({ type: 'clearScenarios' })}
-                    disabled={state.step === 'generating'}
-                  >
-                    清空附加情景（{state.scenarios.length}）
-                  </button>
-                ) : null}
-              </div>
-
-              {state.scenarios.length > 0 ? (
-                <div className="mt-3 rounded-xl border border-pink-100 bg-white/70 p-3">
-                  <div className="text-sm font-semibold text-gray-900">已添加的情景（顺序即拼接顺序）</div>
-                  <ul className="mt-2 space-y-2">
-                    {state.scenarios.map((item, index) => {
-                      const canMoveUp = index > 0;
-                      const canMoveDown = index < state.scenarios.length - 1;
-                      return (
-                        <li key={item.id} className="flex items-start justify-between gap-3 rounded-xl border border-pink-50 bg-white/80 p-3">
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold text-gray-900 truncate">{item.title}</div>
-                            <div className="mt-1 text-xs text-gray-600">
-                              来源：{item.source === 'cloud' ? '档案馆' : '本地'} · 文件：{item.fileName}
-                            </div>
-                            {item.warnings.length > 0 ? (
-                              <div className="mt-1 text-xs text-amber-700">{item.warnings.join('；')}</div>
-                            ) : null}
-                          </div>
-                          <div className="flex shrink-0 flex-col gap-2">
-                            <div className="flex gap-2">
-                              <button
-                                type="button"
-                                className="h-8 w-8 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                                title="上移"
-                                disabled={state.step === 'generating' || !canMoveUp}
-                                onClick={() => dispatch({ type: 'moveScenario', from: index, to: index - 1 })}
-                              >
-                                ↑
-                              </button>
-                              <button
-                                type="button"
-                                className="h-8 w-8 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                                title="下移"
-                                disabled={state.step === 'generating' || !canMoveDown}
-                                onClick={() => dispatch({ type: 'moveScenario', from: index, to: index + 1 })}
-                              >
-                                ↓
-                              </button>
-                            </div>
-                            <button
-                              type="button"
-                              className="h-8 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                              disabled={state.step === 'generating'}
-                              onClick={() => dispatch({ type: 'removeScenario', id: item.id })}
-                            >
-                              移除
-                            </button>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ) : (
-                <div className="mt-3 text-xs text-gray-600">
-                  未添加附加情景：你可以从在线情景库选择情景卡，或上传任意情景 JSON（通用情景/情景问卷）。
-                </div>
-              )}
-            </div>
-          </div>
-
-            <div className="grid gap-4 mt-4">
-              <div>
-                <label className="block text-sm font-semibold text-pink-700">first_mes</label>
-                <textarea
-                  className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                  value={state.fields.firstMes}
-                  onChange={(e) => dispatch({ type: 'setField', key: 'firstMes', value: e.target.value })}
-                  disabled={state.step === 'generating'}
-                  rows={4}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-pink-700">mes_example</label>
-                <textarea
-                  className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                  value={state.fields.mesExample}
-                  onChange={(e) => dispatch({ type: 'setField', key: 'mesExample', value: e.target.value })}
-                  disabled={state.step === 'generating'}
-                  rows={4}
-                />
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-pink-700">creator</label>
-                <input
-                  className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                  value={state.fields.creator}
-                  onChange={(e) => dispatch({ type: 'setField', key: 'creator', value: e.target.value })}
-                  disabled={state.step === 'generating'}
-                />
-                <div className="mt-1 text-xs text-gray-600">建议保留自动拼接的来源信息，可按需调整。</div>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-pink-700">creator_notes</label>
-                <textarea
-                  className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                  value={state.fields.creatorNotes}
-                  onChange={(e) => dispatch({ type: 'setField', key: 'creatorNotes', value: e.target.value })}
-                  disabled={state.step === 'generating'}
-                  rows={3}
-                />
-              </div>
-              <div className="grid gap-3">
                 <div>
-                  <label className="block text-sm font-semibold text-pink-700">talkativeness（0~1）</label>
+                  <label className="block text-sm font-semibold text-pink-700">mes_example</label>
+                  <textarea
+                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                    value={state.fields.mesExample}
+                    onChange={(e) => dispatch({ type: 'setField', key: 'mesExample', value: e.target.value })}
+                    disabled={state.step === 'generating'}
+                    rows={4}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-pink-700">creator</label>
                   <input
-                    type="number"
-                    step="0.05"
-                    min="0"
-                    max="1"
                     className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                    value={String(state.fields.talkativeness)}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'talkativeness', value: Number(e.target.value) })}
+                    value={state.fields.creator}
+                    onChange={(e) => dispatch({ type: 'setField', key: 'creator', value: e.target.value })}
                     disabled={state.step === 'generating'}
                   />
-                  <div className="mt-1 text-xs text-gray-600">
-                    SillyTavern 常用的“话多程度”参数。参考值：0.3（更简洁）/ 0.5（中性，默认）/ 0.8（更健谈）。不确定就保持 0.5。
-                  </div>
+                  <div className="mt-1 text-xs text-gray-600">建议保留自动拼接的来源信息，可按需调整。</div>
                 </div>
-                <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                <div>
+                  <label className="block text-sm font-semibold text-pink-700">creator_notes</label>
+                  <textarea
+                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                    value={state.fields.creatorNotes}
+                    onChange={(e) => dispatch({ type: 'setField', key: 'creatorNotes', value: e.target.value })}
+                    disabled={state.step === 'generating'}
+                    rows={3}
+                  />
+                </div>
+                <div className="grid gap-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-pink-700">talkativeness（0~1）</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0"
+                      max="1"
+                      className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                      value={String(state.fields.talkativeness)}
+                      onChange={(e) => dispatch({ type: 'setField', key: 'talkativeness', value: Number(e.target.value) })}
+                      disabled={state.step === 'generating'}
+                    />
+                    <div className="mt-1 text-xs text-gray-600">
+                      SillyTavern 常用的“话多程度”参数。参考值：0.3（更简洁）/ 0.5（中性，默认）/ 0.8（更健谈）。不确定就保持 0.5。
+                    </div>
+                  </div>
+                  <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                    <input
+                      type="checkbox"
+                      checked={state.fields.fav}
+                      onChange={(e) => dispatch({ type: 'setField', key: 'fav', value: e.target.checked })}
+                      disabled={state.step === 'generating'}
+                      className="mt-1"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm text-gray-900">fav（收藏标记）</div>
+                      <div className="mt-1 text-xs text-gray-600">通常仅影响 SillyTavern 侧的排序/显示，不影响角色设定；默认不勾选。</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <details className="rounded-xl border border-pink-100 bg-white/60 p-3">
+                <summary className="cursor-pointer text-sm font-semibold text-pink-700">高级字段（谨慎写入）</summary>
+                <div className="mt-3">
+                  <label className="block text-sm font-semibold text-pink-700">system_prompt</label>
+                  <textarea
+                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                    value={state.fields.systemPrompt}
+                    onChange={(e) => dispatch({ type: 'setField', key: 'systemPrompt', value: e.target.value })}
+                    disabled={state.step === 'generating'}
+                    rows={3}
+                  />
+                </div>
+                <div className="mt-3">
+                  <label className="block text-sm font-semibold text-pink-700">post_history_instructions</label>
+                  <textarea
+                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                    value={state.fields.postHistoryInstructions}
+                    onChange={(e) => dispatch({ type: 'setField', key: 'postHistoryInstructions', value: e.target.value })}
+                    disabled={state.step === 'generating'}
+                    rows={3}
+                  />
+                </div>
+                <div className="mt-2 text-xs text-gray-600">
+                  注意：这些字段很容易携带隐私信息或提示注入内容。默认推荐保持为空。
+                </div>
+              </details>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-pink-700">AI 补全文本字段（可选）</div>
+                    <div className="mt-1 text-xs text-gray-600">
+                      会把 name/description/personality/scenario/tags 等内容发送到生成接口，返回建议的 scenario/first_mes/mes_example。
+                    </div>
+                  </div>
+
+                  <TavernAiFillButton loading={state.aiFilling} disabled={state.step === 'generating' || state.aiFilling} onClick={onAiFill} />
+                </div>
+
+                <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
                   <input
                     type="checkbox"
-                    checked={state.fields.fav}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'fav', value: e.target.checked })}
-                    disabled={state.step === 'generating'}
+                    checked={state.aiOverwriteFields}
+                    onChange={(e) => dispatch({ type: 'setAiOverwriteFields', value: e.target.checked })}
+                    disabled={state.step === 'generating' || state.aiFilling}
                     className="mt-1"
                   />
                   <div className="min-w-0">
-                    <div className="text-sm text-gray-900">fav（收藏标记）</div>
-                    <div className="mt-1 text-xs text-gray-600">通常仅影响 SillyTavern 侧的排序/显示，不影响角色设定；默认不勾选。</div>
+                    <div className="text-sm text-gray-900">覆盖已填写的字段</div>
+                    <div className="mt-1 text-xs text-gray-600">默认仅填充空字段；勾选后会覆盖你手动填写的内容。</div>
                   </div>
                 </label>
+
+                <details className="mt-3 rounded-xl border border-pink-100 bg-white/60 p-3">
+                  <summary className="cursor-pointer text-sm font-semibold text-pink-700">自定义 AI（可选）</summary>
+                  <div className="mt-3">
+                    <AiProviderSelector onConfigChange={setUserProviderConfig} />
+                  </div>
+                </details>
+              </div>
+
+              <div className="input-group">
+                <label className="input-label" htmlFor="tavern-export-base">
+                  选择底图 PNG（可选）
+                </label>
+                <input
+                  id="tavern-export-base"
+                  type="file"
+                  accept="image/png"
+                  className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={state.step === 'generating'}
+                  onChange={(event) => onBasePngSelected(event.target.files?.[0] ?? null)}
+                />
+                <div className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-pink-200 bg-white/70 px-3 py-1 text-pink-700 hover:bg-pink-50"
+                    onClick={() => dispatch({ type: 'usePlaceholder' })}
+                    disabled={state.step === 'generating'}
+                  >
+                    使用占位图
+                  </button>
+                  {state.basePngName ? <span>当前底图：{state.basePngName}</span> : <span>未选择底图时将自动使用占位图。</span>}
+                </div>
+              </div>
+
+              {tachiePrompt.trim() ? (
+                <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
+                  <div className="text-sm font-semibold text-pink-700">生成立绘（LibLib，可选）</div>
+                  <div className="mt-1 text-xs text-gray-600">生成完成后可一键设为底图（会自动转为 PNG）。</div>
+                  <div className="mt-3">
+                    <TachieGenerator
+                      key={`tavern-export-tachie-${tachiePromptKey}`}
+                      prompt={tachiePrompt}
+                      onImageUrlChange={setTachieImageUrl}
+                    />
+                  </div>
+                  <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-pink-200 bg-white/70 px-3 py-2 text-sm font-semibold text-pink-700 hover:bg-pink-50 disabled:opacity-50"
+                      onClick={() => void onUseTachieAsBase()}
+                      disabled={!tachieImageUrl || state.step === 'generating' || isApplyingTachie}
+                    >
+                      {isApplyingTachie ? '处理中...' : '一键设为底图'}
+                    </button>
+                    <div className="text-xs text-gray-600">
+                      {tachieImageUrl ? '已捕获最新立绘，可直接设为底图。' : '尚未生成立绘或未通过审核。'}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={state.overwriteExisting}
+                      onChange={(e) => dispatch({ type: 'setOption', key: 'overwriteExisting', value: e.target.checked })}
+                      disabled={state.step === 'generating'}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm text-gray-900">覆盖已有酒馆块（推荐）</div>
+                      <div className="mt-1 text-xs text-gray-600">避免重复块导致导入结果不确定。</div>
+                    </div>
+                  </label>
+
+                  <div className="grid gap-2">
+                    <label className="flex items-center gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                      <input
+                        type="checkbox"
+                        checked={state.includeCcv3}
+                        onChange={(e) => dispatch({ type: 'setOption', key: 'includeCcv3', value: e.target.checked })}
+                        disabled={state.step === 'generating'}
+                      />
+                      <span className="text-sm text-gray-900">写入 ccv3</span>
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
+                      <input
+                        type="checkbox"
+                        checked={state.includeChara}
+                        onChange={(e) => dispatch({ type: 'setOption', key: 'includeChara', value: e.target.checked })}
+                        disabled={state.step === 'generating'}
+                      />
+                      <span className="text-sm text-gray-900">写入 chara（旧版兼容）</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
+                <button type="button" className="generate-button mb-0 w-full" disabled={state.step === 'generating'} onClick={onGenerate}>
+                  生成并下载酒馆卡 PNG
+                </button>
+
+                {state.step === 'generating' ? <div className="mt-2 text-xs text-gray-700">生成中…（大字段可能需要数秒）</div> : null}
+                {state.step === 'done' ? <div className="mt-2 text-xs text-green-700">已生成并开始下载。</div> : null}
               </div>
             </div>
-
-            <details className="mt-4 rounded-xl border border-pink-100 bg-white/60 p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-pink-700">高级字段（谨慎写入）</summary>
-              <div className="mt-3">
-                <label className="block text-sm font-semibold text-pink-700">system_prompt</label>
-                <textarea
-                  className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                  value={state.fields.systemPrompt}
-                  onChange={(e) => dispatch({ type: 'setField', key: 'systemPrompt', value: e.target.value })}
-                  disabled={state.step === 'generating'}
-                  rows={3}
-                />
-              </div>
-              <div className="mt-3">
-                <label className="block text-sm font-semibold text-pink-700">post_history_instructions</label>
-                <textarea
-                  className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                  value={state.fields.postHistoryInstructions}
-                  onChange={(e) => dispatch({ type: 'setField', key: 'postHistoryInstructions', value: e.target.value })}
-                  disabled={state.step === 'generating'}
-                  rows={3}
-                />
-              </div>
-              <div className="mt-2 text-xs text-gray-600">
-                注意：这些字段很容易携带隐私信息或提示注入内容。默认推荐保持为空。
-              </div>
-            </details>
-
-            <button type="button" className="generate-button mt-4 mb-0" disabled={state.step === 'generating'} onClick={onGenerate}>
-              生成并下载酒馆卡 PNG
-            </button>
-
-            {state.step === 'generating' ? <div className="mt-2 text-xs text-gray-700">生成中…（大字段可能需要数秒）</div> : null}
-            {state.step === 'done' ? <div className="mt-2 text-xs text-green-700">已生成并开始下载。</div> : null}
           </div>
         </>
       ) : null}

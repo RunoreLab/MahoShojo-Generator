@@ -714,287 +714,290 @@ export function TavernImportPanel() {
       {state.step === 'parsing' ? <div className="mt-3 text-sm text-gray-700">解析中…</div> : null}
 
       {state.parseResult && selectedCandidate && selectedNormalized ? (
-        <>
-          <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-            <div className="text-sm font-semibold text-pink-700">候选来源块</div>
-            <div className="mt-2 grid grid-cols-1 gap-2">
-              {state.parseResult.candidates.map((candidate, index) => {
-                const info = normalizeTavernCard(candidate).normalized;
-                return (
-                  <label
-                    key={`${candidate.keyword}-${candidate.chunkType}-${index}`}
-                    className="flex cursor-pointer items-start gap-2 rounded-lg border border-pink-100 bg-white/70 p-2 hover:bg-pink-50"
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="space-y-4">
+            <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
+              <div className="text-sm font-semibold text-pink-700">候选来源块</div>
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                {state.parseResult.candidates.map((candidate, index) => {
+                  const info = normalizeTavernCard(candidate).normalized;
+                  return (
+                    <label
+                      key={`${candidate.keyword}-${candidate.chunkType}-${index}`}
+                      className="flex cursor-pointer items-start gap-2 rounded-lg border border-pink-100 bg-white/70 p-2 hover:bg-pink-50"
+                    >
+                      <input
+                        type="radio"
+                        name="tavern-candidate"
+                        checked={state.selectedCandidateIndex === index}
+                        onChange={() => {
+                          dispatch({ type: 'selectCandidate', index });
+                          resetGeneratedPreview();
+                        }}
+                        className="mt-1"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-sm text-gray-900">
+                          <span className="font-semibold">{candidate.keyword}</span>
+                          <span className="ml-2 text-xs text-gray-600">
+                            {candidate.chunkType} · {candidate.parseMethod}
+                            {info.spec ? ` · ${info.spec}` : ''}
+                            {info.specVersion ? `@${info.specVersion}` : ''}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-700">name：{info.name}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
+              <div className="grid gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-pink-700">导入为</label>
+                  <select
+                    className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                    value={state.targetTemplate}
+                    onChange={(e) => {
+                      dispatch({ type: 'setTemplate', template: e.target.value as DataCardTemplate });
+                      resetGeneratedPreview();
+                    }}
+                    disabled={state.step === 'converting'}
                   >
+                    <option value="general">通用角色（最稳，推荐）</option>
+                    <option value="magical-girl">魔法少女（保守填充）</option>
+                    <option value="canshou">残兽（保守填充）</option>
+                  </select>
+                  <div className="mt-2 text-xs text-gray-600">
+                    “保守填充”会尽量不做过度推理，无法结构化的信息会被放入分析/研究备注中。
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-pink-700">保真选项</label>
+                  <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/80 p-3">
                     <input
-                      type="radio"
-                      name="tavern-candidate"
-                      checked={state.selectedCandidateIndex === index}
-                      onChange={() => {
-                        dispatch({ type: 'selectCandidate', index });
+                      type="checkbox"
+                      className="mt-1"
+                      checked={state.keepRaw}
+                      onChange={(e) => {
+                        dispatch({ type: 'setKeepRaw', value: e.target.checked });
                         resetGeneratedPreview();
                       }}
-                      className="mt-1"
+                      disabled={state.step === 'converting'}
                     />
                     <div className="min-w-0">
-                      <div className="text-sm text-gray-900">
-                        <span className="font-semibold">{candidate.keyword}</span>
-                        <span className="ml-2 text-xs text-gray-600">
-                          {candidate.chunkType} · {candidate.parseMethod}
-                          {info.spec ? ` · ${info.spec}` : ''}
-                          {info.specVersion ? `@${info.specVersion}` : ''}
-                        </span>
+                      <div className="text-sm text-gray-900">同时保存 `_tavern.raw`（体积很大，仅建议本地下载）</div>
+                      <div className="mt-1 text-xs text-gray-600">
+                        若你计划未来回导到 SillyTavern 或需要完整诊断信息，可开启；保存到档案馆时建议关闭。
                       </div>
-                      <div className="text-xs text-gray-700">name：{info.name}</div>
                     </div>
                   </label>
-                );
-              })}
-            </div>
-          </div>
-
-          <TavernCardPreview normalized={selectedNormalized} warnings={combinedWarnings} />
-
-          <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-            <div className="grid gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-pink-700">导入为</label>
-                <select
-                  className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                  value={state.targetTemplate}
-                  onChange={(e) => {
-                    dispatch({ type: 'setTemplate', template: e.target.value as DataCardTemplate });
-                    resetGeneratedPreview();
-                  }}
-                  disabled={state.step === 'converting'}
-                >
-                  <option value="general">通用角色（最稳，推荐）</option>
-                  <option value="magical-girl">魔法少女（保守填充）</option>
-                  <option value="canshou">残兽（保守填充）</option>
-                </select>
-                <div className="mt-2 text-xs text-gray-600">
-                  “保守填充”会尽量不做过度推理，无法结构化的信息会被放入分析/研究备注中。
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-pink-700">保真选项</label>
-                <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/80 p-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={state.keepRaw}
-                    onChange={(e) => {
-                      dispatch({ type: 'setKeepRaw', value: e.target.checked });
-                      resetGeneratedPreview();
-                    }}
-                    disabled={state.step === 'converting'}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900">同时保存 `_tavern.raw`（体积很大，仅建议本地下载）</div>
-                    <div className="mt-1 text-xs text-gray-600">
-                      若你计划未来回导到 SillyTavern 或需要完整诊断信息，可开启；保存到档案馆时建议关闭。
-                    </div>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <label className="block text-sm font-semibold text-pink-700">转换模式</label>
-              <div className="mt-2 grid gap-2">
-                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/80 p-3">
-                  <input
-                    type="radio"
-                    name="tavern-convert-mode"
-                    className="mt-1"
-                    checked={state.convertMode === 'rules'}
-                    onChange={() => {
-                      dispatch({ type: 'setConvertMode', mode: 'rules' });
-                      resetGeneratedPreview();
-                    }}
-                    disabled={state.step === 'converting'}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900">规则映射（不调用 AI）</div>
-                    <div className="mt-1 text-xs text-gray-600">稳定、可解释、不会发起网络请求。</div>
-                  </div>
-                </label>
-
-                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/80 p-3">
-                  <input
-                    type="radio"
-                    name="tavern-convert-mode"
-                    className="mt-1"
-                    checked={state.convertMode === 'ai'}
-                    onChange={() => {
-                      dispatch({ type: 'setConvertMode', mode: 'ai' });
-                      resetGeneratedPreview();
-                    }}
-                    disabled={state.step === 'converting'}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm text-gray-900">AI 深度转换（可选）</div>
-                    <div className="mt-1 text-xs text-gray-600">
-                      结构化质量更高，但会发送裁剪后的输入包到生成接口；输出会通过 schema 校验。
-                    </div>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            {state.convertMode === 'ai' ? (
-              <div className="mt-4 rounded-xl border border-pink-100 bg-white/60 p-3">
-                <div className="grid gap-3">
-                  <div className="rounded-xl border border-pink-100 bg-white/70 p-3">
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between text-left text-sm font-semibold text-pink-700"
-                      onClick={() => setShowLanguageSection(!showLanguageSection)}
-                      disabled={state.step === 'converting'}
-                    >
-                      <span>生成语言</span>
-                      <span className="text-xs">{showLanguageSection ? '▲' : '▼'}</span>
-                    </button>
-                    {showLanguageSection ? (
-                      <div className="mt-3">
-                        <select
-                          className="w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                          value={selectedLanguage}
-                          onChange={(e) => {
-                            setSelectedLanguage(e.target.value);
-                            resetGeneratedPreview();
-                          }}
-                          disabled={state.step === 'converting'}
-                        >
-                          {languages.map((lang) => (
-                            <option key={lang.code} value={lang.code}>
-                              {lang.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-xs text-gray-600">当前：{selectedLanguage}</div>
-                    )}
-                  </div>
-
-                  <div className="rounded-xl border border-pink-100 bg-white/70 p-3">
-                    <GenerationModeSwitcher
-                      label="生成方式"
-                      value={generationMode}
-                      disabled={state.step === 'converting'}
-                      helper={false}
-                      onChange={(mode) => {
-                        setGenerationMode(mode);
+              <div className="mt-4">
+                <label className="block text-sm font-semibold text-pink-700">转换模式</label>
+                <div className="mt-2 grid gap-2">
+                  <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/80 p-3">
+                    <input
+                      type="radio"
+                      name="tavern-convert-mode"
+                      className="mt-1"
+                      checked={state.convertMode === 'rules'}
+                      onChange={() => {
+                        dispatch({ type: 'setConvertMode', mode: 'rules' });
                         resetGeneratedPreview();
                       }}
+                      disabled={state.step === 'converting'}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm text-gray-900">规则映射（不调用 AI）</div>
+                      <div className="mt-1 text-xs text-gray-600">稳定、可解释、不会发起网络请求。</div>
+                    </div>
+                  </label>
+
+                  <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-pink-100 bg-white/80 p-3">
+                    <input
+                      type="radio"
+                      name="tavern-convert-mode"
+                      className="mt-1"
+                      checked={state.convertMode === 'ai'}
+                      onChange={() => {
+                        dispatch({ type: 'setConvertMode', mode: 'ai' });
+                        resetGeneratedPreview();
+                      }}
+                      disabled={state.step === 'converting'}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm text-gray-900">AI 深度转换（可选）</div>
+                      <div className="mt-1 text-xs text-gray-600">
+                        结构化质量更高，但会发送裁剪后的输入包到生成接口；输出会通过 schema 校验。
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {state.convertMode === 'ai' ? (
+                <div className="mt-4 rounded-xl border border-pink-100 bg-white/60 p-3">
+                  <div className="grid gap-3">
+                    <div className="rounded-xl border border-pink-100 bg-white/70 p-3">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between text-left text-sm font-semibold text-pink-700"
+                        onClick={() => setShowLanguageSection(!showLanguageSection)}
+                        disabled={state.step === 'converting'}
+                      >
+                        <span>生成语言</span>
+                        <span className="text-xs">{showLanguageSection ? '▲' : '▼'}</span>
+                      </button>
+                      {showLanguageSection ? (
+                        <div className="mt-3">
+                          <select
+                            className="w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                            value={selectedLanguage}
+                            onChange={(e) => {
+                              setSelectedLanguage(e.target.value);
+                              resetGeneratedPreview();
+                            }}
+                            disabled={state.step === 'converting'}
+                          >
+                            {languages.map((lang) => (
+                              <option key={lang.code} value={lang.code}>
+                                {lang.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-xs text-gray-600">当前：{selectedLanguage}</div>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-pink-100 bg-white/70 p-3">
+                      <GenerationModeSwitcher
+                        label="生成方式"
+                        value={generationMode}
+                        disabled={state.step === 'converting'}
+                        helper={false}
+                        onChange={(mode) => {
+                          setGenerationMode(mode);
+                          resetGeneratedPreview();
+                        }}
+                      />
+                      <div className="mt-2 text-xs text-gray-600">
+                        {generationMode === 'stream'
+                          ? '提示：流式生成会实时输出 Markdown，并生成【通用角色卡】；若需要结构化的魔法少女/残兽字段与 userAnswers，请切换为非流式。'
+                          : '提示：非流式生成会返回结构化数据卡（魔法少女/残兽会同时生成 userAnswers），适合后续升华/导出酒馆卡。'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <AiProviderSelector
+                      onConfigChange={handleAiProviderConfigChange}
                     />
                     <div className="mt-2 text-xs text-gray-600">
-                      {generationMode === 'stream'
-                        ? '提示：流式生成会实时输出 Markdown，并生成【通用角色卡】；若需要结构化的魔法少女/残兽字段与 userAnswers，请切换为非流式。'
-                        : '提示：非流式生成会返回结构化数据卡（魔法少女/残兽会同时生成 userAnswers），适合后续升华/导出酒馆卡。'}
+                      可选：使用自有 API Key 冷却统一为 3 秒；使用官方 Key 冷却为 {Math.ceil(OFFICIAL_KEY_MAX_AI_COOLDOWN_MS / 1000)} 秒。API Key 仅存储于浏览器本地（localStorage），不会上传到服务器。
                     </div>
                   </div>
                 </div>
+              ) : null}
 
-                <div className="mt-3">
-                  <AiProviderSelector
-                    onConfigChange={handleAiProviderConfigChange}
-                  />
-                  <div className="mt-2 text-xs text-gray-600">
-                    可选：使用自有 API Key 冷却统一为 3 秒；使用官方 Key 冷却为 {Math.ceil(OFFICIAL_KEY_MAX_AI_COOLDOWN_MS / 1000)} 秒。API Key 仅存储于浏览器本地（localStorage），不会上传到服务器。
-                  </div>
+              <div className="mt-4">
+                <button
+                  type="button"
+                  className="generate-button mb-0 w-full"
+                  disabled={state.step === 'converting' || (state.convertMode === 'ai' && isCooldown)}
+                  onClick={onGenerate}
+                >
+                  {state.step === 'converting'
+                    ? '生成中…'
+                    : state.convertMode === 'ai' && isCooldown
+                      ? `冷却中 (${remainingTime}s)`
+                      : '生成角色卡'}
+                </button>
+                <div className="mt-2 text-xs text-gray-600">
+                  生成后会在下方展示角色卡预览；你可以保存图片、下载/复制 JSON，或保存到云端（档案馆）。
                 </div>
-              </div>
-            ) : null}
-
-            <div className="mt-4">
-              <button
-                type="button"
-                className="generate-button mb-0 w-full"
-                disabled={state.step === 'converting' || (state.convertMode === 'ai' && isCooldown)}
-                onClick={onGenerate}
-              >
-                {state.step === 'converting'
-                  ? '生成中…'
-                  : state.convertMode === 'ai' && isCooldown
-                    ? `冷却中 (${remainingTime}s)`
-                    : '生成角色卡'}
-              </button>
-              <div className="mt-2 text-xs text-gray-600">
-                生成后会在下方展示角色卡预览；你可以保存图片、下载/复制 JSON，或保存到云端（档案馆）。
               </div>
             </div>
           </div>
 
-          {previewDataCard ? (
-            <div className="mt-4">
-              <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
-                <div className="text-sm font-semibold text-pink-700">角色卡预览</div>
-                <div className="mt-3">
-                  {outputTemplateForPreview === 'magical-girl' ? (
-                    <MagicalGirlCard
-                      magicalGirl={previewDataCard as any}
-                      gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)"
-                      onSaveImage={handleSaveImage}
-                      imageSaveMode={imageSaveMode}
-                      saveButtonLabel={imageSaveButtonLabel}
-                    />
-                  ) : outputTemplateForPreview === 'canshou' ? (
-                    <CanshouCard
-                      canshou={normalizeCanshouForCard(previewDataCard)}
-                      onSaveImage={handleSaveImage}
-                      imageSaveMode={imageSaveMode}
-                      saveButtonLabel={imageSaveButtonLabel}
-                    />
-                  ) : (
-                    <GeneralCharacterCard
-                      general={previewDataCard as any}
-                      isStreaming={isPreviewStreaming}
-                      onSaveImage={handleSaveImage}
-                      imageSaveMode={imageSaveMode}
-                      saveButtonLabel={imageSaveButtonLabel}
-                    />
-                  )}
+          <div className="space-y-4">
+            <TavernCardPreview normalized={selectedNormalized} warnings={combinedWarnings} />
+
+            {previewDataCard ? (
+              <div>
+                <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
+                  <div className="text-sm font-semibold text-pink-700">角色卡预览</div>
+                  <div className="mt-3">
+                    {outputTemplateForPreview === 'magical-girl' ? (
+                      <MagicalGirlCard
+                        magicalGirl={previewDataCard as any}
+                        gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)"
+                        onSaveImage={handleSaveImage}
+                        imageSaveMode={imageSaveMode}
+                        saveButtonLabel={imageSaveButtonLabel}
+                      />
+                    ) : outputTemplateForPreview === 'canshou' ? (
+                      <CanshouCard
+                        canshou={normalizeCanshouForCard(previewDataCard)}
+                        onSaveImage={handleSaveImage}
+                        imageSaveMode={imageSaveMode}
+                        saveButtonLabel={imageSaveButtonLabel}
+                      />
+                    ) : (
+                      <GeneralCharacterCard
+                        general={previewDataCard as any}
+                        isStreaming={isPreviewStreaming}
+                        onSaveImage={handleSaveImage}
+                        imageSaveMode={imageSaveMode}
+                        saveButtonLabel={imageSaveButtonLabel}
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {outputDataCard ? (
-                <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-                  <div className="space-y-5 text-left">
-                    <div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium text-gray-800">设定长图保存方式</span>
-                        <span className="text-xs text-gray-500">推荐：{recommendedImageMode === 'download' ? '下载' : '弹窗'}</span>
+                {outputDataCard ? (
+                  <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
+                    <div className="space-y-5 text-left">
+                      <div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-medium text-gray-800">设定长图保存方式</span>
+                          <span className="text-xs text-gray-500">推荐：{recommendedImageMode === 'download' ? '下载' : '弹窗'}</span>
+                        </div>
+                        <div className="mt-2 flex gap-2">
+                          <button type="button" className={preferenceButtonClass(imageSaveMode === 'download')} onClick={() => setImageSaveMode('download')}>
+                            💾 一键下载
+                          </button>
+                          <button type="button" className={preferenceButtonClass(imageSaveMode === 'modal')} onClick={() => setImageSaveMode('modal')}>
+                            📱 弹窗长按保存
+                          </button>
+                        </div>
+                        <p className="mt-2 text-xs text-gray-500">提示：保存按钮在角色卡最底部；移动端建议弹窗方式。</p>
                       </div>
-                      <div className="mt-2 flex gap-2">
-                        <button type="button" className={preferenceButtonClass(imageSaveMode === 'download')} onClick={() => setImageSaveMode('download')}>
-                          💾 一键下载
-                        </button>
-                        <button type="button" className={preferenceButtonClass(imageSaveMode === 'modal')} onClick={() => setImageSaveMode('modal')}>
-                          📱 弹窗长按保存
-                        </button>
-                      </div>
-                      <p className="mt-2 text-xs text-gray-500">提示：保存按钮在角色卡最底部；移动端建议弹窗方式。</p>
-                    </div>
 
-                    <div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium text-gray-800">数据卡 JSON 保存方式</span>
-                        <span className="text-xs text-gray-500">推荐：{recommendedJsonMode === 'download' ? '下载' : '复制'}</span>
+                      <div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-medium text-gray-800">数据卡 JSON 保存方式</span>
+                          <span className="text-xs text-gray-500">推荐：{recommendedJsonMode === 'download' ? '下载' : '复制'}</span>
+                        </div>
+                        <div className="mt-2 flex gap-2">
+                          <button type="button" className={preferenceButtonClass(jsonSaveMode === 'download')} onClick={() => setJsonSaveMode('download')}>
+                            下载 JSON
+                          </button>
+                          <button type="button" className={preferenceButtonClass(jsonSaveMode === 'text')} onClick={() => setJsonSaveMode('text')}>
+                            复制 JSON
+                          </button>
+                        </div>
+                        <p className="mt-2 text-xs text-gray-500">两种方式可随时切换；若你开启了 `_tavern.raw`，JSON 会变大。</p>
                       </div>
-                      <div className="mt-2 flex gap-2">
-                        <button type="button" className={preferenceButtonClass(jsonSaveMode === 'download')} onClick={() => setJsonSaveMode('download')}>
-                          下载 JSON
-                        </button>
-                        <button type="button" className={preferenceButtonClass(jsonSaveMode === 'text')} onClick={() => setJsonSaveMode('text')}>
-                          复制 JSON
-                        </button>
-                      </div>
-                      <p className="mt-2 text-xs text-gray-500">两种方式可随时切换；若你开启了 `_tavern.raw`，JSON 会变大。</p>
-                    </div>
 
-                    <div className="rounded-xl border border-pink-100 bg-white/60 p-3">
+                      <div className="rounded-xl border border-pink-100 bg-white/60 p-3">
                       <div className="text-sm font-semibold text-pink-700">保存到档案馆（可选）</div>
                       <div className="mt-2 grid gap-2 md:grid-cols-3">
                         <button
@@ -1113,7 +1116,7 @@ export function TavernImportPanel() {
               ) : null}
             </div>
           ) : null}
-        </>
+        </div>
       ) : null}
 
       <ImagePreviewModal

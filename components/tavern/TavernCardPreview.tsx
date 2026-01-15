@@ -39,16 +39,17 @@ function CollapsibleText({ label, value, previewChars = 280 }: CollapsibleTextPr
 export interface TavernCardPreviewProps {
   normalized: TavernCardNormalized;
   warnings?: string[];
+  className?: string;
 }
 
-export function TavernCardPreview({ normalized, warnings }: TavernCardPreviewProps) {
+export function TavernCardPreview({ normalized, warnings, className }: TavernCardPreviewProps) {
   const tagsText = useMemo(() => {
     if (!normalized.tags || normalized.tags.length === 0) return '';
     return normalized.tags.join('、');
   }, [normalized.tags]);
 
   return (
-    <div className="mt-4 rounded-2xl border border-pink-200 bg-pink-50/40 p-4">
+    <div className={`rounded-2xl border border-pink-200 bg-pink-50/40 p-4 ${className ?? ''}`}>
       <div className="flex flex-col gap-1">
         <div className="text-base font-bold text-pink-800">{normalized.name}</div>
         <div className="text-xs text-gray-700">
@@ -80,4 +81,3 @@ export function TavernCardPreview({ normalized, warnings }: TavernCardPreviewPro
     </div>
   );
 }
-
