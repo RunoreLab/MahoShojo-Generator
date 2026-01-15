@@ -113,6 +113,7 @@ interface ExportFields {
   firstMes: string;
   mesExample: string;
   tags: string;
+  creator: string;
   creatorNotes: string;
   systemPrompt: string;
   postHistoryInstructions: string;
@@ -181,6 +182,7 @@ const initialFields: ExportFields = {
   firstMes: '',
   mesExample: '',
   tags: '',
+  creator: DEFAULT_TAVERN_CREATOR,
   creatorNotes: DEFAULT_CREATOR_NOTES,
   systemPrompt: '',
   postHistoryInstructions: '',
@@ -324,7 +326,8 @@ const buildCreatorNotesWithCloudDescription = (dataCard: unknown, baseCreatorNot
 const buildDefaultFieldsFromDataCard = (
   template: InferableTemplate,
   card: unknown,
-  exportMeta?: ExportMeta | null
+  exportMeta?: ExportMeta | null,
+  creator?: string
 ): ExportFields => {
   const meta = readTavernMeta(card);
   const metaTags = meta ? safeStringArray(meta['tags']) : [];
@@ -340,6 +343,7 @@ const buildDefaultFieldsFromDataCard = (
   const fromMetaMesExample = fromMeta('mesExample') || fromMeta('mes_example');
   const baseCreatorNotes = fromMeta('creatorNotes') || fromMeta('creator_notes') || DEFAULT_CREATOR_NOTES;
   const creatorNotes = buildCreatorNotesWithCloudDescription(card, baseCreatorNotes);
+  const creatorField = creator?.trim() || safeString(meta?.['creator']) || DEFAULT_TAVERN_CREATOR;
 
   if (template === 'magical-girl') {
     const codename = safeString(card['codename']) || safeString(card['name']) || '未命名角色';
@@ -420,6 +424,7 @@ const buildDefaultFieldsFromDataCard = (
       firstMes: fromMetaFirstMes || recommended.firstMes || '',
       mesExample: fromMetaMesExample || recommended.mesExample || '',
       tags: recommendedTags,
+      creator: creatorField,
       creatorNotes,
     };
   }
@@ -451,6 +456,7 @@ const buildDefaultFieldsFromDataCard = (
       firstMes: fromMetaFirstMes,
       mesExample: fromMetaMesExample,
       tags: recommendedTags,
+      creator: creatorField,
       creatorNotes,
     };
   }
@@ -466,6 +472,7 @@ const buildDefaultFieldsFromDataCard = (
     firstMes: fromMetaFirstMes,
     mesExample: fromMetaMesExample,
     tags: recommendedTags,
+    creator: creatorField,
     creatorNotes,
   };
 };
@@ -696,7 +703,8 @@ export function TavernExportPanel() {
       const json = JSON.parse(text) as unknown;
       const template = inferTemplate(json);
       const exportMeta = await buildExportMeta(json);
-      const fields = buildDefaultFieldsFromDataCard(template, json, exportMeta);
+      const creatorField = buildCreatorField(exportMeta, user);
+      const fields = buildDefaultFieldsFromDataCard(template, json, exportMeta, creatorField);
       dispatch({ type: 'setDataCard', data: json, template, fields, meta: exportMeta });
     } catch (error) {
       dispatch({ type: 'setError', message: error instanceof Error ? error.message : '解析数据卡失败' });
@@ -707,7 +715,8 @@ export function TavernExportPanel() {
     try {
       const template = inferTemplate(payload);
       const exportMeta = await buildExportMeta(payload);
-      const fields = buildDefaultFieldsFromDataCard(template, payload, exportMeta);
+      const creatorField = buildCreatorField(exportMeta, user);
+      const fields = buildDefaultFieldsFromDataCard(template, payload, exportMeta, creatorField);
       dispatch({ type: 'setDataCard', data: payload, template, fields, meta: exportMeta });
       setShowCharacterModal(false);
     } catch (error) {
@@ -1050,7 +1059,6 @@ export function TavernExportPanel() {
           })
         : undefined;
 
-      const creator = buildCreatorField(state.exportMeta, user);
       const exportExtensions = buildExportExtensions(state.dataCard, state.exportMeta, user);
       const card = createTavernV3Card({
         name: state.fields.name.trim() || '未命名角色',
@@ -1063,7 +1071,7 @@ export function TavernExportPanel() {
         system_prompt: state.fields.systemPrompt,
         post_history_instructions: state.fields.postHistoryInstructions,
         tags: tagsArray,
-        creator,
+        creator: state.fields.creator,
         extensions: {
           talkativeness: Number(state.fields.talkativeness) || 0.5,
           fav: Boolean(state.fields.fav),
@@ -1558,6 +1566,16 @@ export function TavernExportPanel() {
             </div>
 
             <div className="mt-4 grid gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-pink-700">creator</label>
+                <input
+                  className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
+                  value={state.fields.creator}
+                  onChange={(e) => dispatch({ type: 'setField', key: 'creator', value: e.target.value })}
+                  disabled={state.step === 'generating'}
+                />
+                <div className="mt-1 text-xs text-gray-600">建议保留自动拼接的来源信息，可按需调整。</div>
+              </div>
               <div>
                 <label className="block text-sm font-semibold text-pink-700">creator_notes</label>
                 <textarea
