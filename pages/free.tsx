@@ -763,7 +763,7 @@ export default function FreeGeneratorPage() {
       <div className="magic-background-white">
         <div className="container !max-w-[980px] lg:!max-w-[1200px]">
           <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-            <div className="card !max-w-none">
+            <div className="card !max-w-none min-w-0">
               <div className="text-center mb-4">
                 <h1 className="text-2xl font-bold text-pink-700">自由生成</h1>
                 <p className="subtitle mt-2">
@@ -964,7 +964,7 @@ export default function FreeGeneratorPage() {
               </div>
             </div>
 
-            <div>
+            <div className="min-w-0">
               {resultNode ? (
                 <div className="space-y-4">{resultNode}</div>
               ) : (

@@ -513,7 +513,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                   )}
                   {!isPlaceholder && data?.wasCorrected && <span className="text-yellow-600 whitespace-nowrap">(格式已修正)</span>}
                   {!isPlaceholder && tierToShow && (
-                    <span className="flex items-center gap-1">
+                    <span className="flex flex-wrap items-center gap-1 min-w-0">
                       <TierBadge tier={tierToShow} />
                       {typeof techLevel === 'string' && techLevel.trim() ? (
                         <TechBadge mode="level" techScore={techScore} techLevel={techLevel} />
@@ -583,11 +583,11 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
 
             {!isPlaceholder && (
               <div className="mt-1 text-xs text-gray-600">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <span className="whitespace-nowrap">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+                  <span className="whitespace-normal break-words sm:whitespace-nowrap">
                     技术值：{typeof techScore === 'number' ? techScore : '-'}
                   </span>
-                  <span className="whitespace-nowrap">
+                  <span className="whitespace-normal break-words sm:whitespace-nowrap">
                     严格：{generationParticipant?.queues.strict.rating ?? meta?.ratings.strict?.rating ?? '-'}
                     {(() => {
                       const q = generationParticipant?.queues.strict;
@@ -611,7 +611,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                       return null;
                     })()}
                   </span>
-                  <span className="whitespace-nowrap">
+                  <span className="whitespace-normal break-words sm:whitespace-nowrap">
                     自由：{generationParticipant?.queues.free.rating ?? meta?.ratings.free?.rating ?? '-'}
                     {(() => {
                       const q = generationParticipant?.queues.free;

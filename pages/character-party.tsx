@@ -502,7 +502,7 @@ export default function CharacterPartyPage() {
             )}
 
             <div className="mt-6 grid gap-6 lg:grid-cols-2 lg:items-start">
-              <div className="space-y-6">
+              <div className="space-y-6 min-w-0">
                 <div className="rounded-xl border border-gray-200 bg-white/70 p-4">
                   <DatabaseSelector
                     className="!mb-0"
@@ -676,7 +676,7 @@ export default function CharacterPartyPage() {
                 </div>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-6 min-w-0">
                 <div>
                   <h2 className="text-center text-xl font-bold text-gray-800 mb-4">合并结果预览</h2>
 
