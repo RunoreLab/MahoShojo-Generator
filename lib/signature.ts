@@ -43,7 +43,8 @@ const extractSignaturePayload = (dataWithSignature: any): SignaturePayload | nul
 
     if (!topSignature && !metadataSignature) return null;
 
-    const { signature: _ignored, ...dataWithoutSignature } = dataWithSignature;
+    const dataWithoutSignature = { ...dataWithSignature } as Record<string, unknown>;
+    delete dataWithoutSignature.signature;
     const candidates: object[] = [dataWithoutSignature];
 
     if (metadataSignature && isPlainObject(dataWithoutSignature.metadata) && 'signature' in dataWithoutSignature.metadata) {
