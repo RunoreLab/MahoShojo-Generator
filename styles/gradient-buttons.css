@@ -168,6 +168,15 @@
       #38bdf8 100%);
 }
 
+.magic-tavern .gradient-overlay {
+  background: linear-gradient(45deg,
+      #0ea5e9 0%,
+      #22c55e 25%,
+      #a855f7 50%,
+      #fb7185 75%,
+      #0ea5e9 100%);
+}
+
 .character-party .gradient-overlay {
   background: linear-gradient(45deg,
       #e0f2fe 0%,

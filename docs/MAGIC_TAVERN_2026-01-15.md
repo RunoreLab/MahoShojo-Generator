@@ -234,18 +234,20 @@ IndexedDB 建议分表：
 
 ### 6.2 安全拦截
 
-- 输入前：对用户输入与卡片摘要使用 `lib/sensitive-word-filter` 先行检查
-  - `getSensitiveWordRedirectTarget` 命中 → 视为高风险，阻止发送并跳转 `/arrested`（写入 `arrested-backup`）
-  - 其它命中 → 仅本地拦截与提示，保留输入草稿，允许修改后重试
+- 输入前（客户端）：对用户输入与卡片摘要调用 `getSensitiveWordRedirectTarget` 做快速检查
+  - 命中敏感词：阻止发送并跳转 `/arrested`（写入 `arrested-backup`）
+  - 说明：当前敏感词机制无“软拦截”分级，命中即跳转；如需“仅提示不跳转”，需要引入词表分级并基于 `shouldRedirectToArrested` 分流（后续可做）
 - 服务端：在 `/api/magic-tavern/*` 调用 `enforceTextSafety` 做二次校验（本地敏感词 + AI 安全检查）
   - 合并文本：用户输入 + 角色/情景摘要 + 会话摘要（如有）
   - 文本过长时截断到 **50,000** 字符（与现有生成接口保持一致）
-  - 审查拒绝分级：`shouldRedirect=true` 走 `/arrested`；否则返回 `400` 并提示调整输入
+  - 审查拒绝：当前实现返回 `400` + `shouldRedirect=true`，前端统一跳转 `/arrested`（与现有生成接口行为保持一致）
+  - 实现备注：MVP 默认关闭 `enableAiSafetyCheck`（仅做本地敏感词过滤），避免 BYOK 模式下因供应商能力差异导致安全审查不稳定；后续可再按需开启
 - 输出后：使用 `lib/shield-word-filter` 遮罩可疑内容；若出现敏感词 **立即截断本轮输出并停止流**（详见 13.17）
 - 若触发敏感词：
   - **输入阶段**：不发送请求；保留草稿与对话历史
   - **输出阶段**：不跳转页面；仅截断当轮输出并标记 `blocked`，允许“重新生成/修改后再生成”
   - 绝不在客户端落库违规原文；仅存安全截断内容与安全元信息
+ - 自备 Key：API Key 仅存储于本地浏览器；请求时会随 HTTPS 发送至 Edge 以转发调用上游，但不得落库/不得写入日志/不得回传到埋点（实现时严禁打印 request body）
 
 ### 6.3 约束“角色卡注入”
 
@@ -545,6 +547,7 @@ export type MagicTavernSession = {
     choiceCount?: number;
     outputFormat?: 'jsonl' | 'markdown';
     language?: 'zh-CN' | 'ja-JP' | 'en-US';
+    userDisplayName?: string; // 当 playerRoleId=null 时，{{user}} 的称呼（默认取登录用户名或“旅人”）
     enableSummary?: boolean;
     presetId?: string; // 预设情景（arena-classic / arena-kizuna / arena-daily）
     worldbookPresetId?: string; // 预设世界书（arena-core 等）
@@ -621,11 +624,11 @@ export type MagicTavernSession = {
 ### 13.7 安全与合规细化
 
 - **输入前**：`getSensitiveWordRedirectTarget` 检测用户输入与“卡片摘要”。
-  - 命中高风险：阻止发送并跳转 `/arrested`（写入 `arrested-backup`，保留草稿）
-  - 其它命中：仅本地拦截与提示，不跳转，允许用户修改后重试
+  - 命中敏感词：阻止发送并跳转 `/arrested`（写入 `arrested-backup`，保留草稿）
 - **服务端**：`enforceTextSafety` 做 AI 安全审查（建议 `aiPromptTemplate=free`）。
-  - 触发安全拒绝：返回 `400`，携带 `shouldRedirect`（`true` 则跳转 `/arrested`，`false` 则提示调整输入）
+  - 触发安全拒绝：返回 `400`，携带 `shouldRedirect=true`（当前实现固定），前端跳转 `/arrested`
   - 安全服务不可用：返回 `503`，前端提示稍后重试
+  - 实现备注：MVP 默认关闭 `enableAiSafetyCheck`（仅做本地敏感词过滤），避免 BYOK 模式下因供应商能力差异导致审查不稳定
 - **输出后**：`applyShieldWords` 遮罩可疑文本；若检测到敏感词则**立即截断并停止流**，消息标记 `blocked`（详见 13.17）。
 - **自备 Key 限制**：接口层强制 `providerId !== system`，避免误用系统 Key。
 
@@ -716,7 +719,7 @@ export type MagicTavernPreset = {
 
 **响应**
 - `200`：流式输出；`outputFormat=jsonl` 时为 JSONL 行，`outputFormat=markdown` 时为 Markdown 文本流。
-- `400`：参数无效（如 `choiceCount` 超限、`modelId` 不存在）或内容安全拒绝（返回 `shouldRedirect`，`true` 跳转 `/arrested`，`false` 提示调整输入）。
+- `400`：参数无效（如 `choiceCount` 超限、`modelId` 不存在）或内容安全拒绝（返回 `shouldRedirect=true`，跳转 `/arrested`）。
 - `401/403`：缺少或禁用 API Key（**强制禁止** `providerId=system`）。
 - `503`：内容安全服务不可用（`enforceTextSafety` 调用失败）。
 - `500`：生成失败。
@@ -750,7 +753,7 @@ export type MagicTavernPreset = {
 - JSONL 解析失败时：当行降级为 `narration`，保留原文。
 - 流式中断：标记当前消息为 `error`，允许用户“继续生成”或“重试”。
 - **输出敏感词**：立即终止流，截断至最后安全边界，标记 `blocked`，保留已生成安全片段并提供“重新生成/修改输入”入口（不跳转）。
-- 安全拒绝：若服务端返回 `shouldRedirect=true`，本地不落库、清理草稿并跳转 `/arrested`；若 `shouldRedirect=false` 则提示调整输入并允许重试。
+- 安全拒绝：若服务端返回 `shouldRedirect=true`，本地不落库、清理草稿并跳转 `/arrested`（当前 `enforceTextSafety` 固定为 `true`）。
 - `outputFormat=markdown`：不尝试解析 `choices`，如需要选项另调 `generate-choices`。
 
 ### 13.13 分支编辑策略（定稿）
@@ -823,8 +826,10 @@ export type MagicTavernPreset = {
 ### 13.16 本地配置与草稿键（定稿）
 
 - `localStorage` 键：
-  - `magic-tavern:provider`：AiProviderSelector 专用（providerId/modelId/apiKey）。
-  - `magic-tavern:preferences`：outputFormat/enableChoices/choiceCount/language/lastPresetId/lastWorldbookPresetId。
+  - `magic-tavern.customProvider.selected`：AiProviderSelector 专用（当前 providerId）。
+  - `magic-tavern.customProvider.apiKey.<providerId>`：AiProviderSelector 专用（按 providerId 存储 apiKey，便于切换供应商不丢失配置）。
+  - `magic-tavern.customProvider.model.<providerId>`：AiProviderSelector 专用（按 providerId 存储 modelId）。
+  - `magic-tavern:preferences`：outputFormat/enableChoices/choiceCount/language/userDisplayName/lastPresetId/lastWorldbookPresetId。
   - `magic-tavern:recent-session`：最近打开的 sessionId（便于恢复）。
 - 草稿输入：优先存入 IndexedDB（随会话扩展字段），或使用 `magic-tavern:drafts:{sessionId}` 兜底（刷新可恢复）。
 

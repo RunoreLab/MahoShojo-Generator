@@ -96,6 +96,16 @@ export const featureCategories: FeatureCategory[] = [
         href: '/tavern',
         className: 'tavern-ecosystem',
         color: 'white'
+      },
+      {
+        id: 'magic-tavern',
+        src: '/magic-tavern-white.svg',
+        width: 240,
+        height: 100,
+        alt: '魔法酒馆',
+        href: '/magic-tavern',
+        className: 'magic-tavern',
+        color: 'white'
       }
     ]
   },
