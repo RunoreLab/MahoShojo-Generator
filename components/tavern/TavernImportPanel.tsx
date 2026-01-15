@@ -5,6 +5,7 @@ import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiPr
 import CanshouCard from '@/components/CanshouCard';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
+import GeneralScenarioCard from '@/components/GeneralScenarioCard';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import TachieGenerator from '@/components/TachieGenerator';
@@ -18,7 +19,7 @@ import { downloadBlob } from '@/lib/client/blobUrl';
 import { useCooldown } from '@/lib/cooldown';
 import { createBlankDataCard, type DataCardTemplate } from '@/lib/data-card-converter';
 import { formatKilobytes, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
-import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import {
   buildTavernCloudSavePayload,
@@ -30,7 +31,8 @@ import {
   type TavernImportMeta,
   type TavernParseResult,
 } from '@/lib/tavern-card';
-import type { CanshouData, GeneralCharacterData, MagicalGirlData } from '@/lib/schemas';
+import { buildTavernScenarioFragment } from '@/lib/tavern-card/scenario';
+import type { CanshouData, GeneralCharacterData, GeneralScenarioData, MagicalGirlData, ScenarioData } from '@/lib/schemas';
 import { useAuth } from '@/lib/useAuth';
 
 import { TavernCardPreview } from './TavernCardPreview';
@@ -195,6 +197,88 @@ const buildGeneralMarkdown = (normalized: TavernParseResult['normalized']): stri
   return lines.join('\n');
 };
 
+const buildGeneralScenarioMarkdown = (normalized: TavernParseResult['normalized']): string => {
+  const title = normalized.name?.trim() || '未命名情景';
+  const lines: string[] = [];
+  lines.push(`# ${title}`);
+
+  if (normalized.scenario?.trim()) {
+    lines.push('');
+    lines.push('## 场景概览');
+    lines.push(normalized.scenario.trim());
+  }
+
+  if (normalized.description?.trim()) {
+    lines.push('');
+    lines.push('## 背景摘要');
+    lines.push(normalized.description.trim());
+  }
+
+  if (normalized.personality?.trim()) {
+    lines.push('');
+    lines.push('## 氛围');
+    lines.push(normalized.personality.trim());
+  }
+
+  if (normalized.firstMes?.trim()) {
+    lines.push('');
+    lines.push('## 开场白');
+    lines.push(normalized.firstMes.trim());
+  }
+
+  if (normalized.mesExample?.trim()) {
+    lines.push('');
+    lines.push('## 对话样例');
+    lines.push(normalized.mesExample.trim());
+  }
+
+  if (normalized.tags && normalized.tags.length > 0) {
+    lines.push('');
+    lines.push('## 标签');
+    lines.push(normalized.tags.join('、'));
+  }
+
+  return lines.join('\n');
+};
+
+const buildStructuredScenarioFromTavern = (normalized: TavernParseResult['normalized']): ScenarioData => {
+  const base = createBlankDataCard('scenario') as ScenarioData;
+  const title = normalized.name?.trim() || base.title || '未命名情景';
+  const scenarioText = normalized.scenario?.trim() || '';
+  const description = normalized.description?.trim() || scenarioText;
+  const scenarioType = normalized.tags && normalized.tags.length > 0 ? normalized.tags[0] : '';
+
+  const eventsParts: string[] = [];
+  if (normalized.firstMes?.trim()) {
+    eventsParts.push(`【开场白】\n${normalized.firstMes.trim()}`);
+  }
+  if (normalized.mesExample?.trim()) {
+    eventsParts.push(`【对话样例】\n${normalized.mesExample.trim()}`);
+  }
+
+  const events = eventsParts.length > 0 ? eventsParts.join('\n\n') : scenarioText;
+  const atmosphere = normalized.personality?.trim() || '';
+  const sceneFeatures = scenarioText && scenarioText !== description ? scenarioText : '';
+
+  return {
+    ...base,
+    title,
+    scenario_type: scenarioType,
+    description,
+    elements: {
+      ...base.elements,
+      scene: {
+        ...(base.elements?.scene ?? {}),
+        features: sceneFeatures,
+      },
+      roles: base.elements?.roles ?? [],
+      events: events,
+      atmosphere: atmosphere,
+      development: base.elements?.development ?? [],
+    },
+  };
+};
+
 const buildTavernMeta = (parseResult: TavernParseResult, candidate: TavernCardCandidate): TavernImportMeta => {
   const normalized = normalizeTavernCard(candidate).normalized;
   const selectionWarnings = normalizeTavernCard(candidate).warnings;
@@ -283,6 +367,9 @@ export function TavernImportPanel() {
     return normalizeTavernCard(selectedCandidate).normalized;
   }, [selectedCandidate]);
 
+  const isScenarioTemplate = state.targetTemplate === 'scenario' || state.targetTemplate === 'general-scenario';
+  const targetLabel = isScenarioTemplate ? '情景' : '角色';
+
   const selectionWarnings = useMemo(() => {
     if (!selectedCandidate) return [];
     return normalizeTavernCard(selectedCandidate).warnings;
@@ -300,8 +387,9 @@ export function TavernImportPanel() {
   }, [state.parseResult, selectionWarnings, aiAttachmentPreview]);
 
   const defaultCloudCardName = useMemo(() => {
-    return (selectedNormalized?.name ?? '').trim() || '未命名角色';
-  }, [selectedNormalized?.name]);
+    const fallback = isScenarioTemplate ? '未命名情景' : '未命名角色';
+    return (selectedNormalized?.name ?? '').trim() || fallback;
+  }, [selectedNormalized?.name, isScenarioTemplate]);
 
   const defaultCloudCardDescription = useMemo(() => {
     if (!selectedNormalized) return 'SillyTavern 导入';
@@ -336,6 +424,17 @@ export function TavernImportPanel() {
     if (markdown === null) return null;
 
     const fallbackName = (selectedNormalized?.name ?? '').trim();
+    const isScenarioTarget = state.targetTemplate === 'scenario' || state.targetTemplate === 'general-scenario';
+
+    if (isScenarioTarget) {
+      const { card } = buildGeneralScenarioCardFromMarkdown({
+        markdown,
+        fallbackTitle: fallbackName,
+        defaultTitle: '情景',
+      });
+      return card;
+    }
+
     const defaultName =
       state.targetTemplate === 'magical-girl' ? '魔法少女' : state.targetTemplate === 'canshou' ? '残兽' : '角色';
 
@@ -467,6 +566,18 @@ export function TavernImportPanel() {
           onText: (text) => setStreamingMarkdown(text),
         });
 
+        const isScenarioTarget = state.targetTemplate === 'scenario' || state.targetTemplate === 'general-scenario';
+        if (isScenarioTarget) {
+          const { card } = buildGeneralScenarioCardFromMarkdown({
+            markdown,
+            fallbackTitle: selectedNormalized.name,
+            defaultTitle: '情景',
+          });
+          setStreamedGeneralCard(card);
+          startCooldown(tavernAiCooldownMs);
+          return { ...card, _tavern: tavernPayload };
+        }
+
         const defaultName =
           state.targetTemplate === 'magical-girl' ? '魔法少女' : state.targetTemplate === 'canshou' ? '残兽' : '角色';
         const { card } = buildGeneralCharacterCardFromMarkdown({
@@ -504,6 +615,26 @@ export function TavernImportPanel() {
       const generatedRecord = typeof generated === 'object' && generated !== null ? (generated as Record<string, unknown>) : {};
       startCooldown(tavernAiCooldownMs);
       return { ...generatedRecord, _tavern: tavernPayload };
+    }
+
+    if (state.targetTemplate === 'general-scenario') {
+      const base = createBlankDataCard('general-scenario') as GeneralScenarioData;
+      const output: WithTavern<GeneralScenarioData> = {
+        ...base,
+        title: selectedNormalized.name || base.title || '未命名情景',
+        content: buildGeneralScenarioMarkdown(selectedNormalized),
+        _tavern: tavernPayload,
+      };
+      return output;
+    }
+
+    if (state.targetTemplate === 'scenario') {
+      const structured = buildStructuredScenarioFromTavern(selectedNormalized);
+      const output: WithTavern<ScenarioData> = {
+        ...structured,
+        _tavern: tavernPayload,
+      };
+      return output;
     }
 
     if (state.targetTemplate === 'general') {
@@ -626,10 +757,44 @@ export function TavernImportPanel() {
   const currentOutputKey = buildOutputKey();
   const outputDataCard = currentOutputKey && state.outputKey === currentOutputKey ? state.outputDataCard : null;
   const outputTemplateForPreview: DataCardTemplate =
-    state.convertMode === 'ai' && generationMode === 'stream' ? 'general' : state.targetTemplate;
+    state.convertMode === 'ai' && generationMode === 'stream'
+      ? (state.targetTemplate === 'scenario' || state.targetTemplate === 'general-scenario' ? 'general-scenario' : 'general')
+      : state.targetTemplate;
 
   const previewDataCard = outputDataCard ?? streamedGeneralCardForDisplay;
   const isPreviewStreaming = state.convertMode === 'ai' && generationMode === 'stream' && state.step === 'converting';
+
+  const scenarioPreview = useMemo(() => {
+    if (!previewDataCard) return null;
+
+    if (outputTemplateForPreview === 'general-scenario') {
+      const record = isRecord(previewDataCard) ? previewDataCard : {};
+      return {
+        title: ensureString(record.title, '未命名情景'),
+        content: ensureString(record.content),
+      };
+    }
+
+    if (outputTemplateForPreview === 'scenario') {
+      const fragment = buildTavernScenarioFragment(previewDataCard);
+      if (fragment) {
+        return {
+          title: fragment.title,
+          content: fragment.content,
+        };
+      }
+      return {
+        title: '情景',
+        content: JSON.stringify(previewDataCard, null, 2),
+      };
+    }
+
+    return null;
+  }, [previewDataCard, outputTemplateForPreview]);
+
+  const cloudCardType = outputTemplateForPreview === 'scenario' || outputTemplateForPreview === 'general-scenario'
+    ? 'scenario'
+    : 'character';
 
   const resolvedCloudAuthor = useMemo(() => {
     if (user && typeof user.id === 'number' && user.username) {
@@ -658,6 +823,10 @@ export function TavernImportPanel() {
 
   const tachiePrompt = useMemo(() => {
     if (!outputDataCard) return '';
+
+    if (outputTemplateForPreview === 'scenario' || outputTemplateForPreview === 'general-scenario') {
+      return '';
+    }
 
     if (outputTemplateForPreview === 'magical-girl') {
       const record = isRecord(outputDataCard) ? outputDataCard : {};
@@ -767,11 +936,15 @@ export function TavernImportPanel() {
                     disabled={state.step === 'converting'}
                   >
                     <option value="general">通用角色（最稳，推荐）</option>
+                    <option value="general-scenario">通用情景（规则映射推荐）</option>
                     <option value="magical-girl">魔法少女（保守填充）</option>
                     <option value="canshou">残兽（保守填充）</option>
+                    <option value="scenario">情景（结构化 JSON）</option>
                   </select>
                   <div className="mt-2 text-xs text-gray-600">
-                    “保守填充”会尽量不做过度推理，无法结构化的信息会被放入分析/研究备注中。
+                    {isScenarioTemplate
+                      ? '规则映射更推荐通用情景卡；结构化情景建议使用 AI 转换。'
+                      : '“保守填充”会尽量不做过度推理，无法结构化的信息会被放入分析/研究备注中。'}
                   </div>
                 </div>
 
@@ -890,8 +1063,12 @@ export function TavernImportPanel() {
                       />
                       <div className="mt-2 text-xs text-gray-600">
                         {generationMode === 'stream'
-                          ? '提示：流式生成会实时输出 Markdown，并生成【通用角色卡】；若需要结构化的魔法少女/残兽字段与 userAnswers，请切换为非流式。'
-                          : '提示：非流式生成会返回结构化数据卡（魔法少女/残兽会同时生成 userAnswers），适合后续升华/导出酒馆卡。'}
+                          ? (isScenarioTemplate
+                            ? '提示：流式生成会实时输出 Markdown，并生成【通用情景卡】。'
+                            : '提示：流式生成会实时输出 Markdown，并生成【通用角色卡】；若需要结构化的魔法少女/残兽字段与 userAnswers，请切换为非流式。')
+                          : (isScenarioTemplate
+                            ? '提示：非流式生成会返回结构化情景 JSON（包含 elements 等字段），更适合进阶玩法。'
+                            : '提示：非流式生成会返回结构化数据卡（魔法少女/残兽会同时生成 userAnswers），适合后续升华/导出酒馆卡。')}
                       </div>
                     </div>
                   </div>
@@ -918,10 +1095,10 @@ export function TavernImportPanel() {
                     ? '生成中…'
                     : state.convertMode === 'ai' && isCooldown
                       ? `冷却中 (${remainingTime}s)`
-                      : '生成角色卡'}
+                      : `生成${targetLabel}卡`}
                 </button>
                 <div className="mt-2 text-xs text-gray-600">
-                  生成后会在下方展示角色卡预览；你可以保存图片、下载/复制 JSON，或保存到云端（档案馆）。
+                  生成后会在下方展示{targetLabel}卡预览；你可以保存图片、下载/复制 JSON，或保存到云端（档案馆）。
                 </div>
               </div>
             </div>
@@ -933,7 +1110,7 @@ export function TavernImportPanel() {
             {previewDataCard ? (
               <div>
                 <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
-                  <div className="text-sm font-semibold text-pink-700">角色卡预览</div>
+                  <div className="text-sm font-semibold text-pink-700">{targetLabel}卡预览</div>
                   <div className="mt-3">
                     {outputTemplateForPreview === 'magical-girl' ? (
                       <MagicalGirlCard
@@ -946,6 +1123,14 @@ export function TavernImportPanel() {
                     ) : outputTemplateForPreview === 'canshou' ? (
                       <CanshouCard
                         canshou={normalizeCanshouForCard(previewDataCard)}
+                        onSaveImage={handleSaveImage}
+                        imageSaveMode={imageSaveMode}
+                        saveButtonLabel={imageSaveButtonLabel}
+                      />
+                    ) : outputTemplateForPreview === 'scenario' || outputTemplateForPreview === 'general-scenario' ? (
+                      <GeneralScenarioCard
+                        scenario={scenarioPreview ?? { title: '未命名情景', content: '' }}
+                        isStreaming={isPreviewStreaming}
                         onSaveImage={handleSaveImage}
                         imageSaveMode={imageSaveMode}
                         saveButtonLabel={imageSaveButtonLabel}
@@ -978,7 +1163,7 @@ export function TavernImportPanel() {
                             📱 弹窗长按保存
                           </button>
                         </div>
-                        <p className="mt-2 text-xs text-gray-500">提示：保存按钮在角色卡最底部；移动端建议弹窗方式。</p>
+                        <p className="mt-2 text-xs text-gray-500">提示：保存按钮在{targetLabel}卡最底部；移动端建议弹窗方式。</p>
                       </div>
 
                       <div>
@@ -1059,7 +1244,7 @@ export function TavernImportPanel() {
                         <SaveToCloudButton
                           data={outputDataCard}
                           getData={getCloudPayload}
-                          cardType="character"
+                          cardType={cloudCardType}
                           buttonText="保存到云端"
                           defaultName={defaultCloudCardName}
                           defaultDescription={defaultCloudCardDescription}

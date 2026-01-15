@@ -8,6 +8,7 @@ import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { buildScenarioMarkdownRequirements } from '@/lib/prompts/scenario';
 
 const log = getLogger('api-gen-scenario-stream');
 
@@ -131,13 +132,7 @@ ${normalizedEmptyFields.map((f) => `- ${f}`).join('\n')}
     const prompt = `
 你是一个富有想象力的故事场景设计师。你的任务是根据用户提供的要素，生成一份【情景】设定文本，用于后续故事。
 
-【重要】输出要求：
-1) 必须使用【${language}】创作。
-2) 必须直接输出 Markdown 正文，不要输出“我将要/我不能”之类的解释。
-3) 第 1 行必须是一级标题（以 "# " 开头），写情景标题，不超过 30 字。
-4) 在开头 20 行内，尽量给出明确字段（若无法推断可写“未指定”）：
-   - 标题：...
-5) 正文建议包含：场景概览、时间、地点、环境特征、预设NPC（可选）、核心事件、整体氛围、发展方向（多条）。
+${buildScenarioMarkdownRequirements(language)}
 
 ${emptyFieldsInstruction}
 ${titleHintText}
@@ -176,4 +171,3 @@ ${answerText}
 }
 
 export default handler;
-

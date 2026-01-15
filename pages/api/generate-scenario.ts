@@ -8,6 +8,7 @@ import { generateSignature } from '@/lib/signature';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { buildScenarioCorePrinciples } from '@/lib/prompts/scenario';
 
 const log = getLogger('api-gen-scenario');
 
@@ -79,13 +80,7 @@ ${fieldsToKeepEmpty.map(f => `- ${f}`).join('\n')}
     return `
 你是一个富有想象力的故事场景设计师。你的任务是根据用户提供的几个核心要素，构思并生成一个结构化的、可供后续故事使用的自定义情景（Scenario）文件。
 
-## 核心创作原则
-
-1.  **世界观一致性**：你创作的所有内容，都必须严格遵循“魔法少女”这一核心世界观。情景可以多样，但不能出现与魔法少女主题严重冲突的元素（例如：星际舰队、现代战争等），并且应当符合公序良俗。
-2.  **创意与整合**：你的核心工作是将用户零散的回答，富有创意地整合成一个逻辑自洽、充满想象力的完整情景。你需要发掘回答背后隐藏的动机与深层含义，并将其反映在情景的各个要素中。
-3.  **结构化输出**：你必须严格按照我提供的JSON Schema格式返回结果，不得有任何遗漏或格式错误。
-4.  **处理留白**：用户可能不会回答所有问题，或者回答得很模糊。在这种情况下，你拥有一定的创作自由度。对于留空的核心要素（如“角色”），请直接将其设定为空值或空数组，并在描述中注明“未指定”或“待定”，以便用户后续添加。
-5.  **语言使用**：请你必须使用【${language}】进行内容创作。
+${buildScenarioCorePrinciples(language)}
 
 ${emptyFieldsInstruction}
 
