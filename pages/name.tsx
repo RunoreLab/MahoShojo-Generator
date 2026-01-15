@@ -326,7 +326,10 @@ export default function Name() {
         <div className="container">
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '1rem' }}>
-              <img src="/logo.svg" width={250} height={160} alt="Logo" />
+              <picture>
+                <source media="(prefers-color-scheme: dark)" srcSet="/logo-white.svg" />
+                <img src="/logo.svg" width={250} height={160} alt="Logo" />
+              </picture>
             </div>
             <p className="subtitle text-center">你是什么魔法少女呢！</p>
             <p className="subtitle text-center">
@@ -335,8 +338,8 @@ export default function Name() {
             <EncyclopediaLinks
               items={[{ slug: 'character-generator', text: '百科：角色生成（/name、/details、/canshou）' }]}
             />
-            <div style={{ marginTop: '1rem', marginBottom: '2rem', textAlign: 'center' }}>
-              <p style={{ fontSize: '0.8rem', marginTop: '1rem', color: '#999', fontStyle: 'italic' }}>本测试设定来源于小说《下班，然后变成魔法少女》</p>
+            <div className="mt-4 mb-8 text-center">
+              <p className="text-sm text-gray-500 italic">本测试设定来源于小说《下班，然后变成魔法少女》</p>
             </div>
             <div className="input-group">
               <label htmlFor="name" className="input-label">

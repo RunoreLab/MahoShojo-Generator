@@ -157,13 +157,7 @@ export default function SaveCardModal({
             <button
               onClick={onClose}
               disabled={isSaving}
-              className={`flex-1 generate-button ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
-              style={{
-                background: 'white',
-                backgroundImage: 'none',
-                color: '#6b7280',
-                border: '2px solid #e5e7eb'
-              }}
+              className={`flex-1 generate-button bg-white/80 text-gray-600 border-2 border-gray-200 hover:bg-white ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               取消
             </button>

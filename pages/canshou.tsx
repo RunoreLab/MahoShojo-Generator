@@ -634,7 +634,10 @@ const CanshouPage: React.FC = () => {
         <div className="container">
           <div className="card">
             <div className="text-center mb-4">
-              <img src="/beast-logo.svg" className="w-full px-8" alt="残兽调查" />
+              <picture>
+                <source media="(prefers-color-scheme: dark)" srcSet="/beast-logo-white.svg" />
+                <img src="/beast-logo.svg" className="w-full px-8" alt="残兽调查" />
+              </picture>
               <p className="text-gray-600 mt-2">{questionnaire.description}</p>
             </div>
 
@@ -951,9 +954,9 @@ const CanshouPage: React.FC = () => {
                         >
                           {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
                         </button>
-                        <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                        <div className="mt-2 pt-6 border-t border-gray-200">
                           <p className="text-sm text-gray-600 mb-2">保存好你的档案了吗？</p>
-                          <Link href="/battle" className="footer-link" style={{ color: '#c026d3', fontSize: '1.125rem' }}>
+                          <Link href="/battle" className="footer-link text-lg text-purple-600">
                             前往竞技场，让它大闹一场！→
                           </Link>
                         </div>
@@ -1060,11 +1063,11 @@ const CanshouPage: React.FC = () => {
                         >
                           {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
                         </button>
-                        <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                        <div className="mt-2 pt-6 border-t border-gray-200">
                           <p className="text-sm text-gray-600 mb-2">
                             保存好你的档案了吗？
                           </p>
-                          <Link href="/battle" className="footer-link" style={{ color: '#c026d3', fontSize: '1.125rem' }}>
+                          <Link href="/battle" className="footer-link text-lg text-purple-600">
                             前往竞技场，让它大闹一场！→
                           </Link>
                         </div>

@@ -77,8 +77,8 @@
     --app-magic-bg-white: linear-gradient(135deg, #0b1220 0%, #1f2937 55%, #0f172a 100%);
     --app-magic-bg-dark: linear-gradient(135deg, #0b1220 0%, #111827 100%);
     --app-text: #e5e7eb;
-    --app-text-muted: #cbd5f5;
-    --app-text-subtle: #94a3b8;
+    --app-text-muted: #d7dde8;
+    --app-text-subtle: #a7b0c0;
     --app-surface-strong: rgba(15, 23, 42, 0.98);
     --app-surface: rgba(15, 23, 42, 0.92);
     --app-surface-95: rgba(15, 23, 42, 0.95);
@@ -115,6 +115,26 @@ body {
 body {
   background: var(--app-page-bg);
   min-height: 100vh;
+}
+
+@media (prefers-color-scheme: dark) {
+  input[type='text'],
+  input[type='password'],
+  input[type='email'],
+  input[type='search'],
+  input[type='url'],
+  input[type='number'],
+  textarea,
+  select {
+    color: var(--app-text);
+    background-color: var(--app-input-bg);
+    border-color: var(--app-input-border);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--app-text-subtle);
+  }
 }
 
 .container {
@@ -517,6 +537,104 @@ body.announcement-visible {
       color: var(--app-text);
     }
 
+    .text-blue-500,
+    .text-blue-600,
+    .text-blue-700,
+    .text-blue-800,
+    .text-blue-900 {
+      color: #93c5fd;
+    }
+
+    .text-indigo-500,
+    .text-indigo-600,
+    .text-indigo-700,
+    .text-indigo-800,
+    .text-indigo-900 {
+      color: #a5b4fc;
+    }
+
+    .text-purple-500,
+    .text-purple-600,
+    .text-purple-700,
+    .text-purple-800,
+    .text-purple-900,
+    .text-purple-950 {
+      color: #d8b4fe;
+    }
+
+    .text-violet-600,
+    .text-violet-700,
+    .text-violet-800 {
+      color: #c4b5fd;
+    }
+
+    .text-pink-500,
+    .text-pink-600,
+    .text-pink-700,
+    .text-pink-800,
+    .text-pink-900 {
+      color: #f9a8d4;
+    }
+
+    .text-rose-600,
+    .text-rose-700,
+    .text-rose-800 {
+      color: #fda4af;
+    }
+
+    .text-red-500,
+    .text-red-600,
+    .text-red-700,
+    .text-red-800,
+    .text-red-900 {
+      color: #fca5a5;
+    }
+
+    .text-orange-600,
+    .text-orange-700,
+    .text-orange-800 {
+      color: #fdba74;
+    }
+
+    .text-amber-600,
+    .text-amber-700,
+    .text-amber-800,
+    .text-amber-900,
+    .text-amber-950 {
+      color: #fcd34d;
+    }
+
+    .text-yellow-600,
+    .text-yellow-700,
+    .text-yellow-800,
+    .text-yellow-900 {
+      color: #fde047;
+    }
+
+    .text-green-600,
+    .text-green-700,
+    .text-green-800 {
+      color: #86efac;
+    }
+
+    .text-emerald-600,
+    .text-emerald-700,
+    .text-emerald-800 {
+      color: #6ee7b7;
+    }
+
+    .text-teal-600,
+    .text-teal-700,
+    .text-teal-800 {
+      color: #5eead4;
+    }
+
+    .text-sky-600,
+    .text-sky-700,
+    .text-sky-800 {
+      color: #7dd3fc;
+    }
+
     .bg-white {
       background-color: var(--app-surface-strong);
     }
@@ -573,6 +691,10 @@ body.announcement-visible {
       background-color: var(--app-surface-40);
     }
 
+    .bg-gray-50\/80 {
+      background-color: var(--app-surface-80);
+    }
+
     .bg-slate-50 {
       background-color: var(--app-surface-80);
     }
@@ -585,64 +707,58 @@ body.announcement-visible {
       background-color: var(--app-surface-60);
     }
 
-    :where(
-        .bg-pink-50,
-        .bg-pink-50\\/70,
-        .bg-pink-50\\/40,
-        .bg-pink-50\\/80,
-        .bg-pink-100,
-        .bg-purple-50,
-        .bg-purple-50\\/40,
-        .bg-purple-100,
-        .bg-blue-50,
-        .bg-blue-50\\/50,
-        .bg-blue-100,
-        .bg-indigo-50,
-        .bg-indigo-100,
-        .bg-emerald-50,
-        .bg-green-50,
-        .bg-green-100,
-        .bg-yellow-50,
-        .bg-yellow-100,
-        .bg-amber-50,
-        .bg-amber-50\\/80,
-        .bg-amber-100,
-        .bg-orange-100,
-        .bg-red-50,
-        .bg-rose-50,
-        .bg-violet-50,
-        .bg-sky-50,
-        .bg-teal-50,
-        .bg-teal-100
-      ) {
+    .bg-pink-50,
+    .bg-pink-50\\/70,
+    .bg-pink-50\\/40,
+    .bg-pink-50\\/80,
+    .bg-pink-100,
+    .bg-purple-50,
+    .bg-purple-50\\/40,
+    .bg-purple-100,
+    .bg-blue-50,
+    .bg-blue-50\\/50,
+    .bg-blue-100,
+    .bg-indigo-50,
+    .bg-indigo-100,
+    .bg-emerald-50,
+    .bg-green-50,
+    .bg-green-100,
+    .bg-yellow-50,
+    .bg-yellow-100,
+    .bg-amber-50,
+    .bg-amber-50\\/80,
+    .bg-amber-100,
+    .bg-orange-100,
+    .bg-red-50,
+    .bg-rose-50,
+    .bg-violet-50,
+    .bg-sky-50,
+    .bg-teal-50,
+    .bg-teal-100 {
       background-color: var(--app-surface-70);
     }
 
-    :where(
-        .bg-pink-200,
-        .bg-purple-200,
-        .bg-blue-200,
-        .bg-indigo-200,
-        .bg-emerald-100,
-        .bg-green-200,
-        .bg-yellow-200,
-        .bg-amber-200,
-        .bg-orange-200,
-        .bg-red-100,
-        .bg-red-200,
-        .bg-rose-100,
-        .bg-violet-100,
-        .bg-sky-100
-      ) {
+    .bg-pink-200,
+    .bg-purple-200,
+    .bg-blue-200,
+    .bg-indigo-200,
+    .bg-emerald-100,
+    .bg-green-200,
+    .bg-yellow-200,
+    .bg-amber-200,
+    .bg-orange-200,
+    .bg-red-100,
+    .bg-red-200,
+    .bg-rose-100,
+    .bg-violet-100,
+    .bg-sky-100 {
       background-color: var(--app-surface-60);
     }
 
-    :where(
-        .bg-pink-300,
-        .bg-purple-300,
-        .bg-red-300,
-        .bg-gray-400
-      ) {
+    .bg-pink-300,
+    .bg-purple-300,
+    .bg-red-300,
+    .bg-gray-400 {
       background-color: var(--app-surface-50);
     }
 
@@ -656,25 +772,23 @@ body.announcement-visible {
       border-color: var(--app-border-strong);
     }
 
-    :where(
-        .border-pink-100,
-        .border-pink-200,
-        .border-pink-300,
-        .border-purple-100,
-        .border-purple-200,
-        .border-blue-200,
-        .border-indigo-200,
-        .border-emerald-200,
-        .border-green-200,
-        .border-yellow-200,
-        .border-amber-200,
-        .border-orange-200,
-        .border-red-200,
-        .border-rose-200,
-        .border-violet-200,
-        .border-sky-200,
-        .border-teal-200
-      ) {
+    .border-pink-100,
+    .border-pink-200,
+    .border-pink-300,
+    .border-purple-100,
+    .border-purple-200,
+    .border-blue-200,
+    .border-indigo-200,
+    .border-emerald-200,
+    .border-green-200,
+    .border-yellow-200,
+    .border-amber-200,
+    .border-orange-200,
+    .border-red-200,
+    .border-rose-200,
+    .border-violet-200,
+    .border-sky-200,
+    .border-teal-200 {
       border-color: var(--app-border);
     }
 

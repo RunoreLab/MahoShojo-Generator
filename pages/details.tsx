@@ -869,7 +869,7 @@ const DetailsPage: React.FC = () => {
                   style={{ lineHeight: '1.5', marginTop: '3rem', marginBottom: '4rem' }}
                 >
                   你在魔法少女道路上的潜力和表现将会如何？<br />
-                  <p style={{ fontSize: '0.8rem', marginTop: '1rem', color: '#999', fontStyle: 'italic' }}>本测试设定来源于小说《下班，然后变成魔法少女》</p>
+                  <p className="mt-4 text-sm text-gray-500 italic">本测试设定来源于小说《下班，然后变成魔法少女》</p>
                 </div>
                 {/* 注意事项 */}
                 <div className="mb-6 p-3 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 text-sm text-left rounded-r-lg">
@@ -1170,11 +1170,11 @@ const DetailsPage: React.FC = () => {
                 )}
 
                 {/* 复制已填写内容 */}
-                <div style={{ textAlign: 'center' }}>
+                <div className="text-center">
                   <button className="border-2 border-grey-900 rounded-md px-4 py-2 cursor-pointer" onClick={handleCopyContent} style={{ marginRight: '10px' }}>
                     复制已填写内容
                   </button>
-                  <p style={{ fontSize: '12px', color: '#888', marginTop: '10px' }}>
+                  <p className="mt-2 text-xs text-gray-500">
                     为避免生成失败丢失信息的可能，建议在提交生成前复制保存已填写信息。
                   </p>
                 </div>
@@ -1229,9 +1229,9 @@ const DetailsPage: React.FC = () => {
                           复制到剪贴板
                         </button>
                       </div>
-                      <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                      <div className="mt-2 pt-6 border-t border-gray-200">
                         <p className="text-sm text-gray-600 mb-2">保存好你的档案了吗？</p>
-                        <Link href="/battle" className="footer-link" style={{ color: '#c026d3', fontSize: '1.125rem' }}>
+                        <Link href="/battle" className="footer-link text-lg text-purple-600">
                           前往竞技场，让她大闹一场！→
                         </Link>
                       </div>
@@ -1373,11 +1373,11 @@ const DetailsPage: React.FC = () => {
                     )}
                   </div>
                   {/* 新增：前往竞技场的入口 */}
-                  <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                  <div className="mt-2 pt-6 border-t border-gray-200">
                     <p className="text-sm text-gray-600 mb-2">
                       保存好你的设定文件了吗？
                     </p>
-                    <Link href="/battle" className="footer-link" style={{ color: '#193cb8', fontSize: '1.125rem' }}>
+                    <Link href="/battle" className="footer-link text-lg text-blue-600">
                       前往竞技场，开始战斗！→
                     </Link>
                   </div>

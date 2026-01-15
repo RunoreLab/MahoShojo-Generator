@@ -837,7 +837,10 @@ const SublimationPage: React.FC = () => {
                     <div className="card">
                         <div className="text-center mb-4">
                             <div className="flex justify-center items-center" style={{ marginBottom: '1rem' }}>
-                                <img src="/sublimation.svg" width={360} height={40} alt="角色成长升华" />
+                                <picture>
+                                  <source media="(prefers-color-scheme: dark)" srcSet="/sublimation-white.svg" />
+                                  <img src="/sublimation.svg" width={360} height={40} alt="角色成长升华" />
+                                </picture>
                             </div>
                             <p className="subtitle mt-2">角色成长升华，见证她们在战斗与经历中完成的蜕变</p>
                         </div>

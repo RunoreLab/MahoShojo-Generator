@@ -80,7 +80,7 @@ export default function BadgeGallery({ userBadges, className = '' }: BadgeGaller
                 onClick={() => setSelectedBadge(null)}
                 className="absolute top-3 right-3 p-1 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors"
               >
-                <X size={20} style={{ color: "#000"}} />
+                <X size={20} className="text-gray-900" />
               </button>
 
               {/* 徽章预览 */}

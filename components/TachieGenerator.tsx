@@ -123,7 +123,7 @@ export default function TachieGenerator({ prompt, onImageUrlChange, onResult }: 
   return (
     <div>
       <div style={{ marginBottom: '1.5rem' }}>
-        <p className="text-center" style={{ fontSize: '0.875rem', color: '#666', marginTop: '1rem', lineHeight: 1.5 }}>
+        <p className="text-center text-sm text-gray-500 mt-4 leading-relaxed">
           请前往&nbsp;
           <a
             href="https://www.liblib.art/apis"
@@ -172,8 +172,8 @@ export default function TachieGenerator({ prompt, onImageUrlChange, onResult }: 
       </div>
 
       {/* 记住凭据选项 */}
-      <div className="input-group" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '0.875rem', color: '#666' }}>
+      <div className="input-group flex items-center justify-between">
+        <label className="flex items-center cursor-pointer text-sm text-gray-500">
           <input
             type="checkbox"
             checked={rememberCredentials}
@@ -186,14 +186,7 @@ export default function TachieGenerator({ prompt, onImageUrlChange, onResult }: 
           <button
             type="button"
             onClick={clearSavedCredentials}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#ff6b6b',
-              fontSize: '0.75rem',
-              cursor: 'pointer',
-              textDecoration: 'underline'
-            }}
+            className="bg-transparent border-0 text-xs text-pink-600 underline hover:text-pink-500"
           >
             清除已保存的凭据
           </button>
@@ -209,29 +202,15 @@ export default function TachieGenerator({ prompt, onImageUrlChange, onResult }: 
       </button>
 
       {isGenerating && (
-        <div style={{
-          marginTop: '1rem',
-          padding: '1rem',
-          background: 'rgba(255, 255, 255, 0.9)',
-          borderRadius: '16px',
-          border: '1px solid rgba(255, 107, 107, 0.2)',
-          textAlign: 'center'
-        }}>
+        <div className="mt-4 p-4 rounded-2xl border border-pink-200 bg-white/90 text-center">
           <div style={{ marginBottom: '0.75rem' }}>
-            <span style={{ fontSize: '0.875rem', color: '#ff6b6b', fontWeight: '600' }}>
+            <span className="text-sm font-semibold text-pink-600">
               {progressStatus || "立绘生成中，请稍后捏 (≖ᴗ≖)✧"}
             </span>
           </div>
           
           {/* 进度条 */}
-          <div style={{
-            width: '100%',
-            height: '8px',
-            background: 'rgba(255, 107, 107, 0.1)',
-            borderRadius: '4px',
-            overflow: 'hidden',
-            marginBottom: '0.5rem'
-          }}>
+          <div className="w-full h-2 rounded bg-pink-100/60 overflow-hidden mb-2">
             <div style={{
               width: `${Math.max(progress, 5)}%`, // 最小显示5%，让用户看到有进度
               height: '100%',
@@ -243,7 +222,7 @@ export default function TachieGenerator({ prompt, onImageUrlChange, onResult }: 
           </div>
 
           {/* 进度百分比 */}
-          <div style={{ fontSize: '0.75rem', color: '#666' }}>
+          <div className="text-xs text-gray-500">
             {progress > 0 ? `${progress}%` : "准备中..."}
           </div>
         </div>

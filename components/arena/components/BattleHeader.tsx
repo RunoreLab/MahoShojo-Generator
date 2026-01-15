@@ -8,7 +8,10 @@ export function BattleHeader() {
   return (
     <>
       <div className="text-center mb-4">
-        <img src="/arena-black.svg" width={320} height={90} alt="魔法少女竞技场" />
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcSet="/arena-white.svg" />
+          <img src="/arena-black.svg" width={320} height={90} alt="魔法少女竞技场" />
+        </picture>
         <p className="subtitle" style={{ marginBottom: '1rem', marginTop: '1rem' }}>
           能亲眼见到强者之战，这下就算死也会值回票价呀！
         </p>

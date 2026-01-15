@@ -55,7 +55,10 @@ export default function Home() {
         <div className="container">
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '2rem' }}>
-              <img src="/logo.svg" width={280} height={180} alt="魔法少女生成器" />
+              <picture>
+                <source media="(prefers-color-scheme: dark)" srcSet="/logo-white.svg" />
+                <img src="/logo.svg" width={280} height={180} alt="魔法少女生成器" />
+              </picture>
             </div>
 
             <div className="flex justify-center mb-4">
@@ -161,10 +164,8 @@ export default function Home() {
               ))}
             </div>
 
-            <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-              <p style={{ fontSize: '0.8rem', marginTop: '1rem', color: '#999', fontStyle: 'italic' }}>
-                设定来源于小说《下班，然后变成魔法少女》
-              </p>
+            <div className="mt-8 text-center">
+              <p className="text-sm text-gray-500 italic">设定来源于小说《下班，然后变成魔法少女》</p>
             </div>
           </div>
 
