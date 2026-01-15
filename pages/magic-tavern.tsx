@@ -1,7 +1,7 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import BattleDataModal from '@/components/BattleDataModal';
@@ -947,6 +947,12 @@ export default function MagicTavernPage() {
 
       const now = Date.now();
       const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTavernOutputFormat;
+      const playerRoleIdAtSend = activeSession.playerRoleId ?? null;
+      const userDisplayNameAtSend =
+        (activeSession.settings.userDisplayName || preferences.userDisplayName || '旅人').trim() || '旅人';
+      const playerRoleNameAtSend = playerRoleIdAtSend
+        ? (activeSession.roles ?? []).find((role) => role.id === playerRoleIdAtSend)?.name ?? ''
+        : '';
       const userMessage: MagicTavernMessage = {
         id: createUuid(),
         sessionId: activeSession.id,
@@ -954,6 +960,8 @@ export default function MagicTavernPage() {
         content: trimmed,
         createdAt: now,
         status: 'done',
+        ...(playerRoleIdAtSend ? { speakerId: playerRoleIdAtSend } : {}),
+        meta: { speakerName: playerRoleIdAtSend ? playerRoleNameAtSend || playerRoleIdAtSend : userDisplayNameAtSend },
       };
 
       const assistantMessageId = createUuid();
@@ -991,7 +999,7 @@ export default function MagicTavernPage() {
         arrestedBackupInput: trimmed,
       });
     },
-    [activeSession, ensureProviderReady, isGenerating, messages, persistSession, router, runGenerateStream]
+    [activeSession, ensureProviderReady, isGenerating, messages, persistSession, preferences.userDisplayName, router, runGenerateStream]
   );
 
   const continueGeneration = useCallback(async () => {
@@ -1414,51 +1422,76 @@ export default function MagicTavernPage() {
   const renderMessage = (message: MagicTavernMessage) => {
     const isUser = message.role === 'user';
     const bubbleClass = isUser ? 'bg-pink-600 text-white' : 'bg-white border border-pink-100 text-gray-800';
+    const speakerName =
+      message.meta && typeof message.meta === 'object' && typeof (message.meta as any).speakerName === 'string'
+        ? String((message.meta as any).speakerName).trim()
+        : '';
+    const bubbleSpeaker =
+      speakerName ||
+      (message.role === 'system'
+        ? 'system'
+        : message.role === 'user'
+        ? message.speakerId
+          ? (activeSession?.roles ?? []).find((role) => role.id === message.speakerId)?.name || message.speakerId
+          : (activeSession?.settings.userDisplayName || preferences.userDisplayName || '旅人').trim() || '旅人'
+        : (() => {
+            const presetId =
+              activeSession?.settings && typeof activeSession.settings.presetId === 'string' ? activeSession.settings.presetId : '';
+            const prefix = presetId.startsWith('arena-') ? 'A.R.E.N.A. 魔法酒馆' : '魔法酒馆';
+            return `${prefix} · 叙述者`;
+          })());
+    const speakerClass = `px-1 text-xs font-semibold ${isUser ? 'text-right text-pink-700' : 'text-gray-600'}`;
+    const withHeader = (bubble: ReactNode) => (
+      <div className="space-y-1">
+        <div className={speakerClass}>{bubbleSpeaker}</div>
+        {bubble}
+      </div>
+    );
 
     if (message.role === 'assistant' && Array.isArray(message.segments) && message.segments.length > 0) {
-      return (
+      return withHeader(
         <div className={`rounded-xl px-4 py-3 ${bubbleClass} space-y-2`}>
-          {message.segments.map((seg, idx) => {
-            if (seg.type === 'narration') {
-              return (
-                <p key={`${message.id}-n-${idx}`} className="whitespace-pre-wrap leading-relaxed">
-                  {seg.text}
-                </p>
-              );
-            }
-            if (seg.type === 'dialogue') {
-              const speakerName =
-                seg.speakerName ||
-                (activeSession?.roles ?? []).find((r) => r.id === seg.speakerId)?.name ||
-                seg.speakerId;
-              return (
-                <div key={`${message.id}-d-${idx}`} className="rounded-lg bg-pink-50 px-3 py-2">
-                  <div className="text-xs font-semibold text-pink-700">{speakerName}</div>
-                  <div className="whitespace-pre-wrap leading-relaxed text-gray-800">{seg.text}</div>
-                </div>
-              );
-            }
-            if (seg.type === 'choices') {
-              return (
-                <div key={`${message.id}-c-${idx}`} className="grid gap-2 sm:grid-cols-2">
-                  {seg.items.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="rounded-xl border border-pink-200 bg-white px-4 py-2 text-left text-sm font-semibold text-pink-700 hover:bg-pink-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                      disabled={isGenerating}
-                      onClick={() => void sendMessage(item.text)}
-                      title="选择该行动"
-                    >
-                      {item.text}
-                    </button>
-                  ))}
-                </div>
-              );
-            }
-            return null;
-          })}
-          {renderAssistantFooter(message)}
+            {message.segments.map((seg, idx) => {
+              if (seg.type === 'narration') {
+                return (
+                  <p key={`${message.id}-n-${idx}`} className="whitespace-pre-wrap leading-relaxed">
+                    {seg.text}
+                  </p>
+                );
+              }
+              if (seg.type === 'dialogue') {
+                const speakerName =
+                  seg.speakerName ||
+                  (activeSession?.roles ?? []).find((r) => r.id === seg.speakerId)?.name ||
+                  seg.speakerId;
+                return (
+                  <div key={`${message.id}-d-${idx}`} className="rounded-lg bg-pink-50 px-3 py-2">
+                    <div className="text-xs font-semibold text-pink-700">{speakerName}</div>
+                    <div className="whitespace-pre-wrap leading-relaxed text-gray-800">{seg.text}</div>
+                  </div>
+                );
+              }
+              if (seg.type === 'choices') {
+                return (
+                  <div key={`${message.id}-c-${idx}`} className="grid gap-2 sm:grid-cols-2">
+                    {seg.items.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="rounded-xl border border-pink-200 bg-white px-4 py-2 text-left text-sm font-semibold text-pink-700 hover:bg-pink-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isGenerating}
+                        onClick={() => void sendMessage(item.text)}
+                        title="选择该行动"
+                      >
+                        {item.text}
+                      </button>
+                    ))}
+                  </div>
+                );
+              }
+              return null;
+            })}
+            {renderAssistantFooter(message)}
         </div>
       );
     }
@@ -1468,18 +1501,18 @@ export default function MagicTavernPage() {
     const preferMarkdown = metaOutputFormat === 'markdown' || (!metaOutputFormat && activeSession?.settings.outputFormat === 'markdown');
 
     if (message.role === 'assistant' && preferMarkdown) {
-      return (
+      return withHeader(
         <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
-          <MarkdownBlock content={message.content || ''} variant="light" mode="article" />
-          {renderAssistantFooter(message)}
+            <MarkdownBlock content={message.content || ''} variant="light" mode="article" />
+            {renderAssistantFooter(message)}
         </div>
       );
     }
 
-    return (
+    return withHeader(
       <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
-        <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
-        {renderAssistantFooter(message)}
+          <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+          {renderAssistantFooter(message)}
       </div>
     );
   };
