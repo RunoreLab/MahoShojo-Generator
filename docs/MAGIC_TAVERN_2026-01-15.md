@@ -43,6 +43,7 @@
 
 1. 进入【魔法酒馆】页面
 2. 选择：角色卡（可多选）+ 情景卡（可选）
+   - 来源支持：公开数据卡 / 私有数据卡 / 收藏 / 卡组导入 / 本地导入
 3. 选择扮演方式：
    - 作为 `{{user}}` 互动
    - 选择某个角色作为“玩家角色”
@@ -137,8 +138,8 @@
 组件建议：
 
 - `components/magic-tavern/MagicTavernHero.tsx`：顶部 banner 与功能说明
-- `components/magic-tavern/SessionSetupPanel.tsx`：角色/情景选择、扮演模式、模型配置
-- `components/magic-tavern/SessionSidebar.tsx`：会话列表、搜索、导入/导出
+- `components/magic-tavern/SessionSetupPanel.tsx`：角色/情景选择、扮演模式、模型配置、输出模式、Token 预算提示
+- `components/magic-tavern/SessionSidebar.tsx`：会话列表、搜索、（后续）导入/导出
 - `components/magic-tavern/ChatTimeline.tsx`：聊天流展示（支持角色颜色/头像）
 - `components/magic-tavern/ChatComposer.tsx`：输入区 + 选项按钮
 - `components/magic-tavern/ChoicePanel.tsx`：AI 选项卡片
@@ -195,6 +196,7 @@ export type MagicTavernSession = {
     providerId: string;
     modelId: string;
     temperature?: number;
+    outputFormat?: 'jsonl' | 'markdown';
   };
 };
 ```
@@ -217,7 +219,7 @@ IndexedDB 建议分表：
 
 ### 6.2 安全拦截
 
-- 输入前：使用 `lib/sensitive-word-filter` 先行检查
+- 输入前：对用户输入与卡片摘要使用 `lib/sensitive-word-filter` 先行检查
 - 输出后：使用 `lib/shield-word-filter` 遮罩可疑内容
 - 若触发敏感词：
   - 绝不能在客户端本地储存违规内容
@@ -237,8 +239,8 @@ IndexedDB 建议分表：
 3. 发送用户消息：
    - 通过敏感词检测
    - 构建 prompt
-   - 调用 `/api/magic-tavern/generate`（仅允许自定义 API Key）
-   - 解析输出（文本 + 选项）
+   - 调用 `/api/magic-tavern/generate-stream`（仅允许自定义 API Key）
+   - 解析输出（JSONL 分段或 Markdown 全文）
    - 输出敏感词检测 / 屏蔽
    - 写入 IndexedDB
 4. 选项模式：点击选项 => 自动发送相同内容
@@ -268,7 +270,7 @@ IndexedDB 建议分表：
 
 ### M1：基础会话
 - 页面 + 会话列表（IndexedDB）
-- 角色/情景选择 + 人设切换
+- 角色/情景选择 + 人设切换（数据库多选 + 本地导入）
 - 输入/输出聊天流
 
 ### M2：AI 接入（自备 Key）
@@ -287,18 +289,13 @@ IndexedDB 建议分表：
 
 ---
 
-## 11. 待确认问题
+## 11. 已确认事项（2026-01-15）
 
-1. 角色数量上限？（影响 prompt 与成本）
-  - 因为禁止使用本项目配置的 API Key，角色数量不限，但应当提供与竞技场/自由生成一致的 tokens 计数器以便用户权衡成本。
-2. 是否需要“旁白/主持人”固定出场？
-  - 不需要，实际上用户还可以选择像是竞技场生成战报那样，让 AI 整体生成一整段比较完整的故事。
-3. 会话导入/导出是否列入 MVP？
-  - 如果做起来容易的话，可以列入 MVP。
-4. 选项条数上限（默认 3~4？）
-  - 默认 3~4，用户也可以自行设置。
-5. 立绘生成是否需要缓存结果或允许复用？
-  - 需要缓存，允许复用。
+1. **输出协议**：默认 JSONL；允许用户选择“Markdown 故事模式”，输出一整段更自由的叙事（可能无法解析选项/角色分段）。
+2. **数据来源**：与竞技场一致，支持公开/私有数据卡，支持模态框多选/移除角色与情景，支持导入卡组；同时保留本地导入。
+3. **MVP 范围**：会话导入/导出不列入首版。
+4. **安全策略**：默认对卡片摘要与用户输入执行本地敏感词检测。
+5. **立绘策略**：需要缓存，允许复用。
 
 ---
 
@@ -320,6 +317,8 @@ IndexedDB 建议分表：
 - **流式读取**：复用 `readTextStreamFromResponse` + `STREAM_READ_*` 超时策略。
 - **内容安全**：复用 `getSensitiveWordRedirectTarget` / `quickCheck` / `applyShieldWords` / `arrested-backup` 的既有流程。
 - **ID 生成**：客户端使用 `randomUUID`；与其他模块保持一致。
+- **数据卡选择**：复用 `BattleDataModal`（公开/私有/收藏/搜索/排序），并启用多选模式；角色卡支持 `DecksModal` 的卡组导入。
+- **本地导入**：角色复用 `RosterUploader`；情景复用 `ScenarioPickerPanel` 的上传/粘贴流程。
 
 ### 13.2 数据模型增量字段（用于可追溯与安全策略）
 
@@ -398,6 +397,7 @@ export type MagicTavernSession = {
     maxContextMessages?: number;
     enableChoices?: boolean;
     choiceCount?: number;
+    outputFormat?: 'jsonl' | 'markdown';
     language?: 'zh-CN' | 'ja-JP' | 'en-US';
     enableSummary?: boolean;
   };
@@ -416,10 +416,14 @@ export type MagicTavernSession = {
 {"type":"choices","items":[{"id":"c1","text":"我点头并坐下"},{"id":"c2","text":"我礼貌拒绝，转向角落"}]}
 ```
 
-**方案 B：标签式分段（备选）**
+**方案 B：Markdown 故事模式（用户可选）**
+- 直接流式输出完整叙事片段（Markdown），便于自由书写与沉浸体验。
+- 代价：无法稳定解析 `choices` 与 `speakerId`，前端仅做“旁白式”渲染。
+
+**方案 C：标签式分段（备选）**
 - 使用 `<scene>` / `<character>` / `<choices>` 标签；解析简单但更依赖模型遵守。
 
-**推荐理由**：JSONL 能与 `readTextStreamFromResponse` 顺畅结合，前端易于做增量渲染与回滚。
+**推荐理由**：JSONL 能与 `readTextStreamFromResponse` 顺畅结合，前端易于做增量渲染与回滚；Markdown 模式作为“自由输出”开关提供给用户选择。
 
 ### 13.4 提示词构建与注入防护（补充约束）
 
@@ -441,6 +445,7 @@ export type MagicTavernSession = {
 - **生成过程**：支持「停止生成 / 重新生成 / 继续生成」三种行动。
 - **消息编辑**：允许用户修改上一轮输入并重跑（形成分支）。
 - **会话标题**：首轮生成后自动生成标题，允许手动重命名与置顶。
+- **输出模式**：提供“结构化 JSONL / Markdown 故事”切换开关，切换后提示功能差异。
 
 ### 13.7 安全与合规细化
 
@@ -450,7 +455,7 @@ export type MagicTavernSession = {
 
 ### 13.8 API 草案（Edge）
 
-- `POST /api/magic-tavern/generate-stream`：生成主剧情流式输出（JSONL）。
+- `POST /api/magic-tavern/generate-stream`：生成主剧情流式输出（JSONL 或 Markdown）。
 - `POST /api/magic-tavern/generate-choices`：仅生成选项（可复用主提示词的“缩略版”）。
 - `POST /api/magic-tavern/summarize`：会话摘要（可选，非 MVP）。
 
@@ -464,7 +469,7 @@ export type MagicTavernSession = {
 - 副标题：选择角色卡与情景卡，开启一段可长期延伸的互动剧情。
 - 说明：聊天记录保存在本地浏览器；请使用自备 API Key。
 - 主按钮：开始新会话
-- 次按钮：导入本地会话 / 前往角色管理器
+- 次按钮：前往角色管理器 / 导入会话（后续）
 
 ### 14.2 选择面板
 
@@ -472,12 +477,14 @@ export type MagicTavernSession = {
 - 情景选择标题：选择发生场景
 - 扮演方式提示：你将扮演自己（用户名） / 扮演某个角色
 - 小提示：角色与情景可自由搭配，剧情风格会随之改变。
+- 来源提示：支持公开/私有数据卡、收藏、卡组导入与本地导入。
 
 ### 14.3 输入区与选项
 
 - 输入框占位：输入你的行动、对白或叙事，例如：我推开酒馆的大门……
 - 选项按钮：生成剧情选项（会消耗额外 Token）
 - 停止按钮：停止生成
+- 输出模式提示：结构化 JSONL / Markdown 故事（二者不可兼得）。
 
 ### 14.4 空状态与错误提示
 
@@ -489,15 +496,14 @@ export type MagicTavernSession = {
 ### 14.5 侧边栏
 
 - 标题：会话列表
-- 操作：置顶 / 重命名 / 导出 / 删除
+- 操作：置顶 / 重命名 / 导出（后续） / 删除
 - 排序说明：按最近更新排序
 
 ---
 
 ## 15. 下一步建议
 
-1. **确认输出协议**：优先确定 JSONL 还是标签式，便于前端解析与 UI 结构落地。
-2. **确认数据来源策略**：是否允许直接读取“角色管理器”私有卡（需登录）？是否支持本地导入？
-3. **M1 范围定稿**：最小 MVP 是否包含“会话导入/导出”与“自动标题生成”？
-4. **安全策略阈值**：是否需要对“卡片摘要”执行本地敏感词检查？默认开还是可关闭？
-
+1. **输出模式落地**：定义 JSONL schema（narration / dialogue / choices）与 Markdown fallback 规则；在 UI 中给出清晰的模式差异说明。
+2. **数据选择复用**：接入 `BattleDataModal` 多选 + `DecksModal` 卡组导入 + `RosterUploader` / `ScenarioPickerPanel` 本地导入，并复用竞技场的筛选与权限提示。
+3. **API 合约定稿**：`generate-stream` 接收 `outputFormat`、`selectedRoles`、`scenario`、`playerRoleId`，统一返回流式文本与错误码。
+4. **提示词白名单**：确认角色/情景字段抽取表，确保反注入与一致性输出。
