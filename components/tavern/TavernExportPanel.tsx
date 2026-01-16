@@ -20,7 +20,7 @@ import {
   buildArenaWorldbook,
   buildTavernScenarioFragment,
   createTavernV3Card,
-  getPlaceholderPngBytes,
+  getDefaultTavernBasePngBytes,
   recommendTavernExportFields,
   type TavernExportMeta,
   writeTavernCardToPngBytes,
@@ -150,7 +150,6 @@ type ExportAction =
   | { type: 'setInlineError'; message: string | null }
   | { type: 'setDataCard'; data: unknown; template: InferableTemplate; fields: ExportFields; meta?: ExportMeta | null }
   | { type: 'setBasePng'; bytes: Uint8Array; name: string }
-  | { type: 'usePlaceholder' }
   | { type: 'setField'; key: keyof ExportFields; value: string | number | boolean }
   | {
       type: 'setOption';
@@ -175,6 +174,7 @@ type ExportAction =
 
 const DEFAULT_CREATOR_NOTES = '来源：MahoShojo-Generator / 魔法少女竞技场 A.R.E.N.A.';
 const DEFAULT_TAVERN_CREATOR = 'github.com/colasama/MahoShojo-Generator';
+const DEFAULT_TAVERN_BASE_NAME = 'mahoshojo-logo.png';
 
 const initialFields: ExportFields = {
   name: '',
@@ -233,8 +233,6 @@ function reducer(state: ExportState, action: ExportAction): ExportState {
       };
     case 'setBasePng':
       return { ...state, basePngBytes: action.bytes, basePngName: action.name };
-    case 'usePlaceholder':
-      return { ...state, basePngBytes: getPlaceholderPngBytes(), basePngName: 'placeholder.png' };
     case 'setField':
       return { ...state, fields: { ...state.fields, [action.key]: action.value } as ExportFields };
     case 'setOption':
@@ -859,6 +857,16 @@ export function TavernExportPanel() {
     }
   };
 
+  const applyDefaultBasePng = async () => {
+    dispatch({ type: 'setInlineError', message: null });
+    try {
+      const bytes = await getDefaultTavernBasePngBytes();
+      dispatch({ type: 'setBasePng', bytes, name: DEFAULT_TAVERN_BASE_NAME });
+    } catch (error) {
+      dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '默认底图加载失败' });
+    }
+  };
+
   const tagsArray = useMemo(() => {
     const raw = state.fields.tags
       .split(/[,\n]/g)
@@ -1048,7 +1056,7 @@ export function TavernExportPanel() {
   const onGenerate = async () => {
     dispatch({ type: 'generating' });
     try {
-      const baseBytes = state.basePngBytes ?? getPlaceholderPngBytes();
+      const baseBytes = state.basePngBytes ?? (await getDefaultTavernBasePngBytes());
 
       const baseScenario = state.fields.scenario.trim();
       const scenarioParts: string[] = [];
@@ -1598,12 +1606,12 @@ export function TavernExportPanel() {
                   <button
                     type="button"
                     className="rounded-lg border border-pink-200 bg-white/70 px-3 py-1 text-pink-700 hover:bg-pink-50"
-                    onClick={() => dispatch({ type: 'usePlaceholder' })}
+                    onClick={() => void applyDefaultBasePng()}
                     disabled={state.step === 'generating'}
                   >
-                    使用占位图
+                    使用默认底图（Logo）
                   </button>
-                  {state.basePngName ? <span>当前底图：{state.basePngName}</span> : <span>未选择底图时将自动使用占位图。</span>}
+                  {state.basePngName ? <span>当前底图：{state.basePngName}</span> : <span>未选择底图时将自动使用默认底图（项目 Logo）。</span>}
                 </div>
               </div>
 
