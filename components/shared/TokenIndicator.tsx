@@ -9,6 +9,8 @@ type TokenIndicatorProps = {
   maxTokens?: number;
   warnTokens?: number;
   warningText?: string;
+  estimatedTokens?: number;
+  estimateMultiplier?: number;
   className?: string;
 };
 
@@ -17,13 +19,19 @@ export function TokenIndicator({
   maxTokens = 16000,
   warnTokens = 12000,
   warningText,
+  estimatedTokens: estimatedTokensOverride,
+  estimateMultiplier = 1,
   className,
 }: TokenIndicatorProps) {
   const estimatedTokens = useMemo(() => {
+    if (typeof estimatedTokensOverride === 'number' && Number.isFinite(estimatedTokensOverride)) {
+      return Math.max(0, Math.round(estimatedTokensOverride));
+    }
     const input = typeof text === 'string' ? text : '';
     if (!input) return 0;
-    return estimateTokensFromText(input);
-  }, [text]);
+    const multiplier = Number.isFinite(estimateMultiplier) && estimateMultiplier > 0 ? estimateMultiplier : 1;
+    return Math.max(0, Math.round(estimateTokensFromText(input) * multiplier));
+  }, [text, estimatedTokensOverride, estimateMultiplier]);
 
   const ratio = maxTokens > 0 ? Math.min(1, estimatedTokens / maxTokens) : 0;
   const barColor =
@@ -39,10 +47,10 @@ export function TokenIndicator({
   return (
     <div className={['mt-2', className].filter(Boolean).join(' ')}>
       <div className="flex items-center justify-center gap-2">
-        <div className="h-2 w-40 bg-gray-200 rounded-full overflow-hidden" title="估算仅供参考，不等同于真实 Token">
+        <div className="h-2 w-40 bg-gray-200 rounded-full overflow-hidden" title="估算仅供参考（约 ±20%），不等同于真实 Token">
           <div className={`h-full ${barColor}`} style={{ width: `${Math.round(ratio * 100)}%` }} />
         </div>
-        <div className="text-xs text-gray-600 tabular-nums" title="估算仅供参考，不等同于真实 Token">
+        <div className="text-xs text-gray-600 tabular-nums" title="估算仅供参考（约 ±20%），不等同于真实 Token">
           ~{estimatedTokens.toLocaleString()} tokens
         </div>
       </div>
@@ -52,4 +60,3 @@ export function TokenIndicator({
     </div>
   );
 }
-

@@ -1,9 +1,10 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import Footer from '@/components/Footer';
+import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { MagicTeaPartyCardModals } from '@/components/magic-tea-party/CardModals';
 import { MagicTeaPartyChatComposer } from '@/components/magic-tea-party/ChatComposer';
 import { MagicTeaPartyChatTimeline } from '@/components/magic-tea-party/ChatTimeline';
@@ -13,8 +14,11 @@ import { MagicTeaPartySessionSetupPanel } from '@/components/magic-tea-party/Ses
 import { MagicTeaPartySummaryPanel } from '@/components/magic-tea-party/SummaryPanel';
 import { MagicTeaPartyTachiePanel } from '@/components/magic-tea-party/TachiePanel';
 
+import { estimateMagicTeaPartyTokens, resolveMagicTeaPartyTokenBudget } from '@/lib/magic-tea-party/budget';
 import { readMagicTeaPartyDraft, writeMagicTeaPartyDraft } from '@/lib/magic-tea-party/drafts';
 import { buildMagicTeaPartyHistory } from '@/lib/magic-tea-party/history';
+import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
+import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import { useMagicTeaPartyChat } from '@/lib/magic-tea-party/useMagicTeaPartyChat';
 import { useMagicTeaPartySessions } from '@/lib/magic-tea-party/useMagicTeaPartySessions';
 import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyTachieAsset, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
@@ -163,6 +167,71 @@ export default function MagicTeaPartyPage() {
       setTachieAnchorMessageId(lastUser.id);
     }
   }, [activeSession, messages, tachieReferenceText]);
+
+  const tokenBudget = useMemo(
+    () => resolveMagicTeaPartyTokenBudget(activeSession?.settings, userProviderConfig?.providerId),
+    [activeSession?.settings, userProviderConfig?.providerId]
+  );
+
+  const tokenEstimate = useMemo(() => {
+    if (!activeSession) return null;
+
+    const baseHistory = buildMagicTeaPartyHistory(messages, { includeEmptyContent: false });
+    const trimmedDraft = draft.trim();
+    const historyForEstimate = trimmedDraft
+      ? [...baseHistory, { id: 'draft', role: 'user', content: trimmedDraft }]
+      : baseHistory;
+
+    const preset = getMagicTeaPartyPreset(activeSession.settings.presetId ?? null);
+    const worldbookText = preset ? buildWorldbookText(preset.worldbook) : '';
+    const stylePrompt = preset ? preset.systemPrompt : '';
+
+    const sessionForPrompt = {
+      playerRoleId: activeSession.playerRoleId ?? null,
+      summary: activeSession.summary,
+      settings: {
+        ...activeSession.settings,
+        outputFormat: activeSession.settings.outputFormat ?? preferences.outputFormat,
+        language: activeSession.settings.language ?? preferences.language,
+        enableChoices: activeSession.settings.enableChoices ?? preferences.enableChoices,
+        choiceCount: activeSession.settings.choiceCount ?? preferences.choiceCount,
+        userDisplayName: activeSession.settings.userDisplayName ?? preferences.userDisplayName,
+        readArenaHistory:
+          typeof activeSession.settings.readArenaHistory === 'boolean' ? activeSession.settings.readArenaHistory : preferences.readArenaHistory,
+        readArenaHistoryLimit:
+          typeof activeSession.settings.readArenaHistoryLimit === 'number'
+            ? activeSession.settings.readArenaHistoryLimit
+            : preferences.readArenaHistoryLimit,
+        isArenaHistoryUnlimited:
+          typeof activeSession.settings.isArenaHistoryUnlimited === 'boolean'
+            ? activeSession.settings.isArenaHistoryUnlimited
+            : preferences.isArenaHistoryUnlimited,
+        readCurrentState:
+          typeof activeSession.settings.readCurrentState === 'boolean' ? activeSession.settings.readCurrentState : preferences.readCurrentState,
+      },
+    };
+
+    const prompt = buildMagicTeaPartyMainPrompt({
+      session: sessionForPrompt,
+      roles: activeSession.roles ?? [],
+      scenario: activeSession.scenario,
+      auxScenarios: activeSession.auxScenarios ?? [],
+      worldbookText,
+      messages: historyForEstimate as any,
+      requestChoices: false,
+      stylePrompt,
+    });
+
+    const estimatedTokens = estimateMagicTeaPartyTokens(
+      prompt,
+      userProviderConfig?.providerId ?? activeSession.settings.providerId
+    );
+
+    return {
+      estimatedTokens,
+      messageCount: historyForEstimate.length,
+    };
+  }, [activeSession, draft, messages, preferences, userProviderConfig?.providerId]);
 
   const resolveWriteSettings = () => {
     const writeArenaHistory = activeSession?.settings.writeArenaHistory ?? preferences.writeArenaHistory;
@@ -383,6 +452,35 @@ export default function MagicTeaPartyPage() {
                   onApplyUpdates={() => void handleApplyUpdates()}
                   onClearUpdateDrafts={() => setUpdateDrafts(null)}
                 />
+
+                {activeSession ? (
+                  <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-semibold text-gray-800">
+                      <span>Token 预算提示</span>
+                      <span className="text-xs font-normal text-gray-500">
+                        上下文 {tokenBudget.contextWindowTokens.toLocaleString()} · 预留{' '}
+                        {tokenBudget.responseReserveTokens.toLocaleString()}
+                      </span>
+                    </div>
+
+                    <TokenIndicator
+                      text=""
+                      estimatedTokens={tokenEstimate?.estimatedTokens ?? 0}
+                      maxTokens={tokenBudget.historyBudgetTokens}
+                      warnTokens={tokenBudget.warnTokens}
+                      warningText="⚠️ 已接近上下文阈值，建议生成摘要或减少历史消息。"
+                      className="!mt-1"
+                    />
+
+                    <div className="text-xs text-gray-500">
+                      已计入 {tokenEstimate?.messageCount ?? 0} 条消息 / 上限 {tokenBudget.maxContextMessages} 条（估算值 ±20%）。
+                    </div>
+
+                    {tokenEstimate && tokenEstimate.messageCount > tokenBudget.maxContextMessages ? (
+                      <div className="text-xs text-orange-600">⚠️ 消息条数超过上限，建议先生成摘要再继续对话。</div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="rounded-xl border border-pink-100 bg-white p-4">
                   <MagicTeaPartyChatTimeline
