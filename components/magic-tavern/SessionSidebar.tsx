@@ -1,0 +1,199 @@
+import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import { MagicTavernImportExportPanel } from '@/components/magic-tavern/ImportExportPanel';
+
+import { MAGIC_TAVERN_PRESETS, type MagicTavernPresetId } from '@/lib/magic-tavern/presets';
+import type { MagicTavernPreferences, MagicTavernSession } from '@/lib/magic-tavern/types';
+
+type MagicTavernSidebarProps = {
+  sessions: MagicTavernSession[];
+  activeSessionId: string | null;
+  activeSession: MagicTavernSession | null;
+  preferences: MagicTavernPreferences;
+  onCreateSession: (presetId?: MagicTavernPresetId | null) => void;
+  onSelectSession: (sessionId: string) => void;
+  onDeleteSession: (sessionId: string) => void;
+  onSessionImported: (sessionId: string) => void;
+  onPresetSelected: (presetId: MagicTavernPresetId) => void;
+  onProviderConfigChange: (config: UserAIProviderConfig | null) => void;
+  onPreferenceChange: (patch: Partial<MagicTavernPreferences>) => void;
+  onSessionSettingChange: (patch: Partial<MagicTavernSession['settings']>) => void;
+};
+
+export function MagicTavernSessionSidebar(props: MagicTavernSidebarProps) {
+  const {
+    sessions,
+    activeSessionId,
+    activeSession,
+    preferences,
+    onCreateSession,
+    onSelectSession,
+    onDeleteSession,
+    onSessionImported,
+    onPresetSelected,
+    onProviderConfigChange,
+    onPreferenceChange,
+    onSessionSettingChange,
+  } = props;
+
+  const currentUserDisplayName = activeSession?.settings.userDisplayName ?? preferences.userDisplayName;
+  const currentOutputFormat = activeSession?.settings.outputFormat ?? preferences.outputFormat;
+  const currentLanguage = activeSession?.settings.language ?? preferences.language;
+  const currentEnableChoices = activeSession?.settings.enableChoices ?? preferences.enableChoices;
+  const currentChoiceCount = activeSession?.settings.choiceCount ?? preferences.choiceCount;
+
+  return (
+    <aside className="space-y-4">
+      <div className="rounded-xl border border-pink-100 bg-white p-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold text-gray-800">会话列表</div>
+          <button
+            type="button"
+            className="rounded-lg bg-pink-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-pink-700"
+            onClick={() => onCreateSession(preferences.lastPresetId as MagicTavernPresetId)}
+          >
+            新建
+          </button>
+        </div>
+        <div className="mt-3 space-y-2">
+          {sessions.length === 0 ? (
+            <div className="text-sm text-gray-500">还没有会话，先新建一个吧。</div>
+          ) : (
+            sessions.map((session) => (
+              <div
+                key={session.id}
+                className={`rounded-lg border px-3 py-2 transition-colors ${session.id === activeSessionId
+                  ? 'border-pink-300 bg-pink-50'
+                  : 'border-pink-100 bg-white hover:bg-pink-50/50'
+                  }`}
+              >
+                <button type="button" className="block w-full text-left" onClick={() => onSelectSession(session.id)}>
+                  <div className="text-sm font-semibold text-gray-800 line-clamp-1">{session.title}</div>
+                  <div className="mt-0.5 text-xs text-gray-500">{new Date(session.updatedAt).toLocaleString()}</div>
+                </button>
+                <div className="mt-2 flex justify-end">
+                  <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => onDeleteSession(session.id)}>
+                    删除
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <MagicTavernImportExportPanel activeSession={activeSession} preferences={preferences} onSessionImported={onSessionImported} />
+
+      <div className="rounded-xl border border-pink-100 bg-white p-4">
+        <div className="text-sm font-semibold text-gray-800">预设情景</div>
+        <div className="mt-3 grid gap-2">
+          {MAGIC_TAVERN_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className="rounded-xl border border-pink-200 bg-white px-4 py-3 text-left hover:bg-pink-50"
+              onClick={() => onPresetSelected(preset.id)}
+            >
+              <div className="text-sm font-semibold text-pink-800">{preset.title}</div>
+              <div className="mt-1 text-xs text-gray-600">{preset.description}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-pink-100 bg-white p-4">
+        <AiProviderSelector
+          onConfigChange={onProviderConfigChange}
+          storageNamespace="magic-tavern.customProvider"
+          allowSystemProvider={false}
+          label="自备 API Key（必填）"
+        />
+      </div>
+
+      <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-3">
+        <div className="text-sm font-semibold text-gray-800">输出偏好</div>
+        <div className="grid gap-3">
+          <div className="grid gap-1">
+            <label className="text-xs font-semibold text-gray-600">你的称呼（{'{{user}}'}）</label>
+            <input
+              className="input-field"
+              value={currentUserDisplayName}
+              onChange={(event) => {
+                const value = event.target.value.trim().slice(0, 20) || '旅人';
+                onPreferenceChange({ userDisplayName: value });
+                onSessionSettingChange({ userDisplayName: value });
+              }}
+              placeholder="例如：旅人 / 记者 / 观众"
+            />
+          </div>
+
+          <div className="grid gap-1">
+            <label className="text-xs font-semibold text-gray-600">输出模式</label>
+            <select
+              className="input-field"
+              value={currentOutputFormat}
+              onChange={(event) => {
+                const value = event.target.value === 'markdown' ? 'markdown' : 'jsonl';
+                onPreferenceChange({ outputFormat: value });
+                onSessionSettingChange({ outputFormat: value });
+              }}
+            >
+              <option value="jsonl">结构化 JSONL</option>
+              <option value="markdown">Markdown 故事</option>
+            </select>
+          </div>
+
+          <div className="grid gap-1">
+            <label className="text-xs font-semibold text-gray-600">语言</label>
+            <select
+              className="input-field"
+              value={currentLanguage}
+              onChange={(event) => {
+                const value = event.target.value as MagicTavernPreferences['language'];
+                onPreferenceChange({ language: value });
+                onSessionSettingChange({ language: value });
+              }}
+            >
+              <option value="zh-CN">中文</option>
+              <option value="ja-JP">日本語</option>
+              <option value="en-US">English</option>
+            </select>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold text-gray-600">启用选项</div>
+              <div className="text-xs text-gray-500">仅对 JSONL 模式有效</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={Boolean(currentEnableChoices)}
+              onChange={(event) => {
+                const enableChoices = Boolean(event.target.checked);
+                onPreferenceChange({ enableChoices });
+                onSessionSettingChange({ enableChoices });
+              }}
+            />
+          </div>
+
+          <div className="grid gap-1">
+            <label className="text-xs font-semibold text-gray-600">选项数量</label>
+            <select
+              className="input-field"
+              value={String(currentChoiceCount)}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                const choiceCount = (value === 2 || value === 4) ? (value as 2 | 4) : 3;
+                onPreferenceChange({ choiceCount });
+                onSessionSettingChange({ choiceCount });
+              }}
+            >
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}

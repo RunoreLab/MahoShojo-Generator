@@ -3,20 +3,22 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import BattleDataModal from '@/components/BattleDataModal';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import Footer from '@/components/Footer';
+import { MagicTavernChatComposer } from '@/components/magic-tavern/ChatComposer';
 import { MagicTavernChatMessage } from '@/components/magic-tavern/ChatMessage';
+import { MagicTavernSessionSidebar } from '@/components/magic-tavern/SessionSidebar';
+import { MagicTavernSessionSetupPanel } from '@/components/magic-tavern/SessionSetupPanel';
 import { MagicTavernTachiePanel } from '@/components/magic-tavern/TachiePanel';
-import { MagicTavernImportExportPanel } from '@/components/magic-tavern/ImportExportPanel';
 
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { createMagicTavernJsonlStreamState, ingestMagicTavernJsonlChunk, parseMagicTavernJsonl } from '@/lib/magic-tavern/jsonl';
 import { DEFAULT_MAGIC_TAVERN_PREFERENCES, patchMagicTavernPreferences, readMagicTavernPreferences } from '@/lib/magic-tavern/preferences';
-import { MAGIC_TAVERN_PRESETS, type MagicTavernPresetId, getMagicTavernPreset } from '@/lib/magic-tavern/presets';
+import { type MagicTavernPresetId, getMagicTavernPreset } from '@/lib/magic-tavern/presets';
 import {
   deleteMagicTavernSession,
   getMagicTavernSession,
@@ -26,7 +28,14 @@ import {
   putMagicTavernSession,
 } from '@/lib/magic-tavern/storage';
 import { deriveMagicTavernTitle } from '@/lib/magic-tavern/title';
-import type { MagicTavernMessage, MagicTavernRole, MagicTavernScenario, MagicTavernSession, MagicTavernTachieAsset } from '@/lib/magic-tavern/types';
+import type {
+  MagicTavernMessage,
+  MagicTavernPreferences,
+  MagicTavernRole,
+  MagicTavernScenario,
+  MagicTavernSession,
+  MagicTavernTachieAsset,
+} from '@/lib/magic-tavern/types';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
@@ -568,6 +577,54 @@ export default function MagicTavernPage() {
       await persistSession(next);
     },
     [activeSession, persistSession]
+  );
+
+  const applyPreferencePatch = useCallback((patch: Partial<MagicTavernPreferences>) => {
+    setPreferences(() => patchMagicTavernPreferences(patch));
+  }, []);
+
+  const applyPreset = useCallback(
+    (presetId: MagicTavernPresetId) => {
+      const preset = getMagicTavernPreset(presetId);
+      if (!preset) return;
+
+      if (!activeSession) {
+        void createSession(preset.id);
+        return;
+      }
+
+      void updateActiveSessionSettings({
+        presetId: preset.id,
+        worldbookPresetId: preset.worldbookPresetId,
+        outputFormat: preset.defaultSettings.outputFormat,
+        enableChoices: preset.defaultSettings.enableChoices,
+        choiceCount: preset.defaultSettings.choiceCount,
+      });
+
+      void updateActiveSessionScenarios(
+        {
+          id: 'preset-scenario',
+          title: preset.defaultScenario.title,
+          presetId: preset.id,
+          source: 'preset',
+          card: {
+            title: preset.defaultScenario.title,
+            content: preset.defaultScenario.content,
+            templateId: '通用情景卡（Markdown）',
+          },
+        },
+        []
+      );
+
+      applyPreferencePatch({
+        lastPresetId: preset.id,
+        lastWorldbookPresetId: preset.worldbookPresetId,
+        outputFormat: preset.defaultSettings.outputFormat,
+        enableChoices: preset.defaultSettings.enableChoices,
+        choiceCount: preset.defaultSettings.choiceCount,
+      });
+    },
+    [activeSession, applyPreferencePatch, createSession, updateActiveSessionScenarios, updateActiveSessionSettings]
   );
 
   const onToggleRoleCard = useCallback(
@@ -1680,6 +1737,33 @@ export default function MagicTavernPage() {
     ];
   }, [activeSession?.roles, activeSession?.settings.userDisplayName, preferences.userDisplayName]);
 
+  const lockSessionTitle = useCallback(() => {
+    if (!activeSession) return;
+    void persistSession({
+      ...activeSession,
+      title: activeSession.title,
+      titleMeta: { source: 'manual' },
+      updatedAt: Date.now(),
+    });
+  }, [activeSession, persistSession]);
+
+  const updateSessionTitle = useCallback(
+    (title: string) => {
+      if (!activeSession) return;
+      void persistSession({ ...activeSession, title, titleMeta: { source: 'manual' }, updatedAt: Date.now() });
+    },
+    [activeSession, persistSession]
+  );
+
+  const updatePlayerRole = useCallback(
+    (roleId: string | null) => {
+      if (!activeSession) return;
+      void persistSession({ ...activeSession, playerRoleId: roleId, updatedAt: Date.now() });
+    },
+    [activeSession, persistSession]
+  );
+
+
 
   const lastAssistantId = useMemo(() => {
     const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
@@ -1729,341 +1813,37 @@ export default function MagicTavernPage() {
             )}
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[320px_1fr]">
-              <aside className="space-y-4">
-                <div className="rounded-xl border border-pink-100 bg-white p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-gray-800">会话列表</div>
-                    <button
-                      type="button"
-                      className="rounded-lg bg-pink-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-pink-700"
-                      onClick={() => void createSession(preferences.lastPresetId as any)}
-                    >
-                      新建
-                    </button>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {sessions.length === 0 ? (
-                      <div className="text-sm text-gray-500">还没有会话，先新建一个吧。</div>
-                    ) : (
-                      sessions.map((session) => (
-                        <div
-                          key={session.id}
-                          className={`rounded-lg border px-3 py-2 transition-colors ${session.id === activeSessionId
-                            ? 'border-pink-300 bg-pink-50'
-                            : 'border-pink-100 bg-white hover:bg-pink-50/50'
-                            }`}
-                        >
-                          <button
-                            type="button"
-                            className="block w-full text-left"
-                            onClick={() => setActiveSessionId(session.id)}
-                          >
-                            <div className="text-sm font-semibold text-gray-800 line-clamp-1">{session.title}</div>
-                            <div className="mt-0.5 text-xs text-gray-500">
-                              {new Date(session.updatedAt).toLocaleString()}
-                            </div>
-                          </button>
-                          <div className="mt-2 flex justify-end">
-                            <button
-                              type="button"
-                              className="text-xs text-red-600 hover:underline"
-                              onClick={() => void deleteSession(session.id)}
-                            >
-                              删除
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                <MagicTavernImportExportPanel
-                  activeSession={activeSession}
-                  preferences={preferences}
-                  onSessionImported={handleSessionImported}
-                />
-
-                <div className="rounded-xl border border-pink-100 bg-white p-4">
-                  <div className="text-sm font-semibold text-gray-800">预设情景</div>
-                  <div className="mt-3 grid gap-2">
-                    {MAGIC_TAVERN_PRESETS.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        className="rounded-xl border border-pink-200 bg-white px-4 py-3 text-left hover:bg-pink-50"
-                        onClick={() => {
-                          if (!activeSession) {
-                            void createSession(preset.id);
-                            return;
-                          }
-                          void updateActiveSessionSettings({
-                            presetId: preset.id,
-                            worldbookPresetId: preset.worldbookPresetId,
-                            outputFormat: preset.defaultSettings.outputFormat,
-                            enableChoices: preset.defaultSettings.enableChoices,
-                            choiceCount: preset.defaultSettings.choiceCount,
-                          });
-                          void updateActiveSessionScenarios(
-                            {
-                              id: 'preset-scenario',
-                              title: preset.defaultScenario.title,
-                              presetId: preset.id,
-                              source: 'preset',
-                              card: {
-                                title: preset.defaultScenario.title,
-                                content: preset.defaultScenario.content,
-                                templateId: '通用情景卡（Markdown）',
-                              },
-                            },
-                            []
-                          );
-                          setPreferences(() =>
-                            patchMagicTavernPreferences({
-                              lastPresetId: preset.id,
-                              lastWorldbookPresetId: preset.worldbookPresetId,
-                              outputFormat: preset.defaultSettings.outputFormat,
-                              enableChoices: preset.defaultSettings.enableChoices,
-                              choiceCount: preset.defaultSettings.choiceCount,
-                            })
-                          );
-                        }}
-                      >
-                        <div className="text-sm font-semibold text-pink-800">{preset.title}</div>
-                        <div className="mt-1 text-xs text-gray-600">{preset.description}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-pink-100 bg-white p-4">
-                  <AiProviderSelector
-                    onConfigChange={setUserProviderConfig}
-                    storageNamespace="magic-tavern.customProvider"
-                    allowSystemProvider={false}
-                    label="自备 API Key（必填）"
-                  />
-                </div>
-
-                <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-3">
-                  <div className="text-sm font-semibold text-gray-800">输出偏好</div>
-                  <div className="grid gap-3">
-                    <div className="grid gap-1">
-                      <label className="text-xs font-semibold text-gray-600">你的称呼（{'{{user}}'}）</label>
-                      <input
-                        className="input-field"
-                        value={activeSession?.settings.userDisplayName ?? preferences.userDisplayName}
-                        onChange={(event) => {
-                          const value = event.target.value.trim().slice(0, 20);
-                          setPreferences(() => patchMagicTavernPreferences({ userDisplayName: value || '旅人' }));
-                          void updateActiveSessionSettings({ userDisplayName: value || '旅人' });
-                        }}
-                        placeholder="例如：旅人 / 记者 / 观众"
-                      />
-                    </div>
-
-                    <div className="grid gap-1">
-                      <label className="text-xs font-semibold text-gray-600">输出模式</label>
-                      <select
-                        className="input-field"
-                        value={activeSession?.settings.outputFormat ?? preferences.outputFormat}
-                        onChange={(event) => {
-                          const value = event.target.value === 'markdown' ? 'markdown' : 'jsonl';
-                          setPreferences(() => patchMagicTavernPreferences({ outputFormat: value }));
-                          void updateActiveSessionSettings({ outputFormat: value });
-                        }}
-                      >
-                        <option value="jsonl">结构化 JSONL</option>
-                        <option value="markdown">Markdown 故事</option>
-                      </select>
-                    </div>
-
-                    <div className="grid gap-1">
-                      <label className="text-xs font-semibold text-gray-600">语言</label>
-                      <select
-                        className="input-field"
-                        value={activeSession?.settings.language ?? preferences.language}
-                        onChange={(event) => {
-                          const value = event.target.value as any;
-                          setPreferences(() => patchMagicTavernPreferences({ language: value }));
-                          void updateActiveSessionSettings({ language: value });
-                        }}
-                      >
-                        <option value="zh-CN">中文</option>
-                        <option value="ja-JP">日本語</option>
-                        <option value="en-US">English</option>
-                      </select>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-xs font-semibold text-gray-600">启用选项</div>
-                        <div className="text-xs text-gray-500">仅对 JSONL 模式有效</div>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(activeSession?.settings.enableChoices ?? preferences.enableChoices)}
-                        onChange={(event) => {
-                          const enableChoices = Boolean(event.target.checked);
-                          setPreferences(() => patchMagicTavernPreferences({ enableChoices }));
-                          void updateActiveSessionSettings({ enableChoices });
-                        }}
-                      />
-                    </div>
-
-                    <div className="grid gap-1">
-                      <label className="text-xs font-semibold text-gray-600">选项数量</label>
-                      <select
-                        className="input-field"
-                        value={String(activeSession?.settings.choiceCount ?? preferences.choiceCount)}
-                        onChange={(event) => {
-                          const value = Number(event.target.value);
-                          const choiceCount = (value === 2 || value === 4) ? (value as 2 | 4) : 3;
-                          setPreferences(() => patchMagicTavernPreferences({ choiceCount }));
-                          void updateActiveSessionSettings({ choiceCount });
-                        }}
-                      >
-                        <option value="2">2</option>
-                        <option value="3">3</option>
-                        <option value="4">4</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              </aside>
+              <MagicTavernSessionSidebar
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                activeSession={activeSession}
+                preferences={preferences}
+                onCreateSession={(presetId) => void createSession(presetId)}
+                onSelectSession={setActiveSessionId}
+                onDeleteSession={(sessionId) => void deleteSession(sessionId)}
+                onSessionImported={handleSessionImported}
+                onPresetSelected={(presetId) => applyPreset(presetId)}
+                onProviderConfigChange={setUserProviderConfig}
+                onPreferenceChange={applyPreferencePatch}
+                onSessionSettingChange={updateActiveSessionSettings}
+              />
 
               <main className="space-y-4">
-                <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-gray-800">会话设置</div>
-                    <button
-                      type="button"
-                      className="text-xs text-gray-600 hover:underline"
-                      onClick={() => {
-                        if (!activeSession) return;
-                        void persistSession({
-                          ...activeSession,
-                          title: activeSession.title,
-                          titleMeta: { source: 'manual' },
-                          updatedAt: Date.now(),
-                        });
-                      }}
-                      title="标记为手动标题（阻止自动覆盖）"
-                    >
-                      锁定标题
-                    </button>
-                  </div>
+                <MagicTavernSessionSetupPanel
+                  activeSession={activeSession}
+                  playerOptions={playerOptions}
+                  onOpenRoleModal={() => setShowRoleModal(true)}
+                  onOpenScenarioModal={() => setShowScenarioModal(true)}
+                  onUploadRoles={onUploadRoles}
+                  onUploadScenarios={onUploadScenarios}
+                  onUpdateRoles={(roles) => void updateActiveSessionRoles(roles)}
+                  onUpdateScenarios={(scenario, auxScenarios) => void updateActiveSessionScenarios(scenario, auxScenarios)}
+                  onUpdatePlayerRole={updatePlayerRole}
+                  onUpdateTitle={updateSessionTitle}
+                  onLockTitle={lockSessionTitle}
+                />
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs font-semibold text-gray-600">角色</div>
-                        <button
-                          type="button"
-                          className="text-xs text-pink-700 hover:underline"
-                          onClick={() => setShowRoleModal(true)}
-                          disabled={!activeSession}
-                        >
-                          浏览在线角色库
-                        </button>
-                      </div>
-                      <input type="file" accept=".json" multiple className="input-field" onChange={onUploadRoles} disabled={!activeSession} />
-                      <div className="flex flex-wrap gap-2">
-                        {(activeSession?.roles ?? []).length === 0 ? (
-                          <div className="text-xs text-gray-500">未选择角色（可选）</div>
-                        ) : (
-                          (activeSession?.roles ?? []).map((role) => (
-                            <span key={role.id} className="inline-flex items-center gap-2 rounded-full bg-pink-50 px-3 py-1 text-xs text-pink-800">
-                              {role.name}
-                              <button
-                                type="button"
-                                className="text-pink-700 hover:text-pink-900"
-                                onClick={() => void updateActiveSessionRoles((activeSession?.roles ?? []).filter((r) => r.id !== role.id))}
-                              >
-                                ×
-                              </button>
-                            </span>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs font-semibold text-gray-600">情景</div>
-                        <button
-                          type="button"
-                          className="text-xs text-pink-700 hover:underline"
-                          onClick={() => setShowScenarioModal(true)}
-                          disabled={!activeSession}
-                        >
-                          浏览在线情景库
-                        </button>
-                      </div>
-                      <input type="file" accept=".json" multiple className="input-field" onChange={onUploadScenarios} disabled={!activeSession} />
-                      <div className="space-y-2">
-                        {activeSession?.scenario ? (
-                          <div className="rounded-lg border border-pink-100 bg-pink-50 px-3 py-2">
-                            <div className="text-xs font-semibold text-pink-800">主情景：{activeSession.scenario.title}</div>
-                          </div>
-                        ) : (
-                          <div className="text-xs text-gray-500">未选择主情景（可选）</div>
-                        )}
-                        {(activeSession?.auxScenarios ?? []).length > 0 && (
-                          <div className="flex flex-wrap gap-2">
-                            {(activeSession?.auxScenarios ?? []).map((s) => (
-                              <span key={s.id} className="inline-flex items-center gap-2 rounded-full bg-gray-50 px-3 py-1 text-xs text-gray-700">
-                                {s.title}
-                                <button
-                                  type="button"
-                                  className="text-gray-500 hover:text-gray-700"
-                                  onClick={() => void updateActiveSessionScenarios(activeSession?.scenario, (activeSession?.auxScenarios ?? []).filter((x) => x.id !== s.id))}
-                                >
-                                  ×
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-	                  <div className="grid gap-3 sm:grid-cols-2">
-	                    <div className="grid gap-1">
-	                      <label className="text-xs font-semibold text-gray-600">扮演方式</label>
-	                      <select
-                        className="input-field"
-                        value={activeSession?.playerRoleId ?? ''}
-                        onChange={(event) => {
-                          if (!activeSession) return;
-                          const value = event.target.value;
-                          void persistSession({ ...activeSession, playerRoleId: value ? value : null, updatedAt: Date.now() });
-                        }}
-                      >
-                        {playerOptions.map((opt) => (
-                          <option key={opt.value || 'user'} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="grid gap-1">
-                      <label className="text-xs font-semibold text-gray-600">会话标题</label>
-                      <input
-                        className="input-field"
-                        value={activeSession?.title ?? ''}
-                        onChange={(event) => {
-                          if (!activeSession) return;
-                          void persistSession({ ...activeSession, title: event.target.value, titleMeta: { source: 'manual' }, updatedAt: Date.now() });
-                        }}
-                        placeholder="输入会话标题"
-	                      />
-	                    </div>
-	                  </div>
-	                </div>
-
-	                <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-3">
+                <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-3">
 	                  <div className="flex items-center justify-between gap-3">
 	                    <div className="text-sm font-semibold text-gray-800">会话摘要</div>
 	                    <div className="flex flex-wrap items-center justify-end gap-2">
@@ -2182,50 +1962,17 @@ export default function MagicTavernPage() {
                     )}
                   </div>
 
-                  <div className="mt-4 grid gap-2">
-                    <textarea
-                      className="input-field h-24 resize-y"
-                      value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
-                      placeholder="输入你的行动、对白或叙事，例如：我推开酒馆的大门……"
-                      disabled={!activeSession || isGenerating}
-                    />
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0 flex-1 text-xs text-gray-500">
-                        {activeSession?.settings.outputFormat === 'markdown'
-                          ? '提示：Markdown 模式不会稳定解析选项/角色分段。'
-                          : '提示：JSONL 模式可解析旁白/对白/选项。'}
-	                      </div>
-	                      <div className="flex flex-none items-center gap-2">
-	                        <button
-	                          type="button"
-	                          className="flex-none whitespace-nowrap rounded-lg border border-pink-200 bg-white px-3 py-2 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
-	                          disabled={!activeSession || isGenerating}
-	                          onClick={() => void continueGeneration()}
-	                          title={messages.length === 0 ? '让 AI 根据角色/情景生成开场内容（会消耗 Token）' : '无需输入，继续推进剧情（会消耗 Token）'}
-	                        >
-	                          {messages.length === 0 ? '生成开场' : '继续生成'}
-	                        </button>
-	                        <button
-	                          type="button"
-	                          className="flex-none whitespace-nowrap rounded-lg border border-pink-200 bg-white px-3 py-2 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
-	                          disabled={!activeSession || isGenerating}
-                          onClick={() => void generateChoices()}
-                          title="根据当前剧情生成下一步行动选项"
-                        >
-                          生成选项
-                        </button>
-                        <button
-                          type="button"
-                          className="flex-none whitespace-nowrap rounded-lg bg-pink-600 px-4 py-2 text-xs font-semibold text-white hover:bg-pink-700 disabled:cursor-not-allowed disabled:opacity-50"
-                          disabled={!activeSession || isGenerating || !draft.trim()}
-                          onClick={() => void sendMessage(draft)}
-                        >
-                          发送
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  <MagicTavernChatComposer
+                    activeSession={activeSession}
+                    preferences={preferences}
+                    draft={draft}
+                    onDraftChange={setDraft}
+                    onSend={(value) => void sendMessage(value)}
+                    onContinue={() => void continueGeneration()}
+                    onGenerateChoices={() => void generateChoices()}
+                    isGenerating={isGenerating}
+                    hasMessages={messages.length > 0}
+                  />
 	                </div>
 
 	                  {activeSession ? (
