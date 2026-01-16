@@ -176,7 +176,7 @@ export default function MagicTeaPartyPage() {
     if (Array.isArray(shadowDrafts) && shadowDrafts.length > 0) {
       setUpdateDrafts(shadowDrafts);
     }
-  }, [activeSession?.id]);
+  }, [activeSession]);
 
   const handleStartEditMessage = (message: MagicTeaPartyMessage) => {
     setEditingMessageId(message.id);

@@ -187,11 +187,36 @@ export default async function handler(req: NextRequest): Promise<Response> {
         }))
       : [];
 
+    const normalizedScenario: MagicTeaPartyScenario | undefined =
+      scenario && typeof scenario === 'object'
+        ? ({
+            ...scenario,
+            source: (scenario as any).source || 'cloud',
+            card: typeof (scenario as any).card === 'object' && (scenario as any).card ? (scenario as any).card : {},
+          } as MagicTeaPartyScenario)
+        : undefined;
+
+    const normalizedAuxScenarios: MagicTeaPartyScenario[] = Array.isArray(auxScenarios)
+      ? (auxScenarios as unknown as MagicTeaPartyScenario[]).map((item) => ({
+          ...item,
+          source: (item as any).source || 'cloud',
+          card: typeof (item as any).card === 'object' && (item as any).card ? (item as any).card : {},
+        }))
+      : [];
+
+    const normalizedLastChoices =
+      Array.isArray(lastChoices) && lastChoices.length > 0
+        ? lastChoices.map((choice, index) => ({
+            id: typeof choice.id === 'string' && choice.id.trim() ? choice.id.trim() : `c${index + 1}`,
+            text: typeof choice.text === 'string' ? choice.text : '',
+          }))
+        : undefined;
+
     const promptInput = {
       roles: normalizedRoles,
-      scenario: scenario ?? undefined,
-      auxScenarios: Array.isArray(auxScenarios) ? (auxScenarios as unknown as MagicTeaPartyScenario[]) : [],
-      lastChoices: Array.isArray(lastChoices) ? lastChoices : undefined,
+      scenario: normalizedScenario,
+      auxScenarios: normalizedAuxScenarios,
+      lastChoices: normalizedLastChoices,
       messages: messages as MagicTeaPartyMessage[],
       summary: summary ?? undefined,
       language: settings.language ?? 'zh-CN',

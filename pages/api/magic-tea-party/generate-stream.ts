@@ -7,7 +7,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
 import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
-import type { MagicTeaPartyRole, MagicTeaPartyScenario } from '@/lib/magic-tea-party/types';
+import type { MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { createBlankDataCard } from '@/lib/data-card-converter';
 
@@ -90,6 +90,23 @@ const ProtocolShadowSchema = z
       .optional(),
   })
   .passthrough();
+
+type NormalizedProtocolShadow = {
+  updatedAt: number;
+  messageRange?: { fromMessageId: string; toMessageId: string; count: number };
+  drafts: MagicTeaPartyUpdateDraft[];
+};
+
+const normalizeProtocolShadow = (
+  payload: z.infer<typeof ProtocolShadowSchema> | undefined
+): NormalizedProtocolShadow | undefined => {
+  if (!payload || !Array.isArray(payload.drafts) || payload.drafts.length === 0) return undefined;
+  return {
+    updatedAt: typeof payload.updatedAt === 'number' ? payload.updatedAt : Date.now(),
+    ...(payload.messageRange ? { messageRange: payload.messageRange } : {}),
+    drafts: payload.drafts as MagicTeaPartyUpdateDraft[],
+  };
+};
 
 const SettingsSchema = z
   .object({
@@ -216,11 +233,12 @@ export default async function handler(req: NextRequest): Promise<Response> {
     const worldbookText = preset ? buildWorldbookText(preset.worldbook) : '';
     const stylePrompt = preset ? preset.systemPrompt : '';
 
+    const normalizedProtocolShadow = normalizeProtocolShadow(protocolShadow ?? undefined);
     const prompt = buildMagicTeaPartyMainPrompt({
       session: {
         playerRoleId,
         summary: summary ?? undefined,
-        protocolShadow: protocolShadow ?? undefined,
+        protocolShadow: normalizedProtocolShadow,
         settings: {
           providerId,
           modelId: customProvider.modelId.trim(),
