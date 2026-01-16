@@ -9,6 +9,7 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import Footer from '@/components/Footer';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { MagicTavernTachiePanel } from '@/components/magic-tavern/TachiePanel';
+import { MagicTavernImportExportPanel } from '@/components/magic-tavern/ImportExportPanel';
 
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
@@ -264,6 +265,14 @@ export default function MagicTavernPage() {
     setSessions(next);
     return next;
   }, []);
+
+  const handleSessionImported = useCallback(
+    async (sessionId: string) => {
+      await refreshSessions();
+      setActiveSessionId(sessionId);
+    },
+    [refreshSessions]
+  );
 
   const refreshActiveSession = useCallback(async (sessionId: string) => {
     const session = await getMagicTavernSession(sessionId);
@@ -1195,10 +1204,16 @@ export default function MagicTavernPage() {
     setIsGenerating(true);
 
     let streamedRawSoFar = '';
+    let streamedSafeSoFar = '';
+    let outputBlockedAt: number | null = null;
+    let outputSafetyTruncatedAt: number | null = null;
+    let safetyCheckTimer: ReturnType<typeof setTimeout> | null = null;
+    let safetyCheckInFlight = false;
     const jsonlStreamState = createMagicTavernJsonlStreamState();
     let lastSafeSnapshot = '';
 
-    const updateStreamingPreview = (safePreview: string) => {
+    const updateStreamingPreview = (safePreview: string, status?: MagicTavernMessage['status']) => {
+      streamedSafeSoFar = safePreview;
       if (safePreview.startsWith(lastSafeSnapshot)) {
         const delta = safePreview.slice(lastSafeSnapshot.length);
         ingestMagicTavernJsonlChunk(jsonlStreamState, delta);
@@ -1217,6 +1232,7 @@ export default function MagicTavernPage() {
             ? {
                 ...m,
                 content: safePreview,
+                ...(typeof status === 'string' ? { status } : {}),
                 segments: [...jsonlStreamState.segments],
                 choices: jsonlStreamState.choices ? [...jsonlStreamState.choices] : undefined,
               }
@@ -1286,26 +1302,76 @@ export default function MagicTavernPage() {
         return;
       }
 
+      const scheduleSafetyCheck = () => {
+        if (outputBlockedAt) return;
+        if (safetyCheckTimer) return;
+        safetyCheckTimer = setTimeout(() => {
+          safetyCheckTimer = null;
+          void runSafetyCheck();
+        }, 120);
+      };
+
+      const runSafetyCheck = async () => {
+        if (outputBlockedAt) return;
+        if (safetyCheckInFlight) {
+          scheduleSafetyCheck();
+          return;
+        }
+
+        safetyCheckInFlight = true;
+        const snapshot = streamedRawSoFar;
+        try {
+          const result = await quickCheck(snapshot);
+          if (outputBlockedAt) return;
+
+          if (result.hasSensitiveWords) {
+            const { safeRaw, truncatedAt } = truncateUnsafeOutputText(snapshot, result, 'jsonl');
+            const safeText = applyShieldWords(safeRaw).filteredText;
+            outputBlockedAt = Date.now();
+            outputSafetyTruncatedAt = truncatedAt;
+            updateStreamingPreview(safeText, 'blocked');
+            controller.abort('output-safety');
+            return;
+          }
+
+          const safePreview = applyShieldWords(snapshot).filteredText;
+          updateStreamingPreview(safePreview);
+        } finally {
+          safetyCheckInFlight = false;
+          if (!outputBlockedAt && streamedRawSoFar !== snapshot) scheduleSafetyCheck();
+        }
+      };
+
       const streamedText = await readTextStreamFromResponse(response, {
         label: '魔法酒馆选项',
         onText: (accumulated) => {
           streamedRawSoFar = accumulated;
-          const preview = applyShieldWords(accumulated).filteredText;
-          updateStreamingPreview(preview);
+          scheduleSafetyCheck();
         },
       });
 
-      const sensitive = await quickCheck(streamedText);
-      let status: MagicTavernMessage['status'] = 'done';
-      let safeText = applyShieldWords(streamedText).filteredText;
-      let blockedAt: number | null = null;
-      let truncatedAt: number | null = null;
-      if (sensitive.hasSensitiveWords) {
-        const truncated = truncateUnsafeOutputText(streamedText, sensitive, 'jsonl');
-        safeText = applyShieldWords(truncated.safeRaw).filteredText;
-        status = 'blocked';
-        blockedAt = Date.now();
-        truncatedAt = truncated.truncatedAt;
+      if (safetyCheckTimer) {
+        clearTimeout(safetyCheckTimer);
+        safetyCheckTimer = null;
+      }
+
+      let status: MagicTavernMessage['status'] = outputBlockedAt ? 'blocked' : 'done';
+      let safeText = streamedSafeSoFar || (outputBlockedAt ? applyShieldWords(streamedRawSoFar).filteredText : '');
+      let blockedAt: number | null = outputBlockedAt;
+      let truncatedAt: number | null = outputSafetyTruncatedAt;
+
+      if (!outputBlockedAt) {
+        const sensitive = await quickCheck(streamedText);
+        safeText = applyShieldWords(streamedText).filteredText;
+        if (sensitive.hasSensitiveWords) {
+          const truncated = truncateUnsafeOutputText(streamedText, sensitive, 'jsonl');
+          safeText = applyShieldWords(truncated.safeRaw).filteredText;
+          status = 'blocked';
+          blockedAt = Date.now();
+          truncatedAt = truncated.truncatedAt;
+        } else {
+          status = 'done';
+        }
       }
 
       const parsed = parseMagicTavernJsonl(safeText);
@@ -1324,7 +1390,28 @@ export default function MagicTavernPage() {
       await putMagicTavernMessage(finalAssistant);
       await persistSession({ ...updatedSession, updatedAt: Date.now() });
     } catch (error) {
+      if (safetyCheckTimer) {
+        clearTimeout(safetyCheckTimer);
+        safetyCheckTimer = null;
+      }
       if (error instanceof Error && error.name === 'AbortError') {
+        const reason = controller.signal.reason;
+        if (outputBlockedAt || reason === 'output-safety') {
+          const currentText = streamedSafeSoFar || applyShieldWords(streamedRawSoFar).filteredText;
+          const parsed = parseMagicTavernJsonl(currentText);
+          const finalAssistant: MagicTavernMessage = {
+            ...assistantMessage,
+            content: currentText,
+            status: 'blocked',
+            ...(parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+            safety: { status: 'blocked', blockedBy: 'output', blockedAt: outputBlockedAt ?? Date.now(), action: 'soft-block' },
+            ...(typeof outputSafetyTruncatedAt === 'number' ? { truncatedAt: outputSafetyTruncatedAt } : {}),
+          };
+          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
+          await putMagicTavernMessage(finalAssistant);
+          return;
+        }
+
         const sensitive = await quickCheck(streamedRawSoFar);
         const safeText = sensitive.hasSensitiveWords
           ? applyShieldWords(truncateUnsafeOutputText(streamedRawSoFar, sensitive, 'jsonl').safeRaw).filteredText
@@ -1810,6 +1897,12 @@ export default function MagicTavernPage() {
                     )}
                   </div>
                 </div>
+
+                <MagicTavernImportExportPanel
+                  activeSession={activeSession}
+                  preferences={preferences}
+                  onSessionImported={handleSessionImported}
+                />
 
                 <div className="rounded-xl border border-pink-100 bg-white p-4">
                   <div className="text-sm font-semibold text-gray-800">预设情景</div>
