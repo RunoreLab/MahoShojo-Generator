@@ -2,10 +2,10 @@ import { SYSTEM_PROMPTS } from '@/lib/arena/constants';
 import { buildArenaDefaultScenario, buildArenaWorldbook } from '@/lib/tavern-card';
 import type { TavernCharacterBook } from '@/lib/tavern-card';
 
-export type MagicTavernPresetId = 'arena-classic' | 'arena-kizuna' | 'arena-daily';
+export type MagicTeaPartyPresetId = 'arena-classic' | 'arena-kizuna' | 'arena-daily';
 
-export type MagicTavernPreset = {
-  id: MagicTavernPresetId;
+export type MagicTeaPartyPreset = {
+  id: MagicTeaPartyPresetId;
   title: string;
   description: string;
   systemPrompt: string;
@@ -19,7 +19,7 @@ export type MagicTavernPreset = {
   };
 };
 
-export const MAGIC_TAVERN_PRESETS: MagicTavernPreset[] = [
+export const MAGIC_TEA_PARTY_PRESETS: MagicTeaPartyPreset[] = [
   {
     id: 'arena-classic',
     title: '经典战报',
@@ -52,9 +52,9 @@ export const MAGIC_TAVERN_PRESETS: MagicTavernPreset[] = [
   },
 ];
 
-export const getMagicTavernPreset = (id: string | null | undefined): MagicTavernPreset | null => {
+export const getMagicTeaPartyPreset = (id: string | null | undefined): MagicTeaPartyPreset | null => {
   const needle = typeof id === 'string' ? id.trim() : '';
   if (!needle) return null;
-  return MAGIC_TAVERN_PRESETS.find((preset) => preset.id === needle) ?? null;
+  return MAGIC_TEA_PARTY_PRESETS.find((preset) => preset.id === needle) ?? null;
 };
 

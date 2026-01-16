@@ -1,25 +1,25 @@
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
-import { MagicTavernImportExportPanel } from '@/components/magic-tavern/ImportExportPanel';
+import { MagicTeaPartyImportExportPanel } from '@/components/magic-tea-party/ImportExportPanel';
 
-import { MAGIC_TAVERN_PRESETS, type MagicTavernPresetId } from '@/lib/magic-tavern/presets';
-import type { MagicTavernPreferences, MagicTavernSession } from '@/lib/magic-tavern/types';
+import { MAGIC_TEA_PARTY_PRESETS, type MagicTeaPartyPresetId } from '@/lib/magic-tea-party/presets';
+import type { MagicTeaPartyPreferences, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
 
-type MagicTavernSidebarProps = {
-  sessions: MagicTavernSession[];
+type MagicTeaPartySidebarProps = {
+  sessions: MagicTeaPartySession[];
   activeSessionId: string | null;
-  activeSession: MagicTavernSession | null;
-  preferences: MagicTavernPreferences;
-  onCreateSession: (presetId?: MagicTavernPresetId | null) => void;
+  activeSession: MagicTeaPartySession | null;
+  preferences: MagicTeaPartyPreferences;
+  onCreateSession: (presetId?: MagicTeaPartyPresetId | null) => void;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   onSessionImported: (sessionId: string) => void;
-  onPresetSelected: (presetId: MagicTavernPresetId) => void;
+  onPresetSelected: (presetId: MagicTeaPartyPresetId) => void;
   onProviderConfigChange: (config: UserAIProviderConfig | null) => void;
-  onPreferenceChange: (patch: Partial<MagicTavernPreferences>) => void;
-  onSessionSettingChange: (patch: Partial<MagicTavernSession['settings']>) => void;
+  onPreferenceChange: (patch: Partial<MagicTeaPartyPreferences>) => void;
+  onSessionSettingChange: (patch: Partial<MagicTeaPartySession['settings']>) => void;
 };
 
-export function MagicTavernSessionSidebar(props: MagicTavernSidebarProps) {
+export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
   const {
     sessions,
     activeSessionId,
@@ -50,7 +50,7 @@ export function MagicTavernSessionSidebar(props: MagicTavernSidebarProps) {
           <button
             type="button"
             className="rounded-lg bg-pink-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-pink-700"
-            onClick={() => onCreateSession(preferences.lastPresetId as MagicTavernPresetId)}
+            onClick={() => onCreateSession(preferences.lastPresetId as MagicTeaPartyPresetId)}
           >
             新建
           </button>
@@ -82,12 +82,12 @@ export function MagicTavernSessionSidebar(props: MagicTavernSidebarProps) {
         </div>
       </div>
 
-      <MagicTavernImportExportPanel activeSession={activeSession} preferences={preferences} onSessionImported={onSessionImported} />
+      <MagicTeaPartyImportExportPanel activeSession={activeSession} preferences={preferences} onSessionImported={onSessionImported} />
 
       <div className="rounded-xl border border-pink-100 bg-white p-4">
         <div className="text-sm font-semibold text-gray-800">预设情景</div>
         <div className="mt-3 grid gap-2">
-          {MAGIC_TAVERN_PRESETS.map((preset) => {
+          {MAGIC_TEA_PARTY_PRESETS.map((preset) => {
             const isSelected = selectedPresetId === preset.id;
             return (
               <button
@@ -116,7 +116,7 @@ export function MagicTavernSessionSidebar(props: MagicTavernSidebarProps) {
       <div className="rounded-xl border border-pink-100 bg-white p-4">
         <AiProviderSelector
           onConfigChange={onProviderConfigChange}
-          storageNamespace="magic-tavern.customProvider"
+          storageNamespace="magic-tea-party.customProvider"
           allowSystemProvider={false}
           label="自备 API Key（必填）"
         />
@@ -161,7 +161,7 @@ export function MagicTavernSessionSidebar(props: MagicTavernSidebarProps) {
               className="input-field"
               value={currentLanguage}
               onChange={(event) => {
-                const value = event.target.value as MagicTavernPreferences['language'];
+                const value = event.target.value as MagicTeaPartyPreferences['language'];
                 onPreferenceChange({ language: value });
                 onSessionSettingChange({ language: value });
               }}

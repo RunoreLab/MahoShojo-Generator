@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 
-import { buildMagicTavernSummarizePrompt } from '@/lib/magic-tavern/prompts';
+import { buildMagicTeaPartySummarizePrompt } from '@/lib/magic-tea-party/prompts';
 
-describe('magic tavern summarize prompt', () => {
+describe('magic tea party summarize prompt', () => {
   it('summary 模式包含 5 个小节与对话记录', () => {
-    const prompt = buildMagicTavernSummarizePrompt({
+    const prompt = buildMagicTeaPartySummarizePrompt({
       mode: 'summary',
       language: 'zh-CN',
       userDisplayName: '旅人',
@@ -25,7 +25,7 @@ describe('magic tavern summarize prompt', () => {
   });
 
   it('title 模式只要求输出一行标题', () => {
-    const prompt = buildMagicTavernSummarizePrompt({
+    const prompt = buildMagicTeaPartySummarizePrompt({
       mode: 'title',
       language: 'zh-CN',
       userDisplayName: '{{user}}',

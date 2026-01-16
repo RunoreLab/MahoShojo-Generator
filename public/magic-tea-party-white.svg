@@ -6,7 +6,7 @@
     <path d="M36 22h20" />
     <path d="M82 22l4 6 7 1-5 5 1 7-7-3-7 3 1-7-5-5 7-1z" />
   </g>
-  <text x="96" y="56" fill="#ffffff" font-family="Arial, sans-serif" font-size="26" font-weight="700">魔法酒馆</text>
-  <text x="96" y="78" fill="#ffffff" opacity="0.9" font-family="Arial, sans-serif" font-size="12" font-weight="600">Magic Tavern</text>
+  <text x="96" y="56" fill="#ffffff" font-family="Arial, sans-serif" font-size="26" font-weight="700">魔法茶会</text>
+  <text x="96" y="78" fill="#ffffff" opacity="0.9" font-family="Arial, sans-serif" font-size="12" font-weight="600">Magic Tea Party</text>
 </svg>
 

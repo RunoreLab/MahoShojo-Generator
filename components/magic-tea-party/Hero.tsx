@@ -2,17 +2,17 @@ import Link from 'next/link';
 
 import { ErrorMessage } from '@/components/ErrorMessage';
 
-type MagicTavernHeroProps = {
+type MagicTeaPartyHeroProps = {
   globalError: string | null;
 };
 
-export function MagicTavernHero({ globalError }: MagicTavernHeroProps) {
+export function MagicTeaPartyHero({ globalError }: MagicTeaPartyHeroProps) {
   return (
     <>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-pink-800">魔法酒馆</h1>
-          <p className="mt-1 text-sm text-gray-600">聊天记录保存在本地浏览器；魔法酒馆仅支持自备 API Key。</p>
+          <h1 className="text-2xl font-bold text-pink-800">魔法茶会</h1>
+          <p className="mt-1 text-sm text-gray-600">聊天记录保存在本地浏览器；魔法茶会仅支持自备 API Key。</p>
         </div>
         <Link href="/" className="text-sm text-pink-700 hover:underline">
           返回首页

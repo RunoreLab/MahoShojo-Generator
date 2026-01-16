@@ -1,10 +1,10 @@
 import type { ChangeEvent } from 'react';
 
-import type { MagicTavernPreferences, MagicTavernSession } from '@/lib/magic-tavern/types';
+import type { MagicTeaPartyPreferences, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
 
-type MagicTavernChatComposerProps = {
-  activeSession: MagicTavernSession | null;
-  preferences: MagicTavernPreferences;
+type MagicTeaPartyChatComposerProps = {
+  activeSession: MagicTeaPartySession | null;
+  preferences: MagicTeaPartyPreferences;
   draft: string;
   onDraftChange: (value: string) => void;
   onSend: (value: string) => void;
@@ -14,7 +14,7 @@ type MagicTavernChatComposerProps = {
   hasMessages: boolean;
 };
 
-export function MagicTavernChatComposer(props: MagicTavernChatComposerProps) {
+export function MagicTeaPartyChatComposer(props: MagicTeaPartyChatComposerProps) {
   const {
     activeSession,
     preferences,

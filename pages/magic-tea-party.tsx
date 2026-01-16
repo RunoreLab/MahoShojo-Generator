@@ -4,45 +4,45 @@ import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from '
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import Footer from '@/components/Footer';
-import { MagicTavernChatComposer } from '@/components/magic-tavern/ChatComposer';
-import { MagicTavernChatTimeline } from '@/components/magic-tavern/ChatTimeline';
-import { MagicTavernHero } from '@/components/magic-tavern/Hero';
-import { MagicTavernCardModals } from '@/components/magic-tavern/CardModals';
-import { MagicTavernSessionSidebar } from '@/components/magic-tavern/SessionSidebar';
-import { MagicTavernSessionSetupPanel } from '@/components/magic-tavern/SessionSetupPanel';
-import { MagicTavernSummaryPanel } from '@/components/magic-tavern/SummaryPanel';
-import { MagicTavernTachiePanel } from '@/components/magic-tavern/TachiePanel';
+import { MagicTeaPartyChatComposer } from '@/components/magic-tea-party/ChatComposer';
+import { MagicTeaPartyChatTimeline } from '@/components/magic-tea-party/ChatTimeline';
+import { MagicTeaPartyHero } from '@/components/magic-tea-party/Hero';
+import { MagicTeaPartyCardModals } from '@/components/magic-tea-party/CardModals';
+import { MagicTeaPartySessionSidebar } from '@/components/magic-tea-party/SessionSidebar';
+import { MagicTeaPartySessionSetupPanel } from '@/components/magic-tea-party/SessionSetupPanel';
+import { MagicTeaPartySummaryPanel } from '@/components/magic-tea-party/SummaryPanel';
+import { MagicTeaPartyTachiePanel } from '@/components/magic-tea-party/TachiePanel';
 
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { inferTemplate } from '@/lib/data-card-converter';
-import { createMagicTavernJsonlStreamState, ingestMagicTavernJsonlChunk, parseMagicTavernJsonl } from '@/lib/magic-tavern/jsonl';
-import { DEFAULT_MAGIC_TAVERN_PREFERENCES, patchMagicTavernPreferences, readMagicTavernPreferences } from '@/lib/magic-tavern/preferences';
-import { type MagicTavernPresetId, getMagicTavernPreset } from '@/lib/magic-tavern/presets';
+import { createMagicTeaPartyJsonlStreamState, ingestMagicTeaPartyJsonlChunk, parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import { DEFAULT_MAGIC_TEA_PARTY_PREFERENCES, patchMagicTeaPartyPreferences, readMagicTeaPartyPreferences } from '@/lib/magic-tea-party/preferences';
+import { type MagicTeaPartyPresetId, getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import {
-  deleteMagicTavernSession,
-  getMagicTavernSession,
-  listMagicTavernMessages,
-  listMagicTavernSessions,
-  putMagicTavernMessage,
-  putMagicTavernSession,
-} from '@/lib/magic-tavern/storage';
-import { deriveMagicTavernTitle } from '@/lib/magic-tavern/title';
+  deleteMagicTeaPartySession,
+  getMagicTeaPartySession,
+  listMagicTeaPartyMessages,
+  listMagicTeaPartySessions,
+  putMagicTeaPartyMessage,
+  putMagicTeaPartySession,
+} from '@/lib/magic-tea-party/storage';
+import { deriveMagicTeaPartyTitle } from '@/lib/magic-tea-party/title';
 import type {
-  MagicTavernMessage,
-  MagicTavernPreferences,
-  MagicTavernRole,
-  MagicTavernScenario,
-  MagicTavernSession,
-  MagicTavernTachieAsset,
-} from '@/lib/magic-tavern/types';
+  MagicTeaPartyMessage,
+  MagicTeaPartyPreferences,
+  MagicTeaPartyRole,
+  MagicTeaPartyScenario,
+  MagicTeaPartySession,
+  MagicTeaPartyTachieAsset,
+} from '@/lib/magic-tea-party/types';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { useAuth } from '@/lib/useAuth';
 
-const STORAGE_RECENT_SESSION = 'magic-tavern:recent-session';
-type MagicTavernOutputFormat = NonNullable<MagicTavernSession['settings']['outputFormat']>;
+const STORAGE_RECENT_SESSION = 'magic-tea-party:recent-session';
+type MagicTeaPartyOutputFormat = NonNullable<MagicTeaPartySession['settings']['outputFormat']>;
 
 const createUuid = (): string => {
   if (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function') {
@@ -85,7 +85,7 @@ const getEarliestSensitiveStartIndex = (result: QuickCheckResult): number | null
   return Number.isFinite(earliest) ? earliest : null;
 };
 
-const findOutputSafetyBoundaryIndex = (text: string, matchStartIndex: number, outputFormat: MagicTavernOutputFormat): number => {
+const findOutputSafetyBoundaryIndex = (text: string, matchStartIndex: number, outputFormat: MagicTeaPartyOutputFormat): number => {
   if (!text) return 0;
   const searchFrom = Math.min(text.length - 1, Math.max(0, matchStartIndex - 1));
 
@@ -104,7 +104,7 @@ const findOutputSafetyBoundaryIndex = (text: string, matchStartIndex: number, ou
 const truncateUnsafeOutputText = (
   text: string,
   result: QuickCheckResult,
-  outputFormat: MagicTavernOutputFormat
+  outputFormat: MagicTeaPartyOutputFormat
 ): { safeRaw: string; truncatedAt: number | null } => {
   const matchStart = getEarliestSensitiveStartIndex(result);
   if (matchStart === null) return { safeRaw: text, truncatedAt: null };
@@ -113,12 +113,12 @@ const truncateUnsafeOutputText = (
   return { safeRaw: text.slice(0, boundary), truncatedAt: boundary };
 };
 
-const isMessageSuperseded = (message: MagicTavernMessage): boolean => {
+const isMessageSuperseded = (message: MagicTeaPartyMessage): boolean => {
   const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
   return Boolean(meta && meta.superseded === true);
 };
 
-const shouldIncludeInHistory = (message: MagicTavernMessage): boolean => {
+const shouldIncludeInHistory = (message: MagicTeaPartyMessage): boolean => {
   if (message.role === 'user') return true;
   if (message.role !== 'assistant') return false;
   if (message.status === 'blocked' || message.status === 'error') return false;
@@ -135,7 +135,7 @@ const stripMetaKeys = (payload: Record<string, unknown>): Record<string, unknown
   return out;
 };
 
-const buildRoleFromDataCardPayload = (payload: any): MagicTavernRole => {
+const buildRoleFromDataCardPayload = (payload: any): MagicTeaPartyRole => {
   const cardId = typeof payload?._cardId === 'string' ? payload._cardId : createUuid();
   const cardName = typeof payload?._cardName === 'string' ? payload._cardName : '角色';
   const isPublic = Boolean(payload?._isPublic);
@@ -161,7 +161,7 @@ const buildRoleFromDataCardPayload = (payload: any): MagicTavernRole => {
   };
 };
 
-const buildScenarioFromDataCardPayload = (payload: any): MagicTavernScenario => {
+const buildScenarioFromDataCardPayload = (payload: any): MagicTeaPartyScenario => {
   const cardId = typeof payload?._cardId === 'string' ? payload._cardId : createUuid();
   const cardName = typeof payload?._cardName === 'string' ? payload._cardName : '情景';
   const isPublic = Boolean(payload?._isPublic);
@@ -180,7 +180,7 @@ const buildScenarioFromDataCardPayload = (payload: any): MagicTavernScenario => 
   };
 };
 
-const buildRoleFromLocalJson = (card: Record<string, unknown>, meta: { fileName?: string; importedAt: number }): MagicTavernRole | null => {
+const buildRoleFromLocalJson = (card: Record<string, unknown>, meta: { fileName?: string; importedAt: number }): MagicTeaPartyRole | null => {
   const template = inferTemplate(card);
   if (template !== 'magical-girl' && template !== 'canshou' && template !== 'general') return null;
 
@@ -201,7 +201,7 @@ const buildRoleFromLocalJson = (card: Record<string, unknown>, meta: { fileName?
   };
 };
 
-const buildScenarioFromLocalJson = (card: Record<string, unknown>, meta: { fileName?: string; importedAt: number }): MagicTavernScenario | null => {
+const buildScenarioFromLocalJson = (card: Record<string, unknown>, meta: { fileName?: string; importedAt: number }): MagicTeaPartyScenario | null => {
   const template = inferTemplate(card);
   if (template !== 'scenario' && template !== 'general-scenario') return null;
 
@@ -223,22 +223,22 @@ const buildScenarioFromLocalJson = (card: Record<string, unknown>, meta: { fileN
   };
 };
 
-const sortSessionsByUpdatedAtDesc = (items: MagicTavernSession[]): MagicTavernSession[] => {
+const sortSessionsByUpdatedAtDesc = (items: MagicTeaPartySession[]): MagicTeaPartySession[] => {
   return [...items].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 };
 
-export default function MagicTavernPage() {
+export default function MagicTeaPartyPage() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const [sessions, setSessions] = useState<MagicTavernSession[]>([]);
+  const [sessions, setSessions] = useState<MagicTeaPartySession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [activeSession, setActiveSession] = useState<MagicTavernSession | null>(null);
-  const [messages, setMessages] = useState<MagicTavernMessage[]>([]);
+  const [activeSession, setActiveSession] = useState<MagicTeaPartySession | null>(null);
+  const [messages, setMessages] = useState<MagicTeaPartyMessage[]>([]);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
-  const [preferences, setPreferences] = useState(() => DEFAULT_MAGIC_TAVERN_PREFERENCES);
+  const [preferences, setPreferences] = useState(() => DEFAULT_MAGIC_TEA_PARTY_PREFERENCES);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -252,10 +252,10 @@ export default function MagicTavernPage() {
 	  const [draft, setDraft] = useState('');
 	  const [tachieReferenceText, setTachieReferenceText] = useState('');
 	  const [tachieAnchorMessageId, setTachieAnchorMessageId] = useState<string | null>(null);
-	  const [tachieAssets, setTachieAssets] = useState<MagicTavernTachieAsset[]>([]);
+	  const [tachieAssets, setTachieAssets] = useState<MagicTeaPartyTachieAsset[]>([]);
 
   useEffect(() => {
-    const prefs = readMagicTavernPreferences();
+    const prefs = readMagicTeaPartyPreferences();
     setPreferences(prefs);
   }, []);
 
@@ -269,14 +269,14 @@ export default function MagicTavernPage() {
     if (!user?.username) return;
     if (typeof window === 'undefined') return;
     setPreferences((prev) => {
-      if (prev.userDisplayName !== DEFAULT_MAGIC_TAVERN_PREFERENCES.userDisplayName) return prev;
-      const next = patchMagicTavernPreferences({ userDisplayName: user.username });
+      if (prev.userDisplayName !== DEFAULT_MAGIC_TEA_PARTY_PREFERENCES.userDisplayName) return prev;
+      const next = patchMagicTeaPartyPreferences({ userDisplayName: user.username });
       return next;
     });
   }, [user?.username]);
 
-  const refreshSessions = useCallback(async (): Promise<MagicTavernSession[]> => {
-    const next = await listMagicTavernSessions({ limit: 50 });
+  const refreshSessions = useCallback(async (): Promise<MagicTeaPartySession[]> => {
+    const next = await listMagicTeaPartySessions({ limit: 50 });
     setSessions(next);
     return next;
   }, []);
@@ -290,9 +290,9 @@ export default function MagicTavernPage() {
   );
 
   const refreshActiveSession = useCallback(async (sessionId: string) => {
-    const session = await getMagicTavernSession(sessionId);
+    const session = await getMagicTeaPartySession(sessionId);
     setActiveSession(session);
-    const nextMessagesRaw = await listMagicTavernMessages(sessionId);
+    const nextMessagesRaw = await listMagicTeaPartyMessages(sessionId);
 
     const patchedMessages = nextMessagesRaw.map((message) => {
       if (message.role !== 'assistant') return message;
@@ -308,7 +308,7 @@ export default function MagicTavernPage() {
         content.includes('\n{"type"');
       if (!looksJsonl) return message;
 
-      const parsed = parseMagicTavernJsonl(content);
+      const parsed = parseMagicTeaPartyJsonl(content);
       if (!Array.isArray(parsed.segments) || parsed.segments.length === 0) return message;
 
       const storedSegments = Array.isArray(message.segments) ? message.segments : null;
@@ -336,7 +336,7 @@ export default function MagicTavernPage() {
 
     const dirtyMessages = patchedMessages.filter((m, idx) => m !== nextMessagesRaw[idx]);
     if (dirtyMessages.length > 0) {
-      await Promise.all(dirtyMessages.map((message) => putMagicTavernMessage(message)));
+      await Promise.all(dirtyMessages.map((message) => putMagicTeaPartyMessage(message)));
     }
 
     if (
@@ -347,8 +347,8 @@ export default function MagicTavernPage() {
     ) {
       const firstAssistant = patchedMessages.find((message) => message.role === 'assistant' && message.content.trim());
       if (firstAssistant) {
-        const outputFormat = (session.settings.outputFormat ?? 'jsonl') as MagicTavernOutputFormat;
-        const nextTitle = deriveMagicTavernTitle({
+        const outputFormat = (session.settings.outputFormat ?? 'jsonl') as MagicTeaPartyOutputFormat;
+        const nextTitle = deriveMagicTeaPartyTitle({
           outputFormat,
           content: firstAssistant.content,
           segments: outputFormat === 'jsonl' ? firstAssistant.segments : undefined,
@@ -357,7 +357,7 @@ export default function MagicTavernPage() {
         });
         const titleFiltered = applyShieldWords(nextTitle).filteredText;
         if (titleFiltered && titleFiltered !== session.title) {
-          const updatedSession: MagicTavernSession = {
+          const updatedSession: MagicTeaPartySession = {
             ...session,
             title: titleFiltered,
             titleMeta: {
@@ -368,7 +368,7 @@ export default function MagicTavernPage() {
             },
             updatedAt: Date.now(),
           };
-          await putMagicTavernSession(updatedSession);
+          await putMagicTeaPartySession(updatedSession);
           setActiveSession(updatedSession);
           setSessions((prev) => sortSessionsByUpdatedAtDesc([updatedSession, ...prev.filter((item) => item.id !== updatedSession.id)]));
         }
@@ -380,7 +380,7 @@ export default function MagicTavernPage() {
     if (!activeSession) return;
     if (tachieReferenceText.trim()) return;
 
-    const toPlainText = (message: MagicTavernMessage): string => {
+    const toPlainText = (message: MagicTeaPartyMessage): string => {
       const segments = Array.isArray(message.segments) ? message.segments : null;
       if (segments && segments.length > 0) {
         const lines: string[] = [];
@@ -463,8 +463,8 @@ export default function MagicTavernPage() {
   }, [activeSessionId, refreshActiveSession]);
 
   const persistSession = useCallback(
-    async (next: MagicTavernSession) => {
-      await putMagicTavernSession(next);
+    async (next: MagicTeaPartySession) => {
+      await putMagicTeaPartySession(next);
       setActiveSession(next);
       setSessions((prev) => sortSessionsByUpdatedAtDesc([next, ...prev.filter((item) => item.id !== next.id)]));
     },
@@ -472,10 +472,10 @@ export default function MagicTavernPage() {
   );
 
   const createSession = useCallback(
-    async (presetId?: MagicTavernPresetId | null) => {
+    async (presetId?: MagicTeaPartyPresetId | null) => {
       const now = Date.now();
       const id = createUuid();
-      const preset = getMagicTavernPreset(presetId ?? preferences.lastPresetId);
+      const preset = getMagicTeaPartyPreset(presetId ?? preferences.lastPresetId);
 
       const baseSettings = {
         providerId: userProviderConfig?.providerId || 'unknown',
@@ -486,9 +486,9 @@ export default function MagicTavernPage() {
         enableChoices: preferences.enableChoices,
         choiceCount: preferences.choiceCount,
         userDisplayName: preferences.userDisplayName,
-      } satisfies MagicTavernSession['settings'];
+      } satisfies MagicTeaPartySession['settings'];
 
-      const session: MagicTavernSession = {
+      const session: MagicTeaPartySession = {
         id,
         title: '新会话',
         createdAt: now,
@@ -523,7 +523,7 @@ export default function MagicTavernPage() {
         },
       };
 
-      await putMagicTavernSession(session);
+      await putMagicTeaPartySession(session);
       setSessions((prev) => sortSessionsByUpdatedAtDesc([session, ...prev]));
       setActiveSessionId(session.id);
       writeLocalStorageString(STORAGE_RECENT_SESSION, session.id);
@@ -533,7 +533,7 @@ export default function MagicTavernPage() {
 
   const deleteSession = useCallback(
     async (sessionId: string) => {
-      await deleteMagicTavernSession(sessionId);
+      await deleteMagicTeaPartySession(sessionId);
       const next = await refreshSessions();
       const fallback = next[0]?.id ?? null;
       setActiveSessionId((current) => (current === sessionId ? fallback : current));
@@ -542,9 +542,9 @@ export default function MagicTavernPage() {
   );
 
   const updateActiveSessionSettings = useCallback(
-    async (patch: Partial<MagicTavernSession['settings']>) => {
+    async (patch: Partial<MagicTeaPartySession['settings']>) => {
       if (!activeSession) return;
-      const next: MagicTavernSession = {
+      const next: MagicTeaPartySession = {
         ...activeSession,
         updatedAt: Date.now(),
         settings: { ...activeSession.settings, ...patch },
@@ -555,30 +555,30 @@ export default function MagicTavernPage() {
   );
 
   const updateActiveSessionRoles = useCallback(
-    async (nextRoles: MagicTavernRole[]) => {
+    async (nextRoles: MagicTeaPartyRole[]) => {
       if (!activeSession) return;
-      const next: MagicTavernSession = { ...activeSession, roles: nextRoles, updatedAt: Date.now() };
+      const next: MagicTeaPartySession = { ...activeSession, roles: nextRoles, updatedAt: Date.now() };
       await persistSession(next);
     },
     [activeSession, persistSession]
   );
 
   const updateActiveSessionScenarios = useCallback(
-    async (nextScenario: MagicTavernScenario | undefined, nextAux: MagicTavernScenario[]) => {
+    async (nextScenario: MagicTeaPartyScenario | undefined, nextAux: MagicTeaPartyScenario[]) => {
       if (!activeSession) return;
-      const next: MagicTavernSession = { ...activeSession, scenario: nextScenario, auxScenarios: nextAux, updatedAt: Date.now() };
+      const next: MagicTeaPartySession = { ...activeSession, scenario: nextScenario, auxScenarios: nextAux, updatedAt: Date.now() };
       await persistSession(next);
     },
     [activeSession, persistSession]
   );
 
-  const applyPreferencePatch = useCallback((patch: Partial<MagicTavernPreferences>) => {
-    setPreferences(() => patchMagicTavernPreferences(patch));
+  const applyPreferencePatch = useCallback((patch: Partial<MagicTeaPartyPreferences>) => {
+    setPreferences(() => patchMagicTeaPartyPreferences(patch));
   }, []);
 
   const applyPreset = useCallback(
-    (presetId: MagicTavernPresetId) => {
-      const preset = getMagicTavernPreset(presetId);
+    (presetId: MagicTeaPartyPresetId) => {
+      const preset = getMagicTeaPartyPreset(presetId);
       if (!preset) return;
 
       if (!activeSession) {
@@ -597,7 +597,7 @@ export default function MagicTavernPage() {
         const nextScenario = shouldClearScenario ? undefined : currentScenario;
         const nextAux = currentAux.filter((item) => item.source !== 'preset' && item.presetId !== preset.id);
 
-        const nextSession: MagicTavernSession = {
+        const nextSession: MagicTeaPartySession = {
           ...activeSession,
           updatedAt: Date.now(),
           scenario: nextScenario,
@@ -722,7 +722,7 @@ export default function MagicTavernPage() {
       if (!files || files.length === 0) return;
 
       const importedAt = Date.now();
-      const nextRoles: MagicTavernRole[] = [...(activeSession.roles ?? [])];
+      const nextRoles: MagicTeaPartyRole[] = [...(activeSession.roles ?? [])];
 
       for (const file of Array.from(files)) {
         try {
@@ -784,21 +784,21 @@ export default function MagicTavernPage() {
 
   const ensureProviderReady = useCallback((): { ok: true } | { ok: false; message: string } => {
     if (!userProviderConfig) return { ok: false, message: '请先配置模型与 API Key。' };
-    if (userProviderConfig.providerId === 'system') return { ok: false, message: '魔法酒馆已禁用 system，请使用自备 Key。' };
+    if (userProviderConfig.providerId === 'system') return { ok: false, message: '魔法茶会已禁用 system，请使用自备 Key。' };
     if (!userProviderConfig.apiKey?.trim()) return { ok: false, message: 'API Key 不能为空。' };
     if (!userProviderConfig.modelId?.trim()) return { ok: false, message: '请先选择模型。' };
     return { ok: true };
   }, [userProviderConfig]);
 
-  type MagicTavernHistoryMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string };
+  type MagicTeaPartyHistoryMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string };
 
   const runGenerateStream = useCallback(
     async (params: {
-      session: MagicTavernSession;
-      historyForRequest: MagicTavernHistoryMessage[];
-      outputFormat: MagicTavernOutputFormat;
+      session: MagicTeaPartySession;
+      historyForRequest: MagicTeaPartyHistoryMessage[];
+      outputFormat: MagicTeaPartyOutputFormat;
       assistantMessageId: string;
-      assistantMessage: MagicTavernMessage;
+      assistantMessage: MagicTeaPartyMessage;
       arrestedBackupInput?: string;
     }) => {
       const controller = new AbortController();
@@ -811,7 +811,7 @@ export default function MagicTavernPage() {
       let outputSafetyTruncatedAt: number | null = null;
       let safetyCheckTimer: ReturnType<typeof setTimeout> | null = null;
       let safetyCheckInFlight = false;
-      const jsonlStreamState = params.outputFormat === 'jsonl' ? createMagicTavernJsonlStreamState() : null;
+      const jsonlStreamState = params.outputFormat === 'jsonl' ? createMagicTeaPartyJsonlStreamState() : null;
       let lastSafeSnapshot = '';
 
       const updateStreamingPreview = (safePreview: string) => {
@@ -820,10 +820,10 @@ export default function MagicTavernPage() {
         if (jsonlStreamState) {
           if (safePreview.startsWith(lastSafeSnapshot)) {
             const delta = safePreview.slice(lastSafeSnapshot.length);
-            ingestMagicTavernJsonlChunk(jsonlStreamState, delta);
+            ingestMagicTeaPartyJsonlChunk(jsonlStreamState, delta);
           } else {
-            const resetState = createMagicTavernJsonlStreamState();
-            ingestMagicTavernJsonlChunk(resetState, safePreview);
+            const resetState = createMagicTeaPartyJsonlStreamState();
+            ingestMagicTeaPartyJsonlChunk(resetState, safePreview);
             jsonlStreamState.buffer = resetState.buffer;
             jsonlStreamState.segments = resetState.segments;
             jsonlStreamState.choices = resetState.choices;
@@ -850,7 +850,7 @@ export default function MagicTavernPage() {
       };
 
       try {
-        const response = await fetch('/api/magic-tavern/generate-stream', {
+        const response = await fetch('/api/magic-tea-party/generate-stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -885,11 +885,11 @@ export default function MagicTavernPage() {
               persistArrestedBackup({
                 triggerSource: 'input',
                 reason,
-                origin: '/magic-tavern',
+                origin: '/magic-tea-party',
                 items: [
                   {
-                    label: '魔法酒馆输入',
-                    filename: 'magic-tavern-input.txt',
+                    label: '魔法茶会输入',
+                    filename: 'magic-tea-party-input.txt',
                     mimeType: 'text/plain',
                     content: params.arrestedBackupInput,
                   },
@@ -897,7 +897,7 @@ export default function MagicTavernPage() {
               });
             }
 
-            const blockedMessage: MagicTavernMessage = {
+            const blockedMessage: MagicTeaPartyMessage = {
               ...params.assistantMessage,
               status: 'blocked',
               safety: { status: 'blocked', blockedBy: 'server', blockedAt: Date.now(), action: 'redirect' },
@@ -905,7 +905,7 @@ export default function MagicTavernPage() {
             };
 
             setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? blockedMessage : m)));
-            await putMagicTavernMessage(blockedMessage);
+            await putMagicTeaPartyMessage(blockedMessage);
 
             await router.push('/arrested');
             return;
@@ -918,14 +918,14 @@ export default function MagicTavernPage() {
                 ? payload.message
                 : `请求失败（${response.status}）`;
 
-          const errorMessageRecord: MagicTavernMessage = {
+          const errorMessageRecord: MagicTeaPartyMessage = {
             ...params.assistantMessage,
             status: 'error',
             error: { code: `${response.status}`, message: errorMessage },
           };
 
           setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? errorMessageRecord : m)));
-          await putMagicTavernMessage(errorMessageRecord);
+          await putMagicTeaPartyMessage(errorMessageRecord);
           return;
         }
 
@@ -975,7 +975,7 @@ export default function MagicTavernPage() {
         };
 
         const streamedText = await readTextStreamFromResponse(response, {
-          label: '魔法酒馆',
+          label: '魔法茶会',
           onText: (accumulated) => {
             streamedRawSoFar = accumulated;
             scheduleSafetyCheck();
@@ -987,7 +987,7 @@ export default function MagicTavernPage() {
           safetyCheckTimer = null;
         }
 
-        let status: MagicTavernMessage['status'] = outputBlockedAt ? 'blocked' : 'done';
+        let status: MagicTeaPartyMessage['status'] = outputBlockedAt ? 'blocked' : 'done';
         let safeText = streamedSafeSoFar;
 
         if (!outputBlockedAt) {
@@ -1004,9 +1004,9 @@ export default function MagicTavernPage() {
           }
         }
 
-        const parsed = params.outputFormat === 'jsonl' ? parseMagicTavernJsonl(safeText) : { segments: undefined, choices: null };
+        const parsed = params.outputFormat === 'jsonl' ? parseMagicTeaPartyJsonl(safeText) : { segments: undefined, choices: null };
 
-        const finalAssistant: MagicTavernMessage = {
+        const finalAssistant: MagicTeaPartyMessage = {
           ...params.assistantMessage,
           content: safeText,
           status,
@@ -1018,11 +1018,11 @@ export default function MagicTavernPage() {
         };
 
         setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
-        await putMagicTavernMessage(finalAssistant);
+        await putMagicTeaPartyMessage(finalAssistant);
 
         const shouldAutoTitle = !params.session.titleMeta || params.session.titleMeta.source === 'auto';
         if (shouldAutoTitle && (params.session.title === '新会话' || params.session.title === '未命名会话')) {
-          const nextTitle = deriveMagicTavernTitle({
+          const nextTitle = deriveMagicTeaPartyTitle({
             outputFormat: params.outputFormat,
             content: safeText,
             segments: params.outputFormat === 'jsonl' ? parsed.segments : undefined,
@@ -1057,8 +1057,8 @@ export default function MagicTavernPage() {
 
           if (outputBlockedAt || reason === 'output-safety') {
             const currentText = streamedSafeSoFar || applyShieldWords(rawSnapshot).filteredText;
-            const parsed = params.outputFormat === 'jsonl' ? parseMagicTavernJsonl(currentText) : { segments: undefined, choices: null };
-            const finalAssistant: MagicTavernMessage = {
+            const parsed = params.outputFormat === 'jsonl' ? parseMagicTeaPartyJsonl(currentText) : { segments: undefined, choices: null };
+            const finalAssistant: MagicTeaPartyMessage = {
               ...params.assistantMessage,
               content: currentText,
               status: 'blocked',
@@ -1067,7 +1067,7 @@ export default function MagicTavernPage() {
               ...(typeof outputSafetyTruncatedAt === 'number' ? { truncatedAt: outputSafetyTruncatedAt } : {}),
             };
             setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
-            await putMagicTavernMessage(finalAssistant);
+            await putMagicTeaPartyMessage(finalAssistant);
             return;
           }
 
@@ -1075,9 +1075,9 @@ export default function MagicTavernPage() {
           const safeText = sensitive.hasSensitiveWords
             ? applyShieldWords(truncateUnsafeOutputText(rawSnapshot, sensitive, params.outputFormat).safeRaw).filteredText
             : applyShieldWords(rawSnapshot).filteredText;
-          const status: MagicTavernMessage['status'] = sensitive.hasSensitiveWords ? 'blocked' : 'done';
-          const parsed = params.outputFormat === 'jsonl' ? parseMagicTavernJsonl(safeText) : { segments: undefined, choices: null };
-          const finalAssistant: MagicTavernMessage = {
+          const status: MagicTeaPartyMessage['status'] = sensitive.hasSensitiveWords ? 'blocked' : 'done';
+          const parsed = params.outputFormat === 'jsonl' ? parseMagicTeaPartyJsonl(safeText) : { segments: undefined, choices: null };
+          const finalAssistant: MagicTeaPartyMessage = {
             ...params.assistantMessage,
             content: safeText,
             status,
@@ -1087,14 +1087,14 @@ export default function MagicTavernPage() {
               : { safety: { status: 'ok' } }),
           };
           setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
-          await putMagicTavernMessage(finalAssistant);
+          await putMagicTeaPartyMessage(finalAssistant);
           return;
         }
 
         const message = error instanceof Error ? error.message : '生成失败';
-        const errorRecord: MagicTavernMessage = { ...params.assistantMessage, status: 'error', error: { code: 'exception', message } };
+        const errorRecord: MagicTeaPartyMessage = { ...params.assistantMessage, status: 'error', error: { code: 'exception', message } };
         setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? errorRecord : m)));
-        await putMagicTavernMessage(errorRecord);
+        await putMagicTeaPartyMessage(errorRecord);
       } finally {
         abortControllerRef.current = null;
         setIsGenerating(false);
@@ -1123,11 +1123,11 @@ export default function MagicTavernPage() {
         persistArrestedBackup({
           triggerSource: 'input',
           reason: '使用危险符文',
-          origin: '/magic-tavern',
+          origin: '/magic-tea-party',
           items: [
             {
-              label: '魔法酒馆输入',
-              filename: 'magic-tavern-input.txt',
+              label: '魔法茶会输入',
+              filename: 'magic-tea-party-input.txt',
               mimeType: 'text/plain',
               content: trimmed,
             },
@@ -1138,14 +1138,14 @@ export default function MagicTavernPage() {
       }
 
       const now = Date.now();
-      const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTavernOutputFormat;
+      const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTeaPartyOutputFormat;
       const playerRoleIdAtSend = activeSession.playerRoleId ?? null;
       const userDisplayNameAtSend =
         (activeSession.settings.userDisplayName || preferences.userDisplayName || '旅人').trim() || '旅人';
       const playerRoleNameAtSend = playerRoleIdAtSend
         ? (activeSession.roles ?? []).find((role) => role.id === playerRoleIdAtSend)?.name ?? ''
         : '';
-      const userMessage: MagicTavernMessage = {
+      const userMessage: MagicTeaPartyMessage = {
         id: createUuid(),
         sessionId: activeSession.id,
         role: 'user',
@@ -1157,7 +1157,7 @@ export default function MagicTavernPage() {
       };
 
       const assistantMessageId = createUuid();
-      const assistantMessage: MagicTavernMessage = {
+      const assistantMessage: MagicTeaPartyMessage = {
         id: assistantMessageId,
         sessionId: activeSession.id,
         role: 'assistant',
@@ -1172,10 +1172,10 @@ export default function MagicTavernPage() {
       setMessages(nextMessages);
       setDraft('');
 
-      await putMagicTavernMessage(userMessage);
-      await putMagicTavernMessage(assistantMessage);
+      await putMagicTeaPartyMessage(userMessage);
+      await putMagicTeaPartyMessage(assistantMessage);
 
-      const updatedSession: MagicTavernSession = { ...activeSession, updatedAt: now };
+      const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
       await persistSession(updatedSession);
 
       const historyForRequest = [...messages, userMessage]
@@ -1207,13 +1207,13 @@ export default function MagicTavernPage() {
     setGlobalError(null);
 
     const now = Date.now();
-    const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTavernOutputFormat;
+    const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTeaPartyOutputFormat;
 
     const assistantMessageId = createUuid();
     const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
     const kind = messages.length === 0 ? 'opening' : 'continue';
 
-    const assistantMessage: MagicTavernMessage = {
+    const assistantMessage: MagicTeaPartyMessage = {
       id: assistantMessageId,
       sessionId: activeSession.id,
       role: 'assistant',
@@ -1226,16 +1226,16 @@ export default function MagicTavernPage() {
 
     const nextMessages = [...messages, assistantMessage];
     setMessages(nextMessages);
-    await putMagicTavernMessage(assistantMessage);
+    await putMagicTeaPartyMessage(assistantMessage);
 
-    const updatedSession: MagicTavernSession = { ...activeSession, updatedAt: now };
+    const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
     await persistSession(updatedSession);
 
     const baseHistory = messages
       .filter(shouldIncludeInHistory)
       .map((m) => ({ id: m.id, role: m.role, content: m.content }));
 
-    const systemInstruction: MagicTavernHistoryMessage = {
+    const systemInstruction: MagicTeaPartyHistoryMessage = {
       id: createUuid(),
       role: 'system',
       content:
@@ -1268,7 +1268,7 @@ export default function MagicTavernPage() {
     const now = Date.now();
     const assistantMessageId = createUuid();
     const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
-    const assistantMessage: MagicTavernMessage = {
+    const assistantMessage: MagicTeaPartyMessage = {
       id: assistantMessageId,
       sessionId: activeSession.id,
       role: 'assistant',
@@ -1281,9 +1281,9 @@ export default function MagicTavernPage() {
 
     const nextMessages = [...messages, assistantMessage];
     setMessages(nextMessages);
-    await putMagicTavernMessage(assistantMessage);
+    await putMagicTeaPartyMessage(assistantMessage);
 
-    const updatedSession: MagicTavernSession = { ...activeSession, updatedAt: now };
+    const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
     await persistSession(updatedSession);
 
     const historyForRequest = messages
@@ -1300,17 +1300,17 @@ export default function MagicTavernPage() {
     let outputSafetyTruncatedAt: number | null = null;
     let safetyCheckTimer: ReturnType<typeof setTimeout> | null = null;
     let safetyCheckInFlight = false;
-    const jsonlStreamState = createMagicTavernJsonlStreamState();
+    const jsonlStreamState = createMagicTeaPartyJsonlStreamState();
     let lastSafeSnapshot = '';
 
-    const updateStreamingPreview = (safePreview: string, status?: MagicTavernMessage['status']) => {
+    const updateStreamingPreview = (safePreview: string, status?: MagicTeaPartyMessage['status']) => {
       streamedSafeSoFar = safePreview;
       if (safePreview.startsWith(lastSafeSnapshot)) {
         const delta = safePreview.slice(lastSafeSnapshot.length);
-        ingestMagicTavernJsonlChunk(jsonlStreamState, delta);
+        ingestMagicTeaPartyJsonlChunk(jsonlStreamState, delta);
       } else {
-        const resetState = createMagicTavernJsonlStreamState();
-        ingestMagicTavernJsonlChunk(resetState, safePreview);
+        const resetState = createMagicTeaPartyJsonlStreamState();
+        ingestMagicTeaPartyJsonlChunk(resetState, safePreview);
         jsonlStreamState.buffer = resetState.buffer;
         jsonlStreamState.segments = resetState.segments;
         jsonlStreamState.choices = resetState.choices;
@@ -1332,7 +1332,7 @@ export default function MagicTavernPage() {
       );
     };
     try {
-      const response = await fetch('/api/magic-tavern/generate-choices', {
+      const response = await fetch('/api/magic-tea-party/generate-choices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -1363,14 +1363,14 @@ export default function MagicTavernPage() {
         const shouldRedirect = Boolean(payload?.shouldRedirect);
         if (shouldRedirect) {
           const reason = typeof payload?.reason === 'string' ? payload.reason : '使用危险符文';
-          const blockedMessage: MagicTavernMessage = {
+          const blockedMessage: MagicTeaPartyMessage = {
             ...assistantMessage,
             status: 'blocked',
             safety: { status: 'blocked', blockedBy: 'server', blockedAt: Date.now(), action: 'redirect' },
             error: { code: `${response.status}`, message: reason },
           };
           setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? blockedMessage : m)));
-          await putMagicTavernMessage(blockedMessage);
+          await putMagicTeaPartyMessage(blockedMessage);
           await router.push('/arrested');
           return;
         }
@@ -1385,7 +1385,7 @@ export default function MagicTavernPage() {
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantMessageId ? { ...m, status: 'error', error: { code: `${response.status}`, message: errorMessage } } : m))
         );
-        await putMagicTavernMessage({
+        await putMagicTeaPartyMessage({
           ...assistantMessage,
           status: 'error',
           error: { code: `${response.status}`, message: errorMessage },
@@ -1434,7 +1434,7 @@ export default function MagicTavernPage() {
       };
 
       const streamedText = await readTextStreamFromResponse(response, {
-        label: '魔法酒馆选项',
+        label: '魔法茶会选项',
         onText: (accumulated) => {
           streamedRawSoFar = accumulated;
           scheduleSafetyCheck();
@@ -1446,7 +1446,7 @@ export default function MagicTavernPage() {
         safetyCheckTimer = null;
       }
 
-      let status: MagicTavernMessage['status'] = outputBlockedAt ? 'blocked' : 'done';
+      let status: MagicTeaPartyMessage['status'] = outputBlockedAt ? 'blocked' : 'done';
       let safeText = streamedSafeSoFar || (outputBlockedAt ? applyShieldWords(streamedRawSoFar).filteredText : '');
       let blockedAt: number | null = outputBlockedAt;
       let truncatedAt: number | null = outputSafetyTruncatedAt;
@@ -1465,8 +1465,8 @@ export default function MagicTavernPage() {
         }
       }
 
-      const parsed = parseMagicTavernJsonl(safeText);
-      const finalAssistant: MagicTavernMessage = {
+      const parsed = parseMagicTeaPartyJsonl(safeText);
+      const finalAssistant: MagicTeaPartyMessage = {
         ...assistantMessage,
         content: safeText,
         status,
@@ -1478,7 +1478,7 @@ export default function MagicTavernPage() {
       };
 
       setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
-      await putMagicTavernMessage(finalAssistant);
+      await putMagicTeaPartyMessage(finalAssistant);
       await persistSession({ ...updatedSession, updatedAt: Date.now() });
     } catch (error) {
       if (safetyCheckTimer) {
@@ -1489,8 +1489,8 @@ export default function MagicTavernPage() {
         const reason = controller.signal.reason;
         if (outputBlockedAt || reason === 'output-safety') {
           const currentText = streamedSafeSoFar || applyShieldWords(streamedRawSoFar).filteredText;
-          const parsed = parseMagicTavernJsonl(currentText);
-          const finalAssistant: MagicTavernMessage = {
+          const parsed = parseMagicTeaPartyJsonl(currentText);
+          const finalAssistant: MagicTeaPartyMessage = {
             ...assistantMessage,
             content: currentText,
             status: 'blocked',
@@ -1499,7 +1499,7 @@ export default function MagicTavernPage() {
             ...(typeof outputSafetyTruncatedAt === 'number' ? { truncatedAt: outputSafetyTruncatedAt } : {}),
           };
           setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
-          await putMagicTavernMessage(finalAssistant);
+          await putMagicTeaPartyMessage(finalAssistant);
           return;
         }
 
@@ -1507,9 +1507,9 @@ export default function MagicTavernPage() {
         const safeText = sensitive.hasSensitiveWords
           ? applyShieldWords(truncateUnsafeOutputText(streamedRawSoFar, sensitive, 'jsonl').safeRaw).filteredText
           : applyShieldWords(streamedRawSoFar).filteredText;
-        const status: MagicTavernMessage['status'] = sensitive.hasSensitiveWords ? 'blocked' : 'done';
-        const parsed = parseMagicTavernJsonl(safeText);
-        const finalAssistant: MagicTavernMessage = {
+        const status: MagicTeaPartyMessage['status'] = sensitive.hasSensitiveWords ? 'blocked' : 'done';
+        const parsed = parseMagicTeaPartyJsonl(safeText);
+        const finalAssistant: MagicTeaPartyMessage = {
           ...assistantMessage,
           content: safeText,
           status,
@@ -1519,7 +1519,7 @@ export default function MagicTavernPage() {
             : { safety: { status: 'ok' } }),
         };
         setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
-        await putMagicTavernMessage(finalAssistant);
+        await putMagicTeaPartyMessage(finalAssistant);
         return;
       }
 
@@ -1527,7 +1527,7 @@ export default function MagicTavernPage() {
       setMessages((prev) =>
         prev.map((m) => (m.id === assistantMessageId ? { ...m, status: 'error', error: { code: 'exception', message } } : m))
       );
-      await putMagicTavernMessage({ ...assistantMessage, status: 'error', error: { code: 'exception', message } });
+      await putMagicTeaPartyMessage({ ...assistantMessage, status: 'error', error: { code: 'exception', message } });
     } finally {
       abortControllerRef.current = null;
       setIsGenerating(false);
@@ -1574,7 +1574,7 @@ export default function MagicTavernPage() {
     setIsSummarizing(true);
 
     try {
-      const response = await fetch('/api/magic-tavern/summarize', {
+      const response = await fetch('/api/magic-tea-party/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -1615,13 +1615,13 @@ export default function MagicTavernPage() {
 
       const now = Date.now();
       const safeText = applyShieldWords(summaryRaw).filteredText;
-      const summaryMeta: MagicTavernSession['summaryMeta'] = {
+      const summaryMeta: MagicTeaPartySession['summaryMeta'] = {
         updatedAt: now,
         fromMessageId: historyForRequest[0]?.id,
         toMessageId: historyForRequest[historyForRequest.length - 1]?.id,
       };
 
-      const nextSession: MagicTavernSession = { ...activeSession, summary: safeText, summaryMeta, updatedAt: now };
+      const nextSession: MagicTeaPartySession = { ...activeSession, summary: safeText, summaryMeta, updatedAt: now };
       await persistSession(nextSession);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
@@ -1646,7 +1646,7 @@ export default function MagicTavernPage() {
   ]);
 
   const regenerateMessage = useCallback(
-    async (targetMessage: MagicTavernMessage) => {
+    async (targetMessage: MagicTeaPartyMessage) => {
       if (!activeSession) return;
       if (isGenerating) return;
       if (targetMessage.role !== 'assistant') return;
@@ -1671,7 +1671,7 @@ export default function MagicTavernPage() {
       if (targetIndex < 0) return;
 
       const historyBefore = messages.slice(0, targetIndex);
-      const historyForRequestBase: MagicTavernHistoryMessage[] = historyBefore
+      const historyForRequestBase: MagicTeaPartyHistoryMessage[] = historyBefore
         .filter(shouldIncludeInHistory)
         .map((message) => ({ id: message.id, role: message.role, content: message.content }));
 
@@ -1695,17 +1695,17 @@ export default function MagicTavernPage() {
       }
 
       const now = Date.now();
-      const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTavernOutputFormat;
+      const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTeaPartyOutputFormat;
 
-      const supersededMessage: MagicTavernMessage = {
+      const supersededMessage: MagicTeaPartyMessage = {
         ...targetMessage,
         meta: { ...(targetMessage.meta ?? {}), superseded: true },
       };
       setMessages((prev) => prev.map((message) => (message.id === targetMessage.id ? supersededMessage : message)));
-      await putMagicTavernMessage(supersededMessage);
+      await putMagicTeaPartyMessage(supersededMessage);
 
       const assistantMessageId = createUuid();
-      const assistantMessage: MagicTavernMessage = {
+      const assistantMessage: MagicTeaPartyMessage = {
         id: assistantMessageId,
         sessionId: activeSession.id,
         role: 'assistant',
@@ -1718,12 +1718,12 @@ export default function MagicTavernPage() {
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-      await putMagicTavernMessage(assistantMessage);
+      await putMagicTeaPartyMessage(assistantMessage);
 
-      const updatedSession: MagicTavernSession = { ...activeSession, updatedAt: now };
+      const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
       await persistSession(updatedSession);
 
-      const historyForRequest: MagicTavernHistoryMessage[] =
+      const historyForRequest: MagicTeaPartyHistoryMessage[] =
         kind === 'opening' || kind === 'continue'
           ? [
               ...historyForRequestBase,
@@ -1792,7 +1792,7 @@ export default function MagicTavernPage() {
   }, [messages]);
 
   const canRegenerateMessage = useCallback(
-    (message: MagicTavernMessage): boolean => {
+    (message: MagicTeaPartyMessage): boolean => {
       if (message.role !== 'assistant') return false;
       if (message.status === 'streaming') return false;
       if (!lastAssistantId || message.id !== lastAssistantId) return false;
@@ -1806,17 +1806,17 @@ export default function MagicTavernPage() {
   return (
     <>
       <Head>
-        <title>魔法酒馆</title>
+        <title>魔法茶会</title>
         <meta name="description" content="基于角色卡/情景卡的长期对话与剧情体验（本地存储，自备 API Key）" />
       </Head>
 
       <div className="magic-background-white">
         <div className="container !max-w-[1200px]">
           <div className="card !max-w-none">
-            <MagicTavernHero globalError={globalError} />
+            <MagicTeaPartyHero globalError={globalError} />
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-              <MagicTavernSessionSidebar
+              <MagicTeaPartySessionSidebar
                 sessions={sessions}
                 activeSessionId={activeSessionId}
                 activeSession={activeSession}
@@ -1832,7 +1832,7 @@ export default function MagicTavernPage() {
               />
 
               <main className="space-y-4 min-w-0">
-                <MagicTavernSessionSetupPanel
+                <MagicTeaPartySessionSetupPanel
                   activeSession={activeSession}
                   playerOptions={playerOptions}
                   onOpenRoleModal={() => setShowRoleModal(true)}
@@ -1845,7 +1845,7 @@ export default function MagicTavernPage() {
                   onUpdateTitle={updateSessionTitle}
                   onLockTitle={lockSessionTitle}
                 />
-                <MagicTavernSummaryPanel
+                <MagicTeaPartySummaryPanel
                   activeSession={activeSession}
                   isGenerating={isGenerating}
                   isSummarizing={isSummarizing}
@@ -1857,7 +1857,7 @@ export default function MagicTavernPage() {
                 />
 
                 <div className="rounded-xl border border-pink-100 bg-white p-4">
-                  <MagicTavernChatTimeline
+                  <MagicTeaPartyChatTimeline
                     activeSession={activeSession}
                     preferences={preferences}
                     messages={messages}
@@ -1873,7 +1873,7 @@ export default function MagicTavernPage() {
                     canRegenerateMessage={canRegenerateMessage}
                   />
 
-                  <MagicTavernChatComposer
+                  <MagicTeaPartyChatComposer
                     activeSession={activeSession}
                     preferences={preferences}
                     draft={draft}
@@ -1887,7 +1887,7 @@ export default function MagicTavernPage() {
                 </div>
 
 	                  {activeSession ? (
-	                    <MagicTavernTachiePanel
+	                    <MagicTeaPartyTachiePanel
 	                      session={activeSession}
 	                      messages={messages}
 	                      referenceText={tachieReferenceText}
@@ -1904,7 +1904,7 @@ export default function MagicTavernPage() {
           </div>
         </div>
 
-        <MagicTavernCardModals
+        <MagicTeaPartyCardModals
           showRoleModal={showRoleModal}
           showScenarioModal={showScenarioModal}
           selectedRoleCardIds={selectedRoleCardIds}

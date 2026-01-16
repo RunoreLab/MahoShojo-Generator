@@ -1,30 +1,30 @@
-import { MagicTavernChatMessage } from '@/components/magic-tavern/ChatMessage';
+import { MagicTeaPartyChatMessage } from '@/components/magic-tea-party/ChatMessage';
 
 import type {
-  MagicTavernMessage,
-  MagicTavernPreferences,
-  MagicTavernSession,
-  MagicTavernTachieAsset,
-} from '@/lib/magic-tavern/types';
+  MagicTeaPartyMessage,
+  MagicTeaPartyPreferences,
+  MagicTeaPartySession,
+  MagicTeaPartyTachieAsset,
+} from '@/lib/magic-tea-party/types';
 
-type MagicTavernChatTimelineProps = {
-  activeSession: MagicTavernSession | null;
-  preferences: MagicTavernPreferences;
-  messages: MagicTavernMessage[];
+type MagicTeaPartyChatTimelineProps = {
+  activeSession: MagicTeaPartySession | null;
+  preferences: MagicTeaPartyPreferences;
+  messages: MagicTeaPartyMessage[];
   isGenerating: boolean;
-  tachieAssets?: MagicTavernTachieAsset[];
+  tachieAssets?: MagicTeaPartyTachieAsset[];
   onStopGenerating: () => void;
   onSelectChoice: (text: string) => void;
-  onUseAsReference: (message: MagicTavernMessage, plainText: string) => void;
-  onRegenerate: (message: MagicTavernMessage) => void;
-  canRegenerateMessage: (message: MagicTavernMessage) => boolean;
+  onUseAsReference: (message: MagicTeaPartyMessage, plainText: string) => void;
+  onRegenerate: (message: MagicTeaPartyMessage) => void;
+  canRegenerateMessage: (message: MagicTeaPartyMessage) => boolean;
 };
 
 const InlineSpinner = () => (
   <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-pink-200 border-t-pink-600" aria-hidden="true" />
 );
 
-export function MagicTavernChatTimeline(props: MagicTavernChatTimelineProps) {
+export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps) {
   const {
     activeSession,
     preferences,
@@ -70,7 +70,7 @@ export function MagicTavernChatTimeline(props: MagicTavernChatTimelineProps) {
           messages.map((message) => (
             <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className="max-w-[720px] w-full sm:w-auto">
-                <MagicTavernChatMessage
+                <MagicTeaPartyChatMessage
                   message={message}
                   session={activeSession}
                   preferences={preferences}

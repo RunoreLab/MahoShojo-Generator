@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 
-import { parseSillyTavernJsonl, stringifySillyTavernJsonl } from '@/lib/magic-tavern/transfer';
-import type { MagicTavernMessage } from '@/lib/magic-tavern/types';
+import { parseSillyTavernJsonl, stringifySillyTavernJsonl } from '@/lib/magic-tea-party/transfer';
+import type { MagicTeaPartyMessage } from '@/lib/magic-tea-party/types';
 
-describe('magic tavern transfer', () => {
+describe('magic tea party transfer', () => {
   it('可以导入 SillyTavern JSONL', () => {
     const text = [
       '{"name":"旅人","is_user":true,"mes":"你好","send_date":"2024-01-01T00:00:00.000Z"}',
@@ -28,7 +28,7 @@ describe('magic tavern transfer', () => {
   });
 
   it('导出 SillyTavern JSONL 会优先使用分段文本', () => {
-    const messages: MagicTavernMessage[] = [
+    const messages: MagicTeaPartyMessage[] = [
       {
         id: 'm1',
         sessionId: 's1',

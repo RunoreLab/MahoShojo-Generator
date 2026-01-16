@@ -4,42 +4,42 @@ import type { ReactNode } from 'react';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import type {
-  MagicTavernMessage,
-  MagicTavernPreferences,
-  MagicTavernSession,
-  MagicTavernTachieAsset,
-} from '@/lib/magic-tavern/types';
+  MagicTeaPartyMessage,
+  MagicTeaPartyPreferences,
+  MagicTeaPartySession,
+  MagicTeaPartyTachieAsset,
+} from '@/lib/magic-tea-party/types';
 
-type MagicTavernChatMessageProps = {
-  message: MagicTavernMessage;
-  session: MagicTavernSession | null;
-  preferences: MagicTavernPreferences;
+type MagicTeaPartyChatMessageProps = {
+  message: MagicTeaPartyMessage;
+  session: MagicTeaPartySession | null;
+  preferences: MagicTeaPartyPreferences;
   isGenerating: boolean;
-  tachieAssets?: MagicTavernTachieAsset[];
+  tachieAssets?: MagicTeaPartyTachieAsset[];
   onSelectChoice?: (text: string) => void;
-  onUseAsReference?: (message: MagicTavernMessage, plainText: string) => void;
-  onRegenerate?: (message: MagicTavernMessage) => void;
+  onUseAsReference?: (message: MagicTeaPartyMessage, plainText: string) => void;
+  onRegenerate?: (message: MagicTeaPartyMessage) => void;
   showRegenerate?: boolean;
 };
 
-const isMessageSuperseded = (message: MagicTavernMessage): boolean => {
+const isMessageSuperseded = (message: MagicTeaPartyMessage): boolean => {
   const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
   return Boolean(meta && meta.superseded === true);
 };
 
-const getSpeakerNameFromRole = (session: MagicTavernSession | null, roleId: string): string => {
+const getSpeakerNameFromRole = (session: MagicTeaPartySession | null, roleId: string): string => {
   const roles = session?.roles ?? [];
   const match = roles.find((role) => role.id === roleId);
   return match?.name || roleId;
 };
 
-const getAssistantPrefix = (session: MagicTavernSession | null): string => {
+const getAssistantPrefix = (session: MagicTeaPartySession | null): string => {
   const presetId = session?.settings?.presetId || '';
-  const prefix = presetId.startsWith('arena-') ? 'A.R.E.N.A. 魔法酒馆' : '魔法酒馆';
+  const prefix = presetId.startsWith('arena-') ? 'A.R.E.N.A. 魔法茶会' : '魔法茶会';
   return `${prefix} · 叙述者`;
 };
 
-const getPlainTextFromMessage = (message: MagicTavernMessage, session: MagicTavernSession | null): string => {
+const getPlainTextFromMessage = (message: MagicTeaPartyMessage, session: MagicTeaPartySession | null): string => {
   const segments = Array.isArray(message.segments) ? message.segments : null;
   if (segments && segments.length > 0) {
     const lines: string[] = [];
@@ -68,9 +68,9 @@ const getPlainTextFromMessage = (message: MagicTavernMessage, session: MagicTave
 };
 
 const renderMessageAttachments = (
-  message: MagicTavernMessage,
-  session: MagicTavernSession | null,
-  assets: MagicTavernTachieAsset[] | undefined
+  message: MagicTeaPartyMessage,
+  session: MagicTeaPartySession | null,
+  assets: MagicTeaPartyTachieAsset[] | undefined
 ) => {
   if (!assets || assets.length === 0) return null;
   const attached = assets
@@ -106,7 +106,7 @@ const renderMessageAttachments = (
   );
 };
 
-const renderAssistantFooter = (message: MagicTavernMessage) => {
+const renderAssistantFooter = (message: MagicTeaPartyMessage) => {
   if (message.status === 'streaming') {
     return (
       <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
@@ -170,11 +170,11 @@ const renderAssistantFooter = (message: MagicTavernMessage) => {
 };
 
 const renderAssistantActions = (props: {
-  message: MagicTavernMessage;
-  session: MagicTavernSession | null;
+  message: MagicTeaPartyMessage;
+  session: MagicTeaPartySession | null;
   isGenerating: boolean;
-  onUseAsReference?: (message: MagicTavernMessage, plainText: string) => void;
-  onRegenerate?: (message: MagicTavernMessage) => void;
+  onUseAsReference?: (message: MagicTeaPartyMessage, plainText: string) => void;
+  onRegenerate?: (message: MagicTeaPartyMessage) => void;
   showRegenerate?: boolean;
 }) => {
   const { message, session, isGenerating, onUseAsReference, onRegenerate, showRegenerate } = props;
@@ -213,7 +213,7 @@ const renderAssistantActions = (props: {
   );
 };
 
-export function MagicTavernChatMessage(props: MagicTavernChatMessageProps) {
+export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
   const { message, session, preferences, isGenerating, tachieAssets } = props;
   const isUser = message.role === 'user';
   const bubbleClass = isUser ? 'bg-pink-600 text-white' : 'bg-white border border-pink-100 text-gray-800';

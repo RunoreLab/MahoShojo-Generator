@@ -1,24 +1,24 @@
 import { type ChangeEvent } from 'react';
 
-import type { MagicTavernRole, MagicTavernScenario, MagicTavernSession } from '@/lib/magic-tavern/types';
+import type { MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
 
-type MagicTavernPlayerOption = { value: string; label: string };
+type MagicTeaPartyPlayerOption = { value: string; label: string };
 
-type MagicTavernSessionSetupPanelProps = {
-  activeSession: MagicTavernSession | null;
-  playerOptions: MagicTavernPlayerOption[];
+type MagicTeaPartySessionSetupPanelProps = {
+  activeSession: MagicTeaPartySession | null;
+  playerOptions: MagicTeaPartyPlayerOption[];
   onOpenRoleModal: () => void;
   onOpenScenarioModal: () => void;
   onUploadRoles: (event: ChangeEvent<HTMLInputElement>) => void;
   onUploadScenarios: (event: ChangeEvent<HTMLInputElement>) => void;
-  onUpdateRoles: (roles: MagicTavernRole[]) => void;
-  onUpdateScenarios: (scenario: MagicTavernScenario | undefined, auxScenarios: MagicTavernScenario[]) => void;
+  onUpdateRoles: (roles: MagicTeaPartyRole[]) => void;
+  onUpdateScenarios: (scenario: MagicTeaPartyScenario | undefined, auxScenarios: MagicTeaPartyScenario[]) => void;
   onUpdatePlayerRole: (roleId: string | null) => void;
   onUpdateTitle: (title: string) => void;
   onLockTitle: () => void;
 };
 
-export function MagicTavernSessionSetupPanel(props: MagicTavernSessionSetupPanelProps) {
+export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupPanelProps) {
   const {
     activeSession,
     playerOptions,

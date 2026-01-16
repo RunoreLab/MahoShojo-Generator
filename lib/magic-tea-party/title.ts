@@ -1,4 +1,4 @@
-import type { MagicTavernOutputSegment } from '@/lib/magic-tavern/types';
+import type { MagicTeaPartyOutputSegment } from '@/lib/magic-tea-party/types';
 
 const normalizeTitle = (text: string): string => {
   const collapsed = text.replace(/\s+/g, ' ').trim();
@@ -33,10 +33,10 @@ const pickFirstTitleCandidateFromContent = (content: string): string => {
   return candidate ?? '';
 };
 
-export const deriveMagicTavernTitle = (params: {
+export const deriveMagicTeaPartyTitle = (params: {
   outputFormat: 'jsonl' | 'markdown';
   content: string;
-  segments?: MagicTavernOutputSegment[];
+  segments?: MagicTeaPartyOutputSegment[];
   scenarioTitle?: string;
   roleNames?: string[];
 }): string => {

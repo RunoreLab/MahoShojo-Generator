@@ -1,5 +1,5 @@
 import type { TavernCharacterBook } from '@/lib/tavern-card';
-import type { MagicTavernMessage, MagicTavernRole, MagicTavernScenario, MagicTavernSession } from '@/lib/magic-tavern/types';
+import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
 import { inferTemplate } from '@/lib/data-card-converter';
 
 const MAX_FIELD_CHARS = 2_000;
@@ -75,7 +75,7 @@ export const buildWorldbookText = (worldbook: TavernCharacterBook | null | undef
   return lines.join('\n');
 };
 
-export const buildRoleProfileText = (role: MagicTavernRole): string => {
+export const buildRoleProfileText = (role: MagicTeaPartyRole): string => {
   const card = toRecord(role.card);
   const template = role.template ?? inferTemplate(card);
   const lines: string[] = [];
@@ -169,7 +169,7 @@ export const buildRoleProfileText = (role: MagicTavernRole): string => {
   return lines.join('\n');
 };
 
-export const buildScenarioText = (scenario: MagicTavernScenario): string => {
+export const buildScenarioText = (scenario: MagicTeaPartyScenario): string => {
   const card = toRecord(scenario.card);
   const template = inferTemplate(card);
   const lines: string[] = [];
@@ -201,7 +201,7 @@ export const buildScenarioText = (scenario: MagicTavernScenario): string => {
   return lines.join('\n');
 };
 
-const formatDialogueHistory = (messages: MagicTavernMessage[], userDisplayName: string): string => {
+const formatDialogueHistory = (messages: MagicTeaPartyMessage[], userDisplayName: string): string => {
   const lines: string[] = [];
   lines.push('【对话记录】');
   for (const message of messages) {
@@ -220,13 +220,13 @@ const formatDialogueHistory = (messages: MagicTavernMessage[], userDisplayName: 
   return lines.join('\n');
 };
 
-export const buildMagicTavernMainPrompt = (params: {
-  session: Pick<MagicTavernSession, 'playerRoleId' | 'summary' | 'settings'>;
-  roles: MagicTavernRole[];
-  scenario?: MagicTavernScenario;
-  auxScenarios?: MagicTavernScenario[];
+export const buildMagicTeaPartyMainPrompt = (params: {
+  session: Pick<MagicTeaPartySession, 'playerRoleId' | 'summary' | 'settings'>;
+  roles: MagicTeaPartyRole[];
+  scenario?: MagicTeaPartyScenario;
+  auxScenarios?: MagicTeaPartyScenario[];
   worldbookText?: string;
-  messages: MagicTavernMessage[];
+  messages: MagicTeaPartyMessage[];
   requestChoices?: boolean;
   stylePrompt?: string;
 }): string => {
@@ -240,7 +240,7 @@ export const buildMagicTavernMainPrompt = (params: {
   const playerRole = playerRoleId ? params.roles.find((role) => role.id === playerRoleId) ?? null : null;
 
   const systemLines: string[] = [];
-  systemLines.push('你是“魔法酒馆”的导演/旁白。你的任务是基于【世界书】【情景设定】【角色档案】生成连贯、可持续的互动剧情。');
+  systemLines.push('你是“魔法茶会”的导演/旁白。你的任务是基于【世界书】【情景设定】【角色档案】生成连贯、可持续的互动剧情。');
   systemLines.push('');
   systemLines.push('【安全与合规】');
   systemLines.push('- 内容必须符合公序良俗，不得涉及成人内容、露骨性描写、仇恨歧视、现实违法细节或真实人物影射。');
@@ -313,24 +313,24 @@ export const buildMagicTavernMainPrompt = (params: {
   return parts.join('\n\n').trim();
 };
 
-export const buildMagicTavernChoicesPrompt = (params: {
-  session: Pick<MagicTavernSession, 'playerRoleId' | 'summary' | 'settings'>;
-  roles: MagicTavernRole[];
-  scenario?: MagicTavernScenario;
-  auxScenarios?: MagicTavernScenario[];
+export const buildMagicTeaPartyChoicesPrompt = (params: {
+  session: Pick<MagicTeaPartySession, 'playerRoleId' | 'summary' | 'settings'>;
+  roles: MagicTeaPartyRole[];
+  scenario?: MagicTeaPartyScenario;
+  auxScenarios?: MagicTeaPartyScenario[];
   worldbookText?: string;
-  messages: MagicTavernMessage[];
+  messages: MagicTeaPartyMessage[];
   stylePrompt?: string;
   choiceCount?: number;
 }): string => {
   const choiceCount = Math.min(4, Math.max(2, params.choiceCount ?? params.session.settings.choiceCount ?? 3));
 
-  const patchedSession: Pick<MagicTavernSession, 'playerRoleId' | 'summary' | 'settings'> = {
+  const patchedSession: Pick<MagicTeaPartySession, 'playerRoleId' | 'summary' | 'settings'> = {
     ...params.session,
     settings: { ...params.session.settings, outputFormat: 'jsonl', enableChoices: true, choiceCount },
   };
 
-  const base = buildMagicTavernMainPrompt({
+  const base = buildMagicTeaPartyMainPrompt({
     session: patchedSession,
     roles: params.roles,
     scenario: params.scenario,
@@ -352,20 +352,20 @@ export const buildMagicTavernChoicesPrompt = (params: {
     .trim();
 };
 
-export type MagicTavernSummarizeMode = 'summary' | 'title';
+export type MagicTeaPartySummarizeMode = 'summary' | 'title';
 
-export const buildMagicTavernSummarizePrompt = (params: {
-  messages: MagicTavernMessage[];
-  mode?: MagicTavernSummarizeMode;
-  language?: MagicTavernSession['settings']['language'];
+export const buildMagicTeaPartySummarizePrompt = (params: {
+  messages: MagicTeaPartyMessage[];
+  mode?: MagicTeaPartySummarizeMode;
+  language?: MagicTeaPartySession['settings']['language'];
   userDisplayName?: string;
 }): string => {
-  const mode: MagicTavernSummarizeMode = params.mode ?? 'summary';
+  const mode: MagicTeaPartySummarizeMode = params.mode ?? 'summary';
   const language = params.language ?? 'zh-CN';
   const userDisplayName = readString(params.userDisplayName) || '{{user}}';
 
   const lines: string[] = [];
-  lines.push('你是“魔法酒馆”的摘要助手。你的任务是根据【对话记录】生成可用于长期对话压缩的摘要或标题。');
+  lines.push('你是“魔法茶会”的摘要助手。你的任务是根据【对话记录】生成可用于长期对话压缩的摘要或标题。');
   lines.push('');
   lines.push(`【输出语言】${language}`);
   lines.push('【通用约束】');

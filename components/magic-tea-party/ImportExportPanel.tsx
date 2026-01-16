@@ -5,32 +5,32 @@ import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { randomUUID } from '@/lib/crypto';
 import {
-  listMagicTavernMessages,
-  listMagicTavernSessions,
-  listMagicTavernTachieAssets,
-  putMagicTavernMessage,
-  putMagicTavernSession,
-  putMagicTavernTachieAsset,
-} from '@/lib/magic-tavern/storage';
+  listMagicTeaPartyMessages,
+  listMagicTeaPartySessions,
+  listMagicTeaPartyTachieAssets,
+  putMagicTeaPartyMessage,
+  putMagicTeaPartySession,
+  putMagicTeaPartyTachieAsset,
+} from '@/lib/magic-tea-party/storage';
 import type {
-  MagicTavernMessage,
-  MagicTavernPreferences,
-  MagicTavernRole,
-  MagicTavernScenario,
-  MagicTavernSession,
-  MagicTavernTachieAsset,
-} from '@/lib/magic-tavern/types';
+  MagicTeaPartyMessage,
+  MagicTeaPartyPreferences,
+  MagicTeaPartyRole,
+  MagicTeaPartyScenario,
+  MagicTeaPartySession,
+  MagicTeaPartyTachieAsset,
+} from '@/lib/magic-tea-party/types';
 import {
-  buildMagicTavernSessionExport,
+  buildMagicTeaPartySessionExport,
   parseSillyTavernJsonl,
   stringifySillyTavernJsonl,
-  type MagicTavernArchiveExport,
-  type MagicTavernSessionExport,
-} from '@/lib/magic-tavern/transfer';
+  type MagicTeaPartyArchiveExport,
+  type MagicTeaPartySessionExport,
+} from '@/lib/magic-tea-party/transfer';
 
 type ImportExportPanelProps = {
-  activeSession: MagicTavernSession | null;
-  preferences: MagicTavernPreferences;
+  activeSession: MagicTeaPartySession | null;
+  preferences: MagicTeaPartyPreferences;
   onSessionImported: (sessionId: string) => void;
 };
 
@@ -47,7 +47,7 @@ const ensureRecord = (value: unknown): Record<string, unknown> | null => {
 
 const ensureArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
 
-export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
+export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
   const { activeSession, preferences, onSessionImported } = props;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,25 +84,25 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
         presetId: typeof base.presetId === 'string' ? base.presetId : undefined,
         worldbookPresetId: typeof base.worldbookPresetId === 'string' ? base.worldbookPresetId : undefined,
         enableSummary: typeof base.enableSummary === 'boolean' ? base.enableSummary : undefined,
-      } as MagicTavernSession['settings'];
+      } as MagicTeaPartySession['settings'];
     },
     [preferences]
   );
 
   const importSessionPayload = useCallback(
-    async (payload: MagicTavernSessionExport, titleHint: string | null): Promise<string> => {
+    async (payload: MagicTeaPartySessionExport, titleHint: string | null): Promise<string> => {
       const now = Date.now();
       const sessionId = randomUUID();
       const sessionCore = ensureRecord(payload.session) ?? {};
-      const roles = ensureArray<MagicTavernRole>(payload.roles).length > 0
-        ? ensureArray<MagicTavernRole>(payload.roles)
-        : ensureArray<MagicTavernRole>(sessionCore.roles);
-      const scenario = payload.scenario ?? (sessionCore.scenario as MagicTavernScenario | null) ?? null;
-      const auxScenarios = ensureArray<MagicTavernScenario>(payload.auxScenarios).length > 0
-        ? ensureArray<MagicTavernScenario>(payload.auxScenarios)
-        : ensureArray<MagicTavernScenario>(sessionCore.auxScenarios);
-      const messages = ensureArray<MagicTavernMessage>(payload.messages);
-      const assets = ensureArray<MagicTavernTachieAsset>(payload.tachieAssets);
+      const roles = ensureArray<MagicTeaPartyRole>(payload.roles).length > 0
+        ? ensureArray<MagicTeaPartyRole>(payload.roles)
+        : ensureArray<MagicTeaPartyRole>(sessionCore.roles);
+      const scenario = payload.scenario ?? (sessionCore.scenario as MagicTeaPartyScenario | null) ?? null;
+      const auxScenarios = ensureArray<MagicTeaPartyScenario>(payload.auxScenarios).length > 0
+        ? ensureArray<MagicTeaPartyScenario>(payload.auxScenarios)
+        : ensureArray<MagicTeaPartyScenario>(sessionCore.auxScenarios);
+      const messages = ensureArray<MagicTeaPartyMessage>(payload.messages);
+      const assets = ensureArray<MagicTeaPartyTachieAsset>(payload.tachieAssets);
 
       const messageIdMap = new Map<string, string>();
       const normalizedMessages = messages.map((message, index) => {
@@ -118,7 +118,7 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
           sessionId,
           createdAt,
           status,
-        } as MagicTavernMessage;
+        } as MagicTeaPartyMessage;
       });
 
       const normalizedMessagesFixed = normalizedMessages.map((message) => {
@@ -151,7 +151,7 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
         (titleHint ? titleHint.trim() : '') ||
         '导入会话';
 
-      const session: MagicTavernSession = {
+      const session: MagicTeaPartySession = {
         id: sessionId,
         title: sessionTitle,
         titleMeta: { source: 'manual', generatedAt: now, reason: 'import' },
@@ -166,10 +166,10 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
         settings: buildSessionSettings(ensureRecord(sessionCore.settings)),
       };
 
-      await putMagicTavernSession(session);
-      await Promise.all(normalizedMessagesFixed.map((message) => putMagicTavernMessage(message as any)));
+      await putMagicTeaPartySession(session);
+      await Promise.all(normalizedMessagesFixed.map((message) => putMagicTeaPartyMessage(message as any)));
       if (normalizedAssets.length > 0) {
-        await Promise.all(normalizedAssets.map((asset) => putMagicTavernTachieAsset(asset as any)));
+        await Promise.all(normalizedAssets.map((asset) => putMagicTeaPartyTachieAsset(asset as any)));
       }
 
       return sessionId;
@@ -187,16 +187,16 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
     setNotice(null);
 
     try {
-      const messages = await listMagicTavernMessages(activeSession.id);
-      const tachieAssets = await listMagicTavernTachieAssets(activeSession.id);
-      const payload = buildMagicTavernSessionExport({
+      const messages = await listMagicTeaPartyMessages(activeSession.id);
+      const tachieAssets = await listMagicTeaPartyTachieAssets(activeSession.id);
+      const payload = buildMagicTeaPartySessionExport({
         session: activeSession,
         messages,
         tachieAssets,
         appVersion: 'unknown',
       });
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      downloadBlob(blob, buildSafeFileName(activeSession.title || 'magic-tavern-session', 'json', 'magic-tavern-session'));
+      downloadBlob(blob, buildSafeFileName(activeSession.title || 'magic-tea-party-session', 'json', 'magic-tea-party-session'));
       setNotice('会话已导出。');
     } catch (err) {
       setError(err instanceof Error ? err.message : '导出失败');
@@ -215,7 +215,7 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
     setNotice(null);
 
     try {
-      const messages = await listMagicTavernMessages(activeSession.id);
+      const messages = await listMagicTeaPartyMessages(activeSession.id);
       const userDisplayName =
         activeSession.settings.userDisplayName || preferences.userDisplayName || '旅人';
       const playerRoleName = activeSession.playerRoleId
@@ -230,7 +230,7 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
       const blob = new Blob([jsonl], { type: 'application/jsonl' });
       downloadBlob(
         blob,
-        buildSafeFileName(`${activeSession.title || 'magic-tavern'}_SillyTavern`, 'jsonl', 'magic-tavern')
+        buildSafeFileName(`${activeSession.title || 'magic-tea-party'}_SillyTavern`, 'jsonl', 'magic-tea-party')
       );
       setNotice('SillyTavern JSONL 已导出。');
     } catch (err) {
@@ -245,13 +245,13 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
     setError(null);
     setNotice(null);
     try {
-      const sessions = await listMagicTavernSessions({ limit: 9999 });
-      const exports: MagicTavernSessionExport[] = [];
+      const sessions = await listMagicTeaPartySessions({ limit: 9999 });
+      const exports: MagicTeaPartySessionExport[] = [];
       for (const session of sessions) {
-        const messages = await listMagicTavernMessages(session.id);
-        const assets = await listMagicTavernTachieAssets(session.id);
+        const messages = await listMagicTeaPartyMessages(session.id);
+        const assets = await listMagicTeaPartyTachieAssets(session.id);
         exports.push(
-          buildMagicTavernSessionExport({
+          buildMagicTeaPartySessionExport({
             session,
             messages,
             tachieAssets: assets,
@@ -259,14 +259,14 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
           })
         );
       }
-      const archive: MagicTavernArchiveExport = {
-        schema: 'magic-tavern.archive.v1',
+      const archive: MagicTeaPartyArchiveExport = {
+        schema: 'magic-tea-party.archive.v1',
         exportedAt: new Date().toISOString(),
         appVersion: 'unknown',
         sessions: exports,
       };
       const blob = new Blob([JSON.stringify(archive, null, 2)], { type: 'application/json' });
-      downloadBlob(blob, buildSafeFileName('magic-tavern-archive', 'json', 'magic-tavern-archive'));
+      downloadBlob(blob, buildSafeFileName('magic-tea-party-archive', 'json', 'magic-tea-party-archive'));
       setNotice(`已导出 ${exports.length} 个会话。`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '导出失败');
@@ -298,7 +298,7 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
             userDisplayName: preferences.userDisplayName,
             now,
           });
-          const session: MagicTavernSession = {
+          const session: MagicTeaPartySession = {
             id: sessionId,
             title: baseTitle,
             titleMeta: { source: 'manual', generatedAt: now, reason: 'import' },
@@ -310,8 +310,8 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
             playerRoleId: null,
             settings: buildSessionSettings(null),
           };
-          await putMagicTavernSession(session);
-          await Promise.all(messages.map((message) => putMagicTavernMessage(message)));
+          await putMagicTeaPartySession(session);
+          await Promise.all(messages.map((message) => putMagicTeaPartyMessage(message)));
           setNotice(warnings.length > 0 ? `已导入 ${messages.length} 条消息（${warnings.length} 行已跳过）。` : `已导入 ${messages.length} 条消息。`);
           onSessionImported(sessionId);
           return;
@@ -320,14 +320,14 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
         const parsed = JSON.parse(text);
         const payload = ensureRecord(parsed);
         const schema = payload ? readString(payload.schema) : '';
-        if (schema === 'magic-tavern.session.v1') {
-          const sessionId = await importSessionPayload(payload as MagicTavernSessionExport, baseTitle);
+        if (schema === 'magic-tea-party.session.v1') {
+          const sessionId = await importSessionPayload(payload as MagicTeaPartySessionExport, baseTitle);
           setNotice('会话已导入。');
           onSessionImported(sessionId);
           return;
         }
-        if (schema === 'magic-tavern.archive.v1') {
-          const sessions = ensureArray<MagicTavernSessionExport>((payload as any).sessions);
+        if (schema === 'magic-tea-party.archive.v1') {
+          const sessions = ensureArray<MagicTeaPartySessionExport>((payload as any).sessions);
           if (sessions.length === 0) throw new Error('归档中没有会话数据。');
           const importedIds: string[] = [];
           for (const sessionExport of sessions) {
@@ -339,7 +339,7 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
           return;
         }
 
-        throw new Error('不支持的文件格式，请使用魔法酒馆导出的 JSON 或 SillyTavern JSONL。');
+        throw new Error('不支持的文件格式，请使用魔法茶会导出的 JSON 或 SillyTavern JSONL。');
       } catch (err) {
         setError(err instanceof Error ? err.message : '导入失败');
       } finally {
@@ -353,7 +353,7 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
   return (
     <div className="rounded-xl border border-pink-100 bg-white p-4">
       <div className="text-sm font-semibold text-gray-800">导入 / 导出</div>
-      <div className="mt-2 text-xs text-gray-500">支持魔法酒馆 JSON 与 SillyTavern JSONL。</div>
+      <div className="mt-2 text-xs text-gray-500">支持魔法茶会 JSON 与 SillyTavern JSONL。</div>
       {error && (
         <div className="mt-3">
           <ErrorMessage message={error} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" />

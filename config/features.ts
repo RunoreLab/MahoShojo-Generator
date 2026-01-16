@@ -98,13 +98,13 @@ export const featureCategories: FeatureCategory[] = [
         color: 'white'
       },
       {
-        id: 'magic-tavern',
-        src: '/magic-tavern-white.svg',
+        id: 'magic-tea-party',
+        src: '/magic-tea-party-white.svg',
         width: 240,
         height: 100,
-        alt: '魔法酒馆',
-        href: '/magic-tavern',
-        className: 'magic-tavern',
+        alt: '魔法茶会',
+        href: '/magic-tea-party',
+        className: 'magic-tea-party',
         color: 'white'
       }
     ]

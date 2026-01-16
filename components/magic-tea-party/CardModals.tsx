@@ -1,6 +1,6 @@
 import BattleDataModal from '@/components/BattleDataModal';
 
-type MagicTavernCardModalsProps = {
+type MagicTeaPartyCardModalsProps = {
   showRoleModal: boolean;
   showScenarioModal: boolean;
   selectedRoleCardIds: string[];
@@ -11,7 +11,7 @@ type MagicTavernCardModalsProps = {
   onToggleScenarioCard: (payload: unknown, nextSelected: boolean) => void | Promise<void>;
 };
 
-export function MagicTavernCardModals(props: MagicTavernCardModalsProps) {
+export function MagicTeaPartyCardModals(props: MagicTeaPartyCardModalsProps) {
   const {
     showRoleModal,
     showScenarioModal,

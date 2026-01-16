@@ -1,33 +1,33 @@
 import type {
-  MagicTavernMessage,
-  MagicTavernOutputSegment,
-  MagicTavernRole,
-  MagicTavernScenario,
-  MagicTavernSession,
-  MagicTavernTachieAsset,
-} from '@/lib/magic-tavern/types';
+  MagicTeaPartyMessage,
+  MagicTeaPartyOutputSegment,
+  MagicTeaPartyRole,
+  MagicTeaPartyScenario,
+  MagicTeaPartySession,
+  MagicTeaPartyTachieAsset,
+} from '@/lib/magic-tea-party/types';
 
-export type MagicTavernSessionExport = {
-  schema: 'magic-tavern.session.v1';
+export type MagicTeaPartySessionExport = {
+  schema: 'magic-tea-party.session.v1';
   exportedAt: string;
   appVersion?: string;
-  session: Omit<MagicTavernSession, 'roles' | 'scenario' | 'auxScenarios'>;
-  roles: MagicTavernRole[];
-  scenario: MagicTavernScenario | null;
-  auxScenarios: MagicTavernScenario[];
-  messages: MagicTavernMessage[];
-  tachieAssets: MagicTavernTachieAsset[];
+  session: Omit<MagicTeaPartySession, 'roles' | 'scenario' | 'auxScenarios'>;
+  roles: MagicTeaPartyRole[];
+  scenario: MagicTeaPartyScenario | null;
+  auxScenarios: MagicTeaPartyScenario[];
+  messages: MagicTeaPartyMessage[];
+  tachieAssets: MagicTeaPartyTachieAsset[];
 };
 
-export type MagicTavernArchiveExport = {
-  schema: 'magic-tavern.archive.v1';
+export type MagicTeaPartyArchiveExport = {
+  schema: 'magic-tea-party.archive.v1';
   exportedAt: string;
   appVersion?: string;
-  sessions: MagicTavernSessionExport[];
+  sessions: MagicTeaPartySessionExport[];
 };
 
 type ParseJsonlResult = {
-  messages: MagicTavernMessage[];
+  messages: MagicTeaPartyMessage[];
   warnings: string[];
 };
 
@@ -59,7 +59,7 @@ const normalizeSpeakerName = (payload: Record<string, unknown>): string => {
 };
 
 const buildPlainTextFromSegments = (
-  segments: MagicTavernOutputSegment[] | undefined,
+  segments: MagicTeaPartyOutputSegment[] | undefined,
   roleNameLookup?: (roleId: string) => string
 ): string => {
   if (!Array.isArray(segments) || segments.length === 0) return '';
@@ -86,16 +86,16 @@ const buildPlainTextFromSegments = (
   return lines.join('\n').trim();
 };
 
-export const buildMagicTavernSessionExport = (params: {
-  session: MagicTavernSession;
-  messages: MagicTavernMessage[];
-  tachieAssets?: MagicTavernTachieAsset[];
+export const buildMagicTeaPartySessionExport = (params: {
+  session: MagicTeaPartySession;
+  messages: MagicTeaPartyMessage[];
+  tachieAssets?: MagicTeaPartyTachieAsset[];
   appVersion?: string;
   exportedAt?: string;
-}): MagicTavernSessionExport => {
+}): MagicTeaPartySessionExport => {
   const { roles, scenario, auxScenarios, ...sessionCore } = params.session;
   return {
-    schema: 'magic-tavern.session.v1',
+    schema: 'magic-tea-party.session.v1',
     exportedAt: params.exportedAt ?? new Date().toISOString(),
     appVersion: params.appVersion,
     session: sessionCore,
@@ -116,7 +116,7 @@ export const parseSillyTavernJsonl = (params: {
 }): ParseJsonlResult => {
   const lines = params.text.split(/\r?\n/);
   const warnings: string[] = [];
-  const messages: MagicTavernMessage[] = [];
+  const messages: MagicTeaPartyMessage[] = [];
   const now = typeof params.now === 'number' ? params.now : Date.now();
 
   lines.forEach((rawLine, index) => {
@@ -150,11 +150,11 @@ export const parseSillyTavernJsonl = (params: {
 
     const extra = (parsed.extra && typeof parsed.extra === 'object' ? (parsed.extra as Record<string, unknown>) : null) ?? null;
     const mtExtra =
-      extra && typeof extra.magic_tavern === 'object' && extra.magic_tavern !== null
-        ? (extra.magic_tavern as Record<string, unknown>)
+      extra && typeof extra.magic_tea_party === 'object' && extra.magic_tea_party !== null
+        ? (extra.magic_tea_party as Record<string, unknown>)
         : null;
     const extraSpeakerId = mtExtra && typeof mtExtra.speakerId === 'string' ? mtExtra.speakerId : undefined;
-    const extraSegments = mtExtra && Array.isArray(mtExtra.segments) ? (mtExtra.segments as MagicTavernOutputSegment[]) : undefined;
+    const extraSegments = mtExtra && Array.isArray(mtExtra.segments) ? (mtExtra.segments as MagicTeaPartyOutputSegment[]) : undefined;
     const extraChoices = mtExtra && Array.isArray(mtExtra.choices) ? (mtExtra.choices as { id: string; text: string }[]) : undefined;
     const extraTachieId = mtExtra && typeof mtExtra.tachieId === 'string' ? mtExtra.tachieId : undefined;
     const extraRevisionOf = mtExtra && typeof mtExtra.revisionOf === 'string' ? mtExtra.revisionOf : undefined;
@@ -184,7 +184,7 @@ export const parseSillyTavernJsonl = (params: {
 };
 
 export const stringifySillyTavernJsonl = (params: {
-  messages: MagicTavernMessage[];
+  messages: MagicTeaPartyMessage[];
   userDisplayName: string;
   playerRoleName?: string;
   roleNameLookup?: (roleId: string) => string;
@@ -212,7 +212,7 @@ export const stringifySillyTavernJsonl = (params: {
       mes: content,
       send_date: new Date(message.createdAt || Date.now()).toISOString(),
       extra: {
-        magic_tavern: {
+        magic_tea_party: {
           speakerId: message.speakerId,
           segments: message.segments ?? null,
           choices: message.choices ?? null,

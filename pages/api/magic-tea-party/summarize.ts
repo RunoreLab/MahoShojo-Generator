@@ -5,10 +5,10 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
-import { buildMagicTavernSummarizePrompt, type MagicTavernSummarizeMode } from '@/lib/magic-tavern/prompts';
+import { buildMagicTeaPartySummarizePrompt, type MagicTeaPartySummarizeMode } from '@/lib/magic-tea-party/prompts';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 
-const log = getLogger('api-magic-tavern-summarize');
+const log = getLogger('api-magic-tea-party-summarize');
 
 export const config = {
   runtime: 'edge',
@@ -54,7 +54,7 @@ const buildProviderOverride = (payload: z.infer<typeof CustomProviderSchema>): {
   const apiKey = payload.apiKey.trim();
 
   if (!apiKey) return json({ error: '缺少 API Key' }, { status: 401 });
-  if (providerId === 'system') return json({ error: '魔法酒馆仅支持自备 Key（已禁用 system）' }, { status: 403 });
+  if (providerId === 'system') return json({ error: '魔法茶会仅支持自备 Key（已禁用 system）' }, { status: 403 });
 
   const providerConfig = AI_PROVIDER_CATALOG.find((item) => item.id === providerId);
   if (!providerConfig) return json({ error: '未知的模型供应商 ID' }, { status: 400 });
@@ -105,9 +105,9 @@ export default async function handler(req: NextRequest): Promise<Response> {
     if (providerOverrideResult instanceof Response) return providerOverrideResult;
     const { providerOverride, providerId } = providerOverrideResult;
 
-    const prompt = buildMagicTavernSummarizePrompt({
+    const prompt = buildMagicTeaPartySummarizePrompt({
       messages: messages as any,
-      mode: mode as MagicTavernSummarizeMode,
+      mode: mode as MagicTeaPartySummarizeMode,
       language,
       userDisplayName,
     });
@@ -150,7 +150,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
 
     return json({ summary: text });
   } catch (error) {
-    log.error('魔法酒馆摘要生成失败', { error });
+    log.error('魔法茶会摘要生成失败', { error });
     const message = error instanceof Error ? error.message : '未知错误';
     return json({ error: '生成失败', message }, { status: 500 });
   }

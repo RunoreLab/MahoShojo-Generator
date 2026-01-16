@@ -1,14 +1,14 @@
-export type MagicTavernCardSource = 'local' | 'cloud' | 'public' | 'tavern' | 'random' | 'preset';
+export type MagicTeaPartyCardSource = 'local' | 'cloud' | 'public' | 'tavern' | 'random' | 'preset';
 
-export type MagicTavernRoleTemplate = 'magical-girl' | 'canshou' | 'general';
+export type MagicTeaPartyRoleTemplate = 'magical-girl' | 'canshou' | 'general';
 
-export type MagicTavernRole = {
+export type MagicTeaPartyRole = {
   id: string;
   name: string;
-  template?: MagicTavernRoleTemplate;
+  template?: MagicTeaPartyRoleTemplate;
   templateId?: string;
   dataCardId?: string;
-  source: MagicTavernCardSource;
+  source: MagicTeaPartyCardSource;
   isNative?: boolean;
   signature?: string;
   card: Record<string, unknown>;
@@ -22,13 +22,13 @@ export type MagicTavernRole = {
   };
 };
 
-export type MagicTavernScenario = {
+export type MagicTeaPartyScenario = {
   id: string;
   title: string;
   presetId?: string;
   templateId?: string;
   dataCardId?: string;
-  source: MagicTavernCardSource;
+  source: MagicTeaPartyCardSource;
   isNative?: boolean;
   signature?: string;
   card: Record<string, unknown>;
@@ -40,17 +40,17 @@ export type MagicTavernScenario = {
   };
 };
 
-export type MagicTavernOutputSegment =
+export type MagicTeaPartyOutputSegment =
   | { type: 'narration'; text: string }
   | { type: 'dialogue'; speakerId: string; speakerName?: string; text: string }
   | { type: 'choices'; items: { id: string; text: string }[] };
 
-export type MagicTavernMessage = {
+export type MagicTeaPartyMessage = {
   id: string;
   sessionId: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  segments?: MagicTavernOutputSegment[];
+  segments?: MagicTeaPartyOutputSegment[];
   status?: 'streaming' | 'done' | 'error' | 'blocked';
   createdAt: number;
   speakerId?: string;
@@ -69,7 +69,7 @@ export type MagicTavernMessage = {
   meta?: Record<string, unknown>;
 };
 
-export type MagicTavernTachieAsset = {
+export type MagicTeaPartyTachieAsset = {
   id: string;
   sessionId: string;
   kind?: 'tachie' | 'illustration';
@@ -93,7 +93,7 @@ export type MagicTavernTachieAsset = {
   blobRef?: string;
 };
 
-export type MagicTavernSession = {
+export type MagicTeaPartySession = {
   id: string;
   title: string;
   titleMeta?: {
@@ -105,9 +105,9 @@ export type MagicTavernSession = {
   };
   createdAt: number;
   updatedAt: number;
-  roles: MagicTavernRole[];
-  scenario?: MagicTavernScenario;
-  auxScenarios?: MagicTavernScenario[];
+  roles: MagicTeaPartyRole[];
+  scenario?: MagicTeaPartyScenario;
+  auxScenarios?: MagicTeaPartyScenario[];
   playerRoleId?: string | null;
   summary?: string;
   summaryMeta?: {
@@ -139,7 +139,7 @@ export type MagicTavernSession = {
   };
 };
 
-export type MagicTavernPreferences = {
+export type MagicTeaPartyPreferences = {
   outputFormat: 'jsonl' | 'markdown';
   enableChoices: boolean;
   choiceCount: 2 | 3 | 4;

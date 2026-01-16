@@ -1,23 +1,23 @@
 import { ErrorMessage } from '@/components/ErrorMessage';
 
-import type { MagicTavernSession } from '@/lib/magic-tavern/types';
+import type { MagicTeaPartySession } from '@/lib/magic-tea-party/types';
 
-type MagicTavernSummaryPanelProps = {
-  activeSession: MagicTavernSession | null;
+type MagicTeaPartySummaryPanelProps = {
+  activeSession: MagicTeaPartySession | null;
   isGenerating: boolean;
   isSummarizing: boolean;
   summaryError: string | null;
   hasMessages: boolean;
   onGenerateSummary: () => void;
   onClearSummary: () => void;
-  onPersistSession: (session: MagicTavernSession) => void | Promise<void>;
+  onPersistSession: (session: MagicTeaPartySession) => void | Promise<void>;
 };
 
 const InlineSpinner = () => (
   <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-pink-200 border-t-pink-600" aria-hidden="true" />
 );
 
-export function MagicTavernSummaryPanel(props: MagicTavernSummaryPanelProps) {
+export function MagicTeaPartySummaryPanel(props: MagicTeaPartySummaryPanelProps) {
   const {
     activeSession,
     isGenerating,

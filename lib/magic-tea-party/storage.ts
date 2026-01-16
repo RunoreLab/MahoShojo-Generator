@@ -1,20 +1,20 @@
-import type { MagicTavernMessage, MagicTavernSession, MagicTavernTachieAsset } from '@/lib/magic-tavern/types';
+import type { MagicTeaPartyMessage, MagicTeaPartySession, MagicTeaPartyTachieAsset } from '@/lib/magic-tea-party/types';
 
-const DB_NAME = 'magic-tavern:v1';
+const DB_NAME = 'magic-tea-party:v1';
 const DB_VERSION = 1;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 const ensureBrowser = () => {
   if (typeof window === 'undefined') {
-    throw new Error('Magic Tavern 本地存储仅支持在浏览器端使用。');
+    throw new Error('Magic Tea Party 本地存储仅支持在浏览器端使用。');
   }
   if (!('indexedDB' in window)) {
-    throw new Error('当前浏览器不支持 IndexedDB，无法使用魔法酒馆本地存储。');
+    throw new Error('当前浏览器不支持 IndexedDB，无法使用魔法茶会本地存储。');
   }
 };
 
-export const openMagicTavernDb = async (): Promise<IDBDatabase> => {
+export const openMagicTeaPartyDb = async (): Promise<IDBDatabase> => {
   ensureBrowser();
 
   if (dbPromise) return dbPromise;
@@ -52,8 +52,8 @@ export const openMagicTavernDb = async (): Promise<IDBDatabase> => {
   return dbPromise;
 };
 
-export const putMagicTavernSession = async (session: MagicTavernSession): Promise<void> => {
-  const db = await openMagicTavernDb();
+export const putMagicTeaPartySession = async (session: MagicTeaPartySession): Promise<void> => {
+  const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(['sessions'], 'readwrite');
     tx.oncomplete = () => resolve();
@@ -63,27 +63,27 @@ export const putMagicTavernSession = async (session: MagicTavernSession): Promis
   });
 };
 
-export const getMagicTavernSession = async (sessionId: string): Promise<MagicTavernSession | null> => {
-  const db = await openMagicTavernDb();
-  return await new Promise<MagicTavernSession | null>((resolve, reject) => {
+export const getMagicTeaPartySession = async (sessionId: string): Promise<MagicTeaPartySession | null> => {
+  const db = await openMagicTeaPartyDb();
+  return await new Promise<MagicTeaPartySession | null>((resolve, reject) => {
     const tx = db.transaction(['sessions'], 'readonly');
     tx.onabort = () => reject(tx.error ?? new Error('读取会话失败'));
     tx.onerror = () => reject(tx.error ?? new Error('读取会话失败'));
     const request = tx.objectStore('sessions').get(sessionId);
-    request.onsuccess = () => resolve((request.result as MagicTavernSession | undefined) ?? null);
+    request.onsuccess = () => resolve((request.result as MagicTeaPartySession | undefined) ?? null);
     request.onerror = () => reject(request.error ?? new Error('读取会话失败'));
   });
 };
 
-export const listMagicTavernSessions = async (options?: { limit?: number }): Promise<MagicTavernSession[]> => {
+export const listMagicTeaPartySessions = async (options?: { limit?: number }): Promise<MagicTeaPartySession[]> => {
   const limit = typeof options?.limit === 'number' && Number.isFinite(options.limit) ? Math.max(1, Math.floor(options.limit)) : 50;
-  const db = await openMagicTavernDb();
-  return await new Promise<MagicTavernSession[]>((resolve, reject) => {
+  const db = await openMagicTeaPartyDb();
+  return await new Promise<MagicTeaPartySession[]>((resolve, reject) => {
     const tx = db.transaction(['sessions'], 'readonly');
     tx.onabort = () => reject(tx.error ?? new Error('读取会话列表失败'));
     tx.onerror = () => reject(tx.error ?? new Error('读取会话列表失败'));
 
-    const sessions: MagicTavernSession[] = [];
+    const sessions: MagicTeaPartySession[] = [];
     const index = tx.objectStore('sessions').index('by_updatedAt');
     const request = index.openCursor(null, 'prev');
 
@@ -93,7 +93,7 @@ export const listMagicTavernSessions = async (options?: { limit?: number }): Pro
         resolve(sessions);
         return;
       }
-      sessions.push(cursor.value as MagicTavernSession);
+      sessions.push(cursor.value as MagicTeaPartySession);
       if (sessions.length >= limit) {
         resolve(sessions);
         return;
@@ -104,8 +104,8 @@ export const listMagicTavernSessions = async (options?: { limit?: number }): Pro
   });
 };
 
-export const deleteMagicTavernSession = async (sessionId: string): Promise<void> => {
-  const db = await openMagicTavernDb();
+export const deleteMagicTeaPartySession = async (sessionId: string): Promise<void> => {
+  const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(['sessions', 'messages', 'tachieAssets'], 'readwrite');
     tx.oncomplete = () => resolve();
@@ -137,8 +137,8 @@ export const deleteMagicTavernSession = async (sessionId: string): Promise<void>
   });
 };
 
-export const putMagicTavernMessage = async (message: MagicTavernMessage): Promise<void> => {
-  const db = await openMagicTavernDb();
+export const putMagicTeaPartyMessage = async (message: MagicTeaPartyMessage): Promise<void> => {
+  const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(['messages'], 'readwrite');
     tx.oncomplete = () => resolve();
@@ -148,14 +148,14 @@ export const putMagicTavernMessage = async (message: MagicTavernMessage): Promis
   });
 };
 
-export const listMagicTavernMessages = async (sessionId: string): Promise<MagicTavernMessage[]> => {
-  const db = await openMagicTavernDb();
-  return await new Promise<MagicTavernMessage[]>((resolve, reject) => {
+export const listMagicTeaPartyMessages = async (sessionId: string): Promise<MagicTeaPartyMessage[]> => {
+  const db = await openMagicTeaPartyDb();
+  return await new Promise<MagicTeaPartyMessage[]>((resolve, reject) => {
     const tx = db.transaction(['messages'], 'readonly');
     tx.onabort = () => reject(tx.error ?? new Error('读取消息失败'));
     tx.onerror = () => reject(tx.error ?? new Error('读取消息失败'));
 
-    const messages: MagicTavernMessage[] = [];
+    const messages: MagicTeaPartyMessage[] = [];
     const index = tx.objectStore('messages').index('by_session_createdAt');
     const range = IDBKeyRange.bound([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER]);
     const request = index.openCursor(range, 'next');
@@ -166,15 +166,15 @@ export const listMagicTavernMessages = async (sessionId: string): Promise<MagicT
         resolve(messages);
         return;
       }
-      messages.push(cursor.value as MagicTavernMessage);
+      messages.push(cursor.value as MagicTeaPartyMessage);
       cursor.continue();
     };
     request.onerror = () => reject(request.error ?? new Error('读取消息失败'));
   });
 };
 
-export const putMagicTavernTachieAsset = async (asset: MagicTavernTachieAsset): Promise<void> => {
-  const db = await openMagicTavernDb();
+export const putMagicTeaPartyTachieAsset = async (asset: MagicTeaPartyTachieAsset): Promise<void> => {
+  const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(['tachieAssets'], 'readwrite');
     tx.oncomplete = () => resolve();
@@ -184,14 +184,14 @@ export const putMagicTavernTachieAsset = async (asset: MagicTavernTachieAsset): 
   });
 };
 
-export const listMagicTavernTachieAssets = async (sessionId: string): Promise<MagicTavernTachieAsset[]> => {
-  const db = await openMagicTavernDb();
-  return await new Promise<MagicTavernTachieAsset[]>((resolve, reject) => {
+export const listMagicTeaPartyTachieAssets = async (sessionId: string): Promise<MagicTeaPartyTachieAsset[]> => {
+  const db = await openMagicTeaPartyDb();
+  return await new Promise<MagicTeaPartyTachieAsset[]>((resolve, reject) => {
     const tx = db.transaction(['tachieAssets'], 'readonly');
     tx.onabort = () => reject(tx.error ?? new Error('读取立绘缓存失败'));
     tx.onerror = () => reject(tx.error ?? new Error('读取立绘缓存失败'));
 
-    const items: MagicTavernTachieAsset[] = [];
+    const items: MagicTeaPartyTachieAsset[] = [];
     const index = tx.objectStore('tachieAssets').index('by_sessionId');
     const request = index.openCursor(IDBKeyRange.only(sessionId), 'next');
 
@@ -201,15 +201,15 @@ export const listMagicTavernTachieAssets = async (sessionId: string): Promise<Ma
         resolve(items.sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)));
         return;
       }
-      items.push(cursor.value as MagicTavernTachieAsset);
+      items.push(cursor.value as MagicTeaPartyTachieAsset);
       cursor.continue();
     };
     request.onerror = () => reject(request.error ?? new Error('读取立绘缓存失败'));
   });
 };
 
-export const deleteMagicTavernTachieAsset = async (assetId: string): Promise<void> => {
-  const db = await openMagicTavernDb();
+export const deleteMagicTeaPartyTachieAsset = async (assetId: string): Promise<void> => {
+  const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(['tachieAssets'], 'readwrite');
     tx.oncomplete = () => resolve();
@@ -219,8 +219,8 @@ export const deleteMagicTavernTachieAsset = async (assetId: string): Promise<voi
   });
 };
 
-export const deleteMagicTavernTachieAssets = async (sessionId: string): Promise<void> => {
-  const db = await openMagicTavernDb();
+export const deleteMagicTeaPartyTachieAssets = async (sessionId: string): Promise<void> => {
+  const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(['tachieAssets'], 'readwrite');
     tx.oncomplete = () => resolve();

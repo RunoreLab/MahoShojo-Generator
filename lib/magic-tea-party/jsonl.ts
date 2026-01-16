@@ -1,13 +1,13 @@
-import type { MagicTavernOutputSegment } from '@/lib/magic-tavern/types';
+import type { MagicTeaPartyOutputSegment } from '@/lib/magic-tea-party/types';
 
 type ParseResult = {
-  segments: MagicTavernOutputSegment[];
+  segments: MagicTeaPartyOutputSegment[];
   choices: { id: string; text: string }[] | null;
 };
 
-export type MagicTavernJsonlStreamState = {
+export type MagicTeaPartyJsonlStreamState = {
   buffer: string;
-  segments: MagicTavernOutputSegment[];
+  segments: MagicTeaPartyOutputSegment[];
   choices: { id: string; text: string }[] | null;
 };
 
@@ -23,7 +23,7 @@ const isMarkdownFenceLine = (line: string): boolean => {
   return trimmed.startsWith('```') || trimmed.startsWith('~~~');
 };
 
-const appendMagicTavernJsonlLine = (state: MagicTavernJsonlStreamState, raw: string): void => {
+const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw: string): void => {
   const line = raw.trim();
   if (!line) return;
   if (isMarkdownFenceLine(line)) return;
@@ -99,33 +99,33 @@ const appendMagicTavernJsonlLine = (state: MagicTavernJsonlStreamState, raw: str
   state.segments.push({ type: 'narration', text: raw });
 };
 
-export const createMagicTavernJsonlStreamState = (): MagicTavernJsonlStreamState => ({
+export const createMagicTeaPartyJsonlStreamState = (): MagicTeaPartyJsonlStreamState => ({
   buffer: '',
   segments: [],
   choices: null,
 });
 
-export const ingestMagicTavernJsonlChunk = (state: MagicTavernJsonlStreamState, chunk: string): void => {
+export const ingestMagicTeaPartyJsonlChunk = (state: MagicTeaPartyJsonlStreamState, chunk: string): void => {
   if (!chunk) return;
   state.buffer += chunk;
   const lines = state.buffer.split('\n');
   state.buffer = lines.pop() ?? '';
   for (const raw of lines) {
-    appendMagicTavernJsonlLine(state, raw);
+    appendMagicTeaPartyJsonlLine(state, raw);
   }
 };
 
-export const flushMagicTavernJsonlStream = (state: MagicTavernJsonlStreamState): void => {
+export const flushMagicTeaPartyJsonlStream = (state: MagicTeaPartyJsonlStreamState): void => {
   const tail = state.buffer;
   state.buffer = '';
   if (tail.trim()) {
-    appendMagicTavernJsonlLine(state, tail);
+    appendMagicTeaPartyJsonlLine(state, tail);
   }
 };
 
-export const parseMagicTavernJsonl = (text: string): ParseResult => {
-  const state = createMagicTavernJsonlStreamState();
-  ingestMagicTavernJsonlChunk(state, text);
-  flushMagicTavernJsonlStream(state);
+export const parseMagicTeaPartyJsonl = (text: string): ParseResult => {
+  const state = createMagicTeaPartyJsonlStreamState();
+  ingestMagicTeaPartyJsonlChunk(state, text);
+  flushMagicTeaPartyJsonlStream(state);
   return { segments: state.segments, choices: state.choices };
 };

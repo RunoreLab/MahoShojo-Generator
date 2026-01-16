@@ -5,13 +5,13 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
-import { buildMagicTavernMainPrompt, buildWorldbookText } from '@/lib/magic-tavern/prompts';
-import { getMagicTavernPreset } from '@/lib/magic-tavern/presets';
-import type { MagicTavernRole, MagicTavernScenario } from '@/lib/magic-tavern/types';
+import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
+import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
+import type { MagicTeaPartyRole, MagicTeaPartyScenario } from '@/lib/magic-tea-party/types';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { createBlankDataCard } from '@/lib/data-card-converter';
 
-const log = getLogger('api-magic-tavern-generate-stream');
+const log = getLogger('api-magic-tea-party-generate-stream');
 
 export const config = {
   runtime: 'edge',
@@ -102,7 +102,7 @@ const buildProviderOverride = (payload: z.infer<typeof CustomProviderSchema>): {
   const apiKey = payload.apiKey.trim();
 
   if (!apiKey) return json({ error: '缺少 API Key' }, { status: 401 });
-  if (providerId === 'system') return json({ error: '魔法酒馆仅支持自备 Key（已禁用 system）' }, { status: 403 });
+  if (providerId === 'system') return json({ error: '魔法茶会仅支持自备 Key（已禁用 system）' }, { status: 403 });
 
   const providerConfig = AI_PROVIDER_CATALOG.find((item) => item.id === providerId);
   if (!providerConfig) return json({ error: '未知的模型供应商 ID' }, { status: 400 });
@@ -145,11 +145,11 @@ export default async function handler(req: NextRequest): Promise<Response> {
     if (providerOverrideResult instanceof Response) return providerOverrideResult;
     const { providerOverride, providerId } = providerOverrideResult;
 
-    const preset = getMagicTavernPreset(settings.presetId);
+    const preset = getMagicTeaPartyPreset(settings.presetId);
 
-    const scenario: MagicTavernScenario | undefined =
+    const scenario: MagicTeaPartyScenario | undefined =
       scenarioInput && typeof scenarioInput === 'object'
-        ? (scenarioInput as unknown as MagicTavernScenario)
+        ? (scenarioInput as unknown as MagicTeaPartyScenario)
         : preset
           ? {
             id: 'preset-scenario',
@@ -164,8 +164,8 @@ export default async function handler(req: NextRequest): Promise<Response> {
           }
           : undefined;
 
-    const normalizedRoles: MagicTavernRole[] = Array.isArray(roles)
-      ? (roles as unknown as MagicTavernRole[]).map((role) => ({
+    const normalizedRoles: MagicTeaPartyRole[] = Array.isArray(roles)
+      ? (roles as unknown as MagicTeaPartyRole[]).map((role) => ({
         ...role,
         source: (role as any).source || 'cloud',
         card: typeof (role as any).card === 'object' && (role as any).card ? (role as any).card : {},
@@ -175,7 +175,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
     const worldbookText = preset ? buildWorldbookText(preset.worldbook) : '';
     const stylePrompt = preset ? preset.systemPrompt : '';
 
-    const prompt = buildMagicTavernMainPrompt({
+    const prompt = buildMagicTeaPartyMainPrompt({
       session: {
         playerRoleId,
         summary: undefined,
@@ -194,7 +194,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       },
       roles: normalizedRoles,
       scenario,
-      auxScenarios: auxScenarios as unknown as MagicTavernScenario[],
+      auxScenarios: auxScenarios as unknown as MagicTeaPartyScenario[],
       worldbookText,
       messages: messages as any,
       requestChoices: false,
@@ -228,7 +228,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
 
     return streamResult.response;
   } catch (error) {
-    log.error('魔法酒馆生成失败', { error });
+    log.error('魔法茶会生成失败', { error });
     const message = error instanceof Error ? error.message : '未知错误';
     return json({ error: '生成失败', message }, { status: 500 });
   }

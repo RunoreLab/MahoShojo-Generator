@@ -6,21 +6,21 @@ import TachieGenerator from '@/components/TachieGenerator';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { randomUUID } from '@/lib/crypto';
 import {
-  deleteMagicTavernTachieAsset,
-  deleteMagicTavernTachieAssets,
-  listMagicTavernTachieAssets,
-  putMagicTavernTachieAsset,
-} from '@/lib/magic-tavern/storage';
-import type { MagicTavernMessage, MagicTavernRole, MagicTavernScenario, MagicTavernSession, MagicTavernTachieAsset } from '@/lib/magic-tavern/types';
+  deleteMagicTeaPartyTachieAsset,
+  deleteMagicTeaPartyTachieAssets,
+  listMagicTeaPartyTachieAssets,
+  putMagicTeaPartyTachieAsset,
+} from '@/lib/magic-tea-party/storage';
+import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartySession, MagicTeaPartyTachieAsset } from '@/lib/magic-tea-party/types';
 
-type MagicTavernImageKind = NonNullable<MagicTavernTachieAsset['kind']>;
+type MagicTeaPartyImageKind = NonNullable<MagicTeaPartyTachieAsset['kind']>;
 
 const MAX_PROMPT_CHARS = 10_000;
 const MAX_REFERENCE_CHARS = 2_000;
 const MAX_ASSETS_PER_SESSION = 24;
-const STORAGE_WORKFLOW_KEY = 'magic-tavern:tachie-workflow.v1';
+const STORAGE_WORKFLOW_KEY = 'magic-tea-party:tachie-workflow.v1';
 
-type MagicTavernWorkflowSettings = {
+type MagicTeaPartyWorkflowSettings = {
   workflowUuid: string;
   templateUuid: string;
   promptNodeId: string;
@@ -28,7 +28,7 @@ type MagicTavernWorkflowSettings = {
   negativePromptNodeId: string;
 };
 
-const DEFAULT_WORKFLOW_SETTINGS: Record<MagicTavernImageKind, MagicTavernWorkflowSettings> = {
+const DEFAULT_WORKFLOW_SETTINGS: Record<MagicTeaPartyImageKind, MagicTeaPartyWorkflowSettings> = {
   tachie: {
     workflowUuid: '34fed183375249dfbe293fa99d753cc5',
     templateUuid: '4df2efa0f18d46dc9758803e478eb51c',
@@ -77,7 +77,7 @@ const truncateText = (value: string, maxChars: number): string => {
   return `${text.slice(0, Math.max(0, maxChars))}...[已截断]`;
 };
 
-const getMessagePlainText = (message: MagicTavernMessage, roleNameLookup: (roleId: string) => string): string => {
+const getMessagePlainText = (message: MagicTeaPartyMessage, roleNameLookup: (roleId: string) => string): string => {
   const segments = Array.isArray(message.segments) ? message.segments : null;
   if (segments && segments.length > 0) {
     const lines: string[] = [];
@@ -99,7 +99,7 @@ const getMessagePlainText = (message: MagicTavernMessage, roleNameLookup: (roleI
   return (message.content ?? '').trim();
 };
 
-const pickDefaultReferenceText = (messages: MagicTavernMessage[], roleNameLookup: (roleId: string) => string): string => {
+const pickDefaultReferenceText = (messages: MagicTeaPartyMessage[], roleNameLookup: (roleId: string) => string): string => {
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && (m.content || '').trim() && m.status !== 'error');
   if (lastAssistant) return truncateText(getMessagePlainText(lastAssistant, roleNameLookup), MAX_REFERENCE_CHARS);
   const lastUser = [...messages].reverse().find((m) => m.role === 'user' && (m.content || '').trim());
@@ -107,7 +107,7 @@ const pickDefaultReferenceText = (messages: MagicTavernMessage[], roleNameLookup
   return '';
 };
 
-const buildRoleAppearanceHint = (role: MagicTavernRole): string => {
+const buildRoleAppearanceHint = (role: MagicTeaPartyRole): string => {
   const card = role.card && typeof role.card === 'object' ? (role.card as Record<string, unknown>) : {};
   const appearance = card.appearance;
   if (!appearance) return '';
@@ -122,18 +122,18 @@ const buildRoleAppearanceHint = (role: MagicTavernRole): string => {
   return [outfit, accessories, colorScheme, overallLook].filter(Boolean).join('，');
 };
 
-const buildRoleSummaryHint = (role: MagicTavernRole): string => {
+const buildRoleSummaryHint = (role: MagicTeaPartyRole): string => {
   const appearance = buildRoleAppearanceHint(role);
   if (appearance) return `${role.name}：${appearance}`;
   return role.name;
 };
 
 const buildSuggestedPrompt = (params: {
-  kind: MagicTavernImageKind;
+  kind: MagicTeaPartyImageKind;
   styleId: string;
   referenceText: string;
-  scenario?: MagicTavernScenario | null;
-  roles: MagicTavernRole[];
+  scenario?: MagicTeaPartyScenario | null;
+  roles: MagicTeaPartyRole[];
   mainRoleId?: string | null;
   includedRoleIds?: string[];
 }): string => {
@@ -142,7 +142,7 @@ const buildSuggestedPrompt = (params: {
       ? 'Xiabanmo, 二次元, 魔法少女, 角色立绘, 全身, 单人, 站姿, 细节丰富, 高质量, 干净背景, 不要水印, 不要文字'
       : 'Xiabanmo, 二次元, 魔法少女, 视觉小说, 剧情插画, 场景插图, cinematic lighting, 高质量, 干净画面, 不要水印, 不要文字';
 
-  const scenarioTitle = params.scenario?.title?.trim() || '魔法酒馆';
+  const scenarioTitle = params.scenario?.title?.trim() || '魔法茶会';
   const snippet = truncateText(params.referenceText || '', MAX_REFERENCE_CHARS);
 
   if (params.kind === 'tachie') {
@@ -162,7 +162,7 @@ const buildSuggestedPrompt = (params: {
   const includedRoleIds = Array.isArray(params.includedRoleIds) ? params.includedRoleIds : [];
   const includedRoles = includedRoleIds
     .map((id) => params.roles.find((r) => r.id === id))
-    .filter((r): r is MagicTavernRole => Boolean(r));
+    .filter((r): r is MagicTeaPartyRole => Boolean(r));
   const castHint = includedRoles.length > 0 ? includedRoles.map(buildRoleSummaryHint).join('；') : '';
 
   const parts = [
@@ -175,17 +175,17 @@ const buildSuggestedPrompt = (params: {
   return truncateText(parts.join('\n'), MAX_PROMPT_CHARS);
 };
 
-export function MagicTavernTachiePanel(props: {
-  session: Pick<MagicTavernSession, 'id'> & {
-    roles: MagicTavernRole[];
-    scenario?: MagicTavernScenario;
+export function MagicTeaPartyTachiePanel(props: {
+  session: Pick<MagicTeaPartySession, 'id'> & {
+    roles: MagicTeaPartyRole[];
+    scenario?: MagicTeaPartyScenario;
   };
-  messages: MagicTavernMessage[];
+  messages: MagicTeaPartyMessage[];
   referenceText?: string;
   onReferenceTextChange?: (value: string) => void;
   anchorMessageId?: string | null;
   onAnchorMessageIdChange?: (value: string | null) => void;
-  onAssetsUpdated?: (assets: MagicTavernTachieAsset[]) => void;
+  onAssetsUpdated?: (assets: MagicTeaPartyTachieAsset[]) => void;
 }) {
   const roleNameLookup = useMemo(() => {
     const map = new Map((props.session.roles ?? []).map((role) => [role.id, role.name]));
@@ -195,10 +195,10 @@ export function MagicTavernTachiePanel(props: {
   const sessionId = props.session.id;
   const onAssetsUpdated = props.onAssetsUpdated;
 
-  const [assets, setAssets] = useState<MagicTavernTachieAsset[]>([]);
+  const [assets, setAssets] = useState<MagicTeaPartyTachieAsset[]>([]);
   const [assetError, setAssetError] = useState<string | null>(null);
 
-  const [kind, setKind] = useState<MagicTavernImageKind>('tachie');
+  const [kind, setKind] = useState<MagicTeaPartyImageKind>('tachie');
   const [styleId, setStyleId] = useState<string>('default');
   const [mainRoleId, setMainRoleId] = useState<string>('');
   const [includedRoleIds, setIncludedRoleIds] = useState<string[]>([]);
@@ -208,7 +208,7 @@ export function MagicTavernTachiePanel(props: {
   const [prompt, setPrompt] = useState<string>('');
   const [promptDirty, setPromptDirty] = useState(false);
   const [showWorkflowSettings, setShowWorkflowSettings] = useState(false);
-  const [workflowSettingsByKind, setWorkflowSettingsByKind] = useState<Record<MagicTavernImageKind, MagicTavernWorkflowSettings>>(
+  const [workflowSettingsByKind, setWorkflowSettingsByKind] = useState<Record<MagicTeaPartyImageKind, MagicTeaPartyWorkflowSettings>>(
     () => DEFAULT_WORKFLOW_SETTINGS
   );
 
@@ -237,7 +237,7 @@ export function MagicTavernTachiePanel(props: {
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') return;
       setWorkflowSettingsByKind((prev) => {
-        const next: Record<MagicTavernImageKind, MagicTavernWorkflowSettings> = { ...prev };
+        const next: Record<MagicTeaPartyImageKind, MagicTeaPartyWorkflowSettings> = { ...prev };
         for (const key of ['tachie', 'illustration'] as const) {
           const incoming = (parsed as any)[key];
           if (!incoming || typeof incoming !== 'object') continue;
@@ -272,7 +272,7 @@ export function MagicTavernTachiePanel(props: {
     setAssets([]);
     void (async () => {
       try {
-        const next = await listMagicTavernTachieAssets(sessionId);
+        const next = await listMagicTeaPartyTachieAssets(sessionId);
         if (canceled) return;
         setAssets(next);
         onAssetsUpdated?.(next);
@@ -347,7 +347,7 @@ export function MagicTavernTachiePanel(props: {
       })
     );
 
-    const asset: MagicTavernTachieAsset = {
+    const asset: MagicTeaPartyTachieAsset = {
       id: randomUUID(),
       sessionId: props.session.id,
       kind,
@@ -365,18 +365,18 @@ export function MagicTavernTachiePanel(props: {
       lastUsedAt: now,
     };
 
-    await putMagicTavernTachieAsset(asset);
+    await putMagicTeaPartyTachieAsset(asset);
 
     setAssets((prev) => {
       const next = [asset, ...prev.filter((item) => item.id !== asset.id)].sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0));
       return next;
     });
 
-    const nextAll = await listMagicTavernTachieAssets(sessionId);
+    const nextAll = await listMagicTeaPartyTachieAssets(sessionId);
     let finalAssets = nextAll;
     if (nextAll.length > MAX_ASSETS_PER_SESSION) {
       const over = nextAll.slice(MAX_ASSETS_PER_SESSION);
-      await Promise.all(over.map((item) => deleteMagicTavernTachieAsset(item.id)));
+      await Promise.all(over.map((item) => deleteMagicTeaPartyTachieAsset(item.id)));
       const trimmed = nextAll.slice(0, MAX_ASSETS_PER_SESSION);
       finalAssets = trimmed;
     } else {
@@ -389,8 +389,8 @@ export function MagicTavernTachiePanel(props: {
   const handleDelete = async (assetId: string) => {
     setAssetError(null);
     try {
-      await deleteMagicTavernTachieAsset(assetId);
-      const nextAll = await listMagicTavernTachieAssets(sessionId);
+      await deleteMagicTeaPartyTachieAsset(assetId);
+      const nextAll = await listMagicTeaPartyTachieAssets(sessionId);
       setAssets(nextAll);
       onAssetsUpdated?.(nextAll);
     } catch (error) {
@@ -401,7 +401,7 @@ export function MagicTavernTachiePanel(props: {
   const handleClear = async () => {
     setAssetError(null);
     try {
-      await deleteMagicTavernTachieAssets(sessionId);
+      await deleteMagicTeaPartyTachieAssets(sessionId);
       setAssets([]);
       onAssetsUpdated?.([]);
     } catch (error) {
@@ -505,7 +505,7 @@ export function MagicTavernTachiePanel(props: {
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1">
           <label className="text-xs font-semibold text-gray-600">生成类型</label>
-          <select className="input-field" value={kind} onChange={(e) => setKind(e.target.value as MagicTavernImageKind)}>
+          <select className="input-field" value={kind} onChange={(e) => setKind(e.target.value as MagicTeaPartyImageKind)}>
             <option value="tachie">角色立绘</option>
             <option value="illustration">剧情插画</option>
           </select>
