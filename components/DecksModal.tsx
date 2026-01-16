@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { deckApi, deckFavoritesApi, deckStatsApi, dataCardApi } from '@/lib/auth';
 import { addLikedDeck, getLikedDecks } from '@/lib/localStorage';
+import { buildTitleDisplay } from '@/lib/text';
 
 type DeckTab = 'my' | 'public' | 'favorites';
 
@@ -542,30 +543,33 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                     {detailCards.length === 0 ? (
                       <div className="text-sm text-gray-500">暂无卡片</div>
                     ) : (
-                      detailCards.map((c) => (
-                        <div key={c.data_card_id} className={`flex items-center justify-between gap-3 rounded-md border p-3 ${c.isAccessible ? 'bg-white' : 'bg-gray-50'}`}>
-                          <div className="min-w-0">
-                            <div className="font-medium text-sm break-words">
-                              {c.displayName || '未命名'}
-                              {!c.isAccessible && (
-                                <span className="ml-2 text-xs text-gray-500">
-                                  （不可用：{c.reason === 'deleted' ? '已删除/回收站' : c.reason === 'banned' ? '封禁' : '他人私有/未审核'}）
-                                </span>
-                              )}
+                      detailCards.map((c) => {
+                        const { display, full } = buildTitleDisplay(c.displayName || '未命名');
+                        return (
+                          <div key={c.data_card_id} className={`flex items-center justify-between gap-3 rounded-md border p-3 ${c.isAccessible ? 'bg-white' : 'bg-gray-50'}`}>
+                            <div className="min-w-0">
+                              <div className="font-medium text-sm break-words" title={full}>
+                                {display}
+                                {!c.isAccessible && (
+                                  <span className="ml-2 text-xs text-gray-500">
+                                    （不可用：{c.reason === 'deleted' ? '已删除/回收站' : c.reason === 'banned' ? '封禁' : '他人私有/未审核'}）
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-500 mt-1">{c.displayType}</div>
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">{c.displayType}</div>
-                          </div>
 
-                          {detailMode === 'edit' && (
-                            <button
-                              onClick={() => void handleRemoveDeckCard(c.data_card_id)}
-                              className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
-                            >
-                              移除
-                            </button>
-                          )}
-                        </div>
-                      ))
+                            {detailMode === 'edit' && (
+                              <button
+                                onClick={() => void handleRemoveDeckCard(c.data_card_id)}
+                                className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                              >
+                                移除
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -594,20 +598,23 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                       ) : addCandidates.length === 0 ? (
                         <div className="text-sm text-gray-500">暂无结果</div>
                       ) : (
-                        addCandidates.map((card: any) => (
-                          <div key={card.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium break-words">{card.name || '未命名'}</div>
-                              <div className="text-xs text-gray-500 mt-1 truncate">{card.description || ''}</div>
+                        addCandidates.map((card: any) => {
+                          const { display, full } = buildTitleDisplay(card.name || '未命名');
+                          return (
+                            <div key={card.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium break-words" title={full}>{display}</div>
+                                <div className="text-xs text-gray-500 mt-1 truncate">{card.description || ''}</div>
+                              </div>
+                              <button
+                                onClick={() => void handleAddCards([card.id])}
+                                className="px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700"
+                              >
+                                添加
+                              </button>
                             </div>
-                            <button
-                              onClick={() => void handleAddCards([card.id])}
-                              className="px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700"
-                            >
-                              添加
-                            </button>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   </div>

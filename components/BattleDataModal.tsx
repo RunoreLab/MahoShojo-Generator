@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/useAuth';
 import { authStorage, dataCardApi, favoritesApi, deckApi } from '@/lib/auth';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { buildTitleDisplay } from '@/lib/text';
 import { ChevronDown, Filter } from 'lucide-react';
 import DecksModal from './DecksModal';
 
@@ -1148,13 +1149,16 @@ export default function BattleDataModal({
 	                    const refHint = getPvpHandRefHint(card.ref);
 	                    const type = typeof card.type === 'string' && card.type ? card.type : 'unknown';
 	                    const preview = getPvpHandPreviewText(card.dataJson);
+	                    const { display: displayName, full: fullName } = buildTitleDisplay(card.name || '未命名');
 
 	                    const disableChoose = Boolean(pvpHandTab?.isChoosing || pvpHandTab?.hasChosenMe);
 
 	                    return (
 	                      <div key={card.snapshotId} className="rounded-lg border bg-white p-4 flex flex-col">
 	                        <div className="min-w-0">
-	                          <div className="font-semibold text-gray-900 break-words">{card.name || '未命名'}</div>
+	                          <div className="font-semibold text-gray-900 break-words" title={fullName}>
+	                            {displayName}
+	                          </div>
 	                          <div className="mt-1 flex flex-wrap gap-2 text-xs">
 	                            <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{type}</span>
 	                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{sourceLabel}</span>

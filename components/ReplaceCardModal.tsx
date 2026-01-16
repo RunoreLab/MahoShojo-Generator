@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDateTime } from '@/lib/constants';
+import { buildTitleDisplay } from '@/lib/text';
 
 interface ReplaceCardModalProps {
   isOpen: boolean;
@@ -69,37 +70,42 @@ export default function ReplaceCardModal({
         ) : (
           <>
             <div className="space-y-3 mb-4">
-              {filteredCards.map((card) => (
-                <label
-                  key={card.id}
-                  className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:border-purple-500 ${
-                    selectedId === card.id ? 'border-purple-500 bg-purple-50' : 'border-gray-200'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    className="mt-1"
-                    name="replace-card"
-                    checked={selectedId === card.id}
-                    onChange={() => setSelectedId(card.id)}
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-gray-800">{card.name}</span>
-                      <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
-                        {card.type === 'character' ? '角色' : card.type === 'scenario' ? '情景' : '叙事历史'}
-                      </span>
-                      {card.pending_data && (
-                        <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded">更新审核中</span>
-                      )}
+              {filteredCards.map((card) => {
+                const { display, full } = buildTitleDisplay(card.name || '未命名');
+                return (
+                  <label
+                    key={card.id}
+                    className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer hover:border-purple-500 ${
+                      selectedId === card.id ? 'border-purple-500 bg-purple-50' : 'border-gray-200'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      className="mt-1"
+                      name="replace-card"
+                      checked={selectedId === card.id}
+                      onChange={() => setSelectedId(card.id)}
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-gray-800" title={full}>
+                          {display}
+                        </span>
+                        <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                          {card.type === 'character' ? '角色' : card.type === 'scenario' ? '情景' : '叙事历史'}
+                        </span>
+                        {card.pending_data && (
+                          <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded">更新审核中</span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-600 line-clamp-2">{card.description}</p>
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        创建 {formatDateTime(card.created_at)} ｜ 更新 {formatDateTime(card.updated_at)} ｜ 公开状态：{card.is_public === 1 ? '公开' : '私有'}
+                      </p>
                     </div>
-                    <p className="text-sm text-gray-600 line-clamp-2">{card.description}</p>
-                    <p className="text-[11px] text-gray-500 mt-1">
-                      创建 {formatDateTime(card.created_at)} ｜ 更新 {formatDateTime(card.updated_at)} ｜ 公开状态：{card.is_public === 1 ? '公开' : '私有'}
-                    </p>
-                  </div>
-                </label>
-              ))}
+                  </label>
+                );
+              })}
             </div>
 
             {selectedId && (
