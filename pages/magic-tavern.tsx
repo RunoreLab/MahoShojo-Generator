@@ -1,13 +1,13 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { ChangeEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import BattleDataModal from '@/components/BattleDataModal';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import Footer from '@/components/Footer';
-import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { MagicTavernChatMessage } from '@/components/magic-tavern/ChatMessage';
 import { MagicTavernTachiePanel } from '@/components/magic-tavern/TachiePanel';
 import { MagicTavernImportExportPanel } from '@/components/magic-tavern/ImportExportPanel';
 
@@ -102,6 +102,19 @@ const truncateUnsafeOutputText = (
 
   const boundary = findOutputSafetyBoundaryIndex(text, matchStart, outputFormat);
   return { safeRaw: text.slice(0, boundary), truncatedAt: boundary };
+};
+
+const isMessageSuperseded = (message: MagicTavernMessage): boolean => {
+  const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
+  return Boolean(meta && meta.superseded === true);
+};
+
+const shouldIncludeInHistory = (message: MagicTavernMessage): boolean => {
+  if (message.role === 'user') return true;
+  if (message.role !== 'assistant') return false;
+  if (message.status === 'blocked' || message.status === 'error') return false;
+  if (isMessageSuperseded(message)) return false;
+  return true;
 };
 
 const stripMetaKeys = (payload: Record<string, unknown>): Record<string, unknown> => {
@@ -1088,7 +1101,7 @@ export default function MagicTavernPage() {
       await persistSession(updatedSession);
 
       const historyForRequest = [...messages, userMessage]
-        .filter((m) => m.role === 'user' || (m.role === 'assistant' && m.status !== 'blocked' && m.status !== 'error'))
+        .filter(shouldIncludeInHistory)
         .map((m) => ({ id: m.id, role: m.role, content: m.content }));
 
       await runGenerateStream({
@@ -1141,7 +1154,7 @@ export default function MagicTavernPage() {
     await persistSession(updatedSession);
 
     const baseHistory = messages
-      .filter((m) => m.role === 'user' || (m.role === 'assistant' && m.status !== 'blocked' && m.status !== 'error'))
+      .filter(shouldIncludeInHistory)
       .map((m) => ({ id: m.id, role: m.role, content: m.content }));
 
     const systemInstruction: MagicTavernHistoryMessage = {
@@ -1196,7 +1209,7 @@ export default function MagicTavernPage() {
     await persistSession(updatedSession);
 
     const historyForRequest = messages
-      .filter((m) => m.role === 'user' || (m.role === 'assistant' && m.status !== 'blocked' && m.status !== 'error'))
+      .filter(shouldIncludeInHistory)
       .map((m) => ({ id: m.id, role: m.role, content: m.content }));
 
     const controller = new AbortController();
@@ -1469,7 +1482,7 @@ export default function MagicTavernPage() {
     setSummaryError(null);
 
     const historyForRequest = messages
-      .filter((m) => m.role === 'user' || (m.role === 'assistant' && m.status !== 'blocked' && m.status !== 'error'))
+      .filter(shouldIncludeInHistory)
       .filter((m) => typeof m.content === 'string' && m.content.trim())
       .map((m) => ({ id: m.id, role: m.role, content: m.content }));
 
@@ -1554,6 +1567,111 @@ export default function MagicTavernPage() {
     userProviderConfig,
   ]);
 
+  const regenerateMessage = useCallback(
+    async (targetMessage: MagicTavernMessage) => {
+      if (!activeSession) return;
+      if (isGenerating) return;
+      if (targetMessage.role !== 'assistant') return;
+
+      const providerCheck = ensureProviderReady();
+      if (!providerCheck.ok) {
+        setGlobalError(providerCheck.message);
+        return;
+      }
+
+      setGlobalError(null);
+
+      const meta = targetMessage.meta && typeof targetMessage.meta === 'object' ? (targetMessage.meta as Record<string, unknown>) : null;
+      const kindRaw = typeof meta?.kind === 'string' ? String(meta.kind) : 'reply';
+      if (kindRaw === 'choices') {
+        setGlobalError('选项消息请使用“生成选项”重新获取。');
+        return;
+      }
+      const kind = kindRaw === 'opening' || kindRaw === 'continue' ? kindRaw : 'reply';
+
+      const targetIndex = messages.findIndex((message) => message.id === targetMessage.id);
+      if (targetIndex < 0) return;
+
+      const historyBefore = messages.slice(0, targetIndex);
+      const historyForRequestBase: MagicTavernHistoryMessage[] = historyBefore
+        .filter(shouldIncludeInHistory)
+        .map((message) => ({ id: message.id, role: message.role, content: message.content }));
+
+      let arrestedBackupInput: string | undefined;
+      let sourceMessageId: string | undefined;
+      const lastUserMessage = [...historyBefore].reverse().find((message) => message.role === 'user' && message.content.trim());
+
+      if (kind === 'reply') {
+        const sourceMessage =
+          (targetMessage.sourceMessageId
+            ? historyBefore.find((message) => message.id === targetMessage.sourceMessageId && message.role === 'user')
+            : null) || lastUserMessage;
+        if (!sourceMessage || !sourceMessage.content?.trim()) {
+          setGlobalError('找不到关联的用户输入，无法重新生成。');
+          return;
+        }
+        sourceMessageId = sourceMessage.id;
+        arrestedBackupInput = sourceMessage.content;
+      } else if (lastUserMessage) {
+        sourceMessageId = lastUserMessage.id;
+      }
+
+      const now = Date.now();
+      const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTavernOutputFormat;
+
+      const supersededMessage: MagicTavernMessage = {
+        ...targetMessage,
+        meta: { ...(targetMessage.meta ?? {}), superseded: true },
+      };
+      setMessages((prev) => prev.map((message) => (message.id === targetMessage.id ? supersededMessage : message)));
+      await putMagicTavernMessage(supersededMessage);
+
+      const assistantMessageId = createUuid();
+      const assistantMessage: MagicTavernMessage = {
+        id: assistantMessageId,
+        sessionId: activeSession.id,
+        role: 'assistant',
+        content: '',
+        createdAt: now,
+        status: 'streaming',
+        ...(sourceMessageId ? { sourceMessageId } : {}),
+        revisionOf: targetMessage.id,
+        meta: { ...(targetMessage.meta ?? {}), kind, outputFormat: sessionOutputFormat },
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+      await putMagicTavernMessage(assistantMessage);
+
+      const updatedSession: MagicTavernSession = { ...activeSession, updatedAt: now };
+      await persistSession(updatedSession);
+
+      const historyForRequest: MagicTavernHistoryMessage[] =
+        kind === 'opening' || kind === 'continue'
+          ? [
+              ...historyForRequestBase,
+              {
+                id: createUuid(),
+                role: 'system',
+                content:
+                  kind === 'opening'
+                    ? '【任务】请先生成故事开场：描写场景/氛围，安排角色登场，并给出可供玩家回应的钩子。'
+                    : '【任务】请在不等待玩家新输入的情况下，继续推进下一小节剧情。',
+              },
+            ]
+          : historyForRequestBase;
+
+      await runGenerateStream({
+        session: updatedSession,
+        historyForRequest,
+        outputFormat: sessionOutputFormat,
+        assistantMessageId,
+        assistantMessage,
+        arrestedBackupInput,
+      });
+    },
+    [activeSession, ensureProviderReady, isGenerating, messages, persistSession, runGenerateStream]
+  );
+
   const playerOptions = useMemo(() => {
     const roles = activeSession?.roles ?? [];
     return [
@@ -1562,262 +1680,24 @@ export default function MagicTavernPage() {
     ];
   }, [activeSession?.roles, activeSession?.settings.userDisplayName, preferences.userDisplayName]);
 
-  const renderAssistantFooter = (message: MagicTavernMessage) => {
-    if (message.role !== 'assistant') return null;
 
-    if (message.status === 'streaming') {
-      return (
-        <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-          <LoadingSpinner />
-          <span>生成中…</span>
-        </div>
-      );
-    }
+  const lastAssistantId = useMemo(() => {
+    const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+    return lastAssistant?.id ?? null;
+  }, [messages]);
 
-    if (message.status === 'blocked') {
-      const blockedBy = message.safety?.blockedBy;
-      const hint =
-        blockedBy === 'server'
-          ? '该内容不符合安全策略，已被拦截。'
-          : '本轮输出被安全策略截断（可尝试修改输入或重新生成）。';
-      return (
-        <div className="mt-2 text-xs text-amber-700">
-          <span>{hint}</span>
-          <Link href="/encyclopedia/sensitive-words" className="ml-2 underline underline-offset-2 hover:opacity-90">
-            查看百科：敏感词与逮捕
-          </Link>
-        </div>
-      );
-    }
-
-    if (message.status === 'error') {
-      const rawCode = message.error?.code ?? '';
-      const status = /^\d{3}$/.test(rawCode) ? Number(rawCode) : null;
-      const kind =
-        message.meta && typeof message.meta === 'object' && typeof (message.meta as any).kind === 'string'
-          ? String((message.meta as any).kind)
-          : '';
-
-      const title =
-        kind === 'choices'
-          ? '生成选项失败'
-          : kind === 'opening'
-            ? '生成开场失败'
-            : kind === 'continue'
-              ? '继续生成失败'
-              : '生成失败';
-
-      const lines: string[] = [`❌ ${title}`];
-      if (status) lines.push(`HTTP：${status}`);
-      else if (rawCode) lines.push(`错误码：${rawCode}`);
-      if (message.error?.message?.trim()) lines.push(`原因：${message.error.message.trim()}`);
-
-      return (
-        <div className="mt-2">
-          <ErrorMessage
-            message={lines.join('\n')}
-            status={status}
-            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
-            linkClassName="text-red-700 underline underline-offset-2 hover:opacity-95"
-          />
-        </div>
-      );
-    }
-
-    return null;
-  };
-
-  const renderAssistantActions = (message: MagicTavernMessage) => {
-    if (message.role !== 'assistant') return null;
-    if (message.status === 'streaming') return null;
-
-    const toPlainText = (): string => {
-      const segments = Array.isArray(message.segments) ? message.segments : null;
-      if (segments && segments.length > 0) {
-        const lines: string[] = [];
-        for (const seg of segments) {
-          if (!seg) continue;
-          if (seg.type === 'narration') {
-            const text = typeof (seg as any).text === 'string' ? String((seg as any).text).trim() : '';
-            if (text) lines.push(text);
-            continue;
-          }
-          if (seg.type === 'dialogue') {
-            const speaker =
-              typeof (seg as any).speakerName === 'string' && String((seg as any).speakerName).trim()
-                ? String((seg as any).speakerName).trim()
-                : typeof (seg as any).speakerId === 'string'
-                  ? (activeSession?.roles ?? []).find((r) => r.id === String((seg as any).speakerId))?.name || String((seg as any).speakerId)
-                  : '';
-            const text = typeof (seg as any).text === 'string' ? String((seg as any).text).trim() : '';
-            if (text) lines.push(speaker ? `${speaker}: ${text}` : text);
-            continue;
-          }
-        }
-        return lines.join('\n').trim();
-      }
-      return (message.content ?? '').trim();
-    };
-
-    const plain = toPlainText();
-    if (!plain) return null;
-
-    return (
-      <div className="mt-2 flex items-center justify-end gap-2 text-xs text-gray-500">
-	        <button
-	          type="button"
-	          className="underline underline-offset-2 hover:text-gray-700"
-	          onClick={() => {
-	            setTachieReferenceText(plain.slice(0, 2000));
-	            setTachieAnchorMessageId(message.id);
-	          }}
-	          title="将该条 AI 输出作为插画/立绘的参考片段"
-	        >
-	          用作插画参考
-	        </button>
-      </div>
-    );
-  };
-
-  const renderMessageAttachments = (message: MagicTavernMessage) => {
-    if (!tachieAssets || tachieAssets.length === 0) return null;
-    const attached = tachieAssets
-      .filter((asset) => asset.anchorMessageId === message.id)
-      .filter((asset) => Boolean(asset.imageUrl || asset.blobRef));
-    if (attached.length === 0) return null;
-
-    const sorted = [...attached].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-    const display = sorted.slice(0, 2);
-    const remaining = sorted.length - display.length;
-
-    return (
-      <div className="mt-2 space-y-2">
-        <div className="grid gap-2 sm:grid-cols-2">
-          {display.map((asset) => {
-            const url = asset.imageUrl || asset.blobRef || '';
-            if (!url) return null;
-            const kindLabel = asset.kind === 'illustration' ? '剧情插画' : '角色立绘';
-            const roleLabel = asset.roleId ? (activeSession?.roles ?? []).find((role) => role.id === asset.roleId)?.name || asset.roleId : '';
-            const label = [kindLabel, roleLabel].filter(Boolean).join(' · ');
-            return (
-              <div key={asset.id} className="overflow-hidden rounded-lg border border-pink-100 bg-white">
-                <a href={url} target="_blank" rel="noreferrer" className="block">
-                  <img src={url} alt={label || '已生成图片'} className="h-36 w-full object-cover" loading="lazy" />
-                </a>
-                {label ? <div className="px-2 py-1 text-[11px] text-gray-600">{label}</div> : null}
-              </div>
-            );
-          })}
-        </div>
-        {remaining > 0 ? <div className="text-[11px] text-gray-500">还有 {remaining} 张已绑定图片，可在下方“插画 / 立绘”面板查看。</div> : null}
-      </div>
-    );
-  };
-
-  const renderMessage = (message: MagicTavernMessage) => {
-    const isUser = message.role === 'user';
-    const bubbleClass = isUser ? 'bg-pink-600 text-white' : 'bg-white border border-pink-100 text-gray-800';
-    const speakerName =
-      message.meta && typeof message.meta === 'object' && typeof (message.meta as any).speakerName === 'string'
-        ? String((message.meta as any).speakerName).trim()
-        : '';
-    const bubbleSpeaker =
-      speakerName ||
-      (message.role === 'system'
-        ? 'system'
-        : message.role === 'user'
-        ? message.speakerId
-          ? (activeSession?.roles ?? []).find((role) => role.id === message.speakerId)?.name || message.speakerId
-          : (activeSession?.settings.userDisplayName || preferences.userDisplayName || '旅人').trim() || '旅人'
-        : (() => {
-            const presetId =
-              activeSession?.settings && typeof activeSession.settings.presetId === 'string' ? activeSession.settings.presetId : '';
-            const prefix = presetId.startsWith('arena-') ? 'A.R.E.N.A. 魔法酒馆' : '魔法酒馆';
-            return `${prefix} · 叙述者`;
-          })());
-    const speakerClass = `px-1 text-xs font-semibold ${isUser ? 'text-right text-pink-700' : 'text-gray-600'}`;
-    const withHeader = (bubble: ReactNode) => (
-      <div className="space-y-1">
-        <div className={speakerClass}>{bubbleSpeaker}</div>
-        {bubble}
-      </div>
-    );
-
-    if (message.role === 'assistant' && Array.isArray(message.segments) && message.segments.length > 0) {
-      return withHeader(
-        <div className={`rounded-xl px-4 py-3 ${bubbleClass} space-y-2`}>
-            {message.segments.map((seg, idx) => {
-              if (seg.type === 'narration') {
-                return (
-                  <p key={`${message.id}-n-${idx}`} className="whitespace-pre-wrap leading-relaxed">
-                    {seg.text}
-                  </p>
-                );
-              }
-              if (seg.type === 'dialogue') {
-                const speakerName =
-                  seg.speakerName ||
-                  (activeSession?.roles ?? []).find((r) => r.id === seg.speakerId)?.name ||
-                  seg.speakerId;
-                return (
-                  <div key={`${message.id}-d-${idx}`} className="rounded-lg bg-pink-50 px-3 py-2">
-                    <div className="text-xs font-semibold text-pink-700">{speakerName}</div>
-                    <div className="whitespace-pre-wrap leading-relaxed text-gray-800">{seg.text}</div>
-                  </div>
-                );
-              }
-              if (seg.type === 'choices') {
-                return (
-                  <div key={`${message.id}-c-${idx}`} className="grid gap-2 sm:grid-cols-2">
-                    {seg.items.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className="rounded-xl border border-pink-200 bg-white px-4 py-2 text-left text-sm font-semibold text-pink-700 hover:bg-pink-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled={isGenerating}
-                        onClick={() => void sendMessage(item.text)}
-                        title="选择该行动"
-                      >
-                        {item.text}
-                      </button>
-                    ))}
-                  </div>
-                );
-              }
-            return null;
-          })}
-          {renderMessageAttachments(message)}
-          {renderAssistantFooter(message)}
-          {renderAssistantActions(message)}
-        </div>
-      );
-    }
-
-    const metaOutputFormat =
-      message.meta && typeof message.meta === 'object' && typeof message.meta.outputFormat === 'string' ? message.meta.outputFormat : null;
-    const preferMarkdown = metaOutputFormat === 'markdown' || (!metaOutputFormat && activeSession?.settings.outputFormat === 'markdown');
-
-    if (message.role === 'assistant' && preferMarkdown) {
-      return withHeader(
-        <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
-          <MarkdownBlock content={message.content || ''} variant="light" mode="article" />
-          {renderMessageAttachments(message)}
-          {renderAssistantFooter(message)}
-          {renderAssistantActions(message)}
-        </div>
-      );
-    }
-
-    return withHeader(
-      <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
-        <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
-        {renderMessageAttachments(message)}
-        {renderAssistantFooter(message)}
-        {renderAssistantActions(message)}
-      </div>
-    );
-  };
-
+  const canRegenerateMessage = useCallback(
+    (message: MagicTavernMessage): boolean => {
+      if (message.role !== 'assistant') return false;
+      if (message.status === 'streaming') return false;
+      if (!lastAssistantId || message.id !== lastAssistantId) return false;
+      const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
+      const kind = typeof meta?.kind === 'string' ? String(meta.kind) : '';
+      if (kind === 'choices') return false;
+      return true;
+    },
+    [lastAssistantId]
+  );
   return (
     <>
       <Head>
@@ -2281,7 +2161,22 @@ export default function MagicTavernPage() {
                           key={message.id}
                           className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                         >
-                          <div className="max-w-[720px] w-full sm:w-auto">{renderMessage(message)}</div>
+                          <div className="max-w-[720px] w-full sm:w-auto">
+                            <MagicTavernChatMessage
+                              message={message}
+                              session={activeSession}
+                              preferences={preferences}
+                              isGenerating={isGenerating}
+                              tachieAssets={tachieAssets}
+                              onSelectChoice={(text) => void sendMessage(text)}
+                              onUseAsReference={(target, plainText) => {
+                                setTachieReferenceText(plainText);
+                                setTachieAnchorMessageId(target.id);
+                              }}
+                              onRegenerate={(target) => void regenerateMessage(target)}
+                              showRegenerate={canRegenerateMessage(message)}
+                            />
+                          </div>
                         </div>
                       ))
                     )}

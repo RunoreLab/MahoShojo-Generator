@@ -12,7 +12,14 @@ import {
   putMagicTavernSession,
   putMagicTavernTachieAsset,
 } from '@/lib/magic-tavern/storage';
-import type { MagicTavernMessage, MagicTavernPreferences, MagicTavernSession } from '@/lib/magic-tavern/types';
+import type {
+  MagicTavernMessage,
+  MagicTavernPreferences,
+  MagicTavernRole,
+  MagicTavernScenario,
+  MagicTavernSession,
+  MagicTavernTachieAsset,
+} from '@/lib/magic-tavern/types';
 import {
   buildMagicTavernSessionExport,
   parseSillyTavernJsonl,
@@ -57,7 +64,7 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
 
   const buildSessionSettings = useCallback(
     (raw: Record<string, unknown> | null | undefined) => {
-      const defaults = props.preferences;
+      const defaults = preferences;
       const base = (raw ?? {}) as Record<string, unknown>;
       return {
         providerId: typeof base.providerId === 'string' ? base.providerId : 'unknown',
@@ -87,11 +94,15 @@ export function MagicTavernImportExportPanel(props: ImportExportPanelProps) {
       const now = Date.now();
       const sessionId = randomUUID();
       const sessionCore = ensureRecord(payload.session) ?? {};
-      const roles = ensureArray(payload.roles).length > 0 ? ensureArray(payload.roles) : ensureArray(sessionCore.roles);
-      const scenario = payload.scenario ?? (sessionCore.scenario as any) ?? null;
-      const auxScenarios = ensureArray(payload.auxScenarios).length > 0 ? ensureArray(payload.auxScenarios) : ensureArray(sessionCore.auxScenarios);
-      const messages = ensureArray(payload.messages);
-      const assets = ensureArray(payload.tachieAssets);
+      const roles = ensureArray<MagicTavernRole>(payload.roles).length > 0
+        ? ensureArray<MagicTavernRole>(payload.roles)
+        : ensureArray<MagicTavernRole>(sessionCore.roles);
+      const scenario = payload.scenario ?? (sessionCore.scenario as MagicTavernScenario | null) ?? null;
+      const auxScenarios = ensureArray<MagicTavernScenario>(payload.auxScenarios).length > 0
+        ? ensureArray<MagicTavernScenario>(payload.auxScenarios)
+        : ensureArray<MagicTavernScenario>(sessionCore.auxScenarios);
+      const messages = ensureArray<MagicTavernMessage>(payload.messages);
+      const assets = ensureArray<MagicTavernTachieAsset>(payload.tachieAssets);
 
       const messageIdMap = new Map<string, string>();
       const normalizedMessages = messages.map((message, index) => {
