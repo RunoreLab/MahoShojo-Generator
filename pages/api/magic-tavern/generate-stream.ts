@@ -1,4 +1,5 @@
-export { config } from '../magic-tea-party/generate-stream';
-import handler from '../magic-tea-party/generate-stream';
+export const config = {
+  runtime: 'edge',
+};
 
-export default handler;
+export { default } from '../magic-tea-party/generate-stream';

@@ -1,4 +1,5 @@
-export { config } from '../magic-tea-party/summarize';
-import handler from '../magic-tea-party/summarize';
+export const config = {
+  runtime: 'edge',
+};
 
-export default handler;
+export { default } from '../magic-tea-party/summarize';
