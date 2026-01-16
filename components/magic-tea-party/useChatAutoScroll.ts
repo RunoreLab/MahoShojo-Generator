@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 type UseChatAutoScrollOptions = {
   enabled?: boolean;
@@ -6,15 +6,20 @@ type UseChatAutoScrollOptions = {
   anchorMessageId?: string | null;
   behavior?: ScrollBehavior;
   threshold?: number;
+  mode?: 'window' | 'container';
 };
 
 export function useChatAutoScroll(options: UseChatAutoScrollOptions) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const rafRef = useRef<number | null>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     if (typeof window === 'undefined') return;
+    stickToBottomRef.current = true;
+    setIsAtBottom(true);
     if (rafRef.current !== null) {
       window.cancelAnimationFrame(rafRef.current);
     }
@@ -29,16 +34,35 @@ export function useChatAutoScroll(options: UseChatAutoScrollOptions) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const threshold = typeof options.threshold === 'number' ? options.threshold : 96;
+    const mode = options.mode ?? 'container';
     const updateStickiness = () => {
-      const scrollTop = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
-      const viewport = window.innerHeight || document.documentElement.clientHeight || 0;
-      const height = document.documentElement.scrollHeight || document.body.scrollHeight || 0;
-      stickToBottomRef.current = height - (scrollTop + viewport) < threshold;
+      if (mode === 'window') {
+        const scrollTop = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+        const viewport = window.innerHeight || document.documentElement.clientHeight || 0;
+        const height = document.documentElement.scrollHeight || document.body.scrollHeight || 0;
+        const isBottom = height - (scrollTop + viewport) < threshold;
+        stickToBottomRef.current = isBottom;
+        setIsAtBottom(isBottom);
+        return;
+      }
+
+      const el = containerRef.current;
+      if (!el) return;
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const isBottom = distance < threshold;
+      stickToBottomRef.current = isBottom;
+      setIsAtBottom(isBottom);
     };
     updateStickiness();
-    window.addEventListener('scroll', updateStickiness, { passive: true });
-    return () => window.removeEventListener('scroll', updateStickiness);
-  }, [options.threshold]);
+    if (mode === 'window') {
+      window.addEventListener('scroll', updateStickiness, { passive: true });
+      return () => window.removeEventListener('scroll', updateStickiness);
+    }
+    const el = containerRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', updateStickiness, { passive: true });
+    return () => el.removeEventListener('scroll', updateStickiness);
+  }, [options.threshold, options.mode]);
 
   useEffect(() => {
     if (!options.enabled) return;
@@ -52,6 +76,8 @@ export function useChatAutoScroll(options: UseChatAutoScrollOptions) {
     if (!anchor) return;
     const el = document.getElementById(`magic-tea-party-message-${anchor}`);
     if (!el) return;
+    stickToBottomRef.current = false;
+    setIsAtBottom(false);
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [options.anchorMessageId]);
 
@@ -63,5 +89,5 @@ export function useChatAutoScroll(options: UseChatAutoScrollOptions) {
     }
   }, []);
 
-  return { bottomRef, scrollToBottom };
+  return { containerRef, bottomRef, isAtBottom, scrollToBottom };
 }
