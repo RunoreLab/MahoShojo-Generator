@@ -76,6 +76,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
   const summarizeAbortControllerRef = useRef<AbortController | null>(null);
   const autoSummaryRunningRef = useRef(false);
   const messagesRef = useRef<MagicTeaPartyMessage[]>(messages);
+  const dropTrackerRef = useRef<Record<string, { consecutive: number; lastRatio: number }>>({});
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -155,7 +156,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         ((params.session.settings.outputFormat ?? preferences.outputFormat) as MagicTeaPartyOutputFormat);
       const promptSettings = resolvePromptSettings(params.session, outputFormat);
       const rawHistory = buildMagicTeaPartyHistory(params.messages, { includeEmptyContent: false });
-      if (rawHistory.length === 0) return rawHistory;
+      if (rawHistory.length === 0) {
+        return {
+          history: [],
+          trimStats: { rawCount: 0, trimmedCount: 0, droppedCount: 0, droppedRatio: 0 },
+        };
+      }
 
       const providerId = userProviderConfig?.providerId ?? params.session.settings.providerId;
       const tokenBudget = resolveMagicTeaPartyTokenBudget(params.session.settings, providerId);
@@ -181,16 +187,33 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       const baseTokens = estimateMagicTeaPartyTokens(basePrompt, providerId);
       const availableTokens = Math.max(0, tokenBudget.historyBudgetTokens - baseTokens);
 
-      return trimMagicTeaPartyHistory(rawHistory, {
+      const trimmed = trimMagicTeaPartyHistory(rawHistory, {
         maxMessages: tokenBudget.maxContextMessages,
         tokenBudget: availableTokens,
         providerId,
         userDisplayName: promptSettings.userDisplayName,
         minKeep: 2,
       });
+      const rawCount = rawHistory.length;
+      const trimmedCount = trimmed.length;
+      const droppedCount = Math.max(0, rawCount - trimmedCount);
+      const droppedRatio = rawCount > 0 ? droppedCount / rawCount : 0;
+
+      return {
+        history: trimmed,
+        trimStats: { rawCount, trimmedCount, droppedCount, droppedRatio },
+      };
     },
     [preferences.outputFormat, resolvePromptSettings, userProviderConfig?.providerId]
   );
+
+  const recordDropStats = useCallback((sessionId: string, droppedRatio: number) => {
+    if (!sessionId) return;
+    const prev = dropTrackerRef.current[sessionId];
+    const overLimit = droppedRatio > 0.3;
+    const consecutive = overLimit ? (prev?.consecutive ?? 0) + 1 : 0;
+    dropTrackerRef.current[sessionId] = { consecutive, lastRatio: droppedRatio };
+  }, []);
 
   const runGenerateStream = useCallback(
     async (params: {
@@ -407,7 +430,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
   const maybeAutoSummarize = useCallback(
     async (session: MagicTeaPartySession) => {
       if (!session) return;
-      if (session.settings.enableSummary === false) return;
+      const enableSummary =
+        typeof session.settings.enableSummary === 'boolean' ? session.settings.enableSummary : preferences.enableSummary;
+      if (!enableSummary) return;
       if (autoSummaryRunningRef.current || isSummarizing) return;
 
       const providerId = userProviderConfig?.providerId ?? session.settings.providerId;
@@ -427,7 +452,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
       const triggerByTokens = historyTokens > tokenBudget.historyBudgetTokens * tokenBudget.summaryTriggerRatio;
       const triggerByCount = history.length > tokenBudget.maxContextMessages;
-      if (!triggerByTokens && !triggerByCount) return;
+      const dropStats = dropTrackerRef.current[session.id];
+      const triggerByDropRatio = (dropStats?.consecutive ?? 0) >= 2;
+      if (!triggerByTokens && !triggerByCount && !triggerByDropRatio) return;
 
       const summaryGap = tokenBudget.summaryMinGapMessages;
       if (session.summaryMeta?.toMessageId) {
@@ -532,6 +559,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
         const nextSession: MagicTeaPartySession = { ...session, summary: safeText, summaryMeta, updatedAt: now };
         await persistSession(nextSession);
+        dropTrackerRef.current[session.id] = { consecutive: 0, lastRatio: 0 };
 
         const latestMessages = messagesRef.current;
         const cutoffId = summarizedHistory[summarizedHistory.length - 1]?.id;
@@ -561,6 +589,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       activeSessionId,
       isSummarizing,
       persistSession,
+      preferences.enableSummary,
       preferences.language,
       preferences.userDisplayName,
       setMessages,
@@ -642,11 +671,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
       await persistSession(updatedSession);
 
-      const historyForRequest = buildHistoryForRequest({
+      const { history: historyForRequest, trimStats } = buildHistoryForRequest({
         session: updatedSession,
         messages: [...messages, userMessage],
         outputFormat: sessionOutputFormat,
       });
+      recordDropStats(updatedSession.id, trimStats.droppedRatio);
 
       const finalSession = await runGenerateStream({
         session: updatedSession,
@@ -672,6 +702,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       runGenerateStream,
       setMessages,
       maybeAutoSummarize,
+      recordDropStats,
     ]
   );
 
@@ -712,11 +743,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
     await persistSession(updatedSession);
 
-    const baseHistory = buildHistoryForRequest({
+    const { history: baseHistory, trimStats } = buildHistoryForRequest({
       session: updatedSession,
       messages,
       outputFormat: sessionOutputFormat,
     });
+    recordDropStats(updatedSession.id, trimStats.droppedRatio);
 
     const finalSession = await runGenerateStream({
       session: updatedSession,
@@ -737,6 +769,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     runGenerateStream,
     setMessages,
     maybeAutoSummarize,
+    recordDropStats,
   ]);
 
   const generateChoices = useCallback(async () => {
@@ -772,7 +805,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
     await persistSession(updatedSession);
 
-    const historyForRequest = buildHistoryForRequest({
+    const { history: historyForRequest } = buildHistoryForRequest({
       session: updatedSession,
       messages,
       outputFormat: 'jsonl',
@@ -1075,11 +1108,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
       const historyBefore = messages.slice(0, targetIndex);
       const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTeaPartyOutputFormat;
-      const historyForRequestBase: MagicTeaPartyHistoryMessage[] = buildHistoryForRequest({
+      const { history: historyForRequestBase, trimStats } = buildHistoryForRequest({
         session: activeSession,
         messages: historyBefore,
         outputFormat: sessionOutputFormat,
       });
+      recordDropStats(activeSession.id, trimStats.droppedRatio);
 
       let arrestedBackupInput: string | undefined;
       let sourceMessageId: string | undefined;
@@ -1153,6 +1187,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       runGenerateStream,
       setMessages,
       maybeAutoSummarize,
+      recordDropStats,
     ]
   );
 

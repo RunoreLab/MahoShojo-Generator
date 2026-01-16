@@ -97,6 +97,7 @@ export type MagicTeaPartyTachieAsset = {
   lastUsedAt: number;
   expireAt?: number;
   blobRef?: string;
+  blobSize?: number;
 };
 
 export type MagicTeaPartySession = {
@@ -159,12 +160,16 @@ export type MagicTeaPartyPreferences = {
   userDisplayName: string;
   lastPresetId?: string;
   lastWorldbookPresetId?: string;
+  enableSummary: boolean;
   readArenaHistory: boolean;
   readArenaHistoryLimit: number;
   isArenaHistoryUnlimited: boolean;
   readCurrentState: boolean;
   writeArenaHistory: boolean;
   writeCurrentState: boolean;
+  tachieCacheMaxPerSession: number;
+  tachieCacheMaxGlobal: number;
+  tachieCacheMaxBytes: number;
 };
 
 export type MagicTeaPartyUpdateDraft = {

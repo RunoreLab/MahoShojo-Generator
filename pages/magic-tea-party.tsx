@@ -563,6 +563,7 @@ export default function MagicTeaPartyPage() {
 
                 {activeSession ? (
                   <MagicTeaPartyTachiePanel
+                    preferences={preferences}
                     session={activeSession}
                     messages={messages}
                     referenceText={tachieReferenceText}

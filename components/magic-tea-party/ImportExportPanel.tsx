@@ -83,7 +83,7 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
         userDisplayName: typeof base.userDisplayName === 'string' ? base.userDisplayName : defaults.userDisplayName,
         presetId: typeof base.presetId === 'string' ? base.presetId : undefined,
         worldbookPresetId: typeof base.worldbookPresetId === 'string' ? base.worldbookPresetId : undefined,
-        enableSummary: typeof base.enableSummary === 'boolean' ? base.enableSummary : undefined,
+        enableSummary: typeof base.enableSummary === 'boolean' ? base.enableSummary : defaults.enableSummary,
       } as MagicTeaPartySession['settings'];
     },
     [preferences]

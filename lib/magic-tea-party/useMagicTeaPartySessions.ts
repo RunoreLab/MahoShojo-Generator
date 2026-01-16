@@ -376,6 +376,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
         enableChoices: preferences.enableChoices,
         choiceCount: preferences.choiceCount,
         userDisplayName: preferences.userDisplayName,
+        enableSummary: preferences.enableSummary,
         readArenaHistory: preferences.readArenaHistory,
         readArenaHistoryLimit: preferences.readArenaHistoryLimit,
         isArenaHistoryUnlimited: preferences.isArenaHistoryUnlimited,

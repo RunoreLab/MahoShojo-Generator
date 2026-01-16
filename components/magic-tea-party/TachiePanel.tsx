@@ -6,21 +6,31 @@ import TachieGenerator from '@/components/TachieGenerator';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { randomUUID } from '@/lib/crypto';
 import {
+  calculateMagicTeaPartyCacheStats,
+  cleanupMagicTeaPartyTachieCache,
+  formatMagicTeaPartyBytes,
+  resolveMagicTeaPartyCacheLimits,
+} from '@/lib/magic-tea-party/cache';
+import {
   deleteMagicTeaPartyTachieAsset,
   deleteMagicTeaPartyTachieAssets,
-  deleteMagicTeaPartyTachieAssetsByIds,
-  listAllMagicTeaPartyTachieAssets,
   listMagicTeaPartyTachieAssets,
   putMagicTeaPartyTachieAsset,
+  putMagicTeaPartyTachieBlob,
 } from '@/lib/magic-tea-party/storage';
-import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartySession, MagicTeaPartyTachieAsset } from '@/lib/magic-tea-party/types';
+import type {
+  MagicTeaPartyMessage,
+  MagicTeaPartyPreferences,
+  MagicTeaPartyRole,
+  MagicTeaPartyScenario,
+  MagicTeaPartySession,
+  MagicTeaPartyTachieAsset,
+} from '@/lib/magic-tea-party/types';
 
 type MagicTeaPartyImageKind = NonNullable<MagicTeaPartyTachieAsset['kind']>;
 
 const MAX_PROMPT_CHARS = 10_000;
 const MAX_REFERENCE_CHARS = 2_000;
-const MAX_ASSETS_PER_SESSION = 24;
-const MAX_ASSETS_GLOBAL = 200;
 const STORAGE_WORKFLOW_KEY = 'magic-tea-party:tachie-workflow.v1';
 
 type MagicTeaPartyWorkflowSettings = {
@@ -179,6 +189,7 @@ const buildSuggestedPrompt = (params: {
 };
 
 export function MagicTeaPartyTachiePanel(props: {
+  preferences: MagicTeaPartyPreferences;
   session: Pick<MagicTeaPartySession, 'id'> & {
     roles: MagicTeaPartyRole[];
     scenario?: MagicTeaPartyScenario;
@@ -200,6 +211,8 @@ export function MagicTeaPartyTachiePanel(props: {
 
   const [assets, setAssets] = useState<MagicTeaPartyTachieAsset[]>([]);
   const [assetError, setAssetError] = useState<string | null>(null);
+  const cacheLimits = useMemo(() => resolveMagicTeaPartyCacheLimits(props.preferences), [props.preferences]);
+  const sessionStats = useMemo(() => calculateMagicTeaPartyCacheStats(assets), [assets]);
 
   const [kind, setKind] = useState<MagicTeaPartyImageKind>('tachie');
   const [styleId, setStyleId] = useState<string>('default');
@@ -329,62 +342,73 @@ export function MagicTeaPartyTachiePanel(props: {
   const negativePromptNodeIdForRequest = parseNodeId(activeWorkflowSettings.negativePromptNodeId);
 
   const saveAsset = async (result: { imageUrl: string; seed?: number; auditStatus?: number; generateUuid?: string }) => {
-    const now = Date.now();
-    const normalizedReference = (referenceText || '').trim();
-    const fragmentHash = await sha256Hex(`${kind}:${normalizedReference}`.slice(0, 20_000));
-    const cacheKey = await sha256Hex(
-      JSON.stringify({
-        v: 1,
-        kind,
+    setAssetError(null);
+    try {
+      const now = Date.now();
+      const normalizedReference = (referenceText || '').trim();
+      const fragmentHash = await sha256Hex(`${kind}:${normalizedReference}`.slice(0, 20_000));
+      const cacheKey = await sha256Hex(
+        JSON.stringify({
+          v: 1,
+          kind,
+          sessionId: props.session.id,
+          roleId: kind === 'tachie' ? mainRoleId || null : null,
+          includedRoleIds: kind === 'illustration' ? includedRoleIds.slice().sort() : [],
+          styleId,
+          fragmentHash,
+          anchorMessageId: anchorMessageId || '',
+          workflowUuid: workflowUuidForRequest || '',
+          templateUuid: templateUuidForRequest || '',
+          promptNodeId: promptNodeIdForRequest || 0,
+          negativePromptNodeId: negativePromptNodeIdForRequest || 0,
+          prompt: (prompt || '').slice(0, 20_000),
+        })
+      );
+
+      const assetId = randomUUID();
+      let blobSize: number | undefined;
+
+      if (result.imageUrl) {
+        try {
+          const response = await fetch(result.imageUrl, { method: 'GET' });
+          if (response.ok) {
+            const blob = await response.blob();
+            await putMagicTeaPartyTachieBlob(assetId, blob);
+            blobSize = blob.size;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      const asset: MagicTeaPartyTachieAsset = {
+        id: assetId,
         sessionId: props.session.id,
-        roleId: kind === 'tachie' ? mainRoleId || null : null,
-        includedRoleIds: kind === 'illustration' ? includedRoleIds.slice().sort() : [],
-        styleId,
+        kind,
+        ...(kind === 'tachie' && mainRoleId ? { roleId: mainRoleId } : {}),
+        ...(anchorMessageId ? { anchorMessageId } : {}),
+        cacheKey,
         fragmentHash,
-        anchorMessageId: anchorMessageId || '',
-        workflowUuid: workflowUuidForRequest || '',
-        templateUuid: templateUuidForRequest || '',
-        promptNodeId: promptNodeIdForRequest || 0,
-        negativePromptNodeId: negativePromptNodeIdForRequest || 0,
-        prompt: (prompt || '').slice(0, 20_000),
-      })
-    );
+        styleId,
+        prompt: truncateText(prompt, MAX_PROMPT_CHARS),
+        imageUrl: result.imageUrl,
+        seed: result.seed,
+        auditStatus: result.auditStatus,
+        generateUuid: result.generateUuid,
+        createdAt: now,
+        lastUsedAt: now,
+        ...(typeof blobSize === 'number' ? { blobSize } : {}),
+      };
 
-    const asset: MagicTeaPartyTachieAsset = {
-      id: randomUUID(),
-      sessionId: props.session.id,
-      kind,
-      ...(kind === 'tachie' && mainRoleId ? { roleId: mainRoleId } : {}),
-      ...(anchorMessageId ? { anchorMessageId } : {}),
-      cacheKey,
-      fragmentHash,
-      styleId,
-      prompt: truncateText(prompt, MAX_PROMPT_CHARS),
-      imageUrl: result.imageUrl,
-      seed: result.seed,
-      auditStatus: result.auditStatus,
-      generateUuid: result.generateUuid,
-      createdAt: now,
-      lastUsedAt: now,
-    };
+      await putMagicTeaPartyTachieAsset(asset);
+      await cleanupMagicTeaPartyTachieCache({ sessionId, limits: cacheLimits });
 
-    await putMagicTeaPartyTachieAsset(asset);
-
-    const nextAll = await listMagicTeaPartyTachieAssets(sessionId);
-    if (nextAll.length > MAX_ASSETS_PER_SESSION) {
-      const over = nextAll.slice(MAX_ASSETS_PER_SESSION);
-      await Promise.all(over.map((item) => deleteMagicTeaPartyTachieAsset(item.id)));
+      const finalAssets = await listMagicTeaPartyTachieAssets(sessionId);
+      setAssets(finalAssets);
+      onAssetsUpdated?.(finalAssets);
+    } catch (error) {
+      setAssetError(error instanceof Error ? error.message : '保存缓存失败');
     }
-
-    const allAssets = await listAllMagicTeaPartyTachieAssets();
-    if (allAssets.length > MAX_ASSETS_GLOBAL) {
-      const overflow = allAssets.slice(0, allAssets.length - MAX_ASSETS_GLOBAL);
-      await deleteMagicTeaPartyTachieAssetsByIds(overflow.map((item) => item.id));
-    }
-
-    const finalAssets = await listMagicTeaPartyTachieAssets(sessionId);
-    setAssets(finalAssets);
-    onAssetsUpdated?.(finalAssets);
   };
 
   const handleDelete = async (assetId: string) => {
@@ -438,6 +462,11 @@ export function MagicTeaPartyTachiePanel(props: {
         >
           清空缓存
         </button>
+      </div>
+
+      <div className="text-[11px] text-gray-500">
+        本会话缓存：{sessionStats.totalCount} 张 · {formatMagicTeaPartyBytes(sessionStats.totalBytes)}
+        {sessionStats.unknownCount > 0 ? `（${sessionStats.unknownCount} 张大小待统计）` : ''}
       </div>
 
       {assetError ? (

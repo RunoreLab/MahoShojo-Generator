@@ -2,7 +2,7 @@ import type { MagicTeaPartyMessage, MagicTeaPartySession, MagicTeaPartyTachieAss
 
 const DB_NAME = 'magic-tea-party:v1';
 const LEGACY_DB_NAME = 'magic-tavern:v1';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const IDB_MIGRATION_KEY = 'magic-tea-party:migrated-indexeddb-v1';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -40,6 +40,10 @@ const openMagicTeaPartyDbInternal = (): Promise<IDBDatabase> =>
         store.createIndex('by_cacheKey', 'cacheKey');
         store.createIndex('by_roleId', 'roleId');
         store.createIndex('by_lastUsedAt', 'lastUsedAt');
+      }
+
+      if (!db.objectStoreNames.contains('tachieBlobs')) {
+        db.createObjectStore('tachieBlobs', { keyPath: 'id' });
       }
     };
 
@@ -266,7 +270,7 @@ export const listMagicTeaPartySessions = async (options?: { limit?: number }): P
 export const deleteMagicTeaPartySession = async (sessionId: string): Promise<void> => {
   const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['sessions', 'messages', 'tachieAssets'], 'readwrite');
+    const tx = db.transaction(['sessions', 'messages', 'tachieAssets', 'tachieBlobs'], 'readwrite');
     tx.oncomplete = () => resolve();
     tx.onabort = () => reject(tx.error ?? new Error('删除会话失败'));
     tx.onerror = () => reject(tx.error ?? new Error('删除会话失败'));
@@ -292,7 +296,26 @@ export const deleteMagicTeaPartySession = async (sessionId: string): Promise<voi
     };
 
     deleteByIndex(tx.objectStore('messages'), 'by_sessionId');
-    deleteByIndex(tx.objectStore('tachieAssets'), 'by_sessionId');
+
+    const assetsStore = tx.objectStore('tachieAssets');
+    const blobsStore = tx.objectStore('tachieBlobs');
+    const assetsIndex = assetsStore.index('by_sessionId');
+    const assetsRequest = assetsIndex.openCursor(IDBKeyRange.only(sessionId));
+    assetsRequest.onsuccess = () => {
+      const cursor = assetsRequest.result;
+      if (!cursor) return;
+      const assetId = cursor.value?.id ? String(cursor.value.id) : '';
+      if (assetId) blobsStore.delete(assetId);
+      cursor.delete();
+      cursor.continue();
+    };
+    assetsRequest.onerror = () => {
+      try {
+        tx.abort();
+      } catch {
+        // ignore
+      }
+    };
   });
 };
 
@@ -411,11 +434,12 @@ export const listAllMagicTeaPartyTachieAssets = async (): Promise<MagicTeaPartyT
 export const deleteMagicTeaPartyTachieAsset = async (assetId: string): Promise<void> => {
   const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['tachieAssets'], 'readwrite');
+    const tx = db.transaction(['tachieAssets', 'tachieBlobs'], 'readwrite');
     tx.oncomplete = () => resolve();
     tx.onabort = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
     tx.onerror = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
     tx.objectStore('tachieAssets').delete(assetId);
+    tx.objectStore('tachieBlobs').delete(assetId);
   });
 };
 
@@ -423,15 +447,17 @@ export const deleteMagicTeaPartyTachieAssetsByIds = async (assetIds: string[]): 
   if (!Array.isArray(assetIds) || assetIds.length === 0) return;
   const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['tachieAssets'], 'readwrite');
+    const tx = db.transaction(['tachieAssets', 'tachieBlobs'], 'readwrite');
     tx.oncomplete = () => resolve();
     tx.onabort = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
     tx.onerror = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
 
     const store = tx.objectStore('tachieAssets');
+    const blobStore = tx.objectStore('tachieBlobs');
     for (const assetId of assetIds) {
       if (!assetId) continue;
       store.delete(assetId);
+      blobStore.delete(assetId);
     }
   });
 };
@@ -439,17 +465,20 @@ export const deleteMagicTeaPartyTachieAssetsByIds = async (assetIds: string[]): 
 export const deleteMagicTeaPartyTachieAssets = async (sessionId: string): Promise<void> => {
   const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['tachieAssets'], 'readwrite');
+    const tx = db.transaction(['tachieAssets', 'tachieBlobs'], 'readwrite');
     tx.oncomplete = () => resolve();
     tx.onabort = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
     tx.onerror = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
 
     const store = tx.objectStore('tachieAssets');
+    const blobStore = tx.objectStore('tachieBlobs');
     const index = store.index('by_sessionId');
     const request = index.openCursor(IDBKeyRange.only(sessionId));
     request.onsuccess = () => {
       const cursor = request.result;
       if (!cursor) return;
+      const assetId = cursor.value?.id ? String(cursor.value.id) : '';
+      if (assetId) blobStore.delete(assetId);
       cursor.delete();
       cursor.continue();
     };
@@ -460,5 +489,43 @@ export const deleteMagicTeaPartyTachieAssets = async (sessionId: string): Promis
         // ignore
       }
     };
+  });
+};
+
+export const putMagicTeaPartyTachieBlob = async (assetId: string, blob: Blob): Promise<void> => {
+  const db = await openMagicTeaPartyDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(['tachieBlobs'], 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error('保存立绘缓存失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('保存立绘缓存失败'));
+    tx.objectStore('tachieBlobs').put({ id: assetId, blob });
+  });
+};
+
+export const getMagicTeaPartyTachieBlob = async (assetId: string): Promise<Blob | null> => {
+  const db = await openMagicTeaPartyDb();
+  return await new Promise<Blob | null>((resolve, reject) => {
+    const tx = db.transaction(['tachieBlobs'], 'readonly');
+    tx.onabort = () => reject(tx.error ?? new Error('读取立绘缓存失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('读取立绘缓存失败'));
+    const request = tx.objectStore('tachieBlobs').get(assetId);
+    request.onsuccess = () => {
+      const payload = request.result as { blob?: Blob } | undefined;
+      resolve(payload?.blob ?? null);
+    };
+    request.onerror = () => reject(request.error ?? new Error('读取立绘缓存失败'));
+  });
+};
+
+export const clearMagicTeaPartyTachieCache = async (): Promise<void> => {
+  const db = await openMagicTeaPartyDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(['tachieAssets', 'tachieBlobs'], 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error('清理立绘缓存失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('清理立绘缓存失败'));
+    tx.objectStore('tachieAssets').clear();
+    tx.objectStore('tachieBlobs').clear();
   });
 };

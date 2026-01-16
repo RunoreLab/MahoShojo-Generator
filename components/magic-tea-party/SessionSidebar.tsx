@@ -1,4 +1,8 @@
+import { useState } from 'react';
+
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import { MagicTeaPartyBranchChainModal } from '@/components/magic-tea-party/BranchChainModal';
+import { MagicTeaPartyGlobalSettingsPanel } from '@/components/magic-tea-party/GlobalSettingsPanel';
 import { MagicTeaPartyImportExportPanel } from '@/components/magic-tea-party/ImportExportPanel';
 
 import { MAGIC_TEA_PARTY_PRESETS, type MagicTeaPartyPresetId } from '@/lib/magic-tea-party/presets';
@@ -34,6 +38,7 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
     onPreferenceChange,
     onSessionSettingChange,
   } = props;
+  const [showBranchModal, setShowBranchModal] = useState(false);
 
   const currentUserDisplayName = activeSession?.settings.userDisplayName ?? preferences.userDisplayName;
   const currentOutputFormat = activeSession?.settings.outputFormat ?? preferences.outputFormat;
@@ -59,6 +64,9 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
     }
   }
   const branchTrail = branchChain.slice().reverse();
+  const hasParent = Boolean(activeSession?.forkedFrom?.sessionId);
+  const hasChildren = sessions.some((session) => session.forkedFrom?.sessionId === activeSession?.id);
+  const activeTitle = activeSession?.title ?? '当前会话';
 
   return (
     <aside className="space-y-4 min-w-0">
@@ -114,9 +122,18 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
             ))
           )}
         </div>
-        {activeSession?.forkedFrom && branchTrail.length > 0 ? (
+        {hasParent && branchTrail.length > 0 ? (
           <div className="mt-3 rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">
-            <div className="text-xs font-semibold text-pink-800">分支链</div>
+            <div className="flex items-center justify-between gap-2 text-xs font-semibold text-pink-800">
+              <span>分支链</span>
+              <button
+                type="button"
+                className="text-[11px] text-pink-700 hover:underline"
+                onClick={() => setShowBranchModal(true)}
+              >
+                查看全部
+              </button>
+            </div>
             <div className="mt-1 space-y-1">
               {branchTrail.map((session) => (
                 <button
@@ -128,8 +145,40 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                   {session.title}
                 </button>
               ))}
-              <div className="text-xs text-pink-700">当前：{activeSession.title}</div>
+              <div className="text-xs text-pink-700">当前：{activeTitle}</div>
             </div>
+          </div>
+        ) : null}
+
+        {activeSession && !hasParent && hasChildren ? (
+          <div className="mt-3 rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">
+            <div className="flex items-center justify-between gap-2 text-xs font-semibold text-pink-800">
+              <span>分支链</span>
+              <button
+                type="button"
+                className="text-[11px] text-pink-700 hover:underline"
+                onClick={() => setShowBranchModal(true)}
+              >
+                查看全部
+              </button>
+            </div>
+            <div className="mt-1 text-[11px] text-gray-600">当前会话已有子分支，可在弹窗中快速跳转。</div>
+          </div>
+        ) : null}
+
+        {activeSession && hasParent && branchTrail.length === 0 ? (
+          <div className="mt-3 rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">
+            <div className="flex items-center justify-between gap-2 text-xs font-semibold text-pink-800">
+              <span>分支链</span>
+              <button
+                type="button"
+                className="text-[11px] text-pink-700 hover:underline"
+                onClick={() => setShowBranchModal(true)}
+              >
+                查看全部
+              </button>
+            </div>
+            <div className="mt-1 text-[11px] text-gray-600">父会话已不存在，但仍可查看子分支列表。</div>
           </div>
         ) : null}
       </div>
@@ -355,6 +404,21 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
           </label>
         </div>
       </div>
+
+      <MagicTeaPartyGlobalSettingsPanel
+        preferences={preferences}
+        activeSession={activeSession}
+        onPreferenceChange={onPreferenceChange}
+        onSessionSettingChange={onSessionSettingChange}
+      />
+
+      <MagicTeaPartyBranchChainModal
+        isOpen={showBranchModal}
+        sessions={sessions}
+        activeSession={activeSession}
+        onSelectSession={onSelectSession}
+        onClose={() => setShowBranchModal(false)}
+      />
     </aside>
   );
 }
