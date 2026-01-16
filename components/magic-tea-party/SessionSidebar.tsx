@@ -21,6 +21,7 @@ type MagicTeaPartySidebarProps = {
   onProviderConfigChange: (config: UserAIProviderConfig | null) => void;
   onPreferenceChange: (patch: Partial<MagicTeaPartyPreferences>) => void;
   onSessionSettingChange: (patch: Partial<MagicTeaPartySession['settings']>) => void;
+  onMergeSession: (sessionId?: string | null) => void;
 };
 
 export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
@@ -37,6 +38,7 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
     onProviderConfigChange,
     onPreferenceChange,
     onSessionSettingChange,
+    onMergeSession,
   } = props;
   const [showBranchModal, setShowBranchModal] = useState(false);
 
@@ -102,15 +104,24 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                     </div>
                   ) : null}
                 </button>
-                <div className="mt-2 flex justify-between gap-2">
+                <div className="mt-2 flex items-center justify-between gap-2">
                   {session.id === activeSessionId && session.forkedFrom?.sessionId && sessionMap.has(session.forkedFrom.sessionId) ? (
-                    <button
-                      type="button"
-                      className="text-xs text-pink-600 hover:underline"
-                      onClick={() => onSelectSession(session.forkedFrom?.sessionId as string)}
-                    >
-                      返回原会话
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="text-xs text-pink-600 hover:underline"
+                        onClick={() => onSelectSession(session.forkedFrom?.sessionId as string)}
+                      >
+                        返回原会话
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-amber-700 hover:underline"
+                        onClick={() => onMergeSession(session.id)}
+                      >
+                        合并到原会话
+                      </button>
+                    </div>
                   ) : (
                     <span />
                   )}

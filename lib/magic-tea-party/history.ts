@@ -7,10 +7,10 @@ const isMessageSuperseded = (message: MagicTeaPartyMessage): boolean => {
 };
 
 const shouldIncludeInHistory = (message: MagicTeaPartyMessage): boolean => {
+  if (isMessageSuperseded(message)) return false;
   if (message.role === 'user') return true;
   if (message.role !== 'assistant') return false;
   if (message.status === 'blocked' || message.status === 'error') return false;
-  if (isMessageSuperseded(message)) return false;
   return true;
 };
 

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import {
   cleanupMagicTeaPartyTachieCache,
+  cleanupMagicTeaPartyExpiredTachieCache,
   formatMagicTeaPartyBytes,
   getMagicTeaPartyCacheStats,
   parseMagicTeaPartyCacheLimitInput,
@@ -25,7 +26,7 @@ type MagicTeaPartyGlobalSettingsPanelProps = {
 export function MagicTeaPartyGlobalSettingsPanel(props: MagicTeaPartyGlobalSettingsPanelProps) {
   const { preferences, activeSession, onPreferenceChange, onSessionSettingChange } = props;
   const limits = useMemo(() => resolveMagicTeaPartyCacheLimits(preferences), [preferences]);
-  const [cacheStats, setCacheStats] = useState({ totalCount: 0, totalBytes: 0, unknownCount: 0 });
+  const [cacheStats, setCacheStats] = useState({ totalCount: 0, totalBytes: 0, unknownCount: 0, expiredCount: 0 });
   const [cacheError, setCacheError] = useState<string | null>(null);
   const [isCleaning, setIsCleaning] = useState(false);
 
@@ -60,9 +61,22 @@ export function MagicTeaPartyGlobalSettingsPanel(props: MagicTeaPartyGlobalSetti
     setCacheError(null);
     try {
       await clearMagicTeaPartyTachieCache();
-      setCacheStats({ totalCount: 0, totalBytes: 0, unknownCount: 0 });
+      setCacheStats({ totalCount: 0, totalBytes: 0, unknownCount: 0, expiredCount: 0 });
     } catch (error) {
       setCacheError(error instanceof Error ? error.message : '清空失败');
+    } finally {
+      setIsCleaning(false);
+    }
+  };
+
+  const handleCleanupExpired = async () => {
+    setIsCleaning(true);
+    setCacheError(null);
+    try {
+      const stats = await cleanupMagicTeaPartyExpiredTachieCache();
+      setCacheStats(stats);
+    } catch (error) {
+      setCacheError(error instanceof Error ? error.message : '清理过期缓存失败');
     } finally {
       setIsCleaning(false);
     }
@@ -157,6 +171,7 @@ export function MagicTeaPartyGlobalSettingsPanel(props: MagicTeaPartyGlobalSetti
             <span>
               缓存占用：{cacheStats.totalCount} 张 · {formatMagicTeaPartyBytes(cacheStats.totalBytes)}
               {cacheStats.unknownCount > 0 ? `（${cacheStats.unknownCount} 张大小待统计）` : ''}
+              {cacheStats.expiredCount > 0 ? `（过期 ${cacheStats.expiredCount} 张）` : ''}
             </span>
             <span>清理阈值：{Math.round(limits.maxBytes / MB)} MB</span>
           </div>
@@ -170,6 +185,14 @@ export function MagicTeaPartyGlobalSettingsPanel(props: MagicTeaPartyGlobalSetti
             disabled={isCleaning}
           >
             清理超限
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => void handleCleanupExpired()}
+            disabled={isCleaning || cacheStats.expiredCount === 0}
+          >
+            清理过期
           </button>
           <button
             type="button"

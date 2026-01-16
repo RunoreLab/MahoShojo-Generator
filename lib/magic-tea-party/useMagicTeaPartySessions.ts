@@ -192,6 +192,7 @@ export type UseMagicTeaPartySessionsResult = {
   lockSessionTitle: () => void;
   updatePlayerRole: (roleId: string | null) => void;
   forkSessionFromMessage: (messageId: string, content: string) => Promise<string | null>;
+  mergeSessionToParent: (sessionId?: string | null) => Promise<string | null>;
 };
 
 export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOptions): UseMagicTeaPartySessionsResult {
@@ -902,6 +903,128 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
     [activeSession, messages, onGlobalError, preferences.userDisplayName]
   );
 
+  const mergeSessionToParent = useCallback(
+    async (sessionId?: string | null) => {
+      const sourceSession =
+        sessionId && activeSession?.id === sessionId
+          ? activeSession
+          : sessionId
+            ? sessions.find((session) => session.id === sessionId) ?? (await getMagicTeaPartySession(sessionId))
+            : activeSession;
+      if (!sourceSession) return null;
+
+      const parentId = sourceSession.forkedFrom?.sessionId;
+      const forkMessageId = sourceSession.forkedFrom?.messageId;
+      if (!parentId || !forkMessageId) {
+        onGlobalError?.('当前会话没有可合并的父分支。');
+        return null;
+      }
+
+      const parentSession = await getMagicTeaPartySession(parentId);
+      if (!parentSession) {
+        onGlobalError?.('父会话已不存在，无法合并。');
+        return null;
+      }
+
+      const [parentMessages, branchMessages] = await Promise.all([
+        listMagicTeaPartyMessages(parentId),
+        listMagicTeaPartyMessages(sourceSession.id),
+      ]);
+
+      const parentForkIndex = parentMessages.findIndex((message) => message.id === forkMessageId);
+      if (parentForkIndex < 0) {
+        onGlobalError?.('父会话缺少分支锚点，无法合并。');
+        return null;
+      }
+
+      let branchStartIndex = branchMessages.findIndex((message) => message.revisionOf === forkMessageId);
+      if (branchStartIndex < 0) {
+        const forkedAt = sourceSession.forkedFrom?.createdAt ?? 0;
+        branchStartIndex = branchMessages.findIndex((message) => (message.createdAt ?? 0) >= forkedAt);
+      }
+      if (branchStartIndex < 0) branchStartIndex = 0;
+
+      const branchTail = branchMessages.slice(branchStartIndex);
+      if (branchTail.length === 0) {
+        onGlobalError?.('未找到可合并的分支内容。');
+        return null;
+      }
+
+      const now = Date.now();
+      const superseded = parentMessages.slice(parentForkIndex).map((message) => ({
+        ...message,
+        meta: {
+          ...(message.meta ?? {}),
+          superseded: true,
+          supersededAt: now,
+          supersededBy: 'merge',
+          supersededBySessionId: sourceSession.id,
+        },
+      }));
+      if (superseded.length > 0) {
+        await Promise.all(superseded.map((message) => putMagicTeaPartyMessage(message)));
+      }
+
+      const parentMessageIds = new Set(parentMessages.map((message) => message.id));
+      const idMap = new Map<string, string>();
+      const cloned = branchTail.map((message, index) => {
+        const nextId = randomUUID();
+        idMap.set(message.id, nextId);
+        return {
+          ...message,
+          id: nextId,
+          sessionId: parentId,
+          createdAt: typeof message.createdAt === 'number' ? message.createdAt : now + index,
+        } as MagicTeaPartyMessage;
+      });
+      const fixed = cloned.map((message) => {
+        const next = { ...message } as MagicTeaPartyMessage;
+        if (typeof next.sourceMessageId === 'string') {
+          if (idMap.has(next.sourceMessageId)) {
+            next.sourceMessageId = idMap.get(next.sourceMessageId);
+          } else if (!parentMessageIds.has(next.sourceMessageId)) {
+            delete next.sourceMessageId;
+          }
+        }
+        if (typeof next.revisionOf === 'string') {
+          if (idMap.has(next.revisionOf)) {
+            next.revisionOf = idMap.get(next.revisionOf);
+          } else if (!parentMessageIds.has(next.revisionOf)) {
+            delete next.revisionOf;
+          }
+        }
+        return next;
+      });
+      if (fixed.length > 0) {
+        await Promise.all(fixed.map((message) => putMagicTeaPartyMessage(message)));
+      }
+
+      let summary = parentSession.summary;
+      let summaryMeta = parentSession.summaryMeta;
+      if (summaryMeta?.toMessageId) {
+        const summaryIndex = parentMessages.findIndex((message) => message.id === summaryMeta?.toMessageId);
+        if (summaryIndex >= parentForkIndex) {
+          summary = undefined;
+          summaryMeta = undefined;
+        }
+      }
+
+      const nextParentSession: MagicTeaPartySession = {
+        ...parentSession,
+        summary,
+        summaryMeta,
+        updatedAt: now,
+      };
+
+      await putMagicTeaPartySession(nextParentSession);
+      setSessions((prev) => sortSessionsByUpdatedAtDesc([nextParentSession, ...prev.filter((item) => item.id !== nextParentSession.id)]));
+      setActiveSessionId(parentId);
+      writeLocalStorageString(STORAGE_RECENT_SESSION, parentId);
+      return parentId;
+    },
+    [activeSession, onGlobalError, sessions]
+  );
+
   return {
     sessions,
     activeSessionId,
@@ -934,5 +1057,6 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
     lockSessionTitle,
     updatePlayerRole,
     forkSessionFromMessage,
+    mergeSessionToParent,
   };
 }

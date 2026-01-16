@@ -63,6 +63,7 @@ export default function MagicTeaPartyPage() {
     lockSessionTitle,
     updatePlayerRole,
     forkSessionFromMessage,
+    mergeSessionToParent,
   } = useMagicTeaPartySessions({
     username: user?.username,
     userProviderConfig,
@@ -154,6 +155,15 @@ export default function MagicTeaPartyPage() {
       setEditingDraft('');
       setDraft('');
     }
+  };
+
+  const handleMergeSessionToParent = async (sessionId?: string | null) => {
+    const confirmed =
+      typeof window !== 'undefined'
+        ? window.confirm('将当前分支合并回父会话会替换父会话分支点之后的内容，确定继续吗？')
+        : true;
+    if (!confirmed) return;
+    await mergeSessionToParent(sessionId ?? activeSession?.id ?? null);
   };
 
   useEffect(() => {
@@ -451,6 +461,7 @@ export default function MagicTeaPartyPage() {
                 onProviderConfigChange={setUserProviderConfig}
                 onPreferenceChange={applyPreferencePatch}
                 onSessionSettingChange={updateActiveSessionSettings}
+                onMergeSession={handleMergeSessionToParent}
               />
 
               <main className="space-y-4 min-w-0">

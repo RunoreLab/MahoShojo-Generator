@@ -269,7 +269,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
     <div className={`space-y-1 ${isSuperseded ? 'opacity-70' : ''}`}>
       <div className={speakerClass}>{bubbleSpeaker}</div>
       {bubble}
-      {isSuperseded ? <div className="text-[11px] text-gray-400">该条消息已被重新生成</div> : null}
+      {isSuperseded ? <div className="text-[11px] text-gray-400">该条消息已被更新替换</div> : null}
     </div>
   );
 

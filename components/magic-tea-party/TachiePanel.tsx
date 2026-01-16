@@ -7,12 +7,15 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { randomUUID } from '@/lib/crypto';
 import {
   calculateMagicTeaPartyCacheStats,
+  cleanupMagicTeaPartyExpiredTachieCache,
   cleanupMagicTeaPartyTachieCache,
   formatMagicTeaPartyBytes,
   resolveMagicTeaPartyCacheLimits,
+  resolveMagicTeaPartyTachieExpireAt,
 } from '@/lib/magic-tea-party/cache';
 import {
   deleteMagicTeaPartyTachieAsset,
+  deleteMagicTeaPartyTachieAssetsByIds,
   deleteMagicTeaPartyTachieAssets,
   listMagicTeaPartyTachieAssets,
   putMagicTeaPartyTachieAsset,
@@ -288,6 +291,7 @@ export function MagicTeaPartyTachiePanel(props: {
     setAssets([]);
     void (async () => {
       try {
+        await cleanupMagicTeaPartyExpiredTachieCache();
         const next = await listMagicTeaPartyTachieAssets(sessionId);
         if (canceled) return;
         setAssets(next);
@@ -397,6 +401,7 @@ export function MagicTeaPartyTachiePanel(props: {
         generateUuid: result.generateUuid,
         createdAt: now,
         lastUsedAt: now,
+        expireAt: resolveMagicTeaPartyTachieExpireAt(now),
         ...(typeof blobSize === 'number' ? { blobSize } : {}),
       };
 
@@ -434,6 +439,21 @@ export function MagicTeaPartyTachiePanel(props: {
     }
   };
 
+  const handleClearRole = async () => {
+    if (kind !== 'tachie' || !mainRoleId) return;
+    setAssetError(null);
+    try {
+      const targets = assets.filter((asset) => asset.roleId === mainRoleId);
+      if (targets.length === 0) return;
+      await deleteMagicTeaPartyTachieAssetsByIds(targets.map((asset) => asset.id));
+      const nextAll = await listMagicTeaPartyTachieAssets(sessionId);
+      setAssets(nextAll);
+      onAssetsUpdated?.(nextAll);
+    } catch (error) {
+      setAssetError(error instanceof Error ? error.message : '清理失败');
+    }
+  };
+
   const hasRoles = (props.session.roles ?? []).length > 0;
   const promptForGenerator = truncateText(prompt, MAX_PROMPT_CHARS);
   const anchorMessage = anchorMessageId ? props.messages.find((message) => message.id === anchorMessageId) ?? null : null;
@@ -453,20 +473,34 @@ export function MagicTeaPartyTachiePanel(props: {
             立绘用于角色展示；插画用于“视觉小说式”的剧情画面。生成结果仅保存在本地浏览器缓存中。
           </div>
         </div>
-        <button
-          type="button"
-          className="flex-none rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-          onClick={() => void handleClear()}
-          disabled={assets.length === 0}
-          title="清空本会话已生成的立绘/插画缓存"
-        >
-          清空缓存
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {kind === 'tachie' ? (
+            <button
+              type="button"
+              className="flex-none rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void handleClearRole()}
+              disabled={!mainRoleId || assets.filter((asset) => asset.roleId === mainRoleId).length === 0}
+              title="清理当前角色的立绘缓存"
+            >
+              清理本角色
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="flex-none rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => void handleClear()}
+            disabled={assets.length === 0}
+            title="清空本会话已生成的立绘/插画缓存"
+          >
+            清空缓存
+          </button>
+        </div>
       </div>
 
       <div className="text-[11px] text-gray-500">
         本会话缓存：{sessionStats.totalCount} 张 · {formatMagicTeaPartyBytes(sessionStats.totalBytes)}
         {sessionStats.unknownCount > 0 ? `（${sessionStats.unknownCount} 张大小待统计）` : ''}
+        {sessionStats.expiredCount > 0 ? `（过期 ${sessionStats.expiredCount} 张）` : ''}
       </div>
 
       {assetError ? (

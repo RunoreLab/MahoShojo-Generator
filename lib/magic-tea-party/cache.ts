@@ -6,10 +6,12 @@ import {
 } from '@/lib/magic-tea-party/storage';
 
 const MB = 1024 * 1024;
+const DAY = 24 * 60 * 60 * 1000;
 
 export const MAGIC_TEA_PARTY_CACHE_DEFAULT_MAX_PER_SESSION = 24;
 export const MAGIC_TEA_PARTY_CACHE_DEFAULT_MAX_GLOBAL = 200;
 export const MAGIC_TEA_PARTY_CACHE_DEFAULT_MAX_BYTES = 300 * MB;
+export const MAGIC_TEA_PARTY_CACHE_DEFAULT_TTL_MS = 30 * DAY;
 
 const clampNumber = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
@@ -43,6 +45,7 @@ export type MagicTeaPartyCacheStats = {
   totalCount: number;
   totalBytes: number;
   unknownCount: number;
+  expiredCount: number;
 };
 
 export const resolveMagicTeaPartyCacheLimits = (preferences: MagicTeaPartyPreferences): MagicTeaPartyCacheLimits => {
@@ -71,10 +74,36 @@ export const resolveMagicTeaPartyCacheLimits = (preferences: MagicTeaPartyPrefer
   };
 };
 
-export const calculateMagicTeaPartyCacheStats = (assets: MagicTeaPartyTachieAsset[]): MagicTeaPartyCacheStats => {
+const isExpiredAsset = (asset: MagicTeaPartyTachieAsset, now: number): boolean => {
+  const expireAt = typeof asset.expireAt === 'number' && Number.isFinite(asset.expireAt) ? asset.expireAt : null;
+  return expireAt !== null && expireAt > 0 && expireAt <= now;
+};
+
+const splitExpiredAssets = (
+  assets: MagicTeaPartyTachieAsset[],
+  now: number
+): { expiredIds: string[]; activeAssets: MagicTeaPartyTachieAsset[] } => {
+  const expiredIds: string[] = [];
+  const activeAssets: MagicTeaPartyTachieAsset[] = [];
+  for (const asset of assets) {
+    if (isExpiredAsset(asset, now)) {
+      expiredIds.push(asset.id);
+    } else {
+      activeAssets.push(asset);
+    }
+  }
+  return { expiredIds, activeAssets };
+};
+
+export const calculateMagicTeaPartyCacheStats = (
+  assets: MagicTeaPartyTachieAsset[],
+  now: number = Date.now()
+): MagicTeaPartyCacheStats => {
   let totalBytes = 0;
   let unknownCount = 0;
+  let expiredCount = 0;
   for (const asset of assets) {
+    if (isExpiredAsset(asset, now)) expiredCount += 1;
     const size = typeof asset.blobSize === 'number' && Number.isFinite(asset.blobSize) ? asset.blobSize : null;
     if (size === null) {
       unknownCount += 1;
@@ -86,6 +115,7 @@ export const calculateMagicTeaPartyCacheStats = (assets: MagicTeaPartyTachieAsse
     totalCount: assets.length,
     totalBytes,
     unknownCount,
+    expiredCount,
   };
 };
 
@@ -97,10 +127,29 @@ export const formatMagicTeaPartyBytes = (bytes: number): string => {
   return `${(bytes / (1024 * MB)).toFixed(2)} GB`;
 };
 
+export const resolveMagicTeaPartyTachieExpireAt = (
+  now: number = Date.now(),
+  ttlMs: number = MAGIC_TEA_PARTY_CACHE_DEFAULT_TTL_MS
+): number => {
+  const safeTtl = Number.isFinite(ttlMs) && ttlMs > 0 ? Math.floor(ttlMs) : MAGIC_TEA_PARTY_CACHE_DEFAULT_TTL_MS;
+  return now + safeTtl;
+};
+
+export const cleanupMagicTeaPartyExpiredTachieCache = async (now: number = Date.now()): Promise<MagicTeaPartyCacheStats> => {
+  const allAssets = await listAllMagicTeaPartyTachieAssets();
+  const { expiredIds, activeAssets } = splitExpiredAssets(allAssets, now);
+  if (expiredIds.length > 0) {
+    await deleteMagicTeaPartyTachieAssetsByIds(expiredIds);
+  }
+  return calculateMagicTeaPartyCacheStats(activeAssets, now);
+};
+
 export const cleanupMagicTeaPartyTachieCache = async (params: {
   sessionId?: string | null;
   limits: MagicTeaPartyCacheLimits;
 }): Promise<MagicTeaPartyCacheStats> => {
+  const now = Date.now();
+  await cleanupMagicTeaPartyExpiredTachieCache(now);
   const removedIds = new Set<string>();
 
   if (params.sessionId) {
@@ -128,7 +177,7 @@ export const cleanupMagicTeaPartyTachieCache = async (params: {
     }
   }
 
-  const afterCountStats = calculateMagicTeaPartyCacheStats(allAssets);
+  const afterCountStats = calculateMagicTeaPartyCacheStats(allAssets, now);
   if (afterCountStats.totalBytes > params.limits.maxBytes) {
     const removable = allAssets.filter((asset) => !removedIds.has(asset.id));
     let totalBytes = afterCountStats.totalBytes;
@@ -145,12 +194,12 @@ export const cleanupMagicTeaPartyTachieCache = async (params: {
   }
 
   const finalAssets = await listAllMagicTeaPartyTachieAssets();
-  return calculateMagicTeaPartyCacheStats(finalAssets);
+  return calculateMagicTeaPartyCacheStats(finalAssets, now);
 };
 
 export const getMagicTeaPartyCacheStats = async (): Promise<MagicTeaPartyCacheStats> => {
   const assets = await listAllMagicTeaPartyTachieAssets();
-  return calculateMagicTeaPartyCacheStats(assets);
+  return calculateMagicTeaPartyCacheStats(assets, Date.now());
 };
 
 export const parseMagicTeaPartyCacheLimitInput = (value: string, fallback: number): number => {
