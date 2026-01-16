@@ -41,6 +41,12 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
   const currentEnableChoices = activeSession?.settings.enableChoices ?? preferences.enableChoices;
   const currentChoiceCount = activeSession?.settings.choiceCount ?? preferences.choiceCount;
   const selectedPresetId = activeSession ? activeSession.settings.presetId : preferences.lastPresetId;
+  const readArenaHistory = activeSession?.settings.readArenaHistory ?? preferences.readArenaHistory;
+  const readArenaHistoryLimit = activeSession?.settings.readArenaHistoryLimit ?? preferences.readArenaHistoryLimit;
+  const isArenaHistoryUnlimited = activeSession?.settings.isArenaHistoryUnlimited ?? preferences.isArenaHistoryUnlimited;
+  const readCurrentState = activeSession?.settings.readCurrentState ?? preferences.readCurrentState;
+  const writeArenaHistory = activeSession?.settings.writeArenaHistory ?? preferences.writeArenaHistory;
+  const writeCurrentState = activeSession?.settings.writeCurrentState ?? preferences.writeCurrentState;
 
   return (
     <aside className="space-y-4 min-w-0">
@@ -205,6 +211,102 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
               <option value="4">4</option>
             </select>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-3">
+        <div className="text-sm font-semibold text-gray-800">资料读写</div>
+        <div className="text-xs text-gray-500">茶会写入会移除签名并标记为非原生。</div>
+
+        <div className="space-y-3">
+          <div className="text-xs font-semibold text-gray-600">读取</div>
+          <label className="flex items-center justify-between gap-3 text-xs text-gray-700">
+            <span>读取历战记录</span>
+            <input
+              type="checkbox"
+              checked={Boolean(readArenaHistory)}
+              onChange={(event) => {
+                const value = Boolean(event.target.checked);
+                onPreferenceChange({ readArenaHistory: value });
+                onSessionSettingChange({ readArenaHistory: value });
+              }}
+            />
+          </label>
+
+          {readArenaHistory ? (
+            <div className="grid gap-2 rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-semibold text-gray-600">读取条数</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={999}
+                  className="input-field !h-8 !w-20 !px-2 !py-1 text-xs"
+                  value={String(readArenaHistoryLimit || 3)}
+                  onChange={(event) => {
+                    const nextValue = Number(event.target.value);
+                    const limit = Number.isFinite(nextValue) ? Math.max(1, Math.min(999, Math.floor(nextValue))) : 3;
+                    onPreferenceChange({ readArenaHistoryLimit: limit });
+                    onSessionSettingChange({ readArenaHistoryLimit: limit });
+                  }}
+                  disabled={isArenaHistoryUnlimited}
+                />
+              </div>
+              <label className="flex items-center justify-between gap-2">
+                <span>不限条数</span>
+                <input
+                  type="checkbox"
+                  checked={Boolean(isArenaHistoryUnlimited)}
+                  onChange={(event) => {
+                    const value = Boolean(event.target.checked);
+                    onPreferenceChange({ isArenaHistoryUnlimited: value });
+                    onSessionSettingChange({ isArenaHistoryUnlimited: value });
+                  }}
+                />
+              </label>
+            </div>
+          ) : null}
+
+          <label className="flex items-center justify-between gap-3 text-xs text-gray-700">
+            <span>读取当前状态</span>
+            <input
+              type="checkbox"
+              checked={Boolean(readCurrentState)}
+              onChange={(event) => {
+                const value = Boolean(event.target.checked);
+                onPreferenceChange({ readCurrentState: value });
+                onSessionSettingChange({ readCurrentState: value });
+              }}
+            />
+          </label>
+        </div>
+
+        <div className="space-y-3">
+          <div className="text-xs font-semibold text-gray-600">写入</div>
+          <label className="flex items-center justify-between gap-3 text-xs text-gray-700">
+            <span>写入历战记录</span>
+            <input
+              type="checkbox"
+              checked={Boolean(writeArenaHistory)}
+              onChange={(event) => {
+                const value = Boolean(event.target.checked);
+                onPreferenceChange({ writeArenaHistory: value });
+                onSessionSettingChange({ writeArenaHistory: value });
+              }}
+            />
+          </label>
+          <label className="flex items-center justify-between gap-3 text-xs text-gray-700">
+            <span>写入当前状态</span>
+            <input
+              type="checkbox"
+              checked={Boolean(writeCurrentState)}
+              onChange={(event) => {
+                const value = Boolean(event.target.checked);
+                onPreferenceChange({ writeCurrentState: value });
+                onSessionSettingChange({ writeCurrentState: value });
+              }}
+            />
+          </label>
         </div>
       </div>
     </aside>

@@ -142,6 +142,12 @@ export type MagicTeaPartySession = {
     enableSummary?: boolean;
     presetId?: string;
     worldbookPresetId?: string;
+    readArenaHistory?: boolean;
+    readArenaHistoryLimit?: number;
+    isArenaHistoryUnlimited?: boolean;
+    readCurrentState?: boolean;
+    writeArenaHistory?: boolean;
+    writeCurrentState?: boolean;
   };
 };
 
@@ -153,4 +159,25 @@ export type MagicTeaPartyPreferences = {
   userDisplayName: string;
   lastPresetId?: string;
   lastWorldbookPresetId?: string;
+  readArenaHistory: boolean;
+  readArenaHistoryLimit: number;
+  isArenaHistoryUnlimited: boolean;
+  readCurrentState: boolean;
+  writeArenaHistory: boolean;
+  writeCurrentState: boolean;
+};
+
+export type MagicTeaPartyUpdateDraft = {
+  roleId?: string;
+  characterName: string;
+  impact?: string;
+  currentStateSummary?: string;
+  hasWinner?: boolean;
+  winner?: string;
+  meta?: {
+    sessionId?: string;
+    summaryId?: string;
+    messageRange?: { fromMessageId: string; toMessageId: string; count: number };
+    generatedAt?: number;
+  };
 };

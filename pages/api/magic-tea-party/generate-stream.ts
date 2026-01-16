@@ -73,6 +73,12 @@ const SettingsSchema = z
     presetId: z.string().optional(),
     worldbookPresetId: z.string().optional(),
     userDisplayName: z.string().optional(),
+    readArenaHistory: z.boolean().optional(),
+    readArenaHistoryLimit: z.number().int().min(1).max(999).optional(),
+    isArenaHistoryUnlimited: z.boolean().optional(),
+    readCurrentState: z.boolean().optional(),
+    writeArenaHistory: z.boolean().optional(),
+    writeCurrentState: z.boolean().optional(),
   })
   .passthrough();
 
@@ -83,6 +89,7 @@ const RequestBodySchema = z.object({
   scenario: ScenarioSchema.nullish(),
   auxScenarios: z.array(ScenarioSchema).max(12).optional().default([]),
   playerRoleId: z.string().nullable().optional().default(null),
+  summary: z.string().optional().nullable(),
   settings: SettingsSchema,
   customProvider: CustomProviderSchema,
 });
@@ -139,7 +146,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       return json({ error: '请求参数无效' }, { status: 400 });
     }
 
-    const { sessionId, messages, roles, scenario: scenarioInput, auxScenarios, playerRoleId, settings, customProvider } = parsedBody.data;
+    const { sessionId, messages, roles, scenario: scenarioInput, auxScenarios, playerRoleId, summary, settings, customProvider } = parsedBody.data;
 
     const providerOverrideResult = buildProviderOverride(customProvider);
     if (providerOverrideResult instanceof Response) return providerOverrideResult;
@@ -178,7 +185,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
     const prompt = buildMagicTeaPartyMainPrompt({
       session: {
         playerRoleId,
-        summary: undefined,
+        summary: summary ?? undefined,
         settings: {
           providerId,
           modelId: customProvider.modelId.trim(),
@@ -190,6 +197,12 @@ export default async function handler(req: NextRequest): Promise<Response> {
           presetId: settings.presetId,
           worldbookPresetId: settings.worldbookPresetId,
           userDisplayName: typeof settings.userDisplayName === 'string' ? settings.userDisplayName.trim().slice(0, 20) : undefined,
+          readArenaHistory: settings.readArenaHistory,
+          readArenaHistoryLimit: settings.readArenaHistoryLimit,
+          isArenaHistoryUnlimited: settings.isArenaHistoryUnlimited,
+          readCurrentState: settings.readCurrentState,
+          writeArenaHistory: settings.writeArenaHistory,
+          writeCurrentState: settings.writeCurrentState,
         },
       },
       roles: normalizedRoles,

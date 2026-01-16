@@ -23,7 +23,7 @@ export interface CharacterCurrentState {
 
 export interface ArenaHistoryEntry {
   id: number; // 从 1 开始自增
-  type: 'daily' | 'kizuna' | 'classic' | 'scenario' | 'sublimation';
+  type: 'daily' | 'kizuna' | 'classic' | 'scenario' | 'sublimation' | 'tea-party';
   title: string;
   participants: string[];
   winner: string;

@@ -370,6 +370,12 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
         enableChoices: preferences.enableChoices,
         choiceCount: preferences.choiceCount,
         userDisplayName: preferences.userDisplayName,
+        readArenaHistory: preferences.readArenaHistory,
+        readArenaHistoryLimit: preferences.readArenaHistoryLimit,
+        isArenaHistoryUnlimited: preferences.isArenaHistoryUnlimited,
+        readCurrentState: preferences.readCurrentState,
+        writeArenaHistory: preferences.writeArenaHistory,
+        writeCurrentState: preferences.writeCurrentState,
       } satisfies MagicTeaPartySession['settings'];
 
       const session: MagicTeaPartySession = {

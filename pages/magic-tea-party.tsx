@@ -13,9 +13,10 @@ import { MagicTeaPartySessionSetupPanel } from '@/components/magic-tea-party/Ses
 import { MagicTeaPartySummaryPanel } from '@/components/magic-tea-party/SummaryPanel';
 import { MagicTeaPartyTachiePanel } from '@/components/magic-tea-party/TachiePanel';
 
+import { buildMagicTeaPartyHistory } from '@/lib/magic-tea-party/history';
 import { useMagicTeaPartyChat } from '@/lib/magic-tea-party/useMagicTeaPartyChat';
 import { useMagicTeaPartySessions } from '@/lib/magic-tea-party/useMagicTeaPartySessions';
-import type { MagicTeaPartyMessage, MagicTeaPartyTachieAsset } from '@/lib/magic-tea-party/types';
+import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyTachieAsset, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
 import { useAuth } from '@/lib/useAuth';
 
 export default function MagicTeaPartyPage() {
@@ -88,11 +89,18 @@ export default function MagicTeaPartyPage() {
   const [tachieReferenceText, setTachieReferenceText] = useState('');
   const [tachieAnchorMessageId, setTachieAnchorMessageId] = useState<string | null>(null);
   const [tachieAssets, setTachieAssets] = useState<MagicTeaPartyTachieAsset[]>([]);
+  const [updateDrafts, setUpdateDrafts] = useState<MagicTeaPartyUpdateDraft[] | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateRangeSize, setUpdateRangeSize] = useState<number>(20);
+  const [isGeneratingUpdates, setIsGeneratingUpdates] = useState(false);
+  const [isApplyingUpdates, setIsApplyingUpdates] = useState(false);
 
   useEffect(() => {
     setTachieReferenceText('');
     setTachieAnchorMessageId(null);
     setTachieAssets([]);
+    setUpdateDrafts(null);
+    setUpdateError(null);
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -140,6 +148,164 @@ export default function MagicTeaPartyPage() {
       setTachieAnchorMessageId(lastUser.id);
     }
   }, [activeSession, messages, tachieReferenceText]);
+
+  const resolveWriteSettings = () => {
+    const writeArenaHistory = activeSession?.settings.writeArenaHistory ?? preferences.writeArenaHistory;
+    const writeCurrentState = activeSession?.settings.writeCurrentState ?? preferences.writeCurrentState;
+    return { writeArenaHistory: Boolean(writeArenaHistory), writeCurrentState: Boolean(writeCurrentState) };
+  };
+
+  const ensureProviderReady = (): boolean => {
+    if (!userProviderConfig) {
+      setGlobalError('请先配置模型与 API Key。');
+      return false;
+    }
+    if (userProviderConfig.providerId === 'system') {
+      setGlobalError('魔法茶会已禁用 system，请使用自备 Key。');
+      return false;
+    }
+    if (!userProviderConfig.apiKey?.trim()) {
+      setGlobalError('API Key 不能为空。');
+      return false;
+    }
+    if (!userProviderConfig.modelId?.trim()) {
+      setGlobalError('请先选择模型。');
+      return false;
+    }
+    return true;
+  };
+
+  const handleGenerateUpdateDrafts = async () => {
+    if (!activeSession) return;
+    if (isGenerating || isSummarizing || isGeneratingUpdates || isApplyingUpdates) return;
+    if (!ensureProviderReady()) return;
+
+    const { writeArenaHistory, writeCurrentState } = resolveWriteSettings();
+    if (!writeArenaHistory && !writeCurrentState) {
+      setUpdateError('请先开启写入历战记录或当前状态。');
+      return;
+    }
+
+    const history = buildMagicTeaPartyHistory(messages, { includeEmptyContent: false });
+    if (history.length === 0) {
+      setUpdateError('还没有可用于更新的对话。');
+      return;
+    }
+
+    const rangeSize = Math.max(1, Math.min(200, updateRangeSize || 20));
+    const sliced = history.slice(-rangeSize);
+    const messageRange = {
+      fromMessageId: sliced[0]?.id,
+      toMessageId: sliced[sliced.length - 1]?.id,
+      count: sliced.length,
+    };
+
+    setUpdateError(null);
+    setIsGeneratingUpdates(true);
+
+    try {
+      const response = await fetch('/api/magic-tea-party/generate-updates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: activeSession.id,
+          sessionTitle: activeSession.title,
+          messages: sliced,
+          summary: activeSession.summary,
+          roles: activeSession.roles ?? [],
+          messageRange,
+          settings: {
+            writeArenaHistory,
+            writeCurrentState,
+            language: activeSession.settings.language ?? preferences.language,
+            userDisplayName: activeSession.settings.userDisplayName ?? preferences.userDisplayName,
+          },
+          customProvider: userProviderConfig,
+        }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const errorMessage =
+          typeof payload?.error === 'string'
+            ? payload.error
+            : typeof payload?.message === 'string'
+              ? payload.message
+              : `请求失败（${response.status}）`;
+        setUpdateError(errorMessage);
+        return;
+      }
+
+      const drafts = Array.isArray(payload?.drafts) ? (payload.drafts as MagicTeaPartyUpdateDraft[]) : [];
+      if (drafts.length === 0) {
+        setUpdateError('未生成任何更新草案。');
+        return;
+      }
+      setUpdateDrafts(drafts);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '生成更新草案失败';
+      setUpdateError(message);
+    } finally {
+      setIsGeneratingUpdates(false);
+    }
+  };
+
+  const handleApplyUpdates = async () => {
+    if (!activeSession) return;
+    if (!updateDrafts || updateDrafts.length === 0) {
+      setUpdateError('没有可写入的草案。');
+      return;
+    }
+    if (isGenerating || isSummarizing || isGeneratingUpdates || isApplyingUpdates) return;
+
+    const { writeArenaHistory, writeCurrentState } = resolveWriteSettings();
+    if (!writeArenaHistory && !writeCurrentState) {
+      setUpdateError('请先开启写入历战记录或当前状态。');
+      return;
+    }
+
+    setUpdateError(null);
+    setIsApplyingUpdates(true);
+
+    try {
+      const response = await fetch('/api/magic-tea-party/apply-updates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: activeSession.id,
+          sessionTitle: activeSession.title,
+          drafts: updateDrafts,
+          roles: activeSession.roles ?? [],
+          settings: { writeArenaHistory, writeCurrentState },
+        }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const errorMessage =
+          typeof payload?.error === 'string'
+            ? payload.error
+            : typeof payload?.message === 'string'
+              ? payload.message
+              : `请求失败（${response.status}）`;
+        setUpdateError(errorMessage);
+        return;
+      }
+
+      const updatedRoles = Array.isArray(payload?.updatedRoles) ? (payload.updatedRoles as MagicTeaPartyRole[]) : [];
+      if (updatedRoles.length > 0) {
+        await updateActiveSessionRoles(updatedRoles);
+      } else if (activeSession.roles) {
+        await updateActiveSessionRoles(activeSession.roles);
+      }
+      setUpdateDrafts(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '写入失败';
+      setUpdateError(message);
+    } finally {
+      setIsApplyingUpdates(false);
+    }
+  };
 
   return (
     <>
@@ -192,6 +358,15 @@ export default function MagicTeaPartyPage() {
                   onGenerateSummary={() => void generateSummary()}
                   onClearSummary={() => void clearSummary()}
                   onPersistSession={persistSession}
+                  updateDrafts={updateDrafts}
+                  updateRangeSize={updateRangeSize}
+                  isGeneratingUpdates={isGeneratingUpdates}
+                  isApplyingUpdates={isApplyingUpdates}
+                  updateError={updateError}
+                  onUpdateRangeSizeChange={setUpdateRangeSize}
+                  onGenerateUpdates={() => void handleGenerateUpdateDrafts()}
+                  onApplyUpdates={() => void handleApplyUpdates()}
+                  onClearUpdateDrafts={() => setUpdateDrafts(null)}
                 />
 
                 <div className="rounded-xl border border-pink-100 bg-white p-4">

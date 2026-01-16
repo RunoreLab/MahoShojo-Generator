@@ -4,14 +4,13 @@ import { NextRequest } from 'next/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
-import { createBlankDataCard } from '@/lib/data-card-converter';
 import { getLogger } from '@/lib/logger';
-import { buildMagicTeaPartyChoicesPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
-import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
-import type { MagicTeaPartyRole, MagicTeaPartyScenario } from '@/lib/magic-tea-party/types';
-import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { buildMagicTeaPartyUpdatePrompt } from '@/lib/magic-tea-party/prompts';
+import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
+import { generateWithAI, LoadBalanceStrategy } from '@/lib/ai';
+import { applyShieldWords } from '@/lib/shield-word-filter';
 
-const log = getLogger('api-magic-tea-party-generate-choices');
+const log = getLogger('api-magic-tea-party-generate-updates');
 
 export const config = {
   runtime: 'edge',
@@ -42,41 +41,43 @@ const RoleSchema = z
   })
   .passthrough();
 
-const ScenarioSchema = z
-  .object({
-    id: z.string().min(1),
-    title: z.string().min(1),
-    presetId: z.string().optional(),
-    source: z.string().optional(),
-    card: z.record(z.unknown()).default({}),
-  })
-  .passthrough();
-
-const SettingsSchema = z
-  .object({
-    temperature: z.number().min(0).max(1.2).optional(),
-    language: z.enum(['zh-CN', 'ja-JP', 'en-US']).optional().default('zh-CN'),
-    choiceCount: z.number().int().min(2).max(4).optional().default(3),
-    presetId: z.string().optional(),
-    worldbookPresetId: z.string().optional(),
-    userDisplayName: z.string().optional(),
-    readArenaHistory: z.boolean().optional(),
-    readArenaHistoryLimit: z.number().int().min(1).max(999).optional(),
-    isArenaHistoryUnlimited: z.boolean().optional(),
-    readCurrentState: z.boolean().optional(),
-  })
-  .passthrough();
+const SettingsSchema = z.object({
+  writeArenaHistory: z.boolean().optional(),
+  writeCurrentState: z.boolean().optional(),
+  language: z.enum(['zh-CN', 'ja-JP', 'en-US']).optional(),
+  userDisplayName: z.string().optional(),
+});
 
 const RequestBodySchema = z.object({
   sessionId: z.string().min(1),
+  sessionTitle: z.string().optional(),
   messages: z.array(MessageSchema).max(200),
-  roles: z.array(RoleSchema).max(20).default([]),
-  scenario: ScenarioSchema.nullish(),
-  auxScenarios: z.array(ScenarioSchema).max(12).optional().default([]),
-  playerRoleId: z.string().nullable().optional().default(null),
   summary: z.string().optional().nullable(),
+  roles: z.array(RoleSchema).max(20).default([]),
+  messageRange: z
+    .object({
+      fromMessageId: z.string().min(1),
+      toMessageId: z.string().min(1),
+      count: z.number().int().min(1),
+    })
+    .optional(),
   settings: SettingsSchema,
   customProvider: CustomProviderSchema,
+});
+
+const UpdateSchema = z
+  .object({
+    roleId: z.string().optional(),
+    characterName: z.string().min(1),
+    impact: z.string().optional(),
+    currentStateSummary: z.string().optional(),
+    hasWinner: z.boolean().optional(),
+    winner: z.string().optional(),
+  })
+  .passthrough();
+
+const UpdateResponseSchema = z.object({
+  updates: z.array(UpdateSchema),
 });
 
 const json = (payload: unknown, init?: ResponseInit): Response =>
@@ -120,6 +121,13 @@ const buildProviderOverride = (payload: z.infer<typeof CustomProviderSchema>): {
   };
 };
 
+const sanitizeText = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return applyShieldWords(trimmed).filteredText;
+};
+
 export default async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, { status: 405 });
@@ -131,69 +139,37 @@ export default async function handler(req: NextRequest): Promise<Response> {
       return json({ error: '请求参数无效' }, { status: 400 });
     }
 
-    const { sessionId, messages, roles, scenario: scenarioInput, auxScenarios, playerRoleId, summary, settings, customProvider } = parsedBody.data;
+    const { sessionId, messages, summary, roles, messageRange, settings, customProvider } = parsedBody.data;
+    const writeArenaHistory = Boolean(settings.writeArenaHistory);
+    const writeCurrentState = Boolean(settings.writeCurrentState);
+
+    if (!writeArenaHistory && !writeCurrentState) {
+      return json({ error: '未开启写入开关' }, { status: 400 });
+    }
 
     const providerOverrideResult = buildProviderOverride(customProvider);
     if (providerOverrideResult instanceof Response) return providerOverrideResult;
     const { providerOverride, providerId } = providerOverrideResult;
 
-    const preset = getMagicTeaPartyPreset(settings.presetId);
-
-    const scenario: MagicTeaPartyScenario | undefined =
-      scenarioInput && typeof scenarioInput === 'object'
-        ? (scenarioInput as unknown as MagicTeaPartyScenario)
-        : preset
-          ? {
-            id: 'preset-scenario',
-            title: preset.defaultScenario.title,
-            presetId: preset.id,
-            source: 'preset',
-            card: {
-              ...createBlankDataCard('general-scenario'),
-              title: preset.defaultScenario.title,
-              content: preset.defaultScenario.content,
-            },
-          }
-          : undefined;
-
     const normalizedRoles: MagicTeaPartyRole[] = Array.isArray(roles)
       ? (roles as unknown as MagicTeaPartyRole[]).map((role) => ({
-        ...role,
-        source: (role as any).source || 'cloud',
-        card: typeof (role as any).card === 'object' && (role as any).card ? (role as any).card : {},
-      }))
+          ...role,
+          source: (role as any).source || 'cloud',
+          card: typeof (role as any).card === 'object' && (role as any).card ? (role as any).card : {},
+        }))
       : [];
 
-    const worldbookText = preset ? buildWorldbookText(preset.worldbook) : '';
-    const stylePrompt = preset ? preset.systemPrompt : '';
-
-    const prompt = buildMagicTeaPartyChoicesPrompt({
-      session: {
-        playerRoleId,
-        summary: summary ?? undefined,
-        settings: {
-          providerId,
-          modelId: customProvider.modelId.trim(),
-          temperature: settings.temperature,
-          language: settings.language,
-          choiceCount: settings.choiceCount,
-          presetId: settings.presetId,
-          worldbookPresetId: settings.worldbookPresetId,
-          userDisplayName: typeof settings.userDisplayName === 'string' ? settings.userDisplayName.trim().slice(0, 20) : undefined,
-          readArenaHistory: settings.readArenaHistory,
-          readArenaHistoryLimit: settings.readArenaHistoryLimit,
-          isArenaHistoryUnlimited: settings.isArenaHistoryUnlimited,
-          readCurrentState: settings.readCurrentState,
-        },
-      },
+    const promptInput = {
       roles: normalizedRoles,
-      scenario,
-      auxScenarios: auxScenarios as unknown as MagicTeaPartyScenario[],
-      worldbookText,
-      messages: messages as any,
-      stylePrompt,
-      choiceCount: settings.choiceCount,
-    });
+      messages: messages as MagicTeaPartyMessage[],
+      summary: summary ?? undefined,
+      language: settings.language ?? 'zh-CN',
+      userDisplayName: settings.userDisplayName,
+      writeArenaHistory,
+      writeCurrentState,
+    };
+
+    const prompt = buildMagicTeaPartyUpdatePrompt(promptInput);
 
     const safetyText = prompt.length > MAX_SAFETY_TEXT_CHARS ? prompt.slice(0, MAX_SAFETY_TEXT_CHARS) : prompt;
     const safetyResponse = await enforceTextSafety({
@@ -206,23 +182,49 @@ export default async function handler(req: NextRequest): Promise<Response> {
     });
     if (safetyResponse) return safetyResponse;
 
-    const providerOptions: GenerateWithAIOptions = {
+    const result = await generateWithAI(promptInput, {
+      systemPrompt: '你是魔法茶会的角色更新助手。',
+      temperature: 0.2,
+      promptBuilder: buildMagicTeaPartyUpdatePrompt,
+      schema: UpdateResponseSchema as any,
+      taskName: '魔法茶会角色更新',
+      maxOutputTokens: 1200,
+    }, {
       providerOverride,
       loadBalanceStrategy: LoadBalanceStrategy.CUSTOM,
-    };
+    });
 
-    const streamResult = await generateWithStreamAI(
-      {
-        prompt,
-        temperature: typeof settings.temperature === 'number' ? settings.temperature : 0.5,
-        maxOutputTokens: 1024,
+    const updates = Array.isArray((result as any)?.updates) ? (result as any).updates : [];
+    const updateList: MagicTeaPartyUpdateDraft[] = normalizedRoles.map((role) => {
+      const matched = updates.find((item: any) => item?.roleId === role.id || item?.characterName === role.name);
+      const impact = writeArenaHistory ? sanitizeText(matched?.impact) ?? '在本次茶会中获得新的体悟。' : undefined;
+      const currentStateSummary = writeCurrentState ? sanitizeText(matched?.currentStateSummary) : undefined;
+      const hasWinner = Boolean(matched?.hasWinner && typeof matched?.winner === 'string' && matched.winner.trim());
+      const winner = hasWinner ? sanitizeText(matched?.winner) ?? '不适用' : '不适用';
+      return {
+        roleId: role.id,
+        characterName: role.name,
+        ...(writeArenaHistory ? { impact } : {}),
+        ...(writeCurrentState ? { currentStateSummary } : {}),
+        hasWinner,
+        winner,
+        meta: {
+          sessionId,
+          ...(messageRange ? { messageRange } : {}),
+          generatedAt: Date.now(),
+        },
+      };
+    });
+
+    return json({
+      drafts: updateList,
+      meta: {
+        usedSummary: Boolean(summary && String(summary).trim()),
+        ...(messageRange ? { messageRange } : {}),
       },
-      providerOptions
-    );
-
-    return streamResult.response;
+    });
   } catch (error) {
-    log.error('魔法茶会生成选项失败', { error });
+    log.error('魔法茶会生成更新草案失败', { error });
     const message = error instanceof Error ? error.message : '未知错误';
     return json({ error: '生成失败', message }, { status: 500 });
   }

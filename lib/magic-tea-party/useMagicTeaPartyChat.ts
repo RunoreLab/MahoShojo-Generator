@@ -87,6 +87,29 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     return { ok: true };
   }, [userProviderConfig]);
 
+  const buildRequestSettings = useCallback(
+    (session: MagicTeaPartySession) => ({
+      ...session.settings,
+      readArenaHistory:
+        typeof session.settings.readArenaHistory === 'boolean' ? session.settings.readArenaHistory : preferences.readArenaHistory,
+      readArenaHistoryLimit:
+        typeof session.settings.readArenaHistoryLimit === 'number'
+          ? session.settings.readArenaHistoryLimit
+          : preferences.readArenaHistoryLimit,
+      isArenaHistoryUnlimited:
+        typeof session.settings.isArenaHistoryUnlimited === 'boolean'
+          ? session.settings.isArenaHistoryUnlimited
+          : preferences.isArenaHistoryUnlimited,
+      readCurrentState:
+        typeof session.settings.readCurrentState === 'boolean' ? session.settings.readCurrentState : preferences.readCurrentState,
+      writeArenaHistory:
+        typeof session.settings.writeArenaHistory === 'boolean' ? session.settings.writeArenaHistory : preferences.writeArenaHistory,
+      writeCurrentState:
+        typeof session.settings.writeCurrentState === 'boolean' ? session.settings.writeCurrentState : preferences.writeCurrentState,
+    }),
+    [preferences]
+  );
+
   const runGenerateStream = useCallback(
     async (params: {
       session: MagicTeaPartySession;
@@ -135,13 +158,14 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           signal: controller.signal,
           body: JSON.stringify({
             sessionId: params.session.id,
+            summary: params.session.summary,
             messages: params.historyForRequest,
             roles: params.session.roles ?? [],
             scenario: params.session.scenario ?? null,
             auxScenarios: params.session.auxScenarios ?? [],
             playerRoleId: params.session.playerRoleId ?? null,
             settings: {
-              ...params.session.settings,
+              ...buildRequestSettings(params.session),
               providerId: userProviderConfig?.providerId,
               modelId: userProviderConfig?.modelId,
               userDisplayName: params.session.settings.userDisplayName,
@@ -289,7 +313,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         setIsGenerating(false);
       }
     },
-    [persistSession, router, setMessages, userProviderConfig]
+    [buildRequestSettings, persistSession, router, setMessages, userProviderConfig]
   );
 
   const sendMessage = useCallback(
@@ -512,13 +536,14 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         signal: controller.signal,
         body: JSON.stringify({
           sessionId: activeSession.id,
+          summary: activeSession.summary,
           messages: historyForRequest,
           roles: activeSession.roles ?? [],
           scenario: activeSession.scenario ?? null,
           auxScenarios: activeSession.auxScenarios ?? [],
           playerRoleId: activeSession.playerRoleId ?? null,
           settings: {
-            ...activeSession.settings,
+            ...buildRequestSettings(activeSession),
             providerId: userProviderConfig?.providerId,
             modelId: userProviderConfig?.modelId,
             choiceCount: activeSession.settings.choiceCount ?? preferences.choiceCount,
@@ -622,6 +647,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     }
   }, [
     activeSession,
+    buildRequestSettings,
     ensureProviderReady,
     isGenerating,
     messages,
