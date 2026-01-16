@@ -98,16 +98,28 @@ export function StoryOptionsPanel({
           <label htmlFor="user-guidance" className="input-label">
             故事方向引导 (可选)
           </label>
-          <input
-            id="user-guidance"
-            type="text"
-            className="input-field"
-            placeholder="输入关键词或一句话 (最多200字)"
-            maxLength={200}
-            disabled={isGenerating}
-            value={userGuidance}
-            onChange={(e) => onUserGuidanceChange(e.target.value)}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              id="user-guidance"
+              type="text"
+              className="input-field flex-1 min-w-[12rem]"
+              placeholder="输入关键词或一句话 (最多200字)"
+              maxLength={200}
+              disabled={isGenerating}
+              value={userGuidance}
+              onChange={(e) => onUserGuidanceChange(e.target.value)}
+            />
+            {userGuidance.trim() ? (
+              <button
+                type="button"
+                className="px-3 py-2 text-xs font-semibold rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                onClick={() => onUserGuidanceChange('')}
+                disabled={isGenerating}
+              >
+                清空
+              </button>
+            ) : null}
+          </div>
           <p className="text-xs text-gray-500 mt-1">例如：“在雨中相遇”、“保卫要地”、“猫咖聚会”等。</p>
         </div>
       )}
@@ -154,4 +166,3 @@ export function StoryOptionsPanel({
     </>
   );
 }
-

@@ -451,6 +451,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
     const isPlaceholder = 'id' in combatant;
     const key = getCombatantKey(combatant);
     const data = isPlaceholder ? null : (combatant as CombatantData);
+    const guidanceValue = data?.characterGuidance ?? '';
     const displayName = isPlaceholder ? combatant.filename : getCombatantDisplayName(data?.data);
     const entityKey = !isPlaceholder && data ? buildEntityKeyForCombatant(data) : null;
     const meta = entityKey ? metaByEntityKey.get(entityKey) : null;
@@ -667,19 +668,31 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
               maxLength={100}
               disabled={isGenerating}
               placeholder="例如：谨慎试探、优先保护同伴、尽量不杀、被恐惧支配、隐藏身份等"
-              value={data?.characterGuidance ?? ''}
+              value={guidanceValue}
               onChange={(e) => updateCombatantCharacterGuidance((combatant as CombatantData).filename, e.target.value)}
             />
-            <div className="mt-1 flex justify-between items-center text-xs text-gray-500">
-              <span>{Array.from((data?.characterGuidance ?? '')).length}/100</span>
-              <button
-                type="button"
-                className="px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                onClick={() => setGuidanceOpenFor(null)}
-                disabled={isGenerating}
-              >
-                收起
-              </button>
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+              <span>{Array.from(guidanceValue).length}/100</span>
+              <div className="flex items-center gap-2">
+                {guidanceValue.trim() ? (
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50"
+                    onClick={() => updateCombatantCharacterGuidance((combatant as CombatantData).filename, '')}
+                    disabled={isGenerating}
+                  >
+                    清空
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+                  onClick={() => setGuidanceOpenFor(null)}
+                  disabled={isGenerating}
+                >
+                  收起
+                </button>
+              </div>
             </div>
           </div>
         )}
