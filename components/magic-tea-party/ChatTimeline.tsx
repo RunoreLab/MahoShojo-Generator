@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import { MagicTeaPartyChatMessage } from '@/components/magic-tea-party/ChatMessage';
 import { useChatAutoScroll } from '@/components/magic-tea-party/useChatAutoScroll';
@@ -59,12 +59,24 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
   const lastMessage = messages[messages.length - 1];
   const lastMessageLength = typeof lastMessage?.content === 'string' ? lastMessage.content.length : 0;
   const autoScrollKey = `${activeSession?.id ?? 'no-session'}:${messages.length}:${lastMessage?.id ?? ''}:${lastMessage?.status ?? ''}:${lastMessageLength}`;
-  const { bottomRef } = useChatAutoScroll({
+  const { containerRef, bottomRef, isAtBottom, scrollToBottom } = useChatAutoScroll({
     enabled: true,
     autoScrollKey,
     anchorMessageId,
     behavior: isGenerating ? 'auto' : 'smooth',
+    mode: 'container',
   });
+
+  const lastSeenCountRef = useRef(0);
+  useEffect(() => {
+    if (isAtBottom) {
+      lastSeenCountRef.current = messages.length;
+    }
+  }, [isAtBottom, messages.length]);
+
+  const newCount = Math.max(0, messages.length - lastSeenCountRef.current);
+  const showJump = !isAtBottom && messages.length > 0;
+  const jumpLabel = newCount > 0 ? `回到最新 · ${newCount}条新消息` : '回到最新';
 
   return (
     <>
@@ -89,34 +101,50 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
         ) : null}
       </div>
 
-      <div className="space-y-3">
-        {messages.length === 0 ? (
-          <div className="rounded-lg bg-pink-50 px-4 py-3 text-sm text-pink-800">
-            还没有对话。输入你的行动、对白或叙事，例如：推开咖啡店的门……
-          </div>
-        ) : (
-          messages.map((message) => (
-            <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                id={`magic-tea-party-message-${message.id}`}
-                className={`max-w-[720px] w-full sm:w-auto ${anchorMessageId === message.id ? 'rounded-xl ring-2 ring-pink-200 shadow-sm' : ''}`}
-              >
-                <MagicTeaPartyChatMessage
-                  message={message}
-                  session={activeSession}
-                  preferences={preferences}
-                  isGenerating={isGenerating}
-                  tachieAssets={tachieAssets}
-                  onSelectChoice={onSelectChoice}
-                  onUseAsReference={onUseAsReference}
-                  onRegenerate={onRegenerate}
-                  showRegenerate={canRegenerateMessage(message)}
-                />
+      <div className="relative">
+        <div
+          ref={containerRef}
+          className="h-[60vh] max-h-[520px] min-h-[240px] overflow-y-auto pr-2"
+        >
+          <div className="space-y-3 pb-1">
+            {messages.length === 0 ? (
+              <div className="rounded-lg bg-pink-50 px-4 py-3 text-sm text-pink-800">
+                还没有对话。输入你的行动、对白或叙事，例如：推开咖啡店的门……
               </div>
-            </div>
-          ))
-        )}
-        <div ref={bottomRef} aria-hidden="true" />
+            ) : (
+              messages.map((message) => (
+                <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    id={`magic-tea-party-message-${message.id}`}
+                    className={`max-w-[720px] w-full sm:w-auto ${anchorMessageId === message.id ? 'rounded-xl ring-2 ring-pink-200 shadow-sm' : ''}`}
+                  >
+                    <MagicTeaPartyChatMessage
+                      message={message}
+                      session={activeSession}
+                      preferences={preferences}
+                      isGenerating={isGenerating}
+                      tachieAssets={tachieAssets}
+                      onSelectChoice={onSelectChoice}
+                      onUseAsReference={onUseAsReference}
+                      onRegenerate={onRegenerate}
+                      showRegenerate={canRegenerateMessage(message)}
+                    />
+                  </div>
+                </div>
+              ))
+            )}
+            <div ref={bottomRef} aria-hidden="true" />
+          </div>
+        </div>
+        {showJump ? (
+          <button
+            type="button"
+            className="absolute bottom-3 right-2 rounded-full bg-pink-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-pink-700"
+            onClick={() => scrollToBottom('smooth')}
+          >
+            {jumpLabel}
+          </button>
+        ) : null}
       </div>
     </>
   );

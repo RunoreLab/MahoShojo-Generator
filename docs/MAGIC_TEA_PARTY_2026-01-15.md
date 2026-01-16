@@ -133,20 +133,21 @@
 
 ---
 
-## 4. 页面结构与模块拆分（建议）
+## 4. 页面结构与模块拆分（当前实现对齐）
 
 新增页面：`pages/magic-tea-party.tsx`
 
 组件建议：
 
-- `components/magic-tea-party/MagicTeaPartyHero.tsx`：顶部 banner 与功能说明
-- `components/magic-tea-party/SessionSetupPanel.tsx`：角色/情景选择、扮演模式、模型配置、输出模式、Token 预算提示
-- `components/magic-tea-party/PresetScenarioPanel.tsx`：预设情景选择（经典/羁绊/日常）
-- `components/magic-tea-party/SessionSidebar.tsx`：会话列表、搜索、（后续）导入/导出
-- `components/magic-tea-party/ChatTimeline.tsx`：聊天流展示（支持角色颜色/头像）
-- `components/magic-tea-party/ChatComposer.tsx`：输入区 + 选项按钮
-- `components/magic-tea-party/ChoicePanel.tsx`：AI 选项卡片
-- `components/magic-tea-party/TachiePanel.tsx`：立绘生成与管理
+- `components/magic-tea-party/Hero.tsx`：顶部标题与全局提示/错误
+- `components/magic-tea-party/SessionSidebar.tsx`：会话列表、预设情景选择、模型与偏好设置、导入/导出
+  - 子组件：`ImportExportPanel.tsx`
+- `components/magic-tea-party/SessionSetupPanel.tsx`：角色/情景选择、扮演方式、标题编辑
+- `components/magic-tea-party/SummaryPanel.tsx`：摘要生成与管理
+- `components/magic-tea-party/ChatTimeline.tsx`：聊天流展示（含自动滚动、回到最新、生成中/停止生成头部）
+- `components/magic-tea-party/ChatComposer.tsx`：输入区 + 继续生成/选项/发送按钮
+- `components/magic-tea-party/TachiePanel.tsx`：立绘/插画生成与管理
+- `components/magic-tea-party/CardModals.tsx`：角色/情景选择弹窗
 
 逻辑拆分：
 
@@ -155,27 +156,48 @@
 - `lib/magic-tea-party/storage.ts`：IndexedDB 封装
 - `lib/magic-tea-party/types.ts`：核心类型
 - `lib/magic-tea-party/presets.ts`：预设情景（classic/kizuna/daily）与默认世界书/设定
+- `lib/magic-tea-party/preferences.ts`：偏好读写
+- `lib/magic-tea-party/jsonl.ts`：JSONL 解析与流式增量解析
+- `lib/magic-tea-party/title.ts`：自动标题推断
+- `lib/magic-tea-party/transfer.ts`：导入/导出与 SillyTavern 互转
 
 ---
 
 ## 5. 数据模型（建议草案）
 
 ```ts
+export type MagicTeaPartyCardSource = 'local' | 'cloud' | 'public' | 'tavern' | 'random' | 'preset';
+
 export type MagicTeaPartyRole = {
   id: string;
   name: string;
-  template: 'magical-girl' | 'canshou' | 'general';
+  template?: 'magical-girl' | 'canshou' | 'general';
+  templateId?: string;
+  dataCardId?: string;
+  source: MagicTeaPartyCardSource;
+  signature?: string;
   card: Record<string, unknown>;
   asPlayer?: boolean;
   avatarUrl?: string;
+  origin?: { fileName?: string; importedAt?: number; url?: string };
 };
 
 export type MagicTeaPartyScenario = {
   id: string;
   title: string;
-  presetId?: string; // 情景（例如竞技场复刻）等内置预设
+  presetId?: string;
+  templateId?: string;
+  dataCardId?: string;
+  source: MagicTeaPartyCardSource;
+  signature?: string;
   card: Record<string, unknown>;
+  origin?: { fileName?: string; importedAt?: number; url?: string };
 };
+
+export type MagicTeaPartyOutputSegment =
+  | { type: 'narration'; text: string }
+  | { type: 'dialogue'; speakerId: string; speakerName?: string; text: string }
+  | { type: 'choices'; items: { id: string; text: string }[] };
 
 export type MagicTeaPartyMessage = {
   id: string;
@@ -183,9 +205,14 @@ export type MagicTeaPartyMessage = {
   role: 'user' | 'assistant' | 'system' | 'narrator' | 'character';
   speakerId?: string; // 角色 id
   content: string;
+  segments?: MagicTeaPartyOutputSegment[];
+  status?: 'streaming' | 'done' | 'error' | 'blocked';
   createdAt: number;
   choices?: { id: string; text: string }[];
   tachieId?: string;
+  safety?: { status: 'ok' | 'blocked' | 'masked' | 'truncated'; blockedBy?: 'input' | 'output' | 'server' };
+  error?: { code: string; message: string };
+  meta?: Record<string, unknown>;
 };
 
 export type MagicTeaPartySession = {
@@ -205,6 +232,7 @@ export type MagicTeaPartySession = {
   auxScenarios?: MagicTeaPartyScenario[];
   playerRoleId?: string | null; // null = {{user}}
   summary?: string; // 长对话压缩用
+  summaryMeta?: { updatedAt: number; fromMessageId?: string; toMessageId?: string; tokenCount?: number };
   settings: {
     providerId: string;
     modelId: string;
@@ -215,6 +243,8 @@ export type MagicTeaPartySession = {
   };
 };
 ```
+
+> 完整字段以 `lib/magic-tea-party/types.ts` 为准；叙事/对白/选项均通过 `segments` 表达。
 
 IndexedDB 建议分表：
 - `sessions`（`id`, `updatedAt` 索引）
@@ -245,9 +275,9 @@ IndexedDB 建议分表：
 - 输出后：使用 `lib/shield-word-filter` 遮罩可疑内容；若出现敏感词 **立即截断本轮输出并停止流**（详见 13.17）
 - 若触发敏感词：
   - **输入阶段**：不发送请求；保留草稿与对话历史
-  - **输出阶段**：不跳转页面；仅截断当轮输出并标记 `blocked`，允许“重新生成/修改后再生成”
+  - **输出阶段**：不跳转页面；仅截断当轮输出并标记 `blocked`，允许“重新生成/修改后再生成”，并写入安全截断内容
   - 绝不在客户端落库违规原文；仅存安全截断内容与安全元信息
- - 自备 Key：API Key 仅存储于本地浏览器；请求时会随 HTTPS 发送至 Edge 以转发调用上游，但不得落库/不得写入日志/不得回传到埋点（实现时严禁打印 request body）
+- 自备 Key：API Key 仅存储于本地浏览器；请求时会随 HTTPS 发送至 Edge 以转发调用上游，但不得落库/不得写入日志/不得回传到埋点（实现时严禁打印 request body）
 
 ### 6.3 约束“角色卡注入”
 
@@ -321,8 +351,10 @@ IndexedDB 建议分表：
 
 ## 8. 性能与成本控制
 
-- 上下文窗口采用 **Token 预算 + 消息条数** 双阈值（可配置）
-- 自动摘要：当历史过长时生成“会话摘要”写入 `session.summary`，并保留最近消息窗口
+> 说明：以下阈值为设计目标，当前实现仅提供手动摘要与设置字段，尚未接入自动触发与 Token 预算统计。
+
+- 上下文窗口采用 **Token 预算 + 消息条数** 双阈值（规划中）
+- 自动摘要：当历史过长时生成“会话摘要”写入 `session.summary`，并保留最近消息窗口（规划中）
 - 选项生成默认为“手动触发”，减少额外调用
 - 立绘生成仅在用户明确点击后触发
 
@@ -354,7 +386,7 @@ IndexedDB 建议分表：
 ## 9. 与现有模块对齐
 
 - 首页入口：`config/features.ts` 新增 `magic-tea-party` 卡片，放在「辅助功能」
-- 图标资源：新增 `public/magic-tea-party.svg` / `public/magic-tea-party.webp`
+- 图标资源：已提供 `public/magic-tea-party-white.svg`；彩色 SVG/WebP 预留
 - 角色/情景卡读取：复用 `character-manager` 的解析逻辑
 - 立绘：复用 `TachieGenerator` 与 `lib/tachie/*`
 - 安全：复用 `lib/sensitive-word-filter`、`lib/shield-word-filter`、`lib/arrested-backup`
@@ -388,10 +420,10 @@ IndexedDB 建议分表：
 
 1. **输出协议**：默认 JSONL；允许用户选择“Markdown 故事模式”，输出一整段更自由的叙事（可能无法解析选项/角色分段）。
 2. **数据来源**：与竞技场一致，支持公开/私有数据卡，支持模态框多选/移除角色与情景，支持导入卡组；同时保留本地导入。
-3. **MVP 范围**：会话导入/导出不列入首版，但格式已定稿（见 13.14）。
-4. **上下文窗口与摘要阈值**：采用 Token 预算 + 消息条数双阈值（见 8.1）。
-5. **分支编辑策略**：默认创建新会话分支（fork），不覆盖原会话（见 13.13）。
-6. **会话导入/导出格式**：原生 JSON/ZIP + SillyTavern JSONL 互转（见 13.14）。
+3. **会话导入/导出**：已实现（JSON 单会话/归档 + SillyTavern JSONL 互转，见 13.14）。
+4. **上下文窗口与摘要阈值**：当前为规划，尚未接入自动触发与预算计算（见 8.1）。
+5. **分支编辑策略**：规划中，当前实现为原会话内“重新生成/继续生成”（见 13.13）。
+6. **会话导入/导出格式**：JSON 单会话/归档 + SillyTavern JSONL 互转（见 13.14）。
 7. **安全策略**：本地敏感词检测 + `enforceTextSafety`（服务器 AI 安全检查）+ 输出遮罩 + arrested 机制。
 8. **立绘策略**：缓存键（角色 + 片段 + 风格 + 关键参数），TTL + LRU 失效，允许手动清理（见 13.15）。
 9. **最大角色/情景上限**：当前不设硬上限，仅提供 Token 预算提示与软提醒。
@@ -412,7 +444,7 @@ IndexedDB 建议分表：
 ### 13.1 与现有模块对齐（补充）
 
 - **AI 供应商选择**：复用 `AiProviderSelector`，但需提供“禁用 system”的模式，并使用独立的 localStorage key（避免与竞技场配置互相覆盖）。
-- **Token 预算提示**：复用 `TokenIndicator`，用于提示「角色卡 + 情景卡 + 历史记录」的总上下文长度。
+- **Token 预算提示**：规划复用 `TokenIndicator`，用于提示「角色卡 + 情景卡 + 历史记录」的总上下文长度（当前未接入）。
 - **流式读取**：复用 `readTextStreamFromResponse` + `STREAM_READ_*` 超时策略。
 - **内容安全**：复用 `getSensitiveWordRedirectTarget` / `quickCheck` / `applyShieldWords` / `arrested-backup`，并在服务端补充 `enforceTextSafety`。
 - **ID 生成**：客户端使用 `randomUUID`；与其他模块保持一致。
@@ -800,12 +832,15 @@ export type MagicTeaPartyPreset = {
 - `assets/tachie/<assetId>.webp`
 - `assets/tachie/index.json`（tachie 元数据表）
 
+**资产说明**
+- 当前仅导出 `tachieAssets` 元数据与 URL/引用，不包含二进制图片；`blobRef` 依赖本地 IndexedDB。
+
 **SillyTavern 互转（兼容策略）**
 - **导入**：支持 `.jsonl` 会话日志  
   - 每行对象至少读取 `mes`（内容）、`is_user`（是否用户）、`name`（说话者）与 `send_date`（时间）  
   - 其余字段存入 `message.meta`
 - **导出**：生成 `.jsonl`，以 `name/is_user/mes/send_date` 为主  
-  - 将 `speakerId/choices/segments` 写入 `extra.magic_tea_party` 以便回导
+  - 将 `speakerId/choices/segments/revisionOf/tachieId` 写入 `extra.magic_tea_party` 以便回导
 - **校验提醒**：SillyTavern 格式可能随版本变动，**实现时需用最新样例验证字段映射**（默认保持容错解析）
 
 ### 13.15 立绘缓存策略（定稿）
