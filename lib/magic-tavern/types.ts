@@ -72,7 +72,8 @@ export type MagicTavernMessage = {
 export type MagicTavernTachieAsset = {
   id: string;
   sessionId: string;
-  roleId: string;
+  kind?: 'tachie' | 'illustration';
+  roleId?: string;
   cacheKey: string;
   fragmentHash: string;
   styleId: string;
@@ -80,6 +81,11 @@ export type MagicTavernTachieAsset = {
   modelId?: string;
   width?: number;
   height?: number;
+  prompt?: string;
+  imageUrl?: string;
+  seed?: number;
+  auditStatus?: number;
+  generateUuid?: string;
   createdAt: number;
   lastUsedAt: number;
   expireAt?: number;

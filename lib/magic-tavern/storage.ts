@@ -183,3 +183,65 @@ export const putMagicTavernTachieAsset = async (asset: MagicTavernTachieAsset): 
     tx.objectStore('tachieAssets').put(asset);
   });
 };
+
+export const listMagicTavernTachieAssets = async (sessionId: string): Promise<MagicTavernTachieAsset[]> => {
+  const db = await openMagicTavernDb();
+  return await new Promise<MagicTavernTachieAsset[]>((resolve, reject) => {
+    const tx = db.transaction(['tachieAssets'], 'readonly');
+    tx.onabort = () => reject(tx.error ?? new Error('读取立绘缓存失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('读取立绘缓存失败'));
+
+    const items: MagicTavernTachieAsset[] = [];
+    const index = tx.objectStore('tachieAssets').index('by_sessionId');
+    const request = index.openCursor(IDBKeyRange.only(sessionId), 'next');
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(items.sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)));
+        return;
+      }
+      items.push(cursor.value as MagicTavernTachieAsset);
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error ?? new Error('读取立绘缓存失败'));
+  });
+};
+
+export const deleteMagicTavernTachieAsset = async (assetId: string): Promise<void> => {
+  const db = await openMagicTavernDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(['tachieAssets'], 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
+    tx.objectStore('tachieAssets').delete(assetId);
+  });
+};
+
+export const deleteMagicTavernTachieAssets = async (sessionId: string): Promise<void> => {
+  const db = await openMagicTavernDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(['tachieAssets'], 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
+
+    const store = tx.objectStore('tachieAssets');
+    const index = store.index('by_sessionId');
+    const request = index.openCursor(IDBKeyRange.only(sessionId));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      cursor.delete();
+      cursor.continue();
+    };
+    request.onerror = () => {
+      try {
+        tx.abort();
+      } catch {
+        // ignore
+      }
+    };
+  });
+};

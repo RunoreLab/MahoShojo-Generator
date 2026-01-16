@@ -8,6 +8,7 @@ import BattleDataModal from '@/components/BattleDataModal';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import Footer from '@/components/Footer';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { MagicTavernTachiePanel } from '@/components/magic-tavern/TachiePanel';
 
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
@@ -233,11 +234,16 @@ export default function MagicTavernPage() {
   const [showScenarioModal, setShowScenarioModal] = useState(false);
 
   const [draft, setDraft] = useState('');
+  const [tachieReferenceText, setTachieReferenceText] = useState('');
 
   useEffect(() => {
     const prefs = readMagicTavernPreferences();
     setPreferences(prefs);
   }, []);
+
+  useEffect(() => {
+    setTachieReferenceText('');
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (!user?.username) return;
@@ -341,6 +347,46 @@ export default function MagicTavernPage() {
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (!activeSession) return;
+    setTachieReferenceText((prev) => {
+      if (prev.trim()) return prev;
+      const toPlainText = (message: MagicTavernMessage): string => {
+        const segments = Array.isArray(message.segments) ? message.segments : null;
+        if (segments && segments.length > 0) {
+          const lines: string[] = [];
+          for (const seg of segments) {
+            if (!seg) continue;
+            if (seg.type === 'narration') {
+              const text = typeof (seg as any).text === 'string' ? String((seg as any).text).trim() : '';
+              if (text) lines.push(text);
+              continue;
+            }
+            if (seg.type === 'dialogue') {
+              const speaker =
+                typeof (seg as any).speakerName === 'string' && String((seg as any).speakerName).trim()
+                  ? String((seg as any).speakerName).trim()
+                  : typeof (seg as any).speakerId === 'string'
+                    ? (activeSession.roles ?? []).find((r) => r.id === String((seg as any).speakerId))?.name || String((seg as any).speakerId)
+                    : '';
+              const text = typeof (seg as any).text === 'string' ? String((seg as any).text).trim() : '';
+              if (text) lines.push(speaker ? `${speaker}: ${text}` : text);
+              continue;
+            }
+          }
+          return lines.join('\n').trim();
+        }
+        return (message.content ?? '').trim();
+      };
+
+      const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && (m.content || '').trim() && m.status !== 'error');
+      if (lastAssistant) return toPlainText(lastAssistant).slice(0, 2000);
+      const lastUser = [...messages].reverse().find((m) => m.role === 'user' && (m.content || '').trim());
+      if (lastUser) return toPlainText(lastUser).slice(0, 2000);
+      return '';
+    });
+  }, [activeSession, messages]);
 
   useEffect(() => {
     let canceled = false;
@@ -1419,6 +1465,55 @@ export default function MagicTavernPage() {
     return null;
   };
 
+  const renderAssistantActions = (message: MagicTavernMessage) => {
+    if (message.role !== 'assistant') return null;
+    if (message.status === 'streaming') return null;
+
+    const toPlainText = (): string => {
+      const segments = Array.isArray(message.segments) ? message.segments : null;
+      if (segments && segments.length > 0) {
+        const lines: string[] = [];
+        for (const seg of segments) {
+          if (!seg) continue;
+          if (seg.type === 'narration') {
+            const text = typeof (seg as any).text === 'string' ? String((seg as any).text).trim() : '';
+            if (text) lines.push(text);
+            continue;
+          }
+          if (seg.type === 'dialogue') {
+            const speaker =
+              typeof (seg as any).speakerName === 'string' && String((seg as any).speakerName).trim()
+                ? String((seg as any).speakerName).trim()
+                : typeof (seg as any).speakerId === 'string'
+                  ? (activeSession?.roles ?? []).find((r) => r.id === String((seg as any).speakerId))?.name || String((seg as any).speakerId)
+                  : '';
+            const text = typeof (seg as any).text === 'string' ? String((seg as any).text).trim() : '';
+            if (text) lines.push(speaker ? `${speaker}: ${text}` : text);
+            continue;
+          }
+        }
+        return lines.join('\n').trim();
+      }
+      return (message.content ?? '').trim();
+    };
+
+    const plain = toPlainText();
+    if (!plain) return null;
+
+    return (
+      <div className="mt-2 flex items-center justify-end gap-2 text-xs text-gray-500">
+        <button
+          type="button"
+          className="underline underline-offset-2 hover:text-gray-700"
+          onClick={() => setTachieReferenceText(plain.slice(0, 2000))}
+          title="将该条 AI 输出作为插画/立绘的参考片段"
+        >
+          用作插画参考
+        </button>
+      </div>
+    );
+  };
+
   const renderMessage = (message: MagicTavernMessage) => {
     const isUser = message.role === 'user';
     const bubbleClass = isUser ? 'bg-pink-600 text-white' : 'bg-white border border-pink-100 text-gray-800';
@@ -1492,6 +1587,7 @@ export default function MagicTavernPage() {
               return null;
             })}
             {renderAssistantFooter(message)}
+            {renderAssistantActions(message)}
         </div>
       );
     }
@@ -1503,16 +1599,18 @@ export default function MagicTavernPage() {
     if (message.role === 'assistant' && preferMarkdown) {
       return withHeader(
         <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
-            <MarkdownBlock content={message.content || ''} variant="light" mode="article" />
-            {renderAssistantFooter(message)}
+          <MarkdownBlock content={message.content || ''} variant="light" mode="article" />
+          {renderAssistantFooter(message)}
+          {renderAssistantActions(message)}
         </div>
       );
     }
 
     return withHeader(
       <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
-          <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
-          {renderAssistantFooter(message)}
+        <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+        {renderAssistantFooter(message)}
+        {renderAssistantActions(message)}
       </div>
     );
   };
@@ -2024,9 +2122,18 @@ export default function MagicTavernPage() {
                       </div>
                     </div>
                   </div>
-                </div>
+	                </div>
 
-                <Footer className="footer mt-4" />
+                  {activeSession ? (
+                    <MagicTavernTachiePanel
+                      session={activeSession}
+                      messages={messages}
+                      referenceText={tachieReferenceText}
+                      onReferenceTextChange={setTachieReferenceText}
+                    />
+                  ) : null}
+
+	                <Footer className="footer mt-4" />
               </main>
             </div>
           </div>
