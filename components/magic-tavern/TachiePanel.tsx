@@ -18,6 +18,43 @@ type MagicTavernImageKind = NonNullable<MagicTavernTachieAsset['kind']>;
 const MAX_PROMPT_CHARS = 10_000;
 const MAX_REFERENCE_CHARS = 2_000;
 const MAX_ASSETS_PER_SESSION = 24;
+const STORAGE_WORKFLOW_KEY = 'magic-tavern:tachie-workflow.v1';
+
+type MagicTavernWorkflowSettings = {
+  workflowUuid: string;
+  templateUuid: string;
+  promptNodeId: string;
+  negativePrompt: string;
+  negativePromptNodeId: string;
+};
+
+const DEFAULT_WORKFLOW_SETTINGS: Record<MagicTavernImageKind, MagicTavernWorkflowSettings> = {
+  tachie: {
+    workflowUuid: '34fed183375249dfbe293fa99d753cc5',
+    templateUuid: '4df2efa0f18d46dc9758803e478eb51c',
+    promptNodeId: '105',
+    negativePrompt: '',
+    negativePromptNodeId: '',
+  },
+  illustration: {
+    workflowUuid: '34fed183375249dfbe293fa99d753cc5',
+    templateUuid: '4df2efa0f18d46dc9758803e478eb51c',
+    promptNodeId: '105',
+    negativePrompt: '',
+    negativePromptNodeId: '',
+  },
+};
+
+const isLibLibUuid = (value: string): boolean => /^[a-f0-9]{32}$/i.test(value.trim());
+const parseNodeId = (value: string): number | undefined => {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const num = Number(trimmed);
+  if (!Number.isFinite(num)) return undefined;
+  const id = Math.floor(num);
+  if (id < 1 || id > 9999) return undefined;
+  return id;
+};
 
 const bufferToHex = (buffer: ArrayBuffer): string => {
   const bytes = new Uint8Array(buffer);
@@ -146,11 +183,17 @@ export function MagicTavernTachiePanel(props: {
   messages: MagicTavernMessage[];
   referenceText?: string;
   onReferenceTextChange?: (value: string) => void;
+  anchorMessageId?: string | null;
+  onAnchorMessageIdChange?: (value: string | null) => void;
+  onAssetsUpdated?: (assets: MagicTavernTachieAsset[]) => void;
 }) {
   const roleNameLookup = useMemo(() => {
     const map = new Map((props.session.roles ?? []).map((role) => [role.id, role.name]));
     return (roleId: string) => map.get(roleId) || '';
   }, [props.session.roles]);
+
+  const sessionId = props.session.id;
+  const onAssetsUpdated = props.onAssetsUpdated;
 
   const [assets, setAssets] = useState<MagicTavernTachieAsset[]>([]);
   const [assetError, setAssetError] = useState<string | null>(null);
@@ -160,9 +203,14 @@ export function MagicTavernTachiePanel(props: {
   const [mainRoleId, setMainRoleId] = useState<string>('');
   const [includedRoleIds, setIncludedRoleIds] = useState<string[]>([]);
   const [referenceTextInternal, setReferenceTextInternal] = useState<string>('');
+  const [anchorMessageIdInternal, setAnchorMessageIdInternal] = useState<string | null>(null);
 
   const [prompt, setPrompt] = useState<string>('');
   const [promptDirty, setPromptDirty] = useState(false);
+  const [showWorkflowSettings, setShowWorkflowSettings] = useState(false);
+  const [workflowSettingsByKind, setWorkflowSettingsByKind] = useState<Record<MagicTavernImageKind, MagicTavernWorkflowSettings>>(
+    () => DEFAULT_WORKFLOW_SETTINGS
+  );
 
   const referenceText = typeof props.referenceText === 'string' ? props.referenceText : referenceTextInternal;
   const setReferenceText = (value: string) => {
@@ -172,6 +220,51 @@ export function MagicTavernTachiePanel(props: {
     }
     setReferenceTextInternal(value);
   };
+  const anchorMessageId = typeof props.anchorMessageId === 'string' ? props.anchorMessageId : props.anchorMessageId === null ? null : anchorMessageIdInternal;
+  const setAnchorMessageId = (value: string | null) => {
+    if (typeof props.onAnchorMessageIdChange === 'function') {
+      props.onAnchorMessageIdChange(value);
+      return;
+    }
+    setAnchorMessageIdInternal(value);
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(STORAGE_WORKFLOW_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      setWorkflowSettingsByKind((prev) => {
+        const next: Record<MagicTavernImageKind, MagicTavernWorkflowSettings> = { ...prev };
+        for (const key of ['tachie', 'illustration'] as const) {
+          const incoming = (parsed as any)[key];
+          if (!incoming || typeof incoming !== 'object') continue;
+          next[key] = {
+            workflowUuid: typeof incoming.workflowUuid === 'string' ? incoming.workflowUuid : prev[key].workflowUuid,
+            templateUuid: typeof incoming.templateUuid === 'string' ? incoming.templateUuid : prev[key].templateUuid,
+            promptNodeId: typeof incoming.promptNodeId === 'string' ? incoming.promptNodeId : prev[key].promptNodeId,
+            negativePrompt: typeof incoming.negativePrompt === 'string' ? incoming.negativePrompt : prev[key].negativePrompt,
+            negativePromptNodeId:
+              typeof incoming.negativePromptNodeId === 'string' ? incoming.negativePromptNodeId : prev[key].negativePromptNodeId,
+          };
+        }
+        return next;
+      });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(STORAGE_WORKFLOW_KEY, JSON.stringify(workflowSettingsByKind));
+    } catch {
+      // ignore
+    }
+  }, [workflowSettingsByKind]);
 
   useEffect(() => {
     let canceled = false;
@@ -179,9 +272,10 @@ export function MagicTavernTachiePanel(props: {
     setAssets([]);
     void (async () => {
       try {
-        const next = await listMagicTavernTachieAssets(props.session.id);
+        const next = await listMagicTavernTachieAssets(sessionId);
         if (canceled) return;
         setAssets(next);
+        onAssetsUpdated?.(next);
       } catch (error) {
         if (canceled) return;
         setAssetError(error instanceof Error ? error.message : '读取立绘缓存失败');
@@ -190,7 +284,7 @@ export function MagicTavernTachiePanel(props: {
     return () => {
       canceled = true;
     };
-  }, [props.session.id]);
+  }, [onAssetsUpdated, sessionId]);
 
   useEffect(() => {
     if (typeof props.onReferenceTextChange === 'function') return;
@@ -224,6 +318,13 @@ export function MagicTavernTachiePanel(props: {
     setPrompt(suggestedPrompt);
   }, [promptDirty, suggestedPrompt]);
 
+  const activeWorkflowSettings = workflowSettingsByKind[kind];
+  const workflowUuidForRequest = isLibLibUuid(activeWorkflowSettings.workflowUuid) ? activeWorkflowSettings.workflowUuid.trim() : undefined;
+  const templateUuidForRequest = isLibLibUuid(activeWorkflowSettings.templateUuid) ? activeWorkflowSettings.templateUuid.trim() : undefined;
+  const promptNodeIdForRequest = parseNodeId(activeWorkflowSettings.promptNodeId);
+  const negativePromptForRequest = activeWorkflowSettings.negativePrompt.trim() ? activeWorkflowSettings.negativePrompt.trim() : undefined;
+  const negativePromptNodeIdForRequest = parseNodeId(activeWorkflowSettings.negativePromptNodeId);
+
   const saveAsset = async (result: { imageUrl: string; seed?: number; auditStatus?: number; generateUuid?: string }) => {
     const now = Date.now();
     const normalizedReference = (referenceText || '').trim();
@@ -237,6 +338,11 @@ export function MagicTavernTachiePanel(props: {
         includedRoleIds: kind === 'illustration' ? includedRoleIds.slice().sort() : [],
         styleId,
         fragmentHash,
+        anchorMessageId: anchorMessageId || '',
+        workflowUuid: workflowUuidForRequest || '',
+        templateUuid: templateUuidForRequest || '',
+        promptNodeId: promptNodeIdForRequest || 0,
+        negativePromptNodeId: negativePromptNodeIdForRequest || 0,
         prompt: (prompt || '').slice(0, 20_000),
       })
     );
@@ -246,6 +352,7 @@ export function MagicTavernTachiePanel(props: {
       sessionId: props.session.id,
       kind,
       ...(kind === 'tachie' && mainRoleId ? { roleId: mainRoleId } : {}),
+      ...(anchorMessageId ? { anchorMessageId } : {}),
       cacheKey,
       fragmentHash,
       styleId,
@@ -265,22 +372,27 @@ export function MagicTavernTachiePanel(props: {
       return next;
     });
 
-    const nextAll = await listMagicTavernTachieAssets(props.session.id);
+    const nextAll = await listMagicTavernTachieAssets(sessionId);
+    let finalAssets = nextAll;
     if (nextAll.length > MAX_ASSETS_PER_SESSION) {
       const over = nextAll.slice(MAX_ASSETS_PER_SESSION);
       await Promise.all(over.map((item) => deleteMagicTavernTachieAsset(item.id)));
       const trimmed = nextAll.slice(0, MAX_ASSETS_PER_SESSION);
-      setAssets(trimmed);
+      finalAssets = trimmed;
     } else {
-      setAssets(nextAll);
+      finalAssets = nextAll;
     }
+    setAssets(finalAssets);
+    onAssetsUpdated?.(finalAssets);
   };
 
   const handleDelete = async (assetId: string) => {
     setAssetError(null);
     try {
       await deleteMagicTavernTachieAsset(assetId);
-      setAssets((prev) => prev.filter((item) => item.id !== assetId));
+      const nextAll = await listMagicTavernTachieAssets(sessionId);
+      setAssets(nextAll);
+      onAssetsUpdated?.(nextAll);
     } catch (error) {
       setAssetError(error instanceof Error ? error.message : '删除失败');
     }
@@ -289,8 +401,9 @@ export function MagicTavernTachiePanel(props: {
   const handleClear = async () => {
     setAssetError(null);
     try {
-      await deleteMagicTavernTachieAssets(props.session.id);
+      await deleteMagicTavernTachieAssets(sessionId);
       setAssets([]);
+      onAssetsUpdated?.([]);
     } catch (error) {
       setAssetError(error instanceof Error ? error.message : '清理失败');
     }
@@ -298,6 +411,13 @@ export function MagicTavernTachiePanel(props: {
 
   const hasRoles = (props.session.roles ?? []).length > 0;
   const promptForGenerator = truncateText(prompt, MAX_PROMPT_CHARS);
+  const anchorMessage = anchorMessageId ? props.messages.find((message) => message.id === anchorMessageId) ?? null : null;
+  const anchorLabel = anchorMessage
+    ? `${anchorMessage.role === 'assistant' ? 'AI' : anchorMessage.role === 'user' ? '用户' : 'system'} · ${new Date(anchorMessage.createdAt).toLocaleString()} · ${truncateText(
+        getMessagePlainText(anchorMessage, roleNameLookup),
+        140
+      )}`
+    : '未绑定（生成结果不会在时间线内联展示）';
 
   return (
     <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-4">
@@ -399,6 +519,125 @@ export function MagicTavernTachiePanel(props: {
         </div>
       </div>
 
+      <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-semibold text-gray-700">工作流 / 参数化（提升稳定性）</div>
+          <button
+            type="button"
+            className="text-xs text-pink-700 hover:underline"
+            onClick={() => setShowWorkflowSettings((prev) => !prev)}
+          >
+            {showWorkflowSettings ? '收起' : '展开'}
+          </button>
+        </div>
+        <div className="mt-1 text-[11px] text-gray-500">
+          支持为「立绘/插画」分别指定 LibLib ComfyUI 的 <span className="font-semibold">workflowUuid/templateUuid</span> 与 prompt 节点 ID。
+          不填写或填写无效时会自动回退到默认工作流。
+        </div>
+
+        {showWorkflowSettings ? (
+          <div className="mt-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-semibold text-gray-700">当前模式：{kind === 'tachie' ? '角色立绘' : '剧情插画'}</div>
+              <button
+                type="button"
+                className="text-xs text-gray-600 hover:underline"
+                onClick={() =>
+                  setWorkflowSettingsByKind((prev) => ({
+                    ...prev,
+                    [kind]: { ...DEFAULT_WORKFLOW_SETTINGS[kind] },
+                  }))
+                }
+              >
+                恢复默认
+              </button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-1">
+                <label className="text-xs font-semibold text-gray-600">workflowUuid</label>
+                <input
+                  className="input-field"
+                  value={activeWorkflowSettings.workflowUuid}
+                  onChange={(e) =>
+                    setWorkflowSettingsByKind((prev) => ({
+                      ...prev,
+                      [kind]: { ...prev[kind], workflowUuid: e.target.value },
+                    }))
+                  }
+                  placeholder="32 位 hex，例如 34fed183..."
+                />
+              </div>
+              <div className="grid gap-1">
+                <label className="text-xs font-semibold text-gray-600">templateUuid</label>
+                <input
+                  className="input-field"
+                  value={activeWorkflowSettings.templateUuid}
+                  onChange={(e) =>
+                    setWorkflowSettingsByKind((prev) => ({
+                      ...prev,
+                      [kind]: { ...prev[kind], templateUuid: e.target.value },
+                    }))
+                  }
+                  placeholder="32 位 hex，例如 4df2efa0..."
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-1">
+                <label className="text-xs font-semibold text-gray-600">正向 Prompt 节点 ID</label>
+                <input
+                  className="input-field"
+                  value={activeWorkflowSettings.promptNodeId}
+                  onChange={(e) =>
+                    setWorkflowSettingsByKind((prev) => ({
+                      ...prev,
+                      [kind]: { ...prev[kind], promptNodeId: e.target.value },
+                    }))
+                  }
+                  placeholder="默认 105"
+                  inputMode="numeric"
+                />
+                <div className="text-[11px] text-gray-500">对应 ComfyUI 中 CLIPTextEncode 的节点编号。</div>
+              </div>
+              <div className="grid gap-1">
+                <label className="text-xs font-semibold text-gray-600">负面 Prompt 节点 ID（可选）</label>
+                <input
+                  className="input-field"
+                  value={activeWorkflowSettings.negativePromptNodeId}
+                  onChange={(e) =>
+                    setWorkflowSettingsByKind((prev) => ({
+                      ...prev,
+                      [kind]: { ...prev[kind], negativePromptNodeId: e.target.value },
+                    }))
+                  }
+                  placeholder="留空则不注入负面 Prompt"
+                  inputMode="numeric"
+                />
+                <div className="text-[11px] text-gray-500">仅当填写节点 ID 且下方负面提示词不为空时生效。</div>
+              </div>
+            </div>
+
+            <div className="grid gap-1">
+              <label className="text-xs font-semibold text-gray-600">负面提示词（可选）</label>
+              <textarea
+                className="input-field h-24 resize-y"
+                value={activeWorkflowSettings.negativePrompt}
+                onChange={(e) =>
+                  setWorkflowSettingsByKind((prev) => ({
+                    ...prev,
+                    [kind]: { ...prev[kind], negativePrompt: truncateText(e.target.value, 6_000) },
+                  }))
+                }
+                placeholder="例如：watermark, text, logo, blurry, lowres ..."
+              />
+              <div className="text-[11px] text-gray-500">建议配合负面节点使用；否则会被忽略。</div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
       {kind === 'tachie' ? (
         <div className="grid gap-1">
           <label className="text-xs font-semibold text-gray-600">目标角色</label>
@@ -454,7 +693,23 @@ export function MagicTavernTachiePanel(props: {
           <button
             type="button"
             className="text-xs text-pink-700 hover:underline"
-            onClick={() => setReferenceText(pickDefaultReferenceText(props.messages, roleNameLookup))}
+            onClick={() => {
+              const lastAssistant = [...props.messages]
+                .reverse()
+                .find((message) => message.role === 'assistant' && (message.content || '').trim() && message.status !== 'error');
+              if (lastAssistant) {
+                setReferenceText(truncateText(getMessagePlainText(lastAssistant, roleNameLookup), MAX_REFERENCE_CHARS));
+                setAnchorMessageId(lastAssistant.id);
+                return;
+              }
+              const lastUser = [...props.messages].reverse().find((message) => message.role === 'user' && (message.content || '').trim());
+              if (lastUser) {
+                setReferenceText(truncateText(getMessagePlainText(lastUser, roleNameLookup), MAX_REFERENCE_CHARS));
+                setAnchorMessageId(lastUser.id);
+                return;
+              }
+              setReferenceText(pickDefaultReferenceText(props.messages, roleNameLookup));
+            }}
             title="从最近一条对话自动填入参考片段"
           >
             用最近对话填充
@@ -466,6 +721,19 @@ export function MagicTavernTachiePanel(props: {
           onChange={(e) => setReferenceText(truncateText(e.target.value, MAX_REFERENCE_CHARS))}
           placeholder="例如：雨夜的酒馆里，星见澪抬起眼睛，指尖的光点像火萤一样跳动……"
         />
+        <div className="flex items-center justify-between gap-3 text-[11px] text-gray-500">
+          <div className="min-w-0 truncate">绑定：{anchorLabel}</div>
+          {anchorMessageId ? (
+            <button
+              type="button"
+              className="flex-none text-xs text-gray-600 hover:underline"
+              onClick={() => setAnchorMessageId(null)}
+              title="取消绑定后，该图不会内联显示在时间线中"
+            >
+              取消绑定
+            </button>
+          ) : null}
+        </div>
         <div className="text-[11px] text-gray-500">建议只保留 1~3 段关键描写（越聚焦越稳定）。</div>
       </div>
 
@@ -512,6 +780,12 @@ export function MagicTavernTachiePanel(props: {
       <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
         <TachieGenerator
           prompt={styleId === 'vn' && kind === 'illustration' ? `${promptForGenerator}\n（额外约束：更强调镜头感与氛围，画面层次丰富）` : promptForGenerator}
+          mode={kind}
+          workflowUuid={workflowUuidForRequest}
+          templateUuid={templateUuidForRequest}
+          promptNodeId={promptNodeIdForRequest}
+          negativePrompt={negativePromptForRequest}
+          negativePromptNodeId={negativePromptNodeIdForRequest}
           onResult={(result) => {
             if (!result.success || !result.imageUrl) return;
             void saveAsset({

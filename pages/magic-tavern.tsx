@@ -25,7 +25,7 @@ import {
   putMagicTavernSession,
 } from '@/lib/magic-tavern/storage';
 import { deriveMagicTavernTitle } from '@/lib/magic-tavern/title';
-import type { MagicTavernMessage, MagicTavernRole, MagicTavernScenario, MagicTavernSession } from '@/lib/magic-tavern/types';
+import type { MagicTavernMessage, MagicTavernRole, MagicTavernScenario, MagicTavernSession, MagicTavernTachieAsset } from '@/lib/magic-tavern/types';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
@@ -233,17 +233,21 @@ export default function MagicTavernPage() {
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
 
-  const [draft, setDraft] = useState('');
-  const [tachieReferenceText, setTachieReferenceText] = useState('');
+	  const [draft, setDraft] = useState('');
+	  const [tachieReferenceText, setTachieReferenceText] = useState('');
+	  const [tachieAnchorMessageId, setTachieAnchorMessageId] = useState<string | null>(null);
+	  const [tachieAssets, setTachieAssets] = useState<MagicTavernTachieAsset[]>([]);
 
   useEffect(() => {
     const prefs = readMagicTavernPreferences();
     setPreferences(prefs);
   }, []);
 
-  useEffect(() => {
-    setTachieReferenceText('');
-  }, [activeSessionId]);
+	  useEffect(() => {
+	    setTachieReferenceText('');
+	    setTachieAnchorMessageId(null);
+	    setTachieAssets([]);
+	  }, [activeSessionId]);
 
   useEffect(() => {
     if (!user?.username) return;
@@ -350,43 +354,49 @@ export default function MagicTavernPage() {
 
   useEffect(() => {
     if (!activeSession) return;
-    setTachieReferenceText((prev) => {
-      if (prev.trim()) return prev;
-      const toPlainText = (message: MagicTavernMessage): string => {
-        const segments = Array.isArray(message.segments) ? message.segments : null;
-        if (segments && segments.length > 0) {
-          const lines: string[] = [];
-          for (const seg of segments) {
-            if (!seg) continue;
-            if (seg.type === 'narration') {
-              const text = typeof (seg as any).text === 'string' ? String((seg as any).text).trim() : '';
-              if (text) lines.push(text);
-              continue;
-            }
-            if (seg.type === 'dialogue') {
-              const speaker =
-                typeof (seg as any).speakerName === 'string' && String((seg as any).speakerName).trim()
-                  ? String((seg as any).speakerName).trim()
-                  : typeof (seg as any).speakerId === 'string'
-                    ? (activeSession.roles ?? []).find((r) => r.id === String((seg as any).speakerId))?.name || String((seg as any).speakerId)
-                    : '';
-              const text = typeof (seg as any).text === 'string' ? String((seg as any).text).trim() : '';
-              if (text) lines.push(speaker ? `${speaker}: ${text}` : text);
-              continue;
-            }
-          }
-          return lines.join('\n').trim();
-        }
-        return (message.content ?? '').trim();
-      };
+    if (tachieReferenceText.trim()) return;
 
-      const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && (m.content || '').trim() && m.status !== 'error');
-      if (lastAssistant) return toPlainText(lastAssistant).slice(0, 2000);
-      const lastUser = [...messages].reverse().find((m) => m.role === 'user' && (m.content || '').trim());
-      if (lastUser) return toPlainText(lastUser).slice(0, 2000);
-      return '';
-    });
-  }, [activeSession, messages]);
+    const toPlainText = (message: MagicTavernMessage): string => {
+      const segments = Array.isArray(message.segments) ? message.segments : null;
+      if (segments && segments.length > 0) {
+        const lines: string[] = [];
+        for (const seg of segments) {
+          if (!seg) continue;
+          if (seg.type === 'narration') {
+            const text = typeof (seg as any).text === 'string' ? String((seg as any).text).trim() : '';
+            if (text) lines.push(text);
+            continue;
+          }
+          if (seg.type === 'dialogue') {
+            const speaker =
+              typeof (seg as any).speakerName === 'string' && String((seg as any).speakerName).trim()
+                ? String((seg as any).speakerName).trim()
+                : typeof (seg as any).speakerId === 'string'
+                  ? (activeSession.roles ?? []).find((r) => r.id === String((seg as any).speakerId))?.name || String((seg as any).speakerId)
+                  : '';
+            const text = typeof (seg as any).text === 'string' ? String((seg as any).text).trim() : '';
+            if (text) lines.push(speaker ? `${speaker}: ${text}` : text);
+            continue;
+          }
+        }
+        return lines.join('\n').trim();
+      }
+      return (message.content ?? '').trim();
+    };
+
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && (m.content || '').trim() && m.status !== 'error');
+    if (lastAssistant) {
+      setTachieReferenceText(toPlainText(lastAssistant).slice(0, 2000));
+      setTachieAnchorMessageId(lastAssistant.id);
+      return;
+    }
+
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user' && (m.content || '').trim());
+    if (lastUser) {
+      setTachieReferenceText(toPlainText(lastUser).slice(0, 2000));
+      setTachieAnchorMessageId(lastUser.id);
+    }
+  }, [activeSession, messages, tachieReferenceText]);
 
   useEffect(() => {
     let canceled = false;
@@ -1502,14 +1512,52 @@ export default function MagicTavernPage() {
 
     return (
       <div className="mt-2 flex items-center justify-end gap-2 text-xs text-gray-500">
-        <button
-          type="button"
-          className="underline underline-offset-2 hover:text-gray-700"
-          onClick={() => setTachieReferenceText(plain.slice(0, 2000))}
-          title="将该条 AI 输出作为插画/立绘的参考片段"
-        >
-          用作插画参考
-        </button>
+	        <button
+	          type="button"
+	          className="underline underline-offset-2 hover:text-gray-700"
+	          onClick={() => {
+	            setTachieReferenceText(plain.slice(0, 2000));
+	            setTachieAnchorMessageId(message.id);
+	          }}
+	          title="将该条 AI 输出作为插画/立绘的参考片段"
+	        >
+	          用作插画参考
+	        </button>
+      </div>
+    );
+  };
+
+  const renderMessageAttachments = (message: MagicTavernMessage) => {
+    if (!tachieAssets || tachieAssets.length === 0) return null;
+    const attached = tachieAssets
+      .filter((asset) => asset.anchorMessageId === message.id)
+      .filter((asset) => Boolean(asset.imageUrl || asset.blobRef));
+    if (attached.length === 0) return null;
+
+    const sorted = [...attached].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    const display = sorted.slice(0, 2);
+    const remaining = sorted.length - display.length;
+
+    return (
+      <div className="mt-2 space-y-2">
+        <div className="grid gap-2 sm:grid-cols-2">
+          {display.map((asset) => {
+            const url = asset.imageUrl || asset.blobRef || '';
+            if (!url) return null;
+            const kindLabel = asset.kind === 'illustration' ? '剧情插画' : '角色立绘';
+            const roleLabel = asset.roleId ? (activeSession?.roles ?? []).find((role) => role.id === asset.roleId)?.name || asset.roleId : '';
+            const label = [kindLabel, roleLabel].filter(Boolean).join(' · ');
+            return (
+              <div key={asset.id} className="overflow-hidden rounded-lg border border-pink-100 bg-white">
+                <a href={url} target="_blank" rel="noreferrer" className="block">
+                  <img src={url} alt={label || '已生成图片'} className="h-36 w-full object-cover" loading="lazy" />
+                </a>
+                {label ? <div className="px-2 py-1 text-[11px] text-gray-600">{label}</div> : null}
+              </div>
+            );
+          })}
+        </div>
+        {remaining > 0 ? <div className="text-[11px] text-gray-500">还有 {remaining} 张已绑定图片，可在下方“插画 / 立绘”面板查看。</div> : null}
       </div>
     );
   };
@@ -1584,10 +1632,11 @@ export default function MagicTavernPage() {
                   </div>
                 );
               }
-              return null;
-            })}
-            {renderAssistantFooter(message)}
-            {renderAssistantActions(message)}
+            return null;
+          })}
+          {renderMessageAttachments(message)}
+          {renderAssistantFooter(message)}
+          {renderAssistantActions(message)}
         </div>
       );
     }
@@ -1600,6 +1649,7 @@ export default function MagicTavernPage() {
       return withHeader(
         <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
           <MarkdownBlock content={message.content || ''} variant="light" mode="article" />
+          {renderMessageAttachments(message)}
           {renderAssistantFooter(message)}
           {renderAssistantActions(message)}
         </div>
@@ -1609,6 +1659,7 @@ export default function MagicTavernPage() {
     return withHeader(
       <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
         <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+        {renderMessageAttachments(message)}
         {renderAssistantFooter(message)}
         {renderAssistantActions(message)}
       </div>
@@ -2124,14 +2175,17 @@ export default function MagicTavernPage() {
                   </div>
 	                </div>
 
-                  {activeSession ? (
-                    <MagicTavernTachiePanel
-                      session={activeSession}
-                      messages={messages}
-                      referenceText={tachieReferenceText}
-                      onReferenceTextChange={setTachieReferenceText}
-                    />
-                  ) : null}
+	                  {activeSession ? (
+	                    <MagicTavernTachiePanel
+	                      session={activeSession}
+	                      messages={messages}
+	                      referenceText={tachieReferenceText}
+	                      onReferenceTextChange={setTachieReferenceText}
+	                      anchorMessageId={tachieAnchorMessageId}
+	                      onAnchorMessageIdChange={setTachieAnchorMessageId}
+	                      onAssetsUpdated={setTachieAssets}
+	                    />
+	                  ) : null}
 
 	                <Footer className="footer mt-4" />
               </main>

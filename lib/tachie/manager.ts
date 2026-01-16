@@ -2,12 +2,19 @@ import { generateText2Image, getGenerateStatus, calculateProgress } from "./libl
 import { getStatusDescription, GenerateStatus } from "./liblib/types";
 
 export type TachieSource = "liblib";
+export type TachieGenerateMode = 'tachie' | 'illustration';
 
 export interface TachieGenerationRequest {
     source: TachieSource;
     accessKey: string;
     secretKey: string;
     prompt: string;
+    mode?: TachieGenerateMode;
+    workflowUuid?: string;
+    templateUuid?: string;
+    promptNodeId?: number;
+    negativePrompt?: string;
+    negativePromptNodeId?: number;
 }
 
 export interface TachieGenerationResult {
@@ -40,7 +47,15 @@ export const generateTachieWithProgress = async (
                 const generateUuid = await generateText2Image(
                     request.accessKey,
                     request.secretKey,
-                    request.prompt
+                    request.prompt,
+                    {
+                        mode: request.mode,
+                        workflowUuid: request.workflowUuid,
+                        templateUuid: request.templateUuid,
+                        promptNodeId: request.promptNodeId,
+                        negativePrompt: request.negativePrompt,
+                        negativePromptNodeId: request.negativePromptNodeId,
+                    }
                 );
 
                 onProgress?.(10, "任务已提交，开始生成...");

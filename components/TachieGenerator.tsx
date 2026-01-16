@@ -6,11 +6,27 @@ import { ErrorMessage } from "@/components/ErrorMessage";
 
 interface TachieGeneratorProps {
   prompt: string;
+  mode?: 'tachie' | 'illustration';
+  workflowUuid?: string;
+  templateUuid?: string;
+  promptNodeId?: number;
+  negativePrompt?: string;
+  negativePromptNodeId?: number;
   onImageUrlChange?: (imageUrl: string | null) => void;
   onResult?: (result: TachieGenerationResult) => void;
 }
 
-export default function TachieGenerator({ prompt, onImageUrlChange, onResult }: TachieGeneratorProps) {
+export default function TachieGenerator({
+  prompt,
+  mode,
+  workflowUuid,
+  templateUuid,
+  promptNodeId,
+  negativePrompt,
+  negativePromptNodeId,
+  onImageUrlChange,
+  onResult,
+}: TachieGeneratorProps) {
   const [accessKey, setAccessKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -98,6 +114,12 @@ export default function TachieGenerator({ prompt, onImageUrlChange, onResult }: 
         accessKey: accessKey.trim(),
         secretKey: secretKey.trim(),
         prompt,
+        mode,
+        workflowUuid,
+        templateUuid,
+        promptNodeId,
+        negativePrompt,
+        negativePromptNodeId,
       }, (progress, status) => {
         setProgress(progress);
         setProgressStatus(status);

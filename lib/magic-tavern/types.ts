@@ -74,6 +74,7 @@ export type MagicTavernTachieAsset = {
   sessionId: string;
   kind?: 'tachie' | 'illustration';
   roleId?: string;
+  anchorMessageId?: string;
   cacheKey: string;
   fragmentHash: string;
   styleId: string;

@@ -13,7 +13,40 @@ export default async function handler(req: Request) {
     );
   }
 
-  const { accessKey, secretKey, prompt } = await req.json();
+  const DEFAULT_WORKFLOWS = {
+    tachie: {
+      workflowUuid: "34fed183375249dfbe293fa99d753cc5",
+      templateUuid: "4df2efa0f18d46dc9758803e478eb51c",
+      promptNodeId: 105,
+    },
+    illustration: {
+      workflowUuid: "34fed183375249dfbe293fa99d753cc5",
+      templateUuid: "4df2efa0f18d46dc9758803e478eb51c",
+      promptNodeId: 105,
+    },
+  } as const;
+
+  const isLibLibUuid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{32}$/i.test(value.trim());
+  const parseNodeId = (value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const id = Math.floor(value);
+      if (id >= 1 && id <= 9999) return id;
+      return null;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      const num = Number(trimmed);
+      if (!Number.isFinite(num)) return null;
+      const id = Math.floor(num);
+      if (id >= 1 && id <= 9999) return id;
+      return null;
+    }
+    return null;
+  };
+
+  const payload = await req.json();
+  const { accessKey, secretKey, prompt } = payload ?? {};
 
   if (!accessKey || !secretKey || !prompt) {
     return new Response(
@@ -23,18 +56,39 @@ export default async function handler(req: Request) {
   }
 
   try {
+    const modeRaw = typeof payload?.mode === 'string' ? payload.mode.trim() : '';
+    const mode = modeRaw === 'illustration' ? 'illustration' : 'tachie';
+
+    const preset = DEFAULT_WORKFLOWS[mode];
+    const workflowUuid = isLibLibUuid(payload?.workflowUuid) ? payload.workflowUuid.trim() : preset.workflowUuid;
+    const templateUuid = isLibLibUuid(payload?.templateUuid) ? payload.templateUuid.trim() : preset.templateUuid;
+    const promptNodeId = parseNodeId(payload?.promptNodeId) ?? preset.promptNodeId;
+
+    const negativePrompt = typeof payload?.negativePrompt === 'string' ? payload.negativePrompt.trim() : '';
+    const negativePromptNodeId = parseNodeId(payload?.negativePromptNodeId);
+
     const endpoint = "/api/generate/comfyui/app";
     const signedUrl = await getSignedUrl(accessKey, secretKey, endpoint);
 
     // 预设参数
     const generateParams: ComfyUIAppParams = {
-      105: {
+      [String(promptNodeId)]: {
         class_type: "CLIPTextEncode",
         inputs: {
           text: prompt
         }
       },
-      workflowUuid: "34fed183375249dfbe293fa99d753cc5"
+      ...(negativePrompt && negativePromptNodeId
+        ? {
+            [String(negativePromptNodeId)]: {
+              class_type: "CLIPTextEncode",
+              inputs: {
+                text: negativePrompt
+              }
+            }
+          }
+        : {}),
+      workflowUuid
     };
     const response = await fetch(signedUrl, {
       method: "POST",
@@ -42,7 +96,7 @@ export default async function handler(req: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        templateUuid: "4df2efa0f18d46dc9758803e478eb51c",
+        templateUuid,
         generateParams: generateParams
       }),
     });
