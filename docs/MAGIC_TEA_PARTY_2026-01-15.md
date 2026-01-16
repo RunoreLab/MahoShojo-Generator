@@ -562,7 +562,7 @@ export type MagicTeaPartySession = {
 - 若输出无效或解析失败，则整体降级为 `narration` 文本。 
 
 ```jsonl
-{"type":"narration","text":"酒馆的灯火在雨夜里摇曳……"}
+{"type":"narration","text":"奶茶店的灯光在雨夜里摇曳……"}
 {"type":"dialogue","speakerId":"role-1","speakerName":"星见澪","text":"要来一杯热可可吗？"}
 {"type":"choices","items":[{"id":"c1","text":"我点头并坐下"},{"id":"c2","text":"我礼貌拒绝，转向角落"}]}
 ```
@@ -950,7 +950,7 @@ export type MagicTeaPartyPreset = {
 
 ### 14.3 输入区与选项
 
-- 输入框占位：输入你的行动、对白或叙事，例如：我推开酒馆的大门……
+- 输入框占位：输入你的行动、对白或叙事，例如：我推开奶茶店的门，风铃轻响……
 - 选项按钮：生成剧情选项（会消耗额外 Token）
 - 停止按钮：停止生成
 - 输出模式提示：结构化 JSONL / Markdown 故事（二者不可兼得）。
@@ -1101,4 +1101,3 @@ export type MagicTeaPartyPreset = {
 
 - 收集最新 SillyTavern JSONL 样例跑导入/导出回归，补齐字段差异。
 - 通过真实调用记录校准 Token 估算倍率。
-

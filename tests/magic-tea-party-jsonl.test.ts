@@ -4,29 +4,29 @@ import { createMagicTeaPartyJsonlStreamState, flushMagicTeaPartyJsonlStream, ing
 
 describe('magic tea party jsonl parser', () => {
   it('兼容 narration 的 text/content 字段', () => {
-    const withText = parseMagicTeaPartyJsonl('{"type":"narration","text":"酒馆的灯火在雨夜里摇曳……"}');
+    const withText = parseMagicTeaPartyJsonl('{"type":"narration","text":"奶茶店的灯光在雨夜里摇曳……"}');
     expect(withText.segments).toHaveLength(1);
-    expect(withText.segments[0]).toEqual({ type: 'narration', text: '酒馆的灯火在雨夜里摇曳……' });
+    expect(withText.segments[0]).toEqual({ type: 'narration', text: '奶茶店的灯光在雨夜里摇曳……' });
 
-    const withContent = parseMagicTeaPartyJsonl('{"type":"narration","content":"我推开酒馆的大门……"}');
+    const withContent = parseMagicTeaPartyJsonl('{"type":"narration","content":"我推开咖啡店的门……"}');
     expect(withContent.segments).toHaveLength(1);
-    expect(withContent.segments[0]).toEqual({ type: 'narration', text: '我推开酒馆的大门……' });
+    expect(withContent.segments[0]).toEqual({ type: 'narration', text: '我推开咖啡店的门……' });
   });
 
   it('会跳过 Markdown 围栏，并解析 dialogue/choices', () => {
     const input = [
       '```jsonl',
       '{"type":"narration","content":"场景开场……"}',
-      '{"type":"dialogue","speakerId":"role-1","speakerName":"星见澪","content":"要来一杯热可可吗？"}',
-      '{"type":"choices","items":["我点头并坐下","我礼貌拒绝，转向角落"]}',
+      '{"type":"dialogue","speakerId":"role-1","speakerName":"星见澪","content":"要来一杯桂花奶茶吗？"}',
+      '{"type":"choices","items":["我点头并接过菜单","我礼貌拒绝，转向窗边"]}',
       '```',
     ].join('\n');
 
     const parsed = parseMagicTeaPartyJsonl(input);
     expect(parsed.segments.map((seg) => seg.type)).toEqual(['narration', 'dialogue', 'choices']);
     expect(parsed.segments[0]).toEqual({ type: 'narration', text: '场景开场……' });
-    expect(parsed.segments[1]).toEqual({ type: 'dialogue', speakerId: 'role-1', speakerName: '星见澪', text: '要来一杯热可可吗？' });
-    expect(parsed.choices?.map((c) => c.text)).toEqual(['我点头并坐下', '我礼貌拒绝，转向角落']);
+    expect(parsed.segments[1]).toEqual({ type: 'dialogue', speakerId: 'role-1', speakerName: '星见澪', text: '要来一杯桂花奶茶吗？' });
+    expect(parsed.choices?.map((c) => c.text)).toEqual(['我点头并接过菜单', '我礼貌拒绝，转向窗边']);
   });
 
   it('当行 JSON 解析失败时保留原文', () => {
@@ -48,4 +48,3 @@ describe('magic tea party jsonl parser', () => {
     expect(state.choices?.map((item) => item.text)).toEqual(['回应一', '回应二']);
   });
 });
-

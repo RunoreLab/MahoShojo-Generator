@@ -152,7 +152,9 @@ export const parseSillyTavernJsonl = (params: {
     const mtExtra =
       extra && typeof extra.magic_tea_party === 'object' && extra.magic_tea_party !== null
         ? (extra.magic_tea_party as Record<string, unknown>)
-        : null;
+        : extra && typeof extra.magic_tavern === 'object' && extra.magic_tavern !== null
+          ? (extra.magic_tavern as Record<string, unknown>)
+          : null;
     const extraSpeakerId = mtExtra && typeof mtExtra.speakerId === 'string' ? mtExtra.speakerId : undefined;
     const extraSegments = mtExtra && Array.isArray(mtExtra.segments) ? (mtExtra.segments as MagicTeaPartyOutputSegment[]) : undefined;
     const extraChoices = mtExtra && Array.isArray(mtExtra.choices) ? (mtExtra.choices as { id: string; text: string }[]) : undefined;

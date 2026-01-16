@@ -9,8 +9,8 @@ describe('magic tea party summarize prompt', () => {
       language: 'zh-CN',
       userDisplayName: '旅人',
       messages: [
-        { id: 'u1', sessionId: 's1', role: 'user', content: '我推开酒馆的大门。', createdAt: 0 },
-        { id: 'a1', sessionId: 's1', role: 'assistant', content: '灯火在雨夜里摇曳。', createdAt: 1 },
+        { id: 'u1', sessionId: 's1', role: 'user', content: '我推开奶茶店的门。', createdAt: 0 },
+        { id: 'a1', sessionId: 's1', role: 'assistant', content: '甜香在雨夜里弥漫。', createdAt: 1 },
       ],
     });
 
@@ -20,8 +20,8 @@ describe('magic tea party summarize prompt', () => {
     expect(prompt).toContain('关键事件');
     expect(prompt).toContain('未决事项');
     expect(prompt).toContain('禁忌/边界');
-    expect(prompt).toContain('旅人: 我推开酒馆的大门。');
-    expect(prompt).toContain('assistant: 灯火在雨夜里摇曳。');
+    expect(prompt).toContain('旅人: 我推开奶茶店的门。');
+    expect(prompt).toContain('assistant: 甜香在雨夜里弥漫。');
   });
 
   it('title 模式只要求输出一行标题', () => {
@@ -37,4 +37,3 @@ describe('magic tea party summarize prompt', () => {
     expect(prompt).not.toContain('世界状态：');
   });
 });
-

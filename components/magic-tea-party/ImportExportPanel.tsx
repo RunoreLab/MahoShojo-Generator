@@ -320,13 +320,13 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
         const parsed = JSON.parse(text);
         const payload = ensureRecord(parsed);
         const schema = payload ? readString(payload.schema) : '';
-        if (schema === 'magic-tea-party.session.v1') {
+        if (schema === 'magic-tea-party.session.v1' || schema === 'magic-tavern.session.v1') {
           const sessionId = await importSessionPayload(payload as MagicTeaPartySessionExport, baseTitle);
           setNotice('会话已导入。');
           onSessionImported(sessionId);
           return;
         }
-        if (schema === 'magic-tea-party.archive.v1') {
+        if (schema === 'magic-tea-party.archive.v1' || schema === 'magic-tavern.archive.v1') {
           const sessions = ensureArray<MagicTeaPartySessionExport>((payload as any).sessions);
           if (sessions.length === 0) throw new Error('归档中没有会话数据。');
           const importedIds: string[] = [];

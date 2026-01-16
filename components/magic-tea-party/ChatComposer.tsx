@@ -37,7 +37,7 @@ export function MagicTeaPartyChatComposer(props: MagicTeaPartyChatComposerProps)
         className="input-field h-24 resize-y"
         value={draft}
         onChange={(event: ChangeEvent<HTMLTextAreaElement>) => onDraftChange(event.target.value)}
-        placeholder="输入你的行动、对白或叙事，例如：我推开酒馆的大门……"
+        placeholder="输入你的行动、对白或叙事，例如：我推开奶茶店的门，风铃轻响……"
         disabled={!activeSession || isGenerating}
       />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

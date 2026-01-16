@@ -1,7 +1,9 @@
 import type { MagicTeaPartyMessage, MagicTeaPartySession, MagicTeaPartyTachieAsset } from '@/lib/magic-tea-party/types';
 
 const DB_NAME = 'magic-tea-party:v1';
+const LEGACY_DB_NAME = 'magic-tavern:v1';
 const DB_VERSION = 1;
+const IDB_MIGRATION_KEY = 'magic-tea-party:migrated-indexeddb-v1';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -14,12 +16,8 @@ const ensureBrowser = () => {
   }
 };
 
-export const openMagicTeaPartyDb = async (): Promise<IDBDatabase> => {
-  ensureBrowser();
-
-  if (dbPromise) return dbPromise;
-
-  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+const openMagicTeaPartyDbInternal = (): Promise<IDBDatabase> =>
+  new Promise<IDBDatabase>((resolve, reject) => {
     const request = window.indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = () => {
@@ -48,6 +46,167 @@ export const openMagicTeaPartyDb = async (): Promise<IDBDatabase> => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('打开 IndexedDB 失败'));
   });
+
+const readMigrationFlag = (): string | null => {
+  try {
+    return window.localStorage.getItem(IDB_MIGRATION_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const writeMigrationFlag = (value: string): void => {
+  try {
+    window.localStorage.setItem(IDB_MIGRATION_KEY, value);
+  } catch {
+    // ignore
+  }
+};
+
+const openLegacyDb = async (): Promise<IDBDatabase | null> => {
+  if (typeof window === 'undefined' || !('indexedDB' in window)) return null;
+
+  try {
+    const databases = typeof window.indexedDB.databases === 'function' ? await window.indexedDB.databases() : null;
+    if (Array.isArray(databases) && !databases.some((db) => db?.name === LEGACY_DB_NAME)) {
+      return null;
+    }
+  } catch {
+    // ignore
+  }
+
+  return await new Promise<IDBDatabase | null>((resolve) => {
+    let isFresh = false;
+    const request = window.indexedDB.open(LEGACY_DB_NAME);
+
+    request.onupgradeneeded = () => {
+      isFresh = true;
+    };
+
+    request.onsuccess = () => {
+      const db = request.result;
+      if (isFresh) {
+        db.close();
+        try {
+          window.indexedDB.deleteDatabase(LEGACY_DB_NAME);
+        } catch {
+          // ignore
+        }
+        resolve(null);
+        return;
+      }
+      resolve(db);
+    };
+
+    request.onerror = () => resolve(null);
+  });
+};
+
+const readAllFromStore = async <T>(db: IDBDatabase, storeName: string): Promise<T[]> =>
+  await new Promise<T[]>((resolve, reject) => {
+    const tx = db.transaction([storeName], 'readonly');
+    tx.onabort = () => reject(tx.error ?? new Error('读取旧数据失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('读取旧数据失败'));
+
+    const items: T[] = [];
+    const store = tx.objectStore(storeName);
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(items);
+        return;
+      }
+      items.push(cursor.value as T);
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error ?? new Error('读取旧数据失败'));
+  });
+
+const readStoreKeys = async (db: IDBDatabase, storeName: string): Promise<Set<string>> =>
+  await new Promise<Set<string>>((resolve, reject) => {
+    const tx = db.transaction([storeName], 'readonly');
+    tx.onabort = () => reject(tx.error ?? new Error('读取新数据失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('读取新数据失败'));
+
+    const keys = new Set<string>();
+    const store = tx.objectStore(storeName);
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(keys);
+        return;
+      }
+      keys.add(String(cursor.key));
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error ?? new Error('读取新数据失败'));
+  });
+
+const writeItemsToStore = async <T>(db: IDBDatabase, storeName: string, items: T[]): Promise<void> =>
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([storeName], 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error('写入旧数据失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('写入旧数据失败'));
+
+    const store = tx.objectStore(storeName);
+    items.forEach((item) => store.put(item));
+  });
+
+const migrateLegacyDbIfNeeded = async (targetDb: IDBDatabase): Promise<void> => {
+  if (typeof window === 'undefined') return;
+  if (readMigrationFlag()) return;
+
+  const legacyDb = await openLegacyDb();
+  if (!legacyDb) {
+    writeMigrationFlag(new Date().toISOString());
+    return;
+  }
+
+  try {
+    const storeNames = ['sessions', 'messages', 'tachieAssets'] as const;
+    for (const storeName of storeNames) {
+      const legacyItems = await readAllFromStore<Record<string, unknown>>(legacyDb, storeName);
+      if (legacyItems.length === 0) continue;
+
+      const existingKeys = await readStoreKeys(targetDb, storeName);
+      const merged = legacyItems.filter((item) => {
+        const key = item?.id ? String(item.id) : '';
+        return key && !existingKeys.has(key);
+      });
+      if (merged.length === 0) continue;
+      await writeItemsToStore(targetDb, storeName, merged);
+    }
+
+    legacyDb.close();
+    try {
+      window.indexedDB.deleteDatabase(LEGACY_DB_NAME);
+    } catch {
+      // ignore
+    }
+
+    writeMigrationFlag(new Date().toISOString());
+  } catch {
+    try {
+      legacyDb.close();
+    } catch {
+      // ignore
+    }
+  }
+};
+
+export const openMagicTeaPartyDb = async (): Promise<IDBDatabase> => {
+  ensureBrowser();
+
+  if (dbPromise) return dbPromise;
+
+  dbPromise = (async () => {
+    const db = await openMagicTeaPartyDbInternal();
+    await migrateLegacyDbIfNeeded(db);
+    return db;
+  })();
 
   return dbPromise;
 };

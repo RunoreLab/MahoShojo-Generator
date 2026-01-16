@@ -719,7 +719,7 @@ export function MagicTeaPartyTachiePanel(props: {
           className="input-field h-24 resize-y"
           value={referenceText}
           onChange={(e) => setReferenceText(truncateText(e.target.value, MAX_REFERENCE_CHARS))}
-          placeholder="例如：雨夜的酒馆里，星见澪抬起眼睛，指尖的光点像火萤一样跳动……"
+          placeholder="例如：雨夜的奶茶店里，星见澪抬起眼睛，指尖的光点像火萤一样跳动……"
         />
         <div className="flex items-center justify-between gap-3 text-[11px] text-gray-500">
           <div className="min-w-0 truncate">绑定：{anchorLabel}</div>

@@ -64,7 +64,7 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
       <div className="space-y-3">
         {messages.length === 0 ? (
           <div className="rounded-lg bg-pink-50 px-4 py-3 text-sm text-pink-800">
-            还没有对话。输入你的行动、对白或叙事，例如：我推开酒馆的大门……
+            还没有对话。输入你的行动、对白或叙事，例如：推开咖啡店的门……
           </div>
         ) : (
           messages.map((message) => (

@@ -1,6 +1,7 @@
 import type { MagicTeaPartyPreferences } from '@/lib/magic-tea-party/types';
 
 const STORAGE_KEY = 'magic-tea-party:preferences';
+const LEGACY_STORAGE_KEY = 'magic-tavern:preferences';
 
 export const DEFAULT_MAGIC_TEA_PARTY_PREFERENCES: MagicTeaPartyPreferences = {
   outputFormat: 'jsonl',
@@ -15,7 +16,12 @@ const isChoiceCount = (value: unknown): value is 2 | 3 | 4 => value === 2 || val
 export function readMagicTeaPartyPreferences(): MagicTeaPartyPreferences {
   if (typeof window === 'undefined') return DEFAULT_MAGIC_TEA_PARTY_PREFERENCES;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw =
+      window.localStorage.getItem(STORAGE_KEY) ??
+      window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (raw && !window.localStorage.getItem(STORAGE_KEY)) {
+      window.localStorage.setItem(STORAGE_KEY, raw);
+    }
     if (!raw) return DEFAULT_MAGIC_TEA_PARTY_PREFERENCES;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return DEFAULT_MAGIC_TEA_PARTY_PREFERENCES;

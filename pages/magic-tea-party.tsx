@@ -17,6 +17,7 @@ import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { createMagicTeaPartyJsonlStreamState, ingestMagicTeaPartyJsonlChunk, parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import { migrateMagicTeaPartyLocalStorage } from '@/lib/magic-tea-party/migration';
 import { DEFAULT_MAGIC_TEA_PARTY_PREFERENCES, patchMagicTeaPartyPreferences, readMagicTeaPartyPreferences } from '@/lib/magic-tea-party/preferences';
 import { type MagicTeaPartyPresetId, getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import {
@@ -249,12 +250,13 @@ export default function MagicTeaPartyPage() {
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
 
-	  const [draft, setDraft] = useState('');
-	  const [tachieReferenceText, setTachieReferenceText] = useState('');
-	  const [tachieAnchorMessageId, setTachieAnchorMessageId] = useState<string | null>(null);
-	  const [tachieAssets, setTachieAssets] = useState<MagicTeaPartyTachieAsset[]>([]);
+  const [draft, setDraft] = useState('');
+  const [tachieReferenceText, setTachieReferenceText] = useState('');
+  const [tachieAnchorMessageId, setTachieAnchorMessageId] = useState<string | null>(null);
+  const [tachieAssets, setTachieAssets] = useState<MagicTeaPartyTachieAsset[]>([]);
 
   useEffect(() => {
+    migrateMagicTeaPartyLocalStorage();
     const prefs = readMagicTeaPartyPreferences();
     setPreferences(prefs);
   }, []);
