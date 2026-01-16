@@ -624,6 +624,7 @@ export type MagicTeaPartySession = {
 - 角色卡（通用角色）：name；content（原文 Markdown）。
 - 情景卡：title；scenario_type；description；elements.scene.time/place/features；elements.atmosphere；elements.events；elements.development（≤12 条）；elements.roles（≤12 条，name/description）。
 - 通用情景：title + content（原文 Markdown）。
+- 协议附录（仅在启用“特殊读写协议适配”时）：从**非白名单字段**中按关键词截取**原文片段**（不做结构化解析），用于补充 current_state/arena_history/officialReport/headline/article.* / 选项 / 依赖报错 / 禁词-记录冲突 等协议；附录**按阶段注入**，不进入默认叙事上下文。
 - 永不注入（默认）：signature/templateId/userAnswers/adjudicationEvents/任何 `_` 前缀字段，仅保留给缓存/追溯与 UI 展示。
 - arena_history / current_state 默认不注入；仅在用户开启“读取历战/状态”时，以**专用格式化块**注入（遵循条数/截断/安全规则），避免透传原始字段。
 - 截断规则：单字段字符串默认截断 2,000 字；数组默认截断 12 项；单张卡片拼接文本上限 12,000 字，超限追加“...[已截断]”。
@@ -677,7 +678,7 @@ export type MagicTeaPartySession = {
 - 前端不设硬上限；服务端设置安全上限以防异常负载与滥用。
 - `roles` ≤ 20；`auxScenarios` ≤ 12；`messages` ≤ 200（仅保留最近窗口后再传）。
 - 单条 `message.content` ≤ 8,000 字；单张卡片拼接文本 ≤ 12,000 字；合并文本 ≤ 200,000 字（超出直接 400）。
-- `choiceCount` 2~4；`temperature` 0~1.2；`outputFormat` 仅允许 `jsonl`/`markdown`。
+- `choiceCount` 默认 2~4；命中特殊协议的“选项规则”时允许提升至 2~12（上限可配置），并在 UI 标注“协议锁定/被覆盖”。`temperature` 0~1.2；`outputFormat` 仅允许 `jsonl`/`markdown`。
 - `providerId`/`modelId` 必须命中 `AI_PROVIDER_CATALOG`，并强制 `providerId !== system`。
 
 
@@ -788,7 +789,7 @@ export type MagicTeaPartyPreset = {
 - **输出敏感词**：立即终止流，截断至最后安全边界，标记 `blocked`，保留已生成安全片段并提供“重新生成/修改输入”入口（不跳转）。
 - 安全拒绝：若服务端返回 `shouldRedirect=true`，本地不落库、清理草稿并跳转 `/arrested`（当前 `enforceTextSafety` 固定为 `true`）。
 - `outputFormat=markdown`：不尝试解析 `choices`，如需要选项另调 `generate-choices`。
-- `notice` 行（见 13.19）：仅用于可解析错误/提示，不写入对话历史；`level=error` 时终止本轮并提示用户操作。
+- `notice` 行（见 19.4）：仅用于可解析错误/提示，不写入对话历史；`level=error` 时终止本轮并提示用户操作。
 
 ### 13.13 分支编辑策略（定稿）
 
@@ -1471,11 +1472,23 @@ export type MagicTeaPartyUpdateDraft = {
 - 任何需要写入“茶会无法直接写入字段”的要求，统一改为**可解析输出格式**，由前端再落地。
 - 仅做“关键词级隔离/标注”（可选）：叙事阶段对包含 current_state/arena_history/officialReport/headline/article.* 的指令段落降权或不注入，记录阶段保留，降低误触发概率。
 
+### 19.2.1 协议附录（最小抽取，补充）
+
+- 目标：在“不做协议解析”的前提下，让关键协议在对应阶段可见。
+- 抽取规则：仅截取包含关键词的**原文片段**或指定字段（如 special_rules/common_special_rules/正确游玩指引/headline撰写规则/article.* / officialReport.* / 字数要求 / 选项规则等），不改写、不重排、不做结构化转换。
+- 分阶段注入：  
+  - 叙事阶段：仅保留“读取要求/叙事禁词/末尾等待选择/字数或节奏要求/依赖缺失报错提示”相关片段。  
+  - 记录阶段：仅保留“current_state.summary / arena_history.impact 写入协议”相关片段。  
+  - 选项阶段：仅保留“选项数量/格式/禁忌/保留‘其他’等规则”相关片段。
+- 限额：单卡附录 ≤ 4,000 字、总附录 ≤ 12,000 字；超出截断并提示“协议附录已截断”。
+
 ### 19.3 阶段化提示词规则（覆盖优先级）
 
 **A. 叙事生成阶段（正文）**
 - 明确要求 AI：**忽略**角色/情景卡中关于“写入摘要/状态/历战/选项/officialReport/headline/article.*”的要求。
-- 如果角色/情景卡中有涉及故事引导（`userGuidance`）的内容，则将“用户输入/选项选择”视作 `userGuidance。
+- 如果角色/情景卡中有涉及故事引导（`userGuidance`）的内容，则将“用户输入/选项选择”视作 `userGuidance`。
+- 若卡内要求“故事末尾等待用户选择/不得收束”，叙事必须以悬念或待选行动结束，不给出最终结论。
+- 工具卡/数据卡不参与叙事输出（不生成对白、不作为 speakerId）。
 - 仅允许读取 current_state/arena_history（若存在）作为剧情连续性参考（此项可以不修改提示词要求，已经在现有的读/写机制中实现）。
 - 若卡内有“报错”要求：改为输出可解析提示信号（见 19.4），并**终止本轮正文输出与写入流程**。
 - 若卡内有“警告/提示”要求：改为输出可解析提示信号（见 19.4），但**继续本轮正文输出与写入流程**。
@@ -1483,6 +1496,7 @@ export type MagicTeaPartyUpdateDraft = {
 **B. 记录更新阶段（current_state/arena_history）**
 - 明确要求 AI：**必须遵守**角色/情景卡内关于写入格式的要求。
 - 对于涉及叙事与记录不同规则/要求的数据卡（例如叙事禁词/记录允许冲突），分情况以更高的优先级要求忽略/遵守对应内容（例如该阶段允许使用“记录术语”，并忽略叙事禁词限制）。
+- 记录阶段应切换到“记录白名单模式”（放行体力值/饥饿度等记录术语），仅拦截绝对违规内容，避免误触发安全截断。
 - 若同时存在多套协议（不同角色/情景卡），允许分角色分别遵守；无法同时满足时输出 `notice` 并跳过写入。
 - 记录阶段输入可包含：**安全对话历史** + **可选会话摘要** + **当轮选项列表（如有）**，用于工具卡/全局数据卡写入。
 - 输出应仅包含 `current_state.summary` / `arena_history.impact` 更新内容，不夹带叙事正文。
@@ -1490,32 +1504,38 @@ export type MagicTeaPartyUpdateDraft = {
 **C. 选项生成阶段（配合全局数据卡）**
 - 明确要求 AI：**必须遵守**角色/情景卡内关于选项生成的要求（不包含格式，格式必须遵守魔法茶会规范）。
 - 不得写入角色卡字段（例如“全局数据卡”），而是必须遵守魔法茶会的选项生成格式，输出统一结构化 JSONL。
+- 若协议要求选项数量/标识符（如 A./B./Z. 其他），则在 `items[].text` 中保留原标识并自动覆盖 `choiceCount`；UI 需提示“协议锁定/被覆盖”。
 - 选项原文可回传给记录更新阶段作为参考，可用于写入部分“全局数据卡”的 current_state.summary / arena_history.impact（若协议要求）。
 
 **D. 摘要生成阶段（可选）**
 - 若卡内存在“摘要/结算格式/headline/article.analysis”要求，可映射为**标题生成/会话摘要约束**；否则沿用茶会通用摘要模板。
+
+**E. 指引与依赖提示（首轮/卡组变化时）**
+- `article.analysis` / `正确游玩指引` / `headline*` 等“玩法提示”可转为 `notice(level=info)` 或 UI 顶部提示，**仅首轮或卡组变化时展示一次**。
+- 依赖缺失（如要求 templateId=fairy 或 “全局数据卡”）时，优先本地前置检测并直接提示；否则由 AI 输出 `notice(level=error)` 并终止流程。
 
 ### 19.4 可解析输出规范（替代 officialReport.* / headline / article.*）
 
 为兼容卡内“硬错误/提示”要求，统一使用 `notice`（可解析、可剥离）：
 
 - **JSONL 模式（推荐）**  
-  `{"type":"notice","level":"error","code":"missing_required_card","message":"未检测到播种者妖精，请检查是否放入“[妖精]兰兰”。"}`
+  `{"type":"notice","level":"error","code":"missing_required_card","message":"未检测到播种者妖精，请检查是否放入“[妖精]兰兰”。","meta":{"stage":"narration","roleId":"r_fairy","scenarioId":"s1","once":true}}`
 - **Markdown 模式**：输出独立 `mtp_notice` 块，前端剥离后展示  
   ```mtp_notice
-  {"type":"notice","level":"error","code":"missing_required_card","message":"未检测到播种者妖精，请检查是否放入“[妖精]兰兰”。"}
+  {"type":"notice","level":"error","code":"missing_required_card","message":"未检测到播种者妖精，请检查是否放入“[妖精]兰兰”。","meta":{"stage":"narration","roleId":"r_fairy","scenarioId":"s1","once":true}}
   ```
 
 **使用规则**
 - `level=error`：终止本轮正文/写入流程，仅展示错误提示。
 - `level=warning|info`：正文可继续生成，但提示需展示且不落库。
+- 建议前端按 `code + roleId + scenarioId` 去重，避免重复提示。
 
 ### 19.5 协议优先级与冲突处理（补充）
 
 - **优先级**：阶段系统提示词 > 茶会基础规则与安全策略 > 主情景协议 > 角色卡协议 > 辅助情景协议。  
 - **更具体优先**：若协议明确“仅适用于某角色/工具卡”，其优先级高于通用协议。  
 - **工具卡隔离**：工具卡协议仅对该工具卡写入生效，不影响其他角色。  
-- **冲突处理**：当协议无法同时满足或格式互斥时，输出 `notice(level=error|warning)` 并跳过写入。
+- **冲突处理**：当协议无法同时满足或格式互斥时，输出 `notice(level=error|warning)` 并跳过写入；**仅影响相关角色/工具卡**，其余角色仍可写入。
 
 ### 19.6 自动补齐与读取规则（与竞技场对齐）
 
@@ -1524,6 +1544,8 @@ export type MagicTeaPartyUpdateDraft = {
   - arena_history: []  
   - 适用于所有角色/工具卡。
 - **读取时缺省**：若角色/工具卡没有对应字段，视为“无记录可读”，不额外报错。
+- **影子状态（可选）**：记录阶段生成的草案可写入 `session.protocolShadow`，在未写入前用于下一轮叙事读取（标记为“草案/未落库”）；UI 明示并允许一键清除。
+- **选项缓存**：当轮选项列表写入 `session.lastChoices`，供下一轮 userGuidance/全局数据卡读取；即使写入被拒绝也保留缓存。
 
 ### 19.7 风险与控制
 
@@ -1533,13 +1555,18 @@ export type MagicTeaPartyUpdateDraft = {
   - 处理：以“阶段化系统提示词”统一覆盖，不依赖协议解析，降低脆弱性。
 - **风险：提示信号被正文污染**  
   - 处理：强制 `notice` 独立行/块输出，解析失败即丢弃并提示。
+- **风险：协议要求“每轮写入”与茶会手动写入节奏冲突**  
+  - 处理：自动生成更新草案 + 影子状态参与读取；提示用户开启写入或每轮确认。
 - **风险：全局数据卡与选项不同步**  
   - 处理：选项生成后将“选项原文列表”回传记录阶段；未生成选项时提示用户补充。
 
 ### 19.8 落地清单（方向对齐）
 
 - 为叙事/记录/选项三种生成路径分别新增“高优先级系统提示词”模板。  
-- 增加 `notice`（JSONL）与 `mtp_notice`（Markdown）解析与 UI 显示逻辑。  
+- 增加 `notice`（JSONL）与 `mtp_notice`（Markdown）解析与 UI 显示逻辑（含 meta 去重与首轮提示）。  
+- 实现“协议附录”构建器与分阶段注入。  
 - 写入逻辑统一补齐 current_state/arena_history（与竞技场一致）。  
 - 记录阶段明确放行“记录术语”，避免被正文禁词干扰。
-- 选项生成后将“选项原文列表”透传到记录阶段，用于全局数据卡写入。
+- 选项生成后将“选项原文列表”透传到记录阶段，用于全局数据卡写入；支持协议覆盖 `choiceCount` 并在 UI 标注。  
+- 增加依赖前置检测（可用手工注册表/特征匹配），缺失即提示并终止流程。  
+- 落地影子状态与选项缓存（`protocolShadow` / `lastChoices`）。
