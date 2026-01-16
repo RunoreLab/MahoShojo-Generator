@@ -7,6 +7,7 @@ import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { randomUUID } from '@/lib/crypto';
 import { createMagicTeaPartyJsonlStreamState, ingestMagicTeaPartyJsonlChunk, parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import { createMagicTeaPartyStreamSafety } from '@/lib/magic-tea-party/stream-safety';
 import { putMagicTeaPartyMessage } from '@/lib/magic-tea-party/storage';
 import { deriveMagicTeaPartyTitle } from '@/lib/magic-tea-party/title';
 import type {
@@ -15,52 +16,9 @@ import type {
   MagicTeaPartySession,
 } from '@/lib/magic-tea-party/types';
 import { applyShieldWords } from '@/lib/shield-word-filter';
-import { quickCheck } from '@/lib/sensitive-word-filter';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 
 type MagicTeaPartyOutputFormat = NonNullable<MagicTeaPartySession['settings']['outputFormat']>;
-type QuickCheckResult = Awaited<ReturnType<typeof quickCheck>>;
-
-const getEarliestSensitiveStartIndex = (result: QuickCheckResult): number | null => {
-  const details = result.matchDetails;
-  if (!Array.isArray(details) || details.length === 0) return null;
-
-  let earliest = Number.POSITIVE_INFINITY;
-  for (const detail of details) {
-    if (!detail || typeof detail.startIndex !== 'number') continue;
-    if (detail.startIndex >= 0) earliest = Math.min(earliest, detail.startIndex);
-  }
-
-  return Number.isFinite(earliest) ? earliest : null;
-};
-
-const findOutputSafetyBoundaryIndex = (text: string, matchStartIndex: number, outputFormat: MagicTeaPartyOutputFormat): number => {
-  if (!text) return 0;
-  const searchFrom = Math.min(text.length - 1, Math.max(0, matchStartIndex - 1));
-
-  if (outputFormat === 'jsonl') {
-    const newline = text.lastIndexOf('\n', searchFrom);
-    return newline >= 0 ? newline + 1 : 0;
-  }
-
-  let boundary = -1;
-  for (const ch of ['\n', '。', '！', '？', '.', '!', '?']) {
-    boundary = Math.max(boundary, text.lastIndexOf(ch, searchFrom));
-  }
-  return boundary >= 0 ? boundary + 1 : 0;
-};
-
-const truncateUnsafeOutputText = (
-  text: string,
-  result: QuickCheckResult,
-  outputFormat: MagicTeaPartyOutputFormat
-): { safeRaw: string; truncatedAt: number | null } => {
-  const matchStart = getEarliestSensitiveStartIndex(result);
-  if (matchStart === null) return { safeRaw: text, truncatedAt: null };
-
-  const boundary = findOutputSafetyBoundaryIndex(text, matchStart, outputFormat);
-  return { safeRaw: text.slice(0, boundary), truncatedAt: boundary };
-};
 
 const isMessageSuperseded = (message: MagicTeaPartyMessage): boolean => {
   const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
@@ -153,18 +111,10 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       abortControllerRef.current = controller;
       setIsGenerating(true);
 
-      let streamedRawSoFar = '';
-      let streamedSafeSoFar = '';
-      let outputBlockedAt: number | null = null;
-      let outputSafetyTruncatedAt: number | null = null;
-      let safetyCheckTimer: ReturnType<typeof setTimeout> | null = null;
-      let safetyCheckInFlight = false;
       const jsonlStreamState = params.outputFormat === 'jsonl' ? createMagicTeaPartyJsonlStreamState() : null;
       let lastSafeSnapshot = '';
 
       const updateStreamingPreview = (safePreview: string) => {
-        streamedSafeSoFar = safePreview;
-
         if (jsonlStreamState) {
           if (safePreview.startsWith(lastSafeSnapshot)) {
             const delta = safePreview.slice(lastSafeSnapshot.length);
@@ -196,6 +146,17 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           )
         );
       };
+
+      const safety = createMagicTeaPartyStreamSafety({
+        outputFormat: params.outputFormat,
+        onSafePreview: updateStreamingPreview,
+        onBlocked: (safeText) => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === params.assistantMessageId ? { ...m, content: safeText, status: 'blocked' } : m))
+          );
+          controller.abort('output-safety');
+        },
+      });
 
       try {
         const response = await fetch('/api/magic-tea-party/generate-stream', {
@@ -279,78 +240,14 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
         setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? { ...m, content: '', status: 'streaming' } : m)));
 
-        const scheduleSafetyCheck = () => {
-          if (outputBlockedAt) return;
-          if (safetyCheckTimer) return;
-          safetyCheckTimer = setTimeout(() => {
-            safetyCheckTimer = null;
-            void runSafetyCheck();
-          }, 120);
-        };
-
-        const runSafetyCheck = async () => {
-          if (outputBlockedAt) return;
-          if (safetyCheckInFlight) {
-            scheduleSafetyCheck();
-            return;
-          }
-
-          safetyCheckInFlight = true;
-          const snapshot = streamedRawSoFar;
-          try {
-            const result = await quickCheck(snapshot);
-            if (outputBlockedAt) return;
-
-            if (result.hasSensitiveWords) {
-              const { safeRaw, truncatedAt } = truncateUnsafeOutputText(snapshot, result, params.outputFormat);
-              const safeText = applyShieldWords(safeRaw).filteredText;
-              streamedSafeSoFar = safeText;
-              outputBlockedAt = Date.now();
-              outputSafetyTruncatedAt = truncatedAt;
-              setMessages((prev) =>
-                prev.map((m) => (m.id === params.assistantMessageId ? { ...m, content: safeText, status: 'blocked' } : m))
-              );
-              controller.abort('output-safety');
-              return;
-            }
-
-            const safePreview = applyShieldWords(snapshot).filteredText;
-            updateStreamingPreview(safePreview);
-          } finally {
-            safetyCheckInFlight = false;
-            if (!outputBlockedAt && streamedRawSoFar !== snapshot) scheduleSafetyCheck();
-          }
-        };
-
         const streamedText = await readTextStreamFromResponse(response, {
           label: '魔法茶会',
           onText: (accumulated) => {
-            streamedRawSoFar = accumulated;
-            scheduleSafetyCheck();
+            safety.ingest(accumulated);
           },
         });
 
-        if (safetyCheckTimer) {
-          clearTimeout(safetyCheckTimer);
-          safetyCheckTimer = null;
-        }
-
-        let status: MagicTeaPartyMessage['status'] = outputBlockedAt ? 'blocked' : 'done';
-        let safeText = streamedSafeSoFar;
-
-        if (!outputBlockedAt) {
-          const sensitive = await quickCheck(streamedText);
-          if (sensitive.hasSensitiveWords) {
-            const truncated = truncateUnsafeOutputText(streamedText, sensitive, params.outputFormat);
-            safeText = applyShieldWords(truncated.safeRaw).filteredText;
-            status = 'blocked';
-            outputBlockedAt = Date.now();
-            outputSafetyTruncatedAt = truncated.truncatedAt;
-          } else {
-            safeText = applyShieldWords(streamedText).filteredText;
-            status = 'done';
-          }
-        }
+        const { safeText, status, blockedAt, truncatedAt } = await safety.finalize(streamedText);
 
         const parsed = params.outputFormat === 'jsonl' ? parseMagicTeaPartyJsonl(safeText) : { segments: undefined, choices: null };
 
@@ -360,9 +257,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           status,
           ...(params.outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
           ...(status === 'blocked'
-            ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: outputBlockedAt ?? Date.now(), action: 'soft-block' } }
+            ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
             : { safety: { status: 'ok' } }),
-          ...(status === 'blocked' && typeof outputSafetyTruncatedAt === 'number' ? { truncatedAt: outputSafetyTruncatedAt } : {}),
+          ...(status === 'blocked' && typeof truncatedAt === 'number' ? { truncatedAt } : {}),
         };
 
         setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
@@ -394,36 +291,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           await persistSession({ ...params.session, updatedAt: Date.now() });
         }
       } catch (error) {
-        if (safetyCheckTimer) {
-          clearTimeout(safetyCheckTimer);
-          safetyCheckTimer = null;
-        }
-
+        safety.clearTimer();
         if (error instanceof Error && error.name === 'AbortError') {
-          const reason = controller.signal.reason;
-          const rawSnapshot = streamedRawSoFar;
-
-          if (outputBlockedAt || reason === 'output-safety') {
-            const currentText = streamedSafeSoFar || applyShieldWords(rawSnapshot).filteredText;
-            const parsed = params.outputFormat === 'jsonl' ? parseMagicTeaPartyJsonl(currentText) : { segments: undefined, choices: null };
-            const finalAssistant: MagicTeaPartyMessage = {
-              ...params.assistantMessage,
-              content: currentText,
-              status: 'blocked',
-              ...(params.outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-              safety: { status: 'blocked', blockedBy: 'output', blockedAt: outputBlockedAt ?? Date.now(), action: 'soft-block' },
-              ...(typeof outputSafetyTruncatedAt === 'number' ? { truncatedAt: outputSafetyTruncatedAt } : {}),
-            };
-            setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
-            await putMagicTeaPartyMessage(finalAssistant);
-            return;
-          }
-
-          const sensitive = await quickCheck(rawSnapshot);
-          const safeText = sensitive.hasSensitiveWords
-            ? applyShieldWords(truncateUnsafeOutputText(rawSnapshot, sensitive, params.outputFormat).safeRaw).filteredText
-            : applyShieldWords(rawSnapshot).filteredText;
-          const status: MagicTeaPartyMessage['status'] = sensitive.hasSensitiveWords ? 'blocked' : 'done';
+          const { safeText, status, blockedAt, truncatedAt } = await safety.finalizeAfterAbort(controller.signal.reason);
           const parsed = params.outputFormat === 'jsonl' ? parseMagicTeaPartyJsonl(safeText) : { segments: undefined, choices: null };
           const finalAssistant: MagicTeaPartyMessage = {
             ...params.assistantMessage,
@@ -431,8 +301,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             status,
             ...(params.outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
             ...(status === 'blocked'
-              ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: Date.now(), action: 'soft-block' } }
+              ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
               : { safety: { status: 'ok' } }),
+            ...(status === 'blocked' && typeof truncatedAt === 'number' ? { truncatedAt } : {}),
           };
           setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
           await putMagicTeaPartyMessage(finalAssistant);
@@ -653,17 +524,10 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     abortControllerRef.current = controller;
     setIsGenerating(true);
 
-    let streamedRawSoFar = '';
-    let streamedSafeSoFar = '';
-    let outputBlockedAt: number | null = null;
-    let outputSafetyTruncatedAt: number | null = null;
-    let safetyCheckTimer: ReturnType<typeof setTimeout> | null = null;
-    let safetyCheckInFlight = false;
     const jsonlStreamState = createMagicTeaPartyJsonlStreamState();
     let lastSafeSnapshot = '';
 
     const updateStreamingPreview = (safePreview: string, status?: MagicTeaPartyMessage['status']) => {
-      streamedSafeSoFar = safePreview;
       if (safePreview.startsWith(lastSafeSnapshot)) {
         const delta = safePreview.slice(lastSafeSnapshot.length);
         ingestMagicTeaPartyJsonlChunk(jsonlStreamState, delta);
@@ -690,6 +554,16 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         )
       );
     };
+    const safety = createMagicTeaPartyStreamSafety({
+      outputFormat: 'jsonl',
+      onSafePreview: (safeText) => {
+        updateStreamingPreview(safeText);
+      },
+      onBlocked: (safeText) => {
+        updateStreamingPreview(safeText, 'blocked');
+        controller.abort('output-safety');
+      },
+    });
     try {
       const response = await fetch('/api/magic-tea-party/generate-choices', {
         method: 'POST',
@@ -752,77 +626,14 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         return;
       }
 
-      const scheduleSafetyCheck = () => {
-        if (outputBlockedAt) return;
-        if (safetyCheckTimer) return;
-        safetyCheckTimer = setTimeout(() => {
-          safetyCheckTimer = null;
-          void runSafetyCheck();
-        }, 120);
-      };
-
-      const runSafetyCheck = async () => {
-        if (outputBlockedAt) return;
-        if (safetyCheckInFlight) {
-          scheduleSafetyCheck();
-          return;
-        }
-
-        safetyCheckInFlight = true;
-        const snapshot = streamedRawSoFar;
-        try {
-          const result = await quickCheck(snapshot);
-          if (outputBlockedAt) return;
-
-          if (result.hasSensitiveWords) {
-            const { safeRaw, truncatedAt } = truncateUnsafeOutputText(snapshot, result, 'jsonl');
-            const safeText = applyShieldWords(safeRaw).filteredText;
-            outputBlockedAt = Date.now();
-            outputSafetyTruncatedAt = truncatedAt;
-            updateStreamingPreview(safeText, 'blocked');
-            controller.abort('output-safety');
-            return;
-          }
-
-          const safePreview = applyShieldWords(snapshot).filteredText;
-          updateStreamingPreview(safePreview);
-        } finally {
-          safetyCheckInFlight = false;
-          if (!outputBlockedAt && streamedRawSoFar !== snapshot) scheduleSafetyCheck();
-        }
-      };
-
       const streamedText = await readTextStreamFromResponse(response, {
         label: '魔法茶会选项',
         onText: (accumulated) => {
-          streamedRawSoFar = accumulated;
-          scheduleSafetyCheck();
+          safety.ingest(accumulated);
         },
       });
 
-      if (safetyCheckTimer) {
-        clearTimeout(safetyCheckTimer);
-        safetyCheckTimer = null;
-      }
-
-      let status: MagicTeaPartyMessage['status'] = outputBlockedAt ? 'blocked' : 'done';
-      let safeText = streamedSafeSoFar || (outputBlockedAt ? applyShieldWords(streamedRawSoFar).filteredText : '');
-      let blockedAt: number | null = outputBlockedAt;
-      let truncatedAt: number | null = outputSafetyTruncatedAt;
-
-      if (!outputBlockedAt) {
-        const sensitive = await quickCheck(streamedText);
-        safeText = applyShieldWords(streamedText).filteredText;
-        if (sensitive.hasSensitiveWords) {
-          const truncated = truncateUnsafeOutputText(streamedText, sensitive, 'jsonl');
-          safeText = applyShieldWords(truncated.safeRaw).filteredText;
-          status = 'blocked';
-          blockedAt = Date.now();
-          truncatedAt = truncated.truncatedAt;
-        } else {
-          status = 'done';
-        }
-      }
+      const { safeText, status, blockedAt, truncatedAt } = await safety.finalize(streamedText);
 
       const parsed = parseMagicTeaPartyJsonl(safeText);
       const finalAssistant: MagicTeaPartyMessage = {
@@ -840,33 +651,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       await putMagicTeaPartyMessage(finalAssistant);
       await persistSession({ ...updatedSession, updatedAt: Date.now() });
     } catch (error) {
-      if (safetyCheckTimer) {
-        clearTimeout(safetyCheckTimer);
-        safetyCheckTimer = null;
-      }
+      safety.clearTimer();
       if (error instanceof Error && error.name === 'AbortError') {
-        const reason = controller.signal.reason;
-        if (outputBlockedAt || reason === 'output-safety') {
-          const currentText = streamedSafeSoFar || applyShieldWords(streamedRawSoFar).filteredText;
-          const parsed = parseMagicTeaPartyJsonl(currentText);
-          const finalAssistant: MagicTeaPartyMessage = {
-            ...assistantMessage,
-            content: currentText,
-            status: 'blocked',
-            ...(parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-            safety: { status: 'blocked', blockedBy: 'output', blockedAt: outputBlockedAt ?? Date.now(), action: 'soft-block' },
-            ...(typeof outputSafetyTruncatedAt === 'number' ? { truncatedAt: outputSafetyTruncatedAt } : {}),
-          };
-          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
-          await putMagicTeaPartyMessage(finalAssistant);
-          return;
-        }
-
-        const sensitive = await quickCheck(streamedRawSoFar);
-        const safeText = sensitive.hasSensitiveWords
-          ? applyShieldWords(truncateUnsafeOutputText(streamedRawSoFar, sensitive, 'jsonl').safeRaw).filteredText
-          : applyShieldWords(streamedRawSoFar).filteredText;
-        const status: MagicTeaPartyMessage['status'] = sensitive.hasSensitiveWords ? 'blocked' : 'done';
+        const { safeText, status, blockedAt, truncatedAt } = await safety.finalizeAfterAbort(controller.signal.reason);
         const parsed = parseMagicTeaPartyJsonl(safeText);
         const finalAssistant: MagicTeaPartyMessage = {
           ...assistantMessage,
@@ -874,8 +661,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           status,
           ...(parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
           ...(status === 'blocked'
-            ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: Date.now(), action: 'soft-block' } }
+            ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
             : { safety: { status: 'ok' } }),
+          ...(status === 'blocked' && typeof truncatedAt === 'number' ? { truncatedAt } : {}),
         };
         setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
         await putMagicTeaPartyMessage(finalAssistant);
