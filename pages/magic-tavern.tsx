@@ -1,14 +1,13 @@
 import Head from 'next/head';
-import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
-import BattleDataModal from '@/components/BattleDataModal';
-import { ErrorMessage } from '@/components/ErrorMessage';
 import Footer from '@/components/Footer';
 import { MagicTavernChatComposer } from '@/components/magic-tavern/ChatComposer';
 import { MagicTavernChatTimeline } from '@/components/magic-tavern/ChatTimeline';
+import { MagicTavernHero } from '@/components/magic-tavern/Hero';
+import { MagicTavernCardModals } from '@/components/magic-tavern/CardModals';
 import { MagicTavernSessionSidebar } from '@/components/magic-tavern/SessionSidebar';
 import { MagicTavernSessionSetupPanel } from '@/components/magic-tavern/SessionSetupPanel';
 import { MagicTavernSummaryPanel } from '@/components/magic-tavern/SummaryPanel';
@@ -1786,25 +1785,7 @@ export default function MagicTavernPage() {
       <div className="magic-background-white">
         <div className="container !max-w-[1200px]">
           <div className="card !max-w-none">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold text-pink-800">魔法酒馆</h1>
-                <p className="mt-1 text-sm text-gray-600">聊天记录保存在本地浏览器；魔法酒馆仅支持自备 API Key。</p>
-              </div>
-              <Link href="/" className="text-sm text-pink-700 hover:underline">
-                返回首页
-              </Link>
-            </div>
-
-            {globalError && (
-              <div className="mt-4">
-                <ErrorMessage
-                  message={globalError}
-                  className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-                  linkClassName="text-red-700 underline underline-offset-2 hover:opacity-95"
-                />
-              </div>
-            )}
+            <MagicTavernHero globalError={globalError} />
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[320px_1fr]">
               <MagicTavernSessionSidebar
@@ -1844,17 +1825,7 @@ export default function MagicTavernPage() {
                   hasMessages={messages.length > 0}
                   onGenerateSummary={() => void generateSummary()}
                   onClearSummary={() => void clearSummary()}
-                  onSummaryChange={(value) => {
-                    if (!activeSession) return;
-                    const trimmed = value.trim();
-                    const now = Date.now();
-                    void persistSession({
-                      ...activeSession,
-                      summary: trimmed ? trimmed : undefined,
-                      summaryMeta: trimmed ? { ...(activeSession.summaryMeta ?? {}), updatedAt: now } : undefined,
-                      updatedAt: now,
-                    });
-                  }}
+                  onPersistSession={persistSession}
                 />
 
                 <div className="rounded-xl border border-pink-100 bg-white p-4">
@@ -1905,24 +1876,15 @@ export default function MagicTavernPage() {
           </div>
         </div>
 
-        <BattleDataModal
-          isOpen={showRoleModal}
-          onClose={() => setShowRoleModal(false)}
-          selectedType="character"
-          selectionMode="multi"
-          selectedCardIds={selectedRoleCardIds}
-          onToggleCard={(payload, nextSelected) => void onToggleRoleCard(payload, nextSelected)}
-          titleOverride="选择登场角色（多选）"
-        />
-
-        <BattleDataModal
-          isOpen={showScenarioModal}
-          onClose={() => setShowScenarioModal(false)}
-          selectedType="scenario"
-          selectionMode="multi"
-          selectedCardIds={selectedScenarioCardIds}
-          onToggleCard={(payload, nextSelected) => void onToggleScenarioCard(payload, nextSelected)}
-          titleOverride="选择发生场景（多选）"
+        <MagicTavernCardModals
+          showRoleModal={showRoleModal}
+          showScenarioModal={showScenarioModal}
+          selectedRoleCardIds={selectedRoleCardIds}
+          selectedScenarioCardIds={selectedScenarioCardIds}
+          onCloseRoleModal={() => setShowRoleModal(false)}
+          onCloseScenarioModal={() => setShowScenarioModal(false)}
+          onToggleRoleCard={onToggleRoleCard}
+          onToggleScenarioCard={onToggleScenarioCard}
         />
       </div>
     </>

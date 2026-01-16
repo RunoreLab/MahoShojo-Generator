@@ -10,7 +10,7 @@ type MagicTavernSummaryPanelProps = {
   hasMessages: boolean;
   onGenerateSummary: () => void;
   onClearSummary: () => void;
-  onSummaryChange: (value: string) => void;
+  onPersistSession: (session: MagicTavernSession) => void | Promise<void>;
 };
 
 const InlineSpinner = () => (
@@ -26,7 +26,7 @@ export function MagicTavernSummaryPanel(props: MagicTavernSummaryPanelProps) {
     hasMessages,
     onGenerateSummary,
     onClearSummary,
-    onSummaryChange,
+    onPersistSession,
   } = props;
 
   const disableActions = !activeSession || isGenerating || isSummarizing;
@@ -78,7 +78,17 @@ export function MagicTavernSummaryPanel(props: MagicTavernSummaryPanelProps) {
       <textarea
         className="input-field h-32 resize-y"
         value={activeSession?.summary ?? ''}
-        onChange={(event) => onSummaryChange(event.target.value)}
+        onChange={(event) => {
+          if (!activeSession) return;
+          const trimmed = event.target.value.trim();
+          const now = Date.now();
+          void onPersistSession({
+            ...activeSession,
+            summary: trimmed ? trimmed : undefined,
+            summaryMeta: trimmed ? { ...(activeSession.summaryMeta ?? {}), updatedAt: now } : undefined,
+            updatedAt: now,
+          });
+        }}
         placeholder="还没有摘要。点击“生成/更新摘要”自动生成，或手动填写。"
         disabled={!activeSession || isSummarizing}
       />
