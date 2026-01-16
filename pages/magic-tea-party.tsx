@@ -13,6 +13,7 @@ import { MagicTeaPartySessionSetupPanel } from '@/components/magic-tea-party/Ses
 import { MagicTeaPartySummaryPanel } from '@/components/magic-tea-party/SummaryPanel';
 import { MagicTeaPartyTachiePanel } from '@/components/magic-tea-party/TachiePanel';
 
+import { readMagicTeaPartyDraft, writeMagicTeaPartyDraft } from '@/lib/magic-tea-party/drafts';
 import { buildMagicTeaPartyHistory } from '@/lib/magic-tea-party/history';
 import { useMagicTeaPartyChat } from '@/lib/magic-tea-party/useMagicTeaPartyChat';
 import { useMagicTeaPartySessions } from '@/lib/magic-tea-party/useMagicTeaPartySessions';
@@ -94,6 +95,20 @@ export default function MagicTeaPartyPage() {
   const [updateRangeSize, setUpdateRangeSize] = useState<number>(20);
   const [isGeneratingUpdates, setIsGeneratingUpdates] = useState(false);
   const [isApplyingUpdates, setIsApplyingUpdates] = useState(false);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setDraft('');
+      return;
+    }
+    const storedDraft = readMagicTeaPartyDraft(activeSessionId);
+    setDraft(storedDraft ?? '');
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    writeMagicTeaPartyDraft(activeSessionId, draft);
+  }, [activeSessionId, draft]);
 
   useEffect(() => {
     setTachieReferenceText('');

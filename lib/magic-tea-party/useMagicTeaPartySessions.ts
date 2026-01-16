@@ -4,6 +4,7 @@ import type { ChangeEvent, Dispatch, SetStateAction } from 'react';
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { randomUUID } from '@/lib/crypto';
 import { inferTemplate } from '@/lib/data-card-converter';
+import { clearMagicTeaPartyDraft } from '@/lib/magic-tea-party/drafts';
 import { parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
 import { migrateMagicTeaPartyLocalStorage } from '@/lib/magic-tea-party/migration';
 import {
@@ -423,6 +424,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
 
   const deleteSession = useCallback(
     async (sessionId: string) => {
+      clearMagicTeaPartyDraft(sessionId);
       await deleteMagicTeaPartySession(sessionId);
       const next = await refreshSessions();
       const fallback = next[0]?.id ?? null;
