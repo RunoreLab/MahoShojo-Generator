@@ -1197,13 +1197,13 @@ export type MagicTeaPartyPreset = {
 
 ### 18.5 写入流程（建议）
 
-1) **生成摘要**：用安全文本生成会话摘要（或选择“最近 N 轮”作为写入依据）。  
-2) **生成更新草案**：调用独立端点（如 `POST /api/magic-tea-party/generate-updates`），基于摘要输出 `impact/currentStateSummary`。  
+1) **准备上下文**：以安全的“对话历史”为主（可选最近 N 轮）；若已有会话摘要可作为补充参考。  
+2) **生成更新草案**：调用独立端点（如 `POST /api/magic-tea-party/generate-updates`），基于对话历史（可选摘要）输出 `impact/currentStateSummary`。  
 3) **服务端签名与校验**：复用竞技场的签名验证与 `applyPostBattleUpdates` 思路（可抽象为 `applyPostSessionUpdates`）。  
 4) **前端预览差异**：展示“新增历战记录/当前状态摘要变化”，用户确认后应用。  
 5) **下载与持久化**：支持单角色/批量下载更新后角色卡（与竞技场一致的导出体验）。
 
-> 若本轮输出触发敏感词截断或会话摘要失败，应跳过写入流程，避免污染卡片。
+> 若本轮输出触发敏感词截断应跳过写入流程，避免污染卡片；摘要不存在不应阻塞写入（以对话历史为主）。
 
 ### 18.6 当前状态更新策略
 
@@ -1216,7 +1216,7 @@ export type MagicTeaPartyPreset = {
 - **条目新增**：每次写入新增一条 entry，`title` 使用会话标题或摘要标题。
 - **类型映射**：新增 `type='tea-party'`（语义更清晰），并同步扩展类型定义与下游逻辑兼容。
 - **胜者字段**：
-  - 默认填充“无/不适用”（茶会并非必然对抗）。
+  - 默认填充“**不适用**”（茶会并非必然对抗，标准口径固定为“不适用”）。
   - 仅在存在竞争/强势弱势结论时填写胜者（战斗、辩论或其他冲突皆可）。
   - 建议在 metadata 中标记 `source='magic-tea-party'` 与 `has_winner=true/false`，便于下游筛选。
 - **追溯信息**：建议在 metadata 中记录 `sessionId/summaryId/messageRange`，支持回溯与审计。
@@ -1253,10 +1253,10 @@ export type MagicTeaPartyPreset = {
 
 ### 18.12 winner 规则与 UI 展示
 
-- **默认值**：`winner='无'` 或 `winner='不适用'`（二选一固定口径）。
+- **默认值**：`winner='不适用'`（标准口径固定）。
 - **可选胜者**：当摘要/剧情明确出现竞争与强弱结论时再填写胜者。
 - **UI 展示**：
-  - `winner` 为“无/不适用”时，前端显示“无胜者”而非空值。
+  - `winner='不适用'` 时，前端显示“无胜者”而非空值。
   - `metadata.has_winner=false` 时隐藏“胜者徽标/胜负提示”。
 
 ### 18.13 API 与提示词补充
@@ -1265,7 +1265,8 @@ export type MagicTeaPartyPreset = {
   - `impact`（历战条目影响）
   - `currentStateSummary`（可为空；为空则不更新当前状态）
   - `hasWinner`（可选，用于辅助设置 `winner`）
-- 提示词中增加“若非对抗性情节，不要编造胜者；可明确写‘无胜者/不适用’”。
+- 输入约束：更新生成以“对话历史”为主（可选摘要作为补充）；摘要缺失不影响生成。
+- 提示词中增加“若非对抗性情节，不要编造胜者；胜者缺省用‘不适用’”。
 
 ### 18.14 数据迁移与版本提示
 
