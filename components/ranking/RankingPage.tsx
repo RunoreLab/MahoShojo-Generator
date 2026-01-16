@@ -10,6 +10,7 @@ import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
+import { buildTitleDisplay } from '@/lib/text';
 
 type Queue = 'strict' | 'free';
 type Sort = 'rating' | 'tech';
@@ -985,6 +986,7 @@ export function RankingPage() {
                             <div className="grid gap-2">
                               {searchResults.map((item) => {
                                 const author = formatAuthorLabel(item);
+                                const { display: displayName, full: fullName } = buildTitleDisplay(item.displayName || '未命名');
                                 return (
                                   <button
                                     key={`search:${item.entityType}:${item.entityId}:${item.rank}`}
@@ -993,8 +995,8 @@ export function RankingPage() {
                                     className="flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-left hover:bg-gray-50"
                                   >
                                     <div className="min-w-0">
-                                      <div className="truncate text-sm font-semibold text-gray-900">
-                                        #{item.rank} · {item.displayName}
+                                      <div className="truncate text-sm font-semibold text-gray-900" title={fullName}>
+                                        #{item.rank} · {displayName}
                                       </div>
                                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
                                         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
@@ -1067,6 +1069,7 @@ export function RankingPage() {
                                   const isFocused = rowKey === focusRowKey;
 	                                const winRate = item.games > 0 ? Math.round((item.wins / item.games) * 1000) / 10 : null;
 	                                const authorName = formatAuthorLabel(item);
+	                                const { display: displayName, full: fullName } = buildTitleDisplay(item.displayName || '未命名');
 	                                const tagPreviewIds = item.tagIds.slice(0, 4);
 	                                const remainingTagCount = Math.max(0, item.tagIds.length - tagPreviewIds.length);
 	                                const nativeBadge = item.isNative == null ? (
@@ -1102,9 +1105,10 @@ export function RankingPage() {
 	                                            });
 	                                          }}
 	                                          className="block w-full truncate text-left font-medium text-gray-900 hover:underline underline-offset-2"
-	                                          aria-label={`查看角色详情：${item.displayName}`}
+	                                          aria-label={`查看角色详情：${fullName}`}
+	                                          title={fullName}
 	                                        >
-	                                          {item.displayName}
+	                                          {displayName}
 	                                        </button>
 	                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
 	                                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">

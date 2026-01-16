@@ -72,7 +72,6 @@ const sensitiveWordsConfig = {
     "5aaT5aWz",
     "57K+5ray",
     "5rer5Lmx",
-    "5rer6I2h",
     "5by65aW4",
     "552h5aW4",
     "5oCn5L61",
@@ -118,6 +117,21 @@ const sensitiveWordsConfig = {
     "54q55aSq",
     "56eN5peP54Gt57ud",
     "57qz57K5",
+    // 魅魔相关
+    "5rer57q5",
+    "5rer5Y+r",
+    "6a2F6a2U5YyW",
+    "6a2F6a2U5Zug5a2Q",
+    "5qao57K+",
+    // 奶牛相关
+    "5qao5Lmz",
+    "5rOM5Lmz",
+    "5YKs5Lmz",
+    "5qao5aW2",
+    "5rOM5aW2",
+    "5YKs5aW2",
+    // 其他
+    "5aqa6I2v",
   ],
   encoding: "base64",
   original_count: 71

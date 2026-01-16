@@ -8,6 +8,7 @@ import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } fr
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
+import { buildTitleDisplay } from '@/lib/text';
 import type { Preset } from '@/lib/presets';
 import type { SeasonsConfig } from '@/lib/seasons';
 import { formatSeasonTitle, getCurrentSeason } from '@/lib/seasons';
@@ -657,6 +658,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
 	                          ? selectedPresetFilenames.has(item.entityId)
 	                          : selectedDataCardIds.has(item.entityId);
 	                      const isBusy = addingKey === `${item.entityType}:${item.entityId}`;
+	                      const { display: displayName, full: fullName } = buildTitleDisplay(item.displayName || '未命名');
 	                      const authorName =
 	                        item.entityType === 'preset'
 	                          ? '官方'
@@ -693,9 +695,10 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
 	                                });
 	                              }}
 	                              className="block w-full text-left font-medium text-gray-800 hover:underline underline-offset-2"
-	                              aria-label={`查看角色详情：${item.displayName}`}
+	                              aria-label={`查看角色详情：${fullName}`}
+	                              title={fullName}
 	                            >
-	                              {item.displayName}
+	                              {displayName}
 	                            </button>
 	                            <div className="text-xs text-gray-500">
 	                              {item.entityType === 'preset' ? '预设' : '数据卡'} · 作者：{authorName}

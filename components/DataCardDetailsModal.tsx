@@ -5,6 +5,7 @@ import { getFieldDisplayName } from '@/lib/fieldTranslations';
 import { formatDateTime } from '@/lib/constants';
 import { authStorage } from '@/lib/auth';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { buildTitleDisplay } from '@/lib/text';
 
 type ApiTag = {
   id: string;
@@ -107,6 +108,7 @@ export default function DataCardDetailsModal({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [savingTags, setSavingTags] = useState(false);
   const [saveTagsError, setSaveTagsError] = useState<string | null>(null);
+  const { display: displayName, full: fullName } = buildTitleDisplay(card.name || '未命名');
 
   const reloadMeta = useCallback(async (dataCardId: string) => {
     const requestId = (metaRequestIdRef.current += 1);
@@ -377,8 +379,8 @@ export default function DataCardDetailsModal({
               />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-800">
-                {card.name}
+              <h2 className="text-xl font-bold text-gray-800" title={fullName}>
+                {displayName}
               </h2>
               <p className="text-sm text-gray-500">
                 {card.description}
