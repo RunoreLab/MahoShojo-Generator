@@ -6,6 +6,7 @@ import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { randomUUID } from '@/lib/crypto';
+import { buildMagicTeaPartyHistory } from '@/lib/magic-tea-party/history';
 import { parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
 import { createMagicTeaPartyStreamPreview } from '@/lib/magic-tea-party/stream-preview';
 import { createMagicTeaPartyStreamSafety } from '@/lib/magic-tea-party/stream-safety';
@@ -22,19 +23,6 @@ import { applyShieldWords } from '@/lib/shield-word-filter';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 
 type MagicTeaPartyOutputFormat = NonNullable<MagicTeaPartySession['settings']['outputFormat']>;
-
-const isMessageSuperseded = (message: MagicTeaPartyMessage): boolean => {
-  const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
-  return Boolean(meta && meta.superseded === true);
-};
-
-const shouldIncludeInHistory = (message: MagicTeaPartyMessage): boolean => {
-  if (message.role === 'user') return true;
-  if (message.role !== 'assistant') return false;
-  if (message.status === 'blocked' || message.status === 'error') return false;
-  if (isMessageSuperseded(message)) return false;
-  return true;
-};
 
 export type UseMagicTeaPartyChatOptions = {
   activeSession: MagicTeaPartySession | null;
@@ -378,9 +366,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
       await persistSession(updatedSession);
 
-      const historyForRequest = [...messages, userMessage]
-        .filter(shouldIncludeInHistory)
-        .map((m) => ({ id: m.id, role: m.role, content: m.content }));
+      const historyForRequest = buildMagicTeaPartyHistory([...messages, userMessage]);
 
       await runGenerateStream({
         session: updatedSession,
@@ -443,9 +429,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
     await persistSession(updatedSession);
 
-    const baseHistory = messages
-      .filter(shouldIncludeInHistory)
-      .map((m) => ({ id: m.id, role: m.role, content: m.content }));
+    const baseHistory = buildMagicTeaPartyHistory(messages);
 
     await runGenerateStream({
       session: updatedSession,
@@ -489,9 +473,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
     await persistSession(updatedSession);
 
-    const historyForRequest = messages
-      .filter(shouldIncludeInHistory)
-      .map((m) => ({ id: m.id, role: m.role, content: m.content }));
+    const historyForRequest = buildMagicTeaPartyHistory(messages);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -676,10 +658,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     onGlobalError?.(null);
     setSummaryError(null);
 
-    const historyForRequest = messages
-      .filter(shouldIncludeInHistory)
-      .filter((m) => typeof m.content === 'string' && m.content.trim())
-      .map((m) => ({ id: m.id, role: m.role, content: m.content }));
+    const historyForRequest = buildMagicTeaPartyHistory(messages, { includeEmptyContent: false });
 
     if (historyForRequest.length === 0) {
       setSummaryError('还没有可用于摘要的对话。');
@@ -789,9 +768,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       if (targetIndex < 0) return;
 
       const historyBefore = messages.slice(0, targetIndex);
-      const historyForRequestBase: MagicTeaPartyHistoryMessage[] = historyBefore
-        .filter(shouldIncludeInHistory)
-        .map((message) => ({ id: message.id, role: message.role, content: message.content }));
+      const historyForRequestBase: MagicTeaPartyHistoryMessage[] = buildMagicTeaPartyHistory(historyBefore);
 
       let arrestedBackupInput: string | undefined;
       let sourceMessageId: string | undefined;
