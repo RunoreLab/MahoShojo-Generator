@@ -4,14 +4,16 @@ import { GripVertical, Monitor, Moon, Sun, X } from 'lucide-react';
 import type { ColorModePreference } from '@/lib/color-mode';
 import { COLOR_MODE_OPTIONS, useColorModePreference } from '@/lib/color-mode';
 
+type Position = { x: number; y: number };
+
 export function ColorModeSwitcher() {
   const { preference, resolvedMode, setPreference, isHydrated } = useColorModePreference();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
+  const [position, setPosition] = useState<Position | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const dragOffsetRef = useRef<{ x: number; y: number } | null>(null);
+  const dragOffsetRef = useRef<Position | null>(null);
 
   const storagePositionKey = 'mahoshojo.color-mode-switcher.position';
   const storageMinimizedKey = 'mahoshojo.color-mode-switcher.minimized';
@@ -57,7 +59,7 @@ export function ColorModeSwitcher() {
   };
 
   const clampPosition = useCallback(
-    (next: { x: number; y: number }) => {
+    (next: Position) => {
       if (typeof window === 'undefined') {
         return next;
       }
@@ -74,7 +76,7 @@ export function ColorModeSwitcher() {
     [edgePadding]
   );
 
-  const readStoredPosition = useCallback(() => {
+  const readStoredPosition = useCallback((): Position | null => {
     if (typeof window === 'undefined') {
       return null;
     }
@@ -83,9 +85,9 @@ export function ColorModeSwitcher() {
       if (!stored) {
         return null;
       }
-      const parsed = JSON.parse(stored) as { x?: number; y?: number };
+      const parsed = JSON.parse(stored) as { x?: unknown; y?: unknown };
       if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-        return parsed;
+        return { x: parsed.x, y: parsed.y };
       }
     } catch {
       // localStorage 在受限环境下可能不可用，忽略即可
@@ -94,7 +96,7 @@ export function ColorModeSwitcher() {
   }, [storagePositionKey]);
 
   const storePosition = useCallback(
-    (next: { x: number; y: number }) => {
+    (next: Position) => {
       if (typeof window === 'undefined') {
         return;
       }
@@ -230,7 +232,7 @@ export function ColorModeSwitcher() {
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [clampPosition, isHydrated, position]);
+  }, [clampPosition, isDragging, isHydrated, position]);
 
   useEffect(() => {
     if (!isHydrated) {
