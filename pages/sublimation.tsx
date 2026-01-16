@@ -953,7 +953,28 @@ const SublimationPage: React.FC = () => {
                         {/* 成长方向引导输入框 */}
                         <div className="input-group">
                             <label htmlFor="user-guidance" className="input-label">成长方向引导 (可选)</label>
-                            <input id="user-guidance" type="text" value={userGuidance} onChange={(e) => setUserGuidance(e.target.value)} className="input-field" placeholder="输入关键词或一句话 (最多30字)" maxLength={30} disabled={isGenerating} />
+                            <div className="flex flex-wrap items-center gap-2">
+                                <input
+                                    id="user-guidance"
+                                    type="text"
+                                    value={userGuidance}
+                                    onChange={(e) => setUserGuidance(e.target.value)}
+                                    className="input-field flex-1 min-w-[12rem]"
+                                    placeholder="输入关键词或一句话 (最多30字)"
+                                    maxLength={30}
+                                    disabled={isGenerating}
+                                />
+                                {userGuidance.trim() ? (
+                                    <button
+                                        type="button"
+                                        className="px-3 py-2 text-xs font-semibold rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                                        onClick={() => setUserGuidance('')}
+                                        disabled={isGenerating}
+                                    >
+                                        清空
+                                    </button>
+                                ) : null}
+                            </div>
                             {shouldConfirmGuidanceNativeness && (
                                 <p className="text-xs text-green-700 mt-1">✅ 管理员已允许引导升华保留原生签名。</p>
                             )}

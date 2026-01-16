@@ -17,7 +17,7 @@ export type {
 export { extractPngTextChunks } from './png';
 export { parseTavernCandidates, selectBestTavernCandidate, parseTavernCardFromPngBytes, parseTavernCardFromPngFile } from './parse';
 export { normalizeTavernCard } from './normalize';
-export { createTavernV3Card, writeTavernCardToPngBytes, getPlaceholderPngBytes } from './v3';
+export { createTavernV3Card, writeTavernCardToPngBytes, getPlaceholderPngBytes, getDefaultTavernBasePngBytes } from './v3';
 export { buildTavernAiAttachment } from './ai';
 export { recommendTavernExportFields } from './recommend';
 export type { TavernExportMeta } from './recommend';
