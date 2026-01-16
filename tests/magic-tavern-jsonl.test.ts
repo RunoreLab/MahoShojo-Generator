@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { parseMagicTavernJsonl } from '@/lib/magic-tavern/jsonl';
+import { createMagicTavernJsonlStreamState, flushMagicTavernJsonlStream, ingestMagicTavernJsonlChunk, parseMagicTavernJsonl } from '@/lib/magic-tavern/jsonl';
 
 describe('magic tavern jsonl parser', () => {
   it('兼容 narration 的 text/content 字段', () => {
@@ -33,6 +33,19 @@ describe('magic tavern jsonl parser', () => {
     const parsed = parseMagicTavernJsonl('这是一行普通文本');
     expect(parsed.segments).toHaveLength(1);
     expect(parsed.segments[0]).toEqual({ type: 'narration', text: '这是一行普通文本' });
+  });
+
+  it('支持按行增量解析 JSONL', () => {
+    const state = createMagicTavernJsonlStreamState();
+    ingestMagicTavernJsonlChunk(state, '{"type":"narration","text":"开场"}\n{"type":"dialogue","speakerId":"r1","text":"你');
+    expect(state.segments).toHaveLength(1);
+    expect(state.segments[0]).toEqual({ type: 'narration', text: '开场' });
+
+    ingestMagicTavernJsonlChunk(state, '好"}\n{"type":"choices","items":["回应一","回应二"]}\n');
+    flushMagicTavernJsonlStream(state);
+    expect(state.segments.map((seg) => seg.type)).toEqual(['narration', 'dialogue', 'choices']);
+    expect(state.segments[1]).toEqual({ type: 'dialogue', speakerId: 'r1', text: '你好' });
+    expect(state.choices?.map((item) => item.text)).toEqual(['回应一', '回应二']);
   });
 });
 

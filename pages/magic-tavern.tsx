@@ -13,7 +13,7 @@ import { MagicTavernTachiePanel } from '@/components/magic-tavern/TachiePanel';
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { inferTemplate } from '@/lib/data-card-converter';
-import { parseMagicTavernJsonl } from '@/lib/magic-tavern/jsonl';
+import { createMagicTavernJsonlStreamState, ingestMagicTavernJsonlChunk, parseMagicTavernJsonl } from '@/lib/magic-tavern/jsonl';
 import { DEFAULT_MAGIC_TAVERN_PREFERENCES, patchMagicTavernPreferences, readMagicTavernPreferences } from '@/lib/magic-tavern/preferences';
 import { MAGIC_TAVERN_PRESETS, type MagicTavernPresetId, getMagicTavernPreset } from '@/lib/magic-tavern/presets';
 import {
@@ -711,6 +711,43 @@ export default function MagicTavernPage() {
       let outputSafetyTruncatedAt: number | null = null;
       let safetyCheckTimer: ReturnType<typeof setTimeout> | null = null;
       let safetyCheckInFlight = false;
+      const jsonlStreamState = params.outputFormat === 'jsonl' ? createMagicTavernJsonlStreamState() : null;
+      let lastSafeSnapshot = '';
+
+      const updateStreamingPreview = (safePreview: string) => {
+        streamedSafeSoFar = safePreview;
+
+        if (jsonlStreamState) {
+          if (safePreview.startsWith(lastSafeSnapshot)) {
+            const delta = safePreview.slice(lastSafeSnapshot.length);
+            ingestMagicTavernJsonlChunk(jsonlStreamState, delta);
+          } else {
+            const resetState = createMagicTavernJsonlStreamState();
+            ingestMagicTavernJsonlChunk(resetState, safePreview);
+            jsonlStreamState.buffer = resetState.buffer;
+            jsonlStreamState.segments = resetState.segments;
+            jsonlStreamState.choices = resetState.choices;
+          }
+          lastSafeSnapshot = safePreview;
+        }
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === params.assistantMessageId
+              ? {
+                  ...m,
+                  content: safePreview,
+                  ...(jsonlStreamState
+                    ? {
+                        segments: [...jsonlStreamState.segments],
+                        choices: jsonlStreamState.choices ? [...jsonlStreamState.choices] : undefined,
+                      }
+                    : {}),
+                }
+              : m
+          )
+        );
+      };
 
       try {
         const response = await fetch('/api/magic-tavern/generate-stream', {
@@ -830,8 +867,7 @@ export default function MagicTavernPage() {
             }
 
             const safePreview = applyShieldWords(snapshot).filteredText;
-            streamedSafeSoFar = safePreview;
-            setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? { ...m, content: safePreview } : m)));
+            updateStreamingPreview(safePreview);
           } finally {
             safetyCheckInFlight = false;
             if (!outputBlockedAt && streamedRawSoFar !== snapshot) scheduleSafetyCheck();
@@ -1159,6 +1195,35 @@ export default function MagicTavernPage() {
     setIsGenerating(true);
 
     let streamedRawSoFar = '';
+    const jsonlStreamState = createMagicTavernJsonlStreamState();
+    let lastSafeSnapshot = '';
+
+    const updateStreamingPreview = (safePreview: string) => {
+      if (safePreview.startsWith(lastSafeSnapshot)) {
+        const delta = safePreview.slice(lastSafeSnapshot.length);
+        ingestMagicTavernJsonlChunk(jsonlStreamState, delta);
+      } else {
+        const resetState = createMagicTavernJsonlStreamState();
+        ingestMagicTavernJsonlChunk(resetState, safePreview);
+        jsonlStreamState.buffer = resetState.buffer;
+        jsonlStreamState.segments = resetState.segments;
+        jsonlStreamState.choices = resetState.choices;
+      }
+      lastSafeSnapshot = safePreview;
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMessageId
+            ? {
+                ...m,
+                content: safePreview,
+                segments: [...jsonlStreamState.segments],
+                choices: jsonlStreamState.choices ? [...jsonlStreamState.choices] : undefined,
+              }
+            : m
+        )
+      );
+    };
     try {
       const response = await fetch('/api/magic-tavern/generate-choices', {
         method: 'POST',
@@ -1226,7 +1291,7 @@ export default function MagicTavernPage() {
         onText: (accumulated) => {
           streamedRawSoFar = accumulated;
           const preview = applyShieldWords(accumulated).filteredText;
-          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, content: preview } : m)));
+          updateStreamingPreview(preview);
         },
       });
 
