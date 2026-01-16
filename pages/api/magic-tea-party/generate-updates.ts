@@ -17,6 +17,7 @@ export const config = {
 };
 
 const MAX_SAFETY_TEXT_CHARS = 50_000;
+const MAX_MESSAGE_CHARS = 8_000;
 
 const CustomProviderSchema = z.object({
   providerId: z.string().min(1),
@@ -145,6 +146,11 @@ export default async function handler(req: NextRequest): Promise<Response> {
 
     if (!writeArenaHistory && !writeCurrentState) {
       return json({ error: '未开启写入开关' }, { status: 400 });
+    }
+
+    const overMessage = messages.find((message) => typeof message.content === 'string' && message.content.length > MAX_MESSAGE_CHARS);
+    if (overMessage) {
+      return json({ error: `单条消息内容超过 ${MAX_MESSAGE_CHARS} 字，请先精简。` }, { status: 400 });
     }
 
     const providerOverrideResult = buildProviderOverride(customProvider);

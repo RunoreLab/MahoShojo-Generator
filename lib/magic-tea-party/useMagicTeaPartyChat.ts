@@ -6,8 +6,11 @@ import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { randomUUID } from '@/lib/crypto';
-import { buildMagicTeaPartyHistory } from '@/lib/magic-tea-party/history';
+import { estimateMagicTeaPartyTokens, resolveMagicTeaPartyTokenBudget } from '@/lib/magic-tea-party/budget';
+import { buildMagicTeaPartyHistory, trimMagicTeaPartyHistory } from '@/lib/magic-tea-party/history';
 import { parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
+import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import { createMagicTeaPartyStreamPreview } from '@/lib/magic-tea-party/stream-preview';
 import { createMagicTeaPartyStreamSafety } from '@/lib/magic-tea-party/stream-safety';
 import { appendMagicTeaPartySystemInstruction } from '@/lib/magic-tea-party/system-instruction';
@@ -108,6 +111,75 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         typeof session.settings.writeCurrentState === 'boolean' ? session.settings.writeCurrentState : preferences.writeCurrentState,
     }),
     [preferences]
+  );
+
+  const resolvePromptSettings = useCallback(
+    (session: MagicTeaPartySession, outputFormatOverride?: MagicTeaPartyOutputFormat) => {
+      const outputFormat =
+        outputFormatOverride ?? ((session.settings.outputFormat ?? preferences.outputFormat) as MagicTeaPartyOutputFormat);
+      const language = session.settings.language ?? preferences.language;
+      const enableChoices =
+        typeof session.settings.enableChoices === 'boolean' ? session.settings.enableChoices : preferences.enableChoices;
+      const choiceCount = session.settings.choiceCount ?? preferences.choiceCount;
+      const userDisplayName =
+        typeof session.settings.userDisplayName === 'string' && session.settings.userDisplayName.trim()
+          ? session.settings.userDisplayName.trim().slice(0, 20)
+          : preferences.userDisplayName;
+
+      return {
+        ...buildRequestSettings(session),
+        outputFormat,
+        language,
+        enableChoices,
+        choiceCount,
+        userDisplayName,
+      };
+    },
+    [buildRequestSettings, preferences]
+  );
+
+  const buildHistoryForRequest = useCallback(
+    (params: { session: MagicTeaPartySession; messages: MagicTeaPartyMessage[]; outputFormat?: MagicTeaPartyOutputFormat }) => {
+      const outputFormat =
+        params.outputFormat ??
+        ((params.session.settings.outputFormat ?? preferences.outputFormat) as MagicTeaPartyOutputFormat);
+      const promptSettings = resolvePromptSettings(params.session, outputFormat);
+      const rawHistory = buildMagicTeaPartyHistory(params.messages, { includeEmptyContent: false });
+      if (rawHistory.length === 0) return rawHistory;
+
+      const providerId = userProviderConfig?.providerId ?? params.session.settings.providerId;
+      const tokenBudget = resolveMagicTeaPartyTokenBudget(params.session.settings, providerId);
+      const preset = getMagicTeaPartyPreset(params.session.settings.presetId ?? null);
+      const worldbookText = preset ? buildWorldbookText(preset.worldbook) : '';
+      const stylePrompt = preset ? preset.systemPrompt : '';
+
+      const basePrompt = buildMagicTeaPartyMainPrompt({
+        session: {
+          playerRoleId: params.session.playerRoleId ?? null,
+          summary: params.session.summary,
+          settings: promptSettings,
+        },
+        roles: params.session.roles ?? [],
+        scenario: params.session.scenario,
+        auxScenarios: params.session.auxScenarios ?? [],
+        worldbookText,
+        messages: [],
+        requestChoices: false,
+        stylePrompt,
+      });
+
+      const baseTokens = estimateMagicTeaPartyTokens(basePrompt, providerId);
+      const availableTokens = Math.max(0, tokenBudget.historyBudgetTokens - baseTokens);
+
+      return trimMagicTeaPartyHistory(rawHistory, {
+        maxMessages: tokenBudget.maxContextMessages,
+        tokenBudget: availableTokens,
+        providerId,
+        userDisplayName: promptSettings.userDisplayName,
+        minKeep: 2,
+      });
+    },
+    [preferences.outputFormat, resolvePromptSettings, userProviderConfig?.providerId]
   );
 
   const runGenerateStream = useCallback(
@@ -390,7 +462,11 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
       await persistSession(updatedSession);
 
-      const historyForRequest = buildMagicTeaPartyHistory([...messages, userMessage]);
+      const historyForRequest = buildHistoryForRequest({
+        session: updatedSession,
+        messages: [...messages, userMessage],
+        outputFormat: sessionOutputFormat,
+      });
 
       await runGenerateStream({
         session: updatedSession,
@@ -404,6 +480,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     },
     [
       activeSession,
+      buildHistoryForRequest,
       ensureProviderReady,
       isGenerating,
       messages,
@@ -453,7 +530,11 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
     await persistSession(updatedSession);
 
-    const baseHistory = buildMagicTeaPartyHistory(messages);
+    const baseHistory = buildHistoryForRequest({
+      session: updatedSession,
+      messages,
+      outputFormat: sessionOutputFormat,
+    });
 
     await runGenerateStream({
       session: updatedSession,
@@ -462,7 +543,17 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       assistantMessageId,
       assistantMessage,
     });
-  }, [activeSession, ensureProviderReady, isGenerating, messages, onGlobalError, persistSession, runGenerateStream, setMessages]);
+  }, [
+    activeSession,
+    buildHistoryForRequest,
+    ensureProviderReady,
+    isGenerating,
+    messages,
+    onGlobalError,
+    persistSession,
+    runGenerateStream,
+    setMessages,
+  ]);
 
   const generateChoices = useCallback(async () => {
     if (!activeSession) return;
@@ -497,7 +588,11 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     const updatedSession: MagicTeaPartySession = { ...activeSession, updatedAt: now };
     await persistSession(updatedSession);
 
-    const historyForRequest = buildMagicTeaPartyHistory(messages);
+    const historyForRequest = buildHistoryForRequest({
+      session: updatedSession,
+      messages,
+      outputFormat: 'jsonl',
+    });
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -647,6 +742,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     }
   }, [
     activeSession,
+    buildHistoryForRequest,
     buildRequestSettings,
     ensureProviderReady,
     isGenerating,
@@ -794,7 +890,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       if (targetIndex < 0) return;
 
       const historyBefore = messages.slice(0, targetIndex);
-      const historyForRequestBase: MagicTeaPartyHistoryMessage[] = buildMagicTeaPartyHistory(historyBefore);
+      const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTeaPartyOutputFormat;
+      const historyForRequestBase: MagicTeaPartyHistoryMessage[] = buildHistoryForRequest({
+        session: activeSession,
+        messages: historyBefore,
+        outputFormat: sessionOutputFormat,
+      });
 
       let arrestedBackupInput: string | undefined;
       let sourceMessageId: string | undefined;
@@ -816,8 +917,6 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       }
 
       const now = Date.now();
-      const sessionOutputFormat = (activeSession.settings.outputFormat ?? 'jsonl') as MagicTeaPartyOutputFormat;
-
       const supersededMessage: MagicTeaPartyMessage = {
         ...targetMessage,
         meta: { ...(targetMessage.meta ?? {}), superseded: true },
@@ -858,7 +957,17 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         arrestedBackupInput,
       });
     },
-    [activeSession, ensureProviderReady, isGenerating, messages, onGlobalError, persistSession, runGenerateStream, setMessages]
+    [
+      activeSession,
+      buildHistoryForRequest,
+      ensureProviderReady,
+      isGenerating,
+      messages,
+      onGlobalError,
+      persistSession,
+      runGenerateStream,
+      setMessages,
+    ]
   );
 
   return {
