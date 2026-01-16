@@ -1435,3 +1435,118 @@ export type MagicTeaPartyUpdateDraft = {
 - **单元测试**：`tea-party` 类型写入、winner 默认值、summary 为空时写入仍可用。
 - **集成测试**：生成草案 → 应用写入 → 下载角色卡 → 再导入验证字段。
 - **安全测试**：`blocked` 消息过滤；重复写入提示；确认写入后 `signature` 已被移除。
+
+---
+
+## 19. 特殊读写协议适配（调研与建议）
+
+> 背景：竞技场在单次战报中同时生成“正文 + 历战/状态”，而茶会将“叙事生成”与“历战/状态更新”拆分为两阶段。这会导致带有**强制读写协议**的数据卡在茶会内出现格式错位、字段缺失、依赖卡未校验、选项未落库等问题。
+
+### 19.1 样例归纳（来自 `/docs/temp`）
+
+**高频类型与代表样例**
+- **状态栏协议（`current_state.summary` 必须按模板写入）**  
+  - `小城市的魔法少女 1.7.json`、`平凡的校园生活V0.5.json`、`镜中凡俗 - 2.0(1).json`  
+  - 关键特征：时间连续、字段固定、首次登场判定基于状态栏。
+- **历战记录协议（`arena_history.impact` 严格格式写入）**  
+  - `不变身魔法少女的日常直播 版本3.1 (2).json`、`黑烬黎明地下炼狱` 系列、`魔法少女RTS：灵境争霸赛 - 实况解说系统.json`  
+  - 关键特征：数值/字段非常细、依赖“上一条记录”演进。
+- **工具型数据卡（非叙事角色，专门存数据）**  
+  - `Ciallo～(∠・ω_ )⌒★.json` + `全局数据卡.json`  
+  - 关键特征：选项列表与用户引导存入“全局数据卡”的状态栏/历战。
+- **依赖型角色卡**  
+  - `小城市的魔法少女 1.7.json` 明确要求携带 `templateId=fairy` 的妖精卡（如 `[妖精]兰兰V1.4.json`）。  
+  - 缺失时要求在 `officialReport.winner` 输出硬错误（竞技场逻辑）。
+- **叙事禁词/记录允许冲突**  
+  - `黑烬黎明地下炼狱` 系列要求正文禁止使用“体力值/饥饿度”等术语，但在历战记录里必须使用这些术语。
+- **官方字段映射需求**  
+  - `Ciallo～(∠・ω_ )⌒★.json` 要求在 `officialReport.conclusion` 填写选项列表。  
+  - `小城市的魔法少女 1.7.json` 要求在 `officialReport.winner` 输出“缺少妖精卡”等提示。
+
+> 典型组合示例：**小城市的魔法少女1.7 + [妖精]兰兰 + 全局数据卡**，属于“状态栏协议 + 依赖卡 + 字段映射”叠加场景。
+
+### 19.2 问题本质
+
+1. **读写时序错位**：协议要求“当轮结算”写入，但茶会仅在二阶段写入，导致协议失败或提示缺失。  
+2. **字段语义错位**：竞技场的 `officialReport.*` 在茶会不存在，选项/错误提示无法呈现。  
+3. **依赖卡缺失无校验**：茶会默认不检查“必须携带的工具卡/角色卡”。  
+4. **词表冲突**：协议要求“正文禁词、记录可用”，若同一提示词中混用会互相污染。  
+5. **计数器与时间连续性缺失**：多个协议要求“第 N 次故事/第 N 天/时间段连续”，茶会未维护跨轮计数。
+
+### 19.3 方案对比（多方案）
+
+**方案 A：回退到“单轮一体化输出”**  
+- 做法：叙事 + 状态/历战一次生成，接近竞技场。  
+- 优点：兼容性最高。  
+- 缺点：破坏茶会“解耦”结构，UI/编辑体验大幅下降。
+
+**方案 B：维持双阶段但忽略协议**  
+- 做法：继续只写“通用摘要”。  
+- 优点：实现简单。  
+- 缺点：强制协议场景几乎不可用（高风险）。
+
+**方案 C：协议快照 + 双阶段映射（推荐）**  
+- 做法：对卡片进行“协议解析与快照”，内容生成阶段只读，更新阶段按协议写，并提供字段映射与校验。  
+- 优点：保留茶会结构，且兼容强协议卡。  
+- 缺点：需要增加解析与校验逻辑。
+
+### 19.4 推荐方案：协议快照 + 双阶段提示 + 字段映射
+
+**1) 协议解析与快照（Protocol Snapshot）**
+- 在“角色/情景选择”阶段扫描卡片文本：关键词 `协议/状态栏/current_state/arena_history/officialReport`。  
+- 生成 `protocolSnapshot`（可保存在 session meta）：  
+  - `writeTargets`: `current_state.summary` / `arena_history.impact` / `globalDataCard`  
+  - `readRules`: 读取规则（首次登场判定、依赖字段）  
+  - `writeRules`: 写入模板（原文片段裁剪或提取）  
+  - `requiredCards`: 依赖卡（如 `templateId=fairy`、`codename=全局数据卡`）  
+  - `fieldMap`: `officialReport.conclusion -> choices`，`officialReport.winner -> systemAlert`  
+  - `counterRules`: “第 N 次故事/天数/时间段”计数策略  
+  - `narrativeBanTerms`: 正文禁词，`recordAllowTerms`: 仅记录允许的术语
+
+**2) 内容生成阶段（只读协议）**
+- 只注入 `readRules` 与角色/情景设定，**明确声明：不输出记录**。  
+- 依赖卡缺失时：直接阻断生成并提示（等价于竞技场 `winner` 字段错误）。  
+- 若协议要求选项列表：将其映射到 `choices` 输出段（而非 `officialReport.conclusion`）。
+
+**3) 更新生成阶段（按协议写）**
+- 输入：对话片段 + 最近一条 `current_state.summary` + 最近一条 `arena_history.impact` + `writeRules`。  
+- 输出：对每个角色生成严格格式的 `impact` 与/或 `currentStateSummary`。  
+- 对“工具型数据卡”执行写入（如 `全局数据卡` 记录选项/时间线）。  
+- 对“禁词冲突”场景：更新提示词中显式允许“记录术语”，避免受正文禁词影响。
+
+**4) 字段映射与 UI 显示**
+- `officialReport.conclusion` → `choices`（复用茶会选项 UI）。  
+- `officialReport.winner` → `systemAlert`（阻断提示/红色 Banner）。  
+- “非叙事数据卡”标记 `isUtilityCard`：不进入台词显示，但可更新记录。
+
+**5) 计数器与时间连续性**
+- 在 session 内维护 `storySegmentIndex`、`dayIndex`、`timeSlot` 等计数器。  
+- 若无法可靠解析（如状态栏格式复杂），允许把“上一条记录”原文交给更新模型推断并延续。
+
+**6) 校验与回滚**
+- 对 `impact`/`currentStateSummary` 进行“格式片段校验”（关键字段缺失即失败）。  
+- 失败时保留草案并提示“协议不完整，请重试/缩小范围/开启强制模板”。
+
+### 19.5 建议的数据结构扩展（仅设计）
+
+```ts
+export type MagicTeaPartyProtocolSnapshot = {
+  id: string;
+  writeTargets: Array<'current_state.summary' | 'arena_history.impact' | 'globalDataCard'>;
+  readRules?: string[];
+  writeRules?: string[];
+  requiredCards?: Array<{ type: 'templateId' | 'codename'; value: string }>;
+  fieldMap?: Record<string, 'choices' | 'systemAlert' | 'narration'>;
+  counterRules?: { storyIndex?: boolean; dayIndex?: boolean; timeSlot?: boolean };
+  narrativeBanTerms?: string[];
+  recordAllowTerms?: string[];
+};
+```
+
+### 19.6 实施建议清单
+
+- **解析策略**：先粗匹配关键词，再允许“手动标记协议模式”（UI 复选）。  
+- **依赖卡校验**：缺失时直接阻断生成，并提供“一键补全/导入”入口。  
+- **协议裁剪**：只抽取“读/写规则段落”，避免把全部卡面正文塞进写入提示。  
+- **安全与合规**：成人向/高风险协议仅在用户显式开启相应内容时生效；默认不自动写入。  
+- **回退机制**：协议识别失败时，退回“通用摘要 + 手动编辑模式”，但应提示“可能破坏连续性”。
