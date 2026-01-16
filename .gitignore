@@ -54,3 +54,4 @@ next-env.d.ts
 
 .cache/
 .xdg-data/
+/docs/temp
