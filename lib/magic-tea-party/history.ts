@@ -6,8 +6,14 @@ const isMessageSuperseded = (message: MagicTeaPartyMessage): boolean => {
   return Boolean(meta && meta.superseded === true);
 };
 
+const isNoticeSuppressed = (message: MagicTeaPartyMessage): boolean => {
+  const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
+  return Boolean(meta && meta.noticeSuppressed === true);
+};
+
 const shouldIncludeInHistory = (message: MagicTeaPartyMessage): boolean => {
   if (isMessageSuperseded(message)) return false;
+  if (isNoticeSuppressed(message)) return false;
   if (message.role === 'user') return true;
   if (message.role !== 'assistant') return false;
   if (message.status === 'blocked' || message.status === 'error') return false;

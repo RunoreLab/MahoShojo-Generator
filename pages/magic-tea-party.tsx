@@ -21,7 +21,13 @@ import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-te
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import { useMagicTeaPartyChat } from '@/lib/magic-tea-party/useMagicTeaPartyChat';
 import { useMagicTeaPartySessions } from '@/lib/magic-tea-party/useMagicTeaPartySessions';
-import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyTachieAsset, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
+import type {
+  MagicTeaPartyMessage,
+  MagicTeaPartyNotice,
+  MagicTeaPartyRole,
+  MagicTeaPartyTachieAsset,
+  MagicTeaPartyUpdateDraft,
+} from '@/lib/magic-tea-party/types';
 import { useAuth } from '@/lib/useAuth';
 
 export default function MagicTeaPartyPage() {
@@ -70,6 +76,36 @@ export default function MagicTeaPartyPage() {
     onGlobalError: setGlobalError,
   });
 
+  const [notices, setNotices] = useState<MagicTeaPartyNotice[]>([]);
+
+  const buildNoticeKey = (notice: MagicTeaPartyNotice): string => {
+    const meta = notice.meta && typeof notice.meta === 'object' ? (notice.meta as Record<string, unknown>) : null;
+    const roleId = meta && typeof meta.roleId === 'string' ? String(meta.roleId) : '';
+    const scenarioId = meta && typeof meta.scenarioId === 'string' ? String(meta.scenarioId) : '';
+    const stage = meta && typeof meta.stage === 'string' ? String(meta.stage) : '';
+    const code = notice.code?.trim() || notice.message.trim().slice(0, 80);
+    return [notice.level, code, roleId, scenarioId, stage].filter(Boolean).join(':');
+  };
+
+  const appendNotices = (incoming: MagicTeaPartyNotice[]) => {
+    if (!incoming || incoming.length === 0) return;
+    setNotices((prev) => {
+      const keys = new Set(prev.map(buildNoticeKey));
+      const next = [...prev];
+      incoming.forEach((notice) => {
+        const key = buildNoticeKey(notice);
+        if (!key || keys.has(key)) return;
+        keys.add(key);
+        next.push(notice);
+      });
+      return next;
+    });
+  };
+
+  const clearNotices = () => {
+    setNotices([]);
+  };
+
   const {
     isGenerating,
     isSummarizing,
@@ -90,6 +126,7 @@ export default function MagicTeaPartyPage() {
     preferences,
     userProviderConfig,
     onGlobalError: setGlobalError,
+    onNotices: appendNotices,
     router,
   });
 
@@ -130,7 +167,16 @@ export default function MagicTeaPartyPage() {
     setUpdateError(null);
     setEditingMessageId(null);
     setEditingDraft('');
+    clearNotices();
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!activeSession) return;
+    const shadowDrafts = activeSession.protocolShadow?.drafts;
+    if (Array.isArray(shadowDrafts) && shadowDrafts.length > 0) {
+      setUpdateDrafts(shadowDrafts);
+    }
+  }, [activeSession?.id]);
 
   const handleStartEditMessage = (message: MagicTeaPartyMessage) => {
     setEditingMessageId(message.id);
@@ -164,6 +210,26 @@ export default function MagicTeaPartyPage() {
         : true;
     if (!confirmed) return;
     await mergeSessionToParent(sessionId ?? activeSession?.id ?? null);
+  };
+
+  const handleSendMessage = async (text: string) => {
+    clearNotices();
+    return await sendMessage(text);
+  };
+
+  const handleContinueGeneration = async () => {
+    clearNotices();
+    await continueGeneration();
+  };
+
+  const handleGenerateChoices = async () => {
+    clearNotices();
+    await generateChoices();
+  };
+
+  const handleRegenerateMessage = async (message: MagicTeaPartyMessage) => {
+    clearNotices();
+    await regenerateMessage(message);
   };
 
   useEffect(() => {
@@ -233,6 +299,7 @@ export default function MagicTeaPartyPage() {
     const sessionForPrompt = {
       playerRoleId: activeSession.playerRoleId ?? null,
       summary: activeSession.summary,
+      protocolShadow: activeSession.protocolShadow,
       settings: {
         ...activeSession.settings,
         outputFormat: activeSession.settings.outputFormat ?? preferences.outputFormat,
@@ -327,6 +394,10 @@ export default function MagicTeaPartyPage() {
       toMessageId: sliced[sliced.length - 1]?.id,
       count: sliced.length,
     };
+    const fallbackChoices = [...messages]
+      .reverse()
+      .find((message) => Array.isArray(message.choices) && message.choices.length > 0)?.choices;
+    const lastChoices = activeSession.lastChoices ?? fallbackChoices;
 
     setUpdateError(null);
     setIsGeneratingUpdates(true);
@@ -341,6 +412,9 @@ export default function MagicTeaPartyPage() {
           messages: sliced,
           summary: activeSession.summary,
           roles: activeSession.roles ?? [],
+          scenario: activeSession.scenario ?? null,
+          auxScenarios: activeSession.auxScenarios ?? [],
+          lastChoices: lastChoices ?? undefined,
           messageRange,
           settings: {
             writeArenaHistory,
@@ -370,6 +444,16 @@ export default function MagicTeaPartyPage() {
         return;
       }
       setUpdateDrafts(drafts);
+      const now = Date.now();
+      await persistSession({
+        ...activeSession,
+        protocolShadow: {
+          updatedAt: now,
+          ...(messageRange ? { messageRange } : {}),
+          drafts,
+        },
+        updatedAt: now,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : '生成更新草案失败';
       setUpdateError(message);
@@ -422,9 +506,11 @@ export default function MagicTeaPartyPage() {
 
       const updatedRoles = Array.isArray(payload?.updatedRoles) ? (payload.updatedRoles as MagicTeaPartyRole[]) : [];
       if (updatedRoles.length > 0) {
-        await updateActiveSessionRoles(updatedRoles);
+        const now = Date.now();
+        await persistSession({ ...activeSession, roles: updatedRoles, protocolShadow: undefined, updatedAt: now });
       } else if (activeSession.roles) {
-        await updateActiveSessionRoles(activeSession.roles);
+        const now = Date.now();
+        await persistSession({ ...activeSession, protocolShadow: undefined, updatedAt: now });
       }
       setUpdateDrafts(null);
     } catch (error) {
@@ -445,7 +531,7 @@ export default function MagicTeaPartyPage() {
       <div className="magic-background-white">
         <div className="container !max-w-[1200px]">
           <div className="card !max-w-none">
-            <MagicTeaPartyHero globalError={globalError} />
+            <MagicTeaPartyHero globalError={globalError} notices={notices} onClearNotices={clearNotices} />
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
               <MagicTeaPartySessionSidebar
@@ -499,7 +585,12 @@ export default function MagicTeaPartyPage() {
                   onUpdateRangeSizeChange={setUpdateRangeSize}
                   onGenerateUpdates={() => void handleGenerateUpdateDrafts()}
                   onApplyUpdates={() => void handleApplyUpdates()}
-                  onClearUpdateDrafts={() => setUpdateDrafts(null)}
+                  onClearUpdateDrafts={() => {
+                    setUpdateDrafts(null);
+                    if (activeSession) {
+                      void persistSession({ ...activeSession, protocolShadow: undefined, updatedAt: Date.now() });
+                    }
+                  }}
                 />
 
                 {activeSession ? (
@@ -542,12 +633,12 @@ export default function MagicTeaPartyPage() {
                     editingMessageId={editingMessageId}
                     editingDraft={editingDraft}
                     onStopGenerating={stopGenerating}
-                    onSelectChoice={(text) => void sendMessage(text)}
+                    onSelectChoice={(text) => void handleSendMessage(text)}
                     onUseAsReference={(target, plainText) => {
                       setTachieReferenceText(plainText);
                       setTachieAnchorMessageId(target.id);
                     }}
-                    onRegenerate={(target) => void regenerateMessage(target)}
+                    onRegenerate={(target) => void handleRegenerateMessage(target)}
                     onStartEdit={handleStartEditMessage}
                     onEditDraftChange={setEditingDraft}
                     onCancelEdit={handleCancelEditMessage}
@@ -561,12 +652,12 @@ export default function MagicTeaPartyPage() {
                     onDraftChange={setDraft}
                     onSend={(value) => {
                       if (!value.trim()) return;
-                      void sendMessage(value).then((sent) => {
+                      void handleSendMessage(value).then((sent) => {
                         if (sent) setDraft('');
                       });
                     }}
-                    onContinue={() => void continueGeneration()}
-                    onGenerateChoices={() => void generateChoices()}
+                    onContinue={() => void handleContinueGeneration()}
+                    onGenerateChoices={() => void handleGenerateChoices()}
                     isGenerating={isGenerating}
                     hasMessages={messages.length > 0}
                   />

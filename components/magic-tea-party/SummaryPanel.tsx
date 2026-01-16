@@ -197,7 +197,12 @@ export function MagicTeaPartySummaryPanel(props: MagicTeaPartySummaryPanelProps)
                 {draft.currentStateSummary ? (
                   <div className="mt-1 text-gray-600">状态摘要：{draft.currentStateSummary}</div>
                 ) : null}
-                <div className="mt-1 text-gray-500">胜者：{draft.winner || '不适用'}</div>
+                {!draft.impact && !draft.currentStateSummary ? (
+                  <div className="mt-1 text-gray-500">无可写入更新（可能因协议冲突而跳过）。</div>
+                ) : null}
+                {draft.impact || draft.currentStateSummary ? (
+                  <div className="mt-1 text-gray-500">胜者：{draft.winner || '不适用'}</div>
+                ) : null}
               </div>
             ))}
           </div>

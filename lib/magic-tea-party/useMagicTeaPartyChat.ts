@@ -13,6 +13,7 @@ import {
   trimMagicTeaPartyHistory,
 } from '@/lib/magic-tea-party/history';
 import { parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import { extractMagicTeaPartyNoticesFromJsonl, extractMagicTeaPartyNoticesFromMarkdown } from '@/lib/magic-tea-party/notice';
 import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import { createMagicTeaPartyStreamPreview } from '@/lib/magic-tea-party/stream-preview';
@@ -23,6 +24,7 @@ import { deriveMagicTeaPartyTitle } from '@/lib/magic-tea-party/title';
 import type {
   MagicTeaPartyHistoryMessage,
   MagicTeaPartyMessage,
+  MagicTeaPartyNotice,
   MagicTeaPartyPreferences,
   MagicTeaPartySession,
 } from '@/lib/magic-tea-party/types';
@@ -40,6 +42,7 @@ export type UseMagicTeaPartyChatOptions = {
   preferences: MagicTeaPartyPreferences;
   userProviderConfig: UserAIProviderConfig | null;
   onGlobalError?: (message: string | null) => void;
+  onNotices?: (notices: MagicTeaPartyNotice[]) => void;
   router: NextRouter;
 };
 
@@ -66,6 +69,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     preferences,
     userProviderConfig,
     onGlobalError,
+    onNotices,
     router,
   } = options;
 
@@ -173,6 +177,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         session: {
           playerRoleId: params.session.playerRoleId ?? null,
           summary: params.session.summary,
+          protocolShadow: params.session.protocolShadow,
           settings: promptSettings,
         },
         roles: params.session.roles ?? [],
@@ -214,6 +219,51 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     const consecutive = overLimit ? (prev?.consecutive ?? 0) + 1 : 0;
     dropTrackerRef.current[sessionId] = { consecutive, lastRatio: droppedRatio };
   }, []);
+
+  const buildChoiceNotices = useCallback(
+    (params: {
+      choices: { id: string; text: string }[] | undefined;
+      expectedCount?: number | null;
+      enableChoices: boolean;
+      stage: string;
+    }): MagicTeaPartyNotice[] => {
+      const { choices, expectedCount, enableChoices, stage } = params;
+      if (!choices || choices.length === 0) return [];
+      const notices: MagicTeaPartyNotice[] = [];
+      if (!enableChoices) {
+        notices.push({
+          type: 'notice',
+          level: 'warning',
+          code: 'choices_forced',
+          message: '协议要求选项已临时输出，可在设置中开启选项功能。',
+          meta: { stage },
+        });
+      }
+      if (typeof expectedCount === 'number' && Number.isFinite(expectedCount) && choices.length !== expectedCount) {
+        notices.push({
+          type: 'notice',
+          level: 'info',
+          code: 'choices_count_adjusted',
+          message: `选项数量已调整为 ${choices.length} 条（原设置 ${expectedCount} 条）。`,
+          meta: { stage },
+        });
+      }
+      return notices;
+    },
+    []
+  );
+
+  const emitNotices = useCallback(
+    (notices: MagicTeaPartyNotice[]) => {
+      if (!onNotices || notices.length === 0) return;
+      const sanitized = notices.map((notice) => ({
+        ...notice,
+        message: applyShieldWords(notice.message).filteredText,
+      }));
+      onNotices(sanitized);
+    },
+    [onNotices]
+  );
 
   const runGenerateStream = useCallback(
     async (params: {
@@ -269,6 +319,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             roles: params.session.roles ?? [],
             scenario: params.session.scenario ?? null,
             auxScenarios: params.session.auxScenarios ?? [],
+            protocolShadow: params.session.protocolShadow,
             playerRoleId: params.session.playerRoleId ?? null,
             settings: {
               ...buildRequestSettings(params.session),
@@ -349,13 +400,31 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
         const { safeText, status, blockedAt, truncatedAt } = await safety.finalize(streamedText);
 
-        const parsed = params.outputFormat === 'jsonl' ? parseMagicTeaPartyJsonl(safeText) : { segments: undefined, choices: null };
+        const isJsonl = params.outputFormat === 'jsonl';
+        const parsed = isJsonl ? parseMagicTeaPartyJsonl(safeText) : { segments: undefined, choices: null, notices: [] };
+        const noticeBundle = isJsonl
+          ? extractMagicTeaPartyNoticesFromJsonl(safeText)
+          : extractMagicTeaPartyNoticesFromMarkdown(safeText);
+        const promptSettings = resolvePromptSettings(params.session, params.outputFormat);
+        const extraNotices = isJsonl
+          ? buildChoiceNotices({
+              choices: parsed.choices ?? undefined,
+              expectedCount: promptSettings.enableChoices ? promptSettings.choiceCount : undefined,
+              enableChoices: promptSettings.enableChoices,
+              stage: String(params.assistantMessage.meta?.kind ?? 'narration'),
+            })
+          : [];
+        const allNotices = [...noticeBundle.notices, ...extraNotices];
+        emitNotices(allNotices);
 
+        const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
+        const finalContent = hasErrorNotice ? '' : noticeBundle.cleanedText;
         const finalAssistant: MagicTeaPartyMessage = {
           ...params.assistantMessage,
-          content: safeText,
+          content: finalContent,
           status,
-          ...(params.outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+          ...(isJsonl && parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+          ...(hasErrorNotice ? { meta: { ...(params.assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
           ...(status === 'blocked'
             ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
             : { safety: { status: 'ok' } }),
@@ -366,11 +435,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         await putMagicTeaPartyMessage(finalAssistant);
 
         const shouldAutoTitle = !params.session.titleMeta || params.session.titleMeta.source === 'auto';
-        if (shouldAutoTitle && (params.session.title === '新会话' || params.session.title === '未命名会话')) {
+        const hasChoices = Boolean(parsed.choices && parsed.choices.length > 0 && !hasErrorNotice);
+        if (shouldAutoTitle && !hasErrorNotice && (params.session.title === '新会话' || params.session.title === '未命名会话')) {
           const nextTitle = deriveMagicTeaPartyTitle({
             outputFormat: params.outputFormat,
-            content: safeText,
-            segments: params.outputFormat === 'jsonl' ? parsed.segments : undefined,
+            content: finalContent,
+            segments: isJsonl ? parsed.segments : undefined,
             scenarioTitle: params.session.scenario?.title,
             roleNames: (params.session.roles ?? []).map((r) => r.name),
           });
@@ -379,6 +449,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           const nextSession: MagicTeaPartySession = {
             ...params.session,
             title: titleFiltered,
+            ...(hasChoices ? { lastChoices: parsed.choices ?? undefined } : {}),
             titleMeta: {
               source: 'auto',
               generatedAt: Date.now(),
@@ -390,7 +461,11 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           await persistSession(nextSession);
           finalSession = nextSession;
         } else {
-          const nextSession: MagicTeaPartySession = { ...params.session, updatedAt: Date.now() };
+          const nextSession: MagicTeaPartySession = {
+            ...params.session,
+            ...(hasChoices ? { lastChoices: parsed.choices ?? undefined } : {}),
+            updatedAt: Date.now(),
+          };
           await persistSession(nextSession);
           finalSession = nextSession;
         }
@@ -398,12 +473,31 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         safety.clearTimer();
         if (error instanceof Error && error.name === 'AbortError') {
           const { safeText, status, blockedAt, truncatedAt } = await safety.finalizeAfterAbort(controller.signal.reason);
-          const parsed = params.outputFormat === 'jsonl' ? parseMagicTeaPartyJsonl(safeText) : { segments: undefined, choices: null };
+          const isJsonl = params.outputFormat === 'jsonl';
+          const parsed = isJsonl ? parseMagicTeaPartyJsonl(safeText) : { segments: undefined, choices: null, notices: [] };
+          const noticeBundle = isJsonl
+            ? extractMagicTeaPartyNoticesFromJsonl(safeText)
+            : extractMagicTeaPartyNoticesFromMarkdown(safeText);
+          const promptSettings = resolvePromptSettings(params.session, params.outputFormat);
+          const extraNotices = isJsonl
+            ? buildChoiceNotices({
+                choices: parsed.choices ?? undefined,
+                expectedCount: promptSettings.enableChoices ? promptSettings.choiceCount : undefined,
+                enableChoices: promptSettings.enableChoices,
+                stage: String(params.assistantMessage.meta?.kind ?? 'narration'),
+              })
+            : [];
+          const allNotices = [...noticeBundle.notices, ...extraNotices];
+          emitNotices(allNotices);
+
+          const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
+          const finalContent = hasErrorNotice ? '' : noticeBundle.cleanedText;
           const finalAssistant: MagicTeaPartyMessage = {
             ...params.assistantMessage,
-            content: safeText,
+            content: finalContent,
             status,
-            ...(params.outputFormat === 'jsonl' && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+            ...(isJsonl && parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+            ...(hasErrorNotice ? { meta: { ...(params.assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
             ...(status === 'blocked'
               ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
               : { safety: { status: 'ok' } }),
@@ -424,7 +518,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       }
       return finalSession;
     },
-    [buildRequestSettings, persistSession, router, setMessages, userProviderConfig]
+    [buildChoiceNotices, buildRequestSettings, emitNotices, persistSession, resolvePromptSettings, router, setMessages, userProviderConfig]
   );
 
   const maybeAutoSummarize = useCallback(
@@ -853,6 +947,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           roles: activeSession.roles ?? [],
           scenario: activeSession.scenario ?? null,
           auxScenarios: activeSession.auxScenarios ?? [],
+          protocolShadow: activeSession.protocolShadow,
           playerRoleId: activeSession.playerRoleId ?? null,
           settings: {
             ...buildRequestSettings(activeSession),
@@ -914,11 +1009,23 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       const { safeText, status, blockedAt, truncatedAt } = await safety.finalize(streamedText);
 
       const parsed = parseMagicTeaPartyJsonl(safeText);
+      const noticeBundle = extractMagicTeaPartyNoticesFromJsonl(safeText);
+      const expectedCount = activeSession.settings.choiceCount ?? preferences.choiceCount;
+      const extraNotices = buildChoiceNotices({
+        choices: parsed.choices ?? undefined,
+        expectedCount,
+        enableChoices: true,
+        stage: 'choices',
+      });
+      const allNotices = [...noticeBundle.notices, ...extraNotices];
+      emitNotices(allNotices);
+      const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
       const finalAssistant: MagicTeaPartyMessage = {
         ...assistantMessage,
-        content: safeText,
+        content: hasErrorNotice ? '' : noticeBundle.cleanedText,
         status,
-        ...(parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+        ...(parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+        ...(hasErrorNotice ? { meta: { ...(assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
         ...(status === 'blocked'
           ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
           : { safety: { status: 'ok' } }),
@@ -927,17 +1034,33 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
       setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
       await putMagicTeaPartyMessage(finalAssistant);
-      await persistSession({ ...updatedSession, updatedAt: Date.now() });
+      await persistSession({
+        ...updatedSession,
+        ...(parsed.choices && parsed.choices.length > 0 && !hasErrorNotice ? { lastChoices: parsed.choices } : {}),
+        updatedAt: Date.now(),
+      });
     } catch (error) {
       safety.clearTimer();
       if (error instanceof Error && error.name === 'AbortError') {
         const { safeText, status, blockedAt, truncatedAt } = await safety.finalizeAfterAbort(controller.signal.reason);
         const parsed = parseMagicTeaPartyJsonl(safeText);
+        const noticeBundle = extractMagicTeaPartyNoticesFromJsonl(safeText);
+        const expectedCount = activeSession.settings.choiceCount ?? preferences.choiceCount;
+        const extraNotices = buildChoiceNotices({
+          choices: parsed.choices ?? undefined,
+          expectedCount,
+          enableChoices: true,
+          stage: 'choices',
+        });
+        const allNotices = [...noticeBundle.notices, ...extraNotices];
+        emitNotices(allNotices);
+        const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
         const finalAssistant: MagicTeaPartyMessage = {
           ...assistantMessage,
-          content: safeText,
+          content: hasErrorNotice ? '' : noticeBundle.cleanedText,
           status,
-          ...(parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+          ...(parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+          ...(hasErrorNotice ? { meta: { ...(assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
           ...(status === 'blocked'
             ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
             : { safety: { status: 'ok' } }),
@@ -959,8 +1082,10 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     }
   }, [
     activeSession,
+    buildChoiceNotices,
     buildHistoryForRequest,
     buildRequestSettings,
+    emitNotices,
     ensureProviderReady,
     isGenerating,
     messages,

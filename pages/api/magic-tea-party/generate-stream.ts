@@ -64,6 +64,33 @@ const ScenarioSchema = z
   })
   .passthrough();
 
+const ProtocolShadowSchema = z
+  .object({
+    updatedAt: z.number().optional(),
+    messageRange: z
+      .object({
+        fromMessageId: z.string().min(1),
+        toMessageId: z.string().min(1),
+        count: z.number().int().min(1),
+      })
+      .optional(),
+    drafts: z
+      .array(
+        z
+          .object({
+            roleId: z.string().optional(),
+            characterName: z.string().optional(),
+            impact: z.string().optional(),
+            currentStateSummary: z.string().optional(),
+            hasWinner: z.boolean().optional(),
+            winner: z.string().optional(),
+          })
+          .passthrough()
+      )
+      .optional(),
+  })
+  .passthrough();
+
 const SettingsSchema = z
   .object({
     temperature: z.number().min(0).max(1.2).optional(),
@@ -89,6 +116,7 @@ const RequestBodySchema = z.object({
   roles: z.array(RoleSchema).max(20).default([]),
   scenario: ScenarioSchema.nullish(),
   auxScenarios: z.array(ScenarioSchema).max(12).optional().default([]),
+  protocolShadow: ProtocolShadowSchema.optional(),
   playerRoleId: z.string().nullable().optional().default(null),
   summary: z.string().optional().nullable(),
   settings: SettingsSchema,
@@ -147,7 +175,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       return json({ error: '请求参数无效' }, { status: 400 });
     }
 
-    const { sessionId, messages, roles, scenario: scenarioInput, auxScenarios, playerRoleId, summary, settings, customProvider } = parsedBody.data;
+    const { sessionId, messages, roles, scenario: scenarioInput, auxScenarios, protocolShadow, playerRoleId, summary, settings, customProvider } = parsedBody.data;
 
     const overMessage = messages.find((message) => typeof message.content === 'string' && message.content.length > MAX_MESSAGE_CHARS);
     if (overMessage) {
@@ -192,6 +220,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       session: {
         playerRoleId,
         summary: summary ?? undefined,
+        protocolShadow: protocolShadow ?? undefined,
         settings: {
           providerId,
           modelId: customProvider.modelId.trim(),

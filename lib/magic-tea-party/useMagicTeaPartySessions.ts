@@ -6,6 +6,7 @@ import { randomUUID } from '@/lib/crypto';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { clearMagicTeaPartyDraft } from '@/lib/magic-tea-party/drafts';
 import { parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import { extractMagicTeaPartyNoticesFromJsonl, extractMagicTeaPartyNoticesFromMarkdown } from '@/lib/magic-tea-party/notice';
 import { migrateMagicTeaPartyLocalStorage } from '@/lib/magic-tea-party/migration';
 import {
   DEFAULT_MAGIC_TEA_PARTY_PREFERENCES,
@@ -251,10 +252,28 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
         content.trim().startsWith('```jsonl') ||
         content.trim().startsWith('{"type"') ||
         content.includes('\n{"type"');
-      if (!looksJsonl) return message;
+
+      let nextMessage = message;
+      let didChange = false;
+
+      if (metaOutputFormat === 'markdown' && content) {
+        const cleaned = extractMagicTeaPartyNoticesFromMarkdown(content).cleanedText;
+        if (cleaned !== content) {
+          nextMessage = { ...nextMessage, content: cleaned };
+          didChange = true;
+        }
+      }
+
+      if (!looksJsonl) return didChange ? nextMessage : message;
 
       const parsed = parseMagicTeaPartyJsonl(content);
-      if (!Array.isArray(parsed.segments) || parsed.segments.length === 0) return message;
+      const noticeBundle = extractMagicTeaPartyNoticesFromJsonl(content);
+      if (noticeBundle.cleanedText !== content) {
+        nextMessage = { ...nextMessage, content: noticeBundle.cleanedText };
+        didChange = true;
+      }
+
+      if (!Array.isArray(parsed.segments) || parsed.segments.length === 0) return didChange ? nextMessage : message;
 
       const storedSegments = Array.isArray(message.segments) ? message.segments : null;
       const storedHasMeaningfulSegment = storedSegments
@@ -268,13 +287,14 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
           })
         : false;
 
-      if (storedHasMeaningfulSegment) return message;
+      if (storedHasMeaningfulSegment) return didChange ? nextMessage : message;
 
-      return {
-        ...message,
+      nextMessage = {
+        ...nextMessage,
         segments: parsed.segments,
         ...(parsed.choices ? { choices: parsed.choices } : {}),
       };
+      return nextMessage;
     });
 
     setMessages(patchedMessages);

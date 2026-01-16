@@ -1,14 +1,17 @@
-import type { MagicTeaPartyOutputSegment } from '@/lib/magic-tea-party/types';
+import type { MagicTeaPartyNotice, MagicTeaPartyOutputSegment } from '@/lib/magic-tea-party/types';
+import { parseMagicTeaPartyNoticePayload } from '@/lib/magic-tea-party/notice';
 
 type ParseResult = {
   segments: MagicTeaPartyOutputSegment[];
   choices: { id: string; text: string }[] | null;
+  notices: MagicTeaPartyNotice[];
 };
 
 export type MagicTeaPartyJsonlStreamState = {
   buffer: string;
   segments: MagicTeaPartyOutputSegment[];
   choices: { id: string; text: string }[] | null;
+  notices: MagicTeaPartyNotice[];
 };
 
 const readString = (value: unknown): string => (typeof value === 'string' ? value : '').trim();
@@ -23,10 +26,10 @@ const isMarkdownFenceLine = (line: string): boolean => {
   return trimmed.startsWith('```') || trimmed.startsWith('~~~');
 };
 
-const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw: string): void => {
+const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw: string): boolean => {
   const line = raw.trim();
-  if (!line) return;
-  if (isMarkdownFenceLine(line)) return;
+  if (!line) return true;
+  if (isMarkdownFenceLine(line)) return true;
 
   let parsed: any = null;
   try {
@@ -34,10 +37,15 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
     parsed = JSON.parse(normalized);
   } catch {
     state.segments.push({ type: 'narration', text: raw });
-    return;
+    return true;
   }
 
   let type = readString(parsed?.type).toLowerCase();
+  const notice = parseMagicTeaPartyNoticePayload(parsed);
+  if (notice) {
+    state.notices.push(notice);
+    return false;
+  }
   if (!type) {
     if (Array.isArray(parsed?.items) || (parsed?.items && typeof parsed.items === 'object')) type = 'choices';
   }
@@ -45,7 +53,7 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
     const narrationText = readTextField(parsed);
     if (narrationText) state.segments.push({ type: 'narration', text: narrationText });
     else state.segments.push({ type: 'narration', text: raw });
-    return;
+    return true;
   }
 
   if (type === 'dialogue') {
@@ -54,7 +62,7 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
     const dialogueText = readTextField(parsed);
     if (!speakerId || !dialogueText) {
       state.segments.push({ type: 'narration', text: raw });
-      return;
+      return true;
     }
     state.segments.push({
       type: 'dialogue',
@@ -62,7 +70,7 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
       ...(speakerName ? { speakerName } : {}),
       text: dialogueText,
     });
-    return;
+    return true;
   }
 
   if (type === 'choices' || type === 'options' || type === 'choice') {
@@ -93,16 +101,18 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
     } else {
       state.segments.push({ type: 'narration', text: raw });
     }
-    return;
+    return true;
   }
 
   state.segments.push({ type: 'narration', text: raw });
+  return true;
 };
 
 export const createMagicTeaPartyJsonlStreamState = (): MagicTeaPartyJsonlStreamState => ({
   buffer: '',
   segments: [],
   choices: null,
+  notices: [],
 });
 
 export const ingestMagicTeaPartyJsonlChunk = (state: MagicTeaPartyJsonlStreamState, chunk: string): void => {
@@ -125,7 +135,9 @@ export const flushMagicTeaPartyJsonlStream = (state: MagicTeaPartyJsonlStreamSta
 
 export const parseMagicTeaPartyJsonl = (text: string): ParseResult => {
   const state = createMagicTeaPartyJsonlStreamState();
-  ingestMagicTeaPartyJsonlChunk(state, text);
-  flushMagicTeaPartyJsonlStream(state);
-  return { segments: state.segments, choices: state.choices };
+  const lines = text.split('\n');
+  for (const raw of lines) {
+    appendMagicTeaPartyJsonlLine(state, raw);
+  }
+  return { segments: state.segments, choices: state.choices, notices: state.notices };
 };

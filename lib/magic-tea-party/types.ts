@@ -45,6 +45,14 @@ export type MagicTeaPartyOutputSegment =
   | { type: 'dialogue'; speakerId: string; speakerName?: string; text: string }
   | { type: 'choices'; items: { id: string; text: string }[] };
 
+export type MagicTeaPartyNotice = {
+  type: 'notice';
+  level: 'info' | 'warning' | 'error';
+  code?: string;
+  message: string;
+  meta?: Record<string, unknown>;
+};
+
 export type MagicTeaPartyMessage = {
   id: string;
   sessionId: string;
@@ -125,6 +133,12 @@ export type MagicTeaPartySession = {
   };
   forkedFrom?: { sessionId: string; messageId: string; createdAt: number };
   branchLabel?: string;
+  protocolShadow?: {
+    updatedAt: number;
+    messageRange?: { fromMessageId: string; toMessageId: string; count: number };
+    drafts: MagicTeaPartyUpdateDraft[];
+  };
+  lastChoices?: { id: string; text: string }[];
   settings: {
     providerId: string;
     modelId: string;

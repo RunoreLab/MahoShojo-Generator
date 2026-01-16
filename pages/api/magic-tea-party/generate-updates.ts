@@ -6,7 +6,7 @@ import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
 import { buildMagicTeaPartyUpdatePrompt } from '@/lib/magic-tea-party/prompts';
-import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
+import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
 import { generateWithAI, LoadBalanceStrategy } from '@/lib/ai';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 
@@ -42,6 +42,25 @@ const RoleSchema = z
   })
   .passthrough();
 
+const ScenarioSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    presetId: z.string().optional(),
+    templateId: z.string().optional(),
+    dataCardId: z.string().optional(),
+    source: z.string().optional(),
+    card: z.record(z.unknown()).default({}),
+  })
+  .passthrough();
+
+const ChoiceSchema = z
+  .object({
+    id: z.string().optional(),
+    text: z.string().min(1),
+  })
+  .passthrough();
+
 const SettingsSchema = z.object({
   writeArenaHistory: z.boolean().optional(),
   writeCurrentState: z.boolean().optional(),
@@ -55,6 +74,9 @@ const RequestBodySchema = z.object({
   messages: z.array(MessageSchema).max(200),
   summary: z.string().optional().nullable(),
   roles: z.array(RoleSchema).max(20).default([]),
+  scenario: ScenarioSchema.nullish(),
+  auxScenarios: z.array(ScenarioSchema).max(12).optional().default([]),
+  lastChoices: z.array(ChoiceSchema).optional(),
   messageRange: z
     .object({
       fromMessageId: z.string().min(1),
@@ -140,7 +162,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       return json({ error: '请求参数无效' }, { status: 400 });
     }
 
-    const { sessionId, messages, summary, roles, messageRange, settings, customProvider } = parsedBody.data;
+    const { sessionId, messages, summary, roles, scenario, auxScenarios, lastChoices, messageRange, settings, customProvider } = parsedBody.data;
     const writeArenaHistory = Boolean(settings.writeArenaHistory);
     const writeCurrentState = Boolean(settings.writeCurrentState);
 
@@ -167,6 +189,9 @@ export default async function handler(req: NextRequest): Promise<Response> {
 
     const promptInput = {
       roles: normalizedRoles,
+      scenario: scenario ?? undefined,
+      auxScenarios: Array.isArray(auxScenarios) ? (auxScenarios as unknown as MagicTeaPartyScenario[]) : [],
+      lastChoices: Array.isArray(lastChoices) ? lastChoices : undefined,
       messages: messages as MagicTeaPartyMessage[],
       summary: summary ?? undefined,
       language: settings.language ?? 'zh-CN',
@@ -203,15 +228,15 @@ export default async function handler(req: NextRequest): Promise<Response> {
     const updates = Array.isArray((result as any)?.updates) ? (result as any).updates : [];
     const updateList: MagicTeaPartyUpdateDraft[] = normalizedRoles.map((role) => {
       const matched = updates.find((item: any) => item?.roleId === role.id || item?.characterName === role.name);
-      const impact = writeArenaHistory ? sanitizeText(matched?.impact) ?? '在本次茶会中获得新的体悟。' : undefined;
+      const impact = writeArenaHistory ? sanitizeText(matched?.impact) : undefined;
       const currentStateSummary = writeCurrentState ? sanitizeText(matched?.currentStateSummary) : undefined;
       const hasWinner = Boolean(matched?.hasWinner && typeof matched?.winner === 'string' && matched.winner.trim());
       const winner = hasWinner ? sanitizeText(matched?.winner) ?? '不适用' : '不适用';
       return {
         roleId: role.id,
         characterName: role.name,
-        ...(writeArenaHistory ? { impact } : {}),
-        ...(writeCurrentState ? { currentStateSummary } : {}),
+        ...(writeArenaHistory && impact ? { impact } : {}),
+        ...(writeCurrentState && currentStateSummary ? { currentStateSummary } : {}),
         hasWinner,
         winner,
         meta: {

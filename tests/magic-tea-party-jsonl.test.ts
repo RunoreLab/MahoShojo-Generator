@@ -7,10 +7,12 @@ describe('magic tea party jsonl parser', () => {
     const withText = parseMagicTeaPartyJsonl('{"type":"narration","text":"奶茶店的灯光在雨夜里摇曳……"}');
     expect(withText.segments).toHaveLength(1);
     expect(withText.segments[0]).toEqual({ type: 'narration', text: '奶茶店的灯光在雨夜里摇曳……' });
+    expect(withText.notices).toHaveLength(0);
 
     const withContent = parseMagicTeaPartyJsonl('{"type":"narration","content":"我推开咖啡店的门……"}');
     expect(withContent.segments).toHaveLength(1);
     expect(withContent.segments[0]).toEqual({ type: 'narration', text: '我推开咖啡店的门……' });
+    expect(withContent.notices).toHaveLength(0);
   });
 
   it('会跳过 Markdown 围栏，并解析 dialogue/choices', () => {
@@ -27,12 +29,14 @@ describe('magic tea party jsonl parser', () => {
     expect(parsed.segments[0]).toEqual({ type: 'narration', text: '场景开场……' });
     expect(parsed.segments[1]).toEqual({ type: 'dialogue', speakerId: 'role-1', speakerName: '星见澪', text: '要来一杯桂花奶茶吗？' });
     expect(parsed.choices?.map((c) => c.text)).toEqual(['我点头并接过菜单', '我礼貌拒绝，转向窗边']);
+    expect(parsed.notices).toHaveLength(0);
   });
 
   it('当行 JSON 解析失败时保留原文', () => {
     const parsed = parseMagicTeaPartyJsonl('这是一行普通文本');
     expect(parsed.segments).toHaveLength(1);
     expect(parsed.segments[0]).toEqual({ type: 'narration', text: '这是一行普通文本' });
+    expect(parsed.notices).toHaveLength(0);
   });
 
   it('支持按行增量解析 JSONL', () => {
@@ -46,5 +50,17 @@ describe('magic tea party jsonl parser', () => {
     expect(state.segments.map((seg) => seg.type)).toEqual(['narration', 'dialogue', 'choices']);
     expect(state.segments[1]).toEqual({ type: 'dialogue', speakerId: 'r1', text: '你好' });
     expect(state.choices?.map((item) => item.text)).toEqual(['回应一', '回应二']);
+    expect(state.notices).toHaveLength(0);
+  });
+
+  it('会识别 notice 行并忽略为正文', () => {
+    const input = [
+      '{"type":"notice","level":"error","code":"missing","message":"缺少必要卡片"}',
+      '{"type":"narration","text":"风铃轻响。"}',
+    ].join('\n');
+    const parsed = parseMagicTeaPartyJsonl(input);
+    expect(parsed.segments.map((seg) => seg.type)).toEqual(['narration']);
+    expect(parsed.notices).toHaveLength(1);
+    expect(parsed.notices[0]).toMatchObject({ level: 'error', code: 'missing', message: '缺少必要卡片' });
   });
 });

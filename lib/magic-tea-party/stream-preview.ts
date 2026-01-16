@@ -45,6 +45,7 @@ export function createMagicTeaPartyStreamPreview(options: StreamPreviewOptions):
         jsonlStreamState.buffer = resetState.buffer;
         jsonlStreamState.segments = resetState.segments;
         jsonlStreamState.choices = resetState.choices;
+        jsonlStreamState.notices = resetState.notices;
       }
       lastSafeSnapshot = safeText;
 

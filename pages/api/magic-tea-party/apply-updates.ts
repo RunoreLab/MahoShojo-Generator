@@ -110,12 +110,13 @@ export default async function handler(req: NextRequest): Promise<Response> {
 
     const updatedRoles: MagicTeaPartyRole[] = normalizedRoles.map((role) => {
       const draft = normalizedDrafts.find((item) => item.roleId === role.id || item.characterName === role.name);
-      if (!draft) return { ...role, isNative: false, signature: undefined };
+      if (!draft) return role;
 
       const card = { ...toRecord(role.card) };
       let didMutate = false;
 
-      if (writeArenaHistory) {
+      const impactText = readString(draft.impact);
+      if (writeArenaHistory && impactText) {
         const history = { ...(card.arena_history as Record<string, unknown> | undefined) };
         const entries = Array.isArray(history.entries) ? [...(history.entries as any[])] : [];
         const attributes = toRecord(history.attributes);
@@ -123,7 +124,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
         const lastEntryId = entries.length > 0 && typeof entries[entries.length - 1]?.id === 'number' ? entries[entries.length - 1].id : 0;
         const hasWinner = Boolean(draft.hasWinner && readString(draft.winner));
         const winner = hasWinner ? readString(draft.winner) : '不适用';
-        const impact = readString(draft.impact) || '在本次茶会中获得新的体悟。';
+        const impact = impactText;
 
         const nextAttributes = {
           world_line_id: typeof attributes.world_line_id === 'string' ? attributes.world_line_id : randomUUID(),
@@ -157,15 +158,18 @@ export default async function handler(req: NextRequest): Promise<Response> {
         didMutate = true;
       }
 
-      if (writeCurrentState && readString(draft.currentStateSummary)) {
+      const stateSummary = readString(draft.currentStateSummary);
+      if (writeCurrentState && stateSummary) {
         const existingState = toRecord(card.current_state);
         card.current_state = {
           ...existingState,
-          summary: readString(draft.currentStateSummary),
+          summary: stateSummary,
           updated_at: nowISO,
         };
         didMutate = true;
       }
+
+      if (!didMutate) return role;
 
       delete (card as any).signature;
 
@@ -174,7 +178,6 @@ export default async function handler(req: NextRequest): Promise<Response> {
         card,
         isNative: false,
         signature: undefined,
-        ...(didMutate ? {} : {}),
       };
     });
 
