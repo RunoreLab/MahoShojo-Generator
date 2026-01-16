@@ -1321,3 +1321,116 @@ export type MagicTeaPartyPreset = {
   - 单角色：导出 JSON 卡片。
   - 批量：导出 ZIP（角色卡合集）。
 - 导出文件命名包含 `sessionId` 与时间戳，便于回溯。
+
+### 18.19 数据结构草案（更新草案）
+
+```ts
+export type MagicTeaPartyUpdateDraft = {
+  roleId: string;
+  characterName: string;
+  impact?: string;
+  currentStateSummary?: string;
+  hasWinner?: boolean;
+  winner?: string; // 默认 "不适用"
+  meta?: {
+    sessionId: string;
+    summaryId?: string;
+    messageRange?: { fromMessageId: string; toMessageId: string; count: number };
+    generatedAt: number;
+  };
+};
+```
+
+> 草案仅用于 UI 预览；写入时由服务端基于草案或重新计算生成最终写入结果。
+
+### 18.20 API 合约草案（generate-updates / apply-updates）
+
+#### `POST /api/magic-tea-party/generate-updates`
+
+**请求体（JSON）**
+```json
+{
+  "sessionId": "uuid",
+  "messageRange": { "fromMessageId": "m1", "toMessageId": "m20" },
+  "messages": [{ "id": "m1", "role": "user", "content": "..." }],
+  "summary": "可选会话摘要",
+  "roles": [{ "id": "r1", "name": "星见澪", "card": {}, "signature": "..." }],
+  "settings": { "writeArenaHistory": true, "writeCurrentState": true }
+}
+```
+
+**响应体（JSON）**
+```json
+{
+  "drafts": [
+    {
+      "roleId": "r1",
+      "characterName": "星见澪",
+      "impact": "……",
+      "currentStateSummary": "……",
+      "hasWinner": false,
+      "winner": "不适用"
+    }
+  ],
+  "meta": {
+    "usedSummary": true,
+    "messageRange": { "fromMessageId": "m1", "toMessageId": "m20", "count": 20 }
+  }
+}
+```
+
+**约束**
+- 以对话历史为主；摘要仅作补充。
+- `winner` 缺省为“**不适用**”，仅在 `hasWinner=true` 时填入真实胜者。
+- 遇到 `blocked/error/truncated` 消息需过滤。
+
+#### `POST /api/magic-tea-party/apply-updates`
+
+**请求体（JSON）**
+```json
+{
+  "sessionId": "uuid",
+  "drafts": [{ "roleId": "r1", "impact": "...", "currentStateSummary": "..." }],
+  "roles": [{ "id": "r1", "name": "星见澪", "card": {}, "signature": "..." }],
+  "summaryMeta": { "summaryId": "s1", "messageRange": { "fromMessageId": "m1", "toMessageId": "m20" } },
+  "settings": { "writeArenaHistory": true, "writeCurrentState": true }
+}
+```
+
+**响应体（JSON）**
+```json
+{
+  "updatedRoles": [{ "id": "r1", "card": { /* 已写入并重新签名 */ } }],
+  "writeLog": { "sessionId": "uuid", "summaryId": "s1" }
+}
+```
+
+> 写入只在服务端完成签名与落库更新，前端不得直接修改 `signature`。
+
+### 18.21 与竞技场共用逻辑（建议）
+
+- 可抽象 `applyPostSessionUpdates`：
+  - 输入：角色卡 + drafts + `writeArenaHistory/writeCurrentState`。
+  - 输出：更新后的角色卡（已重新签名）。
+- 复用竞技场签名验证流程（`verifySignature`/`generateSignature`）与原生性冲突检测。
+- `arena_history` 写入时强制 `type='tea-party'`，并在 `metadata` 写入：
+  - `source='magic-tea-party'`
+  - `has_winner`
+  - `sessionId/summaryId/messageRange`
+
+### 18.22 UI 草案补充（角色管理信息架构）
+
+- 角色卡片信息层级：
+  1) 角色名 + 原生性标识
+  2) 当前状态摘要（可编辑）
+  3) 最近一条历战记录（type + title + time）
+  4) 操作区：生成草案 / 查看历战 / 下载角色卡
+- 历战记录模态：
+  - Tab：全部 / 仅茶会 / 仅竞技场
+  - 行项：type、title、time、winner、impact（折叠）
+
+### 18.23 验证与测试建议
+
+- **单元测试**：`tea-party` 类型写入、winner 默认值、summary 为空时写入仍可用。
+- **集成测试**：生成草案 → 应用写入 → 下载角色卡 → 再导入验证字段。
+- **安全测试**：签名篡改降级；`blocked` 消息过滤；重复写入提示。
