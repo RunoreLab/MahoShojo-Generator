@@ -40,11 +40,12 @@ export function MagicTavernSessionSidebar(props: MagicTavernSidebarProps) {
   const currentLanguage = activeSession?.settings.language ?? preferences.language;
   const currentEnableChoices = activeSession?.settings.enableChoices ?? preferences.enableChoices;
   const currentChoiceCount = activeSession?.settings.choiceCount ?? preferences.choiceCount;
+  const selectedPresetId = activeSession ? activeSession.settings.presetId : preferences.lastPresetId;
 
   return (
-    <aside className="space-y-4">
+    <aside className="space-y-4 min-w-0">
       <div className="rounded-xl border border-pink-100 bg-white p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-sm font-semibold text-gray-800">会话列表</div>
           <button
             type="button"
@@ -86,17 +87,29 @@ export function MagicTavernSessionSidebar(props: MagicTavernSidebarProps) {
       <div className="rounded-xl border border-pink-100 bg-white p-4">
         <div className="text-sm font-semibold text-gray-800">预设情景</div>
         <div className="mt-3 grid gap-2">
-          {MAGIC_TAVERN_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className="rounded-xl border border-pink-200 bg-white px-4 py-3 text-left hover:bg-pink-50"
-              onClick={() => onPresetSelected(preset.id)}
-            >
-              <div className="text-sm font-semibold text-pink-800">{preset.title}</div>
-              <div className="mt-1 text-xs text-gray-600">{preset.description}</div>
-            </button>
-          ))}
+          {MAGIC_TAVERN_PRESETS.map((preset) => {
+            const isSelected = selectedPresetId === preset.id;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                aria-pressed={isSelected}
+                className={`rounded-xl border px-4 py-3 text-left transition-colors ${
+                  isSelected
+                    ? 'border-pink-300 bg-pink-50 text-pink-800'
+                    : 'border-pink-200 bg-white hover:bg-pink-50'
+                }`}
+                onClick={() => onPresetSelected(preset.id)}
+                title={isSelected ? '再次点击可取消预设' : '点击选择预设'}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-sm font-semibold text-pink-800">{preset.title}</div>
+                  {isSelected ? <span className="text-[10px] font-semibold text-pink-600">已选</span> : null}
+                </div>
+                <div className="mt-1 text-xs text-gray-600">{preset.description}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
 

@@ -39,7 +39,7 @@ export function MagicTavernSessionSetupPanel(props: MagicTavernSessionSetupPanel
 
   return (
     <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-800">会话设置</div>
         <button
           type="button"
@@ -54,7 +54,7 @@ export function MagicTavernSessionSetupPanel(props: MagicTavernSessionSetupPanel
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-semibold text-gray-600">角色</div>
             <button
               type="button"
@@ -87,7 +87,7 @@ export function MagicTavernSessionSetupPanel(props: MagicTavernSessionSetupPanel
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-semibold text-gray-600">情景</div>
             <button
               type="button"

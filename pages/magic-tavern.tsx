@@ -586,6 +586,34 @@ export default function MagicTavernPage() {
         return;
       }
 
+      const currentPresetId = activeSession.settings.presetId;
+      if (currentPresetId && currentPresetId === preset.id) {
+        const currentScenario = activeSession.scenario;
+        const currentAux = Array.isArray(activeSession.auxScenarios) ? activeSession.auxScenarios : [];
+        const shouldClearScenario =
+          currentScenario?.source === 'preset' ||
+          currentScenario?.presetId === preset.id ||
+          currentScenario?.id === 'preset-scenario';
+        const nextScenario = shouldClearScenario ? undefined : currentScenario;
+        const nextAux = currentAux.filter((item) => item.source !== 'preset' && item.presetId !== preset.id);
+
+        const nextSession: MagicTavernSession = {
+          ...activeSession,
+          updatedAt: Date.now(),
+          scenario: nextScenario,
+          auxScenarios: nextAux,
+          settings: {
+            ...activeSession.settings,
+            presetId: undefined,
+            worldbookPresetId: undefined,
+          },
+        };
+
+        void persistSession(nextSession);
+        applyPreferencePatch({ lastPresetId: undefined, lastWorldbookPresetId: undefined });
+        return;
+      }
+
       void updateActiveSessionSettings({
         presetId: preset.id,
         worldbookPresetId: preset.worldbookPresetId,
@@ -617,7 +645,7 @@ export default function MagicTavernPage() {
         choiceCount: preset.defaultSettings.choiceCount,
       });
     },
-    [activeSession, applyPreferencePatch, createSession, updateActiveSessionScenarios, updateActiveSessionSettings]
+    [activeSession, applyPreferencePatch, createSession, persistSession, updateActiveSessionScenarios, updateActiveSessionSettings]
   );
 
   const onToggleRoleCard = useCallback(
@@ -1787,7 +1815,7 @@ export default function MagicTavernPage() {
           <div className="card !max-w-none">
             <MagicTavernHero globalError={globalError} />
 
-            <div className="mt-6 grid gap-6 lg:grid-cols-[320px_1fr]">
+            <div className="mt-6 grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
               <MagicTavernSessionSidebar
                 sessions={sessions}
                 activeSessionId={activeSessionId}
@@ -1803,7 +1831,7 @@ export default function MagicTavernPage() {
                 onSessionSettingChange={updateActiveSessionSettings}
               />
 
-              <main className="space-y-4">
+              <main className="space-y-4 min-w-0">
                 <MagicTavernSessionSetupPanel
                   activeSession={activeSession}
                   playerOptions={playerOptions}
