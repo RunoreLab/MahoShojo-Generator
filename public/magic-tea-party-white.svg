@@ -1,12 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="240" height="100" viewBox="0 0 240 100">
-  <g fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 30h36v42c0 6-4 10-10 10H38c-6 0-10-4-10-10V30z" />
-    <path d="M64 40h10c8 0 14 6 14 14s-6 14-14 14H64" />
-    <path d="M28 30h36" />
-    <path d="M36 22h20" />
-    <path d="M82 22l4 6 7 1-5 5 1 7-7-3-7 3 1-7-5-5 7-1z" />
+  <g fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 38h52v22c0 12-10 22-22 22H48c-12 0-22-10-22-22V38z" />
+    <path d="M78 44h12c11 0 20 9 20 20s-9 20-20 20H78" />
+    <path d="M30 38h44" />
+    <path d="M22 84h74" />
+    <path d="M36 24c0 8 6 12 12 12" />
+    <path d="M54 22c0 9 7 14 14 14" />
+    <path d="M72 20c0 7 6 11 12 11" />
+    <path d="M98 16l4 6 7 1-5 5 1 7-7-3-7 3 1-7-5-5 7-1z" />
   </g>
-  <text x="96" y="56" fill="#ffffff" font-family="Arial, sans-serif" font-size="26" font-weight="700">魔法茶会</text>
-  <text x="96" y="78" fill="#ffffff" opacity="0.9" font-family="Arial, sans-serif" font-size="12" font-weight="600">Magic Tea Party</text>
+  <text x="110" y="54" fill="#ffffff" font-family="Arial, sans-serif" font-size="26" font-weight="700">魔法茶会</text>
+  <text x="110" y="76" fill="#ffffff" opacity="0.9" font-family="Arial, sans-serif" font-size="12" font-weight="600">Magic Tea Party</text>
 </svg>
-

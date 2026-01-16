@@ -1788,23 +1788,6 @@ export default function MagicTeaPartyPage() {
 
 
 
-  const lastAssistantId = useMemo(() => {
-    const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
-    return lastAssistant?.id ?? null;
-  }, [messages]);
-
-  const canRegenerateMessage = useCallback(
-    (message: MagicTeaPartyMessage): boolean => {
-      if (message.role !== 'assistant') return false;
-      if (message.status === 'streaming') return false;
-      if (!lastAssistantId || message.id !== lastAssistantId) return false;
-      const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
-      const kind = typeof meta?.kind === 'string' ? String(meta.kind) : '';
-      if (kind === 'choices') return false;
-      return true;
-    },
-    [lastAssistantId]
-  );
   return (
     <>
       <Head>
@@ -1865,6 +1848,7 @@ export default function MagicTeaPartyPage() {
                     messages={messages}
                     isGenerating={isGenerating}
                     tachieAssets={tachieAssets}
+                    anchorMessageId={tachieAnchorMessageId}
                     onStopGenerating={stopGenerating}
                     onSelectChoice={(text) => void sendMessage(text)}
                     onUseAsReference={(target, plainText) => {
@@ -1872,7 +1856,6 @@ export default function MagicTeaPartyPage() {
                       setTachieAnchorMessageId(target.id);
                     }}
                     onRegenerate={(target) => void regenerateMessage(target)}
-                    canRegenerateMessage={canRegenerateMessage}
                   />
 
                   <MagicTeaPartyChatComposer

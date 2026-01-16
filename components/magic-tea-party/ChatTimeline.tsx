@@ -1,4 +1,7 @@
+import { useMemo } from 'react';
+
 import { MagicTeaPartyChatMessage } from '@/components/magic-tea-party/ChatMessage';
+import { useChatAutoScroll } from '@/components/magic-tea-party/useChatAutoScroll';
 
 import type {
   MagicTeaPartyMessage,
@@ -13,11 +16,11 @@ type MagicTeaPartyChatTimelineProps = {
   messages: MagicTeaPartyMessage[];
   isGenerating: boolean;
   tachieAssets?: MagicTeaPartyTachieAsset[];
+  anchorMessageId?: string | null;
   onStopGenerating: () => void;
   onSelectChoice: (text: string) => void;
   onUseAsReference: (message: MagicTeaPartyMessage, plainText: string) => void;
   onRegenerate: (message: MagicTeaPartyMessage) => void;
-  canRegenerateMessage: (message: MagicTeaPartyMessage) => boolean;
 };
 
 const InlineSpinner = () => (
@@ -31,12 +34,37 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
     messages,
     isGenerating,
     tachieAssets,
+    anchorMessageId,
     onStopGenerating,
     onSelectChoice,
     onUseAsReference,
     onRegenerate,
-    canRegenerateMessage,
   } = props;
+
+  const lastAssistantId = useMemo(() => {
+    const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+    return lastAssistant?.id ?? null;
+  }, [messages]);
+
+  const canRegenerateMessage = (message: MagicTeaPartyMessage): boolean => {
+    if (message.role !== 'assistant') return false;
+    if (message.status === 'streaming') return false;
+    if (!lastAssistantId || message.id !== lastAssistantId) return false;
+    const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
+    const kind = typeof meta?.kind === 'string' ? String(meta.kind) : '';
+    if (kind === 'choices') return false;
+    return true;
+  };
+
+  const lastMessage = messages[messages.length - 1];
+  const lastMessageLength = typeof lastMessage?.content === 'string' ? lastMessage.content.length : 0;
+  const autoScrollKey = `${activeSession?.id ?? 'no-session'}:${messages.length}:${lastMessage?.id ?? ''}:${lastMessage?.status ?? ''}:${lastMessageLength}`;
+  const { bottomRef } = useChatAutoScroll({
+    enabled: true,
+    autoScrollKey,
+    anchorMessageId,
+    behavior: isGenerating ? 'auto' : 'smooth',
+  });
 
   return (
     <>
@@ -69,7 +97,10 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
         ) : (
           messages.map((message) => (
             <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className="max-w-[720px] w-full sm:w-auto">
+              <div
+                id={`magic-tea-party-message-${message.id}`}
+                className={`max-w-[720px] w-full sm:w-auto ${anchorMessageId === message.id ? 'rounded-xl ring-2 ring-pink-200 shadow-sm' : ''}`}
+              >
                 <MagicTeaPartyChatMessage
                   message={message}
                   session={activeSession}
@@ -85,6 +116,7 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
             </div>
           ))
         )}
+        <div ref={bottomRef} aria-hidden="true" />
       </div>
     </>
   );
