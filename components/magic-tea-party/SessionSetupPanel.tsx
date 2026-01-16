@@ -1,4 +1,4 @@
-import { type ChangeEvent } from 'react';
+import { type ChangeEvent, useState } from 'react';
 
 import type { MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
 
@@ -16,6 +16,10 @@ type MagicTeaPartySessionSetupPanelProps = {
   onUpdatePlayerRole: (roleId: string | null) => void;
   onUpdateTitle: (title: string) => void;
   onLockTitle: () => void;
+  onImportRolesText: (text: string) => void;
+  onImportScenariosText: (text: string) => void;
+  onDropRoles: (files: File[]) => void;
+  onDropScenarios: (files: File[]) => void;
 };
 
 export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupPanelProps) {
@@ -31,11 +35,17 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
     onUpdatePlayerRole,
     onUpdateTitle,
     onLockTitle,
+    onImportRolesText,
+    onImportScenariosText,
+    onDropRoles,
+    onDropScenarios,
   } = props;
 
   const roles = activeSession?.roles ?? [];
   const scenario = activeSession?.scenario;
   const auxScenarios = activeSession?.auxScenarios ?? [];
+  const [rolePasteText, setRolePasteText] = useState('');
+  const [scenarioPasteText, setScenarioPasteText] = useState('');
 
   return (
     <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-4">
@@ -66,6 +76,47 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
             </button>
           </div>
           <input type="file" accept=".json" multiple className="input-field" onChange={onUploadRoles} disabled={!activeSession} />
+          <div
+            className="rounded-lg border border-dashed border-pink-200 bg-pink-50/40 p-3 text-xs text-gray-600"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (!activeSession) return;
+              const files = Array.from(event.dataTransfer.files || []);
+              if (files.length === 0) return;
+              void onDropRoles(files);
+            }}
+          >
+            <div className="text-xs font-semibold text-gray-600">粘贴 / 拖拽导入角色卡</div>
+            <textarea
+              className="input-field mt-2 h-20 resize-y"
+              value={rolePasteText}
+              onChange={(event) => setRolePasteText(event.target.value)}
+              placeholder="粘贴角色卡 JSON（单卡或数组）"
+              disabled={!activeSession}
+            />
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-pink-200 bg-white px-3 py-1 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!activeSession || !rolePasteText.trim()}
+                onClick={() => {
+                  onImportRolesText(rolePasteText);
+                  setRolePasteText('');
+                }}
+              >
+                导入
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!activeSession || !rolePasteText.trim()}
+                onClick={() => setRolePasteText('')}
+              >
+                清空
+              </button>
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2">
             {roles.length === 0 ? (
               <div className="text-xs text-gray-500">未选择角色（可选）</div>
@@ -99,6 +150,47 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
             </button>
           </div>
           <input type="file" accept=".json" multiple className="input-field" onChange={onUploadScenarios} disabled={!activeSession} />
+          <div
+            className="rounded-lg border border-dashed border-pink-200 bg-pink-50/40 p-3 text-xs text-gray-600"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (!activeSession) return;
+              const files = Array.from(event.dataTransfer.files || []);
+              if (files.length === 0) return;
+              void onDropScenarios(files);
+            }}
+          >
+            <div className="text-xs font-semibold text-gray-600">粘贴 / 拖拽导入情景卡</div>
+            <textarea
+              className="input-field mt-2 h-20 resize-y"
+              value={scenarioPasteText}
+              onChange={(event) => setScenarioPasteText(event.target.value)}
+              placeholder="粘贴情景卡 JSON（单卡或数组）"
+              disabled={!activeSession}
+            />
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-pink-200 bg-white px-3 py-1 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!activeSession || !scenarioPasteText.trim()}
+                onClick={() => {
+                  onImportScenariosText(scenarioPasteText);
+                  setScenarioPasteText('');
+                }}
+              >
+                导入
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!activeSession || !scenarioPasteText.trim()}
+                onClick={() => setScenarioPasteText('')}
+              >
+                清空
+              </button>
+            </div>
+          </div>
           <div className="space-y-2">
             {scenario ? (
               <div className="rounded-lg border border-pink-100 bg-pink-50 px-3 py-2">

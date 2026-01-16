@@ -181,12 +181,17 @@ export type UseMagicTeaPartySessionsResult = {
   onToggleScenarioCard: (payload: any, nextSelected: boolean) => Promise<void>;
   onUploadRoles: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
   onUploadScenarios: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
+  onImportRolesText: (text: string) => Promise<void>;
+  onImportScenariosText: (text: string) => Promise<void>;
+  onDropRoles: (files: File[]) => Promise<void>;
+  onDropScenarios: (files: File[]) => Promise<void>;
   selectedRoleCardIds: string[];
   selectedScenarioCardIds: string[];
   playerOptions: { value: string; label: string }[];
   updateSessionTitle: (title: string) => void;
   lockSessionTitle: () => void;
   updatePlayerRole: (roleId: string | null) => void;
+  forkSessionFromMessage: (messageId: string, content: string) => Promise<string | null>;
 };
 
 export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOptions): UseMagicTeaPartySessionsResult {
@@ -607,67 +612,161 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
     return ids;
   }, [activeSession?.scenario, activeSession?.auxScenarios]);
 
-  const onUploadRoles = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
+  const parseJsonPayloads = (text: string): Record<string, unknown>[] => {
+    const trimmed = text.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item) => item && typeof item === 'object' && !Array.isArray(item)) as Record<string, unknown>[];
+      }
+      if (parsed && typeof parsed === 'object') return [parsed as Record<string, unknown>];
+    } catch {
+      // ignore parse error
+    }
+    return [];
+  };
+
+  const onDropRoles = useCallback(
+    async (files: File[]) => {
       if (!activeSession) return;
-      const files = event.target.files;
       if (!files || files.length === 0) return;
 
       const importedAt = Date.now();
       const nextRoles: MagicTeaPartyRole[] = [...(activeSession.roles ?? [])];
 
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         try {
           const text = await file.text();
-          const parsed = JSON.parse(text);
-          const card = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
-          if (!card) continue;
-          const role = buildRoleFromLocalJson(card, { fileName: file.name, importedAt });
-          if (!role) continue;
-          nextRoles.push(role);
+          const payloads = parseJsonPayloads(text);
+          if (payloads.length === 0) continue;
+          for (const payload of payloads) {
+            const role = buildRoleFromLocalJson(payload, { fileName: file.name, importedAt });
+            if (!role) continue;
+            nextRoles.push(role);
+          }
         } catch {
           // ignore invalid file
         }
       }
 
+      if (nextRoles.length === (activeSession.roles ?? []).length) {
+        onGlobalError?.('未识别到有效的角色卡。');
+        return;
+      }
       await updateActiveSessionRoles(nextRoles);
-      event.target.value = '';
     },
-    [activeSession, updateActiveSessionRoles]
+    [activeSession, onGlobalError, updateActiveSessionRoles]
   );
 
-  const onUploadScenarios = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
+  const onDropScenarios = useCallback(
+    async (files: File[]) => {
       if (!activeSession) return;
-      const files = event.target.files;
       if (!files || files.length === 0) return;
 
       const importedAt = Date.now();
       let nextMain = activeSession.scenario;
       const nextAux = Array.isArray(activeSession.auxScenarios) ? [...activeSession.auxScenarios] : [];
 
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         try {
           const text = await file.text();
-          const parsed = JSON.parse(text);
-          const card = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
-          if (!card) continue;
-          const scenario = buildScenarioFromLocalJson(card, { fileName: file.name, importedAt });
-          if (!scenario) continue;
-          if (!nextMain) {
-            nextMain = scenario;
-          } else {
-            nextAux.push(scenario);
+          const payloads = parseJsonPayloads(text);
+          if (payloads.length === 0) continue;
+          for (const payload of payloads) {
+            const scenario = buildScenarioFromLocalJson(payload, { fileName: file.name, importedAt });
+            if (!scenario) continue;
+            if (!nextMain) {
+              nextMain = scenario;
+            } else {
+              nextAux.push(scenario);
+            }
           }
         } catch {
           // ignore
         }
       }
 
+      if (nextMain === activeSession.scenario && nextAux.length === (activeSession.auxScenarios ?? []).length) {
+        onGlobalError?.('未识别到有效的情景卡。');
+        return;
+      }
       await updateActiveSessionScenarios(nextMain, nextAux);
+    },
+    [activeSession, onGlobalError, updateActiveSessionScenarios]
+  );
+
+  const onUploadRoles = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      if (!event.target.files || event.target.files.length === 0) return;
+      await onDropRoles(Array.from(event.target.files));
       event.target.value = '';
     },
-    [activeSession, updateActiveSessionScenarios]
+    [onDropRoles]
+  );
+
+  const onUploadScenarios = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      if (!event.target.files || event.target.files.length === 0) return;
+      await onDropScenarios(Array.from(event.target.files));
+      event.target.value = '';
+    },
+    [onDropScenarios]
+  );
+
+  const onImportRolesText = useCallback(
+    async (text: string) => {
+      if (!activeSession) return;
+      const payloads = parseJsonPayloads(text);
+      if (payloads.length === 0) {
+        onGlobalError?.('未识别到有效的角色 JSON。');
+        return;
+      }
+      const importedAt = Date.now();
+      const nextRoles: MagicTeaPartyRole[] = [...(activeSession.roles ?? [])];
+      for (const payload of payloads) {
+        const role = buildRoleFromLocalJson(payload, { fileName: 'pasted.json', importedAt });
+        if (!role) continue;
+        nextRoles.push(role);
+      }
+      if (nextRoles.length === (activeSession.roles ?? []).length) {
+        onGlobalError?.('未识别到有效的角色卡。');
+        return;
+      }
+      await updateActiveSessionRoles(nextRoles);
+    },
+    [activeSession, onGlobalError, updateActiveSessionRoles]
+  );
+
+  const onImportScenariosText = useCallback(
+    async (text: string) => {
+      if (!activeSession) return;
+      const payloads = parseJsonPayloads(text);
+      if (payloads.length === 0) {
+        onGlobalError?.('未识别到有效的情景 JSON。');
+        return;
+      }
+      const importedAt = Date.now();
+      let nextMain = activeSession.scenario;
+      const nextAux = Array.isArray(activeSession.auxScenarios) ? [...activeSession.auxScenarios] : [];
+
+      for (const payload of payloads) {
+        const scenario = buildScenarioFromLocalJson(payload, { fileName: 'pasted.json', importedAt });
+        if (!scenario) continue;
+        if (!nextMain) {
+          nextMain = scenario;
+        } else {
+          nextAux.push(scenario);
+        }
+      }
+
+      if (nextMain === activeSession.scenario && nextAux.length === (activeSession.auxScenarios ?? []).length) {
+        onGlobalError?.('未识别到有效的情景卡。');
+        return;
+      }
+      await updateActiveSessionScenarios(nextMain, nextAux);
+    },
+    [activeSession, onGlobalError, updateActiveSessionScenarios]
   );
 
   const playerOptions = useMemo(() => {
@@ -704,6 +803,104 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
     [activeSession, persistSession]
   );
 
+  const forkSessionFromMessage = useCallback(
+    async (messageId: string, content: string) => {
+      if (!activeSession) return null;
+      const trimmed = content.trim();
+      if (!trimmed) {
+        onGlobalError?.('编辑内容不能为空。');
+        return null;
+      }
+
+      const targetIndex = messages.findIndex((message) => message.id === messageId);
+      if (targetIndex < 0) return null;
+      const targetMessage = messages[targetIndex];
+      if (targetMessage.role !== 'user') return null;
+
+      const now = Date.now();
+      const newSessionId = randomUUID();
+      const beforeMessages = messages.slice(0, targetIndex);
+
+      const idMap = new Map<string, string>();
+      const cloned = beforeMessages.map((message) => {
+        const nextId = randomUUID();
+        idMap.set(message.id, nextId);
+        return {
+          ...message,
+          id: nextId,
+          sessionId: newSessionId,
+        } as MagicTeaPartyMessage;
+      });
+
+      const fixedMessages = cloned.map((message) => {
+        const next = { ...message } as MagicTeaPartyMessage;
+        if (typeof next.sourceMessageId === 'string' && idMap.has(next.sourceMessageId)) {
+          next.sourceMessageId = idMap.get(next.sourceMessageId);
+        }
+        if (typeof next.revisionOf === 'string' && idMap.has(next.revisionOf)) {
+          next.revisionOf = idMap.get(next.revisionOf);
+        }
+        return next;
+      });
+
+      const roundIndex = messages.slice(0, targetIndex + 1).filter((message) => message.role === 'user').length;
+      const branchLabel = `从第 ${Math.max(1, roundIndex)} 轮分支`;
+
+      let summary = activeSession.summary;
+      let summaryMeta = activeSession.summaryMeta;
+      if (summaryMeta?.toMessageId) {
+        const summaryIndex = messages.findIndex((message) => message.id === summaryMeta?.toMessageId);
+        if (summaryIndex >= 0 && targetIndex <= summaryIndex) {
+          summary = undefined;
+          summaryMeta = undefined;
+        }
+      }
+
+      const nextSession: MagicTeaPartySession = {
+        ...activeSession,
+        id: newSessionId,
+        createdAt: now,
+        updatedAt: now,
+        summary,
+        summaryMeta,
+        forkedFrom: { sessionId: activeSession.id, messageId: targetMessage.id, createdAt: now },
+        branchLabel,
+      };
+
+      await putMagicTeaPartySession(nextSession);
+      if (fixedMessages.length > 0) {
+        await Promise.all(fixedMessages.map((message) => putMagicTeaPartyMessage(message)));
+      }
+
+      const playerRoleId = activeSession.playerRoleId ?? null;
+      const playerRoleName = playerRoleId
+        ? (activeSession.roles ?? []).find((role) => role.id === playerRoleId)?.name ?? ''
+        : '';
+      const speakerName =
+        playerRoleId ? playerRoleName || playerRoleId : activeSession.settings.userDisplayName || preferences.userDisplayName || '旅人';
+
+      const editedMessage: MagicTeaPartyMessage = {
+        id: randomUUID(),
+        sessionId: newSessionId,
+        role: 'user',
+        content: trimmed,
+        createdAt: now + 1,
+        status: 'done',
+        ...(playerRoleId ? { speakerId: playerRoleId } : {}),
+        meta: { speakerName },
+        revisionOf: targetMessage.id,
+      };
+
+      await putMagicTeaPartyMessage(editedMessage);
+
+      setSessions((prev) => sortSessionsByUpdatedAtDesc([nextSession, ...prev.filter((item) => item.id !== nextSession.id)]));
+      setActiveSessionId(newSessionId);
+      writeLocalStorageString(STORAGE_RECENT_SESSION, newSessionId);
+      return newSessionId;
+    },
+    [activeSession, messages, onGlobalError, preferences.userDisplayName]
+  );
+
   return {
     sessions,
     activeSessionId,
@@ -725,11 +922,16 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
     onToggleScenarioCard,
     onUploadRoles,
     onUploadScenarios,
+    onImportRolesText,
+    onImportScenariosText,
+    onDropRoles,
+    onDropScenarios,
     selectedRoleCardIds,
     selectedScenarioCardIds,
     playerOptions,
     updateSessionTitle,
     lockSessionTitle,
     updatePlayerRole,
+    forkSessionFromMessage,
   };
 }

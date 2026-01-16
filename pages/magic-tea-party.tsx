@@ -52,12 +52,17 @@ export default function MagicTeaPartyPage() {
     onToggleScenarioCard,
     onUploadRoles,
     onUploadScenarios,
+    onImportRolesText,
+    onImportScenariosText,
+    onDropRoles,
+    onDropScenarios,
     selectedRoleCardIds,
     selectedScenarioCardIds,
     playerOptions,
     updateSessionTitle,
     lockSessionTitle,
     updatePlayerRole,
+    forkSessionFromMessage,
   } = useMagicTeaPartySessions({
     username: user?.username,
     userProviderConfig,
@@ -91,6 +96,8 @@ export default function MagicTeaPartyPage() {
   const [showScenarioModal, setShowScenarioModal] = useState(false);
 
   const [draft, setDraft] = useState('');
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState('');
   const [tachieReferenceText, setTachieReferenceText] = useState('');
   const [tachieAnchorMessageId, setTachieAnchorMessageId] = useState<string | null>(null);
   const [tachieAssets, setTachieAssets] = useState<MagicTeaPartyTachieAsset[]>([]);
@@ -120,7 +127,34 @@ export default function MagicTeaPartyPage() {
     setTachieAssets([]);
     setUpdateDrafts(null);
     setUpdateError(null);
+    setEditingMessageId(null);
+    setEditingDraft('');
   }, [activeSessionId]);
+
+  const handleStartEditMessage = (message: MagicTeaPartyMessage) => {
+    setEditingMessageId(message.id);
+    setEditingDraft(message.content ?? '');
+  };
+
+  const handleCancelEditMessage = () => {
+    setEditingMessageId(null);
+    setEditingDraft('');
+  };
+
+  const handleConfirmEditMessage = async (message: MagicTeaPartyMessage) => {
+    if (!message?.id) return;
+    const trimmed = editingDraft.trim();
+    if (!trimmed) {
+      setGlobalError('编辑内容不能为空。');
+      return;
+    }
+    const nextSessionId = await forkSessionFromMessage(message.id, trimmed);
+    if (nextSessionId) {
+      setEditingMessageId(null);
+      setEditingDraft('');
+      setDraft('');
+    }
+  };
 
   useEffect(() => {
     if (!activeSession) return;
@@ -427,6 +461,10 @@ export default function MagicTeaPartyPage() {
                   onOpenScenarioModal={() => setShowScenarioModal(true)}
                   onUploadRoles={onUploadRoles}
                   onUploadScenarios={onUploadScenarios}
+                  onImportRolesText={(text) => void onImportRolesText(text)}
+                  onImportScenariosText={(text) => void onImportScenariosText(text)}
+                  onDropRoles={(files) => void onDropRoles(files)}
+                  onDropScenarios={(files) => void onDropScenarios(files)}
                   onUpdateRoles={(roles) => void updateActiveSessionRoles(roles)}
                   onUpdateScenarios={(scenario, auxScenarios) => void updateActiveSessionScenarios(scenario, auxScenarios)}
                   onUpdatePlayerRole={updatePlayerRole}
@@ -490,6 +528,8 @@ export default function MagicTeaPartyPage() {
                     isGenerating={isGenerating}
                     tachieAssets={tachieAssets}
                     anchorMessageId={tachieAnchorMessageId}
+                    editingMessageId={editingMessageId}
+                    editingDraft={editingDraft}
                     onStopGenerating={stopGenerating}
                     onSelectChoice={(text) => void sendMessage(text)}
                     onUseAsReference={(target, plainText) => {
@@ -497,6 +537,10 @@ export default function MagicTeaPartyPage() {
                       setTachieAnchorMessageId(target.id);
                     }}
                     onRegenerate={(target) => void regenerateMessage(target)}
+                    onStartEdit={handleStartEditMessage}
+                    onEditDraftChange={setEditingDraft}
+                    onCancelEdit={handleCancelEditMessage}
+                    onConfirmEdit={handleConfirmEditMessage}
                   />
 
                   <MagicTeaPartyChatComposer

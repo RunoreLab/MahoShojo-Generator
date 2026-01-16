@@ -47,6 +47,18 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
   const readCurrentState = activeSession?.settings.readCurrentState ?? preferences.readCurrentState;
   const writeArenaHistory = activeSession?.settings.writeArenaHistory ?? preferences.writeArenaHistory;
   const writeCurrentState = activeSession?.settings.writeCurrentState ?? preferences.writeCurrentState;
+  const sessionMap = new Map(sessions.map((session) => [session.id, session]));
+  const branchChain: MagicTeaPartySession[] = [];
+  if (activeSession?.forkedFrom?.sessionId) {
+    let cursor: MagicTeaPartySession | undefined = activeSession;
+    while (cursor?.forkedFrom?.sessionId) {
+      const parent = sessionMap.get(cursor.forkedFrom.sessionId);
+      if (!parent) break;
+      branchChain.push(parent);
+      cursor = parent;
+    }
+  }
+  const branchTrail = branchChain.slice().reverse();
 
   return (
     <aside className="space-y-4 min-w-0">
@@ -76,8 +88,24 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                 <button type="button" className="block w-full text-left" onClick={() => onSelectSession(session.id)}>
                   <div className="text-sm font-semibold text-gray-800 line-clamp-1">{session.title}</div>
                   <div className="mt-0.5 text-xs text-gray-500">{new Date(session.updatedAt).toLocaleString()}</div>
+                  {session.forkedFrom ? (
+                    <div className="mt-1 text-[11px] text-pink-600">
+                      分支 · {session.branchLabel || '从历史分支'}
+                    </div>
+                  ) : null}
                 </button>
-                <div className="mt-2 flex justify-end">
+                <div className="mt-2 flex justify-between gap-2">
+                  {session.id === activeSessionId && session.forkedFrom?.sessionId && sessionMap.has(session.forkedFrom.sessionId) ? (
+                    <button
+                      type="button"
+                      className="text-xs text-pink-600 hover:underline"
+                      onClick={() => onSelectSession(session.forkedFrom?.sessionId as string)}
+                    >
+                      返回原会话
+                    </button>
+                  ) : (
+                    <span />
+                  )}
                   <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => onDeleteSession(session.id)}>
                     删除
                   </button>
@@ -86,6 +114,24 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
             ))
           )}
         </div>
+        {activeSession?.forkedFrom && branchTrail.length > 0 ? (
+          <div className="mt-3 rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">
+            <div className="text-xs font-semibold text-pink-800">分支链</div>
+            <div className="mt-1 space-y-1">
+              {branchTrail.map((session) => (
+                <button
+                  key={session.id}
+                  type="button"
+                  className="block text-left text-xs text-gray-600 hover:underline"
+                  onClick={() => onSelectSession(session.id)}
+                >
+                  {session.title}
+                </button>
+              ))}
+              <div className="text-xs text-pink-700">当前：{activeSession.title}</div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <MagicTeaPartyImportExportPanel activeSession={activeSession} preferences={preferences} onSessionImported={onSessionImported} />

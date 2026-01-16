@@ -44,6 +44,11 @@ export type TrimMagicTeaPartyHistoryOptions = {
   minKeep?: number;
 };
 
+export type EstimateMagicTeaPartyHistoryOptions = {
+  providerId?: string | null;
+  userDisplayName?: string;
+};
+
 export const trimMagicTeaPartyHistory = (
   history: MagicTeaPartyHistoryMessage[],
   options: TrimMagicTeaPartyHistoryOptions
@@ -77,4 +82,23 @@ export const trimMagicTeaPartyHistory = (
   }
 
   return kept.reverse();
+};
+
+export const estimateMagicTeaPartyHistoryTokens = (
+  history: MagicTeaPartyHistoryMessage[],
+  options?: EstimateMagicTeaPartyHistoryOptions
+): number => {
+  if (!Array.isArray(history) || history.length === 0) return 0;
+  const userLabel = options?.userDisplayName?.trim() || '{{user}}';
+  const providerId = options?.providerId ?? null;
+  let total = 0;
+
+  for (const message of history) {
+    if (!message) continue;
+    const content = typeof message.content === 'string' ? message.content : '';
+    const prefix = message.role === 'user' ? userLabel : message.role;
+    total += estimateMagicTeaPartyTokens(`${prefix}: ${content}`, providerId);
+  }
+
+  return total;
 };

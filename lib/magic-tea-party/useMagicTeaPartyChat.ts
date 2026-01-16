@@ -7,14 +7,18 @@ import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { randomUUID } from '@/lib/crypto';
 import { estimateMagicTeaPartyTokens, resolveMagicTeaPartyTokenBudget } from '@/lib/magic-tea-party/budget';
-import { buildMagicTeaPartyHistory, trimMagicTeaPartyHistory } from '@/lib/magic-tea-party/history';
+import {
+  buildMagicTeaPartyHistory,
+  estimateMagicTeaPartyHistoryTokens,
+  trimMagicTeaPartyHistory,
+} from '@/lib/magic-tea-party/history';
 import { parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
 import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import { createMagicTeaPartyStreamPreview } from '@/lib/magic-tea-party/stream-preview';
 import { createMagicTeaPartyStreamSafety } from '@/lib/magic-tea-party/stream-safety';
 import { appendMagicTeaPartySystemInstruction } from '@/lib/magic-tea-party/system-instruction';
-import { putMagicTeaPartyMessage } from '@/lib/magic-tea-party/storage';
+import { deleteMagicTeaPartyMessages, putMagicTeaPartyMessage } from '@/lib/magic-tea-party/storage';
 import { deriveMagicTeaPartyTitle } from '@/lib/magic-tea-party/title';
 import type {
   MagicTeaPartyHistoryMessage,
@@ -70,6 +74,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const summarizeAbortControllerRef = useRef<AbortController | null>(null);
+  const autoSummaryRunningRef = useRef(false);
+  const messagesRef = useRef<MagicTeaPartyMessage[]>(messages);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     summarizeAbortControllerRef.current?.abort('session-switch');
@@ -190,7 +200,8 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       assistantMessageId: string;
       assistantMessage: MagicTeaPartyMessage;
       arrestedBackupInput?: string;
-    }) => {
+    }): Promise<MagicTeaPartySession | null> => {
+      let finalSession: MagicTeaPartySession | null = null;
       const controller = new AbortController();
       abortControllerRef.current = controller;
       setIsGenerating(true);
@@ -283,7 +294,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             await putMagicTeaPartyMessage(blockedMessage);
 
             await router.push('/arrested');
-            return;
+            return finalSession;
           }
 
           const errorMessage =
@@ -301,7 +312,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
           setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? errorMessageRecord : m)));
           await putMagicTeaPartyMessage(errorMessageRecord);
-          return;
+          return finalSession;
         }
 
         setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? { ...m, content: '', status: 'streaming' } : m)));
@@ -342,7 +353,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           });
           const titleFiltered = applyShieldWords(nextTitle).filteredText;
 
-          await persistSession({
+          const nextSession: MagicTeaPartySession = {
             ...params.session,
             title: titleFiltered,
             titleMeta: {
@@ -352,9 +363,13 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
               modelId: userProviderConfig?.modelId,
               reason: 'first-message',
             },
-          });
+          };
+          await persistSession(nextSession);
+          finalSession = nextSession;
         } else {
-          await persistSession({ ...params.session, updatedAt: Date.now() });
+          const nextSession: MagicTeaPartySession = { ...params.session, updatedAt: Date.now() };
+          await persistSession(nextSession);
+          finalSession = nextSession;
         }
       } catch (error) {
         safety.clearTimer();
@@ -373,7 +388,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           };
           setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
           await putMagicTeaPartyMessage(finalAssistant);
-          return;
+          return finalSession;
         }
 
         const message = error instanceof Error ? error.message : '生成失败';
@@ -384,8 +399,173 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         abortControllerRef.current = null;
         setIsGenerating(false);
       }
+      return finalSession;
     },
     [buildRequestSettings, persistSession, router, setMessages, userProviderConfig]
+  );
+
+  const maybeAutoSummarize = useCallback(
+    async (session: MagicTeaPartySession) => {
+      if (!session) return;
+      if (session.settings.enableSummary === false) return;
+      if (autoSummaryRunningRef.current || isSummarizing) return;
+
+      const providerId = userProviderConfig?.providerId ?? session.settings.providerId;
+      const providerReady =
+        userProviderConfig &&
+        userProviderConfig.providerId !== 'system' &&
+        userProviderConfig.apiKey?.trim() &&
+        userProviderConfig.modelId?.trim();
+      if (!providerReady) return;
+
+      const history = buildMagicTeaPartyHistory(messagesRef.current, { includeEmptyContent: false });
+      if (history.length === 0) return;
+
+      const tokenBudget = resolveMagicTeaPartyTokenBudget(session.settings, providerId);
+      const userDisplayName = session.settings.userDisplayName ?? preferences.userDisplayName;
+      const historyTokens = estimateMagicTeaPartyHistoryTokens(history, { providerId, userDisplayName });
+
+      const triggerByTokens = historyTokens > tokenBudget.historyBudgetTokens * tokenBudget.summaryTriggerRatio;
+      const triggerByCount = history.length > tokenBudget.maxContextMessages;
+      if (!triggerByTokens && !triggerByCount) return;
+
+      const summaryGap = tokenBudget.summaryMinGapMessages;
+      if (session.summaryMeta?.toMessageId) {
+        const summaryIndex = history.findIndex((message) => message.id === session.summaryMeta?.toMessageId);
+        if (summaryIndex >= 0) {
+          const gap = history.length - summaryIndex - 1;
+          if (gap < summaryGap) return;
+        }
+      } else if (history.length < summaryGap) {
+        return;
+      }
+
+      const keepRatio = 0.35;
+      const keepCount = Math.max(2, Math.ceil(history.length * keepRatio));
+      if (history.length <= keepCount) return;
+
+      const summarizedHistory = history.slice(0, history.length - keepCount);
+      if (summarizedHistory.length < 2) return;
+
+      autoSummaryRunningRef.current = true;
+      setIsSummarizing(true);
+      setSummaryError(null);
+
+      const MAX_SUMMARY_MESSAGES = 200;
+      const MAX_MESSAGE_CHARS = 8_000;
+      const summarySeed = session.summary?.trim() || '';
+
+      const normalizedHistory = summarizedHistory.map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content.slice(0, MAX_MESSAGE_CHARS),
+      }));
+
+      const withSeed = summarySeed
+        ? [
+            {
+              id: randomUUID(),
+              role: 'system' as const,
+              content: `【既有摘要】\n${summarySeed.slice(0, 12_000)}`,
+            },
+            ...normalizedHistory,
+          ]
+        : normalizedHistory;
+
+      let summaryMessages = withSeed;
+      if (summaryMessages.length > MAX_SUMMARY_MESSAGES) {
+        const headCount = Math.max(1, Math.floor(MAX_SUMMARY_MESSAGES * 0.7));
+        const tailCount = MAX_SUMMARY_MESSAGES - headCount;
+        summaryMessages = [...withSeed.slice(0, headCount), ...withSeed.slice(-tailCount)];
+      }
+
+      const controller = new AbortController();
+      summarizeAbortControllerRef.current = controller;
+
+      try {
+        const response = await fetch('/api/magic-tea-party/summarize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            sessionId: session.id,
+            mode: 'summary',
+            language: session.settings.language ?? preferences.language,
+            userDisplayName,
+            messages: summaryMessages,
+            customProvider: {
+              providerId: userProviderConfig?.providerId,
+              modelId: userProviderConfig?.modelId,
+              apiKey: userProviderConfig?.apiKey,
+            },
+          }),
+        });
+
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const errorMessage =
+            typeof payload?.error === 'string'
+              ? payload.error
+              : typeof payload?.message === 'string'
+                ? payload.message
+                : `请求失败（${response.status}）`;
+          setSummaryError(errorMessage);
+          return;
+        }
+
+        const summaryRaw = typeof payload?.summary === 'string' ? payload.summary.trim() : '';
+        if (!summaryRaw) {
+          setSummaryError('模型返回空摘要。');
+          return;
+        }
+
+        if (activeSessionId !== session.id) return;
+
+        const now = Date.now();
+        const safeText = applyShieldWords(summaryRaw).filteredText;
+        const summaryMeta: MagicTeaPartySession['summaryMeta'] = {
+          updatedAt: now,
+          fromMessageId: summarizedHistory[0]?.id,
+          toMessageId: summarizedHistory[summarizedHistory.length - 1]?.id,
+          tokenCount: estimateMagicTeaPartyHistoryTokens(summarizedHistory, { providerId, userDisplayName }),
+        };
+
+        const nextSession: MagicTeaPartySession = { ...session, summary: safeText, summaryMeta, updatedAt: now };
+        await persistSession(nextSession);
+
+        const latestMessages = messagesRef.current;
+        const cutoffId = summarizedHistory[summarizedHistory.length - 1]?.id;
+        if (!cutoffId) return;
+        const cutoffIndex = latestMessages.findIndex((message) => message.id === cutoffId);
+        if (cutoffIndex < 0) return;
+
+        const removed = latestMessages.slice(0, cutoffIndex + 1);
+        const remaining = latestMessages.slice(cutoffIndex + 1);
+        if (removed.length > 0) {
+          setMessages(remaining);
+          await deleteMagicTeaPartyMessages(removed.map((message) => message.id));
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') return;
+        const message = error instanceof Error ? error.message : '自动摘要失败';
+        setSummaryError(message);
+      } finally {
+        if (summarizeAbortControllerRef.current === controller) {
+          summarizeAbortControllerRef.current = null;
+        }
+        autoSummaryRunningRef.current = false;
+        setIsSummarizing(false);
+      }
+    },
+    [
+      activeSessionId,
+      isSummarizing,
+      persistSession,
+      preferences.language,
+      preferences.userDisplayName,
+      setMessages,
+      userProviderConfig,
+    ]
   );
 
   const sendMessage = useCallback(
@@ -468,7 +648,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         outputFormat: sessionOutputFormat,
       });
 
-      await runGenerateStream({
+      const finalSession = await runGenerateStream({
         session: updatedSession,
         historyForRequest,
         outputFormat: sessionOutputFormat,
@@ -476,6 +656,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         assistantMessage,
         arrestedBackupInput: trimmed,
       });
+      if (finalSession) void maybeAutoSummarize(finalSession);
       return true;
     },
     [
@@ -490,6 +671,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       router,
       runGenerateStream,
       setMessages,
+      maybeAutoSummarize,
     ]
   );
 
@@ -536,13 +718,14 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       outputFormat: sessionOutputFormat,
     });
 
-    await runGenerateStream({
+    const finalSession = await runGenerateStream({
       session: updatedSession,
       historyForRequest: appendMagicTeaPartySystemInstruction(baseHistory, kind, randomUUID()),
       outputFormat: sessionOutputFormat,
       assistantMessageId,
       assistantMessage,
     });
+    if (finalSession) void maybeAutoSummarize(finalSession);
   }, [
     activeSession,
     buildHistoryForRequest,
@@ -553,6 +736,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     persistSession,
     runGenerateStream,
     setMessages,
+    maybeAutoSummarize,
   ]);
 
   const generateChoices = useCallback(async () => {
@@ -948,7 +1132,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           ? appendMagicTeaPartySystemInstruction(historyForRequestBase, kind, randomUUID())
           : historyForRequestBase;
 
-      await runGenerateStream({
+      const finalSession = await runGenerateStream({
         session: updatedSession,
         historyForRequest,
         outputFormat: sessionOutputFormat,
@@ -956,6 +1140,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         assistantMessage,
         arrestedBackupInput,
       });
+      if (finalSession) void maybeAutoSummarize(finalSession);
     },
     [
       activeSession,
@@ -967,6 +1152,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       persistSession,
       runGenerateStream,
       setMessages,
+      maybeAutoSummarize,
     ]
   );
 

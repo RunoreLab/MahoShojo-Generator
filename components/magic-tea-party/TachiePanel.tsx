@@ -8,6 +8,8 @@ import { randomUUID } from '@/lib/crypto';
 import {
   deleteMagicTeaPartyTachieAsset,
   deleteMagicTeaPartyTachieAssets,
+  deleteMagicTeaPartyTachieAssetsByIds,
+  listAllMagicTeaPartyTachieAssets,
   listMagicTeaPartyTachieAssets,
   putMagicTeaPartyTachieAsset,
 } from '@/lib/magic-tea-party/storage';
@@ -18,6 +20,7 @@ type MagicTeaPartyImageKind = NonNullable<MagicTeaPartyTachieAsset['kind']>;
 const MAX_PROMPT_CHARS = 10_000;
 const MAX_REFERENCE_CHARS = 2_000;
 const MAX_ASSETS_PER_SESSION = 24;
+const MAX_ASSETS_GLOBAL = 200;
 const STORAGE_WORKFLOW_KEY = 'magic-tea-party:tachie-workflow.v1';
 
 type MagicTeaPartyWorkflowSettings = {
@@ -367,21 +370,19 @@ export function MagicTeaPartyTachiePanel(props: {
 
     await putMagicTeaPartyTachieAsset(asset);
 
-    setAssets((prev) => {
-      const next = [asset, ...prev.filter((item) => item.id !== asset.id)].sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0));
-      return next;
-    });
-
     const nextAll = await listMagicTeaPartyTachieAssets(sessionId);
-    let finalAssets = nextAll;
     if (nextAll.length > MAX_ASSETS_PER_SESSION) {
       const over = nextAll.slice(MAX_ASSETS_PER_SESSION);
       await Promise.all(over.map((item) => deleteMagicTeaPartyTachieAsset(item.id)));
-      const trimmed = nextAll.slice(0, MAX_ASSETS_PER_SESSION);
-      finalAssets = trimmed;
-    } else {
-      finalAssets = nextAll;
     }
+
+    const allAssets = await listAllMagicTeaPartyTachieAssets();
+    if (allAssets.length > MAX_ASSETS_GLOBAL) {
+      const overflow = allAssets.slice(0, allAssets.length - MAX_ASSETS_GLOBAL);
+      await deleteMagicTeaPartyTachieAssetsByIds(overflow.map((item) => item.id));
+    }
+
+    const finalAssets = await listMagicTeaPartyTachieAssets(sessionId);
     setAssets(finalAssets);
     onAssetsUpdated?.(finalAssets);
   };

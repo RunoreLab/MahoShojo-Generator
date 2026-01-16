@@ -17,10 +17,16 @@ type MagicTeaPartyChatTimelineProps = {
   isGenerating: boolean;
   tachieAssets?: MagicTeaPartyTachieAsset[];
   anchorMessageId?: string | null;
+  editingMessageId?: string | null;
+  editingDraft?: string;
   onStopGenerating: () => void;
   onSelectChoice: (text: string) => void;
   onUseAsReference: (message: MagicTeaPartyMessage, plainText: string) => void;
   onRegenerate: (message: MagicTeaPartyMessage) => void;
+  onStartEdit: (message: MagicTeaPartyMessage) => void;
+  onEditDraftChange: (value: string) => void;
+  onCancelEdit: () => void;
+  onConfirmEdit: (message: MagicTeaPartyMessage) => void;
 };
 
 const InlineSpinner = () => (
@@ -35,10 +41,16 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
     isGenerating,
     tachieAssets,
     anchorMessageId,
+    editingMessageId,
+    editingDraft,
     onStopGenerating,
     onSelectChoice,
     onUseAsReference,
     onRegenerate,
+    onStartEdit,
+    onEditDraftChange,
+    onCancelEdit,
+    onConfirmEdit,
   } = props;
 
   const lastAssistantId = useMemo(() => {
@@ -128,6 +140,12 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
                       onUseAsReference={onUseAsReference}
                       onRegenerate={onRegenerate}
                       showRegenerate={canRegenerateMessage(message)}
+                      editingMessageId={editingMessageId}
+                      editingDraft={editingDraft}
+                      onStartEdit={onStartEdit}
+                      onEditDraftChange={onEditDraftChange}
+                      onCancelEdit={onCancelEdit}
+                      onConfirmEdit={onConfirmEdit}
                     />
                   </div>
                 </div>

@@ -332,6 +332,23 @@ export const listMagicTeaPartyMessages = async (sessionId: string): Promise<Magi
   });
 };
 
+export const deleteMagicTeaPartyMessages = async (messageIds: string[]): Promise<void> => {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) return;
+  const db = await openMagicTeaPartyDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(['messages'], 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error('删除消息失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('删除消息失败'));
+
+    const store = tx.objectStore('messages');
+    for (const messageId of messageIds) {
+      if (!messageId) continue;
+      store.delete(messageId);
+    }
+  });
+};
+
 export const putMagicTeaPartyTachieAsset = async (asset: MagicTeaPartyTachieAsset): Promise<void> => {
   const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
@@ -367,6 +384,30 @@ export const listMagicTeaPartyTachieAssets = async (sessionId: string): Promise<
   });
 };
 
+export const listAllMagicTeaPartyTachieAssets = async (): Promise<MagicTeaPartyTachieAsset[]> => {
+  const db = await openMagicTeaPartyDb();
+  return await new Promise<MagicTeaPartyTachieAsset[]>((resolve, reject) => {
+    const tx = db.transaction(['tachieAssets'], 'readonly');
+    tx.onabort = () => reject(tx.error ?? new Error('读取立绘缓存失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('读取立绘缓存失败'));
+
+    const items: MagicTeaPartyTachieAsset[] = [];
+    const index = tx.objectStore('tachieAssets').index('by_lastUsedAt');
+    const request = index.openCursor(null, 'next');
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(items);
+        return;
+      }
+      items.push(cursor.value as MagicTeaPartyTachieAsset);
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error ?? new Error('读取立绘缓存失败'));
+  });
+};
+
 export const deleteMagicTeaPartyTachieAsset = async (assetId: string): Promise<void> => {
   const db = await openMagicTeaPartyDb();
   await new Promise<void>((resolve, reject) => {
@@ -375,6 +416,23 @@ export const deleteMagicTeaPartyTachieAsset = async (assetId: string): Promise<v
     tx.onabort = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
     tx.onerror = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
     tx.objectStore('tachieAssets').delete(assetId);
+  });
+};
+
+export const deleteMagicTeaPartyTachieAssetsByIds = async (assetIds: string[]): Promise<void> => {
+  if (!Array.isArray(assetIds) || assetIds.length === 0) return;
+  const db = await openMagicTeaPartyDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(['tachieAssets'], 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
+    tx.onerror = () => reject(tx.error ?? new Error('删除立绘缓存失败'));
+
+    const store = tx.objectStore('tachieAssets');
+    for (const assetId of assetIds) {
+      if (!assetId) continue;
+      store.delete(assetId);
+    }
   });
 };
 

@@ -20,6 +20,12 @@ type MagicTeaPartyChatMessageProps = {
   onUseAsReference?: (message: MagicTeaPartyMessage, plainText: string) => void;
   onRegenerate?: (message: MagicTeaPartyMessage) => void;
   showRegenerate?: boolean;
+  editingMessageId?: string | null;
+  editingDraft?: string;
+  onStartEdit?: (message: MagicTeaPartyMessage) => void;
+  onEditDraftChange?: (value: string) => void;
+  onCancelEdit?: () => void;
+  onConfirmEdit?: (message: MagicTeaPartyMessage) => void;
 };
 
 const isMessageSuperseded = (message: MagicTeaPartyMessage): boolean => {
@@ -213,6 +219,30 @@ const renderAssistantActions = (props: {
   );
 };
 
+const renderUserActions = (props: {
+  message: MagicTeaPartyMessage;
+  isGenerating: boolean;
+  onStartEdit?: (message: MagicTeaPartyMessage) => void;
+}) => {
+  const { message, isGenerating, onStartEdit } = props;
+  if (message.role !== 'user') return null;
+  if (typeof onStartEdit !== 'function') return null;
+  if (isGenerating) return null;
+
+  return (
+    <div className="mt-2 flex items-center justify-end gap-2 text-xs text-gray-500">
+      <button
+        type="button"
+        className="underline underline-offset-2 hover:text-gray-700"
+        onClick={() => onStartEdit(message)}
+        title="编辑这条输入并创建新的会话分支"
+      >
+        编辑并分支
+      </button>
+    </div>
+  );
+};
+
 export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
   const { message, session, preferences, isGenerating, tachieAssets } = props;
   const isUser = message.role === 'user';
@@ -232,6 +262,8 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
         : getAssistantPrefix(session));
   const speakerClass = `px-1 text-xs font-semibold ${isUser ? 'text-right text-pink-700' : 'text-gray-600'}`;
   const isSuperseded = isMessageSuperseded(message);
+  const isEditing = message.role === 'user' && props.editingMessageId === message.id;
+  const editingDraft = typeof props.editingDraft === 'string' ? props.editingDraft : message.content;
 
   const withHeader = (bubble: ReactNode) => (
     <div className={`space-y-1 ${isSuperseded ? 'opacity-70' : ''}`}>
@@ -295,6 +327,37 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
     );
   }
 
+  if (isEditing) {
+    return withHeader(
+      <div className={`rounded-xl px-4 py-3 ${bubbleClass} space-y-2`}>
+        <textarea
+          className="w-full rounded-lg border border-pink-200 bg-white px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-200"
+          value={editingDraft}
+          onChange={(event) => props.onEditDraftChange?.(event.target.value)}
+          placeholder="编辑后将创建新会话分支"
+          rows={4}
+        />
+        <div className="flex items-center justify-end gap-2 text-xs text-gray-500">
+          <button
+            type="button"
+            className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+            onClick={() => props.onCancelEdit?.()}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            className="rounded-md bg-pink-600 px-3 py-1 text-xs font-semibold text-white hover:bg-pink-700 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => props.onConfirmEdit?.(message)}
+            disabled={!editingDraft.trim()}
+          >
+            创建分支
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const metaOutputFormat =
     message.meta && typeof message.meta === 'object' && typeof (message.meta as any).outputFormat === 'string'
       ? (message.meta as any).outputFormat
@@ -335,7 +398,11 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
             onRegenerate: props.onRegenerate,
             showRegenerate: props.showRegenerate,
           })
-        : null}
+        : renderUserActions({
+            message,
+            isGenerating,
+            onStartEdit: props.onStartEdit,
+          })}
     </div>
   );
 }
