@@ -6,11 +6,14 @@ import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { persistArrestedBackup } from '@/lib/arrested-backup';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { randomUUID } from '@/lib/crypto';
-import { createMagicTeaPartyJsonlStreamState, ingestMagicTeaPartyJsonlChunk, parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import { parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import { createMagicTeaPartyStreamPreview } from '@/lib/magic-tea-party/stream-preview';
 import { createMagicTeaPartyStreamSafety } from '@/lib/magic-tea-party/stream-safety';
+import { appendMagicTeaPartySystemInstruction } from '@/lib/magic-tea-party/system-instruction';
 import { putMagicTeaPartyMessage } from '@/lib/magic-tea-party/storage';
 import { deriveMagicTeaPartyTitle } from '@/lib/magic-tea-party/title';
 import type {
+  MagicTeaPartyHistoryMessage,
   MagicTeaPartyMessage,
   MagicTeaPartyPreferences,
   MagicTeaPartySession,
@@ -96,8 +99,6 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     return { ok: true };
   }, [userProviderConfig]);
 
-  type MagicTeaPartyHistoryMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string };
-
   const runGenerateStream = useCallback(
     async (params: {
       session: MagicTeaPartySession;
@@ -111,49 +112,30 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       abortControllerRef.current = controller;
       setIsGenerating(true);
 
-      const jsonlStreamState = params.outputFormat === 'jsonl' ? createMagicTeaPartyJsonlStreamState() : null;
-      let lastSafeSnapshot = '';
-
-      const updateStreamingPreview = (safePreview: string) => {
-        if (jsonlStreamState) {
-          if (safePreview.startsWith(lastSafeSnapshot)) {
-            const delta = safePreview.slice(lastSafeSnapshot.length);
-            ingestMagicTeaPartyJsonlChunk(jsonlStreamState, delta);
-          } else {
-            const resetState = createMagicTeaPartyJsonlStreamState();
-            ingestMagicTeaPartyJsonlChunk(resetState, safePreview);
-            jsonlStreamState.buffer = resetState.buffer;
-            jsonlStreamState.segments = resetState.segments;
-            jsonlStreamState.choices = resetState.choices;
-          }
-          lastSafeSnapshot = safePreview;
-        }
-
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === params.assistantMessageId
-              ? {
-                  ...m,
-                  content: safePreview,
-                  ...(jsonlStreamState
-                    ? {
-                        segments: [...jsonlStreamState.segments],
-                        choices: jsonlStreamState.choices ? [...jsonlStreamState.choices] : undefined,
-                      }
-                    : {}),
-                }
-              : m
-          )
-        );
-      };
+      const preview = createMagicTeaPartyStreamPreview({
+        outputFormat: params.outputFormat,
+        onUpdate: (update) => {
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== params.assistantMessageId) return m;
+              const patch: Partial<MagicTeaPartyMessage> = {
+                content: update.content,
+                ...(typeof update.status === 'string' ? { status: update.status } : {}),
+                ...(update.includeJsonl ? { segments: update.segments, choices: update.choices } : {}),
+              };
+              return { ...m, ...patch };
+            })
+          );
+        },
+      });
 
       const safety = createMagicTeaPartyStreamSafety({
         outputFormat: params.outputFormat,
-        onSafePreview: updateStreamingPreview,
+        onSafePreview: (safeText) => {
+          preview.applySafeText(safeText);
+        },
         onBlocked: (safeText) => {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === params.assistantMessageId ? { ...m, content: safeText, status: 'blocked' } : m))
-          );
+          preview.applySafeText(safeText, 'blocked');
           controller.abort('output-safety');
         },
       });
@@ -465,18 +447,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       .filter(shouldIncludeInHistory)
       .map((m) => ({ id: m.id, role: m.role, content: m.content }));
 
-    const systemInstruction: MagicTeaPartyHistoryMessage = {
-      id: randomUUID(),
-      role: 'system',
-      content:
-        kind === 'opening'
-          ? '【任务】请先生成故事开场：描写场景/氛围，安排角色登场，并给出可供玩家回应的钩子。'
-          : '【任务】请在不等待玩家新输入的情况下，继续推进下一小节剧情。',
-    };
-
     await runGenerateStream({
       session: updatedSession,
-      historyForRequest: [...baseHistory, systemInstruction],
+      historyForRequest: appendMagicTeaPartySystemInstruction(baseHistory, kind, randomUUID()),
       outputFormat: sessionOutputFormat,
       assistantMessageId,
       assistantMessage,
@@ -524,43 +497,29 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     abortControllerRef.current = controller;
     setIsGenerating(true);
 
-    const jsonlStreamState = createMagicTeaPartyJsonlStreamState();
-    let lastSafeSnapshot = '';
-
-    const updateStreamingPreview = (safePreview: string, status?: MagicTeaPartyMessage['status']) => {
-      if (safePreview.startsWith(lastSafeSnapshot)) {
-        const delta = safePreview.slice(lastSafeSnapshot.length);
-        ingestMagicTeaPartyJsonlChunk(jsonlStreamState, delta);
-      } else {
-        const resetState = createMagicTeaPartyJsonlStreamState();
-        ingestMagicTeaPartyJsonlChunk(resetState, safePreview);
-        jsonlStreamState.buffer = resetState.buffer;
-        jsonlStreamState.segments = resetState.segments;
-        jsonlStreamState.choices = resetState.choices;
-      }
-      lastSafeSnapshot = safePreview;
-
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantMessageId
-            ? {
-                ...m,
-                content: safePreview,
-                ...(typeof status === 'string' ? { status } : {}),
-                segments: [...jsonlStreamState.segments],
-                choices: jsonlStreamState.choices ? [...jsonlStreamState.choices] : undefined,
-              }
-            : m
-        )
-      );
-    };
+    const preview = createMagicTeaPartyStreamPreview({
+      outputFormat: 'jsonl',
+      onUpdate: (update) => {
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== assistantMessageId) return m;
+            const patch: Partial<MagicTeaPartyMessage> = {
+              content: update.content,
+              ...(typeof update.status === 'string' ? { status: update.status } : {}),
+              ...(update.includeJsonl ? { segments: update.segments, choices: update.choices } : {}),
+            };
+            return { ...m, ...patch };
+          })
+        );
+      },
+    });
     const safety = createMagicTeaPartyStreamSafety({
       outputFormat: 'jsonl',
       onSafePreview: (safeText) => {
-        updateStreamingPreview(safeText);
+        preview.applySafeText(safeText);
       },
       onBlocked: (safeText) => {
-        updateStreamingPreview(safeText, 'blocked');
+        preview.applySafeText(safeText, 'blocked');
         controller.abort('output-safety');
       },
     });
@@ -884,17 +843,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
       const historyForRequest: MagicTeaPartyHistoryMessage[] =
         kind === 'opening' || kind === 'continue'
-          ? [
-              ...historyForRequestBase,
-              {
-                id: randomUUID(),
-                role: 'system',
-                content:
-                  kind === 'opening'
-                    ? '【任务】请先生成故事开场：描写场景/氛围，安排角色登场，并给出可供玩家回应的钩子。'
-                    : '【任务】请在不等待玩家新输入的情况下，继续推进下一小节剧情。',
-              },
-            ]
+          ? appendMagicTeaPartySystemInstruction(historyForRequestBase, kind, randomUUID())
           : historyForRequestBase;
 
       await runGenerateStream({

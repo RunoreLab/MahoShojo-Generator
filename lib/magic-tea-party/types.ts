@@ -69,6 +69,12 @@ export type MagicTeaPartyMessage = {
   meta?: Record<string, unknown>;
 };
 
+export type MagicTeaPartyHistoryMessage = {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+};
+
 export type MagicTeaPartyTachieAsset = {
   id: string;
   sessionId: string;
@@ -148,4 +154,3 @@ export type MagicTeaPartyPreferences = {
   lastPresetId?: string;
   lastWorldbookPresetId?: string;
 };
-
