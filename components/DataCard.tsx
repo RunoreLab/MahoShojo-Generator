@@ -102,6 +102,12 @@ export default function DataCard({
   const [favoriting, setFavoriting] = useState(false);
   const cardStatus = getDataCardStatus({ is_public: isPublic });
   const canDownload = Boolean(onDownload);
+  const maxNameLength = 100;
+  const normalizedName = name.trim();
+  const displayName =
+    normalizedName.length > maxNameLength
+      ? `${normalizedName.slice(0, maxNameLength)}...`
+      : normalizedName;
 
   // 检查本地存储中的点赞状态
   useEffect(() => {
@@ -256,7 +262,9 @@ export default function DataCard({
       {/* 主要内容区域 */}
       <div className="flex-1">
         <div className="mb-2">
-          <h4 className={`font-semibold text-lg ${textColor}`}>{name}</h4>
+          <h4 className={`font-semibold text-lg ${textColor}`} title={normalizedName}>
+            {displayName}
+          </h4>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {hot && (
               <span className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-800 border border-orange-200">
