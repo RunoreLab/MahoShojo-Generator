@@ -8,9 +8,10 @@ import BattleDataModal from '@/components/BattleDataModal';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import Footer from '@/components/Footer';
 import { MagicTavernChatComposer } from '@/components/magic-tavern/ChatComposer';
-import { MagicTavernChatMessage } from '@/components/magic-tavern/ChatMessage';
+import { MagicTavernChatTimeline } from '@/components/magic-tavern/ChatTimeline';
 import { MagicTavernSessionSidebar } from '@/components/magic-tavern/SessionSidebar';
 import { MagicTavernSessionSetupPanel } from '@/components/magic-tavern/SessionSetupPanel';
+import { MagicTavernSummaryPanel } from '@/components/magic-tavern/SummaryPanel';
 import { MagicTavernTachiePanel } from '@/components/magic-tavern/TachiePanel';
 
 import { persistArrestedBackup } from '@/lib/arrested-backup';
@@ -226,13 +227,6 @@ const buildScenarioFromLocalJson = (card: Record<string, unknown>, meta: { fileN
 const sortSessionsByUpdatedAtDesc = (items: MagicTavernSession[]): MagicTavernSession[] => {
   return [...items].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 };
-
-const LoadingSpinner = ({ className = 'h-3 w-3' }: { className?: string }) => (
-  <span
-    className={`inline-block ${className} animate-spin rounded-full border-2 border-pink-200 border-t-pink-600`}
-    aria-hidden="true"
-  />
-);
 
 export default function MagicTavernPage() {
   const router = useRouter();
@@ -1842,125 +1836,43 @@ export default function MagicTavernPage() {
                   onUpdateTitle={updateSessionTitle}
                   onLockTitle={lockSessionTitle}
                 />
+                <MagicTavernSummaryPanel
+                  activeSession={activeSession}
+                  isGenerating={isGenerating}
+                  isSummarizing={isSummarizing}
+                  summaryError={summaryError}
+                  hasMessages={messages.length > 0}
+                  onGenerateSummary={() => void generateSummary()}
+                  onClearSummary={() => void clearSummary()}
+                  onSummaryChange={(value) => {
+                    if (!activeSession) return;
+                    const trimmed = value.trim();
+                    const now = Date.now();
+                    void persistSession({
+                      ...activeSession,
+                      summary: trimmed ? trimmed : undefined,
+                      summaryMeta: trimmed ? { ...(activeSession.summaryMeta ?? {}), updatedAt: now } : undefined,
+                      updatedAt: now,
+                    });
+                  }}
+                />
 
-                <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-3">
-	                  <div className="flex items-center justify-between gap-3">
-	                    <div className="text-sm font-semibold text-gray-800">会话摘要</div>
-	                    <div className="flex flex-wrap items-center justify-end gap-2">
-	                      {isSummarizing ? (
-	                        <div className="flex items-center gap-2 text-xs font-semibold text-pink-700">
-	                          <LoadingSpinner className="h-3 w-3" />
-	                          <span>生成中…</span>
-	                        </div>
-	                      ) : null}
-	                      <button
-	                        type="button"
-	                        className="rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
-	                        disabled={!activeSession || isGenerating || isSummarizing || messages.length === 0}
-	                        onClick={() => void generateSummary()}
-	                        title="生成摘要会消耗额外 Token"
-	                      >
-	                        生成/更新摘要
-	                      </button>
-	                      {activeSession?.summary ? (
-	                        <button
-	                          type="button"
-	                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-	                          disabled={!activeSession || isGenerating || isSummarizing}
-	                          onClick={() => void clearSummary()}
-	                        >
-	                          清空
-	                        </button>
-	                      ) : null}
-	                    </div>
-	                  </div>
-
-	                  <div className="text-xs text-gray-500">用于长对话压缩（仅保存在本地浏览器）。生成摘要会消耗额外 Token。</div>
-
-	                  {summaryError ? (
-	                    <ErrorMessage
-	                      message={summaryError}
-	                      className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-	                      linkClassName="text-red-700 underline underline-offset-2 hover:opacity-95"
-	                    />
-	                  ) : null}
-
-	                  <textarea
-	                    className="input-field h-32 resize-y"
-	                    value={activeSession?.summary ?? ''}
-	                    onChange={(event) => {
-	                      if (!activeSession) return;
-	                      const value = event.target.value.trim();
-	                      const now = Date.now();
-	                      void persistSession({
-	                        ...activeSession,
-	                        summary: value ? value : undefined,
-	                        summaryMeta: value ? { ...(activeSession.summaryMeta ?? {}), updatedAt: now } : undefined,
-	                        updatedAt: now,
-	                      });
-	                    }}
-	                    placeholder="还没有摘要。点击“生成/更新摘要”自动生成，或手动填写。"
-	                    disabled={!activeSession || isSummarizing}
-	                  />
-
-	                  {activeSession?.summaryMeta?.updatedAt ? (
-	                    <div className="text-xs text-gray-500">更新时间：{new Date(activeSession.summaryMeta.updatedAt).toLocaleString()}</div>
-	                  ) : null}
-	                </div>
-	
-	                <div className="rounded-xl border border-pink-100 bg-white p-4">
-	                  <div className="mb-3 flex items-center justify-between">
-	                    <div className="flex items-center gap-3">
-                      <div className="text-sm font-semibold text-gray-800">对话</div>
-                      {isGenerating ? (
-                        <div className="flex items-center gap-2 text-xs font-semibold text-pink-700">
-                          <LoadingSpinner className="h-3 w-3" />
-                          <span>生成中…</span>
-                        </div>
-                      ) : null}
-                    </div>
-                    {isGenerating ? (
-                      <button
-                        type="button"
-                        className="rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-700 hover:bg-pink-50"
-                        onClick={stopGenerating}
-                      >
-                        停止生成
-                      </button>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-3">
-                    {messages.length === 0 ? (
-                      <div className="rounded-lg bg-pink-50 px-4 py-3 text-sm text-pink-800">
-                        还没有对话。输入你的行动、对白或叙事，例如：我推开酒馆的大门……
-                      </div>
-                    ) : (
-                      messages.map((message) => (
-                        <div
-                          key={message.id}
-                          className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                        >
-                          <div className="max-w-[720px] w-full sm:w-auto">
-                            <MagicTavernChatMessage
-                              message={message}
-                              session={activeSession}
-                              preferences={preferences}
-                              isGenerating={isGenerating}
-                              tachieAssets={tachieAssets}
-                              onSelectChoice={(text) => void sendMessage(text)}
-                              onUseAsReference={(target, plainText) => {
-                                setTachieReferenceText(plainText);
-                                setTachieAnchorMessageId(target.id);
-                              }}
-                              onRegenerate={(target) => void regenerateMessage(target)}
-                              showRegenerate={canRegenerateMessage(message)}
-                            />
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                <div className="rounded-xl border border-pink-100 bg-white p-4">
+                  <MagicTavernChatTimeline
+                    activeSession={activeSession}
+                    preferences={preferences}
+                    messages={messages}
+                    isGenerating={isGenerating}
+                    tachieAssets={tachieAssets}
+                    onStopGenerating={stopGenerating}
+                    onSelectChoice={(text) => void sendMessage(text)}
+                    onUseAsReference={(target, plainText) => {
+                      setTachieReferenceText(plainText);
+                      setTachieAnchorMessageId(target.id);
+                    }}
+                    onRegenerate={(target) => void regenerateMessage(target)}
+                    canRegenerateMessage={canRegenerateMessage}
+                  />
 
                   <MagicTavernChatComposer
                     activeSession={activeSession}
@@ -1973,7 +1885,7 @@ export default function MagicTavernPage() {
                     isGenerating={isGenerating}
                     hasMessages={messages.length > 0}
                   />
-	                </div>
+                </div>
 
 	                  {activeSession ? (
 	                    <MagicTavernTachiePanel
