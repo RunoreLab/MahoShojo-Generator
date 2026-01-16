@@ -1500,7 +1500,7 @@ export type MagicTeaPartyUpdateDraft = {
 - 对于涉及叙事与记录不同规则/要求的数据卡（例如叙事禁词/记录允许冲突），分情况以更高的优先级要求忽略/遵守对应内容（例如该阶段允许使用“记录术语”，并忽略叙事禁词限制）。
 - 若同时存在多套协议（不同角色/情景卡），允许分角色分别遵守；无法同时满足时**跳过该角色写入**并返回空字段，由前端提示（优先本地前置检测，见 19.3.E）。
 - 记录阶段输入可包含：**安全对话历史** + **可选会话摘要** + **当轮选项列表（如有）**，用于工具卡/全局数据卡写入。
-- **输出格式（JSON，非 JSONL）**：严格输出更新草案结构，便于直接映射到 `MagicTeaPartyUpdateDraft`：  
+- **输出格式（单角色生成时 JSON，批量生成时 JSONL）**：严格输出更新草案结构，便于直接映射到 `MagicTeaPartyUpdateDraft`：  
   ```json
   {
     "updates": [
@@ -1530,7 +1530,7 @@ export type MagicTeaPartyUpdateDraft = {
 
 **E. 指引与依赖提示（首轮/卡组变化时）**
 - `article.analysis` / `正确游玩指引` / `headline*` 等“玩法提示”可转为 `notice(level=info)` 或 UI 顶部提示，**仅首轮或卡组变化时展示一次**。
-- 依赖缺失（如要求 templateId=fairy 或 “全局数据卡”）时，**优先本地前置检测并直接提示，阻断叙事/写入调用**；仅在未命中本地检测时允许 AI 通过 `notice(level=error)` 提示并终止流程。
+- 【可选】依赖缺失（如要求 templateId=fairy 或 “全局数据卡”）时，**优先本地前置检测并直接提示，阻断叙事/写入调用**；在未命中本地检测时允许 AI 通过 `notice(level=error)` 提示并终止流程。
 
 ### 19.4 可解析输出规范（替代 officialReport.* / headline / article.*）
 
