@@ -7,7 +7,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
-import { formatMarkdownImage, isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
+import { formatMarkdownImage, formatMarkdownLink, isAllowedExternalMediaUrl, isLikelyAudioUrl } from '@/lib/markdown/externalMedia';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
@@ -272,6 +272,56 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 {children}
             </p>
         ),
+        a: ({ href, title, children, ...props }) => {
+            const rawHref = typeof href === 'string' ? href : '';
+            const isExternal = /^https?:\/\//i.test(rawHref);
+            const isAudioLink = Boolean(rawHref && isLikelyAudioUrl(rawHref));
+            const normalizedHref = rawHref.startsWith('//') ? `https:${rawHref}` : rawHref;
+            const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
+            const linkText =
+                typeof children === 'string'
+                    ? children
+                    : Array.isArray(children)
+                        ? children.filter((child): child is string => typeof child === 'string').join('')
+                        : '';
+
+            if (isAudioLink) {
+                if (!isAudioAllowed) {
+                    return (
+                        <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200 break-all">
+                            {formatMarkdownLink(linkText || '播放音频', rawHref, title)}
+                        </code>
+                    );
+                }
+
+                return (
+                    <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+                        <audio controls preload="none" src={normalizedHref} className="h-8 max-w-full" />
+                        <a
+                            href={normalizedHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] underline underline-offset-2 text-blue-200"
+                            {...props}
+                        >
+                            {linkText || '打开音频链接'}
+                        </a>
+                    </span>
+                );
+            }
+
+            return (
+                <a
+                    href={href}
+                    target={isExternal ? '_blank' : undefined}
+                    rel={isExternal ? 'noopener noreferrer' : undefined}
+                    className="underline underline-offset-2 text-blue-200 opacity-90 hover:opacity-100"
+                    {...props}
+                >
+                    {children}
+                </a>
+            );
+        },
         // ul -> 列表 (用于随机判定记录等)
         ul: ({ children, ...props }) => (
             <ul className="list-none space-y-2 my-2 text-sm bg-black/20 p-3 rounded border-l-4 border-green-400" {...props}>
@@ -322,7 +372,37 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             </td>
         ),
         img: ({ src, alt, title, ...props }) => {
-            const isAllowed = isAllowedExternalMediaUrl(typeof src === 'string' ? src : '', 'image');
+            const rawSrc = typeof src === 'string' ? src : '';
+            const isAudioLink = Boolean(rawSrc && isLikelyAudioUrl(rawSrc));
+            if (isAudioLink) {
+                const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
+                const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+                const audioLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放音频';
+
+                if (!isAudioAllowed) {
+                    return (
+                        <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200 break-all">
+                            {formatMarkdownImage(alt, src, title)}
+                        </code>
+                    );
+                }
+
+                return (
+                    <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+                        <audio controls preload="none" src={normalizedSrc} className="h-8 max-w-full" />
+                        <a
+                            href={normalizedSrc}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] underline underline-offset-2 text-blue-200"
+                        >
+                            {audioLabel}
+                        </a>
+                    </span>
+                );
+            }
+
+            const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
             if (!isAllowed) {
                 return (
                     <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200 break-all">

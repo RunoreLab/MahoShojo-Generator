@@ -53,7 +53,12 @@ const AUDIO_TRUSTED_MEDIA_HOSTS = [
   // 喜马拉雅
   'ximalaya.com',
   'xmcdn.com',
+  // Cloudflare R2 公共访问域名
+  'r2.dev',
+  'r2.cloudflarestorage.com',
 ] as const;
+
+const AUDIO_FILE_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.oga', '.opus', '.m4a', '.aac', '.flac'] as const;
 
 const MEDIA_HOST_WHITELIST: Record<ExternalMediaKind, readonly string[]> = {
   image: BASE_TRUSTED_MEDIA_HOSTS,
@@ -93,6 +98,16 @@ export const isAllowedExternalMediaUrl = (value: string | null | undefined, kind
   }
 };
 
+export const isLikelyAudioUrl = (value: string | null | undefined) => {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const lowered = trimmed.toLowerCase();
+  const normalized = lowered.startsWith('//') ? `https:${lowered}` : lowered;
+  const withoutQuery = normalized.split('?')[0]?.split('#')[0] ?? normalized;
+  return AUDIO_FILE_EXTENSIONS.some((ext) => withoutQuery.endsWith(ext));
+};
+
 export const formatMarkdownImage = (
   altText: string | null | undefined,
   src: string | null | undefined,
@@ -102,4 +117,15 @@ export const formatMarkdownImage = (
   const url = typeof src === 'string' ? src : '';
   const titlePart = typeof title === 'string' && title ? ` "${title}"` : '';
   return `![${alt}](${url}${titlePart})`;
+};
+
+export const formatMarkdownLink = (
+  text: string | null | undefined,
+  href: string | null | undefined,
+  title: string | null | undefined
+) => {
+  const label = typeof text === 'string' ? text : '';
+  const url = typeof href === 'string' ? href : '';
+  const titlePart = typeof title === 'string' && title ? ` "${title}"` : '';
+  return `[${label}](${url}${titlePart})`;
 };

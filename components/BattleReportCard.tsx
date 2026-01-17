@@ -8,7 +8,7 @@ import remarkMath from 'remark-math';
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
-import { formatMarkdownImage, isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
+import { formatMarkdownImage, formatMarkdownLink, isAllowedExternalMediaUrl, isLikelyAudioUrl } from '@/lib/markdown/externalMedia';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { RankedMatchReportPanel } from '@/components/ranking/RankedMatchReportPanel';
 
@@ -232,6 +232,56 @@ ${adjudicationMarkdown}
   };
 
   const markdownComponents: Components = {
+    a: ({ href, title, children, ...props }) => {
+      const rawHref = typeof href === 'string' ? href : '';
+      const isExternal = /^https?:\/\//i.test(rawHref);
+      const isAudioLink = Boolean(rawHref && isLikelyAudioUrl(rawHref));
+      const normalizedHref = rawHref.startsWith('//') ? `https:${rawHref}` : rawHref;
+      const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
+      const linkText =
+        typeof children === 'string'
+          ? children
+          : Array.isArray(children)
+            ? children.filter((child): child is string => typeof child === 'string').join('')
+            : '';
+
+      if (isAudioLink) {
+        if (!isAudioAllowed) {
+          return (
+            <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
+              {formatMarkdownLink(linkText || '播放音频', rawHref, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <audio controls preload="none" src={normalizedHref} className="h-8 max-w-full" />
+            <a
+              href={normalizedHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] underline underline-offset-2 text-blue-200"
+              {...props}
+            >
+              {linkText || '打开音频链接'}
+            </a>
+          </span>
+        );
+      }
+
+      return (
+        <a
+          href={href}
+          target={isExternal ? '_blank' : undefined}
+          rel={isExternal ? 'noopener noreferrer' : undefined}
+          className="underline underline-offset-2 text-blue-200 opacity-90 hover:opacity-100"
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    },
     h1: ({ children }) => <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>,
     h2: ({ children }) => <h4 className="text-base font-semibold mt-4 mb-2">{children}</h4>,
     h3: ({ children }) => <h5 className="text-sm font-semibold mt-3 mb-1 opacity-95">{children}</h5>,
@@ -289,7 +339,37 @@ ${adjudicationMarkdown}
       <td className="px-3 py-2 text-gray-100/90 align-top border-b border-white/5 whitespace-pre-wrap break-words">{children}</td>
     ),
     img: ({ src, alt, title, ...props }) => {
-      const isAllowed = isAllowedExternalMediaUrl(typeof src === 'string' ? src : '', 'image');
+      const rawSrc = typeof src === 'string' ? src : '';
+      const isAudioLink = Boolean(rawSrc && isLikelyAudioUrl(rawSrc));
+      if (isAudioLink) {
+        const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
+        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const audioLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放音频';
+
+        if (!isAudioAllowed) {
+          return (
+            <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
+              {formatMarkdownImage(alt, src, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <audio controls preload="none" src={normalizedSrc} className="h-8 max-w-full" />
+            <a
+              href={normalizedSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] underline underline-offset-2 text-blue-200"
+            >
+              {audioLabel}
+            </a>
+          </span>
+        );
+      }
+
+      const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
       if (!isAllowed) {
         return (
           <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
