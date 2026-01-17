@@ -16,6 +16,7 @@ type MagicTeaPartySessionSetupPanelProps = {
   onUpdatePlayerRole: (roleId: string | null) => void;
   onUpdateTitle: (title: string) => void;
   onLockTitle: () => void;
+  onCreateSession?: () => void;
   onImportRolesText: (text: string) => void;
   onImportScenariosText: (text: string) => void;
   onDropRoles: (files: File[]) => void;
@@ -35,6 +36,7 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
     onUpdatePlayerRole,
     onUpdateTitle,
     onLockTitle,
+    onCreateSession,
     onImportRolesText,
     onImportScenariosText,
     onDropRoles,
@@ -46,9 +48,28 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
   const auxScenarios = activeSession?.auxScenarios ?? [];
   const [rolePasteText, setRolePasteText] = useState('');
   const [scenarioPasteText, setScenarioPasteText] = useState('');
+  const hasSession = Boolean(activeSession);
 
   return (
     <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-4">
+      {!hasSession ? (
+        <div className="rounded-lg border border-dashed border-pink-200 bg-pink-50/60 px-3 py-3 text-xs text-pink-800">
+          <div className="font-semibold">还没有会话</div>
+          <div className="mt-1 text-pink-700">先新建或选择会话，才能编辑角色/情景与继续对话。</div>
+          {onCreateSession ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="rounded-md bg-pink-600 px-3 py-1 text-xs font-semibold text-white hover:bg-pink-700"
+                onClick={onCreateSession}
+              >
+                新建会话
+              </button>
+              <span className="text-[11px] text-pink-600">或在左侧会话列表中选择已有会话</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-800">会话设置</div>
         <button
@@ -56,7 +77,7 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
           className="text-xs text-gray-600 hover:underline"
           onClick={onLockTitle}
           title="标记为手动标题（阻止自动覆盖）"
-          disabled={!activeSession}
+          disabled={!hasSession}
         >
           锁定标题
         </button>
@@ -70,18 +91,18 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
               type="button"
               className="text-xs text-pink-700 hover:underline"
               onClick={onOpenRoleModal}
-              disabled={!activeSession}
+              disabled={!hasSession}
             >
               浏览在线角色库
             </button>
           </div>
-          <input type="file" accept=".json" multiple className="input-field" onChange={onUploadRoles} disabled={!activeSession} />
+          <input type="file" accept=".json" multiple className="input-field" onChange={onUploadRoles} disabled={!hasSession} />
           <div
             className="rounded-lg border border-dashed border-pink-200 bg-pink-50/40 p-3 text-xs text-gray-600"
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
               event.preventDefault();
-              if (!activeSession) return;
+              if (!hasSession) return;
               const files = Array.from(event.dataTransfer.files || []);
               if (files.length === 0) return;
               void onDropRoles(files);
@@ -93,13 +114,13 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
               value={rolePasteText}
               onChange={(event) => setRolePasteText(event.target.value)}
               placeholder="粘贴角色卡 JSON（单卡或数组）"
-              disabled={!activeSession}
+              disabled={!hasSession}
             />
             <div className="mt-2 flex items-center justify-end gap-2">
               <button
                 type="button"
                 className="rounded-md border border-pink-200 bg-white px-3 py-1 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!activeSession || !rolePasteText.trim()}
+                disabled={!hasSession || !rolePasteText.trim()}
                 onClick={() => {
                   onImportRolesText(rolePasteText);
                   setRolePasteText('');
@@ -110,7 +131,7 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
               <button
                 type="button"
                 className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!activeSession || !rolePasteText.trim()}
+                disabled={!hasSession || !rolePasteText.trim()}
                 onClick={() => setRolePasteText('')}
               >
                 清空
@@ -144,18 +165,18 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
               type="button"
               className="text-xs text-pink-700 hover:underline"
               onClick={onOpenScenarioModal}
-              disabled={!activeSession}
+              disabled={!hasSession}
             >
               浏览在线情景库
             </button>
           </div>
-          <input type="file" accept=".json" multiple className="input-field" onChange={onUploadScenarios} disabled={!activeSession} />
+          <input type="file" accept=".json" multiple className="input-field" onChange={onUploadScenarios} disabled={!hasSession} />
           <div
             className="rounded-lg border border-dashed border-pink-200 bg-pink-50/40 p-3 text-xs text-gray-600"
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
               event.preventDefault();
-              if (!activeSession) return;
+              if (!hasSession) return;
               const files = Array.from(event.dataTransfer.files || []);
               if (files.length === 0) return;
               void onDropScenarios(files);
@@ -167,13 +188,13 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
               value={scenarioPasteText}
               onChange={(event) => setScenarioPasteText(event.target.value)}
               placeholder="粘贴情景卡 JSON（单卡或数组）"
-              disabled={!activeSession}
+              disabled={!hasSession}
             />
             <div className="mt-2 flex items-center justify-end gap-2">
               <button
                 type="button"
                 className="rounded-md border border-pink-200 bg-white px-3 py-1 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!activeSession || !scenarioPasteText.trim()}
+                disabled={!hasSession || !scenarioPasteText.trim()}
                 onClick={() => {
                   onImportScenariosText(scenarioPasteText);
                   setScenarioPasteText('');
@@ -184,7 +205,7 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
               <button
                 type="button"
                 className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!activeSession || !scenarioPasteText.trim()}
+                disabled={!hasSession || !scenarioPasteText.trim()}
                 onClick={() => setScenarioPasteText('')}
               >
                 清空
@@ -229,7 +250,7 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
               const value = event.target.value;
               onUpdatePlayerRole(value ? value : null);
             }}
-            disabled={!activeSession}
+            disabled={!hasSession}
           >
             {playerOptions.map((opt) => (
               <option key={opt.value || 'user'} value={opt.value}>
@@ -245,7 +266,7 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
             value={activeSession?.title ?? ''}
             onChange={(event) => onUpdateTitle(event.target.value)}
             placeholder="输入会话标题"
-            disabled={!activeSession}
+            disabled={!hasSession}
           />
         </div>
       </div>

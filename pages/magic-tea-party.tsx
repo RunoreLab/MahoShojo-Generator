@@ -790,6 +790,7 @@ export default function MagicTeaPartyPage() {
                   onUpdatePlayerRole={updatePlayerRole}
                   onUpdateTitle={updateSessionTitle}
                   onLockTitle={lockSessionTitle}
+                  onCreateSession={() => void createSession()}
                 />
 
                 <MagicTeaPartyPresetCharacterPanel

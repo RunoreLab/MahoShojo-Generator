@@ -30,6 +30,7 @@ export function MagicTeaPartyChatComposer(props: MagicTeaPartyChatComposerProps)
   const outputFormat = activeSession?.settings.outputFormat ?? preferences.outputFormat;
   const canSend = Boolean(activeSession && !isGenerating && draft.trim());
   const canAction = Boolean(activeSession && !isGenerating);
+  const hasSession = Boolean(activeSession);
 
   return (
     <div className="mt-4 grid gap-2">
@@ -42,9 +43,11 @@ export function MagicTeaPartyChatComposer(props: MagicTeaPartyChatComposerProps)
       />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 text-xs text-gray-500">
-          {outputFormat === 'markdown'
-            ? '提示：Markdown 模式不会稳定解析选项/角色分段。'
-            : '提示：JSONL 模式可解析旁白/对白/选项。'}
+          {!hasSession
+            ? '提示：请先新建或选择会话，再开始对话。'
+            : outputFormat === 'markdown'
+              ? '提示：Markdown 模式不会稳定解析选项/角色分段。'
+              : '提示：JSONL 模式可解析旁白/对白/选项。'}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
