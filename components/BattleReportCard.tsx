@@ -130,7 +130,12 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, generationI
       if (buttonsContainer) buttonsContainer.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, { scale: 1, useProxy: getSnapdomProxyUrl() });
+      const result = await snapdom(cardRef.current, {
+        scale: 1,
+        useProxy: getSnapdomProxyUrl(),
+        exclude: ['audio', 'video'],
+        excludeMode: 'remove',
+      });
 
       // 截图后恢复按钮和隐藏Logo
       if (buttonsContainer) buttonsContainer.style.display = 'flex';

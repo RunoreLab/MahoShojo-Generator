@@ -184,7 +184,13 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             const sanitizedTitle = title.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
             const filename = `魔法少女速报_${sanitizedTitle}.png`;
 
-            const blob = await capturePngBlob(cardRef.current, { scale: 1, dprMax: 2, fast: false });
+            const blob = await capturePngBlob(cardRef.current, {
+                scale: 1,
+                dprMax: 2,
+                fast: false,
+                exclude: ['audio', 'video'],
+                excludeMode: 'remove',
+            });
 
             const isMobileDevice = /Mobi/i.test(window.navigator.userAgent);
 

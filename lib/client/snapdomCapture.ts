@@ -17,11 +17,25 @@ export async function capturePngBlob(
     scale?: number;
     dprMax?: number;
     fast?: boolean;
+    exclude?: string[];
+    excludeMode?: 'hide' | 'remove';
+    filter?: (el: Element) => boolean;
+    filterMode?: 'hide' | 'remove';
   }
 ): Promise<Blob> {
   const scale = options?.scale ?? 1;
   const dpr = getSafeDpr(options?.dprMax ?? 2);
   const useProxy = getSnapdomProxyUrl();
 
-  return snapdom.toBlob(element, { type: 'png', scale, dpr, fast: options?.fast, useProxy });
+  return snapdom.toBlob(element, {
+    type: 'png',
+    scale,
+    dpr,
+    fast: options?.fast,
+    useProxy,
+    exclude: options?.exclude,
+    excludeMode: options?.excludeMode,
+    filter: options?.filter,
+    filterMode: options?.filterMode,
+  });
 }
