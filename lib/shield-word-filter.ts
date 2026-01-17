@@ -105,6 +105,7 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '5Lqn5Lmz',
     '5Lqn5aW2',
     '6L+36I2v',
+    '6LCD5pWZ',
   ],
   replace: {
     // key 为 base64 编码的屏蔽词，value 为明文替换词
@@ -127,6 +128,7 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '5Lqn5Lmz': '产出',
     '5Lqn5aW2': '产出',
     '6L+36I2v': '红茶',
+    '6LCD5pWZ': '教育',
   },
   encoding: 'base64',
 };
