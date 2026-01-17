@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, Dispatch, SetStateAction } from 'react';
+import { useRouter } from 'next/router';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { randomUUID } from '@/lib/crypto';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { clearMagicTeaPartyDraft } from '@/lib/magic-tea-party/drafts';
+import { checkMagicTeaPartySensitiveText, maskMagicTeaPartyJsonValue } from '@/lib/magic-tea-party/import-safety';
 import { extractMagicTeaPartySideChannelsFromJsonl, parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
 import { extractMagicTeaPartyNoticesFromMarkdown } from '@/lib/magic-tea-party/notice';
 import { migrateMagicTeaPartyLocalStorage } from '@/lib/magic-tea-party/migration';
@@ -199,6 +201,7 @@ export type UseMagicTeaPartySessionsResult = {
 
 export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOptions): UseMagicTeaPartySessionsResult {
   const { username, userProviderConfig, onGlobalError } = options;
+  const router = useRouter();
 
   const [sessions, setSessions] = useState<MagicTeaPartySession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -223,10 +226,11 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   }, [username]);
 
   const refreshSessions = useCallback(async (): Promise<MagicTeaPartySession[]> => {
-    const next = await listMagicTeaPartySessions({ limit: 50 });
+    const limit = Math.max(50, preferences.maxSessions);
+    const next = await listMagicTeaPartySessions({ limit });
     setSessions(next);
     return next;
-  }, []);
+  }, [preferences.maxSessions]);
 
   const handleSessionImported = useCallback(
     async (sessionId: string) => {
@@ -666,6 +670,28 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
     return [];
   };
 
+  const sanitizeJsonPayloads = (payloads: Record<string, unknown>[]): Record<string, unknown>[] =>
+    payloads.map((payload) => maskMagicTeaPartyJsonValue(payload).value as Record<string, unknown>);
+
+  const guardImportText = useCallback(
+    async (text: string, meta: { label: string; filename?: string; mimeType?: string }): Promise<boolean> => {
+      const result = await checkMagicTeaPartySensitiveText({
+        text,
+        reason: '使用危险符文',
+        origin: '/magic-tea-party',
+        label: meta.label,
+        filename: meta.filename,
+        mimeType: meta.mimeType,
+      });
+      if (!result.blocked) return true;
+      if (result.redirectTarget) {
+        await router.push(result.redirectTarget);
+      }
+      return false;
+    },
+    [router]
+  );
+
   const onDropRoles = useCallback(
     async (files: File[]) => {
       if (!activeSession) return;
@@ -677,7 +703,13 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       for (const file of files) {
         try {
           const text = await file.text();
-          const payloads = parseJsonPayloads(text);
+          const allowed = await guardImportText(text, {
+            label: '魔法茶会导入角色卡',
+            filename: file.name,
+            mimeType: 'application/json',
+          });
+          if (!allowed) return;
+          const payloads = sanitizeJsonPayloads(parseJsonPayloads(text));
           if (payloads.length === 0) continue;
           for (const payload of payloads) {
             const role = buildRoleFromLocalJson(payload, { fileName: file.name, importedAt });
@@ -695,7 +727,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       }
       await updateActiveSessionRoles(nextRoles);
     },
-    [activeSession, onGlobalError, updateActiveSessionRoles]
+    [activeSession, guardImportText, onGlobalError, updateActiveSessionRoles]
   );
 
   const onDropScenarios = useCallback(
@@ -710,7 +742,13 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       for (const file of files) {
         try {
           const text = await file.text();
-          const payloads = parseJsonPayloads(text);
+          const allowed = await guardImportText(text, {
+            label: '魔法茶会导入情景卡',
+            filename: file.name,
+            mimeType: 'application/json',
+          });
+          if (!allowed) return;
+          const payloads = sanitizeJsonPayloads(parseJsonPayloads(text));
           if (payloads.length === 0) continue;
           for (const payload of payloads) {
             const scenario = buildScenarioFromLocalJson(payload, { fileName: file.name, importedAt });
@@ -732,7 +770,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       }
       await updateActiveSessionScenarios(nextMain, nextAux);
     },
-    [activeSession, onGlobalError, updateActiveSessionScenarios]
+    [activeSession, guardImportText, onGlobalError, updateActiveSessionScenarios]
   );
 
   const onUploadRoles = useCallback(
@@ -756,7 +794,13 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   const onImportRolesText = useCallback(
     async (text: string) => {
       if (!activeSession) return;
-      const payloads = parseJsonPayloads(text);
+      const allowed = await guardImportText(text, {
+        label: '魔法茶会粘贴角色卡',
+        filename: 'pasted.json',
+        mimeType: 'application/json',
+      });
+      if (!allowed) return;
+      const payloads = sanitizeJsonPayloads(parseJsonPayloads(text));
       if (payloads.length === 0) {
         onGlobalError?.('未识别到有效的角色 JSON。');
         return;
@@ -774,13 +818,19 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       }
       await updateActiveSessionRoles(nextRoles);
     },
-    [activeSession, onGlobalError, updateActiveSessionRoles]
+    [activeSession, guardImportText, onGlobalError, updateActiveSessionRoles]
   );
 
   const onImportScenariosText = useCallback(
     async (text: string) => {
       if (!activeSession) return;
-      const payloads = parseJsonPayloads(text);
+      const allowed = await guardImportText(text, {
+        label: '魔法茶会粘贴情景卡',
+        filename: 'pasted.json',
+        mimeType: 'application/json',
+      });
+      if (!allowed) return;
+      const payloads = sanitizeJsonPayloads(parseJsonPayloads(text));
       if (payloads.length === 0) {
         onGlobalError?.('未识别到有效的情景 JSON。');
         return;
@@ -805,7 +855,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       }
       await updateActiveSessionScenarios(nextMain, nextAux);
     },
-    [activeSession, onGlobalError, updateActiveSessionScenarios]
+    [activeSession, guardImportText, onGlobalError, updateActiveSessionScenarios]
   );
 
   const playerOptions = useMemo(() => {

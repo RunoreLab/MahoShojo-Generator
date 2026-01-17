@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { MagicTeaPartyBranchChainModal } from '@/components/magic-tea-party/BranchChainModal';
@@ -49,6 +49,9 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
     onCleanupSessions,
   } = props;
   const [showBranchModal, setShowBranchModal] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const currentUserDisplayName = activeSession?.settings.userDisplayName ?? preferences.userDisplayName;
   const currentOutputFormat = activeSession?.settings.outputFormat ?? preferences.outputFormat;
@@ -80,6 +83,29 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
   const hasChildren = sessions.some((session) => session.forkedFrom?.sessionId === activeSession?.id);
   const activeTitle = activeSession?.title ?? '当前会话';
 
+  const normalizedQuery = searchText.trim().toLowerCase();
+  const filteredSessions = useMemo(() => {
+    if (!normalizedQuery) return sessions;
+    return sessions.filter((session) => {
+      const parts: string[] = [];
+      if (session.title) parts.push(session.title);
+      if (session.branchLabel) parts.push(session.branchLabel);
+      if (session.scenario?.title) parts.push(session.scenario.title);
+      (session.auxScenarios ?? []).forEach((item) => item?.title && parts.push(item.title));
+      (session.roles ?? []).forEach((role) => role?.name && parts.push(role.name));
+      return parts.join(' ').toLowerCase().includes(normalizedQuery);
+    });
+  }, [normalizedQuery, sessions]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredSessions.length / pageSize));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageSessions = filteredSessions.slice(pageStart, pageStart + pageSize);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   return (
     <aside className="space-y-4 min-w-0">
       <div className="rounded-xl border border-pink-100 bg-white p-4">
@@ -93,11 +119,45 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
             新建
           </button>
         </div>
+        <div className="mt-3 grid gap-2">
+          <input
+            type="text"
+            className="input-field !h-9 !px-2 text-xs"
+            placeholder="搜索会话标题 / 角色 / 情景"
+            value={searchText}
+            onChange={(event) => {
+              setSearchText(event.target.value);
+              setPage(1);
+            }}
+          />
+          <div className="flex items-center justify-between text-[11px] text-gray-500">
+            <span>
+              共 {filteredSessions.length} 个会话 · 第 {currentPage} / {totalPages} 页
+            </span>
+            <div className="flex items-center gap-2">
+              <span>每页</span>
+              <select
+                className="input-field !h-7 !py-0 !px-2 text-[11px]"
+                value={String(pageSize)}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setPageSize(Number.isFinite(next) ? Math.max(5, Math.min(50, Math.floor(next))) : 10);
+                  setPage(1);
+                }}
+              >
+                <option value="5">5</option>
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+              </select>
+            </div>
+          </div>
+        </div>
         <div className="mt-3 space-y-2">
-          {sessions.length === 0 ? (
-            <div className="text-sm text-gray-500">还没有会话，先新建一个吧。</div>
+          {pageSessions.length === 0 ? (
+            <div className="text-sm text-gray-500">{sessions.length === 0 ? '还没有会话，先新建一个吧。' : '未找到匹配会话。'}</div>
           ) : (
-            sessions.map((session) => (
+            pageSessions.map((session) => (
               <div
                 key={session.id}
                 className={`rounded-lg border px-3 py-2 transition-colors ${session.id === activeSessionId
@@ -142,6 +202,24 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
               </div>
             ))
           )}
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-2 text-xs text-gray-600">
+          <button
+            type="button"
+            className="rounded-md border border-gray-200 bg-white px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPage <= 1}
+          >
+            上一页
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-gray-200 bg-white px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPage >= totalPages}
+          >
+            下一页
+          </button>
         </div>
         {hasParent && branchTrail.length > 0 ? (
           <div className="mt-3 rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">

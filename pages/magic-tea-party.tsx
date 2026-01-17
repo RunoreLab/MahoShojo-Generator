@@ -19,6 +19,7 @@ import { MagicTeaPartyTachiePanel } from '@/components/magic-tea-party/TachiePan
 import { estimateMagicTeaPartyTokens, resolveMagicTeaPartyTokenBudget } from '@/lib/magic-tea-party/budget';
 import { readMagicTeaPartyDraft, writeMagicTeaPartyDraft } from '@/lib/magic-tea-party/drafts';
 import { buildMagicTeaPartyHistory } from '@/lib/magic-tea-party/history';
+import { checkMagicTeaPartySensitiveText, maskMagicTeaPartyText } from '@/lib/magic-tea-party/import-safety';
 import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import { useMagicTeaPartyChat } from '@/lib/magic-tea-party/useMagicTeaPartyChat';
@@ -203,7 +204,22 @@ export default function MagicTeaPartyPage() {
       setGlobalError('编辑内容不能为空。');
       return;
     }
-    const nextSessionId = await forkSessionFromMessage(message.id, trimmed);
+    const guard = await checkMagicTeaPartySensitiveText({
+      text: trimmed,
+      reason: '使用危险符文',
+      origin: '/magic-tea-party',
+      label: '魔法茶会分支编辑',
+      filename: 'magic-tea-party-edit.txt',
+      mimeType: 'text/plain',
+    });
+    if (guard.blocked) {
+      if (guard.redirectTarget) {
+        await router.push(guard.redirectTarget);
+      }
+      return;
+    }
+    const masked = maskMagicTeaPartyText(trimmed).value.trim();
+    const nextSessionId = await forkSessionFromMessage(message.id, masked);
     if (nextSessionId) {
       setEditingMessageId(null);
       setEditingDraft('');

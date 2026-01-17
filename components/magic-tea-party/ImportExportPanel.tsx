@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/router';
 import { strToU8, zipSync } from 'fflate';
 
 import { ErrorMessage } from '@/components/ErrorMessage';
@@ -29,6 +30,11 @@ import {
   type MagicTeaPartyArchiveExport,
   type MagicTeaPartySessionExport,
 } from '@/lib/magic-tea-party/transfer';
+import {
+  checkMagicTeaPartySensitiveText,
+  maskMagicTeaPartyJsonValue,
+  maskMagicTeaPartyText,
+} from '@/lib/magic-tea-party/import-safety';
 
 type ImportExportPanelProps = {
   activeSession: MagicTeaPartySession | null;
@@ -61,6 +67,7 @@ const getBlobExtension = (blob: Blob | null): { ext: string; mime: string } => {
 
 export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
   const { activeSession, preferences, onSessionImported } = props;
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -123,6 +130,87 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
     [preferences]
   );
 
+  const maskOptionalText = useCallback((value: unknown): string | undefined => {
+    if (typeof value !== 'string') return undefined;
+    return maskMagicTeaPartyText(value).value;
+  }, []);
+
+  const sanitizeMessage = useCallback(
+    (message: MagicTeaPartyMessage): MagicTeaPartyMessage => {
+      const next: MagicTeaPartyMessage = { ...message };
+      if (typeof next.content === 'string') {
+        next.content = maskMagicTeaPartyText(next.content).value;
+      }
+      if (Array.isArray(next.segments)) {
+        next.segments = next.segments.map((seg) => {
+          if (seg.type === 'narration') {
+            return { ...seg, text: maskMagicTeaPartyText(seg.text).value };
+          }
+          if (seg.type === 'dialogue') {
+            return {
+              ...seg,
+              speakerName: seg.speakerName ? maskMagicTeaPartyText(seg.speakerName).value : seg.speakerName,
+              text: maskMagicTeaPartyText(seg.text).value,
+            };
+          }
+          if (seg.type === 'choices') {
+            const items = seg.items?.map((item) => ({
+              ...item,
+              text: maskMagicTeaPartyText(item.text).value,
+            }));
+            return { ...seg, items: items ?? seg.items };
+          }
+          return seg;
+        });
+      }
+      if (Array.isArray(next.choices)) {
+        next.choices = next.choices.map((item) => ({
+          ...item,
+          text: maskMagicTeaPartyText(item.text).value,
+        }));
+      }
+      if (next.meta && typeof next.meta === 'object') {
+        const meta = { ...(next.meta as Record<string, unknown>) };
+        if (typeof meta.speakerName === 'string') {
+          meta.speakerName = maskMagicTeaPartyText(meta.speakerName).value;
+        }
+        next.meta = meta;
+      }
+      return next;
+    },
+    []
+  );
+
+  const sanitizeRole = useCallback(
+    (role: MagicTeaPartyRole): MagicTeaPartyRole => {
+      const maskedName = maskOptionalText(role.name) ?? role.name;
+      const maskedNotes = maskOptionalText(role.notes);
+      const maskedCard = maskMagicTeaPartyJsonValue(role.card ?? {}).value as Record<string, unknown>;
+      return {
+        ...role,
+        name: maskedName,
+        ...(typeof maskedNotes === 'string' ? { notes: maskedNotes } : {}),
+        card: maskedCard,
+      };
+    },
+    [maskOptionalText]
+  );
+
+  const sanitizeScenario = useCallback(
+    (scenario: MagicTeaPartyScenario): MagicTeaPartyScenario => {
+      const maskedTitle = maskOptionalText(scenario.title) ?? scenario.title;
+      const maskedNotes = maskOptionalText(scenario.notes);
+      const maskedCard = maskMagicTeaPartyJsonValue(scenario.card ?? {}).value as Record<string, unknown>;
+      return {
+        ...scenario,
+        title: maskedTitle,
+        ...(typeof maskedNotes === 'string' ? { notes: maskedNotes } : {}),
+        card: maskedCard,
+      };
+    },
+    [maskOptionalText]
+  );
+
   const importSessionPayload = useCallback(
     async (payload: MagicTeaPartySessionExport, titleHint: string | null): Promise<string> => {
       const now = Date.now();
@@ -181,7 +269,7 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
       });
 
       const sessionTitle =
-        readString(sessionCore.title) ||
+        maskOptionalText(sessionCore.title) ||
         (titleHint ? titleHint.trim() : '') ||
         '导入会话';
 
@@ -191,24 +279,25 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
         titleMeta: { source: 'manual', generatedAt: now, reason: 'import' },
         createdAt: now,
         updatedAt: now,
-        roles,
-        scenario: scenario ?? undefined,
-        auxScenarios,
+        roles: roles.map(sanitizeRole),
+        scenario: scenario ? sanitizeScenario(scenario) : undefined,
+        auxScenarios: auxScenarios.map(sanitizeScenario),
         playerRoleId: typeof sessionCore.playerRoleId === 'string' ? sessionCore.playerRoleId : null,
-        summary: typeof sessionCore.summary === 'string' ? sessionCore.summary : undefined,
+        summary: typeof sessionCore.summary === 'string' ? maskMagicTeaPartyText(sessionCore.summary).value : undefined,
         summaryMeta: ensureRecord(sessionCore.summaryMeta) as any,
         settings: buildSessionSettings(ensureRecord(sessionCore.settings)),
       };
 
       await putMagicTeaPartySession(session);
-      await Promise.all(normalizedMessagesFixed.map((message) => putMagicTeaPartyMessage(message as any)));
+      const sanitizedMessages = normalizedMessagesFixed.map((message) => sanitizeMessage(message as MagicTeaPartyMessage));
+      await Promise.all(sanitizedMessages.map((message) => putMagicTeaPartyMessage(message as any)));
       if (normalizedAssets.length > 0) {
         await Promise.all(normalizedAssets.map((asset) => putMagicTeaPartyTachieAsset(asset as any)));
       }
 
       return sessionId;
     },
-    [buildSessionSettings]
+    [buildSessionSettings, maskOptionalText, sanitizeMessage, sanitizeRole, sanitizeScenario]
   );
 
   const handleExportSession = useCallback(async () => {
@@ -398,6 +487,20 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
 
       try {
         const text = await file.text();
+        const guard = await checkMagicTeaPartySensitiveText({
+          text,
+          reason: '使用危险符文',
+          origin: '/magic-tea-party',
+          label: '魔法茶会导入会话',
+          filename: file.name,
+          mimeType: file.type || 'application/json',
+        });
+        if (guard.blocked) {
+          if (guard.redirectTarget) {
+            await router.push(guard.redirectTarget);
+          }
+          return;
+        }
         const ext = file.name.toLowerCase();
         const baseTitle = getBaseTitle(file.name, '导入会话');
         const now = Date.now();
@@ -411,6 +514,7 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
             userDisplayName: preferences.userDisplayName,
             now,
           });
+          const sanitizedMessages = messages.map(sanitizeMessage);
           const session: MagicTeaPartySession = {
             id: sessionId,
             title: baseTitle,
@@ -424,8 +528,8 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
             settings: buildSessionSettings(null),
           };
           await putMagicTeaPartySession(session);
-          await Promise.all(messages.map((message) => putMagicTeaPartyMessage(message)));
-          setNotice(warnings.length > 0 ? `已导入 ${messages.length} 条消息（${warnings.length} 行已跳过）。` : `已导入 ${messages.length} 条消息。`);
+          await Promise.all(sanitizedMessages.map((message) => putMagicTeaPartyMessage(message)));
+          setNotice(warnings.length > 0 ? `已导入 ${sanitizedMessages.length} 条消息（${warnings.length} 行已跳过）。` : `已导入 ${sanitizedMessages.length} 条消息。`);
           onSessionImported(sessionId);
           return;
         }
@@ -460,7 +564,7 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
         event.target.value = '';
       }
     },
-    [buildSessionSettings, importSessionPayload, onSessionImported, preferences.userDisplayName]
+    [buildSessionSettings, importSessionPayload, onSessionImported, preferences.userDisplayName, router, sanitizeMessage]
   );
 
   return (
