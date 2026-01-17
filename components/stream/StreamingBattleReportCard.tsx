@@ -7,7 +7,13 @@ import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
-import { formatMarkdownImage, formatMarkdownLink, isAllowedExternalMediaUrl, isLikelyAudioUrl } from '@/lib/markdown/externalMedia';
+import {
+    formatMarkdownImage,
+    formatMarkdownLink,
+    isAllowedExternalMediaUrl,
+    isLikelyAudioUrl,
+    isLikelyVideoUrl,
+} from '@/lib/markdown/externalMedia';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
@@ -276,8 +282,10 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
             const rawHref = typeof href === 'string' ? href : '';
             const isExternal = /^https?:\/\//i.test(rawHref);
             const isAudioLink = Boolean(rawHref && isLikelyAudioUrl(rawHref));
+            const isVideoLink = Boolean(rawHref && isLikelyVideoUrl(rawHref));
             const normalizedHref = rawHref.startsWith('//') ? `https:${rawHref}` : rawHref;
             const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
+            const isVideoAllowed = isVideoLink && isAllowedExternalMediaUrl(rawHref, 'video');
             const linkText =
                 typeof children === 'string'
                     ? children
@@ -305,6 +313,32 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                             {...props}
                         >
                             {linkText || '打开音频链接'}
+                        </a>
+                    </span>
+                );
+            }
+
+            if (isVideoLink) {
+                const videoLabel = linkText || '播放视频';
+                if (!isVideoAllowed) {
+                    return (
+                        <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200 break-all">
+                            {formatMarkdownLink(videoLabel, rawHref, title)}
+                        </code>
+                    );
+                }
+
+                return (
+                    <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+                        <video controls preload="metadata" playsInline src={normalizedHref} className="my-2 max-w-full rounded-md border border-white/15" />
+                        <a
+                            href={normalizedHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] underline underline-offset-2 text-blue-200"
+                            {...props}
+                        >
+                            {videoLabel}
                         </a>
                     </span>
                 );
@@ -374,6 +408,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
         img: ({ src, alt, title, ...props }) => {
             const rawSrc = typeof src === 'string' ? src : '';
             const isAudioLink = Boolean(rawSrc && isLikelyAudioUrl(rawSrc));
+            const isVideoLink = Boolean(rawSrc && isLikelyVideoUrl(rawSrc));
             if (isAudioLink) {
                 const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
                 const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
@@ -382,7 +417,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 if (!isAudioAllowed) {
                     return (
                         <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200 break-all">
-                            {formatMarkdownImage(alt, src, title)}
+                            {formatMarkdownImage(alt, rawSrc, title)}
                         </code>
                     );
                 }
@@ -402,11 +437,39 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 );
             }
 
+            if (isVideoLink) {
+                const isVideoAllowed = isAllowedExternalMediaUrl(rawSrc, 'video');
+                const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+                const videoLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放视频';
+
+                if (!isVideoAllowed) {
+                    return (
+                        <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200 break-all">
+                            {formatMarkdownImage(alt, rawSrc, title)}
+                        </code>
+                    );
+                }
+
+                return (
+                    <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+                        <video controls preload="metadata" playsInline src={normalizedSrc} className="my-2 max-w-full rounded-md border border-white/15" />
+                        <a
+                            href={normalizedSrc}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] underline underline-offset-2 text-blue-200"
+                        >
+                            {videoLabel}
+                        </a>
+                    </span>
+                );
+            }
+
             const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
             if (!isAllowed) {
                 return (
                     <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200 break-all">
-                        {formatMarkdownImage(alt, src, title)}
+                        {formatMarkdownImage(alt, rawSrc, title)}
                     </code>
                 );
             }

@@ -34,6 +34,21 @@ const BASE_TRUSTED_MEDIA_HOSTS = [
   'imgchr.com',
 ] as const;
 
+const VIDEO_TRUSTED_MEDIA_HOSTS = [
+  // 优酷
+  'youku.com',
+  'ykimg.com',
+  // 爱奇艺
+  'iqiyi.com',
+  'qiyi.com',
+  'iqiyipic.com',
+  'qiyipic.com',
+  // 哔哩哔哩短链
+  'b23.tv',
+  // 微博视频 CDN
+  'weibocdn.com',
+] as const;
+
 const AUDIO_TRUSTED_MEDIA_HOSTS = [
   // QQ 音乐
   'qqmusic.qq.com',
@@ -53,6 +68,8 @@ const AUDIO_TRUSTED_MEDIA_HOSTS = [
   // 喜马拉雅
   'ximalaya.com',
   'xmcdn.com',
+  // 音乐资源站
+  '2t58.com',
   // Cloudflare R2 公共访问域名
   'r2.dev',
   'r2.cloudflarestorage.com',
@@ -60,9 +77,11 @@ const AUDIO_TRUSTED_MEDIA_HOSTS = [
 
 const AUDIO_FILE_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.oga', '.opus', '.m4a', '.aac', '.flac'] as const;
 
+const VIDEO_FILE_EXTENSIONS = ['.mp4', '.webm', '.ogv', '.mov', '.m4v', '.mkv', '.flv', '.f4v', '.avi', '.m3u8'] as const;
+
 const MEDIA_HOST_WHITELIST: Record<ExternalMediaKind, readonly string[]> = {
   image: BASE_TRUSTED_MEDIA_HOSTS,
-  video: BASE_TRUSTED_MEDIA_HOSTS,
+  video: [...BASE_TRUSTED_MEDIA_HOSTS, ...VIDEO_TRUSTED_MEDIA_HOSTS],
   audio: [...BASE_TRUSTED_MEDIA_HOSTS, ...AUDIO_TRUSTED_MEDIA_HOSTS],
 };
 
@@ -106,6 +125,16 @@ export const isLikelyAudioUrl = (value: string | null | undefined) => {
   const normalized = lowered.startsWith('//') ? `https:${lowered}` : lowered;
   const withoutQuery = normalized.split('?')[0]?.split('#')[0] ?? normalized;
   return AUDIO_FILE_EXTENSIONS.some((ext) => withoutQuery.endsWith(ext));
+};
+
+export const isLikelyVideoUrl = (value: string | null | undefined) => {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const lowered = trimmed.toLowerCase();
+  const normalized = lowered.startsWith('//') ? `https:${lowered}` : lowered;
+  const withoutQuery = normalized.split('?')[0]?.split('#')[0] ?? normalized;
+  return VIDEO_FILE_EXTENSIONS.some((ext) => withoutQuery.endsWith(ext));
 };
 
 export const formatMarkdownImage = (

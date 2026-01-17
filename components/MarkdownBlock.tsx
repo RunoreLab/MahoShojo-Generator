@@ -4,7 +4,13 @@ import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
-import { formatMarkdownImage, formatMarkdownLink, isAllowedExternalMediaUrl, isLikelyAudioUrl } from '@/lib/markdown/externalMedia';
+import {
+  formatMarkdownImage,
+  formatMarkdownLink,
+  isAllowedExternalMediaUrl,
+  isLikelyAudioUrl,
+  isLikelyVideoUrl,
+} from '@/lib/markdown/externalMedia';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
@@ -88,8 +94,10 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
       const rawHref = typeof href === 'string' ? href : '';
       const isExternal = /^https?:\/\//i.test(rawHref);
       const isAudioLink = Boolean(rawHref && isLikelyAudioUrl(rawHref));
+      const isVideoLink = Boolean(rawHref && isLikelyVideoUrl(rawHref));
       const normalizedHref = rawHref ? normalizeHref(rawHref) : '';
       const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
+      const isVideoAllowed = isVideoLink && isAllowedExternalMediaUrl(rawHref, 'video');
       const linkText = getLinkText(children) || '播放音频';
 
       if (isAudioLink) {
@@ -123,6 +131,44 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
               {...props}
             >
               {linkText}
+            </a>
+          </span>
+        );
+      }
+
+      if (isVideoLink) {
+        const videoLabel = getLinkText(children) || '播放视频';
+        if (!isVideoAllowed) {
+          return (
+            <code
+              className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
+                variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
+              }`}
+            >
+              {formatMarkdownLink(videoLabel, rawHref, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <video
+              controls
+              preload="metadata"
+              playsInline
+              src={normalizedHref}
+              className={`my-2 max-w-full rounded-md border ${borderClass}`}
+            />
+            <a
+              href={normalizedHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`text-[11px] underline underline-offset-2 ${
+                variant === 'light' ? 'text-blue-700' : 'text-blue-200'
+              }`}
+              {...props}
+            >
+              {videoLabel}
             </a>
           </span>
         );
@@ -213,6 +259,7 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
     img: ({ src, alt, title, ...props }) => {
       const rawSrc = typeof src === 'string' ? src : '';
       const isAudioLink = Boolean(rawSrc && isLikelyAudioUrl(rawSrc));
+      const isVideoLink = Boolean(rawSrc && isLikelyVideoUrl(rawSrc));
       if (isAudioLink) {
         const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
         const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
@@ -225,7 +272,7 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
                 variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
               }`}
             >
-              {formatMarkdownImage(alt, src, title)}
+              {formatMarkdownImage(alt, rawSrc, title)}
             </code>
           );
         }
@@ -247,6 +294,46 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
         );
       }
 
+      if (isVideoLink) {
+        const isVideoAllowed = isAllowedExternalMediaUrl(rawSrc, 'video');
+        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const videoLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放视频';
+
+        if (!isVideoAllowed) {
+          return (
+            <code
+              className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
+                variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
+              }`}
+            >
+              {formatMarkdownImage(alt, rawSrc, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <video
+              controls
+              preload="metadata"
+              playsInline
+              src={normalizedSrc}
+              className={`my-2 max-w-full rounded-md border ${borderClass}`}
+            />
+            <a
+              href={normalizedSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`text-[11px] underline underline-offset-2 ${
+                variant === 'light' ? 'text-blue-700' : 'text-blue-200'
+              }`}
+            >
+              {videoLabel}
+            </a>
+          </span>
+        );
+      }
+
       const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
       if (!isAllowed) {
         return (
@@ -255,7 +342,7 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
               variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
             }`}
           >
-            {formatMarkdownImage(alt, src, title)}
+            {formatMarkdownImage(alt, rawSrc, title)}
           </code>
         );
       }

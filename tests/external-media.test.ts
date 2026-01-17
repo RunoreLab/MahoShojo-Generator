@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
+import { isAllowedExternalMediaUrl, isLikelyVideoUrl } from '@/lib/markdown/externalMedia';
 
 describe('external media whitelist', () => {
   it('允许白名单内的图片域名', () => {
@@ -32,5 +32,22 @@ describe('external media whitelist', () => {
 
   it('阻止非 http/https 协议', () => {
     expect(isAllowedExternalMediaUrl('data:audio/mp3;base64,Zm9v', 'audio')).toBe(false);
+  });
+
+  it('允许白名单内的视频域名', () => {
+    expect(isAllowedExternalMediaUrl('https://v.youku.com/v_show/id_abc123.html', 'video')).toBe(true);
+    expect(isAllowedExternalMediaUrl('https://www.iqiyi.com/v_abc123.html', 'video')).toBe(true);
+    expect(isAllowedExternalMediaUrl('https://www.bilibili.com/video/BV1xK4y1Z7yH', 'video')).toBe(true);
+  });
+
+  it('阻止非白名单的视频域名', () => {
+    expect(isAllowedExternalMediaUrl('https://video.example.com/clip.mp4', 'video')).toBe(false);
+  });
+
+  it('识别常见视频文件扩展名', () => {
+    expect(isLikelyVideoUrl('https://media.example.com/clip.mp4')).toBe(true);
+    expect(isLikelyVideoUrl('https://media.example.com/stream.m3u8?token=abc')).toBe(true);
+    expect(isLikelyVideoUrl('https://media.example.com/clip.webm#t=5')).toBe(true);
+    expect(isLikelyVideoUrl('https://www.example.com/watch?v=123')).toBe(false);
   });
 });
