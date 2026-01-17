@@ -244,7 +244,6 @@ export default async function handler(req: NextRequest): Promise<Response> {
       promptBuilder: buildMagicTeaPartyUpdatePrompt,
       schema: UpdateResponseSchema as any,
       taskName: '魔法茶会角色更新',
-      maxOutputTokens: 1200,
     }, {
       providerOverride,
       loadBalanceStrategy: LoadBalanceStrategy.CUSTOM,

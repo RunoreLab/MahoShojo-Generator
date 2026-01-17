@@ -90,7 +90,6 @@ async function generateAiReviewWithModelFallbacks(targets: DataCardAiReviewTarge
     promptBuilder: buildDataCardAiReviewPrompt,
     schema: DataCardAiReviewResponseSchema as any,
     taskName: '数据卡自动审查',
-    maxOutputTokens: 2048,
   } as const;
 
   if (fallbackModels.length === 0) {

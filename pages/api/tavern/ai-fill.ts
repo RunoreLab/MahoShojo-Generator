@@ -157,7 +157,6 @@ ${formatReferenceAttachmentsForPrompt(input.attachments)}
 `.trim(),
         schema: TavernAiFillSchema,
         taskName: '酒馆导出字段 AI 补全',
-        maxOutputTokens: 2048,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       };
 

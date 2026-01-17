@@ -97,7 +97,6 @@ ${answerText}
     promptBuilder,
     schema: ScenarioSchema,
     taskName: "生成情景",
-    maxOutputTokens: 4096,
   };
 };
 

@@ -460,7 +460,6 @@ async function handler(req: NextRequest): Promise<Response> {
         const generationConfig: RawGenerationConfig = {
             prompt: `${systemPrompt}\n\n${prompt}`,
             temperature: 0.9,
-            maxOutputTokens: 8192,
         };
 
         let usedModelOverride: string | undefined;

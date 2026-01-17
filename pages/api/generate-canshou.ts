@@ -56,7 +56,6 @@ const canshouGenerationConfig: GenerationConfig<CanshouDetails, { answers: Recor
   },
   schema: CanshouSchema,
   taskName: "生成残兽档案",
-  maxOutputTokens: 8192,
 };
 
 // API Handler

@@ -200,7 +200,6 @@ async function handler(req: NextRequest): Promise<Response> {
         }),
       schema,
       taskName: '重做角色更新',
-      maxOutputTokens: 1200,
       modelOverride: customModelOverride,
     };
 

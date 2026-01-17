@@ -85,7 +85,6 @@ export const enforceTextSafety = async (params: {
         temperature: 0,
         schema: SafetyCheckSchema,
         taskName: '安全检查',
-        maxOutputTokens: 500,
       });
 
       if (safetyResult.isUnsafe) {

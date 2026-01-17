@@ -415,7 +415,6 @@ ${input.prompt}
 `.trim(),
       schema,
       taskName: '自由生成数据卡',
-      maxOutputTokens: 4096,
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
     };
 

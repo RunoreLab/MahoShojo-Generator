@@ -138,7 +138,6 @@ export default async function handler(req: NextRequest): Promise<Response> {
       {
         prompt,
         temperature: mode === 'title' ? 0.2 : 0.3,
-        maxOutputTokens: mode === 'title' ? 128 : 1400,
       },
       providerOptions
     );

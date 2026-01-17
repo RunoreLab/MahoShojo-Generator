@@ -20,7 +20,7 @@ export interface GenerationConfig<T, I = string> {
   promptBuilder: (input: I) => string;
   schema: z.ZodSchema<T>;
   taskName: string;
-  maxOutputTokens: number;
+  maxOutputTokens?: number;
   modelOverride?: string; // 新增：可选的模型覆盖参数
 }
 
@@ -318,6 +318,10 @@ export async function generateWithAI<T, I = string>(
             })(),
           },
         ]);
+        const maxOutputTokensOption =
+          typeof generationConfig.maxOutputTokens === 'number'
+            ? { maxOutputTokens: generationConfig.maxOutputTokens }
+            : {};
 
         const tryGenerateObject = async () => {
           return await generateObject({
@@ -326,8 +330,8 @@ export async function generateWithAI<T, I = string>(
             prompt: buildPromptMessages(systemPrompt),
             schema: generationConfig.schema,
             temperature: generationConfig.temperature,
-            maxOutputTokens: generationConfig.maxOutputTokens,
             maxRetries: 0,
+            ...maxOutputTokensOption,
           });
         };
 
@@ -346,8 +350,8 @@ export async function generateWithAI<T, I = string>(
             model,
             prompt: buildPromptMessages(guidedPrompt),
             temperature: generationConfig.temperature,
-            maxOutputTokens: generationConfig.maxOutputTokens,
             maxRetries: 0,
+            ...maxOutputTokensOption,
           });
 
           const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
@@ -421,8 +425,8 @@ export async function generateWithAI<T, I = string>(
               model,
               prompt: buildPromptMessages(guidedPrompt),
               temperature: generationConfig.temperature,
-              maxOutputTokens: generationConfig.maxOutputTokens,
               maxRetries: 0,
+              ...maxOutputTokensOption,
             });
 
             const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
@@ -468,8 +472,8 @@ export async function generateWithAI<T, I = string>(
                 model,
                 prompt: buildPromptMessages(guidedPrompt),
                 temperature: generationConfig.temperature,
-                maxOutputTokens: generationConfig.maxOutputTokens,
                 maxRetries: 0,
+                ...maxOutputTokensOption,
               });
 
               const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {

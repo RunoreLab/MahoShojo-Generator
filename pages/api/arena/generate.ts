@@ -345,7 +345,6 @@ interface BattleApiResponse {
             ),
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,
-            maxOutputTokens: 8192,
         };
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};

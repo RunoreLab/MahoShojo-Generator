@@ -268,7 +268,6 @@ export default async function handler(req: NextRequest): Promise<Response> {
       {
         prompt,
         temperature: typeof settings.temperature === 'number' ? settings.temperature : 0.5,
-        maxOutputTokens: 1024,
       },
       providerOptions
     );

@@ -190,7 +190,6 @@ export default async function handler(req: NextRequest): Promise<Response> {
       {
         prompt,
         temperature: 0.75,
-        maxOutputTokens: 4096,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       },
       providerOptions

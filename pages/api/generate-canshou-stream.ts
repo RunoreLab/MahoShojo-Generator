@@ -133,7 +133,6 @@ ${answerText}
       {
         prompt,
         temperature: 0.8,
-        maxOutputTokens: 4096,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       },
       providerOptions

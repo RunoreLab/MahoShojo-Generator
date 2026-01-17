@@ -98,7 +98,6 @@ const magicalGirlDetailsConfig: GenerationConfig<MagicalGirlDetails, { answers: 
   },
   schema: MagicalGirlDetailsSchema,
   taskName: "生成魔法少女详细信息",
-  maxOutputTokens: 8192,
 }
 
 // 处理器重构：

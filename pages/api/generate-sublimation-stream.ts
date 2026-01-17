@@ -197,7 +197,6 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
       {
         prompt,
         temperature: 0.7,
-        maxOutputTokens: 4096,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       },
       providerOptions

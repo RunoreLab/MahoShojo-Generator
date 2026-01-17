@@ -523,7 +523,6 @@ async function handler(req: NextRequest): Promise<Response> {
             ),
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,
-            maxOutputTokens: 8192,
         };
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};

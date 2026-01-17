@@ -396,7 +396,6 @@ ${rulesText}
     promptBuilder,
     schema: finalSchema,
     taskName: '角色成长升华',
-    maxOutputTokens: 8192,
     modelOverride: modelOverride ?? (isDowngrade ? 'gemini-2.5-flash-lite' : undefined),
   };
 };
