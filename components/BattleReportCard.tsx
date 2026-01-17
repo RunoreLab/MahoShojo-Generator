@@ -8,6 +8,7 @@ import remarkMath from 'remark-math';
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { formatMarkdownImage, isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { RankedMatchReportPanel } from '@/components/ranking/RankedMatchReportPanel';
 
@@ -287,6 +288,27 @@ ${adjudicationMarkdown}
     td: ({ children }) => (
       <td className="px-3 py-2 text-gray-100/90 align-top border-b border-white/5 whitespace-pre-wrap break-words">{children}</td>
     ),
+    img: ({ src, alt, title, ...props }) => {
+      const isAllowed = isAllowedExternalMediaUrl(typeof src === 'string' ? src : '', 'image');
+      if (!isAllowed) {
+        return (
+          <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
+            {formatMarkdownImage(alt, src, title)}
+          </code>
+        );
+      }
+
+      return (
+        <img
+          src={src}
+          alt={typeof alt === 'string' ? alt : ''}
+          title={typeof title === 'string' ? title : undefined}
+          className="my-2 max-w-full rounded-md border border-white/15"
+          loading="lazy"
+          {...props}
+        />
+      );
+    },
   };
 
   return (

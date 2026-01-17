@@ -4,6 +4,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { formatMarkdownImage, isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
@@ -157,6 +158,31 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
         {children}
       </td>
     ),
+    img: ({ src, alt, title, ...props }) => {
+      const isAllowed = isAllowedExternalMediaUrl(typeof src === 'string' ? src : '', 'image');
+      if (!isAllowed) {
+        return (
+          <code
+            className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
+              variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
+            }`}
+          >
+            {formatMarkdownImage(alt, src, title)}
+          </code>
+        );
+      }
+
+      return (
+        <img
+          src={src}
+          alt={typeof alt === 'string' ? alt : ''}
+          title={typeof title === 'string' ? title : undefined}
+          className={`my-2 max-w-full rounded-md border ${variant === 'light' ? 'border-gray-200' : 'border-white/10'}`}
+          loading="lazy"
+          {...props}
+        />
+      );
+    },
   };
 
   return (

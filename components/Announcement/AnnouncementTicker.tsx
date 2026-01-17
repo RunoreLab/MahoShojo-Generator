@@ -4,6 +4,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 
 import { interpolateWithQQGroups } from '@/lib/communityGroups';
+import { formatMarkdownImage, isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
 
 interface Announcement {
   id: string;
@@ -212,6 +213,27 @@ const AnnouncementTicker: React.FC = () => {
                           {children}
                         </a>
                       ),
+                      img: ({ src, alt, title, ...props }) => {
+                        const isAllowed = isAllowedExternalMediaUrl(typeof src === 'string' ? src : '', 'image');
+                        if (!isAllowed) {
+                          return (
+                            <code className="font-mono text-xs bg-gray-100 px-2 py-1 rounded text-gray-800 break-all">
+                              {formatMarkdownImage(alt, src, title)}
+                            </code>
+                          );
+                        }
+
+                        return (
+                          <img
+                            src={src}
+                            alt={typeof alt === 'string' ? alt : ''}
+                            title={typeof title === 'string' ? title : undefined}
+                            className="my-2 max-w-full rounded-md border border-gray-200"
+                            loading="lazy"
+                            {...props}
+                          />
+                        );
+                      },
                     }}
                   >
                     {interpolateWithQQGroups(selectedAnnouncement.content)}

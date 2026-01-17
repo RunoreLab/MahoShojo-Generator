@@ -7,6 +7,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 import type { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import { formatMarkdownImage, isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
@@ -320,6 +321,27 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                 {children}
             </td>
         ),
+        img: ({ src, alt, title, ...props }) => {
+            const isAllowed = isAllowedExternalMediaUrl(typeof src === 'string' ? src : '', 'image');
+            if (!isAllowed) {
+                return (
+                    <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded text-pink-200 break-all">
+                        {formatMarkdownImage(alt, src, title)}
+                    </code>
+                );
+            }
+
+            return (
+                <img
+                    src={src}
+                    alt={typeof alt === 'string' ? alt : ''}
+                    title={typeof title === 'string' ? title : undefined}
+                    className="my-2 max-w-full rounded-md border border-white/15"
+                    loading="lazy"
+                    {...props}
+                />
+            );
+        },
     };
 
     return (
