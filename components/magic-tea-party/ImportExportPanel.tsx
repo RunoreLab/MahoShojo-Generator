@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { strToU8, zipSync } from 'fflate';
 
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { randomUUID } from '@/lib/crypto';
 import {
+  getMagicTeaPartyTachieBlob,
   listMagicTeaPartyMessages,
   listMagicTeaPartySessions,
   listMagicTeaPartyTachieAssets,
@@ -46,6 +48,16 @@ const ensureRecord = (value: unknown): Record<string, unknown> | null => {
 };
 
 const ensureArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
+
+const getBlobExtension = (blob: Blob | null): { ext: string; mime: string } => {
+  if (!blob) return { ext: 'bin', mime: 'application/octet-stream' };
+  const mime = blob.type || 'application/octet-stream';
+  if (mime.includes('png')) return { ext: 'png', mime };
+  if (mime.includes('jpeg') || mime.includes('jpg')) return { ext: 'jpg', mime };
+  if (mime.includes('webp')) return { ext: 'webp', mime };
+  if (mime.includes('gif')) return { ext: 'gif', mime };
+  return { ext: 'bin', mime };
+};
 
 export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
   const { activeSession, preferences, onSessionImported } = props;
@@ -297,6 +309,85 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
     }
   }, []);
 
+  const handleExportArchiveZip = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const sessions = await listMagicTeaPartySessions({ limit: 9999 });
+      const exports: MagicTeaPartySessionExport[] = [];
+      const zipEntries: Record<string, Uint8Array> = {};
+      const tachieIndex: Array<Record<string, unknown>> = [];
+      let blobCount = 0;
+      let missingCount = 0;
+
+      for (const session of sessions) {
+        const messages = await listMagicTeaPartyMessages(session.id);
+        const assets = await listMagicTeaPartyTachieAssets(session.id);
+        const sessionExport = buildMagicTeaPartySessionExport({
+          session,
+          messages,
+          tachieAssets: assets,
+          appVersion: 'unknown',
+        });
+        exports.push(sessionExport);
+        zipEntries[`sessions/${session.id}.json`] = strToU8(JSON.stringify(sessionExport, null, 2));
+
+        for (const asset of assets) {
+          const blob = await getMagicTeaPartyTachieBlob(asset.id);
+          const { ext, mime } = getBlobExtension(blob);
+          const fileName = `assets/tachie/${asset.id}.${ext}`;
+          if (blob) {
+            const buffer = new Uint8Array(await blob.arrayBuffer());
+            zipEntries[fileName] = buffer;
+            blobCount += 1;
+            tachieIndex.push({
+              ...asset,
+              fileName,
+              mimeType: mime,
+              blobSize: buffer.byteLength,
+            });
+          } else {
+            missingCount += 1;
+            tachieIndex.push({
+              ...asset,
+              fileName: null,
+              mimeType: mime,
+              blobSize: 0,
+            });
+          }
+        }
+      }
+
+      const manifest = {
+        schema: 'magic-tea-party.archive.zip.v1',
+        exportedAt: new Date().toISOString(),
+        appVersion: 'unknown',
+        sessionCount: exports.length,
+        tachieCount: blobCount,
+        missingBlobs: missingCount,
+      };
+      zipEntries['manifest.json'] = strToU8(JSON.stringify(manifest, null, 2));
+      zipEntries['assets/tachie/index.json'] = strToU8(
+        JSON.stringify({ schema: 'magic-tea-party.tachie.index.v1', items: tachieIndex }, null, 2)
+      );
+
+      const zipped = zipSync(zipEntries, { level: 6 });
+      const zipData = new Uint8Array(zipped);
+      const blob = new Blob([zipData], { type: 'application/zip' });
+      downloadBlob(blob, buildSafeFileName('magic-tea-party-archive', 'zip', 'magic-tea-party-archive'));
+      setNotice(
+        missingCount > 0
+          ? `已导出 ${exports.length} 个会话，包含 ${blobCount} 个图片资源（${missingCount} 个图片缺失）。`
+          : `已导出 ${exports.length} 个会话，包含 ${blobCount} 个图片资源。`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '导出失败');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   const handleFileChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -375,7 +466,7 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
   return (
     <div className="rounded-xl border border-pink-100 bg-white p-4">
       <div className="text-sm font-semibold text-gray-800">导入 / 导出</div>
-      <div className="mt-2 text-xs text-gray-500">支持魔法茶会 JSON 与 SillyTavern JSONL。</div>
+      <div className="mt-2 text-xs text-gray-500">支持魔法茶会 JSON 与 SillyTavern JSONL。ZIP 导出会包含本地图片资源。</div>
       {error && (
         <div className="mt-3">
           <ErrorMessage message={error} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" />
@@ -414,6 +505,14 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
           disabled={busy}
         >
           导出全部会话（JSON）
+        </button>
+        <button
+          type="button"
+          className="rounded-xl border border-pink-200 bg-white px-4 py-2 text-left text-sm font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={handleExportArchiveZip}
+          disabled={busy}
+        >
+          导出全部会话（ZIP，含图片）
         </button>
       </div>
       <input
