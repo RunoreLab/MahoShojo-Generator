@@ -15,6 +15,7 @@ import {
   isLikelyAudioUrl,
   isLikelyVideoUrl,
 } from '@/lib/markdown/externalMedia';
+import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { RankedMatchReportPanel } from '@/components/ranking/RankedMatchReportPanel';
 
@@ -129,7 +130,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, generationI
       if (buttonsContainer) buttonsContainer.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, { scale: 1 });
+      const result = await snapdom(cardRef.current, { scale: 1, useProxy: getSnapdomProxyUrl() });
 
       // 截图后恢复按钮和隐藏Logo
       if (buttonsContainer) buttonsContainer.style.display = 'flex';

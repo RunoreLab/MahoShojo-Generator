@@ -4,6 +4,7 @@ import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 interface MagicalGirlCardProps {
@@ -200,6 +201,7 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
 
       const result = await snapdom(resultRef.current, {
         scale: 1,
+        useProxy: getSnapdomProxyUrl(),
       });
 
       // 截图后恢复按钮和隐藏Logo

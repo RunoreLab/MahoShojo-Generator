@@ -1,6 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import { snapdom } from '@zumer/snapdom';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
 
 interface GeneralScenarioCardProps {
   scenario: {
@@ -42,7 +43,7 @@ const GeneralScenarioCard: React.FC<GeneralScenarioCardProps> = ({
       if (saveButton) saveButton.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, { scale: 1 });
+      const result = await snapdom(cardRef.current, { scale: 1, useProxy: getSnapdomProxyUrl() });
 
       if (saveButton) saveButton.style.display = 'block';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';

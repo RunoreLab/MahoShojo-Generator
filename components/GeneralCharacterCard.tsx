@@ -4,6 +4,7 @@ import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/
 import { GeneralCharacterData } from '@/lib/schemas/general-character';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 export interface GeneralCharacterDetails extends GeneralCharacterData {
@@ -118,7 +119,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
       if (saveButton) saveButton.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, { scale: 1 });
+      const result = await snapdom(cardRef.current, { scale: 1, useProxy: getSnapdomProxyUrl() });
 
       if (saveButton) saveButton.style.display = 'block';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';

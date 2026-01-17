@@ -23,6 +23,8 @@ describe('external media whitelist', () => {
       ),
     ).toBe(true);
 
+    expect(isAllowedExternalMediaUrl('https://music.migu.cn/v3/music/song/123456', 'audio')).toBe(true);
+    expect(isAllowedExternalMediaUrl('https://www.kugou.com/song/#hash=abc', 'audio')).toBe(true);
     expect(isAllowedExternalMediaUrl('https://www.ximalaya.com/track/123456789', 'audio')).toBe(true);
   });
 

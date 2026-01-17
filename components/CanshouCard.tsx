@@ -4,6 +4,7 @@ import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 export interface CanshouDetails {
@@ -50,7 +51,7 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
       if (saveButton) saveButton.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, { scale: 1 });
+      const result = await snapdom(cardRef.current, { scale: 1, useProxy: getSnapdomProxyUrl() });
 
       // 截图后恢复按钮和隐藏Logo
       if (saveButton) saveButton.style.display = 'block';
