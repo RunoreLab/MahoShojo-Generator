@@ -34,10 +34,19 @@ const BASE_TRUSTED_MEDIA_HOSTS = [
   'imgchr.com',
 ] as const;
 
+const AUDIO_TRUSTED_MEDIA_HOSTS = [
+  // QQ 音乐
+  'qqmusic.qq.com',
+  'y.qq.com',
+  // 网易云音乐
+  'music.163.com',
+  'music.126.net',
+] as const;
+
 const MEDIA_HOST_WHITELIST: Record<ExternalMediaKind, readonly string[]> = {
   image: BASE_TRUSTED_MEDIA_HOSTS,
   video: BASE_TRUSTED_MEDIA_HOSTS,
-  audio: BASE_TRUSTED_MEDIA_HOSTS,
+  audio: [...BASE_TRUSTED_MEDIA_HOSTS, ...AUDIO_TRUSTED_MEDIA_HOSTS],
 };
 
 const isHostnameAllowed = (hostname: string, allowlist: readonly string[]) => {
