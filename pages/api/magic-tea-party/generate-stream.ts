@@ -7,7 +7,12 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
 import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
-import type { MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
+import type {
+  MagicTeaPartyOutputPlan,
+  MagicTeaPartyRole,
+  MagicTeaPartyScenario,
+  MagicTeaPartyUpdateDraft,
+} from '@/lib/magic-tea-party/types';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { createBlankDataCard } from '@/lib/data-card-converter';
 
@@ -115,6 +120,15 @@ const OutputPlanSchema = z
     updates: z.enum(['off', 'auto', 'on']).optional(),
   })
   .optional();
+
+const normalizeOutputPlan = (value: z.infer<typeof OutputPlanSchema>): MagicTeaPartyOutputPlan | undefined => {
+  if (!value) return undefined;
+  return {
+    choices: value.choices ?? 'off',
+    summary: value.summary ?? 'off',
+    updates: value.updates ?? 'off',
+  };
+};
 
 const SettingsSchema = z
   .object({
@@ -255,7 +269,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
           modelId: customProvider.modelId.trim(),
           temperature: settings.temperature,
           outputFormat: settings.outputFormat,
-          outputPlan: settings.outputPlan ?? undefined,
+          outputPlan: normalizeOutputPlan(settings.outputPlan),
           updateApplyMode: settings.updateApplyMode,
           language: settings.language,
           enableChoices: settings.enableChoices,

@@ -59,21 +59,23 @@ const parseSummaryPayload = (payload: any): MagicTeaPartyOutputSummary | null =>
 const parseUpdatesPayload = (
   payload: any
 ): { drafts: MagicTeaPartyUpdateDraft[]; meta: Record<string, unknown> | null } | null => {
-  const draftsRaw = Array.isArray(payload?.drafts) ? payload.drafts : null;
+  const draftsRaw: unknown[] | null = Array.isArray(payload?.drafts) ? payload.drafts : null;
   if (!draftsRaw) return null;
   const meta = toRecord(payload?.meta);
 
   const drafts = draftsRaw
-    .map((item: any): MagicTeaPartyUpdateDraft | null => {
-      if (!item || typeof item !== 'object') return null;
-      const roleId = readString(item.roleId) || undefined;
-      const characterName = readString(item.characterName) || readString(item.character) || readString(item.name);
+    .map((item: unknown): MagicTeaPartyUpdateDraft | null => {
+      const record = toRecord(item);
+      if (!record) return null;
+      const roleId = readString(record.roleId) || undefined;
+      const characterName = readString(record.characterName) || readString(record.character) || readString(record.name);
       if (!characterName) return null;
-      const impact = readString(item.impact) || undefined;
-      const currentStateSummary = readString(item.currentStateSummary) || readString(item.current_state_summary) || undefined;
-      const hasWinner = typeof item.hasWinner === 'boolean' ? item.hasWinner : undefined;
-      const winner = readString(item.winner) || undefined;
-      const draftMeta = toRecord(item.meta);
+      const impact = readString(record.impact) || undefined;
+      const currentStateSummary =
+        readString(record.currentStateSummary) || readString(record.current_state_summary) || undefined;
+      const hasWinner = typeof record.hasWinner === 'boolean' ? record.hasWinner : undefined;
+      const winner = readString(record.winner) || undefined;
+      const draftMeta = toRecord(record.meta);
       const mergedMeta = meta ? { ...(draftMeta ?? {}), ...meta } : draftMeta ?? undefined;
       return {
         ...(roleId ? { roleId } : {}),

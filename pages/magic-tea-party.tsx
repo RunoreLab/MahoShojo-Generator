@@ -28,8 +28,10 @@ import type {
   MagicTeaPartyMessage,
   MagicTeaPartyNotice,
   MagicTeaPartyRole,
+  MagicTeaPartySession,
   MagicTeaPartyTachieAsset,
   MagicTeaPartyUpdateDraft,
+  MagicTeaPartyUpdateSnapshot,
 } from '@/lib/magic-tea-party/types';
 import { useAuth } from '@/lib/useAuth';
 import { applyShieldWords } from '@/lib/shield-word-filter';
@@ -427,7 +429,7 @@ export default function MagicTeaPartyPage() {
     try {
       const messageRange =
         params.messageRange ??
-        normalizeMessageRange(activeSession.protocolShadow?.messageRange) ??
+        normalizeMessageRange(session.protocolShadow?.messageRange) ??
         extractMessageRangeFromDrafts(params.drafts);
       const response = await fetch('/api/magic-tea-party/apply-updates', {
         method: 'POST',
@@ -458,22 +460,23 @@ export default function MagicTeaPartyPage() {
       const now = Date.now();
       const rolesBefore = session.roles ?? [];
       const rolesAfter = updatedRoles.length > 0 ? updatedRoles : rolesBefore;
-      const nextSession = {
+      const updateSnapshot: MagicTeaPartyUpdateSnapshot | undefined =
+        params.mode === 'auto'
+          ? {
+              id: randomUUID(),
+              createdAt: now,
+              mode: 'auto',
+              ...(messageRange ? { messageRange } : {}),
+              drafts: params.drafts,
+              rolesBefore,
+              rolesAfter,
+            }
+          : session.updateSnapshot;
+      const nextSession: MagicTeaPartySession = {
         ...session,
         roles: rolesAfter,
         protocolShadow: undefined,
-        updateSnapshot:
-          params.mode === 'auto'
-            ? {
-                id: randomUUID(),
-                createdAt: now,
-                mode: 'auto',
-                ...(messageRange ? { messageRange } : {}),
-                drafts: params.drafts,
-                rolesBefore,
-                rolesAfter,
-              }
-            : session.updateSnapshot,
+        updateSnapshot,
         updatedAt: now,
       };
       await persistSession(nextSession);
@@ -578,7 +581,7 @@ export default function MagicTeaPartyPage() {
       }
       setUpdateDrafts(drafts);
       const now = Date.now();
-      const nextSession = {
+      const nextSession: MagicTeaPartySession = {
         ...activeSession,
         protocolShadow: {
           updatedAt: now,

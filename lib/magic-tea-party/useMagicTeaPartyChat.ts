@@ -567,7 +567,17 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       }
       return finalSession;
     },
-    [buildChoiceNotices, buildRequestSettings, emitNotices, persistSession, resolvePromptSettings, router, setMessages, userProviderConfig]
+    [
+      buildChoiceNotices,
+      buildRequestSettings,
+      emitNotices,
+      onSideChannels,
+      persistSession,
+      resolvePromptSettings,
+      router,
+      setMessages,
+      userProviderConfig,
+    ]
   );
 
   const maybeAutoSummarize = useCallback(

@@ -7,7 +7,12 @@ import { MagicTeaPartyGlobalSettingsPanel } from '@/components/magic-tea-party/G
 import { MagicTeaPartyImportExportPanel } from '@/components/magic-tea-party/ImportExportPanel';
 
 import { MAGIC_TEA_PARTY_PRESETS, type MagicTeaPartyPresetId } from '@/lib/magic-tea-party/presets';
-import type { MagicTeaPartyPreferences, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
+import type {
+  MagicTeaPartyOutputPlan,
+  MagicTeaPartyOutputPlanMode,
+  MagicTeaPartyPreferences,
+  MagicTeaPartySession,
+} from '@/lib/magic-tea-party/types';
 
 type MagicTeaPartySidebarProps = {
   sessions: MagicTeaPartySession[];
@@ -361,10 +366,10 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
               checked={Boolean(currentEnableChoices)}
               onChange={(event) => {
                 const enableChoices = Boolean(event.target.checked);
-                const outputPlan = {
-                  ...currentOutputPlan,
-                  choices: enableChoices ? (currentOutputPlan.choices === 'off' ? 'auto' : currentOutputPlan.choices) : 'off',
-                };
+                const choices: MagicTeaPartyOutputPlanMode = enableChoices
+                  ? (currentOutputPlan.choices === 'off' ? 'auto' : currentOutputPlan.choices)
+                  : 'off';
+                const outputPlan: MagicTeaPartyOutputPlan = { ...currentOutputPlan, choices };
                 onPreferenceChange({ enableChoices, outputPlan });
                 onSessionSettingChange({ enableChoices, outputPlan });
               }}
