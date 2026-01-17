@@ -41,6 +41,7 @@ const VIDEO_TRUSTED_MEDIA_HOSTS = [
   // 优酷
   'youku.com',
   'ykimg.com',
+  'valipl.cp31.ott.cibntv.net',
   // 爱奇艺
   'iqiyi.com',
   'qiyi.com',
@@ -50,6 +51,8 @@ const VIDEO_TRUSTED_MEDIA_HOSTS = [
   'b23.tv',
   // 微博视频 CDN
   'weibocdn.com',
+  // 知乎
+  'vdn3.vzuu.com',
 ] as const;
 
 const AUDIO_TRUSTED_MEDIA_HOSTS = [
