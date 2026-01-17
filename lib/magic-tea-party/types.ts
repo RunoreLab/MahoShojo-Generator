@@ -45,6 +45,19 @@ export type MagicTeaPartyOutputSegment =
   | { type: 'dialogue'; speakerId: string; speakerName?: string; text: string }
   | { type: 'choices'; items: { id: string; text: string }[] };
 
+export type MagicTeaPartyOutputPlanMode = 'off' | 'auto' | 'on';
+
+export type MagicTeaPartyOutputPlan = {
+  choices: MagicTeaPartyOutputPlanMode;
+  summary: MagicTeaPartyOutputPlanMode;
+  updates: MagicTeaPartyOutputPlanMode;
+};
+
+export type MagicTeaPartyOutputSummary = {
+  text: string;
+  sections?: Record<string, string>;
+};
+
 export type MagicTeaPartyNotice = {
   type: 'notice';
   level: 'info' | 'warning' | 'error';
@@ -137,7 +150,9 @@ export type MagicTeaPartySession = {
     updatedAt: number;
     messageRange?: { fromMessageId: string; toMessageId: string; count: number };
     drafts: MagicTeaPartyUpdateDraft[];
+    source?: 'stream' | 'manual';
   };
+  updateSnapshot?: MagicTeaPartyUpdateSnapshot;
   lastChoices?: { id: string; text: string }[];
   settings: {
     providerId: string;
@@ -152,6 +167,8 @@ export type MagicTeaPartySession = {
     enableChoices?: boolean;
     choiceCount?: number;
     outputFormat?: 'jsonl' | 'markdown';
+    outputPlan?: MagicTeaPartyOutputPlan;
+    updateApplyMode?: 'auto' | 'confirm' | 'draft';
     language?: 'zh-CN' | 'ja-JP' | 'en-US';
     userDisplayName?: string;
     enableSummary?: boolean;
@@ -168,6 +185,7 @@ export type MagicTeaPartySession = {
 
 export type MagicTeaPartyPreferences = {
   outputFormat: 'jsonl' | 'markdown';
+  outputPlan: MagicTeaPartyOutputPlan;
   enableChoices: boolean;
   choiceCount: 2 | 3 | 4;
   language: 'zh-CN' | 'ja-JP' | 'en-US';
@@ -175,6 +193,7 @@ export type MagicTeaPartyPreferences = {
   lastPresetId?: string;
   lastWorldbookPresetId?: string;
   enableSummary: boolean;
+  updateApplyMode: 'auto' | 'confirm' | 'draft';
   readArenaHistory: boolean;
   readArenaHistoryLimit: number;
   isArenaHistoryUnlimited: boolean;
@@ -184,6 +203,9 @@ export type MagicTeaPartyPreferences = {
   tachieCacheMaxPerSession: number;
   tachieCacheMaxGlobal: number;
   tachieCacheMaxBytes: number;
+  presetCharacterPanelCollapsed: boolean;
+  sessionRetentionDays: number;
+  maxSessions: number;
 };
 
 export type MagicTeaPartyUpdateDraft = {
@@ -199,4 +221,15 @@ export type MagicTeaPartyUpdateDraft = {
     messageRange?: { fromMessageId: string; toMessageId: string; count: number };
     generatedAt?: number;
   };
+};
+
+export type MagicTeaPartyUpdateSnapshot = {
+  id: string;
+  createdAt: number;
+  mode: 'auto' | 'confirm';
+  messageRange?: { fromMessageId: string; toMessageId: string; count: number };
+  drafts: MagicTeaPartyUpdateDraft[];
+  rolesBefore: MagicTeaPartyRole[];
+  rolesAfter: MagicTeaPartyRole[];
+  revertedAt?: number;
 };

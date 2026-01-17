@@ -108,16 +108,27 @@ const normalizeProtocolShadow = (
   };
 };
 
+const OutputPlanSchema = z
+  .object({
+    choices: z.enum(['off', 'auto', 'on']).optional(),
+    summary: z.enum(['off', 'auto', 'on']).optional(),
+    updates: z.enum(['off', 'auto', 'on']).optional(),
+  })
+  .optional();
+
 const SettingsSchema = z
   .object({
     temperature: z.number().min(0).max(1.2).optional(),
     outputFormat: z.enum(['jsonl', 'markdown']).optional().default('jsonl'),
+    outputPlan: OutputPlanSchema,
+    updateApplyMode: z.enum(['auto', 'confirm', 'draft']).optional(),
     language: z.enum(['zh-CN', 'ja-JP', 'en-US']).optional().default('zh-CN'),
     enableChoices: z.boolean().optional().default(true),
     choiceCount: z.number().int().min(2).max(4).optional().default(3),
     presetId: z.string().optional(),
     worldbookPresetId: z.string().optional(),
     userDisplayName: z.string().optional(),
+    enableSummary: z.boolean().optional(),
     readArenaHistory: z.boolean().optional(),
     readArenaHistoryLimit: z.number().int().min(1).max(999).optional(),
     isArenaHistoryUnlimited: z.boolean().optional(),
@@ -244,12 +255,15 @@ export default async function handler(req: NextRequest): Promise<Response> {
           modelId: customProvider.modelId.trim(),
           temperature: settings.temperature,
           outputFormat: settings.outputFormat,
+          outputPlan: settings.outputPlan ?? undefined,
+          updateApplyMode: settings.updateApplyMode,
           language: settings.language,
           enableChoices: settings.enableChoices,
           choiceCount: settings.choiceCount,
           presetId: settings.presetId,
           worldbookPresetId: settings.worldbookPresetId,
           userDisplayName: typeof settings.userDisplayName === 'string' ? settings.userDisplayName.trim().slice(0, 20) : undefined,
+          enableSummary: typeof settings.enableSummary === 'boolean' ? settings.enableSummary : undefined,
           readArenaHistory: settings.readArenaHistory,
           readArenaHistoryLimit: settings.readArenaHistoryLimit,
           isArenaHistoryUnlimited: settings.isArenaHistoryUnlimited,

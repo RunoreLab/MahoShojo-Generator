@@ -318,7 +318,18 @@ export const buildMagicTeaPartyMainPrompt = (params: {
   const outputFormat = params.session.settings.outputFormat ?? 'jsonl';
   const userDisplayName = params.session.settings.userDisplayName?.trim() || '{{user}}';
   const playerRoleId = params.session.playerRoleId ?? null;
-  const enableChoices = params.requestChoices === true ? true : Boolean(params.session.settings.enableChoices);
+  const baseOutputPlan = params.session.settings.outputPlan ?? { choices: 'off', summary: 'off', updates: 'off' };
+  const enableSummary = params.session.settings.enableSummary !== false;
+  const enableChoicesSetting = params.requestChoices === true ? true : Boolean(params.session.settings.enableChoices);
+  const writeArenaHistory = Boolean(params.session.settings.writeArenaHistory);
+  const writeCurrentState = Boolean(params.session.settings.writeCurrentState);
+  const outputPlan = {
+    choices: outputFormat === 'jsonl' ? baseOutputPlan.choices : 'off',
+    summary: outputFormat === 'jsonl' && enableSummary ? baseOutputPlan.summary : 'off',
+    updates: outputFormat === 'jsonl' && (writeArenaHistory || writeCurrentState) ? baseOutputPlan.updates : 'off',
+  } as const;
+  const effectiveChoicesPlan = enableChoicesSetting ? outputPlan.choices : 'off';
+  const enableChoices = effectiveChoicesPlan !== 'off';
   const choiceCount = params.session.settings.choiceCount ?? 3;
   const readArenaHistory = Boolean(params.session.settings.readArenaHistory);
   const readCurrentState = Boolean(params.session.settings.readCurrentState);
@@ -370,19 +381,26 @@ export const buildMagicTeaPartyMainPrompt = (params: {
   }
 
   systemLines.push('');
-  systemLines.push(`【选项开关】当前状态：${enableChoices ? '开启' : '关闭'}。若协议强制选项，可输出 choices 并附带 notice 说明。`);
+  systemLines.push('【合并输出计划】');
+  systemLines.push(`- choices：${effectiveChoicesPlan}（off=不输出，auto=必要时输出，on=必须输出）`);
+  systemLines.push(`- summary：${outputPlan.summary}（off=不输出，auto=必要时输出，on=必须输出）`);
+  systemLines.push(`- updates：${outputPlan.updates}（off=不输出，auto=必要时输出，on=必须输出）`);
+  systemLines.push('若协议强制选项，可输出 choices 并附带 notice 说明。');
 
   systemLines.push('');
   systemLines.push('【输出格式】');
   if (outputFormat === 'jsonl') {
     systemLines.push('- 仅输出 JSONL（每行一个 JSON 对象），禁止输出代码块/围栏/解释。');
-    systemLines.push('- type 仅允许 narration/dialogue/choices/notice。');
+    systemLines.push('- type 仅允许 narration/dialogue/choices/summary/updates/notice。');
     systemLines.push('- narration：{"type":"narration","text":"..."}（必须使用 text，禁止使用 content）。');
     systemLines.push('- dialogue：{"type":"dialogue","speakerId":"...","speakerName":"...","text":"..."}。');
     systemLines.push('- choices：{"type":"choices","items":[{"id":"c1","text":"..."},...]}。');
+    systemLines.push('- summary：{"type":"summary","text":"...","sections":{...}}。');
+    systemLines.push('- updates：{"type":"updates","drafts":[...],"meta":{...}}。');
     systemLines.push('- notice：{"type":"notice","level":"error|warning|info","code":"...","message":"...","meta":{...}}。');
     systemLines.push('- dialogue 必须包含 speakerId（来自角色 id），并尽量包含 speakerName。');
     systemLines.push('- choices 仅在需要时输出一行，items 默认 2~4；若协议强制数量/标识，可调整至 2~16 并保留标识。');
+    systemLines.push('- summary/updates 仅在合并输出计划允许时输出，且必须位于正文/choices 之后。');
   } else {
     systemLines.push('- 仅输出 Markdown 故事正文，不要输出 JSONL。');
     systemLines.push('- 若需要 notice，请输出独立 mtp_notice 块；level=error 时仅输出 notice。');
@@ -391,8 +409,27 @@ export const buildMagicTeaPartyMainPrompt = (params: {
   if (enableChoices && outputFormat === 'jsonl') {
     systemLines.push('');
     systemLines.push('【选项】');
-    systemLines.push(`- 在本轮结尾输出 choices，一共 ${Math.min(16, Math.max(2, choiceCount))} 条，长度 12~30 字。`);
+    if (effectiveChoicesPlan === 'on') {
+      systemLines.push(`- 必须在本轮结尾输出 choices，一共 ${Math.min(16, Math.max(2, choiceCount))} 条，长度 12~30 字。`);
+    } else {
+      systemLines.push(`- 在需要时输出 choices，一共 ${Math.min(16, Math.max(2, choiceCount))} 条，长度 12~30 字。`);
+    }
     systemLines.push('- 选项必须是“玩家可选行动”，不要引入新设定/新角色。');
+  }
+
+  if (outputFormat === 'jsonl' && outputPlan.summary !== 'off') {
+    systemLines.push('');
+    systemLines.push('【摘要】');
+    systemLines.push('- summary 必须在正文与 choices 之后输出。');
+    systemLines.push('- text 是完整摘要；sections 可按“世界状态/角色关系/关键事件/未决事项/禁忌”拆分。');
+  }
+
+  if (outputFormat === 'jsonl' && outputPlan.updates !== 'off') {
+    systemLines.push('');
+    systemLines.push('【更新草案】');
+    systemLines.push('- updates 必须在 summary 之后输出（若 summary 未输出则紧跟 choices 之后）。');
+    systemLines.push('- drafts 必须只包含角色列表中的角色，字段仅允许 roleId/characterName/impact/currentStateSummary/hasWinner/winner。');
+    systemLines.push('- meta 可携带 messageRange/usedSummary 等信息。');
   }
 
   const parts: string[] = [];
@@ -458,7 +495,13 @@ export const buildMagicTeaPartyChoicesPrompt = (params: {
 
   const patchedSession: Pick<MagicTeaPartySession, 'playerRoleId' | 'summary' | 'settings' | 'protocolShadow'> = {
     ...params.session,
-    settings: { ...params.session.settings, outputFormat: 'jsonl', enableChoices: true, choiceCount },
+    settings: {
+      ...params.session.settings,
+      outputFormat: 'jsonl',
+      enableChoices: true,
+      choiceCount,
+      outputPlan: { choices: 'on', summary: 'off', updates: 'off' },
+    },
   };
 
   const base = buildMagicTeaPartyMainPrompt({

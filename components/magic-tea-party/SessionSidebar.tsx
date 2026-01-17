@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { MagicTeaPartyBranchChainModal } from '@/components/magic-tea-party/BranchChainModal';
+import { MagicTeaPartySessionCleanupPanel } from '@/components/magic-tea-party/SessionCleanupPanel';
 import { MagicTeaPartyGlobalSettingsPanel } from '@/components/magic-tea-party/GlobalSettingsPanel';
 import { MagicTeaPartyImportExportPanel } from '@/components/magic-tea-party/ImportExportPanel';
 
@@ -22,6 +23,7 @@ type MagicTeaPartySidebarProps = {
   onPreferenceChange: (patch: Partial<MagicTeaPartyPreferences>) => void;
   onSessionSettingChange: (patch: Partial<MagicTeaPartySession['settings']>) => void;
   onMergeSession: (sessionId?: string | null) => void;
+  onCleanupSessions: (sessionIds: string[]) => Promise<void>;
 };
 
 export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
@@ -39,11 +41,13 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
     onPreferenceChange,
     onSessionSettingChange,
     onMergeSession,
+    onCleanupSessions,
   } = props;
   const [showBranchModal, setShowBranchModal] = useState(false);
 
   const currentUserDisplayName = activeSession?.settings.userDisplayName ?? preferences.userDisplayName;
   const currentOutputFormat = activeSession?.settings.outputFormat ?? preferences.outputFormat;
+  const currentOutputPlan = activeSession?.settings.outputPlan ?? preferences.outputPlan;
   const currentLanguage = activeSession?.settings.language ?? preferences.language;
   const currentEnableChoices = activeSession?.settings.enableChoices ?? preferences.enableChoices;
   const currentChoiceCount = activeSession?.settings.choiceCount ?? preferences.choiceCount;
@@ -54,6 +58,7 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
   const readCurrentState = activeSession?.settings.readCurrentState ?? preferences.readCurrentState;
   const writeArenaHistory = activeSession?.settings.writeArenaHistory ?? preferences.writeArenaHistory;
   const writeCurrentState = activeSession?.settings.writeCurrentState ?? preferences.writeCurrentState;
+  const updateApplyMode = activeSession?.settings.updateApplyMode ?? preferences.updateApplyMode;
   const sessionMap = new Map(sessions.map((session) => [session.id, session]));
   const branchChain: MagicTeaPartySession[] = [];
   if (activeSession?.forkedFrom?.sessionId) {
@@ -267,6 +272,68 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
             </select>
           </div>
 
+          <div className="rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">
+            <div className="text-xs font-semibold text-gray-600">合并输出计划</div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+              <div className="grid gap-1">
+                <label className="text-[11px] text-gray-600">选项</label>
+                <select
+                  className="input-field !h-8 !py-1 text-xs"
+                  value={currentOutputPlan.choices}
+                  onChange={(event) => {
+                    const value = event.target.value as 'off' | 'auto' | 'on';
+                    const outputPlan = { ...currentOutputPlan, choices: value };
+                    const enableChoices = value !== 'off';
+                    onPreferenceChange({ outputPlan, enableChoices });
+                    onSessionSettingChange({ outputPlan, enableChoices });
+                  }}
+                  disabled={currentOutputFormat !== 'jsonl'}
+                >
+                  <option value="off">关闭</option>
+                  <option value="auto">自动</option>
+                  <option value="on">强制</option>
+                </select>
+              </div>
+              <div className="grid gap-1">
+                <label className="text-[11px] text-gray-600">摘要</label>
+                <select
+                  className="input-field !h-8 !py-1 text-xs"
+                  value={currentOutputPlan.summary}
+                  onChange={(event) => {
+                    const value = event.target.value as 'off' | 'auto' | 'on';
+                    const outputPlan = { ...currentOutputPlan, summary: value };
+                    onPreferenceChange({ outputPlan });
+                    onSessionSettingChange({ outputPlan });
+                  }}
+                  disabled={currentOutputFormat !== 'jsonl'}
+                >
+                  <option value="off">关闭</option>
+                  <option value="auto">自动</option>
+                  <option value="on">强制</option>
+                </select>
+              </div>
+              <div className="grid gap-1">
+                <label className="text-[11px] text-gray-600">更新草案</label>
+                <select
+                  className="input-field !h-8 !py-1 text-xs"
+                  value={currentOutputPlan.updates}
+                  onChange={(event) => {
+                    const value = event.target.value as 'off' | 'auto' | 'on';
+                    const outputPlan = { ...currentOutputPlan, updates: value };
+                    onPreferenceChange({ outputPlan });
+                    onSessionSettingChange({ outputPlan });
+                  }}
+                  disabled={currentOutputFormat !== 'jsonl'}
+                >
+                  <option value="off">关闭</option>
+                  <option value="auto">自动</option>
+                  <option value="on">强制</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-2 text-[11px] text-gray-500">仅对 JSONL 生效，Markdown 模式会自动降级为关闭。</div>
+          </div>
+
           <div className="grid gap-1">
             <label className="text-xs font-semibold text-gray-600">语言</label>
             <select
@@ -294,8 +361,12 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
               checked={Boolean(currentEnableChoices)}
               onChange={(event) => {
                 const enableChoices = Boolean(event.target.checked);
-                onPreferenceChange({ enableChoices });
-                onSessionSettingChange({ enableChoices });
+                const outputPlan = {
+                  ...currentOutputPlan,
+                  choices: enableChoices ? (currentOutputPlan.choices === 'off' ? 'auto' : currentOutputPlan.choices) : 'off',
+                };
+                onPreferenceChange({ enableChoices, outputPlan });
+                onSessionSettingChange({ enableChoices, outputPlan });
               }}
             />
           </div>
@@ -413,6 +484,24 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
               }}
             />
           </label>
+
+          <div className="grid gap-1">
+            <label className="text-xs font-semibold text-gray-600">写入策略</label>
+            <select
+              className="input-field"
+              value={updateApplyMode}
+              onChange={(event) => {
+                const value = event.target.value as 'auto' | 'confirm' | 'draft';
+                onPreferenceChange({ updateApplyMode: value });
+                onSessionSettingChange({ updateApplyMode: value });
+              }}
+            >
+              <option value="auto">自动写入</option>
+              <option value="confirm">确认写入</option>
+              <option value="draft">仅草案</option>
+            </select>
+            <div className="text-[11px] text-gray-500">自动写入会生成可回滚快照。</div>
+          </div>
         </div>
       </div>
 
@@ -421,6 +510,13 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
         activeSession={activeSession}
         onPreferenceChange={onPreferenceChange}
         onSessionSettingChange={onSessionSettingChange}
+      />
+
+      <MagicTeaPartySessionCleanupPanel
+        preferences={preferences}
+        activeSessionId={activeSession?.id ?? null}
+        onPreferenceChange={onPreferenceChange}
+        onCleanupSessions={onCleanupSessions}
       />
 
       <MagicTeaPartyBranchChainModal

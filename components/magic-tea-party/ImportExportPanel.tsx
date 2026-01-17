@@ -66,6 +66,16 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
     (raw: Record<string, unknown> | null | undefined) => {
       const defaults = preferences;
       const base = (raw ?? {}) as Record<string, unknown>;
+      const outputPlanRaw = base.outputPlan && typeof base.outputPlan === 'object' ? (base.outputPlan as Record<string, unknown>) : null;
+      const normalizePlanValue = (value: unknown, fallback: 'off' | 'auto' | 'on') =>
+        value === 'off' || value === 'on' || value === 'auto' ? (value as 'off' | 'auto' | 'on') : fallback;
+      const outputPlan = outputPlanRaw
+        ? {
+            choices: normalizePlanValue(outputPlanRaw.choices, defaults.outputPlan.choices),
+            summary: normalizePlanValue(outputPlanRaw.summary, defaults.outputPlan.summary),
+            updates: normalizePlanValue(outputPlanRaw.updates, defaults.outputPlan.updates),
+          }
+        : defaults.outputPlan;
       return {
         providerId: typeof base.providerId === 'string' ? base.providerId : 'unknown',
         modelId: typeof base.modelId === 'string' ? base.modelId : '',
@@ -79,11 +89,23 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
         enableChoices: typeof base.enableChoices === 'boolean' ? base.enableChoices : defaults.enableChoices,
         choiceCount: typeof base.choiceCount === 'number' ? base.choiceCount : defaults.choiceCount,
         outputFormat: base.outputFormat === 'markdown' ? 'markdown' : defaults.outputFormat,
+        outputPlan,
+        updateApplyMode:
+          base.updateApplyMode === 'confirm' || base.updateApplyMode === 'draft'
+            ? base.updateApplyMode
+            : defaults.updateApplyMode,
         language: base.language === 'en-US' || base.language === 'ja-JP' ? base.language : defaults.language,
         userDisplayName: typeof base.userDisplayName === 'string' ? base.userDisplayName : defaults.userDisplayName,
         presetId: typeof base.presetId === 'string' ? base.presetId : undefined,
         worldbookPresetId: typeof base.worldbookPresetId === 'string' ? base.worldbookPresetId : undefined,
         enableSummary: typeof base.enableSummary === 'boolean' ? base.enableSummary : defaults.enableSummary,
+        readArenaHistory: typeof base.readArenaHistory === 'boolean' ? base.readArenaHistory : defaults.readArenaHistory,
+        readArenaHistoryLimit: typeof base.readArenaHistoryLimit === 'number' ? base.readArenaHistoryLimit : defaults.readArenaHistoryLimit,
+        isArenaHistoryUnlimited:
+          typeof base.isArenaHistoryUnlimited === 'boolean' ? base.isArenaHistoryUnlimited : defaults.isArenaHistoryUnlimited,
+        readCurrentState: typeof base.readCurrentState === 'boolean' ? base.readCurrentState : defaults.readCurrentState,
+        writeArenaHistory: typeof base.writeArenaHistory === 'boolean' ? base.writeArenaHistory : defaults.writeArenaHistory,
+        writeCurrentState: typeof base.writeCurrentState === 'boolean' ? base.writeCurrentState : defaults.writeCurrentState,
       } as MagicTeaPartySession['settings'];
     },
     [preferences]

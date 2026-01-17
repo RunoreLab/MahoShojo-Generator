@@ -63,4 +63,17 @@ describe('magic tea party jsonl parser', () => {
     expect(parsed.notices).toHaveLength(1);
     expect(parsed.notices[0]).toMatchObject({ level: 'error', code: 'missing', message: '缺少必要卡片' });
   });
+
+  it('会识别 summary/updates 作为侧信道输出', () => {
+    const input = [
+      '{"type":"narration","text":"雨夜的奶茶店。"}',
+      '{"type":"summary","text":"世界状态：雨未停。","sections":{"世界状态":"雨未停"}}',
+      '{"type":"updates","drafts":[{"characterName":"星见澪","impact":"并肩作战"}],"meta":{"messageRange":{"fromMessageId":"m1","toMessageId":"m2","count":2}}}',
+    ].join('\n');
+    const parsed = parseMagicTeaPartyJsonl(input);
+    expect(parsed.segments.map((seg) => seg.type)).toEqual(['narration']);
+    expect(parsed.summary?.text).toBe('世界状态：雨未停。');
+    expect(parsed.updates?.[0]?.characterName).toBe('星见澪');
+    expect(parsed.updatesMeta?.messageRange).toMatchObject({ fromMessageId: 'm1', toMessageId: 'm2', count: 2 });
+  });
 });

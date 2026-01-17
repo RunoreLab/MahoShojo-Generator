@@ -5,8 +5,8 @@ import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { randomUUID } from '@/lib/crypto';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { clearMagicTeaPartyDraft } from '@/lib/magic-tea-party/drafts';
-import { parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
-import { extractMagicTeaPartyNoticesFromJsonl, extractMagicTeaPartyNoticesFromMarkdown } from '@/lib/magic-tea-party/notice';
+import { extractMagicTeaPartySideChannelsFromJsonl, parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import { extractMagicTeaPartyNoticesFromMarkdown } from '@/lib/magic-tea-party/notice';
 import { migrateMagicTeaPartyLocalStorage } from '@/lib/magic-tea-party/migration';
 import {
   DEFAULT_MAGIC_TEA_PARTY_PREFERENCES,
@@ -173,6 +173,7 @@ export type UseMagicTeaPartySessionsResult = {
   persistSession: (session: MagicTeaPartySession) => Promise<void>;
   createSession: (presetId?: MagicTeaPartyPresetId | null) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
+  bulkDeleteSessions: (sessionIds: string[]) => Promise<void>;
   handleSessionImported: (sessionId: string) => Promise<void>;
   applyPreset: (presetId: MagicTeaPartyPresetId) => void;
   updateActiveSessionSettings: (patch: Partial<MagicTeaPartySession['settings']>) => Promise<void>;
@@ -267,9 +268,9 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       if (!looksJsonl) return didChange ? nextMessage : message;
 
       const parsed = parseMagicTeaPartyJsonl(content);
-      const noticeBundle = extractMagicTeaPartyNoticesFromJsonl(content);
-      if (noticeBundle.cleanedText !== content) {
-        nextMessage = { ...nextMessage, content: noticeBundle.cleanedText };
+      const sideChannelBundle = extractMagicTeaPartySideChannelsFromJsonl(content);
+      if (sideChannelBundle.cleanedText !== content) {
+        nextMessage = { ...nextMessage, content: sideChannelBundle.cleanedText };
         didChange = true;
       }
 
@@ -393,6 +394,8 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
         modelId: userProviderConfig?.modelId || '',
         temperature: 0.75,
         outputFormat: preferences.outputFormat,
+        outputPlan: preferences.outputPlan,
+        updateApplyMode: preferences.updateApplyMode,
         language: preferences.language,
         enableChoices: preferences.enableChoices,
         choiceCount: preferences.choiceCount,
@@ -456,6 +459,20 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       const next = await refreshSessions();
       const fallback = next[0]?.id ?? null;
       setActiveSessionId((current) => (current === sessionId ? fallback : current));
+    },
+    [refreshSessions]
+  );
+
+  const bulkDeleteSessions = useCallback(
+    async (sessionIds: string[]) => {
+      if (!Array.isArray(sessionIds) || sessionIds.length === 0) return;
+      const uniqueIds = Array.from(new Set(sessionIds.filter(Boolean)));
+      if (uniqueIds.length === 0) return;
+      uniqueIds.forEach((sessionId) => clearMagicTeaPartyDraft(sessionId));
+      await Promise.all(uniqueIds.map((sessionId) => deleteMagicTeaPartySession(sessionId)));
+      const next = await refreshSessions();
+      const fallback = next[0]?.id ?? null;
+      setActiveSessionId((current) => (current && uniqueIds.includes(current) ? fallback : current));
     },
     [refreshSessions]
   );
@@ -1057,6 +1074,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
     persistSession,
     createSession,
     deleteSession,
+    bulkDeleteSessions,
     handleSessionImported,
     applyPreset,
     updateActiveSessionSettings,

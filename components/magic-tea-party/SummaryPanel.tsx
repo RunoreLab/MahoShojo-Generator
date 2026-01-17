@@ -16,10 +16,13 @@ type MagicTeaPartySummaryPanelProps = {
   isGeneratingUpdates: boolean;
   isApplyingUpdates: boolean;
   updateError: string | null;
+  updateApplyMode: 'auto' | 'confirm' | 'draft';
+  updateSnapshot?: { createdAt: number; revertedAt?: number } | null;
   onUpdateRangeSizeChange: (value: number) => void;
   onGenerateUpdates: () => void;
   onApplyUpdates: () => void;
   onClearUpdateDrafts: () => void;
+  onRollbackUpdates: () => void;
 };
 
 const InlineSpinner = () => (
@@ -41,10 +44,13 @@ export function MagicTeaPartySummaryPanel(props: MagicTeaPartySummaryPanelProps)
     isGeneratingUpdates,
     isApplyingUpdates,
     updateError,
+    updateApplyMode,
+    updateSnapshot,
     onUpdateRangeSizeChange,
     onGenerateUpdates,
     onApplyUpdates,
     onClearUpdateDrafts,
+    onRollbackUpdates,
   } = props;
 
   const disableActions = !activeSession || isGenerating || isSummarizing;
@@ -53,6 +59,7 @@ export function MagicTeaPartySummaryPanel(props: MagicTeaPartySummaryPanelProps)
   const writeCurrentState = Boolean(activeSession?.settings.writeCurrentState);
   const hasWriteEnabled = writeArenaHistory || writeCurrentState;
   const hasDrafts = Boolean(updateDrafts && updateDrafts.length > 0);
+  const canRollback = Boolean(updateSnapshot && !updateSnapshot.revertedAt);
 
   return (
     <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-3">
@@ -131,6 +138,7 @@ export function MagicTeaPartySummaryPanel(props: MagicTeaPartySummaryPanelProps)
         </div>
 
         <div className="text-xs text-gray-600">基于对话历史生成更新草案。茶会写入会移除签名并标记为非原生。</div>
+        <div className="text-[11px] text-gray-500">当前策略：{updateApplyMode === 'auto' ? '自动写入' : updateApplyMode === 'confirm' ? '确认写入' : '仅草案'}。</div>
 
         <div className="flex flex-wrap items-center gap-3 text-xs">
           <label className="text-xs font-semibold text-gray-600">对话范围</label>
@@ -178,7 +186,23 @@ export function MagicTeaPartySummaryPanel(props: MagicTeaPartySummaryPanelProps)
               清空草案
             </button>
           ) : null}
+          {canRollback ? (
+            <button
+              type="button"
+              className="rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={disableActions || isGeneratingUpdates || isApplyingUpdates}
+              onClick={onRollbackUpdates}
+            >
+              撤销上次自动写入
+            </button>
+          ) : null}
         </div>
+        {updateSnapshot ? (
+          <div className="text-[11px] text-gray-500">
+            自动写入时间：{new Date(updateSnapshot.createdAt).toLocaleString()}
+            {updateSnapshot.revertedAt ? `（已于 ${new Date(updateSnapshot.revertedAt).toLocaleString()} 撤销）` : ''}
+          </div>
+        ) : null}
 
         {updateError ? (
           <ErrorMessage

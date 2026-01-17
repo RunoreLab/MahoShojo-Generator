@@ -8,7 +8,9 @@ import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { MagicTeaPartyCardModals } from '@/components/magic-tea-party/CardModals';
 import { MagicTeaPartyChatComposer } from '@/components/magic-tea-party/ChatComposer';
 import { MagicTeaPartyChatTimeline } from '@/components/magic-tea-party/ChatTimeline';
+import { MagicTeaPartyCharacterPanel } from '@/components/magic-tea-party/CharacterPanel';
 import { MagicTeaPartyHero } from '@/components/magic-tea-party/Hero';
+import { MagicTeaPartyPresetCharacterPanel } from '@/components/magic-tea-party/PresetCharacterPanel';
 import { MagicTeaPartySessionSidebar } from '@/components/magic-tea-party/SessionSidebar';
 import { MagicTeaPartySessionSetupPanel } from '@/components/magic-tea-party/SessionSetupPanel';
 import { MagicTeaPartySummaryPanel } from '@/components/magic-tea-party/SummaryPanel';
@@ -21,6 +23,7 @@ import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-te
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import { useMagicTeaPartyChat } from '@/lib/magic-tea-party/useMagicTeaPartyChat';
 import { useMagicTeaPartySessions } from '@/lib/magic-tea-party/useMagicTeaPartySessions';
+import { randomUUID } from '@/lib/crypto';
 import type {
   MagicTeaPartyMessage,
   MagicTeaPartyNotice,
@@ -29,6 +32,7 @@ import type {
   MagicTeaPartyUpdateDraft,
 } from '@/lib/magic-tea-party/types';
 import { useAuth } from '@/lib/useAuth';
+import { applyShieldWords } from '@/lib/shield-word-filter';
 
 export default function MagicTeaPartyPage() {
   const router = useRouter();
@@ -49,6 +53,7 @@ export default function MagicTeaPartyPage() {
     persistSession,
     createSession,
     deleteSession,
+    bulkDeleteSessions,
     handleSessionImported,
     applyPreset,
     updateActiveSessionSettings,
@@ -127,6 +132,7 @@ export default function MagicTeaPartyPage() {
     userProviderConfig,
     onGlobalError: setGlobalError,
     onNotices: appendNotices,
+    onSideChannels: (payload) => void handleSideChannels(payload),
     router,
   });
 
@@ -303,10 +309,12 @@ export default function MagicTeaPartyPage() {
       settings: {
         ...activeSession.settings,
         outputFormat: activeSession.settings.outputFormat ?? preferences.outputFormat,
+        outputPlan: activeSession.settings.outputPlan ?? preferences.outputPlan,
         language: activeSession.settings.language ?? preferences.language,
         enableChoices: activeSession.settings.enableChoices ?? preferences.enableChoices,
         choiceCount: activeSession.settings.choiceCount ?? preferences.choiceCount,
         userDisplayName: activeSession.settings.userDisplayName ?? preferences.userDisplayName,
+        enableSummary: activeSession.settings.enableSummary ?? preferences.enableSummary,
         readArenaHistory:
           typeof activeSession.settings.readArenaHistory === 'boolean' ? activeSession.settings.readArenaHistory : preferences.readArenaHistory,
         readArenaHistoryLimit:
@@ -319,6 +327,10 @@ export default function MagicTeaPartyPage() {
             : preferences.isArenaHistoryUnlimited,
         readCurrentState:
           typeof activeSession.settings.readCurrentState === 'boolean' ? activeSession.settings.readCurrentState : preferences.readCurrentState,
+        writeArenaHistory:
+          typeof activeSession.settings.writeArenaHistory === 'boolean' ? activeSession.settings.writeArenaHistory : preferences.writeArenaHistory,
+        writeCurrentState:
+          typeof activeSession.settings.writeCurrentState === 'boolean' ? activeSession.settings.writeCurrentState : preferences.writeCurrentState,
       },
     };
 
@@ -344,10 +356,32 @@ export default function MagicTeaPartyPage() {
     };
   }, [activeSession, draft, messages, preferences, userProviderConfig?.providerId]);
 
-  const resolveWriteSettings = () => {
-    const writeArenaHistory = activeSession?.settings.writeArenaHistory ?? preferences.writeArenaHistory;
-    const writeCurrentState = activeSession?.settings.writeCurrentState ?? preferences.writeCurrentState;
+  const resolveWriteSettings = (session?: MagicTeaPartySession | null) => {
+    const source = session ?? activeSession;
+    const writeArenaHistory = source?.settings.writeArenaHistory ?? preferences.writeArenaHistory;
+    const writeCurrentState = source?.settings.writeCurrentState ?? preferences.writeCurrentState;
     return { writeArenaHistory: Boolean(writeArenaHistory), writeCurrentState: Boolean(writeCurrentState) };
+  };
+
+  const resolveUpdateApplyMode = () =>
+    (activeSession?.settings.updateApplyMode ?? preferences.updateApplyMode) as 'auto' | 'confirm' | 'draft';
+
+  const normalizeMessageRange = (value: any): { fromMessageId: string; toMessageId: string; count: number } | undefined => {
+    if (!value || typeof value !== 'object') return undefined;
+    const record = value as Record<string, unknown>;
+    const fromMessageId = typeof record.fromMessageId === 'string' ? record.fromMessageId : '';
+    const toMessageId = typeof record.toMessageId === 'string' ? record.toMessageId : '';
+    const count = typeof record.count === 'number' ? record.count : Number.NaN;
+    if (!fromMessageId || !toMessageId || !Number.isFinite(count)) return undefined;
+    return { fromMessageId, toMessageId, count: Math.max(1, Math.floor(count)) };
+  };
+
+  const extractMessageRangeFromDrafts = (drafts: MagicTeaPartyUpdateDraft[]): { fromMessageId: string; toMessageId: string; count: number } | undefined => {
+    for (const draft of drafts) {
+      const range = normalizeMessageRange(draft.meta?.messageRange);
+      if (range) return range;
+    }
+    return undefined;
   };
 
   const ensureProviderReady = (): boolean => {
@@ -368,6 +402,105 @@ export default function MagicTeaPartyPage() {
       return false;
     }
     return true;
+  };
+
+  const applyUpdateDrafts = async (params: {
+    drafts: MagicTeaPartyUpdateDraft[];
+    mode: 'auto' | 'confirm';
+    messageRange?: { fromMessageId: string; toMessageId: string; count: number };
+    sessionOverride?: MagicTeaPartySession;
+  }) => {
+    const session = params.sessionOverride ?? activeSession;
+    if (!session) return;
+    if (params.drafts.length === 0) return;
+    if (isGenerating || isSummarizing || isGeneratingUpdates || isApplyingUpdates) return;
+
+    const { writeArenaHistory, writeCurrentState } = resolveWriteSettings(session);
+    if (!writeArenaHistory && !writeCurrentState) {
+      setUpdateError('请先开启写入历战记录或当前状态。');
+      return;
+    }
+
+    setUpdateError(null);
+    setIsApplyingUpdates(true);
+
+    try {
+      const messageRange =
+        params.messageRange ??
+        normalizeMessageRange(activeSession.protocolShadow?.messageRange) ??
+        extractMessageRangeFromDrafts(params.drafts);
+      const response = await fetch('/api/magic-tea-party/apply-updates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: session.id,
+          sessionTitle: session.title,
+          drafts: params.drafts,
+          roles: session.roles ?? [],
+          summaryMeta: messageRange ? { messageRange } : undefined,
+          settings: { writeArenaHistory, writeCurrentState },
+        }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const errorMessage =
+          typeof payload?.error === 'string'
+            ? payload.error
+            : typeof payload?.message === 'string'
+              ? payload.message
+              : `请求失败（${response.status}）`;
+        setUpdateError(errorMessage);
+        return;
+      }
+
+      const updatedRoles = Array.isArray(payload?.updatedRoles) ? (payload.updatedRoles as MagicTeaPartyRole[]) : [];
+      const now = Date.now();
+      const rolesBefore = session.roles ?? [];
+      const rolesAfter = updatedRoles.length > 0 ? updatedRoles : rolesBefore;
+      const nextSession = {
+        ...session,
+        roles: rolesAfter,
+        protocolShadow: undefined,
+        updateSnapshot:
+          params.mode === 'auto'
+            ? {
+                id: randomUUID(),
+                createdAt: now,
+                mode: 'auto',
+                ...(messageRange ? { messageRange } : {}),
+                drafts: params.drafts,
+                rolesBefore,
+                rolesAfter,
+              }
+            : session.updateSnapshot,
+        updatedAt: now,
+      };
+      await persistSession(nextSession);
+      setUpdateDrafts(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '写入失败';
+      setUpdateError(message);
+    } finally {
+      setIsApplyingUpdates(false);
+    }
+  };
+
+  const handleRollbackUpdates = async () => {
+    if (!activeSession?.updateSnapshot) return;
+    if (activeSession.updateSnapshot.revertedAt) return;
+    const confirmed =
+      typeof window !== 'undefined' ? window.confirm('确定撤销上次自动写入吗？这会恢复到写入前的角色状态。') : true;
+    if (!confirmed) return;
+    const now = Date.now();
+    const snapshot = activeSession.updateSnapshot;
+    const nextSession = {
+      ...activeSession,
+      roles: snapshot.rolesBefore,
+      updateSnapshot: { ...snapshot, revertedAt: now },
+      updatedAt: now,
+    };
+    await persistSession(nextSession);
   };
 
   const handleGenerateUpdateDrafts = async () => {
@@ -445,15 +578,20 @@ export default function MagicTeaPartyPage() {
       }
       setUpdateDrafts(drafts);
       const now = Date.now();
-      await persistSession({
+      const nextSession = {
         ...activeSession,
         protocolShadow: {
           updatedAt: now,
           ...(messageRange ? { messageRange } : {}),
           drafts,
+          source: 'manual',
         },
         updatedAt: now,
-      });
+      };
+      await persistSession(nextSession);
+      if (resolveUpdateApplyMode() === 'auto') {
+        await applyUpdateDrafts({ drafts, mode: 'auto', messageRange, sessionOverride: nextSession });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '生成更新草案失败';
       setUpdateError(message);
@@ -468,56 +606,62 @@ export default function MagicTeaPartyPage() {
       setUpdateError('没有可写入的草案。');
       return;
     }
-    if (isGenerating || isSummarizing || isGeneratingUpdates || isApplyingUpdates) return;
+    await applyUpdateDrafts({ drafts: updateDrafts, mode: 'confirm' });
+  };
 
-    const { writeArenaHistory, writeCurrentState } = resolveWriteSettings();
-    if (!writeArenaHistory && !writeCurrentState) {
-      setUpdateError('请先开启写入历战记录或当前状态。');
-      return;
+  const handleSideChannels = async (payload: {
+    summary: { text: string; sections?: Record<string, string> } | null;
+    updates: MagicTeaPartyUpdateDraft[] | null;
+    updatesMeta: Record<string, unknown> | null;
+  }) => {
+    if (!activeSession) return;
+    const now = Date.now();
+    let nextSession = activeSession;
+    let didChange = false;
+    setUpdateError(null);
+
+    const allowSummary = activeSession?.settings.enableSummary ?? preferences.enableSummary;
+    if (payload.summary?.text && allowSummary) {
+      const safeText = applyShieldWords(payload.summary.text).filteredText;
+      if (safeText) {
+        nextSession = {
+          ...nextSession,
+          summary: safeText,
+          summaryMeta: { ...(nextSession.summaryMeta ?? {}), updatedAt: now },
+          updatedAt: now,
+        };
+        didChange = true;
+      }
     }
 
-    setUpdateError(null);
-    setIsApplyingUpdates(true);
+    if (payload.updates && payload.updates.length > 0) {
+      const messageRange =
+        normalizeMessageRange(payload.updatesMeta?.messageRange) ?? extractMessageRangeFromDrafts(payload.updates);
+      setUpdateDrafts(payload.updates);
+      nextSession = {
+        ...nextSession,
+        protocolShadow: {
+          updatedAt: now,
+          ...(messageRange ? { messageRange } : {}),
+          drafts: payload.updates,
+          source: 'stream',
+        },
+        updatedAt: now,
+      };
+      didChange = true;
+    }
 
-    try {
-      const response = await fetch('/api/magic-tea-party/apply-updates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: activeSession.id,
-          sessionTitle: activeSession.title,
-          drafts: updateDrafts,
-          roles: activeSession.roles ?? [],
-          settings: { writeArenaHistory, writeCurrentState },
-        }),
+    if (didChange && nextSession !== activeSession) {
+      await persistSession(nextSession);
+    }
+
+    if (payload.updates && payload.updates.length > 0 && resolveUpdateApplyMode() === 'auto') {
+      await applyUpdateDrafts({
+        drafts: payload.updates,
+        mode: 'auto',
+        messageRange: normalizeMessageRange(payload.updatesMeta?.messageRange),
+        sessionOverride: didChange ? nextSession : activeSession,
       });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const errorMessage =
-          typeof payload?.error === 'string'
-            ? payload.error
-            : typeof payload?.message === 'string'
-              ? payload.message
-              : `请求失败（${response.status}）`;
-        setUpdateError(errorMessage);
-        return;
-      }
-
-      const updatedRoles = Array.isArray(payload?.updatedRoles) ? (payload.updatedRoles as MagicTeaPartyRole[]) : [];
-      if (updatedRoles.length > 0) {
-        const now = Date.now();
-        await persistSession({ ...activeSession, roles: updatedRoles, protocolShadow: undefined, updatedAt: now });
-      } else if (activeSession.roles) {
-        const now = Date.now();
-        await persistSession({ ...activeSession, protocolShadow: undefined, updatedAt: now });
-      }
-      setUpdateDrafts(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '写入失败';
-      setUpdateError(message);
-    } finally {
-      setIsApplyingUpdates(false);
     }
   };
 
@@ -534,21 +678,22 @@ export default function MagicTeaPartyPage() {
             <MagicTeaPartyHero globalError={globalError} notices={notices} onClearNotices={clearNotices} />
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-              <MagicTeaPartySessionSidebar
-                sessions={sessions}
-                activeSessionId={activeSessionId}
-                activeSession={activeSession}
-                preferences={preferences}
-                onCreateSession={(presetId) => void createSession(presetId)}
-                onSelectSession={setActiveSessionId}
-                onDeleteSession={(sessionId) => void deleteSession(sessionId)}
-                onSessionImported={handleSessionImported}
-                onPresetSelected={(presetId) => applyPreset(presetId)}
-                onProviderConfigChange={setUserProviderConfig}
-                onPreferenceChange={applyPreferencePatch}
-                onSessionSettingChange={updateActiveSessionSettings}
-                onMergeSession={handleMergeSessionToParent}
-              />
+                <MagicTeaPartySessionSidebar
+                  sessions={sessions}
+                  activeSessionId={activeSessionId}
+                  activeSession={activeSession}
+                  preferences={preferences}
+                  onCreateSession={(presetId) => void createSession(presetId)}
+                  onSelectSession={setActiveSessionId}
+                  onDeleteSession={(sessionId) => void deleteSession(sessionId)}
+                  onCleanupSessions={(sessionIds) => bulkDeleteSessions(sessionIds)}
+                  onSessionImported={handleSessionImported}
+                  onPresetSelected={(presetId) => applyPreset(presetId)}
+                  onProviderConfigChange={setUserProviderConfig}
+                  onPreferenceChange={applyPreferencePatch}
+                  onSessionSettingChange={updateActiveSessionSettings}
+                  onMergeSession={handleMergeSessionToParent}
+                />
 
               <main className="space-y-4 min-w-0">
                 <MagicTeaPartySessionSetupPanel
@@ -568,6 +713,22 @@ export default function MagicTeaPartyPage() {
                   onUpdateTitle={updateSessionTitle}
                   onLockTitle={lockSessionTitle}
                 />
+
+                <MagicTeaPartyPresetCharacterPanel
+                  activeSession={activeSession}
+                  preferences={preferences}
+                  onPreferenceChange={applyPreferencePatch}
+                  onUpdateRoles={(roles) => void updateActiveSessionRoles(roles)}
+                />
+
+                <MagicTeaPartyCharacterPanel
+                  activeSession={activeSession}
+                  roles={activeSession?.roles ?? []}
+                  isAuthenticated={Boolean(user?.id)}
+                  onUpdateRoles={(roles) => void updateActiveSessionRoles(roles)}
+                  onUpdatePlayerRole={updatePlayerRole}
+                  onToggleRoleCard={onToggleRoleCard}
+                />
                 <MagicTeaPartySummaryPanel
                   activeSession={activeSession}
                   isGenerating={isGenerating}
@@ -582,6 +743,8 @@ export default function MagicTeaPartyPage() {
                   isGeneratingUpdates={isGeneratingUpdates}
                   isApplyingUpdates={isApplyingUpdates}
                   updateError={updateError}
+                  updateApplyMode={resolveUpdateApplyMode()}
+                  updateSnapshot={activeSession?.updateSnapshot ?? null}
                   onUpdateRangeSizeChange={setUpdateRangeSize}
                   onGenerateUpdates={() => void handleGenerateUpdateDrafts()}
                   onApplyUpdates={() => void handleApplyUpdates()}
@@ -591,6 +754,7 @@ export default function MagicTeaPartyPage() {
                       void persistSession({ ...activeSession, protocolShadow: undefined, updatedAt: Date.now() });
                     }
                   }}
+                  onRollbackUpdates={() => void handleRollbackUpdates()}
                 />
 
                 {activeSession ? (

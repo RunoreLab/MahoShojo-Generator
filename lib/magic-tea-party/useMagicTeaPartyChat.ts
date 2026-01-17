@@ -12,8 +12,8 @@ import {
   estimateMagicTeaPartyHistoryTokens,
   trimMagicTeaPartyHistory,
 } from '@/lib/magic-tea-party/history';
-import { parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
-import { extractMagicTeaPartyNoticesFromJsonl, extractMagicTeaPartyNoticesFromMarkdown } from '@/lib/magic-tea-party/notice';
+import { extractMagicTeaPartySideChannelsFromJsonl, parseMagicTeaPartyJsonl } from '@/lib/magic-tea-party/jsonl';
+import { extractMagicTeaPartyNoticesFromMarkdown } from '@/lib/magic-tea-party/notice';
 import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import { createMagicTeaPartyStreamPreview } from '@/lib/magic-tea-party/stream-preview';
@@ -26,7 +26,9 @@ import type {
   MagicTeaPartyMessage,
   MagicTeaPartyNotice,
   MagicTeaPartyPreferences,
+  MagicTeaPartyOutputSummary,
   MagicTeaPartySession,
+  MagicTeaPartyUpdateDraft,
 } from '@/lib/magic-tea-party/types';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
@@ -43,6 +45,13 @@ export type UseMagicTeaPartyChatOptions = {
   userProviderConfig: UserAIProviderConfig | null;
   onGlobalError?: (message: string | null) => void;
   onNotices?: (notices: MagicTeaPartyNotice[]) => void;
+  onSideChannels?: (payload: {
+    summary: MagicTeaPartyOutputSummary | null;
+    updates: MagicTeaPartyUpdateDraft[] | null;
+    updatesMeta: Record<string, unknown> | null;
+    outputFormat: MagicTeaPartyOutputFormat;
+    sourceMessageId: string;
+  }) => void | Promise<void>;
   router: NextRouter;
 };
 
@@ -70,6 +79,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     userProviderConfig,
     onGlobalError,
     onNotices,
+    onSideChannels,
     router,
   } = options;
 
@@ -124,6 +134,10 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         typeof session.settings.writeArenaHistory === 'boolean' ? session.settings.writeArenaHistory : preferences.writeArenaHistory,
       writeCurrentState:
         typeof session.settings.writeCurrentState === 'boolean' ? session.settings.writeCurrentState : preferences.writeCurrentState,
+      enableSummary:
+        typeof session.settings.enableSummary === 'boolean' ? session.settings.enableSummary : preferences.enableSummary,
+      outputPlan: session.settings.outputPlan ?? preferences.outputPlan,
+      updateApplyMode: session.settings.updateApplyMode ?? preferences.updateApplyMode,
     }),
     [preferences]
   );
@@ -401,10 +415,13 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         const { safeText, status, blockedAt, truncatedAt } = await safety.finalize(streamedText);
 
         const isJsonl = params.outputFormat === 'jsonl';
-        const parsed = isJsonl ? parseMagicTeaPartyJsonl(safeText) : { segments: undefined, choices: null, notices: [] };
-        const noticeBundle = isJsonl
-          ? extractMagicTeaPartyNoticesFromJsonl(safeText)
-          : extractMagicTeaPartyNoticesFromMarkdown(safeText);
+        const parsed = isJsonl
+          ? parseMagicTeaPartyJsonl(safeText)
+          : { segments: undefined, choices: null, notices: [], summary: null, updates: null, updatesMeta: null };
+        const sideChannelBundle = isJsonl
+          ? extractMagicTeaPartySideChannelsFromJsonl(safeText)
+          : { cleanedText: safeText, notices: [], summary: null, updates: null, updatesMeta: null };
+        const noticeBundle = isJsonl ? sideChannelBundle : extractMagicTeaPartyNoticesFromMarkdown(safeText);
         const promptSettings = resolvePromptSettings(params.session, params.outputFormat);
         const extraNotices = isJsonl
           ? buildChoiceNotices({
@@ -418,7 +435,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         emitNotices(allNotices);
 
         const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
-        const finalContent = hasErrorNotice ? '' : noticeBundle.cleanedText;
+        const finalContent = hasErrorNotice ? '' : (noticeBundle.cleanedText ?? '');
         const finalAssistant: MagicTeaPartyMessage = {
           ...params.assistantMessage,
           content: finalContent,
@@ -469,15 +486,33 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           await persistSession(nextSession);
           finalSession = nextSession;
         }
+
+        if (onSideChannels && isJsonl && !hasErrorNotice && status !== 'blocked') {
+          const summary = sideChannelBundle.summary ?? null;
+          const updates = sideChannelBundle.updates ?? null;
+          const updatesMeta = sideChannelBundle.updatesMeta ?? null;
+          if (summary || updates) {
+            await onSideChannels({
+              summary,
+              updates,
+              updatesMeta,
+              outputFormat: params.outputFormat,
+              sourceMessageId: params.assistantMessageId,
+            });
+          }
+        }
       } catch (error) {
         safety.clearTimer();
         if (error instanceof Error && error.name === 'AbortError') {
           const { safeText, status, blockedAt, truncatedAt } = await safety.finalizeAfterAbort(controller.signal.reason);
           const isJsonl = params.outputFormat === 'jsonl';
-          const parsed = isJsonl ? parseMagicTeaPartyJsonl(safeText) : { segments: undefined, choices: null, notices: [] };
-          const noticeBundle = isJsonl
-            ? extractMagicTeaPartyNoticesFromJsonl(safeText)
-            : extractMagicTeaPartyNoticesFromMarkdown(safeText);
+          const parsed = isJsonl
+            ? parseMagicTeaPartyJsonl(safeText)
+            : { segments: undefined, choices: null, notices: [], summary: null, updates: null, updatesMeta: null };
+          const sideChannelBundle = isJsonl
+            ? extractMagicTeaPartySideChannelsFromJsonl(safeText)
+            : { cleanedText: safeText, notices: [], summary: null, updates: null, updatesMeta: null };
+          const noticeBundle = isJsonl ? sideChannelBundle : extractMagicTeaPartyNoticesFromMarkdown(safeText);
           const promptSettings = resolvePromptSettings(params.session, params.outputFormat);
           const extraNotices = isJsonl
             ? buildChoiceNotices({
@@ -491,7 +526,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           emitNotices(allNotices);
 
           const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
-          const finalContent = hasErrorNotice ? '' : noticeBundle.cleanedText;
+          const finalContent = hasErrorNotice ? '' : (noticeBundle.cleanedText ?? '');
           const finalAssistant: MagicTeaPartyMessage = {
             ...params.assistantMessage,
             content: finalContent,
@@ -505,6 +540,20 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           };
           setMessages((prev) => prev.map((m) => (m.id === params.assistantMessageId ? finalAssistant : m)));
           await putMagicTeaPartyMessage(finalAssistant);
+          if (onSideChannels && isJsonl && !hasErrorNotice && status !== 'blocked') {
+            const summary = sideChannelBundle.summary ?? null;
+            const updates = sideChannelBundle.updates ?? null;
+            const updatesMeta = sideChannelBundle.updatesMeta ?? null;
+            if (summary || updates) {
+              await onSideChannels({
+                summary,
+                updates,
+                updatesMeta,
+                outputFormat: params.outputFormat,
+                sourceMessageId: params.assistantMessageId,
+              });
+            }
+          }
           return finalSession;
         }
 
@@ -1009,7 +1058,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       const { safeText, status, blockedAt, truncatedAt } = await safety.finalize(streamedText);
 
       const parsed = parseMagicTeaPartyJsonl(safeText);
-      const noticeBundle = extractMagicTeaPartyNoticesFromJsonl(safeText);
+      const sideChannelBundle = extractMagicTeaPartySideChannelsFromJsonl(safeText);
       const expectedCount = activeSession.settings.choiceCount ?? preferences.choiceCount;
       const extraNotices = buildChoiceNotices({
         choices: parsed.choices ?? undefined,
@@ -1017,12 +1066,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         enableChoices: true,
         stage: 'choices',
       });
-      const allNotices = [...noticeBundle.notices, ...extraNotices];
+      const allNotices = [...sideChannelBundle.notices, ...extraNotices];
       emitNotices(allNotices);
       const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
       const finalAssistant: MagicTeaPartyMessage = {
         ...assistantMessage,
-        content: hasErrorNotice ? '' : noticeBundle.cleanedText,
+        content: hasErrorNotice ? '' : sideChannelBundle.cleanedText,
         status,
         ...(parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
         ...(hasErrorNotice ? { meta: { ...(assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
@@ -1044,7 +1093,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       if (error instanceof Error && error.name === 'AbortError') {
         const { safeText, status, blockedAt, truncatedAt } = await safety.finalizeAfterAbort(controller.signal.reason);
         const parsed = parseMagicTeaPartyJsonl(safeText);
-        const noticeBundle = extractMagicTeaPartyNoticesFromJsonl(safeText);
+        const sideChannelBundle = extractMagicTeaPartySideChannelsFromJsonl(safeText);
         const expectedCount = activeSession.settings.choiceCount ?? preferences.choiceCount;
         const extraNotices = buildChoiceNotices({
           choices: parsed.choices ?? undefined,
@@ -1052,12 +1101,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           enableChoices: true,
           stage: 'choices',
         });
-        const allNotices = [...noticeBundle.notices, ...extraNotices];
+        const allNotices = [...sideChannelBundle.notices, ...extraNotices];
         emitNotices(allNotices);
         const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
         const finalAssistant: MagicTeaPartyMessage = {
           ...assistantMessage,
-          content: hasErrorNotice ? '' : noticeBundle.cleanedText,
+          content: hasErrorNotice ? '' : sideChannelBundle.cleanedText,
           status,
           ...(parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
           ...(hasErrorNotice ? { meta: { ...(assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
