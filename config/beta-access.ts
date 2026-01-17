@@ -83,7 +83,7 @@ export const betaAccessConfig: {
     'magic-tea-party': {
       id: 'magic-tea-party',
       title: '魔法茶会',
-      summary: '魔法茶馆内测功能，正在分批开放授权。',
+      summary: '参加魔法茶会需得到魔法少女们的认可。',
       href: '/magic-tea-party',
       showRequirements: true,
       requirements: magicTavernRequirements,
@@ -91,7 +91,7 @@ export const betaAccessConfig: {
     'magic-tavern': {
       id: 'magic-tavern',
       title: '魔法茶馆',
-      summary: '魔法茶馆内测功能，正在分批开放授权。',
+      summary: '参加魔法茶会需得到魔法少女们的认可。',
       href: '/magic-tavern',
       showRequirements: true,
       requirements: magicTavernRequirements,
@@ -99,7 +99,7 @@ export const betaAccessConfig: {
     tachie: {
       id: 'tachie',
       title: '立绘生成',
-      summary: '立绘生成属于未开放内测功能，当前仅对特定成员开放。',
+      summary: '唯有受选中之人能推开魔法画室的门扉。',
       href: '/tachie',
       showRequirements: true,
       requirements: tachieRequirements,
