@@ -432,6 +432,7 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
         createdAt: now,
         updatedAt: now,
         pinnedAt: typeof sessionCore.pinnedAt === 'number' ? sessionCore.pinnedAt : undefined,
+        pinnedOrder: typeof sessionCore.pinnedOrder === 'number' ? sessionCore.pinnedOrder : undefined,
         roles: roles.map(sanitizeRole),
         scenario: scenario ? sanitizeScenario(scenario) : undefined,
         auxScenarios: auxScenarios.map(sanitizeScenario),

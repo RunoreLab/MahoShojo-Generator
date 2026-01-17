@@ -134,6 +134,7 @@ export type MagicTeaPartySession = {
   createdAt: number;
   updatedAt: number;
   pinnedAt?: number;
+  pinnedOrder?: number;
   roles: MagicTeaPartyRole[];
   scenario?: MagicTeaPartyScenario;
   auxScenarios?: MagicTeaPartyScenario[];

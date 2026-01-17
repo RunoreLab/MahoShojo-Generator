@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type DragEvent } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { MagicTeaPartyBranchChainModal } from '@/components/magic-tea-party/BranchChainModal';
@@ -23,6 +23,7 @@ type MagicTeaPartySidebarProps = {
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   onToggleSessionPin: (sessionId: string) => void;
+  onReorderPinnedSessions: (orderedIds: string[]) => void;
   onSessionImported: (sessionId: string) => void;
   onPresetSelected: (presetId: MagicTeaPartyPresetId) => void;
   onProviderConfigChange: (config: UserAIProviderConfig | null) => void;
@@ -42,6 +43,7 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
     onSelectSession,
     onDeleteSession,
     onToggleSessionPin,
+    onReorderPinnedSessions,
     onSessionImported,
     onPresetSelected,
     onProviderConfigChange,
@@ -54,6 +56,10 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
   const [searchText, setSearchText] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
+  const [recentCollapsed, setRecentCollapsed] = useState(false);
+  const sidebarPrefKey = 'magic-tea-party:session-sidebar-v1';
 
   const currentUserDisplayName = activeSession?.settings.userDisplayName ?? preferences.userDisplayName;
   const currentOutputFormat = activeSession?.settings.outputFormat ?? preferences.outputFormat;
@@ -86,6 +92,8 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
   const activeTitle = activeSession?.title ?? '当前会话';
 
   const normalizedQuery = searchText.trim().toLowerCase();
+  const isPinned = (session: MagicTeaPartySession) =>
+    typeof session.pinnedAt === 'number' && Number.isFinite(session.pinnedAt) && session.pinnedAt > 0;
   const filteredSessions = useMemo(() => {
     if (!normalizedQuery) return sessions;
     return sessions.filter((session) => {
@@ -99,14 +107,76 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
     });
   }, [normalizedQuery, sessions]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredSessions.length / pageSize));
+  const pinnedSessionsAll = useMemo(() => sessions.filter((session) => isPinned(session)), [sessions]);
+  const pinnedSessions = useMemo(() => filteredSessions.filter((session) => isPinned(session)), [filteredSessions]);
+  const regularSessions = useMemo(() => filteredSessions.filter((session) => !isPinned(session)), [filteredSessions]);
+  const totalPages = Math.max(1, Math.ceil(regularSessions.length / pageSize));
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const pageStart = (currentPage - 1) * pageSize;
-  const pageSessions = filteredSessions.slice(pageStart, pageStart + pageSize);
+  const pageSessions = regularSessions.slice(pageStart, pageStart + pageSize);
+  const allowPinReorder = normalizedQuery.length === 0 && pinnedSessionsAll.length > 1;
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(sidebarPrefKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { pinnedCollapsed?: boolean; recentCollapsed?: boolean };
+      if (typeof parsed.pinnedCollapsed === 'boolean') setPinnedCollapsed(parsed.pinnedCollapsed);
+      if (typeof parsed.recentCollapsed === 'boolean') setRecentCollapsed(parsed.recentCollapsed);
+    } catch {
+      // ignore
+    }
+  }, [sidebarPrefKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        sidebarPrefKey,
+        JSON.stringify({ pinnedCollapsed, recentCollapsed })
+      );
+    } catch {
+      // ignore
+    }
+  }, [pinnedCollapsed, recentCollapsed, sidebarPrefKey]);
+
+  const handleDragStart = (sessionId: string) => (event: DragEvent<HTMLDivElement>) => {
+    if (!allowPinReorder) return;
+    setDraggingSessionId(sessionId);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', sessionId);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!allowPinReorder) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (targetSessionId: string) => (event: DragEvent<HTMLDivElement>) => {
+    if (!allowPinReorder) return;
+    event.preventDefault();
+    const sourceId = event.dataTransfer.getData('text/plain') || draggingSessionId;
+    if (!sourceId || sourceId === targetSessionId) return;
+    const ids = pinnedSessionsAll.map((session) => session.id);
+    const fromIndex = ids.indexOf(sourceId);
+    const toIndex = ids.indexOf(targetSessionId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const nextIds = [...ids];
+    nextIds.splice(fromIndex, 1);
+    nextIds.splice(toIndex, 0, sourceId);
+    onReorderPinnedSessions(nextIds);
+    setDraggingSessionId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggingSessionId(null);
+  };
 
   return (
     <aside className="space-y-4 min-w-0">
@@ -134,7 +204,7 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
           />
           <div className="flex items-center justify-between text-[11px] text-gray-500">
             <span>
-              共 {filteredSessions.length} 个会话 · 第 {currentPage} / {totalPages} 页
+              共 {filteredSessions.length} 个会话 · 置顶 {pinnedSessions.length} · 第 {currentPage} / {totalPages} 页
             </span>
             <div className="flex items-center gap-2">
               <span>每页</span>
@@ -156,69 +226,164 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
           </div>
         </div>
         <div className="mt-3 space-y-2">
-          {pageSessions.length === 0 ? (
+          {pinnedSessions.length > 0 ? (
+            <div className="rounded-lg border border-amber-100 bg-amber-50/40 p-2">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between text-left text-xs font-semibold text-amber-800"
+                onClick={() => setPinnedCollapsed((prev) => !prev)}
+              >
+                <span>置顶会话（{pinnedSessions.length}）</span>
+                <span className="text-[11px] text-amber-600">{pinnedCollapsed ? '展开' : '收起'}</span>
+              </button>
+              {!pinnedCollapsed ? (
+                <div className="mt-2 space-y-2">
+                  {pinnedSessions.map((session) => (
+                    <div
+                      key={`pinned-${session.id}`}
+                      className={`rounded-lg border px-3 py-2 transition-colors ${
+                        session.id === activeSessionId
+                          ? 'border-amber-300 bg-amber-50'
+                          : 'border-amber-100 bg-white hover:bg-amber-50/60'
+                      } ${allowPinReorder ? 'cursor-move' : ''}`}
+                      draggable={allowPinReorder}
+                      onDragStart={handleDragStart(session.id)}
+                      onDragOver={handleDragOver}
+                      onDrop={handleDrop(session.id)}
+                      onDragEnd={handleDragEnd}
+                      title={allowPinReorder ? '拖拽调整置顶顺序' : undefined}
+                    >
+                      <button type="button" className="block w-full text-left" onClick={() => onSelectSession(session.id)}>
+                        <div className="flex items-center gap-2">
+                          <div className="text-sm font-semibold text-gray-800 line-clamp-1">{session.title}</div>
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                            置顶
+                          </span>
+                          {allowPinReorder ? (
+                            <span className="text-[10px] text-amber-600">拖拽排序</span>
+                          ) : null}
+                        </div>
+                        <div className="mt-0.5 text-xs text-gray-500">{new Date(session.updatedAt).toLocaleString()}</div>
+                        {session.forkedFrom ? (
+                          <div className="mt-1 text-[11px] text-pink-600">
+                            分支 · {session.branchLabel || '从历史分支'}
+                          </div>
+                        ) : null}
+                      </button>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        {session.id === activeSessionId && session.forkedFrom?.sessionId && sessionMap.has(session.forkedFrom.sessionId) ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="text-xs text-pink-600 hover:underline"
+                              onClick={() => onSelectSession(session.forkedFrom?.sessionId as string)}
+                            >
+                              返回原会话
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs text-amber-700 hover:underline"
+                              onClick={() => onMergeSession(session.id)}
+                            >
+                              合并到原会话
+                            </button>
+                          </div>
+                        ) : (
+                          <span />
+                        )}
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            className="text-xs text-amber-700 hover:underline"
+                            onClick={() => onToggleSessionPin(session.id)}
+                          >
+                            取消置顶
+                          </button>
+                          <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => onDeleteSession(session.id)}>
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {pageSessions.length === 0 && pinnedSessions.length === 0 ? (
             <div className="text-sm text-gray-500">{sessions.length === 0 ? '还没有会话，先新建一个吧。' : '未找到匹配会话。'}</div>
           ) : (
-            pageSessions.map((session) => (
-              <div
-                key={session.id}
-                className={`rounded-lg border px-3 py-2 transition-colors ${session.id === activeSessionId
-                  ? 'border-pink-300 bg-pink-50'
-                  : 'border-pink-100 bg-white hover:bg-pink-50/50'
-                  }`}
+            <div className="rounded-lg border border-pink-100 bg-pink-50/30 p-2">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between text-left text-xs font-semibold text-pink-800"
+                onClick={() => setRecentCollapsed((prev) => !prev)}
               >
-                <button type="button" className="block w-full text-left" onClick={() => onSelectSession(session.id)}>
-                  <div className="flex items-center gap-2">
-                    <div className="text-sm font-semibold text-gray-800 line-clamp-1">{session.title}</div>
-                    {session.pinnedAt ? (
-                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                        置顶
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="mt-0.5 text-xs text-gray-500">{new Date(session.updatedAt).toLocaleString()}</div>
-                  {session.forkedFrom ? (
-                    <div className="mt-1 text-[11px] text-pink-600">
-                      分支 · {session.branchLabel || '从历史分支'}
-                    </div>
-                  ) : null}
-                </button>
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  {session.id === activeSessionId && session.forkedFrom?.sessionId && sessionMap.has(session.forkedFrom.sessionId) ? (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="text-xs text-pink-600 hover:underline"
-                        onClick={() => onSelectSession(session.forkedFrom?.sessionId as string)}
-                      >
-                        返回原会话
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs text-amber-700 hover:underline"
-                        onClick={() => onMergeSession(session.id)}
-                      >
-                        合并到原会话
-                      </button>
-                    </div>
-                  ) : (
-                    <span />
-                  )}
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      className="text-xs text-amber-700 hover:underline"
-                      onClick={() => onToggleSessionPin(session.id)}
+                <span>最近会话（{regularSessions.length}）</span>
+                <span className="text-[11px] text-pink-600">{recentCollapsed ? '展开' : '收起'}</span>
+              </button>
+              {!recentCollapsed ? (
+                <div className="mt-2 space-y-2">
+                  {pageSessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className={`rounded-lg border px-3 py-2 transition-colors ${
+                        session.id === activeSessionId
+                          ? 'border-pink-300 bg-pink-50'
+                          : 'border-pink-100 bg-white hover:bg-pink-50/50'
+                      }`}
                     >
-                      {session.pinnedAt ? '取消置顶' : '置顶'}
-                    </button>
-                    <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => onDeleteSession(session.id)}>
-                      删除
-                    </button>
-                  </div>
+                      <button type="button" className="block w-full text-left" onClick={() => onSelectSession(session.id)}>
+                        <div className="flex items-center gap-2">
+                          <div className="text-sm font-semibold text-gray-800 line-clamp-1">{session.title}</div>
+                        </div>
+                        <div className="mt-0.5 text-xs text-gray-500">{new Date(session.updatedAt).toLocaleString()}</div>
+                        {session.forkedFrom ? (
+                          <div className="mt-1 text-[11px] text-pink-600">
+                            分支 · {session.branchLabel || '从历史分支'}
+                          </div>
+                        ) : null}
+                      </button>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        {session.id === activeSessionId && session.forkedFrom?.sessionId && sessionMap.has(session.forkedFrom.sessionId) ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="text-xs text-pink-600 hover:underline"
+                              onClick={() => onSelectSession(session.forkedFrom?.sessionId as string)}
+                            >
+                              返回原会话
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs text-amber-700 hover:underline"
+                              onClick={() => onMergeSession(session.id)}
+                            >
+                              合并到原会话
+                            </button>
+                          </div>
+                        ) : (
+                          <span />
+                        )}
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            className="text-xs text-amber-700 hover:underline"
+                            onClick={() => onToggleSessionPin(session.id)}
+                          >
+                            置顶
+                          </button>
+                          <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => onDeleteSession(session.id)}>
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            ))
+              ) : null}
+            </div>
           )}
         </div>
         <div className="mt-3 flex items-center justify-between gap-2 text-xs text-gray-600">

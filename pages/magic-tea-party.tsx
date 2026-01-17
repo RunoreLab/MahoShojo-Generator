@@ -58,6 +58,7 @@ export default function MagicTeaPartyPage() {
     deleteSession,
     bulkDeleteSessions,
     toggleSessionPin,
+    reorderPinnedSessions,
     handleSessionImported,
     applyPreset,
     updateActiveSessionSettings,
@@ -734,6 +735,7 @@ export default function MagicTeaPartyPage() {
                   onDeleteSession={(sessionId) => void deleteSession(sessionId)}
                   onCleanupSessions={(sessionIds) => bulkDeleteSessions(sessionIds)}
                   onToggleSessionPin={(sessionId) => void toggleSessionPin(sessionId)}
+                  onReorderPinnedSessions={(orderedIds) => void reorderPinnedSessions(orderedIds)}
                   onSessionImported={handleSessionImported}
                   onPresetSelected={(presetId) => applyPreset(presetId)}
                   onProviderConfigChange={setUserProviderConfig}

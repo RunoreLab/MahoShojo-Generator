@@ -56,13 +56,29 @@ const writeLocalStorageString = (key: string, value: string): void => {
   }
 };
 
+const isPinnedSession = (session: MagicTeaPartySession): boolean =>
+  typeof session.pinnedAt === 'number' && Number.isFinite(session.pinnedAt) && session.pinnedAt > 0;
+
+const getPinnedOrder = (session: MagicTeaPartySession): number =>
+  typeof session.pinnedOrder === 'number' && Number.isFinite(session.pinnedOrder) ? session.pinnedOrder : 0;
+
+const getPinnedAt = (session: MagicTeaPartySession): number =>
+  typeof session.pinnedAt === 'number' && Number.isFinite(session.pinnedAt) ? session.pinnedAt : 0;
+
 const sortSessionsByUpdatedAtDesc = (items: MagicTeaPartySession[]): MagicTeaPartySession[] => {
   return [...items].sort((a, b) => {
-    const pinA = typeof a.pinnedAt === 'number' && Number.isFinite(a.pinnedAt) ? a.pinnedAt : 0;
-    const pinB = typeof b.pinnedAt === 'number' && Number.isFinite(b.pinnedAt) ? b.pinnedAt : 0;
-    if (pinA && !pinB) return -1;
-    if (!pinA && pinB) return 1;
-    if (pinA && pinB && pinA !== pinB) return pinB - pinA;
+    const pinnedA = isPinnedSession(a);
+    const pinnedB = isPinnedSession(b);
+    if (pinnedA && !pinnedB) return -1;
+    if (!pinnedA && pinnedB) return 1;
+    if (pinnedA && pinnedB) {
+      const orderA = getPinnedOrder(a);
+      const orderB = getPinnedOrder(b);
+      if (orderA !== orderB) return orderB - orderA;
+      const pinAtA = getPinnedAt(a);
+      const pinAtB = getPinnedAt(b);
+      if (pinAtA !== pinAtB) return pinAtB - pinAtA;
+    }
     return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
   });
 };
@@ -184,6 +200,7 @@ export type UseMagicTeaPartySessionsResult = {
   deleteSession: (sessionId: string) => Promise<void>;
   bulkDeleteSessions: (sessionIds: string[]) => Promise<void>;
   toggleSessionPin: (sessionId: string) => Promise<void>;
+  reorderPinnedSessions: (orderedIds: string[]) => Promise<void>;
   handleSessionImported: (sessionId: string) => Promise<void>;
   applyPreset: (presetId: MagicTeaPartyPresetId) => void;
   updateActiveSessionSettings: (patch: Partial<MagicTeaPartySession['settings']>) => Promise<void>;
@@ -496,16 +513,82 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
         sessions.find((item) => item.id === sessionId) ??
         (activeSession?.id === sessionId ? activeSession : null);
       if (!target) return;
-      const isPinned = typeof target.pinnedAt === 'number' && Number.isFinite(target.pinnedAt) && target.pinnedAt > 0;
-      const next: MagicTeaPartySession = {
-        ...target,
-        pinnedAt: isPinned ? undefined : Date.now(),
-        updatedAt: target.updatedAt,
-      };
-      await putMagicTeaPartySession(next);
-      setSessions((prev) => sortSessionsByUpdatedAtDesc([next, ...prev.filter((item) => item.id !== next.id)]));
-      if (activeSession?.id === sessionId) {
-        setActiveSession(next);
+      const isPinned = isPinnedSession(target);
+      const nextUpdates: MagicTeaPartySession[] = [];
+      if (isPinned) {
+        nextUpdates.push({
+          ...target,
+          pinnedAt: undefined,
+          pinnedOrder: undefined,
+          updatedAt: target.updatedAt,
+        });
+      } else {
+        const now = Date.now();
+        const pinnedSessions = sessions.filter((session) => isPinnedSession(session));
+        const hasOrderMissing = pinnedSessions.some((session) => !getPinnedOrder(session));
+        if (hasOrderMissing) {
+          const normalizedPinned = [...pinnedSessions]
+            .sort((a, b) => getPinnedAt(b) - getPinnedAt(a))
+            .map((session, index, list) => ({
+              ...session,
+              pinnedOrder: list.length - index,
+              updatedAt: session.updatedAt,
+            }));
+          nextUpdates.push(...normalizedPinned);
+        }
+        const maxOrder = Math.max(0, ...pinnedSessions.map((session) => getPinnedOrder(session)));
+        nextUpdates.push({
+          ...target,
+          pinnedAt: now,
+          pinnedOrder: maxOrder + 1,
+          updatedAt: target.updatedAt,
+        });
+      }
+      if (nextUpdates.length === 0) return;
+      await Promise.all(nextUpdates.map((session) => putMagicTeaPartySession(session)));
+      setSessions((prev) => {
+        const nextMap = new Map(nextUpdates.map((session) => [session.id, session]));
+        const merged = prev.map((session) => nextMap.get(session.id) ?? session);
+        return sortSessionsByUpdatedAtDesc(merged);
+      });
+      if (activeSession && nextUpdates.some((session) => session.id === activeSession.id)) {
+        const updated = nextUpdates.find((session) => session.id === activeSession.id) ?? activeSession;
+        setActiveSession(updated);
+      }
+    },
+    [activeSession, sessions]
+  );
+
+  const reorderPinnedSessions = useCallback(
+    async (orderedIds: string[]) => {
+      if (!Array.isArray(orderedIds) || orderedIds.length === 0) return;
+      const pinnedMap = new Map(sessions.filter((session) => isPinnedSession(session)).map((session) => [session.id, session]));
+      if (pinnedMap.size === 0) return;
+      const normalizedIds = orderedIds.filter((id) => pinnedMap.has(id));
+      if (normalizedIds.length === 0) return;
+      const total = normalizedIds.length;
+      const updates: MagicTeaPartySession[] = [];
+      normalizedIds.forEach((id, index) => {
+        const session = pinnedMap.get(id);
+        if (!session) return;
+        const nextOrder = total - index;
+        if (getPinnedOrder(session) === nextOrder) return;
+        updates.push({
+          ...session,
+          pinnedOrder: nextOrder,
+          updatedAt: session.updatedAt,
+        });
+      });
+      if (updates.length === 0) return;
+      await Promise.all(updates.map((session) => putMagicTeaPartySession(session)));
+      setSessions((prev) => {
+        const updateMap = new Map(updates.map((session) => [session.id, session]));
+        const merged = prev.map((session) => updateMap.get(session.id) ?? session);
+        return sortSessionsByUpdatedAtDesc(merged);
+      });
+      if (activeSession && updates.some((session) => session.id === activeSession.id)) {
+        const updated = updates.find((session) => session.id === activeSession.id) ?? activeSession;
+        setActiveSession(updated);
       }
     },
     [activeSession, sessions]
@@ -1162,6 +1245,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
     deleteSession,
     bulkDeleteSessions,
     toggleSessionPin,
+    reorderPinnedSessions,
     handleSessionImported,
     applyPreset,
     updateActiveSessionSettings,
