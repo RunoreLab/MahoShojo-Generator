@@ -451,6 +451,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 ? [
                     'gemma-3-27b-it',
                     'gemini-2.5-flash-lite',
+                    'glm-4.7',
                     'gemma-3-12b-it',
                     'gemini-2.5-flash',
                 ]
