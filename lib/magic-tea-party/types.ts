@@ -138,6 +138,7 @@ export type MagicTeaPartySession = {
   auxScenarios?: MagicTeaPartyScenario[];
   playerRoleId?: string | null;
   summary?: string;
+  summarySections?: Record<string, string>;
   summaryMeta?: {
     updatedAt: number;
     fromMessageId?: string;
@@ -154,6 +155,7 @@ export type MagicTeaPartySession = {
   };
   updateSnapshot?: MagicTeaPartyUpdateSnapshot;
   lastChoices?: { id: string; text: string }[];
+  draft?: string;
   settings: {
     providerId: string;
     modelId: string;

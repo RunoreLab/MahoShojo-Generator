@@ -114,6 +114,7 @@ export function MagicTeaPartySummaryPanel(props: MagicTeaPartySummaryPanelProps)
           void onPersistSession({
             ...activeSession,
             summary: trimmed ? trimmed : undefined,
+            summarySections: undefined,
             summaryMeta: trimmed ? { ...(activeSession.summaryMeta ?? {}), updatedAt: now } : undefined,
             updatedAt: now,
           });

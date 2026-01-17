@@ -710,7 +710,13 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           tokenCount: estimateMagicTeaPartyHistoryTokens(summarizedHistory, { providerId, userDisplayName }),
         };
 
-        const nextSession: MagicTeaPartySession = { ...session, summary: safeText, summaryMeta, updatedAt: now };
+        const nextSession: MagicTeaPartySession = {
+          ...session,
+          summary: safeText,
+          summarySections: undefined,
+          summaryMeta,
+          updatedAt: now,
+        };
         await persistSession(nextSession);
         dropTrackerRef.current[session.id] = { consecutive: 0, lastRatio: 0 };
 
@@ -1160,7 +1166,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     if (!activeSession) return;
     setSummaryError(null);
     const now = Date.now();
-    await persistSession({ ...activeSession, summary: undefined, summaryMeta: undefined, updatedAt: now });
+    await persistSession({ ...activeSession, summary: undefined, summarySections: undefined, summaryMeta: undefined, updatedAt: now });
   }, [activeSession, persistSession]);
 
   const generateSummary = useCallback(async () => {
@@ -1240,7 +1246,13 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         toMessageId: historyForRequest[historyForRequest.length - 1]?.id,
       };
 
-      const nextSession: MagicTeaPartySession = { ...activeSession, summary: safeText, summaryMeta, updatedAt: now };
+      const nextSession: MagicTeaPartySession = {
+        ...activeSession,
+        summary: safeText,
+        summarySections: undefined,
+        summaryMeta,
+        updatedAt: now,
+      };
       await persistSession(nextSession);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;

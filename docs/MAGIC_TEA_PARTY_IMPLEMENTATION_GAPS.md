@@ -11,22 +11,16 @@
 - 分支会话/合并、自动摘要触发、Token 预算提示、立绘/插画生成与缓存清理等主流程已覆盖。
 - 导入/分支编辑/粘贴文本安全处理：敏感词预检（命中跳转逮捕），屏蔽词局部遮罩后继续导入。
 - 会话列表支持搜索与分页展示。
+- 导入元信息完整恢复：`protocolShadow` / `updateSnapshot` / `lastChoices` / `forkedFrom` / `branchLabel` / `summarySections` / 草稿等字段已保留，归档导入支持分支关系重映射。
+- 结构化摘要 `sections` 已持久化并随会话导入导出。
+- 草稿已写入 IndexedDB（会话扩展字段），LocalStorage 作为兜底仍保留。
 
 ## 二、差异与缺口（需要补强）
-1. 导入恢复元信息不完整  
-   导入会话时会重建 session，但会丢失 `protocolShadow`、`updateSnapshot`、`lastChoices`、`forkedFrom/branchLabel`、`titleMeta` 等字段，导致分支链与更新草案不可追溯。
-
-2. 结构化摘要 sections 未持久化  
-   侧信道 summary 支持 `sections`，但当前仅写入 `summary.text`，结构化分段信息被丢弃；类型层与存储未承载。
-
-3. 协议适配仍偏提示词层面  
+1. 协议适配仍偏提示词层面  
    【可忽略】设计中“阶段化系统提示词覆盖/字段映射/协议强制执行”尚未形成可执行机制，当前仅靠提示词约束。
 
-4. outputPlan 失败回退不足  
+2. outputPlan 失败回退不足  
    【可忽略】当模型未输出 summary/updates 时不会触发兜底（调用 summarize / generate-updates），导致摘要与影子状态可能长期过期。
-
-5. 草稿持久化策略偏轻量  
-   草稿仅写 localStorage，未进入 IndexedDB/session 扩展字段，与“优先 IDB”存在差距，导出/迁移时不完整。
 
 ## 三、风险与建议
 - 风险：导入/编辑带来的违规内容可能触发后续服务端安全拦截或输出截断。  

@@ -1,6 +1,6 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import Footer from '@/components/Footer';
@@ -143,6 +143,7 @@ export default function MagicTeaPartyPage() {
   const [showScenarioModal, setShowScenarioModal] = useState(false);
 
   const [draft, setDraft] = useState('');
+  const draftPersistTimerRef = useRef<number | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingDraft, setEditingDraft] = useState('');
   const [tachieReferenceText, setTachieReferenceText] = useState('');
@@ -159,14 +160,38 @@ export default function MagicTeaPartyPage() {
       setDraft('');
       return;
     }
+    const sessionDraft = typeof activeSession?.draft === 'string' ? activeSession.draft : null;
     const storedDraft = readMagicTeaPartyDraft(activeSessionId);
-    setDraft(storedDraft ?? '');
-  }, [activeSessionId]);
+    setDraft(sessionDraft ?? storedDraft ?? '');
+  }, [activeSession?.draft, activeSessionId]);
 
   useEffect(() => {
     if (!activeSessionId) return;
     writeMagicTeaPartyDraft(activeSessionId, draft);
   }, [activeSessionId, draft]);
+
+  useEffect(() => {
+    if (!activeSession || !activeSessionId) return;
+    if (draftPersistTimerRef.current) {
+      clearTimeout(draftPersistTimerRef.current);
+    }
+    const capped = draft.length > 20_000 ? draft.slice(0, 20_000) : draft;
+    draftPersistTimerRef.current = window.setTimeout(() => {
+      const trimmed = capped.trim();
+      const nextDraft = trimmed ? capped : undefined;
+      if (nextDraft === activeSession.draft || (!nextDraft && !activeSession.draft)) return;
+      void persistSession({
+        ...activeSession,
+        draft: nextDraft,
+        updatedAt: activeSession.updatedAt,
+      });
+    }, 400);
+    return () => {
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+      }
+    };
+  }, [activeSession, activeSessionId, draft, persistSession]);
 
   useEffect(() => {
     setTachieReferenceText('');
@@ -646,6 +671,7 @@ export default function MagicTeaPartyPage() {
         nextSession = {
           ...nextSession,
           summary: safeText,
+          summarySections: payload.summary.sections ?? undefined,
           summaryMeta: { ...(nextSession.summaryMeta ?? {}), updatedAt: now },
           updatedAt: now,
         };

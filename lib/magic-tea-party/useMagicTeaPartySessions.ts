@@ -937,11 +937,13 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
 
       let summary = activeSession.summary;
       let summaryMeta = activeSession.summaryMeta;
+      let summarySections = activeSession.summarySections;
       if (summaryMeta?.toMessageId) {
         const summaryIndex = messages.findIndex((message) => message.id === summaryMeta?.toMessageId);
         if (summaryIndex >= 0 && targetIndex <= summaryIndex) {
           summary = undefined;
           summaryMeta = undefined;
+          summarySections = undefined;
         }
       }
 
@@ -951,6 +953,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
         createdAt: now,
         updatedAt: now,
         summary,
+        summarySections,
         summaryMeta,
         forkedFrom: { sessionId: activeSession.id, messageId: targetMessage.id, createdAt: now },
         branchLabel,
@@ -1088,17 +1091,20 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
 
       let summary = parentSession.summary;
       let summaryMeta = parentSession.summaryMeta;
+      let summarySections = parentSession.summarySections;
       if (summaryMeta?.toMessageId) {
         const summaryIndex = parentMessages.findIndex((message) => message.id === summaryMeta?.toMessageId);
         if (summaryIndex >= parentForkIndex) {
           summary = undefined;
           summaryMeta = undefined;
+          summarySections = undefined;
         }
       }
 
       const nextParentSession: MagicTeaPartySession = {
         ...parentSession,
         summary,
+        summarySections,
         summaryMeta,
         updatedAt: now,
       };
