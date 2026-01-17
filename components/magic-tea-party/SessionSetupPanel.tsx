@@ -215,7 +215,18 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
           <div className="space-y-2">
             {scenario ? (
               <div className="rounded-lg border border-pink-100 bg-pink-50 px-3 py-2">
-                <div className="text-xs font-semibold text-pink-800">主情景：{scenario.title}</div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-pink-800">主情景：{scenario.title}</div>
+                  <button
+                    type="button"
+                    className="text-xs text-pink-700 hover:underline"
+                    onClick={() => onUpdateScenarios(undefined, auxScenarios)}
+                    disabled={!hasSession}
+                    title="移除主情景以便重新选择"
+                  >
+                    移除主情景
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="text-xs text-gray-500">未选择主情景（可选）</div>
