@@ -36,10 +36,20 @@ import type {
 } from '@/lib/magic-tea-party/types';
 import { useAuth } from '@/lib/useAuth';
 import { applyShieldWords } from '@/lib/shield-word-filter';
+import { buildBetaAccessUrl } from '@/lib/beta-access';
+import { useBetaAccessStatus } from '@/lib/beta-access-client';
+import type { BetaAccessFeatureId } from '@/config/beta-access';
 
 export default function MagicTeaPartyPage() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, userBadges, isAuthenticated, loading } = useAuth();
+  const betaFeatureId: BetaAccessFeatureId = 'magic-tea-party';
+  const betaAccess = useBetaAccessStatus({
+    featureId: betaFeatureId,
+    isAuthenticated,
+    loading,
+    badges: userBadges,
+  });
 
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
@@ -156,6 +166,12 @@ export default function MagicTeaPartyPage() {
   const [updateRangeSize, setUpdateRangeSize] = useState<number>(20);
   const [isGeneratingUpdates, setIsGeneratingUpdates] = useState(false);
   const [isApplyingUpdates, setIsApplyingUpdates] = useState(false);
+
+  useEffect(() => {
+    if (betaAccess.status === 'blocked' || betaAccess.status === 'error') {
+      void router.replace(buildBetaAccessUrl(betaFeatureId));
+    }
+  }, [betaAccess.status, betaFeatureId, router]);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -711,6 +727,18 @@ export default function MagicTeaPartyPage() {
       });
     }
   };
+
+  if (betaAccess.status !== 'allowed') {
+    return (
+      <div className="magic-background-white">
+        <div className="container">
+          <div className="card">
+            <div className="py-10 text-center text-sm text-gray-600">正在核验内测权限…</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>

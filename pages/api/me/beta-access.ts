@@ -1,0 +1,25 @@
+import { getUserProfileCardDataStats } from '@/lib/d1';
+import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
+
+export const runtime = 'edge';
+
+export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
+
+  if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
+
+  const stats = await getUserProfileCardDataStats(auth.user.id);
+
+  return json(
+    {
+      success: true,
+      stats: {
+        publicCards: stats.publicCards ?? 0,
+        publicUsageTotal: stats.publicUsageTotal ?? 0,
+        publicFavoriteTotal: stats.publicFavoriteTotal ?? 0,
+      },
+    },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
+});

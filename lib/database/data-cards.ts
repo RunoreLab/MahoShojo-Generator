@@ -794,6 +794,8 @@ export type UserProfileCardDataStats = {
   scenarios: number;
   history: number;
   publicCards: number;
+  publicFavoriteTotal: number;
+  publicUsageTotal: number;
   magicalGirl: number;
   canshou: number;
   general: number;
@@ -810,6 +812,8 @@ export async function getUserProfileCardDataStats(userId: number): Promise<UserP
     scenarios: 0,
     history: 0,
     publicCards: 0,
+    publicFavoriteTotal: 0,
+    publicUsageTotal: 0,
     magicalGirl: 0,
     canshou: 0,
     general: 0,
@@ -848,6 +852,10 @@ export async function getUserProfileCardDataStats(userId: number): Promise<UserP
       out.likeTotal += Number.isFinite(likes) ? likes : 0;
       out.favoriteTotal += Number.isFinite(favorites) ? favorites : 0;
       out.usageTotal += Number.isFinite(usage) ? usage : 0;
+      if (isPublic) {
+        out.publicFavoriteTotal += Number.isFinite(favorites) ? favorites : 0;
+        out.publicUsageTotal += Number.isFinite(usage) ? usage : 0;
+      }
 
       if (row.type === 'character') {
         out.characters += 1;
