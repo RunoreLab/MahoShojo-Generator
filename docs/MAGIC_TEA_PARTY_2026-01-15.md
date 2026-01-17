@@ -1751,3 +1751,75 @@ export type MagicTeaPartyUpdateDraft = {
 - 写入逻辑统一补齐 current_state/arena_history（与竞技场一致）。  
 - 选项生成后将“选项原文列表”透传到记录阶段，用于部分特殊记录工具数据卡写入；允许按协议/设置调整数量（1~16）并在 UI 标注。
 - 落地影子状态与选项缓存（`protocolShadow` / `lastChoices`）。
+
+---
+
+## 20. 实测问题记录：小城市协议在茶会内失效（2026-01-17）
+
+> 现象来源：小城市的魔法少女1.7 + [妖精]兰兰 + 主情景已选，资料读写全开，合并输出=自动（默认），结构化 JSONL。实测叙事风格未进入“小城市”语气/节奏，且未稳定产生符合协议的记录更新。
+
+### 20.1 复现特征
+
+- 主情景与角色卡已选中（含妖精卡），但生成文本更接近通用叙事。
+- `summary/updates` 行不稳定出现，导致写入草案缺失。
+- UI 未出现“缺卡/依赖”提示，难以判断是协议缺失还是输出未触发。
+
+### 20.2 可能原因（基于代码现状的排查结论）
+
+1) **高优先级协议覆盖未落地**  
+   设计文档 19 章要求“阶段化高优先级系统提示词覆盖”，但当前 `lib/magic-tea-party/prompts.ts` 仍是通用系统提示词，未注入协议专用覆盖块；协议仅以“附录原文”形式出现，优先级不足且易被忽略。
+
+2) **合并输出为 auto 时缺少兜底**  
+   `lib/magic-tea-party/useMagicTeaPartyChat.ts` 中 `requestOutputPlanFallbacks` 仅对 `outputPlan=on` 触发补生成。  
+   现配置为 `auto` 时，如果模型未主动输出 `summary/updates`，不会自动补生成 → 导致“记录缺失”。
+
+3) **协议内容可能被截断**  
+   `MAX_PROTOCOL_APPENDIX_CHARS=4000`，而“小城市 1.7”卡体量较大，协议正文可能被裁剪。  
+   结果：模型拿不到“风格/记录规则”关键段落，无法遵守。
+
+4) **依赖卡/全局数据卡缺乏前置校验**  
+   设计文档 19.3.E 建议“缺卡直接 notice + 阻断”，但目前未实现。  
+   即使 [妖精]兰兰缺失或 templateId 不匹配，前端也不会阻断叙事。
+
+5) **选项强制生成未与协议联动**  
+   当用户关闭选项时，`buildMagicTeaPartyMainPrompt` 不输出“选项规则块”，仅保留一句“协议强制时可输出 choices”。  
+   强协议卡若依赖选项，模型更容易跳过，导致记录阶段缺参。
+
+### 20.3 改进方案（多方案对比）
+
+**方案 A：轻量补丁（1~2 天）**  
+优点：改动少、可快速验证；缺点：协议识别仍偏粗糙。
+- 新增**协议关键词检测**（角色/情景卡内包含 `officialReport/headline/article.`/“状态栏协议/历战记录协议/小城市”等）。  
+  检测命中时在本轮请求上**临时升格**：  
+  - `outputPlan.updates=on`（必要时 `choices=on`，`summary=auto/on`）  
+  - 强制 `enableChoices=true`（不落盘，仅本轮）  
+- 当 `auto` 未输出 updates 时，**允许自动补生成**（触发 `generate-updates`）。
+- 提升 `MAX_PROTOCOL_APPENDIX_CHARS` 或抽取**关键协议片段**（正则匹配后置顶插入）。
+- 前端加入**依赖卡检查**，缺失时 `notice(level=error)` 并阻断生成。
+
+**方案 B：协议适配器（推荐，中期）**  
+优点：可维护、可扩展；缺点：需要引入新模块与测试。
+- 新增 `lib/magic-tea-party/protocol.ts`：  
+  - `detectProtocol(cards)` → 识别协议类型（小城市/校园/镜中等）  
+  - `buildProtocolOverlay()` → 返回高优先级系统提示词块  
+  - `resolveProtocolOutputPlan()` → 输出本轮强制的 `outputPlan/enableChoices`  
+- 在 `buildMagicTeaPartyMainPrompt` / `buildMagicTeaPartyChoicesPrompt` / `buildMagicTeaPartyUpdatePrompt` 中统一注入。  
+- 在 `useMagicTeaPartyChat` 侧将**协议识别结果**用于 fallback 与 UI 提示。
+
+**方案 C：强协议工具卡机制（长期）**  
+优点：最强一致性；缺点：开发量大。  
+- 将“全局数据卡/工具卡”独立为协议卡槽，强制存在与校验。  
+- 输出时根据工具卡自动写入目标字段或独立记录区。
+
+### 20.4 推荐落地路径
+
+1) 先落地 **方案 A** 做快速修复，观察“小城市 1.7”组合是否恢复。  
+2) 同步推进 **方案 B** 作为稳定方案：把协议识别/覆盖抽象为模块，减少 prompt 分散修改。  
+3) 若后续协议数量持续增加，再评估 **方案 C**。
+
+### 20.5 验证清单
+
+- 组合：小城市 1.7 + [妖精]兰兰 + 全局数据卡 → **叙事风格命中**。  
+- `outputPlan=auto` 仍能稳定拿到 `updates`（或自动补生成）。  
+- 缺失依赖卡时触发 `notice(level=error)` 且阻断生成。  
+- 选项关闭时，协议强制选项仍可单轮输出并提示。  
