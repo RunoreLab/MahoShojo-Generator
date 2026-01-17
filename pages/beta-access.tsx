@@ -1,7 +1,7 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { betaAccessConfig } from '@/config/beta-access';
 import { evaluateBetaAccess, getBetaAccessFeature, matchBetaAccessRequirement } from '@/lib/beta-access';
@@ -53,10 +53,33 @@ export default function BetaAccessPage() {
   const allOf = feature?.requirements.allOf ?? [];
   const anyOf = feature?.requirements.anyOf ?? [];
 
+  const [autoRedirectCountdown, setAutoRedirectCountdown] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!feature || !evaluation.allowed || !isAuthenticated) {
+      setAutoRedirectCountdown(null);
+      return;
+    }
+    let countdown = 3;
+    setAutoRedirectCountdown(countdown);
+    const intervalId = window.setInterval(() => {
+      countdown -= 1;
+      setAutoRedirectCountdown(countdown);
+    }, 1000);
+    const timeoutId = window.setTimeout(() => {
+      void router.replace(feature.href);
+    }, 3000);
+    return () => {
+      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [evaluation.allowed, feature, isAuthenticated, router]);
+
   const statusText = (() => {
     if (loading || accessState.status === 'loading') return '正在核验权限…';
     if (!isAuthenticated) return '尚未登录，无法验证内测资格。';
     if (accessState.status === 'error') return accessState.error || '暂时无法核验权限。';
+    if (feature && evaluation.allowed) return '检测到你已满足条件，正在为你放行。';
     return '该功能仍处于内测阶段，尚未对所有用户开放。';
   })();
 
@@ -138,7 +161,28 @@ export default function BetaAccessPage() {
             </div>
           </div>
 
-          {showRequirements ? (
+          {feature && evaluation.allowed && isAuthenticated ? (
+            <div className="bg-purple-950/70 border border-emerald-400/70 rounded-lg p-6 mb-8 shadow-2xl">
+              <div className="text-emerald-100 text-lg font-semibold">权限已通过</div>
+              <p className="text-sm text-emerald-100/80 mt-2">
+                系统已确认你的内测资格{autoRedirectCountdown !== null ? `，${autoRedirectCountdown} 秒后自动放行。` : '。'}
+              </p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <Link
+                  href={feature.href}
+                  className="rounded-full border border-emerald-200/70 px-5 py-2 text-sm text-emerald-100 hover:bg-emerald-400/10"
+                >
+                  立即进入 {feature.title}
+                </Link>
+                <Link
+                  href="/"
+                  className="rounded-full border border-purple-200/70 px-5 py-2 text-sm text-purple-100 hover:bg-purple-400/10"
+                >
+                  返回首页
+                </Link>
+              </div>
+            </div>
+          ) : showRequirements ? (
             <div className="bg-purple-950/70 border border-pink-400/80 rounded-lg p-6 mb-8 shadow-2xl">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>

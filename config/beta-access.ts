@@ -32,6 +32,7 @@ export type BetaAccessFeatureConfig = {
   id: BetaAccessFeatureId;
   title: string;
   summary: string;
+  href: string;
   showRequirements?: boolean;
   requirements: BetaAccessRequirementGroup;
 };
@@ -83,6 +84,7 @@ export const betaAccessConfig: {
       id: 'magic-tea-party',
       title: '魔法茶会',
       summary: '魔法茶馆内测功能，正在分批开放授权。',
+      href: '/magic-tea-party',
       showRequirements: true,
       requirements: magicTavernRequirements,
     },
@@ -90,6 +92,7 @@ export const betaAccessConfig: {
       id: 'magic-tavern',
       title: '魔法茶馆',
       summary: '魔法茶馆内测功能，正在分批开放授权。',
+      href: '/magic-tavern',
       showRequirements: true,
       requirements: magicTavernRequirements,
     },
@@ -97,6 +100,7 @@ export const betaAccessConfig: {
       id: 'tachie',
       title: '立绘生成',
       summary: '立绘生成属于未开放内测功能，当前仅对特定成员开放。',
+      href: '/tachie',
       showRequirements: true,
       requirements: tachieRequirements,
     },
