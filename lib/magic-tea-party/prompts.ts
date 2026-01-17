@@ -9,10 +9,11 @@ import type {
 import { inferTemplate } from '@/lib/data-card-converter';
 import { filterAndFormatHistory, formatCurrentStateForPrompt } from '@/lib/arena/logic';
 
-const MAX_FIELD_CHARS = 2_000;
-const MAX_LIST_ITEMS = 12;
-const MAX_CARD_TEXT_CHARS = 12_000;
-const MAX_PROTOCOL_APPENDIX_CHARS = 4_000;
+// 取消卡片内容截断上限；如需恢复可参考以下阈值：
+// const MAX_FIELD_CHARS = 2_000;
+// const MAX_LIST_ITEMS = 12;
+// const MAX_CARD_TEXT_CHARS = 12_000;
+// const MAX_PROTOCOL_APPENDIX_CHARS = 4_000;
 
 const toRecord = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -24,47 +25,14 @@ const readString = (value: unknown): string => {
   return value.trim();
 };
 
-const truncateText = (text: string, maxChars: number): string => {
-  if (text.length <= maxChars) return text;
-  return `${text.slice(0, Math.max(0, maxChars))}...[已截断]`;
-};
+const truncateText = (text: string, _maxChars: number): string => text;
 
-const truncateList = <T,>(items: T[], limit: number): T[] => (items.length > limit ? items.slice(0, limit) : items);
-
-const safeStringField = (value: unknown): string => {
-  const text = readString(value);
-  return text ? truncateText(text, MAX_FIELD_CHARS) : '';
-};
+const safeStringField = (value: unknown): string => readString(value);
 
 const safeStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   const out = value.map((item) => safeStringField(item)).filter(Boolean);
-  return truncateList(out, MAX_LIST_ITEMS);
-};
-
-const safeScenarioElements = (value: unknown): Record<string, unknown> => {
-  const elements = toRecord(value);
-  const scene = toRecord(elements.scene);
-  const roles = Array.isArray(elements.roles) ? truncateList(elements.roles, MAX_LIST_ITEMS) : [];
-  const development = Array.isArray(elements.development) ? truncateList(elements.development, MAX_LIST_ITEMS) : [];
-  return {
-    scene: {
-      time: safeStringField(scene.time),
-      place: safeStringField(scene.place),
-      features: safeStringField(scene.features),
-    },
-    atmosphere: safeStringField(elements.atmosphere),
-    events: safeStringField(elements.events),
-    development: development.map((item) => safeStringField(item)).filter(Boolean),
-    roles: roles
-      .map((item) => {
-        const role = toRecord(item);
-        const name = safeStringField(role.name);
-        const description = safeStringField(role.description);
-        return name || description ? { name, description } : null;
-      })
-      .filter((item): item is { name: string; description: string } => Boolean(item)),
-  };
+  return out;
 };
 
 const stripRoleMetaFields = (card: Record<string, unknown>): Record<string, unknown> => {
@@ -78,11 +46,12 @@ const stripRoleMetaFields = (card: Record<string, unknown>): Record<string, unkn
 const stripScenarioMetaFields = (card: Record<string, unknown>): Record<string, unknown> => {
   const cloned = { ...card };
   delete cloned.signature;
+  delete (cloned as any).metadata;
   return cloned;
 };
 
 const buildProtocolAppendixText = (card: Record<string, unknown>, label: string): string => {
-  const raw = truncateText(JSON.stringify(card, null, 2), MAX_PROTOCOL_APPENDIX_CHARS);
+  const raw = JSON.stringify(card, null, 2);
   if (!raw) return '';
   return `【${label}】\n${raw}`.trim();
 };
@@ -245,43 +214,34 @@ export const buildRoleProfileText = (
 };
 
 export const buildScenarioText = (scenario: MagicTeaPartyScenario, options?: { includeProtocolAppendix?: boolean }): string => {
-  const card = toRecord(scenario.card);
+  const card = stripScenarioMetaFields(toRecord(scenario.card));
   const template = inferTemplate(card);
   const lines: string[] = [];
   const includeProtocolAppendix = Boolean(options?.includeProtocolAppendix);
 
   lines.push(`【情景】${scenario.title}`.trim());
-  lines.push('（以下为情景摘要与协议附录；仅在系统提示词允许的阶段遵守协议规则，禁止直接输出字段名）');
+  lines.push(
+    includeProtocolAppendix
+      ? '（以下为情景全文与协议附录；仅在系统提示词允许的阶段遵守协议规则，禁止直接输出字段名）'
+      : '（以下为情景全文；仅在系统提示词允许的阶段遵守协议规则，禁止直接输出字段名）'
+  );
 
   if (template === 'scenario') {
-    const payload = {
-      title: safeStringField(card.title) || scenario.title,
-      scenario_type: safeStringField(card.scenario_type),
-      description: safeStringField(card.description),
-      elements: safeScenarioElements(card.elements),
-    };
-    lines.push(truncateText(JSON.stringify(payload, null, 2), MAX_CARD_TEXT_CHARS));
-    if (includeProtocolAppendix) {
-      const appendix = buildProtocolAppendixText(stripScenarioMetaFields(card), '协议附录');
-      if (appendix) lines.push(appendix);
-    }
+    lines.push(JSON.stringify(card, null, 2));
     return lines.join('\n');
   }
 
   if (template === 'general-scenario') {
-    const payload = {
-      title: safeStringField(card.title) || scenario.title,
-      content: truncateText(safeStringField(card.content), MAX_CARD_TEXT_CHARS),
-    };
-    lines.push(JSON.stringify(payload, null, 2));
-    if (includeProtocolAppendix) {
-      const appendix = buildProtocolAppendixText(stripScenarioMetaFields(card), '协议附录');
-      if (appendix) lines.push(appendix);
+    const content = safeStringField(card.content);
+    if (content) {
+      lines.push(content);
+    } else {
+      lines.push(JSON.stringify(card, null, 2));
     }
     return lines.join('\n');
   }
 
-  lines.push(truncateText(JSON.stringify(card, null, 2), MAX_CARD_TEXT_CHARS));
+  lines.push(JSON.stringify(card, null, 2));
   return lines.join('\n');
 };
 
