@@ -1775,7 +1775,8 @@ export type MagicTeaPartyUpdateDraft = {
 
 3) **协议内容可能被截断**  
    `MAX_PROTOCOL_APPENDIX_CHARS=4000`，而“小城市 1.7”卡体量较大，协议正文可能被裁剪。  
-   结果：模型拿不到“风格/记录规则”关键段落，无法遵守。
+   同时情景卡目前仅抽取 `elements` 局部字段，关键规则更易丢失（详见 `docs/MAGIC_TEA_PARTY_SCENARIO_ALIGNMENT_2026-01-17.md`）。  
+   结果：模型拿不到“风格/记录规则/情景锚点”关键段落，无法遵守。
 
 4) **依赖卡/全局数据卡缺乏前置校验**  
    设计文档 19.3.E 建议“缺卡直接 notice + 阻断”，但目前未实现。  
@@ -1785,36 +1786,40 @@ export type MagicTeaPartyUpdateDraft = {
    当用户关闭选项时，`buildMagicTeaPartyMainPrompt` 不输出“选项规则块”，仅保留一句“协议强制时可输出 choices”。  
    强协议卡若依赖选项，模型更容易跳过，导致记录阶段缺参。
 
+6) **情景优先级未明确高于对话历史**  
+   目前提示词未像竞技场情景模式那样明确“情景设定为最高优先级”，对话历史与世界书更容易稀释情景约束（详见对齐分析文档）。
+
 ### 20.3 改进方案（多方案对比）
 
-**方案 A：轻量补丁（1~2 天）**  
-优点：改动少、可快速验证；缺点：协议识别仍偏粗糙。
-- 新增**协议关键词检测**（角色/情景卡内包含 `officialReport/headline/article.`/“状态栏协议/历战记录协议/小城市”等）。  
-  检测命中时在本轮请求上**临时升格**：  
-  - `outputPlan.updates=on`（必要时 `choices=on`，`summary=auto/on`）  
-  - 强制 `enableChoices=true`（不落盘，仅本轮）  
-- 当 `auto` 未输出 updates 时，**允许自动补生成**（触发 `generate-updates`）。
-- 提升 `MAX_PROTOCOL_APPENDIX_CHARS` 或抽取**关键协议片段**（正则匹配后置顶插入）。
-- 前端加入**依赖卡检查**，缺失时 `notice(level=error)` 并阻断生成。
+**方案 A：全卡协议 + 无截断（已定）**  
+优点：最直接、最贴近“大胆操作”要求；缺点：提示词更长、成本更高。
+- **不做协议关键词检测**：将所有角色/情景/工具卡视为潜在协议卡，统一纳入“协议附录 + 高优先级覆盖”。
+- **移除卡片截断上限**：`MAX_FIELD_CHARS/MAX_LIST_ITEMS/MAX_CARD_TEXT_CHARS/MAX_PROTOCOL_APPENDIX_CHARS` 不再生效（保留为注释阈值）。
+- **情景卡导入全量对齐竞技场**：不再仅抽取 `elements`，改为直接传入完整情景卡 JSON（与竞技场战报生成保持一致）。
+- **阶段化高优先级提示词覆盖**：  
+  - 叙事阶段：忽略卡内写入/选项要求，仅遵守叙事与情景约束。  
+  - 更新阶段：严格遵守卡内 current_state/arena_history/摘要写入要求。  
+  - 选项阶段：严格遵守卡内选项数量/标识/格式要求（输出仍为茶会 JSONL）。  
+- **notice/映射协议**：卡内“硬错误/特殊提示/官方字段映射需求”统一转为可解析 notice 输出，不再尝试在不可写字段中输出。
+- **auto 输出兜底**：`outputPlan=auto` 未输出 updates/summary 时允许补生成，避免记录缺失。
 
-**方案 B：协议适配器（推荐，中期）**  
-优点：可维护、可扩展；缺点：需要引入新模块与测试。
+**方案 B：协议覆盖模块化（中期）**  
+优点：可维护、可扩展；缺点：需要新模块与测试。
 - 新增 `lib/magic-tea-party/protocol.ts`：  
-  - `detectProtocol(cards)` → 识别协议类型（小城市/校园/镜中等）  
-  - `buildProtocolOverlay()` → 返回高优先级系统提示词块  
-  - `resolveProtocolOutputPlan()` → 输出本轮强制的 `outputPlan/enableChoices`  
-- 在 `buildMagicTeaPartyMainPrompt` / `buildMagicTeaPartyChoicesPrompt` / `buildMagicTeaPartyUpdatePrompt` 中统一注入。  
-- 在 `useMagicTeaPartyChat` 侧将**协议识别结果**用于 fallback 与 UI 提示。
+  - `buildProtocolOverlay()` → 生成叙事/更新/选项三阶段的高优先级提示词块  
+  - `resolveProtocolOutputPlan()` → 基于“全卡协议”策略输出更激进的本轮 outputPlan/enableChoices（无关键词检测）  
+- 在 `buildMagicTeaPartyMainPrompt` / `buildMagicTeaPartyChoicesPrompt` / `buildMagicTeaPartyUpdatePrompt` 中统一注入。
+- 在 `useMagicTeaPartyChat` 中对 `auto` 做兜底补生成，并将 notice 与 UI 提示联动。
 
 **方案 C：强协议工具卡机制（长期）**  
-优点：最强一致性；缺点：开发量大。  
+优点：一致性最高；缺点：开发量大。  
 - 将“全局数据卡/工具卡”独立为协议卡槽，强制存在与校验。  
 - 输出时根据工具卡自动写入目标字段或独立记录区。
 
 ### 20.4 推荐落地路径
 
-1) 先落地 **方案 A** 做快速修复，观察“小城市 1.7”组合是否恢复。  
-2) 同步推进 **方案 B** 作为稳定方案：把协议识别/覆盖抽象为模块，减少 prompt 分散修改。  
+1) 先落地 **方案 A**：全卡协议 + 无截断 + 情景全量注入 + auto 兜底。  
+2) 同步推进 **方案 B**：将高优先级覆盖抽象为模块，减少 prompt 分散修改。  
 3) 若后续协议数量持续增加，再评估 **方案 C**。
 
 ### 20.5 验证清单
@@ -1823,3 +1828,48 @@ export type MagicTeaPartyUpdateDraft = {
 - `outputPlan=auto` 仍能稳定拿到 `updates`（或自动补生成）。  
 - 缺失依赖卡时触发 `notice(level=error)` 且阻断生成。  
 - 选项关闭时，协议强制选项仍可单轮输出并提示。  
+
+---
+
+## 21. 情景模式对齐与全卡协议策略（2026-01-17）
+
+> 参考对齐分析：`docs/MAGIC_TEA_PARTY_SCENARIO_ALIGNMENT_2026-01-17.md`  
+> 本节为“强协议、强情景”的设计补充，覆盖提示词、注入策略与协议输出规范。
+
+### 21.1 核心决策
+
+- **全卡协议策略**：不再进行协议关键词检测，**所有角色/情景/工具卡视为潜在协议卡**。  
+- **取消截断上限**：卡片相关的截断阈值不再生效，保留为注释以便将来回调。  
+  - `MAX_FIELD_CHARS` / `MAX_LIST_ITEMS` / `MAX_CARD_TEXT_CHARS` / `MAX_PROTOCOL_APPENDIX_CHARS`
+- **情景卡注入全量对齐竞技场**：不再仅抽取 `elements`，而是以与竞技场战报一致的方式注入完整情景卡 JSON（移除签名/元信息即可）。
+
+### 21.2 通用提示词改造要点（高优先级覆盖）
+
+**A. 叙事生成（主对话）**
+- 明确“**情景设定为最高优先级**”，高于世界书/角色档案/对话历史。
+- **忽略**角色/情景中的写入要求与选项要求（`current_state`/`arena_history`/摘要/选项），仅将其视为叙事约束。
+- 若卡内出现“硬错误/硬提示”或“无法输出字段”的要求，**必须输出 notice**（可解析格式），不得在正文中写字段名。
+
+**B. 摘要/更新生成（current_state/arena_history）**
+- **必须遵守**角色/情景卡内关于写入摘要、当前状态与历战记录的要求。
+- 允许使用记录术语，忽略叙事阶段禁词或格式限制。
+- 输出严格为 JSON（或 JSONL updates 行），不得混入正文/notice。
+
+**C. 选项生成**
+- **必须遵守**角色/情景卡中关于选项数量/标识/格式的要求，输出仍为茶会 JSONL `choices` 结构。
+- 若协议要求选项但用户关闭功能，允许单轮强制生成并提示（notice）。
+
+**D. 自定义提示/官方字段映射**
+- 对“写入不可达字段”的要求，一律转为 **notice 规范输出**（JSONL 或 `mtp_notice`）。
+- 对需要“官方字段映射”的协议要求，统一在高优先级提示词中声明：**改以可解析协议输出，由前端写入**。
+
+### 21.3 冲突与例外规则（统一声明）
+
+- 叙事禁词与记录允许冲突：**叙事阶段服从禁词，记录阶段忽略禁词**。
+- 辅助情景冲突时以主情景为准；若无法同时满足，输出 notice 并保持情景一致性。
+- 任何 `level=error` notice 必须终止本轮正文与写入输出。
+
+### 21.4 预期影响
+
+- 提示词长度显著增长，模型成本上升；但换来情景遵循度与协议完整性提升。  
+- 需要配合 Token 预算与自动摘要策略，否则长对话易挤压情景权重。  

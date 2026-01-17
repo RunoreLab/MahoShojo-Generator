@@ -5,7 +5,7 @@
 
 ## 一、已完成（已验证落地）
 - `outputPlan` + JSONL 侧信道解析：summary/updates/notice 已从正文剥离，支持流式解析与本地落库。
-- outputPlan 失败回退：当模型未按合并输出计划返回 summary/updates 时，自动补调用 summarize / generate-updates 并提示。
+- outputPlan 失败回退：**仅当 outputPlan=on** 时触发 summarize / generate-updates 补生成并提示。
 - `updateApplyMode` 写入策略：auto/confirm/draft 已接入，自动写入带快照与撤销入口。
 - 预设角色面板与角色管理：PresetCharacterPanel + CharacterPanel（编辑/历战查看/云端保存/拖拽排序/卡组导入）。
 - 会话清理与归档：保留天数/数量预览 + 清理逻辑、JSON/JSONL 导出，ZIP 导出含 tachie 图片资源。
@@ -17,9 +17,17 @@
 - 草稿已写入 IndexedDB（会话扩展字段），LocalStorage 作为兜底仍保留。
 
 ## 二、差异与缺口（需要补强）
-1. 协议适配仍偏提示词层面  
-   【可忽略】设计中“阶段化系统提示词覆盖/字段映射/协议强制执行”尚未形成可执行机制，当前仅靠提示词约束。
-2. 摘要后自动生成更新草案仍为规划项  
+1. 全卡协议策略尚未落地  
+   当前仍以“协议附录 + 通用提示词”方式注入，未实现**全卡协议高优先级覆盖**与阶段化提示词重写。
+2. 卡片截断阈值仍生效  
+   `MAX_FIELD_CHARS/MAX_LIST_ITEMS/MAX_CARD_TEXT_CHARS/MAX_PROTOCOL_APPENDIX_CHARS` 仍限制卡片内容，需改为**无限制**并保留注释阈值。
+3. 情景卡注入仍被裁剪  
+   `buildScenarioText` 仍仅抽取 `elements` 局部字段，未与竞技场“全量情景注入”对齐。
+4. 情景优先级不足  
+   通用系统提示词缺少“情景设定为最高优先级”与“主情景优先”硬性声明。
+5. 选项/更新阶段协议覆盖不足  
+   选项与更新提示词尚未强制要求“遵守卡内选项/写入规则”，也未加入官方字段映射与 notice 规范。
+6. 摘要后自动生成更新草案仍为规划项  
    目前支持 outputPlan 侧信道与手动触发更新草案，摘要后自动生成/写入尚未接入。
 
 ## 三、风险与建议
