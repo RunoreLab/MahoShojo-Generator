@@ -41,6 +41,18 @@ const AUDIO_TRUSTED_MEDIA_HOSTS = [
   // 网易云音乐
   'music.163.com',
   'music.126.net',
+  // 酷狗音乐
+  'kugou.com',
+  'kugou.cn',
+  // 酷我音乐
+  'kuwo.cn',
+  'kuwo.com',
+  // 咪咕音乐
+  'migu.cn',
+  'music.migu.cn',
+  // 喜马拉雅
+  'ximalaya.com',
+  'xmcdn.com',
 ] as const;
 
 const MEDIA_HOST_WHITELIST: Record<ExternalMediaKind, readonly string[]> = {
