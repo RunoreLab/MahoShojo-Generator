@@ -33,8 +33,9 @@ export function useBetaAccessStatus(params: {
   isAuthenticated: boolean;
   loading: boolean;
   badges: UserBadge[];
+  badgesLoading?: boolean;
 }): BetaAccessState {
-  const { featureId, isAuthenticated, loading, badges } = params;
+  const { featureId, isAuthenticated, loading, badges, badgesLoading } = params;
   const [stats, setStats] = useState<BetaAccessStats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -74,7 +75,7 @@ export function useBetaAccessStatus(params: {
     return evaluateBetaAccess(featureId, badges, stats);
   }, [featureId, badges, stats]);
 
-  if (loading || statsLoading) {
+  if (loading || statsLoading || badgesLoading) {
     return { status: 'loading', stats, error };
   }
 

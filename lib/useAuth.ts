@@ -13,11 +13,17 @@ export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [userBadges, setUserBadges] = useState<UserBadge[]>([]);
+  const [badgesLoading, setBadgesLoading] = useState(false);
 
   // 加载用户徽章
   const loadUserBadges = async () => {
-    const badges = await getUserBadges();
-    setUserBadges(badges);
+    setBadgesLoading(true);
+    try {
+      const badges = await getUserBadges();
+      setUserBadges(badges);
+    } finally {
+      setBadgesLoading(false);
+    }
   };
 
   // 初始化时验证登录状态
@@ -30,12 +36,16 @@ export function useAuth() {
           setUser(result.user);
           if (Array.isArray(result.badges)) {
             setUserBadges(result.badges);
+            setBadgesLoading(false);
           } else {
-            void loadUserBadges();
+            await loadUserBadges();
           }
         } else {
           authStorage.clearAuth();
         }
+      }
+      if (!auth) {
+        setBadgesLoading(false);
       }
       setLoading(false);
     };
@@ -67,7 +77,7 @@ export function useAuth() {
     if (result.success && result.user) {
       setUser(result.user);
       // 加载用户徽章
-      void loadUserBadges();
+      await loadUserBadges();
     }
     return result;
   };
@@ -77,6 +87,7 @@ export function useAuth() {
     authApi.logout();
     setUser(null);
     setUserBadges([]);
+    setBadgesLoading(false);
   };
 
   // 重新加载徽章（用于徽章更新后刷新）
@@ -89,6 +100,7 @@ export function useAuth() {
     userBadges,
     loading,
     isAuthenticated: !!user,
+    badgesLoading,
     register,
     login,
     logout,

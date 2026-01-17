@@ -29,12 +29,13 @@ export default function BetaAccessPage() {
   const feature = getBetaAccessFeature(rawFeature);
   const resolvedFeatureId = feature?.id ?? 'magic-tea-party';
 
-  const { userBadges, isAuthenticated, loading } = useAuth();
+  const { userBadges, isAuthenticated, loading, badgesLoading } = useAuth();
   const accessState = useBetaAccessStatus({
     featureId: resolvedFeatureId,
     isAuthenticated,
     loading,
     badges: userBadges,
+    badgesLoading,
   });
 
   const evaluation = useMemo(() => {
@@ -44,7 +45,7 @@ export default function BetaAccessPage() {
   const showRequirements = Boolean(feature) && (feature?.showRequirements ?? betaAccessConfig.showRequirementsByDefault);
 
   const resolveRequirementStatus = (requirement: Parameters<typeof matchBetaAccessRequirement>[0]): RequirementStatus => {
-    if (loading || !isAuthenticated) return 'unknown';
+    if (loading || badgesLoading || !isAuthenticated) return 'unknown';
     if (requirement.type !== 'badge' && !accessState.stats) return 'unknown';
     return matchBetaAccessRequirement(requirement, accessState.stats, userBadges) ? 'met' : 'missing';
   };

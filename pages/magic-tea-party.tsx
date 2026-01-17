@@ -42,13 +42,14 @@ import type { BetaAccessFeatureId } from '@/config/beta-access';
 
 export default function MagicTeaPartyPage() {
   const router = useRouter();
-  const { user, userBadges, isAuthenticated, loading } = useAuth();
+  const { user, userBadges, isAuthenticated, loading, badgesLoading } = useAuth();
   const betaFeatureId: BetaAccessFeatureId = 'magic-tea-party';
   const betaAccess = useBetaAccessStatus({
     featureId: betaFeatureId,
     isAuthenticated,
     loading,
     badges: userBadges,
+    badgesLoading,
   });
 
   const [globalError, setGlobalError] = useState<string | null>(null);

@@ -9,13 +9,14 @@ import { useAuth } from '@/lib/useAuth';
 
 export default function MagicTavernRedirect() {
   const router = useRouter();
-  const { isAuthenticated, loading, userBadges } = useAuth();
+  const { isAuthenticated, loading, userBadges, badgesLoading } = useAuth();
   const betaFeatureId: BetaAccessFeatureId = 'magic-tavern';
   const betaAccess = useBetaAccessStatus({
     featureId: betaFeatureId,
     isAuthenticated,
     loading,
     badges: userBadges,
+    badgesLoading,
   });
 
   useEffect(() => {

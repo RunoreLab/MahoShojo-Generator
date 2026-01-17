@@ -9,13 +9,14 @@ import { useAuth } from '@/lib/useAuth';
 
 export default function TachiePage() {
   const router = useRouter();
-  const { isAuthenticated, loading, userBadges } = useAuth();
+  const { isAuthenticated, loading, userBadges, badgesLoading } = useAuth();
   const betaFeatureId: BetaAccessFeatureId = 'tachie';
   const betaAccess = useBetaAccessStatus({
     featureId: betaFeatureId,
     isAuthenticated,
     loading,
     badges: userBadges,
+    badgesLoading,
   });
 
   const [prompt, setPrompt] = useState<string>('');
