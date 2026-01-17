@@ -22,18 +22,18 @@ const uniqById = (items: MagicTeaPartySession[]): MagicTeaPartySession[] => {
   return result;
 };
 
-export const buildMagicTeaPartyCleanupPlan = async (options: {
+export const computeMagicTeaPartyCleanupPlan = (options: {
+  sessions: MagicTeaPartySession[];
   retentionDays: number;
   maxSessions: number;
   excludeSessionId?: string | null;
   now?: number;
-}): Promise<MagicTeaPartyCleanupPlan> => {
+}): MagicTeaPartyCleanupPlan => {
   const retentionDays = Math.max(1, Math.floor(options.retentionDays));
   const maxSessions = Math.max(1, Math.floor(options.maxSessions));
   const now = typeof options.now === 'number' ? options.now : Date.now();
   const excludeId = options.excludeSessionId ?? null;
-
-  const sessions = await listMagicTeaPartySessions({ limit: 9999 });
+  const sessions = Array.isArray(options.sessions) ? options.sessions : [];
   const sorted = [...sessions].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 
   const expired = sorted.filter((session) => {
@@ -62,6 +62,22 @@ export const buildMagicTeaPartyCleanupPlan = async (options: {
     overLimit,
     candidates,
   };
+};
+
+export const buildMagicTeaPartyCleanupPlan = async (options: {
+  retentionDays: number;
+  maxSessions: number;
+  excludeSessionId?: string | null;
+  now?: number;
+}): Promise<MagicTeaPartyCleanupPlan> => {
+  const sessions = await listMagicTeaPartySessions({ limit: 9999 });
+  return computeMagicTeaPartyCleanupPlan({
+    sessions,
+    retentionDays: options.retentionDays,
+    maxSessions: options.maxSessions,
+    excludeSessionId: options.excludeSessionId,
+    now: options.now,
+  });
 };
 
 export const cleanupMagicTeaPartySessions = async (options: {

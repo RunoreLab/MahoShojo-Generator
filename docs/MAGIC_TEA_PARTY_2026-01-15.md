@@ -20,8 +20,8 @@
 
 ## 0.1 实现状态更新（2026-01-17）
 
-- 已落地：魔法茶会完整页面、会话/消息 IndexedDB、本地导入与数据库多选、流式输出（JSONL/Markdown）、notice 解析与剥离、协议适配提示词、分支会话/合并、自动摘要触发与 Token 预算提示、会话导入/导出（JSON + SillyTavern JSONL）、立绘/插画生成与缓存清理。
-- 已确认下一阶段落地：`outputPlan`（摘要/更新合并输出）、`updateApplyMode` 自动写入策略、预设角色面板/卡组导入、角色面板（角色卡管理/更新/历战）、会话清理与归档（范围见 13.5/13.14/13.23）。
+- 已落地：魔法茶会完整页面、会话/消息 IndexedDB、本地导入与数据库多选、流式输出（JSONL/Markdown）、notice 解析与剥离、协议适配提示词、分支会话/合并、自动摘要触发与 Token 预算提示、会话导入/导出（JSON + SillyTavern JSONL）、立绘/插画生成与缓存清理、`outputPlan`（摘要/更新合并输出）、`updateApplyMode` 自动写入策略、预设角色面板/卡组导入、角色面板（角色卡管理/更新/历战）、会话清理与归档（范围见 13.5/13.14/13.23）。
+- 待完善（可选）：协议强制执行机制、会话置顶、自动清理策略等（后续评估优先级）。
 
 ---
 
@@ -146,7 +146,7 @@
 
 新增页面：`pages/magic-tea-party.tsx`
 
-组件建议（已落地 / 待落地）：
+组件建议（当前实现）：
 
 - `components/magic-tea-party/Hero.tsx`：顶部标题与全局提示/错误
 - `components/magic-tea-party/SessionSidebar.tsx`：会话列表、预设情景选择、模型与偏好设置、导入/导出
@@ -158,8 +158,8 @@
 - `components/magic-tea-party/ChatComposer.tsx`：输入区 + 继续生成/选项/发送按钮
 - `components/magic-tea-party/TachiePanel.tsx`：立绘/插画生成与管理
 - `components/magic-tea-party/CardModals.tsx`：角色/情景选择弹窗
-- （待落地）`components/magic-tea-party/PresetCharacterPanel.tsx`：预设角色选择（复用竞技场），默认折叠、状态持久化
-- （待落地）`components/magic-tea-party/CharacterPanel.tsx`：角色面板（管理 + 更新 + 历战全量查看/编辑）
+- `components/magic-tea-party/PresetCharacterPanel.tsx`：预设角色选择（复用竞技场），默认折叠、状态持久化
+- `components/magic-tea-party/CharacterPanel.tsx`：角色面板（管理 + 更新 + 历战全量查看/编辑）
 
 > 命名说明：新增面板组件使用 `Character*`，用于强调“角色数据卡”语义，避免与玩家扮演 role 混淆；数据类型仍沿用 `MagicTeaPartyRole`。
 
@@ -434,7 +434,7 @@ IndexedDB 建议分表：
 
 ### M1：基础会话
 - 页面 + 会话列表（IndexedDB）
-- 角色/情景选择 + 人设切换（数据库多选 / 本地导入；卡组导入待落地）
+- 角色/情景选择 + 人设切换（数据库多选 / 本地导入 / 卡组导入）
 - 输入/输出聊天流
 
 ### M2：AI 接入（自备 Key）
@@ -451,7 +451,7 @@ IndexedDB 建议分表：
 - 会话导入/导出
 - 扩展卡类型与酒馆卡兼容（部分）
 
-### M5：协议与自动化（已确认）
+### M5：协议与自动化（已落地）
 - `outputPlan` 合并输出（summary/updates 侧信道）
 - `updateApplyMode` 自动写入 + 回滚/确认策略
 - `CharacterPanel` / `PresetCharacterPanel` 与卡组导入
@@ -717,11 +717,11 @@ export type MagicTeaPartySession = {
 
 - **版本化**：建议 `magic-tea-party:v1`，升级时提供 migration（仅新增字段时容错）。
 - **索引**：`sessions.updatedAt`、`messages.sessionId + createdAt`；保障侧边栏排序与时间轴性能。
-- **实现现状**：已落地消息清理（自动摘要后删除旧消息）与立绘缓存清理；会话保留/过期自动清理已确认纳入下一阶段。
+- **实现现状**：已落地消息清理（自动摘要后删除旧消息）与立绘缓存清理；会话保留/过期清理已落地（手动预览 + 确认），自动清理策略暂未提供。
 - **清理策略**：
   - 默认保留最近 N 个会话；超过时提示用户清理。
   - 单会话触发摘要阈值（见 8.1）时，先生成摘要，再归档旧消息。
-  - **全局设置可调**：允许用户配置「保留会话数 / 会话过期天数 / 自动清理频率」，并提供“立即清理过期数据”按钮。
+  - **全局设置可调**：允许用户配置「保留会话数 / 会话过期天数」，并提供“预览清理/执行清理”入口。
 
 ### 13.6 交互与状态补充
 
@@ -876,7 +876,7 @@ export type MagicTeaPartyPreset = {
 - **输出敏感词**：立即终止流，截断至最后安全边界，标记 `blocked`，保留已生成安全片段并提供“重新生成/修改输入”入口（不跳转）。
 - 安全拒绝：若服务端返回 `shouldRedirect=true`，本地不落库、清理草稿并跳转 `/arrested`（当前 `enforceTextSafety` 固定为 `true`）。
 - `outputFormat=markdown`：不尝试解析 `choices`，如需要选项另调 `generate-choices`。
-- （规划）`summary/updates` 行解析失败：忽略该行并提示，不影响正文；必要时回退为手动生成。
+- 已实现：`summary/updates` 行解析失败会被忽略并提示，不影响正文；必要时回退为手动生成。
 - `notice` 行（见 19.4）：仅用于可解析错误/提示，不写入对话历史；`level=error` 时终止本轮并提示用户操作。
 
 ### 13.13 分支编辑策略（定稿）
@@ -994,7 +994,7 @@ export type MagicTeaPartyPreset = {
   - `type` 仅允许 `narration` / `dialogue` / `choices` / `summary` / `updates` / `notice`；未知字段忽略。
   - `dialogue` 必须包含 `speakerId`（若缺失则降级为 `narration`）。
   - `choices.items` 不能为空；若为空则丢弃该行。
-  - （规划）`summary`/`updates` 不进入聊天时间轴，仅进入会话摘要或角色更新流程。
+  - 已实现：`summary`/`updates` 不进入聊天时间轴，仅进入会话摘要或角色更新流程。
 - `notice` 行用于可解析错误/提示，不进入聊天记录：
   - 格式：`{"type":"notice","level":"error|warning|info","code":"...","message":"...","meta":{...}}`
   - 位置：建议置于本轮输出最前；`level=error` 时必须停止继续输出正文。
@@ -1066,9 +1066,9 @@ export type MagicTeaPartyPreset = {
 
 ### 13.23.1 会话清理
 
-- **入口**：全局设置新增“会话清理”模块，提供“预览将删除的会话”与“立即清理”按钮。
-- **默认阈值**：`sessionRetentionDays=90`、`maxSessions=30`（均可配置；任一为 0 代表关闭该规则）。
-- **触发策略**：默认仅提示超限并要求手动确认；可选开启“自动清理”（需二次确认）。
+- **入口**：全局设置新增“会话清理”模块，提供“预览将删除的会话”与“执行清理”按钮。
+- **默认阈值**：`sessionRetentionDays=60`、`maxSessions=200`（均可配置；当前最小值分别为 1 与 10）。
+- **触发策略**：默认仅提示超限并要求手动确认，暂不提供自动清理开关。
 - **保护规则**：不删除当前会话；如后续支持置顶/锁定会话则默认排除；若存在未发送草稿则提示先处理。
 - **清理范围**：删除会话时同时删除其消息与立绘缓存（`sessions/messages/tachieAssets/tachieBlobs` 全链路删除）。
 
@@ -1125,11 +1125,11 @@ export type MagicTeaPartyPreset = {
 ### 14.5 侧边栏
 
 - 标题：会话列表
-- 操作：置顶（规划）/ 重命名（规划） / 导出 / 删除
+- 操作：置顶（规划）/ 重命名 / 导出 / 删除
 - 排序说明：按最近更新排序
-- 入口：角色面板（待落地） / 全局设置（清理与输出策略）
+- 入口：角色面板 / 全局设置（清理与输出策略）
 
-### 14.6 角色面板（待落地）
+### 14.6 角色面板（已落地）
 
 - 开关：自动写入（默认）/ 需要确认 / 仅生成草案
 - 操作：生成更新草案 / 撤销最近更新 / 查看全部历战
@@ -1140,7 +1140,7 @@ export type MagicTeaPartyPreset = {
 
 ### 15.1 复用组件清单与职责
 
-> 现状：已接入 `BattleDataModal` 多选与本地导入流程；卡组导入与预设角色面板已确认在下一阶段接入。
+> 现状：已接入 `BattleDataModal` 多选与本地导入流程；卡组导入与预设角色面板已落地。
 
 - **`BattleDataModal`**：统一数据库选择入口（公开/私有/收藏/搜索/排序），支持 `selectionMode="multi"`、`selectedType="character|scenario"`；**当前不启用硬上限**（`maxSelected` 预留给未来）。
 - **`DecksModal`**：仅角色卡组导入（`character`），从卡组详情导入可访问的卡片并自动去重。
@@ -1279,7 +1279,7 @@ export type MagicTeaPartyPreset = {
 ## 18. 与竞技场读写对齐（讨论稿）
 
 > 目标：让魔法茶会在“读取/写入当前状态与历战记录”的体验上与竞技场一致，同时适配长对话的节奏与安全边界，避免不必要的误写入。
-> 实现现状：当前仅支持“生成更新草案 → 手动确认写入”；已确认接入 `updateApplyMode` 自动写入与降级策略，以下为目标方案与对齐方向。
+> 实现现状：已支持“生成更新草案 → 自动/确认/仅草案”三态写入（`updateApplyMode`），并提供自动写入快照与撤销入口；以下为对齐方向与后续规划。
 
 ### 18.1 角色面板组件（整合角色管理 + 更新）
 
@@ -1295,7 +1295,7 @@ export type MagicTeaPartyPreset = {
   - 支持查看/编辑**全部条目**（不仅最新一条），并提供搜索/筛选（type/时间/参与者）与分页。
   - 默认只允许**删除/标记无效**；如需编辑或新增，进入“高级编辑模式”并提示风险。
 - **AI 更新整合**：
-  - 复用竞技场更新流程：生成更新草案 → 差异预览 → 自动写入或确认写入（取决于 `updateApplyMode`，规划）。
+  - 复用竞技场更新流程：生成更新草案 → 差异预览 → 自动写入或确认写入（取决于 `updateApplyMode`）。
   - 支持“仅生成草案 / 仅更新当前状态 / 仅写入历战”的精细控制。
   - 在角色面板内提供“下载更新后角色卡 / 保存到云端 / 替换已有”操作，复用竞技场导出与云端逻辑。
 - **复用建议**：可抽出竞技场参战列表与排序交互组件（如 CombatantList 体系）与更新草案生成逻辑，降低重复实现成本。
@@ -1329,15 +1329,15 @@ export type MagicTeaPartyPreset = {
 - 优点：体验自然、少操作。
 - 风险：判定标准不稳定；BYOK 模式下模型能力差异放大风险。
 
-**方案 E：混合（推荐，规划）**
-- 在“摘要生成/关键里程碑”后**自动生成更新草案**，并**默认自动写入**（`updateApplyMode=auto`）。
-- 仍保留“确认写入/仅生成草案”两种模式，当前阶段**不启用自动降级**。
+**方案 E：混合（推荐）**
+- 更新草案来源：支持 `outputPlan` 侧信道与手动触发；“摘要后自动生成草案”仍为规划项。
+- `updateApplyMode=auto` 时自动写入；其余模式进入确认或仅草案流程，暂不启用自动降级。
 
 ### 18.4 推荐策略（与竞技场对齐且更安全）
 
 - **读取默认**：`readCurrentState` 默认开启；`readArenaHistory` 默认开启但限制条数（建议 3），并可一键关闭以降低上下文负担。
-- **写入默认（规划）**：`writeArenaHistory`/`writeCurrentState` 默认关闭；**一旦开启**，默认 `updateApplyMode=auto` 自动写入（可切换为确认/仅草案，当前仅全局设置）。
-- **触发点**：以 `SummaryPanel` 的“会话摘要生成”为主要写入触发；默认“摘要后自动写入”，当无摘要时建议用户先生成摘要（但不依赖摘要内容生成）。
+- **写入默认**：`writeArenaHistory`/`writeCurrentState` 默认关闭；`updateApplyMode` 默认 `auto`，但可独立切换为确认/仅草案。
+- **触发点**：目前以 `outputPlan` 侧信道或手动触发为主；“摘要后自动生成/写入”仍为规划项。
 
 ### 18.5 写入流程（建议）
 
@@ -1409,7 +1409,7 @@ export type MagicTeaPartyPreset = {
   - `impact`（历战条目影响）
   - `currentStateSummary`（可为空；为空则不更新当前状态）
   - `hasWinner`（可选，用于辅助设置 `winner`）
-- （规划）当 `outputPlan.updates=auto/on` 时，`generate-stream` 允许直接输出与 `generate-updates` 相同结构的 drafts，供自动写入或差异预览复用。
+- 已实现：当 `outputPlan.updates=auto/on` 时，`generate-stream` 允许直接输出与 `generate-updates` 相同结构的 drafts，供自动写入或差异预览复用。
 - 输入约束：更新生成以“对话历史”为主（可选摘要作为补充）；摘要缺失不影响生成。
 - 提示词中增加“若非对抗性情节，不要编造胜者；胜者缺省用‘不适用’”。
 
@@ -1645,7 +1645,7 @@ export type MagicTeaPartyUpdateDraft = {
 3) 记录更新（带入当轮选项与 userGuidance）  
 4) 写入/生成草案（写入开关开启则落库，关闭则存草案/影子状态）
 
-> （规划）当 `outputPlan` 启用“叙事合并输出”时，模型在同一流中按顺序输出 1~3 的结果；解析层仍按阶段处理，写入阶段在流结束后执行。
+> 已实现：当 `outputPlan` 启用“叙事合并输出”时，模型在同一流中按顺序输出 1~3 的结果；解析层仍按阶段处理，写入阶段在流结束后执行。
 
 **A. 叙事生成阶段（正文）**
 - 明确要求 AI：**忽略字段名与写入动作**，但保留其**内容约束**（例如“时间过渡/天气描写/叙事禁词”等），不输出 officialReport/headline/article.* 字段名。
