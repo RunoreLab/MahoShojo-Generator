@@ -62,7 +62,7 @@ export default function BetaAccessPage() {
   return (
     <>
       <Head>
-        <title>内测权限拦截 - 魔法国度</title>
+        <title>权限拦截 - 魔法国度</title>
         <meta name="description" content="内测功能权限拦截页" />
         <link rel="icon" href="/favicon.svg" />
       </Head>
@@ -92,7 +92,7 @@ export default function BetaAccessPage() {
             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-10 animate-pulse"></div>
             <div className="relative z-10">
               <div className="text-4xl font-semibold text-purple-100" style={{ padding: '2rem' }}>
-                暂 未 获 得 授 权
+                未 获 授 权
               </div>
             </div>
           </div>
@@ -123,16 +123,16 @@ export default function BetaAccessPage() {
             <div className="absolute bottom-4 left-4 text-2xl animate-bounce">✨</div>
 
             <div className="relative text-center space-y-6">
-              <div className="text-2xl font-serif text-pink-300">魔法国度内测授权厅</div>
+              <div className="text-2xl font-serif text-pink-300">魔法国度魔事院</div>
               <div className="text-sm text-purple-200 tracking-widest">
-                M A G I C A L &nbsp; K I N G D O M &nbsp; B E T A &nbsp; A C C E S S
+                M A G I C A L &nbsp; K I N G D O M &nbsp; B U R E A U &nbsp; O F &nbsp; M A G I C A L &nbsp; A F F A I R S
               </div>
               <div className="text-lg text-purple-100">
                 {feature?.summary ?? '当前功能仍处于内测阶段，授权正在分批开放。'}
               </div>
               <div className="text-purple-100 space-y-2">
                 <p className="flex items-center justify-center gap-2">⚠️ 矢车菊权杖严正声明 ⚠️</p>
-                <p className="text-xl flex items-center justify-center gap-2">未开放内测功能不对外提供服务</p>
+                <p className="text-xl flex items-center justify-center gap-2">未经魔事院授权不得访问</p>
               </div>
             </div>
           </div>
@@ -141,8 +141,8 @@ export default function BetaAccessPage() {
             <div className="bg-purple-950/70 border border-pink-400/80 rounded-lg p-6 mb-8 shadow-2xl">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="text-pink-200 text-lg font-semibold">内测准入条件</div>
-                  <p className="text-sm text-purple-100/80 mt-2">满足条件后可获得相应内测功能授权。</p>
+                  <div className="text-pink-200 text-lg font-semibold">准入条件</div>
+                  <p className="text-sm text-purple-100/80 mt-2">满足条件后可获得相应访问授权。</p>
                 </div>
                 {accessState.stats ? (
                   <div className="grid grid-cols-3 gap-3 text-center text-xs text-purple-100/80">
@@ -210,13 +210,13 @@ export default function BetaAccessPage() {
             </div>
           ) : (
             <div className="bg-purple-950/70 border border-pink-400/80 rounded-lg p-6 mb-8 shadow-2xl text-sm text-purple-100/80">
-              本次内测条件暂不对外公开，授权将通过系统自动下发。
+              本次内测条件暂不对外公开，授权将通过魔事院系统自动下发。
             </div>
           )}
 
           {!isAuthenticated ? (
             <div className="bg-purple-950/60 border border-pink-300/70 rounded-lg p-4 text-sm text-purple-100 mb-6">
-              你尚未登录。请先前往 <Link href="/character-manager" className="text-pink-200 hover:underline">角色管理器</Link> 完成登录，再返回进行授权核验。
+              尚未登录。请先前往 <Link href="/character-manager" className="text-pink-200 hover:underline">角色管理器</Link> 完成登录，再返回进行授权核验。
             </div>
           ) : null}
 
@@ -232,7 +232,7 @@ export default function BetaAccessPage() {
             </Link>
           </div>
 
-          <div className="mt-8 text-center text-xs text-purple-300">本拦截提示由魔法国度内测授权厅发布</div>
+          <div className="mt-8 text-center text-xs text-purple-300">本拦截提示由魔法国度魔事院发布</div>
         </div>
 
         <style jsx>{`
