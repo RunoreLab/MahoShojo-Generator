@@ -29,6 +29,7 @@ export default async function handler(req: Request): Promise<Response> {
     const limit = parseInt(url.searchParams.get('limit') || '12');
     const offset = parseInt(url.searchParams.get('offset') || '0');
     const tagIds = parseCommaList(url.searchParams.get('tagIds'));
+    const tagMatch = url.searchParams.get('tagMatch') === 'all' ? 'all' : 'any';
 
     // 【新增】解析高级筛选参数
     const author = url.searchParams.get('author');
@@ -72,6 +73,7 @@ export default async function handler(req: Request): Promise<Response> {
         search || undefined, 
         sortBy || undefined,
         tagIds,
+        tagMatch,
         author || undefined,
         minLikes ? parseInt(minLikes) : undefined,
         maxLikes ? parseInt(maxLikes) : undefined,

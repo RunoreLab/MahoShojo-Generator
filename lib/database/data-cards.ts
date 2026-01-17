@@ -507,6 +507,7 @@ export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
  * 获取公开的数据卡列表，增加了完整的筛选功能。
  * @param author - 作者用户名 (精确匹配)
  * @param tagIds - 标签 ID 过滤（任一匹配）
+ * @param tagMatch - 标签匹配模式（any/任一, all/全部）
  * @param minLikes - 最小点赞数
  * @param maxLikes - 最大点赞数
  * @param minUsage - 最少使用数
@@ -519,6 +520,7 @@ export async function getPublicDataCards(
   search?: string,
   sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
   tagIds?: string[],
+  tagMatch?: 'any' | 'all',
   author?: string,
   minLikes?: number,
   maxLikes?: number,
@@ -556,12 +558,22 @@ export async function getPublicDataCards(
       const uniq = Array.from(new Set(tagIds.map((id) => id.trim()).filter(Boolean)));
       if (uniq.length > 0) {
         const placeholders = uniq.map(() => '?').join(', ');
-        sql += ` AND EXISTS (
-          SELECT 1 FROM data_card_tags dct
-          WHERE dct.data_card_id = dc.id
-            AND dct.tag_id IN (${placeholders})
-        )`;
-        params.push(...uniq);
+        if (tagMatch === 'all') {
+          sql += ` AND (
+            SELECT COUNT(DISTINCT dct.tag_id)
+            FROM data_card_tags dct
+            WHERE dct.data_card_id = dc.id
+              AND dct.tag_id IN (${placeholders})
+          ) = ?`;
+          params.push(...uniq, uniq.length);
+        } else {
+          sql += ` AND EXISTS (
+            SELECT 1 FROM data_card_tags dct
+            WHERE dct.data_card_id = dc.id
+              AND dct.tag_id IN (${placeholders})
+          )`;
+          params.push(...uniq);
+        }
       }
     }
     if (author) {
