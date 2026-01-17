@@ -38,6 +38,7 @@ export const computeMagicTeaPartyCleanupPlan = (options: {
 
   const expired = sorted.filter((session) => {
     if (excludeId && session.id === excludeId) return false;
+    if (typeof session.pinnedAt === 'number' && Number.isFinite(session.pinnedAt) && session.pinnedAt > 0) return false;
     const updatedAt = session.updatedAt ?? session.createdAt ?? 0;
     return updatedAt > 0 && now - updatedAt > retentionDays * DAY_MS;
   });
@@ -51,6 +52,7 @@ export const computeMagicTeaPartyCleanupPlan = (options: {
 
   const overLimit = sorted.filter((session) => {
     if (excludeId && session.id === excludeId) return false;
+    if (typeof session.pinnedAt === 'number' && Number.isFinite(session.pinnedAt) && session.pinnedAt > 0) return false;
     return !keepIds.has(session.id);
   });
 

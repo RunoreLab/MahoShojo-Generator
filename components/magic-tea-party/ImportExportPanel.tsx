@@ -431,6 +431,7 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
         titleMeta: { source: 'manual', generatedAt: now, reason: 'import' },
         createdAt: now,
         updatedAt: now,
+        pinnedAt: typeof sessionCore.pinnedAt === 'number' ? sessionCore.pinnedAt : undefined,
         roles: roles.map(sanitizeRole),
         scenario: scenario ? sanitizeScenario(scenario) : undefined,
         auxScenarios: auxScenarios.map(sanitizeScenario),

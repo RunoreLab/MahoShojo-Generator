@@ -22,6 +22,7 @@ type MagicTeaPartySidebarProps = {
   onCreateSession: (presetId?: MagicTeaPartyPresetId | null) => void;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
+  onToggleSessionPin: (sessionId: string) => void;
   onSessionImported: (sessionId: string) => void;
   onPresetSelected: (presetId: MagicTeaPartyPresetId) => void;
   onProviderConfigChange: (config: UserAIProviderConfig | null) => void;
@@ -40,6 +41,7 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
     onCreateSession,
     onSelectSession,
     onDeleteSession,
+    onToggleSessionPin,
     onSessionImported,
     onPresetSelected,
     onProviderConfigChange,
@@ -166,7 +168,14 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                   }`}
               >
                 <button type="button" className="block w-full text-left" onClick={() => onSelectSession(session.id)}>
-                  <div className="text-sm font-semibold text-gray-800 line-clamp-1">{session.title}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-gray-800 line-clamp-1">{session.title}</div>
+                    {session.pinnedAt ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                        置顶
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="mt-0.5 text-xs text-gray-500">{new Date(session.updatedAt).toLocaleString()}</div>
                   {session.forkedFrom ? (
                     <div className="mt-1 text-[11px] text-pink-600">
@@ -195,9 +204,18 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                   ) : (
                     <span />
                   )}
-                  <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => onDeleteSession(session.id)}>
-                    删除
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      className="text-xs text-amber-700 hover:underline"
+                      onClick={() => onToggleSessionPin(session.id)}
+                    >
+                      {session.pinnedAt ? '取消置顶' : '置顶'}
+                    </button>
+                    <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => onDeleteSession(session.id)}>
+                      删除
+                    </button>
+                  </div>
                 </div>
               </div>
             ))

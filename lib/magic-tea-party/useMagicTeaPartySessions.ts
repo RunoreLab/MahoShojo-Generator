@@ -57,7 +57,14 @@ const writeLocalStorageString = (key: string, value: string): void => {
 };
 
 const sortSessionsByUpdatedAtDesc = (items: MagicTeaPartySession[]): MagicTeaPartySession[] => {
-  return [...items].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  return [...items].sort((a, b) => {
+    const pinA = typeof a.pinnedAt === 'number' && Number.isFinite(a.pinnedAt) ? a.pinnedAt : 0;
+    const pinB = typeof b.pinnedAt === 'number' && Number.isFinite(b.pinnedAt) ? b.pinnedAt : 0;
+    if (pinA && !pinB) return -1;
+    if (!pinA && pinB) return 1;
+    if (pinA && pinB && pinA !== pinB) return pinB - pinA;
+    return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+  });
 };
 
 const stripMetaKeys = (payload: Record<string, unknown>): Record<string, unknown> => {
@@ -176,6 +183,7 @@ export type UseMagicTeaPartySessionsResult = {
   createSession: (presetId?: MagicTeaPartyPresetId | null) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   bulkDeleteSessions: (sessionIds: string[]) => Promise<void>;
+  toggleSessionPin: (sessionId: string) => Promise<void>;
   handleSessionImported: (sessionId: string) => Promise<void>;
   applyPreset: (presetId: MagicTeaPartyPresetId) => void;
   updateActiveSessionSettings: (patch: Partial<MagicTeaPartySession['settings']>) => Promise<void>;
@@ -228,8 +236,9 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
   const refreshSessions = useCallback(async (): Promise<MagicTeaPartySession[]> => {
     const limit = Math.max(50, preferences.maxSessions);
     const next = await listMagicTeaPartySessions({ limit });
-    setSessions(next);
-    return next;
+    const sorted = sortSessionsByUpdatedAtDesc(next);
+    setSessions(sorted);
+    return sorted;
   }, [preferences.maxSessions]);
 
   const handleSessionImported = useCallback(
@@ -479,6 +488,27 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       setActiveSessionId((current) => (current && uniqueIds.includes(current) ? fallback : current));
     },
     [refreshSessions]
+  );
+
+  const toggleSessionPin = useCallback(
+    async (sessionId: string) => {
+      const target =
+        sessions.find((item) => item.id === sessionId) ??
+        (activeSession?.id === sessionId ? activeSession : null);
+      if (!target) return;
+      const isPinned = typeof target.pinnedAt === 'number' && Number.isFinite(target.pinnedAt) && target.pinnedAt > 0;
+      const next: MagicTeaPartySession = {
+        ...target,
+        pinnedAt: isPinned ? undefined : Date.now(),
+        updatedAt: target.updatedAt,
+      };
+      await putMagicTeaPartySession(next);
+      setSessions((prev) => sortSessionsByUpdatedAtDesc([next, ...prev.filter((item) => item.id !== next.id)]));
+      if (activeSession?.id === sessionId) {
+        setActiveSession(next);
+      }
+    },
+    [activeSession, sessions]
   );
 
   const updateActiveSessionSettings = useCallback(
@@ -1131,6 +1161,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
     createSession,
     deleteSession,
     bulkDeleteSessions,
+    toggleSessionPin,
     handleSessionImported,
     applyPreset,
     updateActiveSessionSettings,

@@ -74,4 +74,19 @@ describe('computeMagicTeaPartyCleanupPlan', () => {
     expect(plan.expired.map((item) => item.id)).toEqual([]);
     expect(plan.candidates.map((item) => item.id)).toEqual(['keep']);
   });
+
+  it('置顶会话不进入清理候选', () => {
+    const now = 20 * DAY_MS;
+    const pinned = { ...buildSession('pinned', now - 200 * DAY_MS), pinnedAt: now - 10 * DAY_MS };
+    const old = buildSession('old', now - 200 * DAY_MS);
+
+    const plan = computeMagicTeaPartyCleanupPlan({
+      sessions: [pinned, old],
+      retentionDays: 30,
+      maxSessions: 1,
+      now,
+    });
+
+    expect(plan.candidates.map((item) => item.id)).toEqual(['old']);
+  });
 });
