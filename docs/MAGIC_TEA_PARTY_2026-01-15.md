@@ -642,7 +642,7 @@ export type MagicTeaPartySession = {
 - **仅 JSONL 模式生效**：`outputFormat=markdown` 时，`summary/updates` 输出一律降级为单独生成（避免不可解析混杂内容）。
 - **三态设置（关闭/灵活/开启）**：对 `choices/summary/updates` 分别配置 `off/auto/on`。
   - `off`：本轮**绝不**输出该项（即便协议提示），但允许用户手动触发独立接口。
-  - `auto`：仅在必要时输出（例如接近摘要阈值、协议要求、用户显式请求）。
+  - `auto`：默认值，提示 AI 在必要时输出（例如协议要求、叙事要求、角色状态明显需要变化）。
   - `on`：本轮必须输出该项（适合“强协议卡”或强制日志场景）。
 - **解析与落库原则**：
   - `summary`：不进入聊天时间轴；更新 `session.summary/summaryMeta`，并可用于后续写入。
