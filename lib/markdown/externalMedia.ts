@@ -26,12 +26,15 @@ const BASE_TRUSTED_MEDIA_HOSTS = [
   'hdslb.com',
   'biliimg.com',
   'bilivideo.com',
-  // 可信图床
+  // 图床
   'pnglog.com',
   'imgs.moe',
   'imgur.com',
   'i.imgur.com',
   'imgchr.com',
+  // 托管
+  'i.imgs.ovh',
+  'imgloc.com'
 ] as const;
 
 const VIDEO_TRUSTED_MEDIA_HOSTS = [
@@ -70,6 +73,7 @@ const AUDIO_TRUSTED_MEDIA_HOSTS = [
   'xmcdn.com',
   // 音乐资源站
   '2t58.com',
+  'er-sycdn.kuwo.cn',
   // Cloudflare R2 公共访问域名
   'r2.dev',
   'r2.cloudflarestorage.com',
