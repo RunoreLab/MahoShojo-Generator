@@ -187,11 +187,28 @@ export type MagicTeaPartySession = {
   };
 };
 
+export type MagicTeaPartyChoiceCount =
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | 8
+  | 9
+  | 10
+  | 11
+  | 12
+  | 13
+  | 14
+  | 15
+  | 16;
+
 export type MagicTeaPartyPreferences = {
   outputFormat: 'jsonl' | 'markdown';
   outputPlan: MagicTeaPartyOutputPlan;
   enableChoices: boolean;
-  choiceCount: 2 | 3 | 4;
+  choiceCount: MagicTeaPartyChoiceCount;
   language: 'zh-CN' | 'ja-JP' | 'en-US';
   userDisplayName: string;
   lastPresetId?: string;

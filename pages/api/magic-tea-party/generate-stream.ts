@@ -138,7 +138,7 @@ const SettingsSchema = z
     updateApplyMode: z.enum(['auto', 'confirm', 'draft']).optional(),
     language: z.enum(['zh-CN', 'ja-JP', 'en-US']).optional().default('zh-CN'),
     enableChoices: z.boolean().optional().default(true),
-    choiceCount: z.number().int().min(2).max(4).optional().default(3),
+    choiceCount: z.number().int().min(2).max(16).optional().default(3),
     presetId: z.string().optional(),
     worldbookPresetId: z.string().optional(),
     userDisplayName: z.string().optional(),

@@ -292,8 +292,8 @@ export const buildMagicTeaPartyMainPrompt = (params: {
     systemLines.push('- notice：{"type":"notice","level":"error|warning|info","code":"...","message":"...","meta":{...}}。');
     systemLines.push('- notice 必须独立成行；level=error 时仅输出 notice。');
     systemLines.push('- dialogue 必须包含 speakerId（来自角色 id），并尽量包含 speakerName。');
-    systemLines.push('- choices 仅在需要时输出一行，items 默认 2~4；若协议强制数量/标识，可调整至 2~16 并保留标识。');
-    systemLines.push('- summary/updates 仅在合并输出计划允许时输出，且必须位于正文/choices 之后。');
+    systemLines.push('- choices 仅在需要时输出一行，items 默认 3~4；若有要求也可调整至 2~16 并保留标识。');
+    systemLines.push('- summary/updates 仅在需要时输出，且必须位于正文/choices 之后。');
   } else {
     systemLines.push('- 仅输出 Markdown 故事正文。');
     systemLines.push('- 若需要 notice，请输出独立 mtp_notice 块；level=error 时仅输出 notice。');
@@ -426,7 +426,7 @@ export const buildMagicTeaPartyChoicesPrompt = (params: {
     '- 选项之间要有明确差异且各自可执行，避免只是措辞变化或结果近似。',
     '- 保持角色性格、能力边界与世界观一致，确保后续可合理演绎。',
     '【任务】你将仅生成“下一步玩家可选行动”的 choices；如需报错/提示则输出 notice。',
-    `【输出要求】仅输出 1 行 JSON：{"type":"choices","items":[{"id":"c1","text":"..."},...]}，items 默认 ${choiceCount} 条；若协议强制数量/标识，可调整至 2~16 并保留标识。`,
+    `【输出要求】仅输出 1 行 JSON：{"type":"choices","items":[{"id":"c1","text":"..."},...]}，items 默认 ${choiceCount} 条；若有要求也可调整至 2~16 并保留标识。`,
     '【输出限制】禁止输出代码块、解释、标题或多余换行。',
   ]
     .join('\n')

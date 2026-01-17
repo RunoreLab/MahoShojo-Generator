@@ -1,6 +1,7 @@
 import { SYSTEM_PROMPTS } from '@/lib/arena/constants';
 import { buildArenaDefaultScenario, buildArenaWorldbook } from '@/lib/tavern-card';
 import type { TavernCharacterBook } from '@/lib/tavern-card';
+import type { MagicTeaPartyChoiceCount } from '@/lib/magic-tea-party/types';
 
 export type MagicTeaPartyPresetId = 'arena-classic' | 'arena-kizuna' | 'arena-daily';
 
@@ -15,7 +16,7 @@ export type MagicTeaPartyPreset = {
   defaultSettings: {
     outputFormat: 'jsonl' | 'markdown';
     enableChoices: boolean;
-    choiceCount: 2 | 3 | 4;
+    choiceCount: MagicTeaPartyChoiceCount;
   };
 };
 

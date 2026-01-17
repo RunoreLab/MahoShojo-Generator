@@ -101,7 +101,7 @@ const SettingsSchema = z
   .object({
     temperature: z.number().min(0).max(1.2).optional(),
     language: z.enum(['zh-CN', 'ja-JP', 'en-US']).optional().default('zh-CN'),
-    choiceCount: z.number().int().min(2).max(4).optional().default(3),
+    choiceCount: z.number().int().min(2).max(16).optional().default(3),
     presetId: z.string().optional(),
     worldbookPresetId: z.string().optional(),
     userDisplayName: z.string().optional(),

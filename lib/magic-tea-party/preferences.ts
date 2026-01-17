@@ -1,4 +1,9 @@
-import type { MagicTeaPartyPreferences, MagicTeaPartyOutputPlan, MagicTeaPartyOutputPlanMode } from '@/lib/magic-tea-party/types';
+import type {
+  MagicTeaPartyChoiceCount,
+  MagicTeaPartyPreferences,
+  MagicTeaPartyOutputPlan,
+  MagicTeaPartyOutputPlanMode,
+} from '@/lib/magic-tea-party/types';
 import {
   MAGIC_TEA_PARTY_CACHE_DEFAULT_MAX_BYTES,
   MAGIC_TEA_PARTY_CACHE_DEFAULT_MAX_GLOBAL,
@@ -35,7 +40,19 @@ export const DEFAULT_MAGIC_TEA_PARTY_PREFERENCES: MagicTeaPartyPreferences = {
   maxSessions: 200,
 };
 
-const isChoiceCount = (value: unknown): value is 2 | 3 | 4 => value === 2 || value === 3 || value === 4;
+const CHOICE_COUNT_MIN = 2;
+const CHOICE_COUNT_MAX = 16;
+const normalizeChoiceCount = (value: unknown, fallback: MagicTeaPartyChoiceCount): MagicTeaPartyChoiceCount => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const clamped = Math.max(CHOICE_COUNT_MIN, Math.min(CHOICE_COUNT_MAX, Math.floor(value)));
+    return clamped as MagicTeaPartyChoiceCount;
+  }
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+    const clamped = Math.max(CHOICE_COUNT_MIN, Math.min(CHOICE_COUNT_MAX, Math.floor(Number(value))));
+    return clamped as MagicTeaPartyChoiceCount;
+  }
+  return fallback;
+};
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const isOutputPlanMode = (value: unknown): value is MagicTeaPartyOutputPlanMode =>
   value === 'off' || value === 'auto' || value === 'on';
@@ -102,7 +119,7 @@ export function readMagicTeaPartyPreferences(): MagicTeaPartyPreferences {
     const outputFormat = parsed.outputFormat === 'markdown' ? 'markdown' : 'jsonl';
     const outputPlan = sanitizeOutputPlan(parsed.outputPlan, DEFAULT_MAGIC_TEA_PARTY_PREFERENCES.outputPlan);
     const enableChoices = typeof parsed.enableChoices === 'boolean' ? parsed.enableChoices : DEFAULT_MAGIC_TEA_PARTY_PREFERENCES.enableChoices;
-    const choiceCount = isChoiceCount(parsed.choiceCount) ? parsed.choiceCount : DEFAULT_MAGIC_TEA_PARTY_PREFERENCES.choiceCount;
+    const choiceCount = normalizeChoiceCount(parsed.choiceCount, DEFAULT_MAGIC_TEA_PARTY_PREFERENCES.choiceCount);
     const language = parsed.language === 'ja-JP' || parsed.language === 'en-US' ? parsed.language : 'zh-CN';
     const userDisplayName =
       typeof parsed.userDisplayName === 'string' && parsed.userDisplayName.trim()
@@ -208,7 +225,7 @@ export function patchMagicTeaPartyPreferences(patch: Partial<MagicTeaPartyPrefer
     ...current,
     ...patch,
     outputPlan: nextOutputPlan,
-    choiceCount: isChoiceCount(patch.choiceCount) ? patch.choiceCount : current.choiceCount,
+    choiceCount: normalizeChoiceCount(patch.choiceCount, current.choiceCount),
     readArenaHistoryLimit: nextReadArenaHistoryLimit,
     tachieCacheMaxPerSession: nextCacheMaxPerSession,
     tachieCacheMaxGlobal: nextCacheMaxGlobal,
