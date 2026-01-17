@@ -249,8 +249,8 @@ export const buildMagicTeaPartyMainPrompt = (params: {
   systemLines.push('【全卡协议与阶段覆盖】');
   systemLines.push('- 当前为叙事阶段：忽略卡内关于摘要/选项/当前状态/历战记录等写入或格式要求，仅作为叙事约束。');
   systemLines.push('- 不同阶段允许差异化规则，本轮以叙事阶段规则为准。');
-  systemLines.push('- 若卡内要求在 officialReport/headline/article.* 或其它不可达字段写入，必须改为输出 notice。');
-  systemLines.push('- 若卡内要求硬错误/特定提示，也必须输出 notice；level=error 时仅输出 notice，不输出正文或 choices。');
+  systemLines.push('- 若出现 officialReport/headline/article.* 等不可达字段写入要求，在叙事阶段仅作为内容约束，不得输出字段名，或改为输出 notice。');
+  systemLines.push('- 若要求报错/警告/提示，请输出 notice 行/块；level=error 时仅输出 notice，不输出正文或 choices。');
   systemLines.push('');
   systemLines.push(`【输出语言】${language}`);
 
@@ -329,7 +329,7 @@ export const buildMagicTeaPartyMainPrompt = (params: {
     systemLines.push('- 如果是平局，则返回“平局”。');
     systemLines.push('【记录要点】');
     systemLines.push('- impact：总结角色经历带来的影响、成长或关系变化。');
-    systemLines.push('- currentStateSummary：描述角色的即时状态（如身体状况、关系、心情或想法）；无变化可省略。');
+    systemLines.push('- currentStateSummary：描述角色的即时状态（如身体状况、关系、心情或想法）；无变化可省略。如果当前状态已有既定格式，请遵循该格式。');
   }
 
   const parts: string[] = [];
@@ -465,6 +465,7 @@ export const buildMagicTeaPartyUpdatePrompt = (params: {
   lines.push(`【输出语言】${language}`);
   lines.push('【阶段说明】记录更新阶段（仅输出 JSON 草案）。');
   lines.push('【核心优先级】');
+  lines.push('- 遵守角色/情景卡内关于写入格式、字段规则的要求。');
   lines.push('- 情景设定为最高优先级；辅助情景仅作补充，冲突时以主情景为准。');
   lines.push('【全卡协议】');
   lines.push('- 本阶段允许采用与叙事阶段不同的规则集（例如格式/风格/用词），以阶段系统提示词为最高优先级。');
@@ -480,7 +481,7 @@ export const buildMagicTeaPartyUpdatePrompt = (params: {
   lines.push('- 如果是平局，则返回“平局”。');
   lines.push('【记录要点】');
   lines.push('- impact：总结角色经历带来的影响、成长或关系变化。');
-  lines.push('- currentStateSummary：描述角色的即时状态（如身体状况、关系、心情或想法）；无变化可省略。');
+  lines.push('- currentStateSummary：描述角色的即时状态（如身体状况、关系、心情或想法）；无变化可省略。如果当前状态已有既定格式，请遵循该格式。');
   lines.push('');
   lines.push('【输出 JSON Schema】');
   lines.push(

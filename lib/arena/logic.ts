@@ -372,7 +372,7 @@ export const createPromptBuilder = (
     finalPrompt += `\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
 
     if (writeCurrentState) {
-        finalPrompt += `\n\n【当前状态同步】请在输出的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式（如属性、数值），请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
+        finalPrompt += `\n\n【当前状态同步】请在输出的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式，请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
     }
 
     return finalPrompt;
@@ -554,7 +554,7 @@ export const createStreamPromptBuilder = (
     finalPrompt += `\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
 
     if (writeCurrentState) {
-        finalPrompt += `\n\n【当前状态同步】请在输出的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式（如属性、数值），请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
+        finalPrompt += `\n\n【当前状态同步】请在输出的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式，请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
     }
 
     // 流式生成的关键：要求输出 Markdown 格式的战报
