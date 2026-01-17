@@ -1769,9 +1769,9 @@ export type MagicTeaPartyUpdateDraft = {
 1) **高优先级协议覆盖未落地**  
    设计文档 19 章要求“阶段化高优先级系统提示词覆盖”，但当前 `lib/magic-tea-party/prompts.ts` 仍是通用系统提示词，未注入协议专用覆盖块；协议仅以“附录原文”形式出现，优先级不足且易被忽略。
 
-2) **合并输出为 auto 时缺少兜底**  
-   `lib/magic-tea-party/useMagicTeaPartyChat.ts` 中 `requestOutputPlanFallbacks` 仅对 `outputPlan=on` 触发补生成。  
-   现配置为 `auto` 时，如果模型未主动输出 `summary/updates`，不会自动补生成 → 导致“记录缺失”。
+2) **合并输出为 auto 时不做兜底（设计决议）**  
+   `outputPlan=auto` 允许模型自行判断“本轮不需要 summary/updates”。  
+   不进行自动补生成，以避免强行写入不必要的记录。
 
 3) **协议内容可能被截断**  
    `MAX_PROTOCOL_APPENDIX_CHARS=4000`，而“小城市 1.7”卡体量较大，协议正文可能被裁剪。  
@@ -1801,7 +1801,6 @@ export type MagicTeaPartyUpdateDraft = {
   - 更新阶段：严格遵守卡内 current_state/arena_history/摘要写入要求。  
   - 选项阶段：严格遵守卡内选项数量/标识/格式要求（输出仍为茶会 JSONL）。  
 - **notice/映射协议**：卡内“硬错误/特殊提示/官方字段映射需求”统一转为可解析 notice 输出，不再尝试在不可写字段中输出。
-- **auto 输出兜底**：`outputPlan=auto` 未输出 updates/summary 时允许补生成，避免记录缺失。
 
 **方案 B：协议覆盖模块化（中期）**  
 优点：可维护、可扩展；缺点：需要新模块与测试。
@@ -1809,7 +1808,6 @@ export type MagicTeaPartyUpdateDraft = {
   - `buildProtocolOverlay()` → 生成叙事/更新/选项三阶段的高优先级提示词块  
   - `resolveProtocolOutputPlan()` → 基于“全卡协议”策略输出更激进的本轮 outputPlan/enableChoices（无关键词检测）  
 - 在 `buildMagicTeaPartyMainPrompt` / `buildMagicTeaPartyChoicesPrompt` / `buildMagicTeaPartyUpdatePrompt` 中统一注入。
-- 在 `useMagicTeaPartyChat` 中对 `auto` 做兜底补生成，并将 notice 与 UI 提示联动。
 
 **方案 C：强协议工具卡机制（长期）**  
 优点：一致性最高；缺点：开发量大。  
@@ -1818,14 +1816,14 @@ export type MagicTeaPartyUpdateDraft = {
 
 ### 20.4 推荐落地路径
 
-1) 先落地 **方案 A**：全卡协议 + 无截断 + 情景全量注入 + auto 兜底。  
+1) 先落地 **方案 A**：全卡协议 + 无截断 + 情景全量注入。  
 2) 同步推进 **方案 B**：将高优先级覆盖抽象为模块，减少 prompt 分散修改。  
 3) 若后续协议数量持续增加，再评估 **方案 C**。
 
 ### 20.5 验证清单
 
 - 组合：小城市 1.7 + [妖精]兰兰 + 全局数据卡 → **叙事风格命中**。  
-- `outputPlan=auto` 仍能稳定拿到 `updates`（或自动补生成）。  
+- `outputPlan=auto` 允许本轮不输出 `updates/summary`（按设计决议）。  
 - 缺失依赖卡时触发 `notice(level=error)` 且阻断生成。  
 - 选项关闭时，协议强制选项仍可单轮输出并提示。  
 
