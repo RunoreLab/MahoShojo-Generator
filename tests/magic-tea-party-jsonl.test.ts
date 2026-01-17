@@ -39,6 +39,13 @@ describe('magic tea party jsonl parser', () => {
     expect(parsed.notices).toHaveLength(0);
   });
 
+  it('疑似侧信道行解析失败时会忽略并提示', () => {
+    const input = ['{"type":"summary","text":"夜雨"}', '{"type":"summary","text":"夜雨"', '{"type":"narration","text":"灯光摇曳"}'].join('\n');
+    const parsed = parseMagicTeaPartyJsonl(input);
+    expect(parsed.segments.map((seg) => seg.type)).toEqual(['narration']);
+    expect(parsed.notices.some((notice) => notice.code === 'jsonl_side_channel_parse_error')).toBe(true);
+  });
+
   it('支持按行增量解析 JSONL', () => {
     const state = createMagicTeaPartyJsonlStreamState();
     ingestMagicTeaPartyJsonlChunk(state, '{"type":"narration","text":"开场"}\n{"type":"dialogue","speakerId":"r1","text":"你');

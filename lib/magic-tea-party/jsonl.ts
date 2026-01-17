@@ -42,6 +42,35 @@ const isMarkdownFenceLine = (line: string): boolean => {
   return trimmed.startsWith('```') || trimmed.startsWith('~~~');
 };
 
+const normalizeJsonlLine = (raw: string): string => {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  return trimmed.startsWith('data:') ? trimmed.slice('data:'.length).trim() : trimmed;
+};
+
+const detectSideChannelHint = (raw: string): 'notice' | 'summary' | 'updates' | null => {
+  const normalized = normalizeJsonlLine(raw);
+  if (!normalized || !normalized.startsWith('{')) return null;
+  const match = normalized.match(/"type"\s*:\s*"(notice|summary|updates|update)"/i);
+  if (!match) return null;
+  const type = match[1].toLowerCase();
+  if (type === 'notice') return 'notice';
+  if (type === 'summary') return 'summary';
+  if (type === 'update' || type === 'updates') return 'updates';
+  return null;
+};
+
+const buildSideChannelParseNotice = (hint: 'notice' | 'summary' | 'updates'): MagicTeaPartyNotice => {
+  const label = hint === 'summary' ? '摘要' : hint === 'updates' ? '更新草案' : 'notice';
+  return {
+    type: 'notice',
+    level: 'warning',
+    code: 'jsonl_side_channel_parse_error',
+    message: `检测到疑似${label}侧信道行但解析失败，已忽略该行。`,
+    meta: { stage: hint },
+  };
+};
+
 const parseSummaryPayload = (payload: any): MagicTeaPartyOutputSummary | null => {
   const text = readTextField(payload);
   if (!text) return null;
@@ -100,9 +129,14 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
 
   let parsed: any = null;
   try {
-    const normalized = line.startsWith('data:') ? line.slice('data:'.length).trim() : line;
+    const normalized = normalizeJsonlLine(line);
     parsed = JSON.parse(normalized);
   } catch {
+    const hint = detectSideChannelHint(raw);
+    if (hint) {
+      state.notices.push(buildSideChannelParseNotice(hint));
+      return false;
+    }
     state.segments.push({ type: 'narration', text: raw });
     return true;
   }
@@ -259,11 +293,16 @@ export const extractMagicTeaPartySideChannelsFromJsonl = (
       kept.push(raw);
       continue;
     }
-    const normalized = trimmed.startsWith('data:') ? trimmed.slice('data:'.length).trim() : trimmed;
+    const normalized = normalizeJsonlLine(trimmed);
     let parsed: any = null;
     try {
       parsed = JSON.parse(normalized);
     } catch {
+      const hint = detectSideChannelHint(raw);
+      if (hint) {
+        notices.push(buildSideChannelParseNotice(hint));
+        continue;
+      }
       kept.push(raw);
       continue;
     }

@@ -167,6 +167,24 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     [buildRequestSettings, preferences]
   );
 
+  const resolveOutputPlanForRequest = useCallback(
+    (session: MagicTeaPartySession, outputFormat: MagicTeaPartyOutputFormat) => {
+      const settings = buildRequestSettings(session);
+      const basePlan = settings.outputPlan ?? preferences.outputPlan;
+      if (outputFormat !== 'jsonl') {
+        return { choices: 'off', summary: 'off', updates: 'off' } as const;
+      }
+      const summaryPlan = settings.enableSummary ? basePlan.summary : 'off';
+      const updatesPlan = settings.writeArenaHistory || settings.writeCurrentState ? basePlan.updates : 'off';
+      return {
+        choices: basePlan.choices,
+        summary: summaryPlan,
+        updates: updatesPlan,
+      } as const;
+    },
+    [buildRequestSettings, preferences.outputPlan]
+  );
+
   const buildHistoryForRequest = useCallback(
     (params: { session: MagicTeaPartySession; messages: MagicTeaPartyMessage[]; outputFormat?: MagicTeaPartyOutputFormat }) => {
       const outputFormat =
@@ -277,6 +295,235 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       onNotices(sanitized);
     },
     [onNotices]
+  );
+
+  const normalizeFallbackHistory = useCallback((history: MagicTeaPartyHistoryMessage[]) => {
+    const MAX_MESSAGES = 200;
+    const MAX_MESSAGE_CHARS = 8_000;
+    return history.slice(-MAX_MESSAGES).map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: typeof message.content === 'string' ? message.content.slice(0, MAX_MESSAGE_CHARS) : '',
+    }));
+  }, []);
+
+  const requestOutputPlanFallbacks = useCallback(
+    async (params: {
+      session: MagicTeaPartySession;
+      outputFormat: MagicTeaPartyOutputFormat;
+      historyForRequest: MagicTeaPartyHistoryMessage[];
+      assistantMessageId: string;
+      assistantContent: string;
+      summary: MagicTeaPartyOutputSummary | null;
+      updates: MagicTeaPartyUpdateDraft[] | null;
+    }) => {
+      if (!onSideChannels) return;
+      if (params.outputFormat !== 'jsonl') return;
+      const effectivePlan = resolveOutputPlanForRequest(params.session, params.outputFormat);
+      const hasSummary = Boolean(params.summary?.text?.trim());
+      const hasUpdates = Array.isArray(params.updates) && params.updates.length > 0;
+      const needsSummary = effectivePlan.summary === 'on' && !hasSummary;
+      const needsUpdates = effectivePlan.updates === 'on' && !hasUpdates;
+      if (!needsSummary && !needsUpdates) return;
+
+      if (!userProviderConfig || userProviderConfig.providerId === 'system') return;
+      if (!userProviderConfig.apiKey?.trim() || !userProviderConfig.modelId?.trim()) return;
+
+      const assistantText = params.assistantContent?.trim();
+      const assistantHistory: MagicTeaPartyHistoryMessage | null = assistantText
+        ? { id: params.assistantMessageId, role: 'assistant', content: assistantText }
+        : null;
+      const baseHistory: MagicTeaPartyHistoryMessage[] = assistantHistory
+        ? [...params.historyForRequest, assistantHistory]
+        : params.historyForRequest;
+      const normalizedHistory = normalizeFallbackHistory(baseHistory);
+      if (normalizedHistory.length === 0) return;
+
+      const mergedSettings = buildRequestSettings(params.session);
+      const language = params.session.settings.language ?? preferences.language;
+      const userDisplayName = params.session.settings.userDisplayName ?? preferences.userDisplayName;
+
+      if (needsSummary && !isSummarizing) {
+        try {
+          const response = await fetch('/api/magic-tea-party/summarize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: params.session.id,
+              mode: 'summary',
+              language,
+              userDisplayName,
+              messages: normalizedHistory,
+              customProvider: {
+                providerId: userProviderConfig.providerId,
+                modelId: userProviderConfig.modelId,
+                apiKey: userProviderConfig.apiKey,
+              },
+            }),
+          });
+
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            const errorMessage =
+              typeof payload?.error === 'string'
+                ? payload.error
+                : typeof payload?.message === 'string'
+                  ? payload.message
+                  : `请求失败（${response.status}）`;
+            emitNotices([
+              {
+                type: 'notice',
+                level: 'error',
+                code: 'output_plan_fallback_summary_failed',
+                message: `摘要补生成失败：${errorMessage}`,
+              },
+            ]);
+          } else {
+            const summaryRaw = typeof payload?.summary === 'string' ? payload.summary.trim() : '';
+            if (!summaryRaw) {
+              emitNotices([
+                {
+                  type: 'notice',
+                  level: 'error',
+                  code: 'output_plan_fallback_summary_failed',
+                  message: '摘要补生成失败：模型返回空摘要。',
+                },
+              ]);
+            } else {
+              await onSideChannels({
+                summary: { text: summaryRaw },
+                updates: null,
+                updatesMeta: null,
+                outputFormat: params.outputFormat,
+                sourceMessageId: params.assistantMessageId,
+              });
+              emitNotices([
+                {
+                  type: 'notice',
+                  level: 'warning',
+                  code: 'output_plan_fallback_summary',
+                  message: '模型未按合并输出计划返回摘要，已使用摘要接口补生成。',
+                },
+              ]);
+            }
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '未知错误';
+          emitNotices([
+            {
+              type: 'notice',
+              level: 'error',
+              code: 'output_plan_fallback_summary_failed',
+              message: `摘要补生成失败：${message}`,
+            },
+          ]);
+        }
+      }
+
+      if (needsUpdates) {
+        try {
+          const fromMessageId = normalizedHistory[0]?.id;
+          const toMessageId = normalizedHistory[normalizedHistory.length - 1]?.id;
+          const messageRange =
+            fromMessageId && toMessageId
+              ? { fromMessageId, toMessageId, count: normalizedHistory.length }
+              : undefined;
+          const response = await fetch('/api/magic-tea-party/generate-updates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: params.session.id,
+              sessionTitle: params.session.title,
+              messages: normalizedHistory,
+              summary: params.session.summary,
+              roles: params.session.roles ?? [],
+              scenario: params.session.scenario ?? null,
+              auxScenarios: params.session.auxScenarios ?? [],
+              lastChoices: params.session.lastChoices ?? undefined,
+              ...(messageRange ? { messageRange } : {}),
+              settings: {
+                writeArenaHistory: mergedSettings.writeArenaHistory,
+                writeCurrentState: mergedSettings.writeCurrentState,
+                language,
+                userDisplayName,
+              },
+              customProvider: {
+                providerId: userProviderConfig.providerId,
+                modelId: userProviderConfig.modelId,
+                apiKey: userProviderConfig.apiKey,
+              },
+            }),
+          });
+
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            const errorMessage =
+              typeof payload?.error === 'string'
+                ? payload.error
+                : typeof payload?.message === 'string'
+                  ? payload.message
+                  : `请求失败（${response.status}）`;
+            emitNotices([
+              {
+                type: 'notice',
+                level: 'error',
+                code: 'output_plan_fallback_updates_failed',
+                message: `更新草案补生成失败：${errorMessage}`,
+              },
+            ]);
+          } else {
+            const drafts = Array.isArray(payload?.drafts) ? (payload.drafts as MagicTeaPartyUpdateDraft[]) : [];
+            if (!drafts || drafts.length === 0) {
+              emitNotices([
+                {
+                  type: 'notice',
+                  level: 'error',
+                  code: 'output_plan_fallback_updates_failed',
+                  message: '更新草案补生成失败：模型未返回草案。',
+                },
+              ]);
+            } else {
+              await onSideChannels({
+                summary: null,
+                updates: drafts,
+                updatesMeta: payload?.meta ?? null,
+                outputFormat: params.outputFormat,
+                sourceMessageId: params.assistantMessageId,
+              });
+              emitNotices([
+                {
+                  type: 'notice',
+                  level: 'warning',
+                  code: 'output_plan_fallback_updates',
+                  message: '模型未按合并输出计划返回更新草案，已使用更新接口补生成。',
+                },
+              ]);
+            }
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '未知错误';
+          emitNotices([
+            {
+              type: 'notice',
+              level: 'error',
+              code: 'output_plan_fallback_updates_failed',
+              message: `更新草案补生成失败：${message}`,
+            },
+          ]);
+        }
+      }
+    },
+    [
+      buildRequestSettings,
+      emitNotices,
+      isSummarizing,
+      normalizeFallbackHistory,
+      onSideChannels,
+      preferences.language,
+      preferences.userDisplayName,
+      resolveOutputPlanForRequest,
+      userProviderConfig,
+    ]
   );
 
   const runGenerateStream = useCallback(
@@ -500,6 +747,15 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
               sourceMessageId: params.assistantMessageId,
             });
           }
+          await requestOutputPlanFallbacks({
+            session: params.session,
+            outputFormat: params.outputFormat,
+            historyForRequest: params.historyForRequest,
+            assistantMessageId: params.assistantMessageId,
+            assistantContent: finalContent,
+            summary,
+            updates,
+          });
         }
       } catch (error) {
         safety.clearTimer();
@@ -573,6 +829,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       emitNotices,
       onSideChannels,
       persistSession,
+      requestOutputPlanFallbacks,
       resolvePromptSettings,
       router,
       setMessages,
