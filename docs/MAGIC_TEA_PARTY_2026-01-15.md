@@ -21,7 +21,7 @@
 ## 0.1 实现状态更新（2026-01-17）
 
 - 已落地：魔法茶会完整页面、会话/消息 IndexedDB、本地导入与数据库多选、流式输出（JSONL/Markdown）、notice 解析与剥离、协议适配提示词、分支会话/合并、自动摘要触发与 Token 预算提示、会话导入/导出（JSON + SillyTavern JSONL）、立绘/插画生成与缓存清理。
-- 仍在规划：`outputPlan`（摘要/更新合并输出）、`updateApplyMode` 自动写入、预设角色面板/卡组导入、会话保留与自动清理、ZIP 归档导出。
+- 已确认下一阶段落地：`outputPlan`（摘要/更新合并输出）、`updateApplyMode` 自动写入策略、预设角色面板/卡组导入、角色面板（角色卡管理/更新/历战）、会话清理与归档（范围见 13.5/13.14/13.23）。
 
 ---
 
@@ -140,13 +140,13 @@
 
 ---
 
-> **补充（规划｜与自由组合输出对齐）**：`outputPlan.choices=off/auto/on` 分别对应「用户按需触发 / 关键节点自动 / 每轮自动」，便于在同一套设置中统一控制叙事与选项产出。
+> **补充（定稿｜与自由组合输出对齐）**：`outputPlan.choices=off/auto/on` 分别对应「用户按需触发 / 关键节点自动 / 每轮自动」，便于在同一套设置中统一控制叙事与选项产出。
 
 ## 4. 页面结构与模块拆分（当前实现对齐）
 
 新增页面：`pages/magic-tea-party.tsx`
 
-组件建议（已落地 / 规划）：
+组件建议（已落地 / 待落地）：
 
 - `components/magic-tea-party/Hero.tsx`：顶部标题与全局提示/错误
 - `components/magic-tea-party/SessionSidebar.tsx`：会话列表、预设情景选择、模型与偏好设置、导入/导出
@@ -158,8 +158,10 @@
 - `components/magic-tea-party/ChatComposer.tsx`：输入区 + 继续生成/选项/发送按钮
 - `components/magic-tea-party/TachiePanel.tsx`：立绘/插画生成与管理
 - `components/magic-tea-party/CardModals.tsx`：角色/情景选择弹窗
-- （规划）`components/magic-tea-party/PresetRolePanel.tsx`：预设角色选择（复用竞技场），默认折叠、状态持久化
-- （规划）`components/magic-tea-party/RolePanel.tsx`：角色面板（管理 + 更新 + 历战全量查看/编辑）
+- （待落地）`components/magic-tea-party/PresetCharacterPanel.tsx`：预设角色选择（复用竞技场），默认折叠、状态持久化
+- （待落地）`components/magic-tea-party/CharacterPanel.tsx`：角色面板（管理 + 更新 + 历战全量查看/编辑）
+
+> 命名说明：新增面板组件使用 `Character*`，用于强调“角色数据卡”语义，避免与玩家扮演 role 混淆；数据类型仍沿用 `MagicTeaPartyRole`。
 
 逻辑拆分：
 
@@ -387,8 +389,8 @@ IndexedDB 建议分表：
 
 > 说明：自动摘要与 Token 预算提示已接入（可在全局设置开关），同时保留手动摘要；以下阈值为当前实现的默认值与目标区间。
 
-- 上下文窗口采用 **Token 预算 + 消息条数** 双阈值（规划中）
-- 自动摘要：当历史过长时生成“会话摘要”写入 `session.summary`，并保留最近消息窗口（规划中）
+- 上下文窗口采用 **Token 预算 + 消息条数** 双阈值（已接入）
+- 自动摘要：当历史过长时生成“会话摘要”写入 `session.summary`，并保留最近消息窗口（已接入）
 - 选项生成默认为“手动触发”，减少额外调用
 - 立绘生成仅在用户明确点击后触发
 
@@ -432,7 +434,7 @@ IndexedDB 建议分表：
 
 ### M1：基础会话
 - 页面 + 会话列表（IndexedDB）
-- 角色/情景选择 + 人设切换（数据库多选 / 卡组导入 / 本地导入）
+- 角色/情景选择 + 人设切换（数据库多选 / 本地导入；卡组导入待落地）
 - 输入/输出聊天流
 
 ### M2：AI 接入（自备 Key）
@@ -444,10 +446,16 @@ IndexedDB 建议分表：
 - 视觉小说选项
 - 立绘生成入口（基于角色卡 + 当前剧情）
 
-### M4：体验增强
+### M4：体验增强（已落地）
 - 自动摘要
 - 会话导入/导出
-- 扩展卡类型与酒馆卡兼容
+- 扩展卡类型与酒馆卡兼容（部分）
+
+### M5：协议与自动化（已确认）
+- `outputPlan` 合并输出（summary/updates 侧信道）
+- `updateApplyMode` 自动写入 + 回滚/确认策略
+- `CharacterPanel` / `PresetCharacterPanel` 与卡组导入
+- 会话清理与归档增强（含可选 ZIP 资源包）
 
 ---
 
@@ -462,6 +470,9 @@ IndexedDB 建议分表：
 7. **安全策略**：本地敏感词检测 + `enforceTextSafety`（服务器 AI 安全检查）+ 输出遮罩 + arrested 机制。
 8. **立绘策略**：缓存键（角色 + 片段 + 风格 + 关键参数），TTL + LRU 失效，允许手动清理（见 13.15）。
 9. **最大角色/情景上限**：当前不设硬上限，仅提供 Token 预算提示与软提醒。
+10. **合并输出**：`outputPlan` 已确认落地（JSONL 模式合并输出 `summary/updates`）。
+11. **自动写入**：`updateApplyMode` 已确认落地（auto/confirm/draft + 回滚策略）。
+12. **角色面板与清理归档**：`CharacterPanel`/`PresetCharacterPanel`、会话清理与归档范围已定稿（见 13.23）。
 
 ---
 
@@ -635,11 +646,11 @@ export type MagicTeaPartySession = {
 };
 ```
 
-> `MagicTeaPartyPreferences` 当前已包含 `enableSummary`、读写开关、立绘缓存阈值等字段；`outputPlan`、`updateApplyMode`、`presetRolePanelCollapsed`、`sessionRetentionDays/maxSessions` 仍为规划项。
+> `MagicTeaPartyPreferences` 当前已包含 `enableSummary`、读写开关、立绘缓存阈值等字段；已确认新增 `outputPlan`、`updateApplyMode`、`presetCharacterPanelCollapsed`、`sessionRetentionDays/maxSessions`，用于默认值与 UI 持久化。
 
 ### 13.3 输出协议（推荐 JSONL，利于流式解析）
 
-**当前实现**：仅解析 `narration/dialogue/choices/notice` 四类 JSONL 行；`summary/updates` 仍需走 `/summarize` 与 `/generate-updates`，按后续规划落地可能需考虑在主流中合并输出。
+**当前实现**：仅解析 `narration/dialogue/choices/notice` 四类 JSONL 行；`summary/updates` 仍需走 `/summarize` 与 `/generate-updates`。**已确认升级**：通过 `outputPlan` 合并输出 `summary/updates` 行（JSONL 模式）。
 
 **方案 A：JSONL（推荐）**
 - 每行输出一个 JSON 对象，前端可逐行解析并追加渲染。
@@ -662,9 +673,9 @@ export type MagicTeaPartySession = {
 
 **推荐理由**：JSONL 能与 `readTextStreamFromResponse` 顺畅结合，前端易于做增量渲染与回滚；Markdown 模式作为“自由输出”开关提供给用户选择。
 
-### 13.3.1 自由组合输出（叙事合并输出｜规划）
+### 13.3.1 自由组合输出（叙事合并输出｜已确认落地）
 
-> 目标：在一次叙事生成中复用上下文，**同时**产出选项/摘要/更新草案，减少二次输入造成的 Token 浪费，并更好适配特殊读写协议。当前尚未落地，保留为后续扩展方案。
+> 目标：在一次叙事生成中复用上下文，**同时**产出选项/摘要/更新草案，减少二次输入造成的 Token 浪费，并更好适配特殊读写协议。
 
 - **仅 JSONL 模式生效**：`outputFormat=markdown` 时，`summary/updates` 输出一律降级为单独生成（避免不可解析混杂内容）。
 - **三态设置（关闭/灵活/开启）**：对 `choices/summary/updates` 分别配置 `off/auto/on`。
@@ -706,7 +717,7 @@ export type MagicTeaPartySession = {
 
 - **版本化**：建议 `magic-tea-party:v1`，升级时提供 migration（仅新增字段时容错）。
 - **索引**：`sessions.updatedAt`、`messages.sessionId + createdAt`；保障侧边栏排序与时间轴性能。
-- **实现现状**：已落地消息清理（自动摘要后删除旧消息）与立绘缓存清理；会话保留/过期自动清理仍在规划。
+- **实现现状**：已落地消息清理（自动摘要后删除旧消息）与立绘缓存清理；会话保留/过期自动清理已确认纳入下一阶段。
 - **清理策略**：
   - 默认保留最近 N 个会话；超过时提示用户清理。
   - 单会话触发摘要阈值（见 8.1）时，先生成摘要，再归档旧消息。
@@ -733,7 +744,7 @@ export type MagicTeaPartySession = {
 ### 13.8 API 草案（Edge）
 
 - `POST /api/magic-tea-party/generate-stream`：生成主剧情流式输出（JSONL 或 Markdown）。
-  - 当前实现不支持 `outputPlan` 合并输出；`summary/updates` 需走独立接口（见 13.3）。
+  - `outputPlan` 已确认接入：允许在同一流中输出 `summary/updates` 行（JSONL 模式）。
 - `POST /api/magic-tea-party/generate-choices`：仅生成选项（可复用主提示词的“缩略版”）。
 - `POST /api/magic-tea-party/summarize`：会话摘要/标题（可选，非 MVP）。
 
@@ -744,7 +755,8 @@ export type MagicTeaPartySession = {
 - `roles` ≤ 20；`auxScenarios` ≤ 12；`messages` ≤ 200（仅保留最近窗口后再传）。
 - 单条 `message.content` ≤ 8,000 字；单张卡片拼接文本 ≤ 12,000 字；合并文本 ≤ 200,000 字（超出直接 400）。
 - `choiceCount` 允许 1~16（默认 3 或 4），UI 可提示“选项数量已变更”。`temperature` 0~1.2；`outputFormat` 仅允许 `jsonl`/`markdown`。
-- `outputPlan.*` 仅允许 `off/auto/on`；`outputFormat=markdown` 时强制降级为 `off`。`updateApplyMode` 仅允许 `auto/confirm/draft`。
+- `outputPlan.*` 仅允许 `off/auto/on`；`outputFormat=markdown` 时强制降级为 `off`。
+- `updateApplyMode` 仅允许 `auto/confirm/draft`（默认 `auto`，并保留确认/草案模式切换）。
 - `providerId`/`modelId` 必须命中 `AI_PROVIDER_CATALOG`，并强制 `providerId !== system`。
 
 
@@ -888,7 +900,7 @@ export type MagicTeaPartyPreset = {
 
 **导出层级**
 - 单会话：`magic-tea-party.session.v1.json`
-- 全量归档：`magic-tea-party.archive.v1.zip`
+- 全量归档：`magic-tea-party.archive.v1.json`（默认）；高级模式可导出含图片 ZIP（见 13.23）
 
 **单会话 JSON（示意）**
 ```json
@@ -905,15 +917,14 @@ export type MagicTeaPartyPreset = {
 }
 ```
 
-**归档 ZIP（结构约定）**
-- `manifest.json`（含 schema/version/exportedAt）
-- `sessions/<sessionId>.json`
-- `assets/tachie/<assetId>.webp`
-- `assets/tachie/index.json`（tachie 元数据表）
+**归档 JSON（结构约定）**
+- 单个 JSON 文件（`schema=magic-tea-party.archive.v1`）
+- `sessions`: `MagicTeaPartySessionExport[]`
 
 **资产说明**
 - 当前仅导出 `tachieAssets` 元数据与 URL/引用，不包含二进制图片；`blobRef` 依赖本地 IndexedDB。
 - 当前实现归档为 JSON（非 ZIP），暂未打包图片与二进制资源，后续落地实现需修改。
+- 可选 ZIP 模式将打包 `tachieBlobs`，但需在 UI 明示体积与隐私风险。
 
 **SillyTavern 互转（兼容策略）**
 - **导入**：支持 `.jsonl` 会话日志  
@@ -944,7 +955,7 @@ export type MagicTeaPartyPreset = {
   - `magic-tea-party.customProvider.selected`：AiProviderSelector 专用（当前 providerId）。
   - `magic-tea-party.customProvider.apiKey.<providerId>`：AiProviderSelector 专用（按 providerId 存储 apiKey，便于切换供应商不丢失配置）。
   - `magic-tea-party.customProvider.model.<providerId>`：AiProviderSelector 专用（按 providerId 存储 modelId）。
-  - `magic-tea-party:preferences`：outputFormat/outputPlan/enableChoices/choiceCount/language/userDisplayName/lastPresetId/lastWorldbookPresetId/updateApplyMode/读写开关/过期清理与缓存阈值/预设角色折叠状态。
+  - `magic-tea-party:preferences`：outputFormat/outputPlan/enableChoices/choiceCount/language/userDisplayName/lastPresetId/lastWorldbookPresetId/enableSummary/updateApplyMode/读写开关与条数/sessionRetentionDays/maxSessions/立绘缓存阈值/预设角色折叠状态。
   - `magic-tea-party:recent-session`：最近打开的 sessionId（便于恢复）。
 - 草稿输入：优先存入 IndexedDB（随会话扩展字段），或使用 `magic-tea-party:drafts:{sessionId}` 兜底（刷新可恢复）。
 
@@ -980,7 +991,7 @@ export type MagicTeaPartyPreset = {
 
 - **JSONL 行协议**：
   - 每行必须是完整 JSON 对象，禁止代码块/围栏。
-  - `type` 当前实现仅解析 `narration` / `dialogue` / `choices` / `notice`；`summary` / `updates` 为规划项；未知字段忽略。
+  - `type` 仅允许 `narration` / `dialogue` / `choices` / `summary` / `updates` / `notice`；未知字段忽略。
   - `dialogue` 必须包含 `speakerId`（若缺失则降级为 `narration`）。
   - `choices.items` 不能为空；若为空则丢弃该行。
   - （规划）`summary`/`updates` 不进入聊天时间轴，仅进入会话摘要或角色更新流程。
@@ -1051,6 +1062,31 @@ export type MagicTeaPartyPreset = {
 
 ---
 
+## 13.23 会话清理与归档范围（定稿）
+
+### 13.23.1 会话清理
+
+- **入口**：全局设置新增“会话清理”模块，提供“预览将删除的会话”与“立即清理”按钮。
+- **默认阈值**：`sessionRetentionDays=90`、`maxSessions=30`（均可配置；任一为 0 代表关闭该规则）。
+- **触发策略**：默认仅提示超限并要求手动确认；可选开启“自动清理”（需二次确认）。
+- **保护规则**：不删除当前会话；如后续支持置顶/锁定会话则默认排除；若存在未发送草稿则提示先处理。
+- **清理范围**：删除会话时同时删除其消息与立绘缓存（`sessions/messages/tachieAssets/tachieBlobs` 全链路删除）。
+
+### 13.23.2 归档导出
+
+- **默认格式**：`magic-tea-party.archive.v1.json`（单文件），包含 `session/roles/scenario/auxScenarios/messages/summary/summaryMeta/protocolShadow/lastChoices/settings/tachieAssets` 元数据。
+- **不含图片**：默认不打包二进制图片（`tachieBlobs` 仍保留在本地 IndexedDB）。
+- **导入规则**：导入时重建 `sessionId/messageId`，并映射 `sourceMessageId/revisionOf/anchorMessageId` 等引用字段。
+- **可选增强**：提供“含图片 ZIP”高级导出（将 `tachieBlobs` 打包），并在 UI 明示体积与隐私风险。
+
+**归档 ZIP（结构示例）**
+- `manifest.json`（含 schema/version/exportedAt）
+- `sessions/<sessionId>.json`
+- `assets/tachie/<assetId>.webp`
+- `assets/tachie/index.json`（tachie 元数据表）
+
+---
+
 ## 14. 文案草案（页面与交互）
 
 ### 14.1 入口与 Hero
@@ -1091,9 +1127,9 @@ export type MagicTeaPartyPreset = {
 - 标题：会话列表
 - 操作：置顶（规划）/ 重命名（规划） / 导出 / 删除
 - 排序说明：按最近更新排序
-- 入口：角色面板（规划） / 全局设置（清理与输出策略）
+- 入口：角色面板（待落地） / 全局设置（清理与输出策略）
 
-### 14.6 角色面板（规划）
+### 14.6 角色面板（待落地）
 
 - 开关：自动写入（默认）/ 需要确认 / 仅生成草案
 - 操作：生成更新草案 / 撤销最近更新 / 查看全部历战
@@ -1104,7 +1140,7 @@ export type MagicTeaPartyPreset = {
 
 ### 15.1 复用组件清单与职责
 
-> 现状：已接入 `BattleDataModal` 多选与本地导入流程；卡组导入与预设角色面板仍待接入。
+> 现状：已接入 `BattleDataModal` 多选与本地导入流程；卡组导入与预设角色面板已确认在下一阶段接入。
 
 - **`BattleDataModal`**：统一数据库选择入口（公开/私有/收藏/搜索/排序），支持 `selectionMode="multi"`、`selectedType="character|scenario"`；**当前不启用硬上限**（`maxSelected` 预留给未来）。
 - **`DecksModal`**：仅角色卡组导入（`character`），从卡组详情导入可访问的卡片并自动去重。
@@ -1243,7 +1279,7 @@ export type MagicTeaPartyPreset = {
 ## 18. 与竞技场读写对齐（讨论稿）
 
 > 目标：让魔法茶会在“读取/写入当前状态与历战记录”的体验上与竞技场一致，同时适配长对话的节奏与安全边界，避免不必要的误写入。
-> 实现现状：当前仅支持“生成更新草案 → 手动确认写入”，`updateApplyMode` 自动写入与相关降级策略仍为规划；以下为目标方案与对齐方向。
+> 实现现状：当前仅支持“生成更新草案 → 手动确认写入”；已确认接入 `updateApplyMode` 自动写入与降级策略，以下为目标方案与对齐方向。
 
 ### 18.1 角色面板组件（整合角色管理 + 更新）
 
