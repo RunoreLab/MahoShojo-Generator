@@ -4,6 +4,14 @@ import { getPublicDataCards, getDataCardById } from '@/lib/d1';
 
 export const runtime = 'edge';
 
+const parseCommaList = (value: string | null): string[] => {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -20,6 +28,7 @@ export default async function handler(req: Request): Promise<Response> {
     const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'favorites' | 'created_at' | null; // 排序方式
     const limit = parseInt(url.searchParams.get('limit') || '12');
     const offset = parseInt(url.searchParams.get('offset') || '0');
+    const tagIds = parseCommaList(url.searchParams.get('tagIds'));
 
     // 【新增】解析高级筛选参数
     const author = url.searchParams.get('author');
@@ -62,6 +71,7 @@ export default async function handler(req: Request): Promise<Response> {
         type as 'character' | 'scenario' | 'history' | undefined, 
         search || undefined, 
         sortBy || undefined,
+        tagIds,
         author || undefined,
         minLikes ? parseInt(minLikes) : undefined,
         maxLikes ? parseInt(maxLikes) : undefined,

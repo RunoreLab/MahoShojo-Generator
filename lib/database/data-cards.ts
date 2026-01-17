@@ -109,9 +109,19 @@ export async function getUserDataCards(
 ): Promise<any[]> {
   try {
     let sql = `
-      SELECT dc.*, du.data AS pending_data, du.name AS pending_name, du.description AS pending_description, du.updated_at AS pending_updated_at
+      SELECT dc.*, 
+             du.data AS pending_data, 
+             du.name AS pending_name, 
+             du.description AS pending_description, 
+             du.updated_at AS pending_updated_at,
+             tag_map.tag_ids AS tag_ids
       FROM data_cards dc
       LEFT JOIN data_card_updates du ON du.data_card_id = dc.id
+      LEFT JOIN (
+        SELECT data_card_id, group_concat(DISTINCT tag_id) AS tag_ids
+        FROM data_card_tags
+        GROUP BY data_card_id
+      ) tag_map ON tag_map.data_card_id = dc.id
       WHERE dc.user_id = ? AND dc.deleted_at IS NULL`;
     const params: any[] = [userId];
     
@@ -138,7 +148,15 @@ export async function getUserDataCards(
     const result = await queryFromD1(sql, params) as any;
     
     if (result.success && result.result && result.result[0]?.results) {
-      return result.result[0].results;
+      const rows = result.result[0].results as any[];
+      return rows.map((row) => {
+        const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
+        const tagIds = raw
+          .split(',')
+          .map((id: string) => id.trim())
+          .filter(Boolean);
+        return { ...row, tagIds };
+      });
     }
     return [];
   } catch (error) {
@@ -420,7 +438,16 @@ export async function verifyCardOwnership(cardId: string, userId: number): Promi
 // 通过ID获取单个数据卡（公开或私有）
 export async function getDataCardById(cardId: string, isPublic: boolean = false): Promise<any | null> {
   try {
-    let sql = 'SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.id = ? AND dc.deleted_at IS NULL';
+    let sql = `
+      SELECT dc.*, u.username, tag_map.tag_ids AS tag_ids
+      FROM data_cards dc
+      JOIN users u ON dc.user_id = u.id
+      LEFT JOIN (
+        SELECT data_card_id, group_concat(DISTINCT tag_id) AS tag_ids
+        FROM data_card_tags
+        GROUP BY data_card_id
+      ) tag_map ON tag_map.data_card_id = dc.id
+      WHERE dc.id = ? AND dc.deleted_at IS NULL`;
     const params: any[] = [cardId];
 
     // [v0.4.2 修改] 如果是查询公开卡，则必须是通过审查的
@@ -431,7 +458,13 @@ export async function getDataCardById(cardId: string, isPublic: boolean = false)
     const result = await queryFromD1(sql, params) as any;
     
     if (result.success && result.result && result.result[0]?.results?.length > 0) {
-      return result.result[0].results[0];
+      const row = result.result[0].results[0] as any;
+      const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
+      const tagIds = raw
+        .split(',')
+        .map((id: string) => id.trim())
+        .filter(Boolean);
+      return { ...row, tagIds };
     }
     return null;
   } catch (error) {
@@ -473,6 +506,7 @@ export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
 /**
  * 获取公开的数据卡列表，增加了完整的筛选功能。
  * @param author - 作者用户名 (精确匹配)
+ * @param tagIds - 标签 ID 过滤（任一匹配）
  * @param minLikes - 最小点赞数
  * @param maxLikes - 最大点赞数
  * @param minUsage - 最少使用数
@@ -484,6 +518,7 @@ export async function getPublicDataCards(
   type?: 'character' | 'scenario' | 'history',
   search?: string,
   sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
+  tagIds?: string[],
   author?: string,
   minLikes?: number,
   maxLikes?: number,
@@ -495,7 +530,16 @@ export async function getPublicDataCards(
 ): Promise<any[]> {
   try {
     // 基础查询语句
-    let sql = "SELECT dc.*, u.username FROM data_cards dc JOIN users u ON dc.user_id = u.id WHERE dc.is_public = 1 AND dc.review_status = 'approved' AND dc.deleted_at IS NULL";
+    let sql = `
+      SELECT dc.*, u.username, tag_map.tag_ids AS tag_ids
+      FROM data_cards dc
+      JOIN users u ON dc.user_id = u.id
+      LEFT JOIN (
+        SELECT data_card_id, group_concat(DISTINCT tag_id) AS tag_ids
+        FROM data_card_tags
+        GROUP BY data_card_id
+      ) tag_map ON tag_map.data_card_id = dc.id
+      WHERE dc.is_public = 1 AND dc.review_status = 'approved' AND dc.deleted_at IS NULL`;
     const params: any[] = [];
     
     // -- 动态构建 WHERE 子句 --
@@ -507,6 +551,18 @@ export async function getPublicDataCards(
     if (search) {
       sql += ' AND (dc.name LIKE ? OR dc.description LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
+    }
+    if (Array.isArray(tagIds) && tagIds.length > 0) {
+      const uniq = Array.from(new Set(tagIds.map((id) => id.trim()).filter(Boolean)));
+      if (uniq.length > 0) {
+        const placeholders = uniq.map(() => '?').join(', ');
+        sql += ` AND EXISTS (
+          SELECT 1 FROM data_card_tags dct
+          WHERE dct.data_card_id = dc.id
+            AND dct.tag_id IN (${placeholders})
+        )`;
+        params.push(...uniq);
+      }
     }
     if (author) {
       sql += ' AND u.username = ?';
@@ -564,7 +620,15 @@ export async function getPublicDataCards(
     const result = await queryFromD1(sql, params) as any;
     
     if (result.success && result.result && result.result[0]?.results) {
-      return result.result[0].results;
+      const rows = result.result[0].results as any[];
+      return rows.map((row) => {
+        const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
+        const tagIds = raw
+          .split(',')
+          .map((id: string) => id.trim())
+          .filter(Boolean);
+        return { ...row, tagIds };
+      });
     }
     return [];
   } catch (error) {

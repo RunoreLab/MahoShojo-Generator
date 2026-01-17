@@ -41,6 +41,35 @@ const parseDataCardPayload = (raw: unknown): any => {
   throw new Error('数据卡内容为空或格式不受支持。');
 };
 
+const normalizeTagIds = (value: unknown): string[] => {
+  const rawList: string[] = [];
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === 'string') rawList.push(item);
+    }
+  } else if (typeof value === 'string') {
+    rawList.push(...value.split(','));
+  }
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of rawList) {
+    const trimmed = item.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+};
+
+const getCardTagIds = (card: any): string[] => {
+  if (!card) return [];
+  if (Array.isArray(card.tagIds)) return normalizeTagIds(card.tagIds);
+  if (Array.isArray(card.tag_ids)) return normalizeTagIds(card.tag_ids);
+  if (typeof card.tag_ids === 'string') return normalizeTagIds(card.tag_ids);
+  return [];
+};
+
 type PvpHandTabCard = {
   snapshotId: string;
   name: string;
@@ -103,6 +132,15 @@ interface Filters {
   roleType: '' | 'magical-girl' | 'canshou' | 'general';
 }
 
+type ApiTag = {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  scope: 'user' | 'system' | 'admin';
+  isActive: boolean;
+};
+
 export default function BattleDataModal({
   isOpen,
   onClose,
@@ -158,6 +196,11 @@ export default function BattleDataModal({
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [activeFilters, setActiveFilters] = useState<Filters>(initialFilters);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [tagSearch, setTagSearch] = useState('');
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [tagOptions, setTagOptions] = useState<ApiTag[]>([]);
+  const [tagOptionsLoading, setTagOptionsLoading] = useState(false);
+  const [tagOptionsError, setTagOptionsError] = useState<string | null>(null);
 
   const effectiveTabs = useMemo<BattleDataTab[]>(() => {
     const candidates = Array.isArray(visibleTabs) && visibleTabs.length > 0
@@ -224,6 +267,34 @@ export default function BattleDataModal({
     }));
   }, [inferRoleType]);
 
+  const loadTagOptions = useCallback(async () => {
+    if (tagOptionsLoading || tagOptions.length > 0) return;
+    setTagOptionsLoading(true);
+    setTagOptionsError(null);
+    try {
+      const response = await fetch('/api/tags?includeInactive=1');
+      if (!response.ok) {
+        setTagOptionsError(`标签库加载失败（${response.status}）`);
+        return;
+      }
+      const json = (await response.json()) as { success: boolean; tags?: ApiTag[]; error?: string };
+      if (!json?.success) {
+        setTagOptionsError(json?.error ?? '标签库加载失败');
+        return;
+      }
+      setTagOptions(Array.isArray(json.tags) ? json.tags : []);
+    } catch (error) {
+      setTagOptionsError(String(error));
+    } finally {
+      setTagOptionsLoading(false);
+    }
+  }, [tagOptions.length, tagOptionsLoading]);
+
+  const ensureTagOptions = useCallback(() => {
+    if (tagOptions.length > 0 || tagOptionsLoading) return;
+    void loadTagOptions();
+  }, [loadTagOptions, tagOptions.length, tagOptionsLoading]);
+
 
   // 获取用户的数据卡
   const loadUserDataCards = useCallback(async (searchTerm?: string, sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at') => {
@@ -275,7 +346,8 @@ export default function BattleDataModal({
     page: number = 1,
     currentSortBy: 'likes' | 'usage' | 'favorites' | 'created_at',
     currentSearchTerm?: string,
-    currentFilters?: Filters
+    currentFilters?: Filters,
+    currentTagIds?: string[]
   ) => {
     publicFetchAbortControllerRef.current?.abort();
     const abortController = new AbortController();
@@ -293,6 +365,9 @@ export default function BattleDataModal({
       });
 
       if (currentSearchTerm) params.append('search', currentSearchTerm);
+      if (Array.isArray(currentTagIds) && currentTagIds.length > 0) {
+        params.append('tagIds', currentTagIds.join(','));
+      }
       // 【新增】将高级筛选条件添加到请求参数中
       if (currentFilters) {
         if (currentFilters.author) params.append('author', currentFilters.author);
@@ -408,6 +483,12 @@ export default function BattleDataModal({
     };
   }, [searchQuery]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    if (isPvpHandTab) return;
+    void loadTagOptions();
+  }, [isOpen, isPvpHandTab, loadTagOptions]);
+
   // 当防抖搜索词变化时执行搜索
   useEffect(() => {
     if (!isOpen) return;
@@ -437,9 +518,9 @@ export default function BattleDataModal({
     if (match) {
       loadCardByIdForDisplay(match[0]);
     } else {
-      loadPublicDataCards(1, sortBy, trimmed || undefined, activeFilters);
+      loadPublicDataCards(1, sortBy, trimmed || undefined, activeFilters, selectedTagIds);
     }
-  }, [debouncedSearchQuery, isOpen, activeTab, loadUserDataCards, loadCardByIdForDisplay, loadPublicDataCards, sortBy, activeFilters]);
+  }, [debouncedSearchQuery, isOpen, activeTab, loadUserDataCards, loadCardByIdForDisplay, loadPublicDataCards, sortBy, activeFilters, selectedTagIds]);
 
   useEffect(() => {
     return () => {
@@ -457,6 +538,9 @@ export default function BattleDataModal({
     setSelectError(null);
     setFilters(initialFilters); // 清空高级筛选
     setActiveFilters(initialFilters);
+    setTagSearch('');
+    setSelectedTagIds([]);
+    setTagOptionsError(null);
 
     const fallbackTab: BattleDataTab = effectiveTabs[0] ?? 'public';
     const canUseInitialTab = Boolean(initialTab && effectiveTabs.includes(initialTab));
@@ -486,7 +570,7 @@ export default function BattleDataModal({
     }
 
     if (effectiveTabs.includes('public')) {
-      loadPublicDataCards(1, sortBy);
+      loadPublicDataCards(1, sortBy, undefined, initialFilters, []);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, selectedType, isAuthenticated]);
@@ -787,7 +871,7 @@ export default function BattleDataModal({
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
     if (activeTab === 'public' && !(activeFilters.roleType && selectedType === 'character')) {
-      loadPublicDataCards(newPage, sortBy, debouncedSearchQuery.trim() || undefined, activeFilters);
+      loadPublicDataCards(newPage, sortBy, debouncedSearchQuery.trim() || undefined, activeFilters, selectedTagIds);
     }
   };
 
@@ -798,23 +882,88 @@ export default function BattleDataModal({
     if (activeTab === 'my') {
       loadUserDataCards(debouncedSearchQuery.trim() || undefined, newSortBy);
     } else if (activeTab === 'public') {
-      loadPublicDataCards(1, newSortBy, debouncedSearchQuery.trim() || undefined, activeFilters);
+      loadPublicDataCards(1, newSortBy, debouncedSearchQuery.trim() || undefined, activeFilters, selectedTagIds);
     } else if (activeTab === 'favorites') {
       setFavoriteCards((prev) => sortFavorites(prev, newSortBy));
     }
   };
 
-  const userTotalPages = Math.max(1, Math.ceil(userDataCards.length / cardsPerPage));
+  const tagById = useMemo(() => {
+    const map = new Map<string, ApiTag>();
+    for (const tag of tagOptions) {
+      if (!tag?.id) continue;
+      map.set(tag.id, tag);
+    }
+    return map;
+  }, [tagOptions]);
+
+  const selectedTagChips = useMemo(() => {
+    return selectedTagIds.map((id) => {
+      const tag = tagById.get(id);
+      return {
+        id,
+        label: tag?.name ?? id,
+        description: tag?.description ?? null,
+      };
+    });
+  }, [selectedTagIds, tagById]);
+
+  const filteredTagOptions = useMemo(() => {
+    const keyword = tagSearch.trim().toLowerCase();
+    if (!keyword) return [];
+    return tagOptions
+      .filter((tag) => {
+        const name = (tag.name || '').toLowerCase();
+        const id = (tag.id || '').toLowerCase();
+        const category = (tag.category || '').toLowerCase();
+        const description = (tag.description || '').toLowerCase();
+        return (
+          name.includes(keyword) ||
+          id.includes(keyword) ||
+          category.includes(keyword) ||
+          description.includes(keyword)
+        );
+      })
+      .filter((tag) => !selectedTagIds.includes(tag.id))
+      .slice(0, 8);
+  }, [tagOptions, tagSearch, selectedTagIds]);
+
+  const toggleTagFilter = useCallback((tagId: string) => {
+    setSelectedTagIds((prev) => {
+      if (prev.includes(tagId)) return prev.filter((id) => id !== tagId);
+      return [...prev, tagId];
+    });
+  }, []);
+
+  const clearTagFilters = useCallback(() => {
+    setTagSearch('');
+    setSelectedTagIds([]);
+  }, []);
+
+  const tagFilterSet = useMemo(() => new Set(selectedTagIds), [selectedTagIds]);
+  const applyTagFilter = useCallback((cards: any[]) => {
+    if (selectedTagIds.length === 0) return cards;
+    return cards.filter((card) => {
+      const tagIds = getCardTagIds(card);
+      return tagIds.some((id) => tagFilterSet.has(id));
+    });
+  }, [selectedTagIds.length, tagFilterSet]);
+
+  const filteredUserCards = useMemo(() => applyTagFilter(userDataCards), [applyTagFilter, userDataCards]);
   const filteredFavoriteCards = useMemo(() => {
     const keyword = debouncedSearchQuery.trim().toLowerCase();
-    if (!keyword) return favoriteCards;
+    const baseList = keyword
+      ? favoriteCards.filter((card) => {
+        const name = (card.name || '').toLowerCase();
+        const desc = (card.description || '').toLowerCase();
+        return name.includes(keyword) || desc.includes(keyword);
+      })
+      : favoriteCards;
+    return applyTagFilter(baseList);
+  }, [favoriteCards, debouncedSearchQuery, applyTagFilter]);
+  const filteredPublicCards = useMemo(() => applyTagFilter(publicDataCards), [applyTagFilter, publicDataCards]);
 
-    return favoriteCards.filter((card) => {
-      const name = (card.name || '').toLowerCase();
-      const desc = (card.description || '').toLowerCase();
-      return name.includes(keyword) || desc.includes(keyword);
-    });
-  }, [favoriteCards, debouncedSearchQuery]);
+  const userTotalPages = Math.max(1, Math.ceil(filteredUserCards.length / cardsPerPage));
 
   const filteredPvpHandCards = useMemo<PvpHandTabCard[]>(() => {
     const cards = Array.isArray(pvpHandTab?.cards) ? pvpHandTab.cards : [];
@@ -832,8 +981,8 @@ export default function BattleDataModal({
 
   const favoritesTotalPages = Math.max(1, Math.ceil(filteredFavoriteCards.length / cardsPerPage));
   const paginatedUserCards = useMemo(
-    () => userDataCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
-    [userDataCards, currentPage, cardsPerPage]
+    () => filteredUserCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
+    [filteredUserCards, currentPage, cardsPerPage]
   );
   const paginatedFavoriteCards = useMemo(
     () => filteredFavoriteCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage),
@@ -842,10 +991,10 @@ export default function BattleDataModal({
 
   const publicPaginatedCards = useMemo(() => {
     if (activeFilters.roleType && selectedType === 'character') {
-      return publicDataCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage);
+      return filteredPublicCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage);
     }
-    return publicDataCards;
-  }, [publicDataCards, activeFilters.roleType, selectedType, currentPage, cardsPerPage]);
+    return filteredPublicCards;
+  }, [filteredPublicCards, activeFilters.roleType, selectedType, currentPage, cardsPerPage]);
 
   const displayCards = useMemo(() => {
     if (activeTab === 'my') return paginatedUserCards;
@@ -929,7 +1078,7 @@ export default function BattleDataModal({
   }, [isOpen, isPvpHandTab, displayCardIds, cardMetaById]);
 
   const publicTotalPages = activeFilters.roleType && selectedType === 'character'
-    ? Math.max(1, Math.ceil(publicDataCards.length / cardsPerPage))
+    ? Math.max(1, Math.ceil(filteredPublicCards.length / cardsPerPage))
     : null;
 
   const currentTabTotalPages = activeTab === 'my'
@@ -999,15 +1148,110 @@ export default function BattleDataModal({
 	                {searchQuery && searchQuery !== debouncedSearchQuery && <div className="absolute right-3 top-1/2 -translate-y-1/2"><div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div></div>}
 	              </div>
 	              {!isPvpHandTab && <SortSelector value={sortBy} onChange={handleSortChange} />}
-	              {!isPvpHandTab && (
-	                <button
-	                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-	                  className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-	                >
-	                  <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
-	                </button>
-	              )}
-	            </div>
+              {!isPvpHandTab && (
+                <button
+                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                  className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                >
+                  <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+            </div>
+            {!isPvpHandTab && (
+              <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-xs font-semibold text-gray-600">标签过滤</div>
+                  <div className="relative flex-1 min-w-[180px]">
+                    <input
+                      type="text"
+                      value={tagSearch}
+                      onChange={(e) => setTagSearch(e.target.value)}
+                      onFocus={ensureTagOptions}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setTagSearch('');
+                          return;
+                        }
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (filteredTagOptions.length > 0) {
+                            toggleTagFilter(filteredTagOptions[0].id);
+                            setTagSearch('');
+                          }
+                        }
+                      }}
+                      placeholder="搜索/添加标签"
+                      className="input-field h-8 text-xs pr-8"
+                    />
+                    {tagOptionsLoading && (
+                      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                        <div className="w-3 h-3 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    )}
+                  </div>
+                  {selectedTagIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearTagFilters}
+                      className="text-xs text-gray-500 hover:text-gray-700 hover:underline"
+                    >
+                      清空
+                    </button>
+                  )}
+                  <div className="text-[11px] text-gray-500">多选为任一命中</div>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedTagChips.length === 0 ? (
+                    <div className="text-[11px] text-gray-500">未选择标签</div>
+                  ) : (
+                    selectedTagChips.map((chip) => (
+                      <span
+                        key={chip.id}
+                        className="inline-flex items-center gap-2 rounded-full bg-pink-50 px-3 py-1 text-xs text-pink-800"
+                        title={chip.description ?? chip.label}
+                      >
+                        {chip.label}
+                        <button
+                          type="button"
+                          className="text-pink-700 hover:text-pink-900"
+                          onClick={() => toggleTagFilter(chip.id)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+                {tagSearch.trim() && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {tagOptionsLoading ? (
+                      <div className="text-[11px] text-gray-500">正在加载标签库...</div>
+                    ) : filteredTagOptions.length === 0 ? (
+                      <div className="text-[11px] text-gray-500">未找到匹配标签</div>
+                    ) : (
+                      filteredTagOptions.map((tag) => (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => {
+                            toggleTagFilter(tag.id);
+                            setTagSearch('');
+                          }}
+                          className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-100"
+                          title={tag.description ?? tag.name}
+                        >
+                          {tag.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+                {tagOptionsError && (
+                  <div className="mt-1 text-[11px] text-red-600">{tagOptionsError}</div>
+                )}
+              </div>
+            )}
             {/* 【新增】高级筛选面板 */}
             {showAdvancedFilters && activeTab === 'public' && (
               <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down">
@@ -1105,7 +1349,7 @@ export default function BattleDataModal({
                   hasUserSelectedTabRef.current = true;
                   setActiveTab('public');
                   setCurrentPage(1);
-                  loadPublicDataCards(1, sortBy, '', filters);
+                  loadPublicDataCards(1, sortBy, '', filters, selectedTagIds);
                 }}
                 className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
               >
@@ -1289,8 +1533,8 @@ export default function BattleDataModal({
 
           {/* 分页与底部 */}
           {(
-            (activeTab === 'my' && userDataCards.length > cardsPerPage) ||
-            (activeTab === 'favorites' && favoriteCards.length > cardsPerPage) ||
+            (activeTab === 'my' && filteredUserCards.length > cardsPerPage) ||
+            (activeTab === 'favorites' && filteredFavoriteCards.length > cardsPerPage) ||
             (activeTab === 'public' && (
               (activeFilters.roleType && selectedType === 'character')
                 ? publicPaginatedCards.length > 0 || publicTotalPages! > 1
