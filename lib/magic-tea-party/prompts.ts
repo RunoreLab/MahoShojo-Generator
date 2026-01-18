@@ -400,7 +400,7 @@ export const buildMagicTeaPartyChoicesPrompt = (params: {
       outputFormat: 'jsonl',
       enableChoices: true,
       choiceCount,
-      outputPlan: { choices: 'on', summary: 'off', updates: 'off' },
+      outputPlan: { choices: 'on', summary: 'off', updates: 'on' },
     },
   };
 
