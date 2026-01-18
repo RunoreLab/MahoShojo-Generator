@@ -126,7 +126,10 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
             </div>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="text-[11px] leading-snug text-gray-500">
+            视图说明：渲染更适合阅读；原始主要用于排查问题，建议使用渲染。
+          </div>
           <div className="flex items-center rounded-full border border-pink-200 bg-white p-0.5 text-xs font-semibold text-pink-700">
             <button
               type="button"
