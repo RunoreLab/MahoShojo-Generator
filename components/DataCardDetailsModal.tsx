@@ -59,6 +59,8 @@ const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   return json;
 };
 
+const META_EXPANDED_STORAGE_KEY = 'mahoshojo.data-card-details.meta-expanded.v1';
+
 interface DataCardDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -167,7 +169,19 @@ export default function DataCardDetailsModal({
   useEffect(() => {
     if (!isOpen) return;
     if (typeof window === 'undefined') return;
-    setIsMetaExpanded(window.innerWidth >= 768);
+    let nextExpanded: boolean | null = null;
+    try {
+      const stored = window.localStorage.getItem(META_EXPANDED_STORAGE_KEY);
+      if (stored === '1' || stored === '0') {
+        nextExpanded = stored === '1';
+      }
+    } catch {
+      nextExpanded = null;
+    }
+    if (nextExpanded == null) {
+      nextExpanded = window.innerWidth >= 768;
+    }
+    setIsMetaExpanded(nextExpanded);
   }, [isOpen]);
 
   useEffect(() => {
@@ -178,12 +192,6 @@ export default function DataCardDetailsModal({
     if (!meta || isEditingTags) return;
     setSelectedTagIds(meta.tags.filter((t) => t.scope === tagScope).map((t) => t.id));
   }, [meta, isEditingTags, tagScope]);
-
-  useEffect(() => {
-    if (isEditingTags) {
-      setIsMetaExpanded(true);
-    }
-  }, [isEditingTags]);
 
   const visibleTags = useMemo(() => {
     if (!meta?.tags) return [];
@@ -262,6 +270,21 @@ export default function DataCardDetailsModal({
   const selectedTagCount = selectedTagIds.length;
   const isTagLimitReached = selectedTagCount >= 30;
   const showMetaDetails = isMetaExpanded || isEditingTags;
+
+  const toggleMetaExpanded = useCallback(() => {
+    if (isEditingTags) return;
+    setIsMetaExpanded((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(META_EXPANDED_STORAGE_KEY, next ? '1' : '0');
+        } catch {
+          // ignore storage errors
+        }
+      }
+      return next;
+    });
+  }, [isEditingTags]);
 
   const toggleSelectTag = useCallback((tagId: string) => {
     setSelectedTagIds((prev) => {
@@ -434,10 +457,7 @@ export default function DataCardDetailsModal({
               <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (isEditingTags) return;
-                    setIsMetaExpanded((prev) => !prev);
-                  }}
+                  onClick={toggleMetaExpanded}
                   className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
                   aria-expanded={showMetaDetails}
                   disabled={isEditingTags}
