@@ -1,4 +1,5 @@
 import { createMagicTeaPartyJsonlStreamState, ingestMagicTeaPartyJsonlChunk } from '@/lib/magic-tea-party/jsonl';
+import { extractMagicTeaPartyNoticesFromMarkdown } from '@/lib/magic-tea-party/notice';
 import type { MagicTeaPartyMessage, MagicTeaPartyNotice, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
 
 type MagicTeaPartyOutputFormat = NonNullable<MagicTeaPartySession['settings']['outputFormat']>;
@@ -32,9 +33,26 @@ export function createMagicTeaPartyStreamPreview(options: StreamPreviewOptions):
   const { outputFormat, onUpdate } = options;
 
   if (outputFormat !== 'jsonl') {
+    let lastSafeSnapshot = '';
+    let lastNoticeCount = 0;
     return {
       applySafeText: (safeText, status) => {
-        onUpdate({ content: safeText, status, includeJsonl: false });
+        if (!safeText.startsWith(lastSafeSnapshot)) {
+          lastNoticeCount = 0;
+        }
+        lastSafeSnapshot = safeText;
+        const noticeBundle = extractMagicTeaPartyNoticesFromMarkdown(safeText);
+        const notices =
+          noticeBundle.notices.length > lastNoticeCount
+            ? noticeBundle.notices.slice(lastNoticeCount)
+            : [];
+        lastNoticeCount = noticeBundle.notices.length;
+        onUpdate({
+          content: noticeBundle.cleanedText ?? safeText,
+          status,
+          includeJsonl: false,
+          notices,
+        });
       },
     };
   }

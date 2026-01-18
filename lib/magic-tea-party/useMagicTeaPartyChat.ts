@@ -688,12 +688,13 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
         const previewText = isJsonl ? buildMagicTeaPartyJsonlPreview(safeText) : (noticeBundle.cleanedText ?? safeText);
         const finalContent = hasErrorNotice ? '' : previewText;
+        const shouldSuppressMessage = hasErrorNotice || (!finalContent.trim() && allNotices.length > 0);
         const finalAssistant: MagicTeaPartyMessage = {
           ...params.assistantMessage,
           content: finalContent,
           status,
           ...(isJsonl && parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-          ...(hasErrorNotice ? { meta: { ...(params.assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
+          ...(shouldSuppressMessage ? { meta: { ...(params.assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
           ...(status === 'blocked'
             ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
             : { safety: { status: 'ok' } }),
@@ -789,12 +790,13 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
           const previewText = isJsonl ? buildMagicTeaPartyJsonlPreview(safeText) : (noticeBundle.cleanedText ?? safeText);
           const finalContent = hasErrorNotice ? '' : previewText;
+          const shouldSuppressMessage = hasErrorNotice || (!finalContent.trim() && allNotices.length > 0);
           const finalAssistant: MagicTeaPartyMessage = {
             ...params.assistantMessage,
             content: finalContent,
             status,
             ...(isJsonl && parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-            ...(hasErrorNotice ? { meta: { ...(params.assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
+            ...(shouldSuppressMessage ? { meta: { ...(params.assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
             ...(status === 'blocked'
               ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
               : { safety: { status: 'ok' } }),
