@@ -46,9 +46,9 @@ const magicTavernRequirements: BetaAccessRequirementGroup = {
       label: '持有「老资历」徽章',
     },
     {
-      type: 'publicUsage',
-      min: 500,
-      label: '公开卡累计使用量 ≥ 500',
+      type: 'publicCards',
+      min: 1,
+      label: '公开卡数量 ≥ 1',
     },
   ],
 };
