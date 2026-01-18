@@ -6,6 +6,7 @@ import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
+import { InlineField } from '@/components/shared/InlineField';
 
 interface MagicalGirlCardProps {
   magicalGirl: {
@@ -103,41 +104,6 @@ const renderInlineValue = (value: unknown): string => {
     }
   }
   return String(value);
-};
-
-const isMarkdownLike = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return false;
-
-  if (trimmed.includes('\n')) return true;
-
-  return (
-    /(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+\.\s|>)/.test(trimmed)
-    || /`/.test(trimmed)
-    || /\$\$?/.test(trimmed)
-    || /!\[[^\]]*\]\([^)]+\)/.test(trimmed)
-    || /\[[^\]]+\]\([^)]+\)/.test(trimmed)
-    || /(\*\*|__|~~)/.test(trimmed)
-    || /<(audio|video|img)\b/i.test(trimmed)
-  );
-};
-
-const InlineField = ({ label, content }: { label: string; content: string }) => {
-  const normalized = String(content ?? '');
-  const shouldRenderMarkdown = isMarkdownLike(normalized);
-
-  return (
-    <div className="leading-relaxed">
-      <span className="font-semibold">{label}：</span>
-      {shouldRenderMarkdown ? (
-        <div className="mt-1">
-          <MarkdownBlock content={normalized} variant="dark" />
-        </div>
-      ) : (
-        <span className="whitespace-pre-wrap break-words">{normalized}</span>
-      )}
-    </div>
-  );
 };
 
 const renderAbilityItem = (ability: string | Record<string, unknown>, index: number) => {

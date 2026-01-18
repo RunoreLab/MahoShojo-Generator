@@ -6,6 +6,7 @@ import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
+import { InlineField } from '@/components/shared/InlineField';
 
 export interface GeneralCharacterDetails extends GeneralCharacterData {
   arena_history?: ArenaHistory | null;
@@ -95,6 +96,7 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
+  const labelClassName = 'text-sm opacity-90';
 
   const displayContent =
     general?.content?.trim()
@@ -205,24 +207,26 @@ const GeneralCharacterCard: React.FC<GeneralCharacterCardProps> = ({
         </div>
 
         <div className="result-item">
-          <div className="result-label">角色名称</div>
-          <div className="result-value text-2xl font-bold text-white drop-shadow" style={{ letterSpacing: '0.08em' }}>
-            {general?.name || '未命名角色'}
-          </div>
+          <InlineField
+            label="角色名称"
+            content={general?.name || '未命名角色'}
+            labelClassName={labelClassName}
+            contentClassName="text-2xl font-bold text-white drop-shadow"
+            contentStyle={{ letterSpacing: '0.08em' }}
+          />
         </div>
 
         <div className="result-item">
-          <div className="result-label">角色设定</div>
-          <div className="result-value text-sm">
-            <MarkdownBlock
-              content={displayContent}
-              variant="dark"
-              mode="article"
-            />
-            {isStreaming && (
-              <span className="inline-block w-2 h-4 bg-white/70 animate-pulse align-middle ml-1" />
-            )}
-          </div>
+          <InlineField
+            label="角色设定"
+            content={displayContent}
+            labelClassName={labelClassName}
+            contentClassName="text-sm"
+            className={isStreaming ? 'inline-block' : undefined}
+          />
+          {isStreaming && (
+            <span className="inline-block w-2 h-4 bg-white/70 animate-pulse align-middle ml-1" />
+          )}
         </div>
 
         <CurrentStatePanel state={general?.current_state} variant="dark" />
