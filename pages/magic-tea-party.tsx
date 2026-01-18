@@ -375,7 +375,7 @@ export default function MagicTeaPartyPage() {
         language: activeSession.settings.language ?? preferences.language,
         enableChoices: activeSession.settings.enableChoices ?? preferences.enableChoices,
         choiceCount: activeSession.settings.choiceCount ?? preferences.choiceCount,
-        userDisplayName: activeSession.settings.userDisplayName ?? preferences.userDisplayName,
+        userDisplayName: activeSession.settings.userDisplayName || preferences.userDisplayName || '旅人',
         enableSummary: activeSession.settings.enableSummary ?? preferences.enableSummary,
         readArenaHistory:
           typeof activeSession.settings.readArenaHistory === 'boolean' ? activeSession.settings.readArenaHistory : preferences.readArenaHistory,
@@ -616,7 +616,7 @@ export default function MagicTeaPartyPage() {
             writeArenaHistory,
             writeCurrentState,
             language: activeSession.settings.language ?? preferences.language,
-            userDisplayName: activeSession.settings.userDisplayName ?? preferences.userDisplayName,
+            userDisplayName: activeSession.settings.userDisplayName || preferences.userDisplayName || '旅人',
           },
           customProvider: userProviderConfig,
         }),

@@ -150,10 +150,11 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       const enableChoices =
         typeof session.settings.enableChoices === 'boolean' ? session.settings.enableChoices : preferences.enableChoices;
       const choiceCount = session.settings.choiceCount ?? preferences.choiceCount;
-      const userDisplayName =
-        typeof session.settings.userDisplayName === 'string' && session.settings.userDisplayName.trim()
+      const sessionDisplayName =
+        typeof session.settings.userDisplayName === 'string'
           ? session.settings.userDisplayName.trim().slice(0, 20)
-          : preferences.userDisplayName;
+          : '';
+      const userDisplayName = sessionDisplayName || preferences.userDisplayName || '旅人';
 
       return {
         ...buildRequestSettings(session),
@@ -341,7 +342,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
       const mergedSettings = buildRequestSettings(params.session);
       const language = params.session.settings.language ?? preferences.language;
-      const userDisplayName = params.session.settings.userDisplayName ?? preferences.userDisplayName;
+      const userDisplayName = params.session.settings.userDisplayName || preferences.userDisplayName || '旅人';
 
       if (needsSummary && !isSummarizing) {
         try {
@@ -857,7 +858,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       if (history.length === 0) return;
 
       const tokenBudget = resolveMagicTeaPartyTokenBudget(session.settings, providerId);
-      const userDisplayName = session.settings.userDisplayName ?? preferences.userDisplayName;
+      const userDisplayName = session.settings.userDisplayName || preferences.userDisplayName || '旅人';
       const historyTokens = estimateMagicTeaPartyHistoryTokens(history, { providerId, userDisplayName });
 
       const triggerByTokens = historyTokens > tokenBudget.historyBudgetTokens * tokenBudget.summaryTriggerRatio;
@@ -1464,7 +1465,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           sessionId: activeSession.id,
           mode: 'summary',
           language: activeSession.settings.language ?? preferences.language,
-          userDisplayName: activeSession.settings.userDisplayName ?? preferences.userDisplayName,
+          userDisplayName: activeSession.settings.userDisplayName || preferences.userDisplayName || '旅人',
           messages: historyForRequest,
           customProvider: {
             providerId: userProviderConfig.providerId,

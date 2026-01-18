@@ -530,7 +530,7 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
               className="input-field"
               value={currentUserDisplayName}
               onChange={(event) => {
-                const value = event.target.value.trim().slice(0, 20) || '旅人';
+                const value = event.target.value.trim().slice(0, 20);
                 onPreferenceChange({ userDisplayName: value });
                 onSessionSettingChange({ userDisplayName: value });
               }}
@@ -655,10 +655,10 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
 
           <div className="grid gap-1">
             <label className="text-xs font-semibold text-gray-600">选项数量</label>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                className="h-8 w-8 rounded-md border border-pink-100 bg-white text-sm font-semibold text-gray-700 shadow-sm hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-8 w-8 shrink-0 rounded-md border border-pink-100 bg-white text-sm font-semibold text-gray-700 shadow-sm hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => handleChoiceCountChange(choiceCountValue - 1)}
                 disabled={choiceCountValue <= CHOICE_COUNT_MIN}
                 aria-label="减少选项数量"
@@ -672,12 +672,12 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                 step={1}
                 value={choiceCountValue}
                 onChange={(event) => handleChoiceCountChange(Number(event.target.value))}
-                className="h-2 flex-1 cursor-pointer rounded-lg bg-pink-100 accent-pink-500"
+                className="h-2 min-w-0 flex-1 cursor-pointer rounded-lg bg-pink-100 accent-pink-500"
                 aria-label="选项数量滑块"
               />
               <button
                 type="button"
-                className="h-8 w-8 rounded-md border border-pink-100 bg-white text-sm font-semibold text-gray-700 shadow-sm hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-8 w-8 shrink-0 rounded-md border border-pink-100 bg-white text-sm font-semibold text-gray-700 shadow-sm hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => handleChoiceCountChange(choiceCountValue + 1)}
                 disabled={choiceCountValue >= CHOICE_COUNT_MAX}
                 aria-label="增加选项数量"
@@ -689,7 +689,7 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                 min={CHOICE_COUNT_MIN}
                 max={CHOICE_COUNT_MAX}
                 step={1}
-                className="input-field !h-8 !w-16 !px-2 !py-1 text-center text-xs"
+                className="input-field !h-8 !w-16 !px-2 !py-1 text-center text-xs shrink-0"
                 value={String(choiceCountValue)}
                 onChange={(event) => handleChoiceCountChange(Number(event.target.value))}
               />

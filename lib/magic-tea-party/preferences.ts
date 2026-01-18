@@ -122,7 +122,7 @@ export function readMagicTeaPartyPreferences(): MagicTeaPartyPreferences {
     const choiceCount = normalizeChoiceCount(parsed.choiceCount, DEFAULT_MAGIC_TEA_PARTY_PREFERENCES.choiceCount);
     const language = parsed.language === 'ja-JP' || parsed.language === 'en-US' ? parsed.language : 'zh-CN';
     const userDisplayName =
-      typeof parsed.userDisplayName === 'string' && parsed.userDisplayName.trim()
+      typeof parsed.userDisplayName === 'string'
         ? parsed.userDisplayName.trim().slice(0, 20)
         : DEFAULT_MAGIC_TEA_PARTY_PREFERENCES.userDisplayName;
     const enableSummary = typeof parsed.enableSummary === 'boolean' ? parsed.enableSummary : DEFAULT_MAGIC_TEA_PARTY_PREFERENCES.enableSummary;

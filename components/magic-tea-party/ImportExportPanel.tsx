@@ -655,7 +655,7 @@ export function MagicTeaPartyImportExportPanel(props: ImportExportPanelProps) {
             text,
             sessionId,
             createId: randomUUID,
-            userDisplayName: preferences.userDisplayName,
+            userDisplayName: preferences.userDisplayName || '旅人',
             now,
           });
           const sanitizedMessages = messages.map(sanitizeMessage);
