@@ -98,6 +98,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['JSONL', 'Markdown', 'outputPlan', '选项', '摘要', '写入', '历战记录', '当前状态'],
   },
   {
+    slug: 'magic-tea-party-session-management',
+    title: '魔法茶会：会话管理（分支/合并/备份与导出）',
+    summary: '置顶会话、编辑并分支、合并到原会话、ZIP 归档（含图片）与对话导出图片等常用操作。',
+    markdownPath: '/encyclopedia/magic-tea-party-session-management.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['会话', '分支', '合并', 'fork', 'merge', '置顶', '导入', '导出', 'ZIP', '图片导出'],
+  },
+  {
     slug: 'magic-tea-party-card-authoring',
     title: '魔法茶会：角色卡/情景卡进阶（协议与 mtp_notice）',
     summary: '如何写更适合茶会的角色卡和情景卡：情景锚点、协议重映射、mtp_notice 自定义提示/报错。',

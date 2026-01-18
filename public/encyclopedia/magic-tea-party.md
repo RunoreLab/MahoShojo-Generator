@@ -17,6 +17,8 @@
 - **视觉小说选项**：可一键生成下一步行动选项（2~16）。
 - **自动摘要**：对话变长时可自动摘要，减轻上下文压力。
 - **角色更新**：可把本次茶会的影响写入角色卡的 `arena_history` / `current_state`（写入后会移除 `signature`，变为非原生）。
+- **立绘/插画**：可从对话片段生成立绘/插画，并缓存到本地（可手动清理）。
+- **会话分支/合并**：从某一轮开始另写一条线，满意后再合回原会话。
 - **导入/导出**：会话保存在本地浏览器，可导出 JSON 备份，或导出为 SillyTavern JSONL。
 
 ## 2) 重要提醒（避免先翻车）
@@ -53,12 +55,23 @@
 - 读取当前状态：开
 - 写入：先关（确定要写入再开），写入策略建议先用“确认写入”
 
+## 5) 立绘/插画（实验性，选看）
+
+对话区下方有「插画 / 立绘」面板：
+
+1) 选择模式：角色立绘 / 剧情插画  
+2) 立绘模式下选一个“目标角色”；插画模式下可勾选登场角色  
+3) 在「剧情片段 / 参考描述」点击「用最近对话填充」，或手动写一句画面描述  
+4) 点击生成（生成结果会缓存到本地；可用“清理本角色/清空缓存”管理空间）
+
+想把对话与图片一起完整备份：建议使用「导出全部会话（ZIP，含图片）」。详见：`/encyclopedia/magic-tea-party-session-management`。
+
 ## 相关条目
 
 - 魔法茶会：设置与参数说明：`/encyclopedia/magic-tea-party-settings`
+- 魔法茶会：会话管理（分支/合并/备份与导出）：`/encyclopedia/magic-tea-party-session-management`
 - 魔法茶会：角色卡/情景卡进阶（协议与 mtp_notice）：`/encyclopedia/magic-tea-party-card-authoring`
 - 魔法茶会：错误排查与 FAQ：`/encyclopedia/magic-tea-party-troubleshooting`
 - 敏感词与逮捕：`/encyclopedia/sensitive-words`
 - 屏蔽词（和谐替换）：`/encyclopedia/shield-words`
 - 酒馆生态联动（SillyTavern）：`/encyclopedia/tavern-ecosystem`
-

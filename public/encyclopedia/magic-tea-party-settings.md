@@ -162,7 +162,7 @@
 ## 相关条目
 
 - 魔法茶会（功能与快速开始）：`/encyclopedia/magic-tea-party`
+- 魔法茶会：会话管理（分支/合并/备份与导出）：`/encyclopedia/magic-tea-party-session-management`
 - 魔法茶会：角色卡/情景卡进阶（协议与 mtp_notice）：`/encyclopedia/magic-tea-party-card-authoring`
 - 魔法茶会：错误排查与 FAQ：`/encyclopedia/magic-tea-party-troubleshooting`
 - 引导 / 裁判事件 / 读写状态：`/encyclopedia/guidance`
-

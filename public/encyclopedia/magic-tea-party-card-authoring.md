@@ -164,8 +164,8 @@ mtp_notice: level=warning, message="请注意，当前输入缺少角色卡"
 
 - 魔法茶会（功能与快速开始）：`/encyclopedia/magic-tea-party`
 - 魔法茶会：设置与参数说明：`/encyclopedia/magic-tea-party-settings`
+- 魔法茶会：会话管理（分支/合并/备份与导出）：`/encyclopedia/magic-tea-party-session-management`
 - 魔法茶会：错误排查与 FAQ：`/encyclopedia/magic-tea-party-troubleshooting`
 - 情景卡进阶（继承与长线）：`/encyclopedia/scenario-advanced`
 - 引导 / 裁判事件 / 读写状态：`/encyclopedia/guidance`
 - 酒馆生态联动（SillyTavern）：`/encyclopedia/tavern-ecosystem`
-

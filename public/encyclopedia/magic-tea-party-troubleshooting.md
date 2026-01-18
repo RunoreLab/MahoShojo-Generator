@@ -122,7 +122,16 @@
 - 数据卡问题：导入/解析/格式校验/签名：`/encyclopedia/data-card-errors`
 - 酒馆生态联动（SillyTavern）：`/encyclopedia/tavern-ecosystem`
 
-## 9) 立绘/缓存太大，浏览器变卡
+## 9) 为什么会看到“该条消息已被更新替换”？（分支/合并相关）
+
+当你在茶会里使用了「编辑并分支」并「合并到原会话」时：
+
+- 原会话从分支锚点开始的旧内容会被标记为“已被更新替换”（灰色提示）
+- 分支内容会作为新的后续写回原会话
+
+这是设计行为：用于保留“原时间线”供你回溯对比，不影响继续对话。
+
+## 10) 立绘/缓存太大，浏览器变卡
 
 在左侧「全局设置」里可以：
 
@@ -136,4 +145,4 @@
 - 魔法茶会（功能与快速开始）：`/encyclopedia/magic-tea-party`
 - 魔法茶会：设置与参数说明：`/encyclopedia/magic-tea-party-settings`
 - 魔法茶会：角色卡/情景卡进阶（协议与 mtp_notice）：`/encyclopedia/magic-tea-party-card-authoring`
-
+- 魔法茶会：会话管理（分支/合并/备份与导出）：`/encyclopedia/magic-tea-party-session-management`
