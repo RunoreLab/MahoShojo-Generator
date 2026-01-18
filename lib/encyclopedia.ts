@@ -116,10 +116,10 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
   {
     slug: 'magic-tea-party-troubleshooting',
     title: '魔法茶会：错误排查与 FAQ',
-    summary: '权限不足、缺少 API Key、输出解析失败、敏感词拦截、上下文超载与写入异常的自救清单。',
+    summary: '登录提示、缺少 API Key、输出解析失败、敏感词拦截、上下文超载与写入异常的自救清单。',
     markdownPath: '/encyclopedia/magic-tea-party-troubleshooting.md',
     categoryId: 'magic-tea-party',
-    keywords: ['权限', 'beta', 'API Key', '403', 'notice', '解析失败', '敏感词', 'blocked'],
+    keywords: ['登录', '未登录', 'API Key', '403', 'notice', '解析失败', '敏感词', 'blocked'],
   },
   {
     slug: 'network-errors',

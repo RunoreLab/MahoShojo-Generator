@@ -1,4 +1,5 @@
 import Head from 'next/head';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -38,21 +39,10 @@ import type {
 } from '@/lib/magic-tea-party/types';
 import { useAuth } from '@/lib/useAuth';
 import { applyShieldWords } from '@/lib/shield-word-filter';
-import { buildBetaAccessUrl } from '@/lib/beta-access';
-import { useBetaAccessStatus } from '@/lib/beta-access-client';
-import type { BetaAccessFeatureId } from '@/config/beta-access';
 
 export default function MagicTeaPartyPage() {
   const router = useRouter();
-  const { user, userBadges, isAuthenticated, loading, badgesLoading } = useAuth();
-  const betaFeatureId: BetaAccessFeatureId = 'magic-tea-party';
-  const betaAccess = useBetaAccessStatus({
-    featureId: betaFeatureId,
-    isAuthenticated,
-    loading,
-    badges: userBadges,
-    badgesLoading,
-  });
+  const { user, isAuthenticated, loading } = useAuth();
 
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
@@ -171,12 +161,6 @@ export default function MagicTeaPartyPage() {
   const [updateRangeSize, setUpdateRangeSize] = useState<number>(20);
   const [isGeneratingUpdates, setIsGeneratingUpdates] = useState(false);
   const [isApplyingUpdates, setIsApplyingUpdates] = useState(false);
-
-  useEffect(() => {
-    if (betaAccess.status === 'blocked' || betaAccess.status === 'error') {
-      void router.replace(buildBetaAccessUrl(betaFeatureId));
-    }
-  }, [betaAccess.status, betaFeatureId, router]);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -733,15 +717,51 @@ export default function MagicTeaPartyPage() {
     }
   };
 
-  if (betaAccess.status !== 'allowed') {
+  if (loading) {
     return (
-      <div className="magic-background-white">
-        <div className="container">
-          <div className="card">
-            <div className="py-10 text-center text-sm text-gray-600">正在核验内测权限…</div>
+      <>
+        <Head>
+          <title>魔法茶会</title>
+        </Head>
+        <div className="magic-background-white">
+          <div className="container">
+            <div className="card">
+              <div className="py-10 text-center text-sm text-gray-600">正在确认登录状态…</div>
+            </div>
           </div>
         </div>
-      </div>
+      </>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <>
+        <Head>
+          <title>魔法茶会</title>
+        </Head>
+        <div className="magic-background-white">
+          <div className="container">
+            <div className="card">
+              <div className="py-10 text-center text-sm text-gray-600">
+                <div className="text-base font-semibold text-gray-800">魔法茶会仅对已登录用户开放</div>
+                <p className="mt-2 text-sm text-gray-600">请先前往角色管理器完成登录，再返回开启茶会。</p>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                  <Link
+                    href="/character-manager"
+                    className="rounded-full border border-pink-200 px-4 py-2 text-sm text-pink-700 hover:bg-pink-50"
+                  >
+                    前往登录
+                  </Link>
+                  <Link href="/" className="rounded-full border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+                    返回首页
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
     );
   }
 
