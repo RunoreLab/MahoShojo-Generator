@@ -14,6 +14,7 @@ export function useChatAutoScroll(options: UseChatAutoScrollOptions) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const rafRef = useRef<number | null>(null);
+  const modeRef = useRef<'window' | 'container'>(options.mode ?? 'container');
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -25,6 +26,15 @@ export function useChatAutoScroll(options: UseChatAutoScrollOptions) {
     }
     rafRef.current = window.requestAnimationFrame(() => {
       rafRef.current = null;
+      const mode = modeRef.current;
+      if (mode === 'container') {
+        const container = containerRef.current;
+        if (container) {
+          const top = Math.max(0, container.scrollHeight - container.clientHeight);
+          container.scrollTo({ top, behavior });
+          return;
+        }
+      }
       const el = bottomRef.current;
       if (!el) return;
       el.scrollIntoView({ behavior, block: 'end' });
@@ -65,6 +75,10 @@ export function useChatAutoScroll(options: UseChatAutoScrollOptions) {
   }, [options.threshold, options.mode]);
 
   useEffect(() => {
+    modeRef.current = options.mode ?? 'container';
+  }, [options.mode]);
+
+  useEffect(() => {
     if (!options.enabled) return;
     if (!stickToBottomRef.current) return;
     scrollToBottom(options.behavior ?? 'auto');
@@ -78,8 +92,20 @@ export function useChatAutoScroll(options: UseChatAutoScrollOptions) {
     if (!el) return;
     stickToBottomRef.current = false;
     setIsAtBottom(false);
+    const mode = options.mode ?? 'container';
+    if (mode === 'container') {
+      const container = containerRef.current;
+      if (container && container.contains(el)) {
+        const containerRect = container.getBoundingClientRect();
+        const anchorRect = el.getBoundingClientRect();
+        const offsetTop = anchorRect.top - containerRect.top + container.scrollTop;
+        const targetTop = offsetTop - container.clientHeight / 2 + anchorRect.height / 2;
+        container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+        return;
+      }
+    }
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [options.anchorMessageId]);
+  }, [options.anchorMessageId, options.mode]);
 
   useEffect(() => () => {
     if (typeof window === 'undefined') return;
