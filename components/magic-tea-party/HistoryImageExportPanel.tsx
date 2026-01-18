@@ -293,8 +293,7 @@ export function MagicTeaPartyHistoryImageExportPanel(props: Props) {
             <div className="text-xs text-gray-500">支持保存全部对话、最近 N 条或手动勾选对话条目。</div>
             <div className="rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">
               {summaryLine}
-              <div className="mt-1 text-[11px] text-gray-500">图片将包含项目 Logo + 保存者用户名与徽章。</div>
-              <div className="mt-1 text-[11px] text-gray-500">当前对话视图：{outputView === 'raw' ? '原始' : '渲染'}。</div>
+              <div className="mt-1 text-[11px] text-gray-500">将会按照当前对话视图保存：{outputView === 'raw' ? '原始' : '渲染'}内容。</div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">

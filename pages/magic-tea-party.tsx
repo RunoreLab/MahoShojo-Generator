@@ -872,14 +872,6 @@ export default function MagicTeaPartyPage() {
                 <MagicTeaPartyNoticePanel notices={notices} onClearNotices={clearNotices} />
 
                 <div className="rounded-xl border border-pink-100 bg-white p-4">
-                  <MagicTeaPartyHistoryImageExportPanel
-                    activeSession={activeSession}
-                    preferences={preferences}
-                    messages={messages}
-                    outputView={outputView}
-                    isGenerating={isGenerating}
-                  />
-
                   <MagicTeaPartyChatTimeline
                     activeSession={activeSession}
                     preferences={preferences}
@@ -920,6 +912,14 @@ export default function MagicTeaPartyPage() {
                     onGenerateChoices={() => void handleGenerateChoices()}
                     isGenerating={isGenerating}
                     hasMessages={messages.length > 0}
+                  />
+
+                  <MagicTeaPartyHistoryImageExportPanel
+                    activeSession={activeSession}
+                    preferences={preferences}
+                    messages={messages}
+                    outputView={outputView}
+                    isGenerating={isGenerating}
                   />
                 </div>
 
