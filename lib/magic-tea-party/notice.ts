@@ -85,6 +85,25 @@ const parseLooseKeyValuePairs = (raw: string): Record<string, string> => {
   return pairs;
 };
 
+const stripLooseKeyValuePairs = (raw: string): string => {
+  if (!raw.trim()) return '';
+  const regex =
+    /\b(type|level|code|message|content|text|notice|motice)\b\s*[:=]\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s]+(?:\s+[^\s]+)*?)(?=\s+\b(?:type|level|code|message|content|text|notice|motice)\b\s*[:=]|$)/gi;
+  const spans: Array<[number, number]> = [];
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(raw)) !== null) {
+    spans.push([match.index, regex.lastIndex]);
+  }
+  if (spans.length === 0) return raw;
+  let remainder = raw;
+  for (let i = spans.length - 1; i >= 0; i -= 1) {
+    const [start, end] = spans[i];
+    remainder = `${remainder.slice(0, start)}${remainder.slice(end)}`;
+  }
+  remainder = remainder.replace(/^[，,;；]+/, '').replace(/[，,;；]+$/, '').trim();
+  return remainder;
+};
+
 const isTrivialNoticeMarker = (value: string): boolean => {
   const normalized = value.trim().toLowerCase();
   if (!normalized) return true;
@@ -153,6 +172,15 @@ const parseLooseNoticeFromLine = (raw: string): MagicTeaPartyNotice | null => {
   }
 
   return null;
+};
+
+const extractLooseNoticeRemainder = (raw: string): string => {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  const prefixMatch = trimmed.match(/^(notice|motice|mtp_notice)\b[:\s-]*/i);
+  const body = prefixMatch ? trimmed.slice(prefixMatch[0].length).trim() : trimmed;
+  const remainder = stripLooseKeyValuePairs(body);
+  return remainder.trim();
 };
 
 const isMarkdownFenceLine = (line: string): boolean => {
@@ -247,6 +275,10 @@ export const extractMagicTeaPartyNoticesFromMarkdown = (text: string): { cleaned
     const looseNotice = parseLooseNoticeFromLine(raw);
     if (looseNotice) {
       notices.push(looseNotice);
+      const remainder = extractLooseNoticeRemainder(raw);
+      if (remainder) {
+        kept.push(remainder);
+      }
       continue;
     }
 
