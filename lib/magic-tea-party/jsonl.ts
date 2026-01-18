@@ -67,7 +67,7 @@ const parseLooseKeyValuePairs = (raw: string): Record<string, string> => {
   let match: RegExpExecArray | null;
   while ((match = regex.exec(raw)) !== null) {
     const key = match[1].toLowerCase();
-    const value = stripWrappingQuotes(match[2]);
+    const value = stripWrappingQuotes(match[2]).replace(/[，,;；]+$/, '').trim();
     if (value) pairs[key] = value;
   }
   return pairs;
@@ -76,7 +76,7 @@ const parseLooseKeyValuePairs = (raw: string): Record<string, string> => {
 const detectLooseSideChannelHint = (raw: string): 'notice' | 'summary' | 'updates' | null => {
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  if (/^notice\b/i.test(trimmed) || /\btype\s*[:=]\s*notice\b/i.test(trimmed)) return 'notice';
+  if (/^notice\b/i.test(trimmed) || /^mtp_notice\b/i.test(trimmed) || /\btype\s*[:=]\s*notice\b/i.test(trimmed)) return 'notice';
   if (/^summary\b/i.test(trimmed) || /\btype\s*[:=]\s*summary\b/i.test(trimmed)) return 'summary';
   if (/^(updates?|update)\b/i.test(trimmed) || /\btype\s*[:=]\s*(updates?|update)\b/i.test(trimmed)) return 'updates';
   return null;
@@ -85,7 +85,7 @@ const detectLooseSideChannelHint = (raw: string): 'notice' | 'summary' | 'update
 const parseLooseNoticeFromLine = (raw: string): MagicTeaPartyNotice | null => {
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  if (!/^notice\b/i.test(trimmed) && !/\btype\s*[:=]\s*notice\b/i.test(trimmed)) return null;
+  if (!/^notice\b/i.test(trimmed) && !/^mtp_notice\b/i.test(trimmed) && !/\btype\s*[:=]\s*notice\b/i.test(trimmed)) return null;
 
   const pairs = parseLooseKeyValuePairs(trimmed);
   const message = pairs.message || pairs.content || pairs.text || '';
@@ -102,7 +102,7 @@ const parseLooseNoticeFromLine = (raw: string): MagicTeaPartyNotice | null => {
     if (notice) return notice;
   }
 
-  const tail = trimmed.replace(/^notice\b[:\s-]*/i, '').trim();
+  const tail = trimmed.replace(/^(notice|mtp_notice)\b[:\s-]*/i, '').trim();
   if (tail && !/\b(level|code|message|content|text)\b\s*[:=]/i.test(tail)) {
     return parseMagicTeaPartyNoticePayload({
       type: 'notice',

@@ -21,6 +21,29 @@ type StreamPreviewOptions = {
   onUpdate: (update: MagicTeaPartyStreamPreviewUpdate) => void;
 };
 
+const buildPreviewContentFromSegments = (segments: MagicTeaPartyMessage['segments'] | undefined): string => {
+  if (!segments || segments.length === 0) return '';
+  const lines: string[] = [];
+  for (const seg of segments) {
+    if (!seg) continue;
+    if (seg.type === 'narration') {
+      if (seg.text) lines.push(seg.text);
+      continue;
+    }
+    if (seg.type === 'dialogue') {
+      const name = seg.speakerName || seg.speakerId || '角色';
+      lines.push(`${name}: ${seg.text}`);
+      continue;
+    }
+    if (seg.type === 'choices') {
+      for (const item of seg.items) {
+        lines.push(`- ${item.text}`);
+      }
+    }
+  }
+  return lines.join('\n');
+};
+
 export function createMagicTeaPartyStreamPreview(options: StreamPreviewOptions): MagicTeaPartyStreamPreviewController {
   const { outputFormat, onUpdate } = options;
 
@@ -58,7 +81,7 @@ export function createMagicTeaPartyStreamPreview(options: StreamPreviewOptions):
       lastNoticeCount = jsonlStreamState.notices.length;
 
       onUpdate({
-        content: safeText,
+        content: buildPreviewContentFromSegments(jsonlStreamState.segments),
         status,
         includeJsonl: true,
         segments: [...jsonlStreamState.segments],

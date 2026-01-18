@@ -86,6 +86,12 @@ describe('magic tea party jsonl parser', () => {
     expect(parsedLooseNotice.notices).toHaveLength(1);
     expect(parsedLooseNotice.notices[0]).toMatchObject({ level: 'warning', message: '请注意，当前输入缺少角色卡' });
     expect(parsedLooseNotice.segments.map((seg) => seg.type)).toEqual(['narration']);
+
+    const mtpNotice = ['mtp_notice: level=warning, message="请注意，当前输入缺少角色卡"', '{"type":"narration","text":"风铃轻响。"}'].join('\n');
+    const parsedMtpNotice = parseMagicTeaPartyJsonl(mtpNotice);
+    expect(parsedMtpNotice.notices).toHaveLength(1);
+    expect(parsedMtpNotice.notices[0]).toMatchObject({ level: 'warning', message: '请注意，当前输入缺少角色卡' });
+    expect(parsedMtpNotice.segments.map((seg) => seg.type)).toEqual(['narration']);
   });
 
   it('会尝试修复轻度 JSON 格式错误', () => {
