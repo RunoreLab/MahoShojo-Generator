@@ -687,8 +687,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
         const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
         const previewText = isJsonl ? buildMagicTeaPartyJsonlPreview(safeText) : (noticeBundle.cleanedText ?? safeText);
-        const finalContent = hasErrorNotice ? '' : previewText;
-        const shouldSuppressMessage = hasErrorNotice || (!finalContent.trim() && allNotices.length > 0);
+        const shouldSuppressForError = isJsonl && hasErrorNotice;
+        const finalContent = shouldSuppressForError ? '' : previewText;
+        const shouldSuppressMessage = shouldSuppressForError || (!finalContent.trim() && allNotices.length > 0);
         const finalAssistant: MagicTeaPartyMessage = {
           ...params.assistantMessage,
           content: finalContent,
@@ -789,8 +790,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
           const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
           const previewText = isJsonl ? buildMagicTeaPartyJsonlPreview(safeText) : (noticeBundle.cleanedText ?? safeText);
-          const finalContent = hasErrorNotice ? '' : previewText;
-          const shouldSuppressMessage = hasErrorNotice || (!finalContent.trim() && allNotices.length > 0);
+          const shouldSuppressForError = isJsonl && hasErrorNotice;
+          const finalContent = shouldSuppressForError ? '' : previewText;
+          const shouldSuppressMessage = shouldSuppressForError || (!finalContent.trim() && allNotices.length > 0);
           const finalAssistant: MagicTeaPartyMessage = {
             ...params.assistantMessage,
             content: finalContent,

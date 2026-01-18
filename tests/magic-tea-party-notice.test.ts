@@ -11,7 +11,7 @@ describe('magic tea party notice parser', () => {
     const result = extractMagicTeaPartyNoticesFromMarkdown(input);
     expect(result.notices).toHaveLength(1);
     expect(result.notices[0]).toMatchObject({ level: 'warning', message: '请注意，上一轮输出包含多个 notice，请聚焦叙事。' });
-    expect(result.cleanedText.trim()).toBe('这里是正常正文。');
+    expect(result.cleanedText).toBe(input);
   });
 
   it('缺失 message 时会用整行作为 message', () => {
@@ -19,7 +19,7 @@ describe('magic tea party notice parser', () => {
     const result = extractMagicTeaPartyNoticesFromMarkdown(input);
     expect(result.notices).toHaveLength(1);
     expect(result.notices[0]).toMatchObject({ level: 'warning', message: 'notice: level=warning' });
-    expect(result.cleanedText.trim()).toBe('');
+    expect(result.cleanedText).toBe(input);
   });
 
   it('能解析 Markdown 中的 JSON notice 行', () => {
@@ -27,7 +27,7 @@ describe('magic tea party notice parser', () => {
     const result = extractMagicTeaPartyNoticesFromMarkdown(input);
     expect(result.notices).toHaveLength(1);
     expect(result.notices[0]).toMatchObject({ level: 'warning', message: '角色配置缺失' });
-    expect(result.cleanedText.trim()).toBe('后续正文');
+    expect(result.cleanedText).toBe(input);
   });
 
   it('不会解析普通代码块内的 notice 文本', () => {

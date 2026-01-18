@@ -85,25 +85,6 @@ const parseLooseKeyValuePairs = (raw: string): Record<string, string> => {
   return pairs;
 };
 
-const stripLooseKeyValuePairs = (raw: string): string => {
-  if (!raw.trim()) return '';
-  const regex =
-    /\b(type|level|code|message|content|text|notice|motice)\b\s*[:=]\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s]+(?:\s+[^\s]+)*?)(?=\s+\b(?:type|level|code|message|content|text|notice|motice)\b\s*[:=]|$)/gi;
-  const spans: Array<[number, number]> = [];
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(raw)) !== null) {
-    spans.push([match.index, regex.lastIndex]);
-  }
-  if (spans.length === 0) return raw;
-  let remainder = raw;
-  for (let i = spans.length - 1; i >= 0; i -= 1) {
-    const [start, end] = spans[i];
-    remainder = `${remainder.slice(0, start)}${remainder.slice(end)}`;
-  }
-  remainder = remainder.replace(/^[，,;；]+/, '').replace(/[，,;；]+$/, '').trim();
-  return remainder;
-};
-
 const isTrivialNoticeMarker = (value: string): boolean => {
   const normalized = value.trim().toLowerCase();
   if (!normalized) return true;
@@ -174,15 +155,6 @@ const parseLooseNoticeFromLine = (raw: string): MagicTeaPartyNotice | null => {
   return null;
 };
 
-const extractLooseNoticeRemainder = (raw: string): string => {
-  const trimmed = raw.trim();
-  if (!trimmed) return '';
-  const prefixMatch = trimmed.match(/^(notice|motice|mtp_notice)\b[:\s-]*/i);
-  const body = prefixMatch ? trimmed.slice(prefixMatch[0].length).trim() : trimmed;
-  const remainder = stripLooseKeyValuePairs(body);
-  return remainder.trim();
-};
-
 const isMarkdownFenceLine = (line: string): boolean => {
   const trimmed = line.trim();
   if (!trimmed) return false;
@@ -227,35 +199,32 @@ export const extractMagicTeaPartyNoticesFromMarkdown = (text: string): { cleaned
   if (!text) return { cleanedText: '', notices: [] };
   const notices: MagicTeaPartyNotice[] = [];
 
-  const cleanedText = text.replace(NOTICE_BLOCK_REGEX, (_match, blockA, blockB) => {
+  NOTICE_BLOCK_REGEX.lastIndex = 0;
+  const matches = text.matchAll(NOTICE_BLOCK_REGEX);
+  for (const match of matches) {
+    const blockA = match[1];
+    const blockB = match[2];
     const payloadRaw = typeof blockA === 'string' && blockA.trim() ? blockA : typeof blockB === 'string' ? blockB : '';
-    if (!payloadRaw.trim()) return '';
+    if (!payloadRaw.trim()) continue;
     try {
       const parsed = JSON.parse(payloadRaw.trim());
       const notice = parseMagicTeaPartyNoticePayload(parsed, { rawLine: payloadRaw.trim() });
-      if (notice) {
-        notices.push(notice);
-        return '';
-      }
+      if (notice) notices.push(notice);
     } catch {
       // ignore
     }
-    return _match;
-  });
+  }
 
-  const lines = cleanedText.split(/\r?\n/);
-  const kept: string[] = [];
+  const lines = text.split(/\r?\n/);
   let inFence = false;
 
   for (const raw of lines) {
     if (isMarkdownFenceLine(raw)) {
       inFence = !inFence;
-      kept.push(raw);
       continue;
     }
 
     if (inFence) {
-      kept.push(raw);
       continue;
     }
 
@@ -275,15 +244,9 @@ export const extractMagicTeaPartyNoticesFromMarkdown = (text: string): { cleaned
     const looseNotice = parseLooseNoticeFromLine(raw);
     if (looseNotice) {
       notices.push(looseNotice);
-      const remainder = extractLooseNoticeRemainder(raw);
-      if (remainder) {
-        kept.push(remainder);
-      }
       continue;
     }
-
-    kept.push(raw);
   }
 
-  return { cleanedText: kept.join('\n'), notices };
+  return { cleanedText: text, notices };
 };
