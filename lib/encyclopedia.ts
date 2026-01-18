@@ -9,6 +9,7 @@ export type EncyclopediaEntry = {
 
 export type EncyclopediaCategoryId =
   | 'guide'
+  | 'magic-tea-party'
   | 'troubleshooting'
   | 'ai'
   | 'gameplay'
@@ -28,6 +29,11 @@ export const encyclopediaCategories: EncyclopediaCategory[] = [
     id: 'guide',
     title: '快速开始',
     description: '站内入口、生成流程与新手速查。',
+  },
+  {
+    id: 'magic-tea-party',
+    title: '魔法茶会',
+    description: '长期剧情会话：角色/情景/世界书 + 选项/摘要/更新草案。',
   },
   {
     id: 'troubleshooting',
@@ -74,6 +80,38 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     markdownPath: '/encyclopedia/site-guide.md',
     categoryId: 'guide',
     keywords: ['新手', '入口', '流程', '速查'],
+  },
+  {
+    slug: 'magic-tea-party',
+    title: '魔法茶会（功能与快速开始）',
+    summary: '长期剧情对话页：角色/情景自由组合，支持选项、摘要、角色更新与导入导出。',
+    markdownPath: '/encyclopedia/magic-tea-party.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['/magic-tea-party', '茶会', '长期对话', '互动剧情', '自备 Key'],
+  },
+  {
+    slug: 'magic-tea-party-settings',
+    title: '魔法茶会：设置与参数说明',
+    summary: '输出模式（JSONL/Markdown）、合并输出计划、资料读写与写入策略等设置怎么选。',
+    markdownPath: '/encyclopedia/magic-tea-party-settings.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['JSONL', 'Markdown', 'outputPlan', '选项', '摘要', '写入', '历战记录', '当前状态'],
+  },
+  {
+    slug: 'magic-tea-party-card-authoring',
+    title: '魔法茶会：角色卡/情景卡进阶（协议与 mtp_notice）',
+    summary: '如何写更适合茶会的角色卡和情景卡：情景锚点、协议重映射、mtp_notice 自定义提示/报错。',
+    markdownPath: '/encyclopedia/magic-tea-party-card-authoring.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['协议', '协议附录', 'mtp_notice', 'notice', '情景卡', '世界书', 'SillyTavern'],
+  },
+  {
+    slug: 'magic-tea-party-troubleshooting',
+    title: '魔法茶会：错误排查与 FAQ',
+    summary: '权限不足、缺少 API Key、输出解析失败、敏感词拦截、上下文超载与写入异常的自救清单。',
+    markdownPath: '/encyclopedia/magic-tea-party-troubleshooting.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['权限', 'beta', 'API Key', '403', 'notice', '解析失败', '敏感词', 'blocked'],
   },
   {
     slug: 'network-errors',

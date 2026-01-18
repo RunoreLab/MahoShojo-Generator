@@ -26,8 +26,9 @@
 - `/scenario`：箱庭物语（情景生成器，生成“情景文件”）
 - `/free`：自由生成（任意提示词 + 选择 Schema 生成数据卡）
 
-### 创作辅助（0.7.0）
+### 创作辅助（0.7.0+）
 
+- `/magic-tea-party`：魔法茶会（长期剧情对话；角色/情景自由组合；自备 API Key；本地保存会话）
 - `/character-party`：角色组队（把多张角色卡拼成“队伍卡”）
 - `/tavern`：酒馆生态（SillyTavern 角色卡 PNG 导入/导出）
 
@@ -67,6 +68,7 @@
 - 角色生成（/name、/details、/canshou）：`/encyclopedia/character-generator`
 - 通用数据卡（Markdown）：`/encyclopedia/general-cards`
 - 自由生成：`/encyclopedia/free-generator`
+- 魔法茶会（功能与快速开始）：`/encyclopedia/magic-tea-party`
 - 角色组队：`/encyclopedia/character-party`
 - 酒馆生态联动（SillyTavern）：`/encyclopedia/tavern-ecosystem`
 - 档案馆（角色管理）：`/encyclopedia/archive`
