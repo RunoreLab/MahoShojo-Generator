@@ -10,6 +10,7 @@ import { MagicTeaPartyChatComposer } from '@/components/magic-tea-party/ChatComp
 import { MagicTeaPartyChatTimeline } from '@/components/magic-tea-party/ChatTimeline';
 import { MagicTeaPartyCharacterPanel } from '@/components/magic-tea-party/CharacterPanel';
 import { MagicTeaPartyHero } from '@/components/magic-tea-party/Hero';
+import { MagicTeaPartyHistoryImageExportPanel } from '@/components/magic-tea-party/HistoryImageExportPanel';
 import { MagicTeaPartyNoticePanel } from '@/components/magic-tea-party/NoticePanel';
 import { MagicTeaPartyPresetCharacterPanel } from '@/components/magic-tea-party/PresetCharacterPanel';
 import { MagicTeaPartySessionSidebar } from '@/components/magic-tea-party/SessionSidebar';
@@ -871,6 +872,14 @@ export default function MagicTeaPartyPage() {
                 <MagicTeaPartyNoticePanel notices={notices} onClearNotices={clearNotices} />
 
                 <div className="rounded-xl border border-pink-100 bg-white p-4">
+                  <MagicTeaPartyHistoryImageExportPanel
+                    activeSession={activeSession}
+                    preferences={preferences}
+                    messages={messages}
+                    outputView={outputView}
+                    isGenerating={isGenerating}
+                  />
+
                   <MagicTeaPartyChatTimeline
                     activeSession={activeSession}
                     preferences={preferences}
