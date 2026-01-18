@@ -10,6 +10,7 @@ import { MagicTeaPartyChatComposer } from '@/components/magic-tea-party/ChatComp
 import { MagicTeaPartyChatTimeline } from '@/components/magic-tea-party/ChatTimeline';
 import { MagicTeaPartyCharacterPanel } from '@/components/magic-tea-party/CharacterPanel';
 import { MagicTeaPartyHero } from '@/components/magic-tea-party/Hero';
+import { MagicTeaPartyNoticePanel } from '@/components/magic-tea-party/NoticePanel';
 import { MagicTeaPartyPresetCharacterPanel } from '@/components/magic-tea-party/PresetCharacterPanel';
 import { MagicTeaPartySessionSidebar } from '@/components/magic-tea-party/SessionSidebar';
 import { MagicTeaPartySessionSetupPanel } from '@/components/magic-tea-party/SessionSetupPanel';
@@ -752,7 +753,7 @@ export default function MagicTeaPartyPage() {
       <div className="magic-background-white">
         <div className="container !max-w-[1200px]">
           <div className="card !max-w-none">
-            <MagicTeaPartyHero globalError={globalError} notices={notices} onClearNotices={clearNotices} />
+            <MagicTeaPartyHero globalError={globalError} />
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
                 <MagicTeaPartySessionSidebar
@@ -865,6 +866,8 @@ export default function MagicTeaPartyPage() {
                     ) : null}
                   </div>
                 ) : null}
+
+                <MagicTeaPartyNoticePanel notices={notices} onClearNotices={clearNotices} />
 
                 <div className="rounded-xl border border-pink-100 bg-white p-4">
                   <MagicTeaPartyChatTimeline
