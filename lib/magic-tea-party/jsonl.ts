@@ -134,26 +134,29 @@ const parseLooseNoticeFromLine = (raw: string): MagicTeaPartyNotice | null => {
   const hasKeywordTriplet = hasPairs && hasNoticeKeywordTriplet(trimmed);
   if (!hasExplicitPrefix && !hasKeywordTriplet) return null;
 
-  const messageCandidate = pairs.message || pairs.content || pairs.text || '';
-  const noticeCandidate = pairs.notice || pairs.motice || '';
-  const message = messageCandidate || (isTrivialNoticeMarker(noticeCandidate) ? '' : noticeCandidate);
-  const level = pairs.level || 'info';
-  const code = pairs.code || '';
+  const tail = hasExplicitPrefix ? trimmed.replace(/^(notice|motice|mtp_notice)\b[:\s-]*/i, '').trim() : '';
+  const tailPairs = tail ? parseLooseKeyValuePairs(tail) : {};
+  const mergedPairs = { ...pairs, ...tailPairs };
+  const messageCandidate = mergedPairs.message || mergedPairs.content || mergedPairs.text || '';
+  const noticeCandidate = mergedPairs.notice || mergedPairs.motice || '';
+  const level = mergedPairs.level || 'info';
+  const code = mergedPairs.code || '';
 
-  const notice = parseMagicTeaPartyNoticePayload(
-    {
-      type: 'notice',
-      level,
-      ...(code ? { code } : {}),
-      ...(message ? { message } : {}),
-      ...(pairs.notice ? { notice: pairs.notice } : {}),
-      ...(pairs.motice ? { motice: pairs.motice } : {}),
-    },
-    { rawLine: normalizeJsonlLine(raw), assumeNotice: true }
-  );
+  const noticePayload: Record<string, unknown> = {
+    type: 'notice',
+    level,
+    ...(code ? { code } : {}),
+    ...(messageCandidate ? { message: messageCandidate } : {}),
+  };
+  if (messageCandidate && noticeCandidate && !isTrivialNoticeMarker(noticeCandidate)) {
+    noticePayload.notice = noticeCandidate;
+  }
+  const notice = parseMagicTeaPartyNoticePayload(noticePayload, {
+    rawLine: normalizeJsonlLine(raw),
+    assumeNotice: true,
+  });
   if (notice) return notice;
 
-  const tail = trimmed.replace(/^(notice|motice|mtp_notice)\b[:\s-]*/i, '').trim();
   if (tail && !/\b(level|code|message|content|text|notice|motice)\b\s*[:=]/i.test(tail)) {
     return parseMagicTeaPartyNoticePayload(
       {
