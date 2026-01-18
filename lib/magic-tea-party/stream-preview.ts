@@ -21,26 +21,10 @@ type StreamPreviewOptions = {
   onUpdate: (update: MagicTeaPartyStreamPreviewUpdate) => void;
 };
 
-const buildPreviewContentFromSegments = (segments: MagicTeaPartyMessage['segments'] | undefined): string => {
-  if (!segments || segments.length === 0) return '';
-  const lines: string[] = [];
-  for (const seg of segments) {
-    if (!seg) continue;
-    if (seg.type === 'narration') {
-      if (seg.text) lines.push(seg.text);
-      continue;
-    }
-    if (seg.type === 'dialogue') {
-      const name = seg.speakerName || seg.speakerId || '角色';
-      lines.push(`${name}: ${seg.text}`);
-      continue;
-    }
-    if (seg.type === 'choices') {
-      for (const item of seg.items) {
-        lines.push(`- ${item.text}`);
-      }
-    }
-  }
+const buildPreviewContentFromState = (state: ReturnType<typeof createMagicTeaPartyJsonlStreamState>): string => {
+  const lines = Array.isArray(state.previewLines) ? [...state.previewLines] : [];
+  const tail = state.buffer;
+  if (tail) lines.push(tail);
   return lines.join('\n');
 };
 
@@ -71,6 +55,7 @@ export function createMagicTeaPartyStreamPreview(options: StreamPreviewOptions):
         jsonlStreamState.segments = resetState.segments;
         jsonlStreamState.choices = resetState.choices;
         jsonlStreamState.notices = resetState.notices;
+        jsonlStreamState.previewLines = resetState.previewLines;
         lastNoticeCount = 0;
       }
       lastSafeSnapshot = safeText;
@@ -81,7 +66,7 @@ export function createMagicTeaPartyStreamPreview(options: StreamPreviewOptions):
       lastNoticeCount = jsonlStreamState.notices.length;
 
       onUpdate({
-        content: buildPreviewContentFromSegments(jsonlStreamState.segments),
+        content: buildPreviewContentFromState(jsonlStreamState),
         status,
         includeJsonl: true,
         segments: [...jsonlStreamState.segments],

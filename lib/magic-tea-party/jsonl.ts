@@ -24,6 +24,7 @@ export type MagicTeaPartyJsonlStreamState = {
   summary: MagicTeaPartyOutputSummary | null;
   updates: MagicTeaPartyUpdateDraft[] | null;
   updatesMeta: Record<string, unknown> | null;
+  previewLines?: string[];
 };
 
 const readString = (value: unknown): string => (typeof value === 'string' ? value : '').trim();
@@ -206,9 +207,24 @@ const parseUpdatesPayload = (
 };
 
 const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw: string): boolean => {
+  const pushPreview = (value: string | string[]) => {
+    if (!state.previewLines) return;
+    if (Array.isArray(value)) {
+      state.previewLines.push(...value);
+    } else {
+      state.previewLines.push(value);
+    }
+  };
+
   const line = raw.trim();
-  if (!line) return true;
-  if (isMarkdownFenceLine(line)) return true;
+  if (!line) {
+    pushPreview(raw);
+    return true;
+  }
+  if (isMarkdownFenceLine(line)) {
+    pushPreview(raw);
+    return true;
+  }
 
   let parsed: any = null;
   parsed = tryParseJsonFromLine(line);
@@ -221,8 +237,10 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
     const hint = detectSideChannelHint(raw) ?? detectLooseSideChannelHint(raw);
     if (hint) {
       state.notices.push(buildSideChannelParseNotice(hint));
+      pushPreview(raw);
       return false;
     }
+    pushPreview(raw);
     state.segments.push({ type: 'narration', text: raw });
     return true;
   }
@@ -239,6 +257,9 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
   if (type === 'summary') {
     const summary = parseSummaryPayload(parsed);
     if (summary) state.summary = summary;
+    if (!summary) {
+      pushPreview(raw);
+    }
     return false;
   }
 
@@ -248,13 +269,21 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
       state.updates = updatesPayload.drafts;
       state.updatesMeta = updatesPayload.meta;
     }
+    if (!updatesPayload) {
+      pushPreview(raw);
+    }
     return false;
   }
 
   if (type === 'narration') {
     const narrationText = readTextField(parsed);
-    if (narrationText) state.segments.push({ type: 'narration', text: narrationText });
-    else state.segments.push({ type: 'narration', text: raw });
+    if (narrationText) {
+      state.segments.push({ type: 'narration', text: narrationText });
+      pushPreview(narrationText);
+    } else {
+      state.segments.push({ type: 'narration', text: raw });
+      pushPreview(raw);
+    }
     return true;
   }
 
@@ -263,6 +292,7 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
     const speakerName = readString(parsed?.speakerName) || readString(parsed?.speaker) || readString(parsed?.name);
     const dialogueText = readTextField(parsed);
     if (!speakerId || !dialogueText) {
+      pushPreview(raw);
       state.segments.push({ type: 'narration', text: raw });
       return true;
     }
@@ -272,6 +302,8 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
       ...(speakerName ? { speakerName } : {}),
       text: dialogueText,
     });
+    const displayName = speakerName || speakerId;
+    pushPreview(displayName ? `${displayName}: ${dialogueText}` : dialogueText);
     return true;
   }
 
@@ -300,12 +332,15 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
     if (items.length > 0) {
       state.choices = items;
       state.segments.push({ type: 'choices', items });
+      pushPreview(items.map((item) => `- ${item.text}`));
     } else {
+      pushPreview(raw);
       state.segments.push({ type: 'narration', text: raw });
     }
     return true;
   }
 
+  pushPreview(raw);
   state.segments.push({ type: 'narration', text: raw });
   return true;
 };
@@ -318,6 +353,7 @@ export const createMagicTeaPartyJsonlStreamState = (): MagicTeaPartyJsonlStreamS
   summary: null,
   updates: null,
   updatesMeta: null,
+  previewLines: [],
 });
 
 export const ingestMagicTeaPartyJsonlChunk = (state: MagicTeaPartyJsonlStreamState, chunk: string): void => {
