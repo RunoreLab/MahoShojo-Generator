@@ -1,5 +1,13 @@
 [
   {
+    "id": "20260118-v071-magic-tea-party",
+    "date": "2026-01-18",
+    "title": "✨ v0.7.1 魔法茶会上线！长期剧情会话/选项/摘要/角色更新",
+    "publisher": "末伏之夜",
+    "pinned": true,
+    "content": "### ✨ **v0.7.1 更新公告：【魔法茶会 × 长期剧情会话】** ✨\n\n我们在 v0.7.1 带来了一个大体量的新功能：**魔法茶会（/magic-tea-party）**。\n\n它更像“跑团/视觉小说式的长期对话”，而不是竞技场那种“一次生成一篇战报”：\n- 你可以把多张角色卡请进同一个舞台\n- 可选主情景 + 追加情景，慢慢推进长线剧情\n- 支持 **JSONL / Markdown** 两种输出\n- 支持 **视觉小说选项、自动摘要、角色更新（写入历战/状态）**\n- 支持 **导入/导出、分支会话与合并**（更适合多路线尝试）\n\n---\n\n#### ✅ 重要提醒（避免先翻车）\n- 茶会 **仅支持自备 API Key**（不会提供官方 Key 兜底）\n- 会话默认只保存在本地浏览器，换设备/清缓存会丢：建议定期导出 JSON 或归档 ZIP\n\n---\n\n#### 🚀 快速上手\n1) 打开：/magic-tea-party\n2) 左侧选择供应商/模型并填写你的 API Key\n3) 新建会话 → 选择角色卡/情景卡 → 生成开场 → 开始聊天\n\n---\n\n#### 📚 配套百科（强烈建议收藏）\n- 功能与快速开始：/encyclopedia/magic-tea-party\n- 设置与参数说明：/encyclopedia/magic-tea-party-settings\n- 会话管理（分支/合并/备份与导出）：/encyclopedia/magic-tea-party-session-management\n- 角色卡/情景卡进阶（协议与 mtp_notice）：/encyclopedia/magic-tea-party-card-authoring\n- 错误排查与 FAQ：/encyclopedia/magic-tea-party-troubleshooting\n\n欢迎大家用茶会写长线故事、日常互动、群像跑团，也欢迎把你遇到的协议兼容/格式问题丢给我们继续打磨！"
+  },
+  {
     "id": "20260114-v070-creator-tools",
     "date": "2026-01-14",
     "title": "✨ v0.7.0 创作者工具箱上线！通用情景卡/自由生成/酒馆生态/组队卡",
