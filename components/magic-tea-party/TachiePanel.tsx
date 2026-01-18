@@ -217,6 +217,7 @@ export function MagicTeaPartyTachiePanel(props: {
   const cacheLimits = useMemo(() => resolveMagicTeaPartyCacheLimits(props.preferences), [props.preferences]);
   const sessionStats = useMemo(() => calculateMagicTeaPartyCacheStats(assets), [assets]);
 
+  const [collapsed, setCollapsed] = useState(true);
   const [kind, setKind] = useState<MagicTeaPartyImageKind>('tachie');
   const [styleId, setStyleId] = useState<string>('default');
   const [mainRoleId, setMainRoleId] = useState<string>('');
@@ -473,35 +474,55 @@ export function MagicTeaPartyTachiePanel(props: {
             立绘用于角色展示；插画用于“视觉小说式”的剧情画面。生成结果仅保存在本地浏览器缓存中。
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {kind === 'tachie' ? (
-            <button
-              type="button"
-              className="flex-none rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={() => void handleClearRole()}
-              disabled={!mainRoleId || assets.filter((asset) => asset.roleId === mainRoleId).length === 0}
-              title="清理当前角色的立绘缓存"
-            >
-              清理本角色
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="flex-none rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={() => void handleClear()}
-            disabled={assets.length === 0}
-            title="清空本会话已生成的立绘/插画缓存"
-          >
-            清空缓存
-          </button>
-        </div>
+        <button
+          type="button"
+          className="text-xs text-pink-700 hover:underline"
+          onClick={() => setCollapsed((prev) => !prev)}
+        >
+          {collapsed ? '展开' : '收起'}
+        </button>
       </div>
 
-      <div className="text-[11px] text-gray-500">
-        本会话缓存：{sessionStats.totalCount} 张 · {formatMagicTeaPartyBytes(sessionStats.totalBytes)}
-        {sessionStats.unknownCount > 0 ? `（${sessionStats.unknownCount} 张大小待统计）` : ''}
-        {sessionStats.expiredCount > 0 ? `（过期 ${sessionStats.expiredCount} 张）` : ''}
-      </div>
+      {collapsed ? (
+        <div className="space-y-2 text-xs text-gray-500">
+          <div>
+            当前模式：{kind === 'tachie' ? '角色立绘' : '剧情插画'} · 本会话缓存 {sessionStats.totalCount} 张 ·{' '}
+            {formatMagicTeaPartyBytes(sessionStats.totalBytes)}
+          </div>
+          {sessionStats.unknownCount > 0 ? <div>有 {sessionStats.unknownCount} 张大小待统计。</div> : null}
+          {sessionStats.expiredCount > 0 ? <div>过期 {sessionStats.expiredCount} 张。</div> : null}
+          {assetError ? <div className="text-xs text-red-600">{assetError}</div> : null}
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            {kind === 'tachie' ? (
+              <button
+                type="button"
+                className="flex-none rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => void handleClearRole()}
+                disabled={!mainRoleId || assets.filter((asset) => asset.roleId === mainRoleId).length === 0}
+                title="清理当前角色的立绘缓存"
+              >
+                清理本角色
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="flex-none rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void handleClear()}
+              disabled={assets.length === 0}
+              title="清空本会话已生成的立绘/插画缓存"
+            >
+              清空缓存
+            </button>
+          </div>
+
+          <div className="text-[11px] text-gray-500">
+            本会话缓存：{sessionStats.totalCount} 张 · {formatMagicTeaPartyBytes(sessionStats.totalBytes)}
+            {sessionStats.unknownCount > 0 ? `（${sessionStats.unknownCount} 张大小待统计）` : ''}
+            {sessionStats.expiredCount > 0 ? `（过期 ${sessionStats.expiredCount} 张）` : ''}
+          </div>
 
       {assetError ? (
         <ErrorMessage
@@ -861,6 +882,8 @@ export function MagicTeaPartyTachiePanel(props: {
           }}
         />
       </div>
+        </>
+      )}
     </div>
   );
 }

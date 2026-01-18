@@ -48,42 +48,60 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
   const auxScenarios = activeSession?.auxScenarios ?? [];
   const [rolePasteText, setRolePasteText] = useState('');
   const [scenarioPasteText, setScenarioPasteText] = useState('');
+  const [collapsed, setCollapsed] = useState(false);
   const hasSession = Boolean(activeSession);
 
   return (
     <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-4">
-      {!hasSession ? (
-        <div className="rounded-lg border border-dashed border-pink-200 bg-pink-50/60 px-3 py-3 text-xs text-pink-800">
-          <div className="font-semibold">还没有会话</div>
-          <div className="mt-1 text-pink-700">先新建或选择会话，才能编辑角色/情景与继续对话。</div>
-          {onCreateSession ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className="rounded-md bg-pink-600 px-3 py-1 text-xs font-semibold text-white hover:bg-pink-700"
-                onClick={onCreateSession}
-              >
-                新建会话
-              </button>
-              <span className="text-[11px] text-pink-600">或在左侧会话列表中选择已有会话</span>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-800">会话设置</div>
-        <button
-          type="button"
-          className="text-xs text-gray-600 hover:underline"
-          onClick={onLockTitle}
-          title="标记为手动标题（阻止自动覆盖）"
-          disabled={!hasSession}
-        >
-          锁定标题
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="text-xs text-gray-600 hover:underline"
+            onClick={onLockTitle}
+            title="标记为手动标题（阻止自动覆盖）"
+            disabled={!hasSession}
+          >
+            锁定标题
+          </button>
+          <button
+            type="button"
+            className="text-xs text-pink-700 hover:underline"
+            onClick={() => setCollapsed((prev) => !prev)}
+          >
+            {collapsed ? '展开' : '收起'}
+          </button>
+        </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      {collapsed ? (
+        <div className="text-xs text-gray-500">
+          {hasSession
+            ? `角色 ${roles.length} · 情景 ${scenario ? '已选' : '未选'} · 追加情景 ${auxScenarios.length}`
+            : '尚未选择会话，展开可新建或选择。'}
+        </div>
+      ) : (
+        <>
+          {!hasSession ? (
+            <div className="rounded-lg border border-dashed border-pink-200 bg-pink-50/60 px-3 py-3 text-xs text-pink-800">
+              <div className="font-semibold">还没有会话</div>
+              <div className="mt-1 text-pink-700">先新建或选择会话，才能编辑角色/情景与继续对话。</div>
+              {onCreateSession ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded-md bg-pink-600 px-3 py-1 text-xs font-semibold text-white hover:bg-pink-700"
+                    onClick={onCreateSession}
+                  >
+                    新建会话
+                  </button>
+                  <span className="text-[11px] text-pink-600">或在左侧会话列表中选择已有会话</span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-semibold text-gray-600">角色</div>
@@ -281,6 +299,8 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
           />
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

@@ -13,6 +13,7 @@ type MagicTeaPartySessionCleanupPanelProps = {
 
 export function MagicTeaPartySessionCleanupPanel(props: MagicTeaPartySessionCleanupPanelProps) {
   const { preferences, activeSessionId, onPreferenceChange, onCleanupSessions } = props;
+  const [collapsed, setCollapsed] = useState(true);
   const [preview, setPreview] = useState<MagicTeaPartySession[] | null>(null);
   const [previewMeta, setPreviewMeta] = useState<{ expired: number; overLimit: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,91 +78,121 @@ export function MagicTeaPartySessionCleanupPanel(props: MagicTeaPartySessionClea
 
   return (
     <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-3">
-      <div className="text-sm font-semibold text-gray-800">会话清理</div>
-      <div className="text-[11px] text-gray-500">仅影响本地浏览器数据，可在导出后执行清理。</div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="grid gap-1">
-          <label className="text-xs font-semibold text-gray-600">保留天数</label>
-          <input
-            type="number"
-            min={1}
-            max={3650}
-            className="input-field !h-8 !px-2 !py-1 text-xs"
-            value={String(retentionDays)}
-            onChange={(event) => {
-              const nextValue = Number(event.target.value);
-              const value = Number.isFinite(nextValue) ? Math.max(1, Math.min(3650, Math.floor(nextValue))) : retentionDays;
-              onPreferenceChange({ sessionRetentionDays: value });
-            }}
-          />
-        </div>
-        <div className="grid gap-1">
-          <label className="text-xs font-semibold text-gray-600">最多保留会话数</label>
-          <input
-            type="number"
-            min={10}
-            max={1000}
-            className="input-field !h-8 !px-2 !py-1 text-xs"
-            value={String(maxSessions)}
-            onChange={(event) => {
-              const nextValue = Number(event.target.value);
-              const value = Number.isFinite(nextValue) ? Math.max(10, Math.min(1000, Math.floor(nextValue))) : maxSessions;
-              onPreferenceChange({ maxSessions: value });
-            }}
-          />
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold text-gray-800">会话清理</div>
+        <button
+          type="button"
+          className="text-xs text-pink-700 hover:underline"
+          onClick={() => setCollapsed((prev) => !prev)}
+        >
+          {collapsed ? '展开' : '收起'}
+        </button>
       </div>
 
-      <div className="rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span>{previewLabel}</span>
+      {collapsed ? (
+        <div className="space-y-2 text-xs text-gray-500">
+          <div>仅影响本地浏览器数据，可在导出后执行清理。</div>
+          <div>
+            保留 {retentionDays} 天 · 最多 {maxSessions} 个会话 · {previewLabel}
+          </div>
           {previewMeta ? (
-            <span>
+            <div>
               过期 {previewMeta.expired} · 超量 {previewMeta.overLimit}
-            </span>
+            </div>
+          ) : null}
+          {loading ? <div className="text-xs text-gray-500">处理中…</div> : null}
+          {error ? (
+            <div className="text-xs text-red-600">{error}</div>
           ) : null}
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="text-[11px] text-gray-500">仅影响本地浏览器数据，可在导出后执行清理。</div>
 
-      {preview && preview.length > 0 ? (
-        <div className="space-y-1 text-[11px] text-gray-600">
-          {preview.slice(0, 5).map((session) => (
-            <div key={session.id} className="truncate">
-              {session.title} · {new Date(session.updatedAt ?? session.createdAt).toLocaleString()}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-1">
+              <label className="text-xs font-semibold text-gray-600">保留天数</label>
+              <input
+                type="number"
+                min={1}
+                max={3650}
+                className="input-field !h-8 !px-2 !py-1 text-xs"
+                value={String(retentionDays)}
+                onChange={(event) => {
+                  const nextValue = Number(event.target.value);
+                  const value = Number.isFinite(nextValue) ? Math.max(1, Math.min(3650, Math.floor(nextValue))) : retentionDays;
+                  onPreferenceChange({ sessionRetentionDays: value });
+                }}
+              />
             </div>
-          ))}
-          {preview.length > 5 ? <div>…还有 {preview.length - 5} 个会话</div> : null}
-        </div>
-      ) : null}
+            <div className="grid gap-1">
+              <label className="text-xs font-semibold text-gray-600">最多保留会话数</label>
+              <input
+                type="number"
+                min={10}
+                max={1000}
+                className="input-field !h-8 !px-2 !py-1 text-xs"
+                value={String(maxSessions)}
+                onChange={(event) => {
+                  const nextValue = Number(event.target.value);
+                  const value = Number.isFinite(nextValue) ? Math.max(10, Math.min(1000, Math.floor(nextValue))) : maxSessions;
+                  onPreferenceChange({ maxSessions: value });
+                }}
+              />
+            </div>
+          </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          className="rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
-          onClick={() => void handlePreview()}
-          disabled={loading}
-        >
-          预览清理
-        </button>
-        <button
-          type="button"
-          className="rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
-          onClick={() => void handleCleanup()}
-          disabled={loading || (preview !== null && preview.length === 0)}
-        >
-          执行清理
-        </button>
-        {loading ? <span className="text-xs text-gray-500">处理中…</span> : null}
-      </div>
+          <div className="rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>{previewLabel}</span>
+              {previewMeta ? (
+                <span>
+                  过期 {previewMeta.expired} · 超量 {previewMeta.overLimit}
+                </span>
+              ) : null}
+            </div>
+          </div>
 
-      {error ? (
-        <ErrorMessage
-          message={error}
-          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
-          linkClassName="text-red-700 underline underline-offset-2 hover:opacity-95"
-        />
-      ) : null}
+          {preview && preview.length > 0 ? (
+            <div className="space-y-1 text-[11px] text-gray-600">
+              {preview.slice(0, 5).map((session) => (
+                <div key={session.id} className="truncate">
+                  {session.title} · {new Date(session.updatedAt ?? session.createdAt).toLocaleString()}
+                </div>
+              ))}
+              {preview.length > 5 ? <div>…还有 {preview.length - 5} 个会话</div> : null}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void handlePreview()}
+              disabled={loading}
+            >
+              预览清理
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void handleCleanup()}
+              disabled={loading || (preview !== null && preview.length === 0)}
+            >
+              执行清理
+            </button>
+            {loading ? <span className="text-xs text-gray-500">处理中…</span> : null}
+          </div>
+
+          {error ? (
+            <ErrorMessage
+              message={error}
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+              linkClassName="text-red-700 underline underline-offset-2 hover:opacity-95"
+            />
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
