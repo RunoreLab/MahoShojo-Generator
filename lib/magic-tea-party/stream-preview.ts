@@ -1,5 +1,5 @@
 import { createMagicTeaPartyJsonlStreamState, ingestMagicTeaPartyJsonlChunk } from '@/lib/magic-tea-party/jsonl';
-import type { MagicTeaPartyMessage, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
+import type { MagicTeaPartyMessage, MagicTeaPartyNotice, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
 
 type MagicTeaPartyOutputFormat = NonNullable<MagicTeaPartySession['settings']['outputFormat']>;
 
@@ -9,6 +9,7 @@ export type MagicTeaPartyStreamPreviewUpdate = {
   includeJsonl: boolean;
   segments?: MagicTeaPartyMessage['segments'];
   choices?: MagicTeaPartyMessage['choices'];
+  notices?: MagicTeaPartyNotice[];
 };
 
 export type MagicTeaPartyStreamPreviewController = {
@@ -33,6 +34,7 @@ export function createMagicTeaPartyStreamPreview(options: StreamPreviewOptions):
 
   const jsonlStreamState = createMagicTeaPartyJsonlStreamState();
   let lastSafeSnapshot = '';
+  let lastNoticeCount = 0;
 
   return {
     applySafeText: (safeText, status) => {
@@ -46,8 +48,14 @@ export function createMagicTeaPartyStreamPreview(options: StreamPreviewOptions):
         jsonlStreamState.segments = resetState.segments;
         jsonlStreamState.choices = resetState.choices;
         jsonlStreamState.notices = resetState.notices;
+        lastNoticeCount = 0;
       }
       lastSafeSnapshot = safeText;
+      const notices =
+        jsonlStreamState.notices.length > lastNoticeCount
+          ? jsonlStreamState.notices.slice(lastNoticeCount)
+          : [];
+      lastNoticeCount = jsonlStreamState.notices.length;
 
       onUpdate({
         content: safeText,
@@ -55,6 +63,7 @@ export function createMagicTeaPartyStreamPreview(options: StreamPreviewOptions):
         includeJsonl: true,
         segments: [...jsonlStreamState.segments],
         choices: jsonlStreamState.choices ? [...jsonlStreamState.choices] : undefined,
+        notices,
       });
     },
   };

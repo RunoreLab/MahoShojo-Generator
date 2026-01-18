@@ -555,6 +555,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
               return { ...m, ...patch };
             })
           );
+          if (update.notices && update.notices.length > 0) {
+            emitNotices(update.notices);
+          }
         },
       });
 
@@ -1246,6 +1249,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             return { ...m, ...patch };
           })
         );
+        if (update.notices && update.notices.length > 0) {
+          emitNotices(update.notices);
+        }
       },
     });
     const safety = createMagicTeaPartyStreamSafety({
