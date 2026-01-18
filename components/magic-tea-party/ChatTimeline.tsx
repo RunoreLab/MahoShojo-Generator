@@ -15,6 +15,8 @@ type MagicTeaPartyChatTimelineProps = {
   preferences: MagicTeaPartyPreferences;
   messages: MagicTeaPartyMessage[];
   isGenerating: boolean;
+  outputView: 'raw' | 'rendered';
+  onOutputViewChange: (view: 'raw' | 'rendered') => void;
   tachieAssets?: MagicTeaPartyTachieAsset[];
   anchorMessageId?: string | null;
   editingMessageId?: string | null;
@@ -39,6 +41,8 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
     preferences,
     messages,
     isGenerating,
+    outputView,
+    onOutputViewChange,
     tachieAssets,
     anchorMessageId,
     editingMessageId,
@@ -109,15 +113,33 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
             </div>
           ) : null}
         </div>
-        {isGenerating ? (
-          <button
-            type="button"
-            className="rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-700 hover:bg-pink-50"
-            onClick={onStopGenerating}
-          >
-            停止生成
-          </button>
-        ) : null}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-full border border-pink-200 bg-white p-0.5 text-xs font-semibold text-pink-700">
+            <button
+              type="button"
+              className={`rounded-full px-3 py-1 transition ${outputView === 'rendered' ? 'bg-pink-600 text-white' : 'hover:bg-pink-50'}`}
+              onClick={() => onOutputViewChange('rendered')}
+            >
+              渲染
+            </button>
+            <button
+              type="button"
+              className={`rounded-full px-3 py-1 transition ${outputView === 'raw' ? 'bg-pink-600 text-white' : 'hover:bg-pink-50'}`}
+              onClick={() => onOutputViewChange('raw')}
+            >
+              原始
+            </button>
+          </div>
+          {isGenerating ? (
+            <button
+              type="button"
+              className="rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-700 hover:bg-pink-50"
+              onClick={onStopGenerating}
+            >
+              停止生成
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="relative">
@@ -142,6 +164,7 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
                       session={activeSession}
                       preferences={preferences}
                       isGenerating={isGenerating}
+                      outputView={outputView}
                       tachieAssets={tachieAssets}
                       onSelectChoice={onSelectChoice}
                       onUseAsReference={onUseAsReference}

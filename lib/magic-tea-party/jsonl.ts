@@ -390,6 +390,18 @@ export const parseMagicTeaPartyJsonl = (text: string): ParseResult => {
   };
 };
 
+export const buildMagicTeaPartyJsonlPreview = (text: string): string => {
+  if (!text) return '';
+  const state = createMagicTeaPartyJsonlStreamState();
+  const lines = text.split('\n');
+  for (const raw of lines) {
+    appendMagicTeaPartyJsonlLine(state, raw);
+  }
+  const previewLines = Array.isArray(state.previewLines) ? [...state.previewLines] : [];
+  if (state.buffer) previewLines.push(state.buffer);
+  return previewLines.join('\n');
+};
+
 export const extractMagicTeaPartySideChannelsFromJsonl = (
   text: string
 ): {

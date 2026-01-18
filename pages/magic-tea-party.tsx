@@ -98,6 +98,7 @@ export default function MagicTeaPartyPage() {
   });
 
   const [notices, setNotices] = useState<MagicTeaPartyNotice[]>([]);
+  const [outputView, setOutputView] = useState<'raw' | 'rendered'>('raw');
 
   const buildNoticeKey = (notice: MagicTeaPartyNotice): string => {
     const meta = notice.meta && typeof notice.meta === 'object' ? (notice.meta as Record<string, unknown>) : null;
@@ -871,6 +872,8 @@ export default function MagicTeaPartyPage() {
                     preferences={preferences}
                     messages={messages}
                     isGenerating={isGenerating}
+                    outputView={outputView}
+                    onOutputViewChange={setOutputView}
                     tachieAssets={tachieAssets}
                     anchorMessageId={tachieAnchorMessageId}
                     editingMessageId={editingMessageId}

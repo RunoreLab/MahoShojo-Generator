@@ -15,6 +15,7 @@ type MagicTeaPartyChatMessageProps = {
   session: MagicTeaPartySession | null;
   preferences: MagicTeaPartyPreferences;
   isGenerating: boolean;
+  outputView?: 'raw' | 'rendered';
   tachieAssets?: MagicTeaPartyTachieAsset[];
   onSelectChoice?: (text: string) => void;
   onUseAsReference?: (message: MagicTeaPartyMessage, plainText: string) => void;
@@ -247,6 +248,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
   const { message, session, preferences, isGenerating, tachieAssets } = props;
   const isUser = message.role === 'user';
   const bubbleClass = isUser ? 'bg-pink-600 text-white' : 'bg-white border border-pink-100 text-gray-800';
+  const isRawView = message.role === 'assistant' && props.outputView === 'raw';
   const speakerName =
     message.meta && typeof message.meta === 'object' && typeof (message.meta as any).speakerName === 'string'
       ? String((message.meta as any).speakerName).trim()
@@ -272,6 +274,24 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
       {isSuperseded ? <div className="text-[11px] text-gray-400">该条消息已被更新替换</div> : null}
     </div>
   );
+
+  if (isRawView) {
+    return withHeader(
+      <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
+        <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+        {renderMessageAttachments(message, session, tachieAssets)}
+        {renderAssistantFooter(message)}
+        {renderAssistantActions({
+          message,
+          session,
+          isGenerating,
+          onUseAsReference: props.onUseAsReference,
+          onRegenerate: props.onRegenerate,
+          showRegenerate: props.showRegenerate,
+        })}
+      </div>
+    );
+  }
 
   if (message.role === 'assistant' && Array.isArray(message.segments) && message.segments.length > 0) {
     return withHeader(
