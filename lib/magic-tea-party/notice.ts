@@ -18,11 +18,11 @@ export const parseMagicTeaPartyNoticePayload = (payload: unknown): MagicTeaParty
   if (!record) return null;
 
   const type = readString(record.type).toLowerCase();
-  const hasNoticeShape = Boolean(readString(record.message) && (readString(record.level) || readString(record.code)));
+  const message = readString(record.message) || readString(record.content) || readString(record.text);
+  const hasNoticeShape = Boolean(message && (readString(record.level) || readString(record.code)));
   if (type && type !== 'notice') return null;
   if (!type && !hasNoticeShape) return null;
 
-  const message = readString(record.message);
   if (!message) return null;
 
   const code = readString(record.code);

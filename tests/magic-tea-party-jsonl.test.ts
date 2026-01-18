@@ -40,7 +40,7 @@ describe('magic tea party jsonl parser', () => {
   });
 
   it('疑似侧信道行解析失败时会忽略并提示', () => {
-    const input = ['{"type":"summary","text":"夜雨"}', '{"type":"summary","text":"夜雨"', '{"type":"narration","text":"灯光摇曳"}'].join('\n');
+    const input = ['{"type":"summary","text":"夜雨"}', 'summary text=夜雨', '{"type":"narration","text":"灯光摇曳"}'].join('\n');
     const parsed = parseMagicTeaPartyJsonl(input);
     expect(parsed.segments.map((seg) => seg.type)).toEqual(['narration']);
     expect(parsed.notices.some((notice) => notice.code === 'jsonl_side_channel_parse_error')).toBe(true);
@@ -69,6 +69,30 @@ describe('magic tea party jsonl parser', () => {
     expect(parsed.segments.map((seg) => seg.type)).toEqual(['narration']);
     expect(parsed.notices).toHaveLength(1);
     expect(parsed.notices[0]).toMatchObject({ level: 'error', code: 'missing', message: '缺少必要卡片' });
+  });
+
+  it('兼容 notice 的 content 字段与非 JSON notice 行', () => {
+    const jsonNotice = [
+      '{"type":"notice","level":"warning","content":"请注意，当前输入缺少角色卡"}',
+      '{"type":"narration","text":"风铃轻响。"}',
+    ].join('\n');
+    const parsedJsonNotice = parseMagicTeaPartyJsonl(jsonNotice);
+    expect(parsedJsonNotice.notices).toHaveLength(1);
+    expect(parsedJsonNotice.notices[0]).toMatchObject({ level: 'warning', message: '请注意，当前输入缺少角色卡' });
+    expect(parsedJsonNotice.segments.map((seg) => seg.type)).toEqual(['narration']);
+
+    const looseNotice = ['notice level=warning content=请注意，当前输入缺少角色卡', '{"type":"narration","text":"风铃轻响。"}'].join('\n');
+    const parsedLooseNotice = parseMagicTeaPartyJsonl(looseNotice);
+    expect(parsedLooseNotice.notices).toHaveLength(1);
+    expect(parsedLooseNotice.notices[0]).toMatchObject({ level: 'warning', message: '请注意，当前输入缺少角色卡' });
+    expect(parsedLooseNotice.segments.map((seg) => seg.type)).toEqual(['narration']);
+  });
+
+  it('会尝试修复轻度 JSON 格式错误', () => {
+    const input = '{"type":"narration","text":"灯影摇曳",}';
+    const parsed = parseMagicTeaPartyJsonl(input);
+    expect(parsed.segments).toHaveLength(1);
+    expect(parsed.segments[0]).toEqual({ type: 'narration', text: '灯影摇曳' });
   });
 
   it('会识别 summary/updates 作为侧信道输出', () => {

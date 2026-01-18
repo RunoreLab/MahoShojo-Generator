@@ -5,6 +5,7 @@ import type {
   MagicTeaPartyUpdateDraft,
 } from '@/lib/magic-tea-party/types';
 import { parseMagicTeaPartyNoticePayload } from '@/lib/magic-tea-party/notice';
+import { jsonrepair } from 'jsonrepair';
 
 type ParseResult = {
   segments: MagicTeaPartyOutputSegment[];
@@ -46,6 +47,88 @@ const normalizeJsonlLine = (raw: string): string => {
   const trimmed = raw.trim();
   if (!trimmed) return '';
   return trimmed.startsWith('data:') ? trimmed.slice('data:'.length).trim() : trimmed;
+};
+
+const stripWrappingQuotes = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'") || (first === '`' && last === '`')) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+};
+
+const parseLooseKeyValuePairs = (raw: string): Record<string, string> => {
+  const pairs: Record<string, string> = {};
+  const regex =
+    /\b(type|level|code|message|content|text)\b\s*[:=]\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s]+(?:\s+[^\s]+)*?)(?=\s+\b(?:type|level|code|message|content|text)\b\s*[:=]|$)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(raw)) !== null) {
+    const key = match[1].toLowerCase();
+    const value = stripWrappingQuotes(match[2]);
+    if (value) pairs[key] = value;
+  }
+  return pairs;
+};
+
+const detectLooseSideChannelHint = (raw: string): 'notice' | 'summary' | 'updates' | null => {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^notice\b/i.test(trimmed) || /\btype\s*[:=]\s*notice\b/i.test(trimmed)) return 'notice';
+  if (/^summary\b/i.test(trimmed) || /\btype\s*[:=]\s*summary\b/i.test(trimmed)) return 'summary';
+  if (/^(updates?|update)\b/i.test(trimmed) || /\btype\s*[:=]\s*(updates?|update)\b/i.test(trimmed)) return 'updates';
+  return null;
+};
+
+const parseLooseNoticeFromLine = (raw: string): MagicTeaPartyNotice | null => {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (!/^notice\b/i.test(trimmed) && !/\btype\s*[:=]\s*notice\b/i.test(trimmed)) return null;
+
+  const pairs = parseLooseKeyValuePairs(trimmed);
+  const message = pairs.message || pairs.content || pairs.text || '';
+  const level = pairs.level || 'info';
+  const code = pairs.code || '';
+
+  if (message) {
+    const notice = parseMagicTeaPartyNoticePayload({
+      type: 'notice',
+      level,
+      ...(code ? { code } : {}),
+      message,
+    });
+    if (notice) return notice;
+  }
+
+  const tail = trimmed.replace(/^notice\b[:\s-]*/i, '').trim();
+  if (tail && !/\b(level|code|message|content|text)\b\s*[:=]/i.test(tail)) {
+    return parseMagicTeaPartyNoticePayload({
+      type: 'notice',
+      level: 'info',
+      message: tail,
+    });
+  }
+
+  return null;
+};
+
+const tryParseJsonFromLine = (raw: string): unknown | null => {
+  const normalized = normalizeJsonlLine(raw);
+  if (!normalized) return null;
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    const looksJsonLike = /^[\[{]/.test(normalized.trim());
+    if (!looksJsonLike) return null;
+    try {
+      const repaired = jsonrepair(normalized);
+      return JSON.parse(repaired);
+    } catch {
+      return null;
+    }
+  }
 };
 
 const detectSideChannelHint = (raw: string): 'notice' | 'summary' | 'updates' | null => {
@@ -128,11 +211,14 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
   if (isMarkdownFenceLine(line)) return true;
 
   let parsed: any = null;
-  try {
-    const normalized = normalizeJsonlLine(line);
-    parsed = JSON.parse(normalized);
-  } catch {
-    const hint = detectSideChannelHint(raw);
+  parsed = tryParseJsonFromLine(line);
+  if (!parsed) {
+    const looseNotice = parseLooseNoticeFromLine(raw);
+    if (looseNotice) {
+      state.notices.push(looseNotice);
+      return false;
+    }
+    const hint = detectSideChannelHint(raw) ?? detectLooseSideChannelHint(raw);
     if (hint) {
       state.notices.push(buildSideChannelParseNotice(hint));
       return false;
@@ -293,12 +379,15 @@ export const extractMagicTeaPartySideChannelsFromJsonl = (
       kept.push(raw);
       continue;
     }
-    const normalized = normalizeJsonlLine(trimmed);
     let parsed: any = null;
-    try {
-      parsed = JSON.parse(normalized);
-    } catch {
-      const hint = detectSideChannelHint(raw);
+    parsed = tryParseJsonFromLine(trimmed);
+    if (!parsed) {
+      const looseNotice = parseLooseNoticeFromLine(raw);
+      if (looseNotice) {
+        notices.push(looseNotice);
+        continue;
+      }
+      const hint = detectSideChannelHint(raw) ?? detectLooseSideChannelHint(raw);
       if (hint) {
         notices.push(buildSideChannelParseNotice(hint));
         continue;
