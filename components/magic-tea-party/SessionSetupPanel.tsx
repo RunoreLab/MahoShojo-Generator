@@ -96,7 +96,7 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
               浏览在线角色库
             </button>
           </div>
-          <input type="file" accept=".json" multiple className="input-field" onChange={onUploadRoles} disabled={!hasSession} />
+          <input type="file" accept=".json,.png" multiple className="input-field" onChange={onUploadRoles} disabled={!hasSession} />
           <div
             className="rounded-lg border border-dashed border-pink-200 bg-pink-50/40 p-3 text-xs text-gray-600"
             onDragOver={(event) => event.preventDefault()}
@@ -108,12 +108,12 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
               void onDropRoles(files);
             }}
           >
-            <div className="text-xs font-semibold text-gray-600">粘贴 / 拖拽导入角色卡</div>
+            <div className="text-xs font-semibold text-gray-600">粘贴 / 拖拽导入角色卡（支持 SillyTavern PNG/JSON）</div>
             <textarea
               className="input-field mt-2 h-20 resize-y"
               value={rolePasteText}
               onChange={(event) => setRolePasteText(event.target.value)}
-              placeholder="粘贴角色卡 JSON（单卡或数组）"
+              placeholder="粘贴角色卡 JSON（单卡/数组，支持 SillyTavern JSON）"
               disabled={!hasSession}
             />
             <div className="mt-2 flex items-center justify-end gap-2">

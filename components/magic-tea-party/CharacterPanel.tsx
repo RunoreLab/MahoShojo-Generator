@@ -27,6 +27,7 @@ const parseDataCardPayload = (raw: unknown): any => {
 const getRoleSourceLabel = (role: MagicTeaPartyRole): string => {
   if (role.source === 'preset') return '预设';
   if (role.source === 'local') return '本地';
+  if (role.source === 'tavern') return '酒馆';
   if (role.source === 'public') return '公开';
   if (role.source === 'cloud') return '私有';
   return '未知';
@@ -83,6 +84,7 @@ const buildRoleBadges = (role: MagicTeaPartyRole): { text: string; tone: 'pink' 
   const badges: { text: string; tone: 'pink' | 'gray' | 'amber' | 'blue' }[] = [];
   if (role.source === 'preset') badges.push({ text: '预设', tone: 'pink' });
   if (role.source === 'local') badges.push({ text: '本地', tone: 'gray' });
+  if (role.source === 'tavern') badges.push({ text: '酒馆', tone: 'blue' });
   if (role.source === 'cloud') badges.push({ text: '私有', tone: 'blue' });
   if (role.source === 'public') badges.push({ text: '公开', tone: 'blue' });
   if (role.template) badges.push({ text: `模板:${role.template}`, tone: 'amber' });

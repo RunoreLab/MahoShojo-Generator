@@ -17,12 +17,19 @@ import {
 } from '@/lib/magic-tea-party/preferences';
 import { getMagicTeaPartyPreset, type MagicTeaPartyPresetId } from '@/lib/magic-tea-party/presets';
 import {
+  buildMagicTeaPartyRoleCardFromTavern,
+  isTavernCardPayload,
+  normalizeTavernCardPayload,
+} from '@/lib/magic-tea-party/tavern-import';
+import {
   deleteMagicTeaPartySession,
   getMagicTeaPartySession,
   listMagicTeaPartyMessages,
   listMagicTeaPartySessions,
   putMagicTeaPartyMessage,
   putMagicTeaPartySession,
+  putMagicTeaPartyTachieAsset,
+  putMagicTeaPartyTachieBlob,
 } from '@/lib/magic-tea-party/storage';
 import { deriveMagicTeaPartyTitle } from '@/lib/magic-tea-party/title';
 import type {
@@ -32,7 +39,13 @@ import type {
   MagicTeaPartyScenario,
   MagicTeaPartySession,
 } from '@/lib/magic-tea-party/types';
+import {
+  cleanupMagicTeaPartyTachieCache,
+  resolveMagicTeaPartyCacheLimits,
+  resolveMagicTeaPartyTachieExpireAt,
+} from '@/lib/magic-tea-party/cache';
 import { applyShieldWords } from '@/lib/shield-word-filter';
+import { parseTavernCardFromPngFile } from '@/lib/tavern-card';
 
 const STORAGE_RECENT_SESSION = 'magic-tea-party:recent-session';
 type MagicTeaPartyOutputFormat = NonNullable<MagicTeaPartySession['settings']['outputFormat']>;
@@ -179,6 +192,33 @@ const buildScenarioFromLocalJson = (card: Record<string, unknown>, meta: { fileN
     origin: { fileName: meta.fileName, importedAt: meta.importedAt },
   };
 };
+
+const buildRoleFromTavernCard = (card: Record<string, unknown>, meta: { fileName?: string; importedAt: number }): MagicTeaPartyRole => {
+  const name = typeof (card as any).name === 'string' ? (card as any).name.trim() : '';
+  return {
+    id: randomUUID(),
+    name: name || '角色',
+    template: 'general',
+    templateId: typeof (card as any).templateId === 'string' ? (card as any).templateId : undefined,
+    source: 'tavern',
+    card,
+    origin: { fileName: meta.fileName, importedAt: meta.importedAt },
+  };
+};
+
+const isPngFile = (file: File): boolean => {
+  if (!file) return false;
+  if (file.type === 'image/png') return true;
+  return file.name.toLowerCase().endsWith('.png');
+};
+
+const readFileAsDataUrl = async (file: File): Promise<string> =>
+  await new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(file);
+  });
 
 export type UseMagicTeaPartySessionsOptions = {
   username?: string | null;
@@ -812,9 +852,52 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
 
       const importedAt = Date.now();
       const nextRoles: MagicTeaPartyRole[] = [...(activeSession.roles ?? [])];
+      const cacheLimits = resolveMagicTeaPartyCacheLimits(preferences);
 
       for (const file of files) {
         try {
+          if (isPngFile(file)) {
+            const parsed = await parseTavernCardFromPngFile(file);
+            if (parsed && typeof parsed === 'object' && 'code' in parsed) {
+              continue;
+            }
+            const normalized = (parsed as { normalized: ReturnType<typeof normalizeTavernCardPayload> }).normalized;
+            const { card } = buildMagicTeaPartyRoleCardFromTavern(normalized);
+            const allowed = await guardImportText(JSON.stringify(card), {
+              label: '魔法茶会导入 SillyTavern 角色卡',
+              filename: file.name,
+              mimeType: file.type || 'image/png',
+            });
+            if (!allowed) return;
+            const maskedCard = maskMagicTeaPartyJsonValue(card).value as Record<string, unknown>;
+            const role = buildRoleFromTavernCard(maskedCard, { fileName: file.name, importedAt });
+            nextRoles.push(role);
+
+            try {
+              const assetId = randomUUID();
+              const dataUrl = await readFileAsDataUrl(file);
+              await putMagicTeaPartyTachieBlob(assetId, file);
+              await putMagicTeaPartyTachieAsset({
+                id: assetId,
+                sessionId: activeSession.id,
+                kind: 'tachie',
+                roleId: role.id,
+                cacheKey: `tavern:${role.id}:${file.name}:${file.size}:${file.lastModified}`,
+                fragmentHash: `tavern:${role.id}:${file.size}`,
+                styleId: 'tavern-import',
+                imageUrl: dataUrl || undefined,
+                createdAt: importedAt,
+                lastUsedAt: importedAt,
+                expireAt: resolveMagicTeaPartyTachieExpireAt(importedAt),
+                blobSize: file.size,
+              });
+              await cleanupMagicTeaPartyTachieCache({ sessionId: activeSession.id, limits: cacheLimits });
+            } catch {
+              // ignore cache failures
+            }
+            continue;
+          }
+
           const text = await file.text();
           const allowed = await guardImportText(text, {
             label: '魔法茶会导入角色卡',
@@ -825,9 +908,20 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
           const payloads = sanitizeJsonPayloads(parseJsonPayloads(text));
           if (payloads.length === 0) continue;
           for (const payload of payloads) {
-            const role = buildRoleFromLocalJson(payload, { fileName: file.name, importedAt });
-            if (!role) continue;
-            nextRoles.push(role);
+            const template = inferTemplate(payload);
+            if (template === 'magical-girl' || template === 'canshou' || template === 'general') {
+              const role = buildRoleFromLocalJson(payload, { fileName: file.name, importedAt });
+              if (!role) continue;
+              nextRoles.push(role);
+              continue;
+            }
+            if (isTavernCardPayload(payload)) {
+              const normalized = normalizeTavernCardPayload(payload);
+              const { card } = buildMagicTeaPartyRoleCardFromTavern(normalized);
+              const maskedCard = maskMagicTeaPartyJsonValue(card).value as Record<string, unknown>;
+              const role = buildRoleFromTavernCard(maskedCard, { fileName: file.name, importedAt });
+              nextRoles.push(role);
+            }
           }
         } catch {
           // ignore invalid file
@@ -840,7 +934,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       }
       await updateActiveSessionRoles(nextRoles);
     },
-    [activeSession, guardImportText, onGlobalError, updateActiveSessionRoles]
+    [activeSession, guardImportText, onGlobalError, preferences, updateActiveSessionRoles]
   );
 
   const onDropScenarios = useCallback(
@@ -921,9 +1015,20 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       const importedAt = Date.now();
       const nextRoles: MagicTeaPartyRole[] = [...(activeSession.roles ?? [])];
       for (const payload of payloads) {
-        const role = buildRoleFromLocalJson(payload, { fileName: 'pasted.json', importedAt });
-        if (!role) continue;
-        nextRoles.push(role);
+        const template = inferTemplate(payload);
+        if (template === 'magical-girl' || template === 'canshou' || template === 'general') {
+          const role = buildRoleFromLocalJson(payload, { fileName: 'pasted.json', importedAt });
+          if (!role) continue;
+          nextRoles.push(role);
+          continue;
+        }
+        if (isTavernCardPayload(payload)) {
+          const normalized = normalizeTavernCardPayload(payload);
+          const { card } = buildMagicTeaPartyRoleCardFromTavern(normalized);
+          const maskedCard = maskMagicTeaPartyJsonValue(card).value as Record<string, unknown>;
+          const role = buildRoleFromTavernCard(maskedCard, { fileName: 'pasted.json', importedAt });
+          nextRoles.push(role);
+        }
       }
       if (nextRoles.length === (activeSession.roles ?? []).length) {
         onGlobalError?.('未识别到有效的角色卡。');
