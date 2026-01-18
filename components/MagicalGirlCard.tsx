@@ -105,13 +105,37 @@ const renderInlineValue = (value: unknown): string => {
   return String(value);
 };
 
-const FieldRow = ({ label, content }: { label: string; content: string }) => {
+const isMarkdownLike = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+
+  if (trimmed.includes('\n')) return true;
+
   return (
-    <div className="flex items-start gap-2 min-w-0">
-      <div className="shrink-0 font-semibold">{label}：</div>
-      <div className="min-w-0 flex-1">
-        <MarkdownBlock content={content} variant="dark" />
-      </div>
+    /(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+\.\s|>)/.test(trimmed)
+    || /`/.test(trimmed)
+    || /\$\$?/.test(trimmed)
+    || /!\[[^\]]*\]\([^)]+\)/.test(trimmed)
+    || /\[[^\]]+\]\([^)]+\)/.test(trimmed)
+    || /(\*\*|__|~~)/.test(trimmed)
+    || /<(audio|video|img)\b/i.test(trimmed)
+  );
+};
+
+const InlineField = ({ label, content }: { label: string; content: string }) => {
+  const normalized = String(content ?? '');
+  const shouldRenderMarkdown = isMarkdownLike(normalized);
+
+  return (
+    <div className="leading-relaxed">
+      <span className="font-semibold">{label}：</span>
+      {shouldRenderMarkdown ? (
+        <div className="mt-1">
+          <MarkdownBlock content={normalized} variant="dark" />
+        </div>
+      ) : (
+        <span className="whitespace-pre-wrap break-words">{normalized}</span>
+      )}
     </div>
   );
 };
@@ -266,11 +290,11 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         <div className="result-item">
           <div className="result-label">👗 魔法少女外观</div>
           <div className="result-value whitespace-pre-wrap break-words">
-            <div className="space-y-1">
-              <FieldRow label="服装" content={magicalGirl.appearance.outfit} />
-              <FieldRow label="饰品" content={magicalGirl.appearance.accessories} />
-              <FieldRow label="配色" content={magicalGirl.appearance.colorScheme} />
-              <FieldRow label="整体风格" content={magicalGirl.appearance.overallLook} />
+            <div className="space-y-2">
+              <InlineField label="服装" content={magicalGirl.appearance.outfit} />
+              <InlineField label="饰品" content={magicalGirl.appearance.accessories} />
+              <InlineField label="配色" content={magicalGirl.appearance.colorScheme} />
+              <InlineField label="整体风格" content={magicalGirl.appearance.overallLook} />
             </div>
           </div>
         </div>
@@ -279,14 +303,14 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         <div className="result-item">
           <div className="result-label">⚔️ 魔力构装</div>
           <div className="result-value whitespace-pre-wrap break-words">
-            <div className="space-y-1">
-              <FieldRow label="名称" content={magicalGirl.magicConstruct.name} />
-              <div className="flex items-start gap-2 min-w-0">
-                <div className="shrink-0 font-semibold">形态：</div>
-                <div className="min-w-0 flex-1">{renderComplexValue(magicalGirl.magicConstruct.form)}</div>
+            <div className="space-y-2">
+              <InlineField label="名称" content={magicalGirl.magicConstruct.name} />
+              <div className="leading-relaxed">
+                <span className="font-semibold">形态：</span>
+                {renderComplexValue(magicalGirl.magicConstruct.form)}
               </div>
             </div>
-            <div><strong>基本能力：</strong></div>
+            <div className="mt-2"><strong>基本能力：</strong></div>
             {Array.isArray(magicalGirl.magicConstruct.basicAbilities) ? (
               <ul style={{ marginLeft: '1rem', marginTop: '0.5rem' }}>
                 {magicalGirl.magicConstruct.basicAbilities.map((ability, index) => renderAbilityItem(ability, index))}
@@ -297,8 +321,7 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
               </div>
             )}
             <div className="mt-2">
-              <div className="font-semibold">详细描述：</div>
-              <MarkdownBlock content={magicalGirl.magicConstruct.description} variant="dark" />
+              <InlineField label="详细描述" content={magicalGirl.magicConstruct.description} />
             </div>
           </div>
         </div>
@@ -307,11 +330,11 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         <div className="result-item">
           <div className="result-label">🌟 奇境规则</div>
           <div className="result-value whitespace-pre-wrap break-words">
-            <div className="space-y-1">
-              <FieldRow label="规则名称" content={magicalGirl.wonderlandRule.name} />
-              <FieldRow label="规则描述" content={magicalGirl.wonderlandRule.description} />
-              <FieldRow label="规则倾向" content={magicalGirl.wonderlandRule.tendency} />
-              <FieldRow label="激活条件" content={magicalGirl.wonderlandRule.activation} />
+            <div className="space-y-2">
+              <InlineField label="规则名称" content={magicalGirl.wonderlandRule.name} />
+              <InlineField label="规则描述" content={magicalGirl.wonderlandRule.description} />
+              <InlineField label="规则倾向" content={magicalGirl.wonderlandRule.tendency} />
+              <InlineField label="激活条件" content={magicalGirl.wonderlandRule.activation} />
             </div>
           </div>
         </div>
@@ -320,11 +343,11 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         <div className="result-item">
           <div className="result-label">🌸 繁开状态</div>
           <div className="result-value whitespace-pre-wrap break-words">
-            <div className="flex items-start gap-2 min-w-0">
-              <div className="shrink-0 font-semibold">繁开名：</div>
-              <div className="min-w-0 flex-1">{renderComplexValue(magicalGirl.blooming.name)}</div>
+            <div className="leading-relaxed">
+              <span className="font-semibold">繁开名：</span>
+              {renderComplexValue(magicalGirl.blooming.name)}
             </div>
-            <div><strong>进化能力：</strong></div>
+            <div className="mt-2"><strong>进化能力：</strong></div>
             <ul style={{ marginLeft: '1rem', marginTop: '0.5rem' }}>
               {/*如果 magicalGirl.blooming.evolvedAbilities 是字符串，.map() 会抛出 TypeError。
                 因此，在使用 .map() 前进行 Array.isArray() 检查，确保代码的鲁棒性。
@@ -333,17 +356,17 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
                 <li key={index}>• {ability}</li>
               ))}
             </ul>
-            <div className="mt-2 space-y-1">
+            <div className="mt-2 space-y-2">
               {typeof magicalGirl.blooming.evolvedForm === 'string' ? (
-                <FieldRow label="进化形态" content={magicalGirl.blooming.evolvedForm} />
+                <InlineField label="进化形态" content={magicalGirl.blooming.evolvedForm} />
               ) : (
-                <div className="flex items-start gap-2 min-w-0">
-                  <div className="shrink-0 font-semibold">进化形态：</div>
-                  <div className="min-w-0 flex-1">{renderComplexValue(magicalGirl.blooming.evolvedForm)}</div>
+                <div className="leading-relaxed">
+                  <span className="font-semibold">进化形态：</span>
+                  {renderComplexValue(magicalGirl.blooming.evolvedForm)}
                 </div>
               )}
-              <FieldRow label="进化衣装" content={magicalGirl.blooming.evolvedOutfit} />
-              <FieldRow label="力量等级" content={magicalGirl.blooming.powerLevel} />
+              <InlineField label="进化衣装" content={magicalGirl.blooming.evolvedOutfit} />
+              <InlineField label="力量等级" content={magicalGirl.blooming.powerLevel} />
             </div>
           </div>
         </div>
@@ -352,10 +375,10 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         <div className="result-item">
           <div className="result-label">🔮 性格分析</div>
           <div className="result-value whitespace-pre-wrap break-words">
-            <div className="space-y-1">
-              <FieldRow label="性格分析" content={magicalGirl.analysis.personalityAnalysis} />
-              <FieldRow label="能力推理" content={magicalGirl.analysis.abilityReasoning} />
-              <FieldRow
+            <div className="space-y-2">
+              <InlineField label="性格分析" content={magicalGirl.analysis.personalityAnalysis} />
+              <InlineField label="能力推理" content={magicalGirl.analysis.abilityReasoning} />
+              <InlineField
                 label="核心特征"
                 content={
                   Array.isArray(magicalGirl.analysis.coreTraits)
@@ -363,7 +386,7 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
                     : String(magicalGirl.analysis.coreTraits ?? '')
                 }
               />
-              <FieldRow label="预测依据" content={magicalGirl.analysis.predictionBasis} />
+              <InlineField label="预测依据" content={magicalGirl.analysis.predictionBasis} />
             </div>
           </div>
         </div>
@@ -372,13 +395,13 @@ const MagicalGirlCard: React.FC<MagicalGirlCardProps> = ({
         {magicalGirl.analysis.background && (
           <div className="result-item">
             <div className="result-label">📖 角色背景</div>
-            <div className="result-value whitespace-pre-wrap break-words">
-              <div className="space-y-2">
-                <FieldRow label="信念" content={magicalGirl.analysis.background.belief} />
-                <FieldRow label="羁绊" content={magicalGirl.analysis.background.bonds} />
-              </div>
+          <div className="result-value whitespace-pre-wrap break-words">
+            <div className="space-y-2">
+              <InlineField label="信念" content={magicalGirl.analysis.background.belief} />
+              <InlineField label="羁绊" content={magicalGirl.analysis.background.bonds} />
             </div>
           </div>
+        </div>
         )}
 
         <CurrentStatePanel state={magicalGirl.current_state} variant="dark" />
