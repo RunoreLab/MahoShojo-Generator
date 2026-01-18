@@ -1,4 +1,4 @@
-import { type ChangeEvent, useState } from 'react';
+import { type ChangeEvent, useEffect, useRef, useState } from 'react';
 
 import type { MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartySession } from '@/lib/magic-tea-party/types';
 
@@ -49,7 +49,50 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
   const [rolePasteText, setRolePasteText] = useState('');
   const [scenarioPasteText, setScenarioPasteText] = useState('');
   const [collapsed, setCollapsed] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [isTitleFocused, setIsTitleFocused] = useState(false);
+  const [isTitleComposing, setIsTitleComposing] = useState(false);
+  const lastCommittedTitleRef = useRef('');
+  const compositionRef = useRef(false);
+  const prevSessionIdRef = useRef<string | null>(null);
   const hasSession = Boolean(activeSession);
+  const sessionId = activeSession?.id ?? null;
+  const sessionTitle = activeSession?.title ?? '';
+
+  useEffect(() => {
+    if (prevSessionIdRef.current === sessionId) return;
+    prevSessionIdRef.current = sessionId;
+
+    if (!sessionId) {
+      setTitleDraft('');
+      setIsTitleComposing(false);
+      setIsTitleFocused(false);
+      lastCommittedTitleRef.current = '';
+      compositionRef.current = false;
+      return;
+    }
+
+    setTitleDraft(sessionTitle);
+    setIsTitleComposing(false);
+    setIsTitleFocused(false);
+    compositionRef.current = false;
+    lastCommittedTitleRef.current = sessionTitle;
+  }, [sessionId, sessionTitle]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    if (isTitleFocused || isTitleComposing) return;
+    const nextTitle = sessionTitle;
+    setTitleDraft(nextTitle);
+    lastCommittedTitleRef.current = nextTitle;
+  }, [sessionId, sessionTitle, isTitleFocused, isTitleComposing]);
+
+  const commitTitle = (nextTitle: string) => {
+    if (!hasSession) return;
+    if (nextTitle === lastCommittedTitleRef.current) return;
+    lastCommittedTitleRef.current = nextTitle;
+    onUpdateTitle(nextTitle);
+  };
 
   return (
     <div className="rounded-xl border border-pink-100 bg-white p-4 space-y-4">
@@ -292,8 +335,33 @@ export function MagicTeaPartySessionSetupPanel(props: MagicTeaPartySessionSetupP
           <label className="text-xs font-semibold text-gray-600">会话标题</label>
           <input
             className="input-field"
-            value={activeSession?.title ?? ''}
-            onChange={(event) => onUpdateTitle(event.target.value)}
+            value={titleDraft}
+            onFocus={() => setIsTitleFocused(true)}
+            onBlur={() => {
+              setIsTitleFocused(false);
+              if (!compositionRef.current) {
+                commitTitle(titleDraft);
+              }
+            }}
+            onCompositionStart={() => {
+              compositionRef.current = true;
+              setIsTitleComposing(true);
+            }}
+            onCompositionEnd={(event) => {
+              compositionRef.current = false;
+              setIsTitleComposing(false);
+              const nextTitle = event.currentTarget.value;
+              setTitleDraft(nextTitle);
+              commitTitle(nextTitle);
+            }}
+            onChange={(event) => {
+              const nextTitle = event.target.value;
+              setTitleDraft(nextTitle);
+              const composing = (event.nativeEvent as InputEvent | undefined)?.isComposing || compositionRef.current;
+              if (!composing) {
+                commitTitle(nextTitle);
+              }
+            }}
             placeholder="输入会话标题"
             disabled={!hasSession}
           />
