@@ -1,4 +1,6 @@
-import { FREE_GENERATION_ATTACHMENT_LIMITS } from '@/lib/ai/attachments';
+import { getUtf8ByteLength } from '@/lib/data-card-size';
+
+import { TAVERN_IMPORT_ATTACHMENT_LIMITS } from './limits';
 
 import type { TavernAiAttachmentBuildResult, TavernCardNormalized } from './types';
 
@@ -33,12 +35,12 @@ type TavernAiSource = {
 type TavernAiLimits = Record<keyof Omit<TavernAiSource, 'name' | 'tags'>, number>;
 
 const DEFAULT_LIMITS: TavernAiLimits = {
-  description: 8_000,
-  personality: 8_000,
-  scenario: 6_000,
-  first_mes: 2_000,
-  mes_example: 20_000,
-  creator_notes: 10_000,
+  description: 32_000,
+  personality: 32_000,
+  scenario: 24_000,
+  first_mes: 8_000,
+  mes_example: 80_000,
+  creator_notes: 40_000,
 };
 
 const applyLimits = (source: TavernAiSource, limits: TavernAiLimits): TavernAiSource => {
@@ -76,7 +78,7 @@ const buildWarnings = (source: TavernAiSource, limited: TavernAiSource, limits: 
 };
 
 const fitWithinLimit = (source: TavernAiSource, limits: TavernAiLimits): TavernAiLimits => {
-  const maxChars = FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsPerFile;
+  const maxBytes = TAVERN_IMPORT_ATTACHMENT_LIMITS.maxBytesPerFile;
 
   const trimOrder: Array<keyof TavernAiLimits> = ['mes_example', 'creator_notes', 'description', 'personality', 'scenario', 'first_mes'];
 
@@ -86,10 +88,11 @@ const fitWithinLimit = (source: TavernAiSource, limits: TavernAiLimits): TavernA
   };
 
   let content = stringify(limits);
+  let contentBytes = getUtf8ByteLength(content);
   let nextLimits = { ...limits };
 
   for (const key of trimOrder) {
-    if (content.length <= maxChars) break;
+    if (contentBytes <= maxBytes) break;
     if (nextLimits[key] <= 0) continue;
 
     let low = 0;
@@ -99,7 +102,7 @@ const fitWithinLimit = (source: TavernAiSource, limits: TavernAiLimits): TavernA
       const mid = Math.floor((low + high + 1) / 2);
       const candidateLimits = { ...nextLimits, [key]: mid };
       const candidateContent = stringify(candidateLimits);
-      if (candidateContent.length <= maxChars) {
+      if (getUtf8ByteLength(candidateContent) <= maxBytes) {
         low = mid;
       } else {
         high = mid - 1;
@@ -108,6 +111,7 @@ const fitWithinLimit = (source: TavernAiSource, limits: TavernAiLimits): TavernA
 
     nextLimits = { ...nextLimits, [key]: low };
     content = stringify(nextLimits);
+    contentBytes = getUtf8ByteLength(content);
   }
 
   return nextLimits;
@@ -137,7 +141,7 @@ export function buildTavernAiAttachment(normalized: TavernCardNormalized): Taver
   }
 
   const content = JSON.stringify(limited);
-  const truncated = warnings.length > 0 || content.length > FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsPerFile;
+  const truncated = warnings.length > 0 || getUtf8ByteLength(content) > TAVERN_IMPORT_ATTACHMENT_LIMITS.maxBytesPerFile;
 
   return {
     attachment: {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
-import { FREE_GENERATION_ATTACHMENT_LIMITS } from '@/lib/ai/attachments';
+import { getUtf8ByteLength } from '@/lib/data-card-size';
 import { buildTavernAiAttachment, type TavernCardNormalized } from '@/lib/tavern-card';
+import { TAVERN_IMPORT_ATTACHMENT_LIMITS } from '@/lib/tavern-card/limits';
 
 describe('tavern-ai-attachment', () => {
   it('builds a single attachment within size limits', () => {
@@ -18,7 +19,7 @@ describe('tavern-ai-attachment', () => {
     };
 
     const result = buildTavernAiAttachment(normalized);
-    expect(result.attachment.content.length).toBeLessThanOrEqual(FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsPerFile);
+    expect(getUtf8ByteLength(result.attachment.content)).toBeLessThanOrEqual(TAVERN_IMPORT_ATTACHMENT_LIMITS.maxBytesPerFile);
     expect(result.attachment.truncated).toBe(true);
     expect(result.warnings.length).toBeGreaterThan(0);
 
@@ -46,9 +47,8 @@ describe('tavern-ai-attachment', () => {
     };
 
     const result = buildTavernAiAttachment(normalized);
-    expect(result.attachment.content.length).toBeLessThanOrEqual(FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsPerFile);
+    expect(getUtf8ByteLength(result.attachment.content)).toBeLessThanOrEqual(TAVERN_IMPORT_ATTACHMENT_LIMITS.maxBytesPerFile);
     expect(result.warnings.length).toBe(0);
     expect(result.attachment.truncated).toBeUndefined();
   });
 });
-

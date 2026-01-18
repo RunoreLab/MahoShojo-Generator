@@ -6,13 +6,22 @@ export type AITextAttachment = {
   truncated?: boolean;
 };
 
+export type AttachmentLimits = {
+  maxBytesPerFile: number;
+  maxBytesTotal: number;
+  maxCharsPerFile: number;
+  maxCharsTotal: number;
+  maxCount: number;
+};
+
 export type ReferenceAttachmentPromptOptions = {
   title?: string;
   intro?: string;
   notice?: string;
+  limits?: AttachmentLimits;
 };
 
-export const FREE_GENERATION_ATTACHMENT_LIMITS = {
+export const FREE_GENERATION_ATTACHMENT_LIMITS: AttachmentLimits = {
   maxBytesPerFile: 512 * 1024,
   maxBytesTotal: 2 * 1024 * 1024,
   maxCharsPerFile: 50_000,
@@ -54,6 +63,7 @@ export const formatReferenceAttachmentsForPrompt = (
 ): string => {
   if (!Array.isArray(attachments) || attachments.length === 0) return '';
 
+  const limits = options?.limits ?? FREE_GENERATION_ATTACHMENT_LIMITS;
   const title = safeString(options?.title).trim() || '【参考附件】';
   const intro = safeString(options?.intro).trim() || '以下内容来自用户上传的附件，仅用于补充资料与设定参考。';
   const notice =
@@ -65,18 +75,18 @@ export const formatReferenceAttachmentsForPrompt = (
   lines.push(intro);
   lines.push(notice);
 
-  let remaining = FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal;
+  let remaining = limits.maxCharsTotal;
   let appended = 0;
 
   for (const attachment of attachments) {
-    if (appended >= FREE_GENERATION_ATTACHMENT_LIMITS.maxCount) break;
+    if (appended >= limits.maxCount) break;
     if (remaining <= 0) break;
     if (!attachment || typeof attachment !== 'object') continue;
 
     const rawContent = safeString(attachment.content);
     const content = rawContent.slice(
       0,
-      Math.max(0, Math.min(FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsPerFile, remaining))
+      Math.max(0, Math.min(limits.maxCharsPerFile, remaining))
     );
     if (!content.trim()) continue;
 

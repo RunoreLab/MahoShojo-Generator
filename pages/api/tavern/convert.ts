@@ -5,13 +5,15 @@ import questionnaire from '@/public/questionnaire.json';
 import canshouQuestionnaire from '@/public/canshou_questionnaire.json';
 import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
-import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
+import { formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
 import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
+import { getUtf8ByteLength } from '@/lib/data-card-size';
 import { getLogger } from '@/lib/logger';
 import { createBlankDataCard } from '@/lib/data-card-converter';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
+import { TAVERN_IMPORT_ATTACHMENT_LIMITS } from '@/lib/tavern-card/limits';
 import {
   CanshouSchema as AppCanshouSchema,
   GeneralCharacterSchema as AppGeneralCharacterSchema,
@@ -37,25 +39,35 @@ const CustomProviderSchema = z.object({
   apiKey: z.string(),
 });
 
-const AttachmentSchema = z.object({
-  name: z.string().min(1).max(200),
-  type: z.string().optional().default('application/octet-stream'),
-  size: z.number().int().nonnegative().optional(),
-  content: z.string().max(FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsPerFile),
-  truncated: z.boolean().optional(),
-});
+const AttachmentSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    type: z.string().optional().default('application/octet-stream'),
+    size: z.number().int().nonnegative().optional(),
+    content: z.string().max(TAVERN_IMPORT_ATTACHMENT_LIMITS.maxCharsPerFile),
+    truncated: z.boolean().optional(),
+  })
+  .superRefine((item, ctx) => {
+    const bytes = getUtf8ByteLength(item.content);
+    if (bytes > TAVERN_IMPORT_ATTACHMENT_LIMITS.maxBytesPerFile) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `附件内容超过大小上限（单文件 ${Math.round(TAVERN_IMPORT_ATTACHMENT_LIMITS.maxBytesPerFile / 1024)}KB）。`,
+      });
+    }
+  });
 
 const AttachmentsSchema = z
   .array(AttachmentSchema)
-  .max(FREE_GENERATION_ATTACHMENT_LIMITS.maxCount)
+  .max(TAVERN_IMPORT_ATTACHMENT_LIMITS.maxCount)
   .optional()
   .default([])
   .superRefine((items, ctx) => {
-    const total = items.reduce((sum, item) => sum + item.content.length, 0);
-    if (total > FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal) {
+    const total = items.reduce((sum, item) => sum + getUtf8ByteLength(item.content), 0);
+    if (total > TAVERN_IMPORT_ATTACHMENT_LIMITS.maxBytesTotal) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `附件内容总长度超出限制（上限 ${FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal.toLocaleString()} 字符）`,
+        message: `附件内容总大小超出限制（上限 ${Math.round(TAVERN_IMPORT_ATTACHMENT_LIMITS.maxBytesTotal / 1024)}KB）。`,
       });
     }
   });
@@ -204,6 +216,7 @@ const buildMagicalGirlPrompt = (params: { language: string; sourceName: string; 
   const attachmentSection = formatReferenceAttachmentsForPrompt(params.attachments, {
     title: '【原始设定信息】',
     intro: '以下内容为该潜在魔法少女的原始设定资料，请你据此进行预测。',
+    limits: TAVERN_IMPORT_ATTACHMENT_LIMITS,
   });
 
   return `
@@ -249,6 +262,7 @@ const buildCanshouPrompt = (params: { language: string; sourceName: string; atta
   const attachmentSection = formatReferenceAttachmentsForPrompt(params.attachments, {
     title: '【原始设定信息】',
     intro: '以下内容为该潜在残兽的原始设定资料，请你据此进行分析并生成档案。',
+    limits: TAVERN_IMPORT_ATTACHMENT_LIMITS,
   });
 
   return `
@@ -277,7 +291,9 @@ ${attachmentSection}
 };
 
 const buildGeneralPrompt = (params: { language: string; sourceName: string; attachments: AITextAttachment[] }): string => {
-  const attachmentSection = formatReferenceAttachmentsForPrompt(params.attachments);
+  const attachmentSection = formatReferenceAttachmentsForPrompt(params.attachments, {
+    limits: TAVERN_IMPORT_ATTACHMENT_LIMITS,
+  });
   return `
 你是一个角色设定整理助手。你将根据【原始设定信息】中的角色资料，整理为详细的 JSON 角色卡，忠于原始设定，不得遗漏。
 
@@ -302,6 +318,7 @@ const buildScenarioPrompt = (params: { language: string; sourceName: string; att
   const attachmentSection = formatReferenceAttachmentsForPrompt(params.attachments, {
     title: '## 情景设定信息',
     intro: '以下内容为原始情景设定信息，请据此完成创作。',
+    limits: TAVERN_IMPORT_ATTACHMENT_LIMITS,
   });
   const nameHint = params.sourceName ? `情景名称提示：原情景名为「${params.sourceName}」。` : '情景名称提示：未提供。';
 
@@ -322,6 +339,7 @@ const buildGeneralScenarioPrompt = (params: { language: string; sourceName: stri
   const attachmentSection = formatReferenceAttachmentsForPrompt(params.attachments, {
     title: '## 情景设定信息',
     intro: '以下内容为原始情景设定信息，请据此完成创作。',
+    limits: TAVERN_IMPORT_ATTACHMENT_LIMITS,
   });
   const nameHint = params.sourceName ? `情景名称提示：原情景名为「${params.sourceName}」。` : '情景名称提示：未提供。';
 
