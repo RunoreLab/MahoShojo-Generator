@@ -64,6 +64,7 @@ export type UseMagicTeaPartyChatResult = {
   continueGeneration: () => Promise<void>;
   generateChoices: () => Promise<void>;
   regenerateMessage: (target: MagicTeaPartyMessage) => Promise<void>;
+  deleteMessage: (target: MagicTeaPartyMessage) => Promise<void>;
   generateSummary: () => Promise<void>;
   clearSummary: () => Promise<void>;
 };
@@ -687,15 +688,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
         const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
         const previewText = isJsonl ? buildMagicTeaPartyJsonlPreview(safeText) : (noticeBundle.cleanedText ?? safeText);
-        const shouldSuppressForError = isJsonl && hasErrorNotice;
-        const finalContent = shouldSuppressForError ? '' : previewText;
-        const shouldSuppressMessage = shouldSuppressForError || (!finalContent.trim() && allNotices.length > 0);
+        const finalContent = previewText;
         const finalAssistant: MagicTeaPartyMessage = {
           ...params.assistantMessage,
           content: finalContent,
           status,
-          ...(isJsonl && parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-          ...(shouldSuppressMessage ? { meta: { ...(params.assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
+          ...(isJsonl && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
           ...(status === 'blocked'
             ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
             : { safety: { status: 'ok' } }),
@@ -790,15 +788,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
           const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
           const previewText = isJsonl ? buildMagicTeaPartyJsonlPreview(safeText) : (noticeBundle.cleanedText ?? safeText);
-          const shouldSuppressForError = isJsonl && hasErrorNotice;
-          const finalContent = shouldSuppressForError ? '' : previewText;
-          const shouldSuppressMessage = shouldSuppressForError || (!finalContent.trim() && allNotices.length > 0);
+          const finalContent = previewText;
           const finalAssistant: MagicTeaPartyMessage = {
             ...params.assistantMessage,
             content: finalContent,
             status,
-            ...(isJsonl && parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-            ...(shouldSuppressMessage ? { meta: { ...(params.assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
+            ...(isJsonl && parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
             ...(status === 'blocked'
               ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
               : { safety: { status: 'ok' } }),
@@ -1358,10 +1353,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       const previewText = buildMagicTeaPartyJsonlPreview(safeText);
       const finalAssistant: MagicTeaPartyMessage = {
         ...assistantMessage,
-        content: hasErrorNotice ? '' : previewText,
+        content: previewText,
         status,
-        ...(parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-        ...(hasErrorNotice ? { meta: { ...(assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
+        ...(parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
         ...(status === 'blocked'
           ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
           : { safety: { status: 'ok' } }),
@@ -1390,14 +1384,12 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         });
         const allNotices = [...sideChannelBundle.notices, ...extraNotices];
         emitNotices(allNotices);
-        const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
         const previewText = buildMagicTeaPartyJsonlPreview(safeText);
         const finalAssistant: MagicTeaPartyMessage = {
           ...assistantMessage,
-          content: hasErrorNotice ? '' : previewText,
+          content: previewText,
           status,
-          ...(parsed.segments && !hasErrorNotice ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
-          ...(hasErrorNotice ? { meta: { ...(assistantMessage.meta ?? {}), noticeSuppressed: true } } : {}),
+          ...(parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
           ...(status === 'blocked'
             ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
             : { safety: { status: 'ok' } }),
@@ -1659,6 +1651,19 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     ]
   );
 
+  const deleteMessage = useCallback(
+    async (targetMessage: MagicTeaPartyMessage) => {
+      if (!activeSession) return;
+      if (targetMessage.status === 'streaming') return;
+      const nextMessages = messagesRef.current.filter((message) => message.id !== targetMessage.id);
+      setMessages(nextMessages);
+      await deleteMagicTeaPartyMessages([targetMessage.id]);
+      const now = Date.now();
+      await persistSession({ ...activeSession, updatedAt: now });
+    },
+    [activeSession, persistSession, setMessages]
+  );
+
   return {
     isGenerating,
     isSummarizing,
@@ -1668,6 +1673,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     continueGeneration,
     generateChoices,
     regenerateMessage,
+    deleteMessage,
     generateSummary,
     clearSummary,
   };

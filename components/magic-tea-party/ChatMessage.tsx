@@ -27,6 +27,7 @@ type MagicTeaPartyChatMessageProps = {
   onEditDraftChange?: (value: string) => void;
   onCancelEdit?: () => void;
   onConfirmEdit?: (message: MagicTeaPartyMessage) => void;
+  onDeleteMessage?: (message: MagicTeaPartyMessage) => void;
 };
 
 const isMessageSuperseded = (message: MagicTeaPartyMessage): boolean => {
@@ -183,15 +184,17 @@ const renderAssistantActions = (props: {
   onUseAsReference?: (message: MagicTeaPartyMessage, plainText: string) => void;
   onRegenerate?: (message: MagicTeaPartyMessage) => void;
   showRegenerate?: boolean;
+  onDeleteMessage?: (message: MagicTeaPartyMessage) => void;
 }) => {
-  const { message, session, isGenerating, onUseAsReference, onRegenerate, showRegenerate } = props;
+  const { message, session, isGenerating, onUseAsReference, onRegenerate, showRegenerate, onDeleteMessage } = props;
   if (message.status === 'streaming') return null;
 
   const plain = getPlainTextFromMessage(message, session);
   const canUseReference = plain && typeof onUseAsReference === 'function';
   const canRegenerate = showRegenerate && typeof onRegenerate === 'function';
+  const canDelete = message.role !== 'system' && typeof onDeleteMessage === 'function';
 
-  if (!canUseReference && !canRegenerate) return null;
+  if (!canUseReference && !canRegenerate && !canDelete) return null;
 
   return (
     <div className="mt-2 flex items-center justify-end gap-2 text-xs text-gray-500">
@@ -216,6 +219,17 @@ const renderAssistantActions = (props: {
           重新生成
         </button>
       ) : null}
+      {canDelete ? (
+        <button
+          type="button"
+          className="underline underline-offset-2 hover:text-gray-700"
+          onClick={() => onDeleteMessage?.(message)}
+          disabled={isGenerating}
+          title="删除这条对话消息"
+        >
+          删除
+        </button>
+      ) : null}
     </div>
   );
 };
@@ -224,22 +238,36 @@ const renderUserActions = (props: {
   message: MagicTeaPartyMessage;
   isGenerating: boolean;
   onStartEdit?: (message: MagicTeaPartyMessage) => void;
+  onDeleteMessage?: (message: MagicTeaPartyMessage) => void;
 }) => {
-  const { message, isGenerating, onStartEdit } = props;
+  const { message, isGenerating, onStartEdit, onDeleteMessage } = props;
   if (message.role !== 'user') return null;
-  if (typeof onStartEdit !== 'function') return null;
-  if (isGenerating) return null;
+  const canEdit = typeof onStartEdit === 'function' && !isGenerating;
+  const canDelete = typeof onDeleteMessage === 'function' && !isGenerating;
+  if (!canEdit && !canDelete) return null;
 
   return (
     <div className="mt-2 flex items-center justify-end gap-2 text-xs text-gray-500">
-      <button
-        type="button"
-        className="underline underline-offset-2 hover:text-gray-700"
-        onClick={() => onStartEdit(message)}
-        title="编辑这条输入并创建新的会话分支"
-      >
-        编辑并分支
-      </button>
+      {canEdit ? (
+        <button
+          type="button"
+          className="underline underline-offset-2 hover:text-gray-700"
+          onClick={() => onStartEdit?.(message)}
+          title="编辑这条输入并创建新的会话分支"
+        >
+          编辑并分支
+        </button>
+      ) : null}
+      {canDelete ? (
+        <button
+          type="button"
+          className="underline underline-offset-2 hover:text-gray-700"
+          onClick={() => onDeleteMessage?.(message)}
+          title="删除这条对话消息"
+        >
+          删除
+        </button>
+      ) : null}
     </div>
   );
 };
@@ -288,6 +316,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
           onUseAsReference: props.onUseAsReference,
           onRegenerate: props.onRegenerate,
           showRegenerate: props.showRegenerate,
+          onDeleteMessage: props.onDeleteMessage,
         })}
       </div>
     );
@@ -342,6 +371,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
           onUseAsReference: props.onUseAsReference,
           onRegenerate: props.onRegenerate,
           showRegenerate: props.showRegenerate,
+          onDeleteMessage: props.onDeleteMessage,
         })}
       </div>
     );
@@ -397,6 +427,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
           onUseAsReference: props.onUseAsReference,
           onRegenerate: props.onRegenerate,
           showRegenerate: props.showRegenerate,
+          onDeleteMessage: props.onDeleteMessage,
         })}
       </div>
     );
@@ -422,6 +453,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
             message,
             isGenerating,
             onStartEdit: props.onStartEdit,
+            onDeleteMessage: props.onDeleteMessage,
           })}
     </div>
   );

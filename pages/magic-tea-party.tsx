@@ -138,6 +138,7 @@ export default function MagicTeaPartyPage() {
     continueGeneration,
     generateChoices,
     regenerateMessage,
+    deleteMessage,
     generateSummary,
     clearSummary,
   } = useMagicTeaPartyChat({
@@ -892,6 +893,7 @@ export default function MagicTeaPartyPage() {
                     onEditDraftChange={setEditingDraft}
                     onCancelEdit={handleCancelEditMessage}
                     onConfirmEdit={handleConfirmEditMessage}
+                    onDeleteMessage={(message) => void deleteMessage(message)}
                   />
 
                   <MagicTeaPartyChatComposer
