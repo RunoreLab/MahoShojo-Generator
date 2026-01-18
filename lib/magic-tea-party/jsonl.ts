@@ -64,7 +64,7 @@ const stripWrappingQuotes = (value: string): string => {
 const parseLooseKeyValuePairs = (raw: string): Record<string, string> => {
   const pairs: Record<string, string> = {};
   const regex =
-    /\b(type|level|code|message|content|text)\b\s*[:=]\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s]+(?:\s+[^\s]+)*?)(?=\s+\b(?:type|level|code|message|content|text)\b\s*[:=]|$)/gi;
+    /\b(type|level|code|message|content|text|notice|motice)\b\s*[:=]\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s]+(?:\s+[^\s]+)*?)(?=\s+\b(?:type|level|code|message|content|text|notice|motice)\b\s*[:=]|$)/gi;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(raw)) !== null) {
     const key = match[1].toLowerCase();
@@ -74,10 +74,47 @@ const parseLooseKeyValuePairs = (raw: string): Record<string, string> => {
   return pairs;
 };
 
+const isTrivialNoticeMarker = (value: string): boolean => {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return true;
+  return ['true', 'false', 'notice', 'motice', '1', '0'].includes(normalized);
+};
+
+const hasNoticeKeywordTriplet = (raw: string, record?: Record<string, unknown>): boolean => {
+  if (record) {
+    const hasNotice = Object.prototype.hasOwnProperty.call(record, 'notice') || Object.prototype.hasOwnProperty.call(record, 'motice');
+    const hasLevel = Object.prototype.hasOwnProperty.call(record, 'level');
+    const hasMessage =
+      Object.prototype.hasOwnProperty.call(record, 'message') ||
+      Object.prototype.hasOwnProperty.call(record, 'content') ||
+      Object.prototype.hasOwnProperty.call(record, 'text');
+    return hasNotice && hasLevel && hasMessage;
+  }
+  const pairs = parseLooseKeyValuePairs(raw);
+  const hasNotice = Boolean(pairs.notice || pairs.motice);
+  const hasLevel = Boolean(pairs.level);
+  const hasMessage = Boolean(pairs.message || pairs.content || pairs.text);
+  return hasNotice && hasLevel && hasMessage;
+};
+
+const shouldAssumeNoticeFromRecord = (record: Record<string, unknown>, raw: string): boolean => {
+  const type = readString(record.type).toLowerCase();
+  if (type === 'notice' || type === 'motice') return true;
+  if (Object.prototype.hasOwnProperty.call(record, 'notice') || Object.prototype.hasOwnProperty.call(record, 'motice')) return true;
+  if (hasNoticeKeywordTriplet(raw, record)) return true;
+  return hasNoticeKeywordTriplet(raw);
+};
+
 const detectLooseSideChannelHint = (raw: string): 'notice' | 'summary' | 'updates' | null => {
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  if (/^notice\b/i.test(trimmed) || /^mtp_notice\b/i.test(trimmed) || /\btype\s*[:=]\s*notice\b/i.test(trimmed)) return 'notice';
+  if (
+    /^notice\b/i.test(trimmed) ||
+    /^motice\b/i.test(trimmed) ||
+    /^mtp_notice\b/i.test(trimmed) ||
+    /\btype\s*[:=]\s*(notice|motice)\b/i.test(trimmed)
+  )
+    return 'notice';
   if (/^summary\b/i.test(trimmed) || /\btype\s*[:=]\s*summary\b/i.test(trimmed)) return 'summary';
   if (/^(updates?|update)\b/i.test(trimmed) || /\btype\s*[:=]\s*(updates?|update)\b/i.test(trimmed)) return 'updates';
   return null;
@@ -86,30 +123,46 @@ const detectLooseSideChannelHint = (raw: string): 'notice' | 'summary' | 'update
 const parseLooseNoticeFromLine = (raw: string): MagicTeaPartyNotice | null => {
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  if (!/^notice\b/i.test(trimmed) && !/^mtp_notice\b/i.test(trimmed) && !/\btype\s*[:=]\s*notice\b/i.test(trimmed)) return null;
+  const hasExplicitPrefix =
+    /^notice\b/i.test(trimmed) ||
+    /^motice\b/i.test(trimmed) ||
+    /^mtp_notice\b/i.test(trimmed) ||
+    /\btype\s*[:=]\s*(notice|motice)\b/i.test(trimmed);
 
   const pairs = parseLooseKeyValuePairs(trimmed);
-  const message = pairs.message || pairs.content || pairs.text || '';
+  const hasPairs = Object.keys(pairs).length > 0;
+  const hasKeywordTriplet = hasPairs && hasNoticeKeywordTriplet(trimmed);
+  if (!hasExplicitPrefix && !hasKeywordTriplet) return null;
+
+  const messageCandidate = pairs.message || pairs.content || pairs.text || '';
+  const noticeCandidate = pairs.notice || pairs.motice || '';
+  const message = messageCandidate || (isTrivialNoticeMarker(noticeCandidate) ? '' : noticeCandidate);
   const level = pairs.level || 'info';
   const code = pairs.code || '';
 
-  if (message) {
-    const notice = parseMagicTeaPartyNoticePayload({
+  const notice = parseMagicTeaPartyNoticePayload(
+    {
       type: 'notice',
       level,
       ...(code ? { code } : {}),
-      message,
-    });
-    if (notice) return notice;
-  }
+      ...(message ? { message } : {}),
+      ...(pairs.notice ? { notice: pairs.notice } : {}),
+      ...(pairs.motice ? { motice: pairs.motice } : {}),
+    },
+    { rawLine: normalizeJsonlLine(raw), assumeNotice: true }
+  );
+  if (notice) return notice;
 
-  const tail = trimmed.replace(/^(notice|mtp_notice)\b[:\s-]*/i, '').trim();
-  if (tail && !/\b(level|code|message|content|text)\b\s*[:=]/i.test(tail)) {
-    return parseMagicTeaPartyNoticePayload({
-      type: 'notice',
-      level: 'info',
-      message: tail,
-    });
+  const tail = trimmed.replace(/^(notice|motice|mtp_notice)\b[:\s-]*/i, '').trim();
+  if (tail && !/\b(level|code|message|content|text|notice|motice)\b\s*[:=]/i.test(tail)) {
+    return parseMagicTeaPartyNoticePayload(
+      {
+        type: 'notice',
+        level: 'info',
+        message: tail,
+      },
+      { rawLine: normalizeJsonlLine(raw), assumeNotice: true }
+    );
   }
 
   return null;
@@ -135,10 +188,10 @@ const tryParseJsonFromLine = (raw: string): unknown | null => {
 const detectSideChannelHint = (raw: string): 'notice' | 'summary' | 'updates' | null => {
   const normalized = normalizeJsonlLine(raw);
   if (!normalized || !normalized.startsWith('{')) return null;
-  const match = normalized.match(/"type"\s*:\s*"(notice|summary|updates|update)"/i);
+  const match = normalized.match(/"type"\s*:\s*"(notice|motice|summary|updates|update)"/i);
   if (!match) return null;
   const type = match[1].toLowerCase();
-  if (type === 'notice') return 'notice';
+  if (type === 'notice' || type === 'motice') return 'notice';
   if (type === 'summary') return 'summary';
   if (type === 'update' || type === 'updates') return 'updates';
   return null;
@@ -246,7 +299,11 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
   }
 
   let type = readString(parsed?.type).toLowerCase();
-  const notice = parseMagicTeaPartyNoticePayload(parsed);
+  const record = toRecord(parsed);
+  const notice = parseMagicTeaPartyNoticePayload(parsed, {
+    rawLine: normalizeJsonlLine(raw),
+    assumeNotice: record ? shouldAssumeNoticeFromRecord(record, raw) : false,
+  });
   if (notice) {
     state.notices.push(notice);
     return false;
@@ -444,7 +501,11 @@ export const extractMagicTeaPartySideChannelsFromJsonl = (
       continue;
     }
 
-    const notice = parseMagicTeaPartyNoticePayload(parsed);
+    const record = toRecord(parsed);
+    const notice = parseMagicTeaPartyNoticePayload(parsed, {
+      rawLine: normalizeJsonlLine(raw),
+      assumeNotice: record ? shouldAssumeNoticeFromRecord(record, raw) : false,
+    });
     if (notice) {
       notices.push(notice);
       continue;
