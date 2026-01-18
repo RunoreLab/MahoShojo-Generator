@@ -96,6 +96,16 @@ export const featureCategories: FeatureCategory[] = [
         href: '/tavern',
         className: 'tavern-ecosystem',
         color: 'white'
+      },
+      {
+        id: 'magic-tea-party',
+        src: '/magic-tea-party-white.svg',
+        width: 240,
+        height: 100,
+        alt: '魔法茶会',
+        href: '/magic-tea-party',
+        className: 'magic-tea-party',
+        color: 'white'
       }
     ]
   },

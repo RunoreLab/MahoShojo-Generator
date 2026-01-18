@@ -47,8 +47,8 @@ const magicTavernRequirements: BetaAccessRequirementGroup = {
     },
     {
       type: 'publicUsage',
-      min: 1500,
-      label: '公开卡累计使用量 ≥ 1500',
+      min: 500,
+      label: '公开卡累计使用量 ≥ 500',
     },
   ],
 };
