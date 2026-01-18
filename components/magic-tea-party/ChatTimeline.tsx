@@ -57,6 +57,8 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
     onConfirmEdit,
   } = props;
 
+  const currentOutputFormat = activeSession?.settings.outputFormat ?? preferences.outputFormat;
+
   const visibleMessages = useMemo(() => {
     return messages.filter((message) => {
       const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
@@ -106,6 +108,15 @@ export function MagicTeaPartyChatTimeline(props: MagicTeaPartyChatTimelineProps)
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <div className="text-sm font-semibold text-gray-800">对话</div>
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+              currentOutputFormat === 'markdown'
+                ? 'bg-emerald-50 text-emerald-700'
+                : 'bg-sky-50 text-sky-700'
+            }`}
+          >
+            {currentOutputFormat === 'markdown' ? 'Markdown' : 'JSONL'}
+          </span>
           {isGenerating ? (
             <div className="flex items-center gap-2 text-xs font-semibold text-pink-700">
               <InlineSpinner />

@@ -540,18 +540,29 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
 
           <div className="grid gap-1">
             <label className="text-xs font-semibold text-gray-600">输出模式</label>
-            <select
-              className="input-field"
-              value={currentOutputFormat}
-              onChange={(event) => {
-                const value = event.target.value === 'markdown' ? 'markdown' : 'jsonl';
-                onPreferenceChange({ outputFormat: value });
-                onSessionSettingChange({ outputFormat: value });
-              }}
-            >
-              <option value="jsonl">结构化 JSONL</option>
-              <option value="markdown">Markdown 故事</option>
-            </select>
+            <div className="flex items-center space-x-1 rounded-full bg-gray-200 p-1">
+              {([
+                { key: 'jsonl', label: 'JSONL', activeClass: 'text-sky-700' },
+                { key: 'markdown', label: 'Markdown', activeClass: 'text-emerald-700' },
+              ] as const).map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => {
+                    const value = option.key;
+                    onPreferenceChange({ outputFormat: value });
+                    onSessionSettingChange({ outputFormat: value });
+                  }}
+                  className={`w-1/2 rounded-full py-2 text-sm font-semibold transition-colors duration-300 ${
+                    currentOutputFormat === option.key
+                      ? `bg-white shadow ${option.activeClass}`
+                      : 'text-gray-600 hover:bg-gray-300'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="rounded-lg border border-pink-100 bg-pink-50/60 px-3 py-2 text-xs text-gray-600">
