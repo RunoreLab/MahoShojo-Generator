@@ -65,7 +65,8 @@
     { "id": "ability:technology", "name": "科技系能力", "description": "装备/机巧/科技手段为主的能力表达", "category": "设定/能力倾向", "scope": "user", "isActive": true },
 
     { "id": "attr:mortal", "name": "凡人", "description": "设定上无超凡要素或极弱", "category": "卡片属性", "scope": "user", "isActive": true },
-    { "id": "attr:original", "name": "自设", "description": "原创设定/原创角色", "category": "卡片属性", "scope": "user", "isActive": true },
+    { "id": "attr:original", "name": "自设", "description": "以用户自己为原型的角色设定（自我投射/自我认知/理想化自我）", "category": "卡片属性", "scope": "user", "isActive": true },
+    { "id": "attr:oc", "name": "OC", "description": "原创设定/原创角色", "category": "卡片属性", "scope": "user", "isActive": true },
     { "id": "attr:veteran", "name": "历战王", "description": "强调战斗经验/历战设定", "category": "卡片属性", "scope": "user", "isActive": true },
     { "id": "attr:rookie", "name": "新人", "description": "缺乏经验、成长空间大", "category": "卡片属性", "scope": "user", "isActive": true },
     { "id": "attr:genius", "name": "天才型", "description": "学习/成长速度极快或悟性突出", "category": "卡片属性", "scope": "user", "isActive": true },
@@ -106,6 +107,8 @@
     { "alias": "高还原", "tagId": "style:faithful" },
     { "alias": "师徒", "tagId": "rel:mentor" },
     { "alias": "宿敌", "tagId": "rel:rivals" },
-    { "alias": "百合", "tagId": "rel:yuri" }
+    { "alias": "百合", "tagId": "rel:yuri" },
+    { "alias": "原创角色", "tagId": "attr:oc" },
+    { "alias": "Original Character", "tagId": "attr:oc" }
   ]
 }
