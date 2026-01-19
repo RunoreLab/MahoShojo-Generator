@@ -735,6 +735,7 @@ export default function DataCardDetailsModal({
                 </>
               ) : null}
             </div>
+          )}
           </section>
 
           <section className="space-y-2">
