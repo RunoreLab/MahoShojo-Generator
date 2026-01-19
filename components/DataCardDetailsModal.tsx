@@ -112,6 +112,8 @@ export default function DataCardDetailsModal({
   const [saveTagsError, setSaveTagsError] = useState<string | null>(null);
   const [isMetaExpanded, setIsMetaExpanded] = useState(true);
   const { display: displayName, full: fullName } = buildTitleDisplay(card.name || '未命名');
+  const cardTypeLabel = card.type === 'character' ? '角色' : card.type === 'scenario' ? '剧本' : '历史';
+  const descriptionText = card.description?.trim() ? card.description : '暂无简介';
 
   const reloadMeta = useCallback(async (dataCardId: string) => {
     const requestId = (metaRequestIdRef.current += 1);
@@ -418,7 +420,7 @@ export default function DataCardDetailsModal({
       <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* 头部 */}
         <div className="flex items-center justify-between p-6 border-b">
-          <div className="flex items-start gap-3">
+          <div className="flex items-center gap-3">
             <div
               className={`p-2 mt-1 rounded-lg ${
                 card.type === 'character' ? 'bg-pink-100' : card.type === 'scenario' ? 'bg-purple-100' : 'bg-emerald-100'
@@ -438,251 +440,7 @@ export default function DataCardDetailsModal({
               <h2 className="text-xl font-bold text-gray-800" title={fullName}>
                 {displayName}
               </h2>
-              <p className="text-sm text-gray-500">
-                {card.description}
-              </p>
-              <p className="text-xs text-gray-500 mt-2">
-                作者：{card.author}
-              </p>
-              <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-gray-500">
-                <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{card.likeCount ?? 0}</span>
-                <span className="flex items-center gap-1"><Star className="w-3 h-3" />{card.favoriteCount ?? 0}</span>
-                <span className="flex items-center gap-1"><Download className="w-3 h-3" />{card.usageCount ?? 0}</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-4 mt-1 text-[11px] text-gray-500">
-                <span>创建：{formatDateTime(card.createdAt)}</span>
-                <span>更新：{formatDateTime(card.updatedAt)}</span>
-              </div>
-
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
-                <button
-                  type="button"
-                  onClick={toggleMetaExpanded}
-                  className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
-                  aria-expanded={showMetaDetails}
-                  disabled={isEditingTags}
-                >
-                  {showMetaDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                  <span>{showMetaDetails ? '收起信息' : '展开信息'}</span>
-                </button>
-                {!showMetaDetails && (
-                  <span className="text-gray-500">{metaSummary}</span>
-                )}
-              </div>
-
-              {showMetaDetails && (
-                <div className="mt-2 text-[11px] text-gray-600 space-y-1">
-                  {metaLoading ? (
-                    <div className="text-gray-500">正在加载技术值/标签/排位...</div>
-                  ) : metaError ? (
-                    <div className="text-red-600">指标加载失败：{metaError}</div>
-                  ) : meta ? (
-                    <>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1">
-                        <span>
-                          技术值：{meta.metrics ? `${meta.metrics.techScore}（${meta.metrics.techLevel}）` : '—'}
-                          {meta.metrics?.isStale ? <span className="ml-1 text-amber-700">（已触发重算）</span> : null}
-                        </span>
-                        <a
-                          href="/encyclopedia/tech-index"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline"
-                        >
-                          了解技术值
-                        </a>
-                        <span>
-                          原生：{meta.metrics?.isNative == null ? '未知' : meta.metrics.isNative ? '是' : '否'}
-                        </span>
-                        {card.type === 'character' && (
-                          <span>
-                            排位：
-                            {meta.ratings.strict ? (
-                              <span
-                                title={
-                                  meta.ratings.strict.lastDelta != null && meta.ratings.strict.lastAppliedAt
-                                    ? `最近变动：Δ${formatSignedDelta(meta.ratings.strict.lastDelta)} @ ${formatDateTime(meta.ratings.strict.lastAppliedAt)}`
-                                    : undefined
-                                }
-                              >
-                                严格 {meta.ratings.strict.rating}（
-                                <TierBadge tier={meta.ratings.strict.tier} className="mx-1 align-middle" />
-                                {meta.ratings.strict.lastDelta != null ? (
-                                  <span>，Δ{formatSignedDelta(meta.ratings.strict.lastDelta)}</span>
-                                ) : null}
-                                {meta.ratings.strict.publicRank != null ? (
-                                  <span>
-                                    ，公共排名#{meta.ratings.strict.publicRank}
-                                    {meta.ratings.strict.publicTotal != null ? `/${meta.ratings.strict.publicTotal}` : ''}
-                                  </span>
-                                ) : null}
-                                ）
-                              </span>
-                            ) : (
-                              '严格 —'
-                            )}
-                            {' / '}
-                            {meta.ratings.free ? (
-                              <span
-                                title={
-                                  meta.ratings.free.lastDelta != null && meta.ratings.free.lastAppliedAt
-                                    ? `最近变动：Δ${formatSignedDelta(meta.ratings.free.lastDelta)} @ ${formatDateTime(meta.ratings.free.lastAppliedAt)}`
-                                    : undefined
-                                }
-                              >
-                                自由 {meta.ratings.free.rating}（
-                                <TierBadge tier={meta.ratings.free.tier} className="mx-1 align-middle" />
-                                {meta.ratings.free.lastDelta != null ? (
-                                  <span>，Δ{formatSignedDelta(meta.ratings.free.lastDelta)}</span>
-                                ) : null}
-                                {meta.ratings.free.publicRank != null ? (
-                                  <span>
-                                    ，公共排名#{meta.ratings.free.publicRank}
-                                    {meta.ratings.free.publicTotal != null ? `/${meta.ratings.free.publicTotal}` : ''}
-                                  </span>
-                                ) : null}
-                                ）
-                              </span>
-                            ) : (
-                              '自由 —'
-                            )}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-gray-500">标签：</span>
-                        {visibleTags.length === 0 ? (
-                          <span className="text-gray-400">暂无</span>
-                        ) : (
-                          visibleTags.map((tag) => (
-                            <span
-                              key={tag.id}
-                              className="px-2 py-0.5 rounded-full border border-gray-200 bg-white text-gray-700"
-                              title={tag.description ?? undefined}
-                            >
-                              {tag.name}
-                            </span>
-                          ))
-                        )}
-                        {canEditTags && (
-                          <button
-                            onClick={() => void openTagEditor()}
-                            className="ml-1 px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
-                          >
-                            {adminTagEditor ? '编辑（管理员/系统）' : '编辑'}
-                          </button>
-                        )}
-                        <a
-                          href="/encyclopedia/tags"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="ml-1 text-blue-600 hover:underline"
-                        >
-                          了解标签
-                        </a>
-                      </div>
-
-                      {isEditingTags && (
-                        <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                          <div className="flex items-center justify-between gap-3 flex-wrap">
-                            <div className="text-xs font-medium text-gray-700">
-                              选择标签（最多 30 个，当前 {selectedTagCount}）
-                            </div>
-                            {adminTagEditor && (
-                              <select
-                                value={tagScope}
-                                onChange={(e) => {
-                                  const nextScope = (e.target.value === 'system' ? 'system' : 'admin') as 'system' | 'admin';
-                                  setTagScope(nextScope);
-                                  setTagSearch('');
-                                  setSelectedTagIds(meta ? meta.tags.filter((t) => t.scope === nextScope).map((t) => t.id) : []);
-                                }}
-                                className="px-2 py-1 text-xs rounded border border-gray-200 bg-white"
-                                disabled={savingTags}
-                              >
-                                <option value="admin">管理员标签</option>
-                                <option value="system">系统标签</option>
-                              </select>
-                            )}
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => {
-                                  setIsEditingTags(false);
-                                  setSaveTagsError(null);
-                                }}
-                                className="px-2 py-1 text-xs rounded border border-gray-200 bg-white hover:bg-gray-100"
-                                disabled={savingTags}
-                              >
-                                取消
-                              </button>
-                              <button
-                                onClick={() => void saveTags()}
-                                className="px-2 py-1 text-xs rounded bg-purple-600 text-white hover:bg-purple-700 disabled:bg-purple-300"
-                                disabled={savingTags}
-                              >
-                                {savingTags ? '保存中...' : '保存'}
-                              </button>
-                            </div>
-                          </div>
-
-                          {saveTagsError && (
-                            <div className="mt-2 text-xs text-red-600">保存失败：{saveTagsError}</div>
-                          )}
-
-                          <input
-                            value={tagSearch}
-                            onChange={(e) => setTagSearch(e.target.value)}
-                            placeholder="搜索标签..."
-                            className="input-field mt-2 w-full"
-                          />
-
-                          {tagsLoading ? (
-                            <div className="mt-2 text-xs text-gray-500">正在加载标签库...</div>
-                          ) : tagsError ? (
-                            <div className="mt-2 text-xs text-red-600">标签库加载失败：{tagsError}</div>
-                          ) : (
-                            <div className="mt-2 max-h-64 overflow-auto pr-1 space-y-3">
-                              {groupedSelectableTags.map(([category, categoryTags]) => (
-                                <div key={category}>
-                                  <div className="text-[11px] font-medium text-gray-600">
-                                    {category}（{categoryTags.length}）
-                                  </div>
-                                  <div className="mt-2 flex flex-wrap gap-2">
-                                    {categoryTags.map((tag) => {
-                                      const selected = selectedTagIds.includes(tag.id);
-                                      const disabled = !selected && isTagLimitReached;
-                                      return (
-                                        <button
-                                          key={tag.id}
-                                          onClick={() => toggleSelectTag(tag.id)}
-                                          disabled={disabled}
-                                          className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                                            selected
-                                              ? 'bg-purple-600 text-white border-purple-600'
-                                              : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'
-                                          } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                          title={tag.description ?? undefined}
-                                        >
-                                          {tag.name}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              ))}
-
-                              {groupedSelectableTags.length === 0 && (
-                                <div className="text-xs text-gray-500">没有匹配的标签</div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                  </>
-                ) : null}
-              </div>
-            )}
+              <p className="text-xs text-gray-500 mt-1">类型：{cardTypeLabel}</p>
             </div>
           </div>
           <button
@@ -693,28 +451,282 @@ export default function DataCardDetailsModal({
           </button>
         </div>
 
-        {/* 详细设定内容 */}
-        <div className="flex-1 overflow-auto p-6">
-          <div className="mb-3 space-y-2">
-            {pendingNotice && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm px-3 py-2">
-                {pendingNotice}
-              </div>
+        {/* 内容区 */}
+        <div className="flex-1 overflow-auto p-6 space-y-6">
+          {pendingNotice && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm px-3 py-2">
+              {pendingNotice}
+            </div>
+          )}
+
+          <section className="space-y-2">
+            <h3 className="font-medium text-gray-700 flex items-center gap-2">
+              <span>概览</span>
+            </h3>
+            <p className="text-sm text-gray-600 whitespace-pre-wrap">
+              {descriptionText}
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+              <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{card.likeCount ?? 0}</span>
+              <span className="flex items-center gap-1"><Star className="w-3 h-3" />{card.favoriteCount ?? 0}</span>
+              <span className="flex items-center gap-1"><Download className="w-3 h-3" />{card.usageCount ?? 0}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-4 text-[11px] text-gray-500">
+              <span>作者：{card.author ?? '未知'}</span>
+              <span>创建：{formatDateTime(card.createdAt)}</span>
+              <span>更新：{formatDateTime(card.updatedAt)}</span>
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <h3 className="font-medium text-gray-700 flex items-center gap-2">
+                <span>技术与标签</span>
+              </h3>
+              <button
+                type="button"
+                onClick={toggleMetaExpanded}
+                className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                aria-expanded={showMetaDetails}
+                disabled={isEditingTags}
+              >
+                {showMetaDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                <span>{showMetaDetails ? '收起信息' : '展开信息'}</span>
+              </button>
+            </div>
+
+            {!showMetaDetails && (
+              <div className="text-[11px] text-gray-500">{metaSummary}</div>
             )}
+
+            {showMetaDetails && (
+              <div className="text-[11px] text-gray-600 space-y-2">
+                {metaLoading ? (
+                  <div className="text-gray-500">正在加载技术值/标签/排位...</div>
+                ) : metaError ? (
+                  <div className="text-red-600">指标加载失败：{metaError}</div>
+                ) : meta ? (
+                  <>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      <span>
+                        技术值：{meta.metrics ? `${meta.metrics.techScore}（${meta.metrics.techLevel}）` : '—'}
+                        {meta.metrics?.isStale ? <span className="ml-1 text-amber-700">（已触发重算）</span> : null}
+                      </span>
+                      <a
+                        href="/encyclopedia/tech-index"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        了解技术值
+                      </a>
+                      <span>
+                        原生：{meta.metrics?.isNative == null ? '未知' : meta.metrics.isNative ? '是' : '否'}
+                      </span>
+                      {card.type === 'character' && (
+                        <span>
+                          排位：
+                          {meta.ratings.strict ? (
+                            <span
+                              title={
+                                meta.ratings.strict.lastDelta != null && meta.ratings.strict.lastAppliedAt
+                                  ? `最近变动：Δ${formatSignedDelta(meta.ratings.strict.lastDelta)} @ ${formatDateTime(meta.ratings.strict.lastAppliedAt)}`
+                                  : undefined
+                              }
+                            >
+                              严格 {meta.ratings.strict.rating}（
+                              <TierBadge tier={meta.ratings.strict.tier} className="mx-1 align-middle" />
+                              {meta.ratings.strict.lastDelta != null ? (
+                                <span>，Δ{formatSignedDelta(meta.ratings.strict.lastDelta)}</span>
+                              ) : null}
+                              {meta.ratings.strict.publicRank != null ? (
+                                <span>
+                                  ，公共排名#{meta.ratings.strict.publicRank}
+                                  {meta.ratings.strict.publicTotal != null ? `/${meta.ratings.strict.publicTotal}` : ''}
+                                </span>
+                              ) : null}
+                              ）
+                            </span>
+                          ) : (
+                            '严格 —'
+                          )}
+                          {' / '}
+                          {meta.ratings.free ? (
+                            <span
+                              title={
+                                meta.ratings.free.lastDelta != null && meta.ratings.free.lastAppliedAt
+                                  ? `最近变动：Δ${formatSignedDelta(meta.ratings.free.lastDelta)} @ ${formatDateTime(meta.ratings.free.lastAppliedAt)}`
+                                  : undefined
+                              }
+                            >
+                              自由 {meta.ratings.free.rating}（
+                              <TierBadge tier={meta.ratings.free.tier} className="mx-1 align-middle" />
+                              {meta.ratings.free.lastDelta != null ? (
+                                <span>，Δ{formatSignedDelta(meta.ratings.free.lastDelta)}</span>
+                              ) : null}
+                              {meta.ratings.free.publicRank != null ? (
+                                <span>
+                                  ，公共排名#{meta.ratings.free.publicRank}
+                                  {meta.ratings.free.publicTotal != null ? `/${meta.ratings.free.publicTotal}` : ''}
+                                </span>
+                              ) : null}
+                              ）
+                            </span>
+                          ) : (
+                            '自由 —'
+                          )}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-gray-500">标签：</span>
+                      {visibleTags.length === 0 ? (
+                        <span className="text-gray-400">暂无</span>
+                      ) : (
+                        visibleTags.map((tag) => (
+                          <span
+                            key={tag.id}
+                            className="px-2 py-0.5 rounded-full border border-gray-200 bg-white text-gray-700"
+                            title={tag.description ?? undefined}
+                          >
+                            {tag.name}
+                          </span>
+                        ))
+                      )}
+                      {canEditTags && (
+                        <button
+                          onClick={() => void openTagEditor()}
+                          className="ml-1 px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
+                        >
+                          {adminTagEditor ? '编辑（管理员/系统）' : '编辑'}
+                        </button>
+                      )}
+                      <a
+                        href="/encyclopedia/tags"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-1 text-blue-600 hover:underline"
+                      >
+                        了解标签
+                      </a>
+                    </div>
+
+                    {isEditingTags && (
+                      <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div className="text-xs font-medium text-gray-700">
+                            选择标签（最多 30 个，当前 {selectedTagCount}）
+                          </div>
+                          {adminTagEditor && (
+                            <select
+                              value={tagScope}
+                              onChange={(e) => {
+                                const nextScope = (e.target.value === 'system' ? 'system' : 'admin') as 'system' | 'admin';
+                                setTagScope(nextScope);
+                                setTagSearch('');
+                                setSelectedTagIds(meta ? meta.tags.filter((t) => t.scope === nextScope).map((t) => t.id) : []);
+                              }}
+                              className="px-2 py-1 text-xs rounded border border-gray-200 bg-white"
+                              disabled={savingTags}
+                            >
+                              <option value="admin">管理员标签</option>
+                              <option value="system">系统标签</option>
+                            </select>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                setIsEditingTags(false);
+                                setSaveTagsError(null);
+                              }}
+                              className="px-2 py-1 text-xs rounded border border-gray-200 bg-white hover:bg-gray-100"
+                              disabled={savingTags}
+                            >
+                              取消
+                            </button>
+                            <button
+                              onClick={() => void saveTags()}
+                              className="px-2 py-1 text-xs rounded bg-purple-600 text-white hover:bg-purple-700 disabled:bg-purple-300"
+                              disabled={savingTags}
+                            >
+                              {savingTags ? '保存中...' : '保存'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {saveTagsError && (
+                          <div className="mt-2 text-xs text-red-600">保存失败：{saveTagsError}</div>
+                        )}
+
+                        <input
+                          value={tagSearch}
+                          onChange={(e) => setTagSearch(e.target.value)}
+                          placeholder="搜索标签..."
+                          className="input-field mt-2 w-full"
+                        />
+
+                        {tagsLoading ? (
+                          <div className="mt-2 text-xs text-gray-500">正在加载标签库...</div>
+                        ) : tagsError ? (
+                          <div className="mt-2 text-xs text-red-600">标签库加载失败：{tagsError}</div>
+                        ) : (
+                          <div className="mt-2 max-h-64 overflow-auto pr-1 space-y-3">
+                            {groupedSelectableTags.map(([category, categoryTags]) => (
+                              <div key={category}>
+                                <div className="text-[11px] font-medium text-gray-600">
+                                  {category}（{categoryTags.length}）
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {categoryTags.map((tag) => {
+                                    const selected = selectedTagIds.includes(tag.id);
+                                    const disabled = !selected && isTagLimitReached;
+                                    return (
+                                      <button
+                                        key={tag.id}
+                                        onClick={() => toggleSelectTag(tag.id)}
+                                        disabled={disabled}
+                                        className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                                          selected
+                                            ? 'bg-purple-600 text-white border-purple-600'
+                                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'
+                                        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        title={tag.description ?? undefined}
+                                      >
+                                        {tag.name}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+
+                            {groupedSelectableTags.length === 0 && (
+                              <div className="text-xs text-gray-500">没有匹配的标签</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                </>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="space-y-2">
             <h3 className="font-medium text-gray-700 flex items-center gap-2">
               <span>{card.type === 'history' ? '内容' : '详细设定'}</span>
             </h3>
-          </div>
-
-          <div className="bg-gray-50 rounded-lg p-4">
-            {Object.keys(parsedData).length > 0 ? (
-              renderObjectContent(parsedData)
-            ) : (
-              <p className="text-gray-500 text-center py-8">
-                暂无详细设定数据
-              </p>
-            )}
-          </div>
+            <div className="bg-gray-50 rounded-lg p-4">
+              {Object.keys(parsedData).length > 0 ? (
+                renderObjectContent(parsedData)
+              ) : (
+                <p className="text-gray-500 text-center py-8">
+                  暂无详细设定数据
+                </p>
+              )}
+            </div>
+          </section>
         </div>
 
         {/* 底部 */}
