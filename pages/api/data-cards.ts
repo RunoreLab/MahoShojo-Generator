@@ -18,7 +18,10 @@ import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { resetStrictArenaRatingForDataCard } from '@/lib/database/arena-ratings';
-import { autoReviewLatestPendingPublicDataCardsForUser } from '@/lib/review/auto-data-card-review';
+import {
+  autoReviewLatestPendingPublicDataCardsForUser,
+  autoReviewLatestPendingPublicDataCardUpdatesForUser
+} from '@/lib/review/auto-data-card-review';
 
 export const runtime = 'edge';
 
@@ -387,6 +390,18 @@ export default async function handler(req: Request): Promise<Response> {
               status: 500,
               headers: { 'Content-Type': 'application/json' }
             });
+          }
+
+          const shouldAutoReviewUpdate =
+            config.DATA_CARD_AUTO_REVIEW?.enabled && Number(currentCard.is_public) === 1;
+          if (shouldAutoReviewUpdate) {
+            const executionContext = (req as any).context;
+            const autoReviewPromise = autoReviewLatestPendingPublicDataCardUpdatesForUser(userId).then(() => undefined);
+            if (executionContext?.waitUntil) {
+              executionContext.waitUntil(autoReviewPromise);
+            } else {
+              await autoReviewPromise;
+            }
           }
 
           return new Response(JSON.stringify({ success: true, pendingReview: true, message: '更新已提交，待审核' }), {
