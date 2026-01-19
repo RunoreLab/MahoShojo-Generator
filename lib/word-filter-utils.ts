@@ -144,7 +144,23 @@ export const buildKeepCharsMapping = (
   return { normalized: normalizedChars.join(''), indexMap };
 };
 
-export const keepHanOrAsciiWordChar = (ch: string): boolean => /[\u4e00-\u9fa5a-zA-Z0-9]/.test(ch);
+// 用于识别常见“穿插分隔符”字符（位于汉字区段但并非正常语义字符）
+const obfuscationSeparators = new Set([
+  '丨',
+  '丶',
+  '丿',
+  '乀',
+  '乁',
+  '亅',
+  '乛',
+  '乚',
+  '丷',
+]);
+
+export const keepHanOrAsciiWordChar = (ch: string): boolean => {
+  if (obfuscationSeparators.has(ch)) return false;
+  return /[\u4e00-\u9fa5a-zA-Z0-9]/.test(ch);
+};
 export const keepAsciiWordChar = (ch: string): boolean => /[a-zA-Z0-9]/.test(ch);
 
 export const createWordsSearch = (keywords: string[]): InstanceType<typeof WordsSearch> => {
