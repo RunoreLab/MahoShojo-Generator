@@ -64,7 +64,7 @@ const stripWrappingQuotes = (value: string): string => {
 const parseLooseKeyValuePairs = (raw: string): Record<string, string> => {
   const pairs: Record<string, string> = {};
   const regex =
-    /\b(type|level|code|message|content|text|notice|motice)\b\s*[:=]\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s]+(?:\s+[^\s]+)*?)(?=\s+\b(?:type|level|code|message|content|text|notice|motice)\b\s*[:=]|$)/gi;
+    /\b(type|level|code|message|content|text|notice|motice|speakerId|speakerName|speaker_id|speaker_name|speaker|name|items)\b\s*[:=]\s*("[^"]*"|'[^']*'|`[^`]*`|[^\s]+(?:\s+[^\s]+)*?)(?=\s+\b(?:type|level|code|message|content|text|notice|motice|speakerId|speakerName|speaker_id|speaker_name|speaker|name|items)\b\s*[:=]|$)/gi;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(raw)) !== null) {
     const key = match[1].toLowerCase();
@@ -72,6 +72,54 @@ const parseLooseKeyValuePairs = (raw: string): Record<string, string> => {
     if (value) pairs[key] = value;
   }
   return pairs;
+};
+
+const parseLooseJsonlSegment = (
+  raw: string
+): { segment: MagicTeaPartyOutputSegment; previewLines: string[] } | null => {
+  const normalized = normalizeJsonlLine(raw).trim();
+  if (!normalized) return null;
+  if (!normalized.startsWith('{') && !/\btype\b\s*[:=]/i.test(normalized)) return null;
+
+  const pairs = parseLooseKeyValuePairs(raw);
+  if (Object.keys(pairs).length === 0) return null;
+
+  const type = readString(pairs.type).toLowerCase();
+  const text = readString(pairs.text) || readString(pairs.content) || readString(pairs.message);
+  if (!text) return null;
+
+  const speakerId =
+    readString(pairs.speakerid) ||
+    readString(pairs.speaker_id) ||
+    readString(pairs.speaker);
+  const speakerName =
+    readString(pairs.speakername) ||
+    readString(pairs.speaker_name) ||
+    readString(pairs.name);
+  const inferredType = type || (speakerId || speakerName ? 'dialogue' : 'narration');
+
+  if (inferredType === 'dialogue') {
+    const resolvedSpeakerId = speakerId || speakerName;
+    if (!resolvedSpeakerId) {
+      return { segment: { type: 'narration', text }, previewLines: [text] };
+    }
+    const displayName = speakerName || resolvedSpeakerId;
+    return {
+      segment: {
+        type: 'dialogue',
+        speakerId: resolvedSpeakerId,
+        ...(speakerName ? { speakerName } : {}),
+        text,
+      },
+      previewLines: [displayName ? `${displayName}: ${text}` : text],
+    };
+  }
+
+  if (inferredType === 'narration') {
+    return { segment: { type: 'narration', text }, previewLines: [text] };
+  }
+
+  return null;
 };
 
 const isTrivialNoticeMarker = (value: string): boolean => {
@@ -295,6 +343,12 @@ const appendMagicTeaPartyJsonlLine = (state: MagicTeaPartyJsonlStreamState, raw:
       state.notices.push(buildSideChannelParseNotice(hint));
       pushPreview(raw);
       return false;
+    }
+    const looseSegment = parseLooseJsonlSegment(raw);
+    if (looseSegment) {
+      state.segments.push(looseSegment.segment);
+      pushPreview(looseSegment.previewLines);
+      return true;
     }
     pushPreview(raw);
     state.segments.push({ type: 'narration', text: raw });

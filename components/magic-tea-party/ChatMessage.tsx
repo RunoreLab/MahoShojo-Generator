@@ -328,9 +328,13 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
         {message.segments.map((seg, idx) => {
           if (seg.type === 'narration') {
             return (
-              <p key={`${message.id}-n-${idx}`} className="whitespace-pre-wrap leading-relaxed">
-                {seg.text}
-              </p>
+              <MarkdownBlock
+                key={`${message.id}-n-${idx}`}
+                content={seg.text}
+                variant="light"
+                mode="compact"
+                className="text-sm"
+              />
             );
           }
           if (seg.type === 'dialogue') {
@@ -338,7 +342,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
             return (
               <div key={`${message.id}-d-${idx}`} className="rounded-lg bg-pink-50 px-3 py-2">
                 <div className="text-xs font-semibold text-pink-700">{segSpeakerName}</div>
-                <div className="whitespace-pre-wrap leading-relaxed text-gray-800">{seg.text}</div>
+                <MarkdownBlock content={seg.text} variant="light" mode="compact" className="text-sm" />
               </div>
             );
           }
