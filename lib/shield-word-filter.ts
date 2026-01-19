@@ -60,7 +60,6 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '6ams5YWL5oCd',
     '56S+5Lya5Li75LmJ',
     '5Zu95rCR5YWa',
-    '6IKJ5aOB',
     '6IKb6Zeo',
     '6IO45Zu0',
     '5LiL5L2T',
@@ -84,6 +83,7 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '5aW2572p',
     '5qao5Y+W',
     'VlBO',
+    '5Lmz5bCW',
     // 使用指定词汇替换
     '5Lit5Zu9',
     '5Lit5Y2O5Lq65rCR5YWx5ZKM5Zu9',
@@ -107,6 +107,9 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '5Lqn5aW2',
     '6L+36I2v',
     '6LCD5pWZ',
+    '6IKJ5qyy',
+    '6IKJ5aOB',
+    '5rOV44CL',
   ],
   replace: {
     // key 为 base64 编码的屏蔽词，value 为明文替换词
@@ -130,6 +133,9 @@ const shieldWordsConfig: ShieldWordsConfig = {
     '5Lqn5aW2': '产出',
     '6L+36I2v': '红茶',
     '6LCD5pWZ': '教育',
+    '6IKJ5qyy': '食欲',
+    '6IKJ5aOB': '铁壁',
+    '5rOV44CL': '律》'
   },
   encoding: 'base64',
 };
