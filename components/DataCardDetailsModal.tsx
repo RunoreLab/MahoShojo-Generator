@@ -114,6 +114,8 @@ export default function DataCardDetailsModal({
   const { display: displayName, full: fullName } = buildTitleDisplay(card.name || '未命名');
   const cardTypeLabel = card.type === 'character' ? '角色' : card.type === 'scenario' ? '剧本' : '历史';
   const descriptionText = card.description?.trim() ? card.description : '暂无简介';
+  const tagSectionRef = useRef<HTMLDivElement | null>(null);
+  const tagSearchInputRef = useRef<HTMLInputElement | null>(null);
 
   const reloadMeta = useCallback(async (dataCardId: string) => {
     const requestId = (metaRequestIdRef.current += 1);
@@ -194,6 +196,27 @@ export default function DataCardDetailsModal({
     if (!meta || isEditingTags) return;
     setSelectedTagIds(meta.tags.filter((t) => t.scope === tagScope).map((t) => t.id));
   }, [meta, isEditingTags, tagScope]);
+
+  useEffect(() => {
+    if (!isOpen || !isEditingTags) return;
+    const prefersReducedMotion = typeof window !== 'undefined'
+      && window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (tagSectionRef.current) {
+      tagSectionRef.current.scrollIntoView({
+        behavior: prefersReducedMotion ? 'auto' : 'smooth',
+        block: 'start',
+      });
+    }
+    if (tagSearchInputRef.current) {
+      const focusInput = () => tagSearchInputRef.current?.focus();
+      if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+        window.requestAnimationFrame(focusInput);
+      } else {
+        focusInput();
+      }
+    }
+  }, [isEditingTags, isOpen]);
 
   const visibleTags = useMemo(() => {
     if (!meta?.tags) return [];
@@ -478,7 +501,7 @@ export default function DataCardDetailsModal({
             </div>
           </section>
 
-          <section className="space-y-2">
+          <section className="space-y-2" ref={tagSectionRef}>
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h3 className="font-medium text-gray-700 flex items-center gap-2">
                 <span>技术与标签</span>
@@ -660,6 +683,7 @@ export default function DataCardDetailsModal({
                         )}
 
                         <input
+                          ref={tagSearchInputRef}
                           value={tagSearch}
                           onChange={(e) => setTagSearch(e.target.value)}
                           placeholder="搜索标签..."
