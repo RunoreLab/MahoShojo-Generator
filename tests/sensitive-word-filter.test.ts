@@ -19,6 +19,12 @@ describe('sensitive-word-filter（繁体/拼音/去符号绕过）', () => {
     expect(result.matchDetails.some((d) => d.matchType === 'variant')).toBe(true);
   });
 
+  it('应能识别偏旁部首分隔绕过（艹）', async () => {
+    const result = await quickCheck('我来自中亻华亻帝亻国。');
+    expect(result.hasSensitiveWords).toBe(true);
+    expect(result.matchDetails.some((d) => d.matchType === 'variant')).toBe(true);
+  });
+
   it('应能识别纯拼音绕过（falungong/zhonghuadiguo 等）', async () => {
     const result = await quickCheck('wo lai zi zhong hua di guo');
     expect(result.hasSensitiveWords).toBe(true);
