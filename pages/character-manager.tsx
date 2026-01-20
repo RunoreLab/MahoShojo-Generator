@@ -1574,7 +1574,14 @@ const CharacterManagerPage: React.FC = () => {
             }
 
             // 3. 执行下载或复制操作
-            const name = finalData.codename || finalData.name;
+            const isScenario = isScenarioData(finalData);
+            const nameCandidates = [
+                typeof finalData.codename === 'string' ? finalData.codename : '',
+                typeof finalData.name === 'string' ? finalData.name : '',
+                typeof finalData.title === 'string' ? finalData.title : '',
+            ];
+            const resolvedName = nameCandidates.map((item) => item.trim()).find((item) => item) || (isScenario ? '未命名情景' : '未命名角色');
+            const filenamePrefix = isScenario ? '情景档案' : '角色档案';
             const jsonData = JSON.stringify(finalData, null, 2);
 
             if (type === 'download') {
@@ -1582,7 +1589,7 @@ const CharacterManagerPage: React.FC = () => {
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
-                link.download = `角色档案_${name}_已编辑.json`;
+                link.download = `${filenamePrefix}_${resolvedName}_已编辑.json`;
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
