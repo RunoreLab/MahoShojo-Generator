@@ -511,16 +511,17 @@ export const useBattleActions = () => {
   );
 
   const handleScenarioPaste = useCallback(
-    async (text: string) => {
+    async (text: string, options?: { fileName?: string }) => {
       const parsed = ScenarioSchema.safeParse(JSON.parse(text));
       if (!parsed.success) {
         throw new Error(parsed.error.issues[0]?.message || '情景文件缺少必需字段');
       }
       const isNative = await verifyOrigin(parsed.data);
       const scenarioLabel = (parsed.data as any)?.title || (parsed.data as any)?.name || '粘贴的情景';
+      const scenarioFileName = options?.fileName || scenarioLabel;
       setScenario({
         content: parsed.data,
-        fileName: scenarioLabel,
+        fileName: scenarioFileName,
         isNative,
       });
       appendAdjudicationEvents((parsed.data as any).adjudicationEvents, scenarioLabel);
@@ -530,7 +531,7 @@ export const useBattleActions = () => {
   );
 
   const handleAuxScenarioPaste = useCallback(
-    async (text: string) => {
+    async (text: string, options?: { fileName?: string }) => {
       if (useBattleStore.getState().battleMode !== 'scenario') {
         throw new Error('仅在情景模式下可添加辅助情景。');
       }
@@ -547,9 +548,11 @@ export const useBattleActions = () => {
       }
 
       const scenarioLabel = (parsed.data as any)?.title || (parsed.data as any)?.name || `辅助情景 ${useBattleStore.getState().auxScenarios.length + 1}`;
+      const scenarioFileName =
+        options?.fileName || (scenarioLabel ? `${scenarioLabel}.json` : '粘贴的辅助情景.json');
       const built = await buildAuxScenario({
         rawScenario: parsed.data,
-        fileName: scenarioLabel ? `${scenarioLabel}.json` : '粘贴的辅助情景.json',
+        fileName: scenarioFileName,
       });
       addAuxScenario(built);
       setError(null);

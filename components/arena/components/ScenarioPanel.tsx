@@ -3,13 +3,19 @@
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
 import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker';
 
-import { ChangeEvent, useRef, useState } from 'react';
+import { ChangeEvent, useMemo, useRef, useState } from 'react';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleActions } from '../hooks/useBattleActions';
-import { BattleStoreState } from '../types';
+import { BattleStoreState, MAX_AUX_SCENARIOS } from '../types';
 import { useScenarioPresetQuery } from '../hooks/useArenaData';
 import type { ScenarioPreset } from '@/lib/scenario-presets';
+
+const getScenarioTitle = (content: Record<string, unknown> | null) => {
+  if (!content) return '';
+  const rawTitle = (content as any)?.title ?? (content as any)?.name;
+  return typeof rawTitle === 'string' ? rawTitle.trim() : '';
+};
 
 interface ScenarioPanelProps {
   onOpenScenarioModal: () => void;
@@ -57,21 +63,55 @@ export function ScenarioPanel({
     setError(`❌ ${e.message}`);
   };
 
-  const selectedScenarioTitle = (() => {
-    const title = (scenario.content as any)?.title;
-    return typeof title === 'string' ? title.trim() : '';
-  })();
-  const selectedScenarioPresetFilenames = (() => {
+  const selectedScenarioPresetFilenames = useMemo(() => {
     const presets = scenarioPresetQuery.data;
-    if (!presets || !selectedScenarioTitle) return [];
-    return presets.filter((preset) => preset.title === selectedScenarioTitle).map((preset) => preset.filename);
-  })();
+    if (!presets) return [];
+
+    const selected = new Set<string>();
+    const mainTitle = getScenarioTitle(scenario.content);
+
+    presets.forEach((preset) => {
+      const matchesMain =
+        Boolean(scenario.content) &&
+        (scenario.fileName === preset.filename || (mainTitle && preset.title === mainTitle));
+      const matchesAux = auxScenarios.some((aux) => {
+        const auxTitle = getScenarioTitle(aux.content);
+        return aux.fileName === preset.filename || (auxTitle && auxTitle === preset.title);
+      });
+
+      if (matchesMain || matchesAux) {
+        selected.add(preset.filename);
+      }
+    });
+
+    return Array.from(selected);
+  }, [auxScenarios, scenario.content, scenario.fileName, scenarioPresetQuery.data]);
 
   const handleToggleScenarioPreset = async (preset: ScenarioPreset) => {
     if (isGenerating) return;
-    if (selectedScenarioTitle && preset.title === selectedScenarioTitle) {
+    const mainTitle = getScenarioTitle(scenario.content);
+    const isMainSelected =
+      Boolean(scenario.content) &&
+      (scenario.fileName === preset.filename || (mainTitle && preset.title === mainTitle));
+    const matchedAux = auxScenarios.find((aux) => {
+      const auxTitle = getScenarioTitle(aux.content);
+      return aux.fileName === preset.filename || (auxTitle && auxTitle === preset.title);
+    });
+
+    if (isMainSelected) {
       clearScenario();
       setError(null);
+      return;
+    }
+    if (matchedAux) {
+      removeAuxScenario(matchedAux.id);
+      setError(null);
+      return;
+    }
+
+    const hasMainScenario = Boolean(scenario.content);
+    if (hasMainScenario && auxScenarios.length >= MAX_AUX_SCENARIOS) {
+      setError(`❌ 最多只能添加 ${MAX_AUX_SCENARIOS} 个辅助情景。`);
       return;
     }
 
@@ -82,7 +122,11 @@ export function ScenarioPanel({
         throw new Error(`无法加载预设情景：${preset.title}`);
       }
       const text = await response.text();
-      await handleScenarioPaste(text);
+      if (hasMainScenario) {
+        await handleAuxScenarioPaste(text, { fileName: preset.filename });
+      } else {
+        await handleScenarioPaste(text, { fileName: preset.filename });
+      }
       setError(null);
     } catch (error) {
       reportError(error);
@@ -176,7 +220,7 @@ export function ScenarioPanel({
               />
             )}
             <div className="text-xs text-gray-500">
-              提示：再次点击已选的预设情景可清空主情景。
+              提示：未选择主情景时点击将设为主情景；已有主情景时会加入辅助情景。再次点击已选项可移除对应情景。
             </div>
           </div>
         )}
