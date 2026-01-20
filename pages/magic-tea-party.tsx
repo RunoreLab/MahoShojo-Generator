@@ -14,6 +14,7 @@ import { MagicTeaPartyHero } from '@/components/magic-tea-party/Hero';
 import { MagicTeaPartyHistoryImageExportPanel } from '@/components/magic-tea-party/HistoryImageExportPanel';
 import { MagicTeaPartyNoticePanel } from '@/components/magic-tea-party/NoticePanel';
 import { MagicTeaPartyPresetCharacterPanel } from '@/components/magic-tea-party/PresetCharacterPanel';
+import { MagicTeaPartyPresetScenarioPanel } from '@/components/magic-tea-party/PresetScenarioPanel';
 import { MagicTeaPartySessionSidebar } from '@/components/magic-tea-party/SessionSidebar';
 import { MagicTeaPartySessionSetupPanel } from '@/components/magic-tea-party/SessionSetupPanel';
 import { MagicTeaPartySummaryPanel } from '@/components/magic-tea-party/SummaryPanel';
@@ -814,6 +815,13 @@ export default function MagicTeaPartyPage() {
                   preferences={preferences}
                   onPreferenceChange={applyPreferencePatch}
                   onUpdateRoles={(roles) => void updateActiveSessionRoles(roles)}
+                />
+
+                <MagicTeaPartyPresetScenarioPanel
+                  activeSession={activeSession}
+                  preferences={preferences}
+                  onPreferenceChange={applyPreferencePatch}
+                  onUpdateScenarios={(scenario, auxScenarios) => void updateActiveSessionScenarios(scenario, auxScenarios)}
                 />
 
                 <MagicTeaPartyCharacterPanel

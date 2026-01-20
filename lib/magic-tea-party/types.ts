@@ -225,6 +225,7 @@ export type MagicTeaPartyPreferences = {
   tachieCacheMaxGlobal: number;
   tachieCacheMaxBytes: number;
   presetCharacterPanelCollapsed: boolean;
+  presetScenarioPanelCollapsed: boolean;
   sessionRetentionDays: number;
   maxSessions: number;
 };

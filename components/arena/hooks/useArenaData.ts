@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { config as appConfig } from '@/lib/config';
 import type { Preset } from '@/lib/presets';
+import type { ScenarioPreset } from '@/lib/scenario-presets';
 import { StatsData } from '@/pages/api/get-stats';
 
 import { LanguageOption, PresetCollections } from '../types';
@@ -46,5 +47,13 @@ export const useLanguagesQuery = () => {
   return useQuery<LanguageOption[]>({
     queryKey: ['arena', 'languages'],
     queryFn: () => fetcher('/languages.json'),
+  });
+};
+
+export const useScenarioPresetQuery = (options?: { enabled?: boolean }) => {
+  return useQuery<ScenarioPreset[]>({
+    queryKey: ['arena', 'scenario-presets'],
+    queryFn: () => fetcher('/api/get-scenario-presets'),
+    enabled: options?.enabled ?? true,
   });
 };

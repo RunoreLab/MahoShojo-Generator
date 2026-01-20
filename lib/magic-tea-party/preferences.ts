@@ -36,6 +36,7 @@ export const DEFAULT_MAGIC_TEA_PARTY_PREFERENCES: MagicTeaPartyPreferences = {
   tachieCacheMaxGlobal: MAGIC_TEA_PARTY_CACHE_DEFAULT_MAX_GLOBAL,
   tachieCacheMaxBytes: MAGIC_TEA_PARTY_CACHE_DEFAULT_MAX_BYTES,
   presetCharacterPanelCollapsed: true,
+  presetScenarioPanelCollapsed: true,
   sessionRetentionDays: 60,
   maxSessions: 200,
 };
@@ -159,6 +160,10 @@ export function readMagicTeaPartyPreferences(): MagicTeaPartyPreferences {
       typeof parsed.presetCharacterPanelCollapsed === 'boolean'
         ? parsed.presetCharacterPanelCollapsed
         : DEFAULT_MAGIC_TEA_PARTY_PREFERENCES.presetCharacterPanelCollapsed;
+    const presetScenarioPanelCollapsed =
+      typeof parsed.presetScenarioPanelCollapsed === 'boolean'
+        ? parsed.presetScenarioPanelCollapsed
+        : DEFAULT_MAGIC_TEA_PARTY_PREFERENCES.presetScenarioPanelCollapsed;
     const sessionRetentionDays = clampRetentionDays(parsed.sessionRetentionDays);
     const maxSessions = clampMaxSessions(parsed.maxSessions);
 
@@ -181,6 +186,7 @@ export function readMagicTeaPartyPreferences(): MagicTeaPartyPreferences {
       tachieCacheMaxGlobal,
       tachieCacheMaxBytes,
       presetCharacterPanelCollapsed,
+      presetScenarioPanelCollapsed,
       sessionRetentionDays,
       maxSessions,
       ...(lastPresetId ? { lastPresetId } : {}),

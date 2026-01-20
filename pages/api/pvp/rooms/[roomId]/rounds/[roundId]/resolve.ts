@@ -17,6 +17,7 @@ import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
+import { loadScenarioPresetPayload } from '@/lib/pvp/scenario-preset';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
@@ -161,27 +162,36 @@ async function resolveHandler(req: Request): Promise<Response> {
   let scenarioSourceDataCardId: string | null = null;
   let scenarioSourceDataCardUpdatedAt: string | null = null;
   if (rules.mode === 'scenario' && scenarioSelection) {
-    const row = await getPvpEligibleScenarioDataCard(scenarioSelection.id, room.host_user_id);
-    if (!row) {
-      return json({ error: '所选情景已不可用（可能未通过审查/已被封禁/已删除），请房主重新选择情景', code: 'SCENARIO_NOT_ELIGIBLE' }, { status: 409 });
-    }
-    const expectedUpdatedAt = typeof scenarioSelection.updatedAt === 'string' ? scenarioSelection.updatedAt : null;
-    const actualUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
-    if (expectedUpdatedAt && actualUpdatedAt && expectedUpdatedAt !== actualUpdatedAt) {
-      return json({ error: '情景数据卡版本已变更，请房主重新选择情景后再结算', code: 'SCENARIO_VERSION_MISMATCH', expected: expectedUpdatedAt, actual: actualUpdatedAt }, { status: 409 });
-    }
-
-    scenarioSourceDataCardId = row.id;
-    scenarioSourceDataCardUpdatedAt = actualUpdatedAt;
-
-    try {
-      const parsedScenario = JSON.parse(row.data);
-      if (!parsedScenario || typeof parsedScenario !== 'object' || Array.isArray(parsedScenario)) {
-        return json({ error: '情景数据卡内容损坏（不是有效 JSON 对象）', code: 'SCENARIO_JSON_INVALID' }, { status: 500 });
+    if (scenarioSelection.kind === 'preset') {
+      try {
+        const origin = getRequestOrigin(req);
+        scenarioPayload = stripPrivateKeys(await loadScenarioPresetPayload(origin, scenarioSelection.filename)) as Record<string, unknown>;
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : '预设情景读取失败', code: 'SCENARIO_PRESET_LOAD_FAILED' }, { status: 500 });
       }
-      scenarioPayload = stripPrivateKeys(parsedScenario) as Record<string, unknown>;
-    } catch {
-      return json({ error: '情景数据卡内容损坏（不是有效 JSON）', code: 'SCENARIO_JSON_INVALID' }, { status: 500 });
+    } else {
+      const row = await getPvpEligibleScenarioDataCard(scenarioSelection.id, room.host_user_id);
+      if (!row) {
+        return json({ error: '所选情景已不可用（可能未通过审查/已被封禁/已删除），请房主重新选择情景', code: 'SCENARIO_NOT_ELIGIBLE' }, { status: 409 });
+      }
+      const expectedUpdatedAt = typeof scenarioSelection.updatedAt === 'string' ? scenarioSelection.updatedAt : null;
+      const actualUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
+      if (expectedUpdatedAt && actualUpdatedAt && expectedUpdatedAt !== actualUpdatedAt) {
+        return json({ error: '情景数据卡版本已变更，请房主重新选择情景后再结算', code: 'SCENARIO_VERSION_MISMATCH', expected: expectedUpdatedAt, actual: actualUpdatedAt }, { status: 409 });
+      }
+
+      scenarioSourceDataCardId = row.id;
+      scenarioSourceDataCardUpdatedAt = actualUpdatedAt;
+
+      try {
+        const parsedScenario = JSON.parse(row.data);
+        if (!parsedScenario || typeof parsedScenario !== 'object' || Array.isArray(parsedScenario)) {
+          return json({ error: '情景数据卡内容损坏（不是有效 JSON 对象）', code: 'SCENARIO_JSON_INVALID' }, { status: 500 });
+        }
+        scenarioPayload = stripPrivateKeys(parsedScenario) as Record<string, unknown>;
+      } catch {
+        return json({ error: '情景数据卡内容损坏（不是有效 JSON）', code: 'SCENARIO_JSON_INVALID' }, { status: 500 });
+      }
     }
   }
 

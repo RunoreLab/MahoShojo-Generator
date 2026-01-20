@@ -1,12 +1,15 @@
 'use client';
 
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
+import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker';
 
 import { ChangeEvent, useRef, useState } from 'react';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleActions } from '../hooks/useBattleActions';
 import { BattleStoreState } from '../types';
+import { useScenarioPresetQuery } from '../hooks/useArenaData';
+import type { ScenarioPreset } from '@/lib/scenario-presets';
 
 interface ScenarioPanelProps {
   onOpenScenarioModal: () => void;
@@ -27,6 +30,7 @@ export function ScenarioPanel({
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const isMatching = useBattleSelector((state) => state.isMatching);
   const setError = useBattleSelector((state) => state.setError);
+  const clearScenario = useBattleSelector((state) => state.clearScenario);
   const {
     handleScenarioUpload,
     handleScenarioPaste,
@@ -43,9 +47,48 @@ export function ScenarioPanel({
   const [auxPastedJson, setAuxPastedJson] = useState('');
   const auxInputRef = useRef<HTMLInputElement>(null);
 
+  const [isPresetCollapsed, setIsPresetCollapsed] = useState(true);
+  const [presetPage, setPresetPage] = useState(1);
+  const [loadingScenarioPreset, setLoadingScenarioPreset] = useState<string | null>(null);
+  const scenarioPresetQuery = useScenarioPresetQuery();
+
   const reportError = (error: unknown) => {
     const e = error instanceof Error ? error : new Error('未知错误');
     setError(`❌ ${e.message}`);
+  };
+
+  const selectedScenarioTitle = (() => {
+    const title = (scenario.content as any)?.title;
+    return typeof title === 'string' ? title.trim() : '';
+  })();
+  const selectedScenarioPresetFilenames = (() => {
+    const presets = scenarioPresetQuery.data;
+    if (!presets || !selectedScenarioTitle) return [];
+    return presets.filter((preset) => preset.title === selectedScenarioTitle).map((preset) => preset.filename);
+  })();
+
+  const handleToggleScenarioPreset = async (preset: ScenarioPreset) => {
+    if (isGenerating) return;
+    if (selectedScenarioTitle && preset.title === selectedScenarioTitle) {
+      clearScenario();
+      setError(null);
+      return;
+    }
+
+    setLoadingScenarioPreset(preset.filename);
+    try {
+      const response = await fetch(`/scenario-presets/${encodeURIComponent(preset.filename)}`);
+      if (!response.ok) {
+        throw new Error(`无法加载预设情景：${preset.title}`);
+      }
+      const text = await response.text();
+      await handleScenarioPaste(text);
+      setError(null);
+    } catch (error) {
+      reportError(error);
+    } finally {
+      setLoadingScenarioPreset(null);
+    }
   };
 
   const onAuxFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -101,6 +144,43 @@ export function ScenarioPanel({
         scenarioFileName={scenario.fileName || null}
         isScenarioNative={scenario.isNative}
       />
+
+      <div className="mt-2">
+        <button
+          type="button"
+          onClick={() => setIsPresetCollapsed((prev) => !prev)}
+          className="text-purple-700 hover:underline cursor-pointer font-semibold"
+          disabled={isGenerating}
+        >
+          {isPresetCollapsed ? '▶ 展开预设情景（内置）' : '▼ 折叠预设情景（内置）'}
+        </button>
+
+        {!isPresetCollapsed && (
+          <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            {scenarioPresetQuery.error ? (
+              <div className="text-sm text-red-600">
+                无法加载预设情景：{(scenarioPresetQuery.error as Error).message}
+              </div>
+            ) : scenarioPresetQuery.isLoading || !scenarioPresetQuery.data ? (
+              <div className="text-sm text-gray-500">正在加载预设情景...</div>
+            ) : (
+              <ScenarioPresetGridPicker
+                title="选择预设情景"
+                presets={scenarioPresetQuery.data}
+                currentPage={presetPage}
+                onPageChange={setPresetPage}
+                disabled={isGenerating}
+                selectedFilenames={selectedScenarioPresetFilenames}
+                loadingFilename={loadingScenarioPreset}
+                onToggle={handleToggleScenarioPreset}
+              />
+            )}
+            <div className="text-xs text-gray-500">
+              提示：再次点击已选的预设情景可清空主情景。
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="mt-2">
         <button

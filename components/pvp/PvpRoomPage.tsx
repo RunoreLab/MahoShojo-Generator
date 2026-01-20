@@ -11,10 +11,11 @@ import BattleReportCard from '@/components/BattleReportCard';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
 import { PresetGridPicker } from '@/components/PresetGridPicker';
+import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 import { UserWithTitle } from '@/components/UserTitle';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
-import { useLanguagesQuery, usePresetQuery } from '@/components/arena/hooks/useArenaData';
+import { useLanguagesQuery, usePresetQuery, useScenarioPresetQuery } from '@/components/arena/hooks/useArenaData';
 import { PvpChatPanel } from '@/components/pvp/PvpChatPanel';
 import { PvpHeroBanner } from '@/components/pvp/PvpHeroBanner';
 import { PvpScoreboard } from '@/components/pvp/PvpScoreboard';
@@ -44,6 +45,7 @@ import { inferTemplate } from '@/lib/data-card-converter';
 	import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
 
 import type { Preset } from '@/lib/presets';
+import type { ScenarioPreset } from '@/lib/scenario-presets';
 import type { UserBadge } from '@/types/badge';
 import { revokeBlobUrl } from '@/lib/client/blobUrl';
 
@@ -261,6 +263,8 @@ export function PvpRoomPage() {
   const [roomPasswordDraft, setRoomPasswordDraft] = useState('');
   const [rulesDraft, setRulesDraft] = useState<PvpRoomRules | null>(null);
   const [scenarioDraft, setScenarioDraft] = useState<PvpScenarioSelection | null>(null);
+  const [presetScenarioCollapsed, setPresetScenarioCollapsed] = useState(true);
+  const [presetScenarioPage, setPresetScenarioPage] = useState(1);
   const autoScenarioImportKeyRef = useRef<string>('');
   const [isScenarioMatching, setIsScenarioMatching] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
@@ -326,6 +330,7 @@ export function PvpRoomPage() {
 
   const presetsQuery = usePresetQuery();
   const languagesQuery = useLanguagesQuery();
+  const scenarioPresetQuery = useScenarioPresetQuery({ enabled: rulesDraft?.mode === 'scenario' });
 
   const joinMutation = useMutation({
     mutationFn: async (payload: { password?: string }) => {
@@ -404,6 +409,15 @@ export function PvpRoomPage() {
     typeof (room as any)?.scenarioAdjudicationImportedFor === 'string'
       ? String((room as any).scenarioAdjudicationImportedFor).trim() || null
       : null;
+  const selectedPresetScenarioFilenames = useMemo(() => {
+    if (scenarioDraft?.kind === 'preset') return [scenarioDraft.filename];
+    if (roomScenario && typeof roomScenario === 'object' && (roomScenario as any).kind === 'preset') {
+      const filename =
+        typeof (roomScenario as any).presetFilename === 'string' ? String((roomScenario as any).presetFilename).trim() : '';
+      if (filename) return [filename];
+    }
+    return [];
+  }, [roomScenario, scenarioDraft]);
   const phase: string = room?.phase || 'unknown';
   const version: number = room?.version ?? 0;
   const lastActivityAt: string | null = typeof room?.lastActivityAt === 'string' ? room.lastActivityAt : null;
@@ -480,11 +494,20 @@ export function PvpRoomPage() {
   useEffect(() => {
     if (!isHost) return;
     if (!rules || !roomScenario || typeof roomScenario !== 'object') return;
-    const id = typeof (roomScenario as any).sourceDataCardId === 'string' ? String((roomScenario as any).sourceDataCardId).trim() : '';
-    if (!id) return;
-    const updatedAt =
-      typeof (roomScenario as any).sourceDataCardUpdatedAt === 'string' ? String((roomScenario as any).sourceDataCardUpdatedAt) : null;
-    const key = `${id}|${updatedAt ?? ''}`;
+    const scenarioKind = typeof (roomScenario as any).kind === 'string' ? String((roomScenario as any).kind).trim() : '';
+    let key = '';
+    if (scenarioKind === 'preset') {
+      const filename =
+        typeof (roomScenario as any).presetFilename === 'string' ? String((roomScenario as any).presetFilename).trim() : '';
+      if (!filename) return;
+      key = `preset:${filename}`;
+    } else {
+      const id = typeof (roomScenario as any).sourceDataCardId === 'string' ? String((roomScenario as any).sourceDataCardId).trim() : '';
+      if (!id) return;
+      const updatedAt =
+        typeof (roomScenario as any).sourceDataCardUpdatedAt === 'string' ? String((roomScenario as any).sourceDataCardUpdatedAt) : null;
+      key = `${id}|${updatedAt ?? ''}`;
+    }
     if (scenarioAdjudicationImportedFor !== key) return;
     if (autoScenarioImportKeyRef.current !== key) return;
 
@@ -1283,6 +1306,31 @@ export function PvpRoomPage() {
     if (scenarioDraft) return;
     if (phase !== 'waiting' && phase !== 'submitting') return;
     if (!roomScenario || typeof roomScenario !== 'object') return;
+    const scenarioKind = typeof (roomScenario as any).kind === 'string' ? String((roomScenario as any).kind).trim() : '';
+    const shouldBlock = isScenarioSaving || rulesMutation.isPending;
+    if (scenarioKind === 'preset') {
+      const filename =
+        typeof (roomScenario as any).presetFilename === 'string' ? String((roomScenario as any).presetFilename).trim() : '';
+      if (!filename) return;
+      const key = `preset:${filename}`;
+      if (scenarioAdjudicationImportedFor === key) return;
+      if (autoScenarioImportKeyRef.current === key) return;
+      if (shouldBlock) return;
+
+      autoScenarioImportKeyRef.current = key;
+      triggerScenarioSave({
+        selection: {
+          kind: 'preset',
+          filename,
+          name:
+            typeof (roomScenario as any).presetName === 'string'
+              ? String((roomScenario as any).presetName)
+              : (typeof (roomScenario as any).title === 'string' ? String((roomScenario as any).title) : null),
+        },
+      });
+      return;
+    }
+
     const id = typeof (roomScenario as any).sourceDataCardId === 'string' ? String((roomScenario as any).sourceDataCardId).trim() : '';
     if (!id) return;
     const updatedAt =
@@ -1290,7 +1338,7 @@ export function PvpRoomPage() {
     const key = `${id}|${updatedAt ?? ''}`;
     if (scenarioAdjudicationImportedFor === key) return;
     if (autoScenarioImportKeyRef.current === key) return;
-    if (isScenarioSaving || rulesMutation.isPending) return;
+    if (shouldBlock) return;
 
     autoScenarioImportKeyRef.current = key;
     triggerScenarioSave({
@@ -1494,6 +1542,22 @@ export function PvpRoomPage() {
       author: typeof cardData?._author === 'string' ? cardData._author : null,
     } satisfies PvpScenarioSelection);
     setError(warning);
+  };
+
+  const handleTogglePresetScenario = (preset: ScenarioPreset) => {
+    if (!isHost) {
+      setError('仅房主可设置房间情景。');
+      return;
+    }
+    setScenarioDraft((prev) => {
+      if (prev?.kind === 'preset' && prev.filename === preset.filename) return null;
+      return {
+        kind: 'preset',
+        filename: preset.filename,
+        name: preset.title,
+      } satisfies PvpScenarioSelection;
+    });
+    setError(null);
   };
 
   const handleRandomMatchScenario = async () => {
@@ -2588,6 +2652,43 @@ export function PvpRoomPage() {
                                 isMatchingScenario={isScenarioMatching}
                                 scenarioFileName={scenarioDraft?.name ?? (typeof roomScenario?.title === 'string' ? roomScenario.title : (typeof roomScenario?.name === 'string' ? roomScenario.name : null))}
                               />
+
+                              <div className="mt-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setPresetScenarioCollapsed((prev) => !prev)}
+                                  className="text-purple-700 hover:underline cursor-pointer font-semibold"
+                                  disabled={rulesMutation.isPending || scenarioMutation.isPending}
+                                >
+                                  {presetScenarioCollapsed ? '▶ 展开预设情景（内置）' : '▼ 折叠预设情景（内置）'}
+                                </button>
+
+                                {!presetScenarioCollapsed && (
+                                  <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                                    {scenarioPresetQuery.error ? (
+                                      <div className="text-sm text-red-600">
+                                        无法加载预设情景：{(scenarioPresetQuery.error as Error).message}
+                                      </div>
+                                    ) : scenarioPresetQuery.isLoading || !scenarioPresetQuery.data ? (
+                                      <div className="text-sm text-gray-500">正在加载预设情景...</div>
+                                    ) : (
+                                      <ScenarioPresetGridPicker
+                                        title="选择预设情景"
+                                        presets={scenarioPresetQuery.data}
+                                        currentPage={presetScenarioPage}
+                                        onPageChange={setPresetScenarioPage}
+                                        disabled={rulesMutation.isPending || scenarioMutation.isPending}
+                                        selectedFilenames={selectedPresetScenarioFilenames}
+                                        onToggle={handleTogglePresetScenario}
+                                      />
+                                    )}
+                                    <div className="text-xs text-gray-500">
+                                      提示：选择预设情景后需要点击“保存情景”才会生效。
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
                               <div className="flex gap-2">
                                 <button
                                   className="px-3 py-2 rounded bg-purple-600 text-white text-sm disabled:opacity-50"

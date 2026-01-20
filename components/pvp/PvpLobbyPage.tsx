@@ -13,10 +13,13 @@ import { usePvpLobbyStore } from '@/components/pvp/stores/usePvpLobbyStore';
 import { BattleModeSelector } from '@/components/shared/BattleModeSelector';
 import { GenerationModeSwitcher } from '@/components/shared/GenerationModeSwitcher';
 import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
+import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker';
+import { useScenarioPresetQuery } from '@/components/arena/hooks/useArenaData';
 import { authStorage } from '@/lib/auth';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { useAuth } from '@/lib/useAuth';
 import type { PvpRoomRules, PvpScenarioSelection } from '@/lib/pvp/types';
+import type { ScenarioPreset } from '@/lib/scenario-presets';
 
 const PASSWORD_CACHE_PREFIX = 'pvp-room-password:';
 
@@ -60,6 +63,8 @@ export function PvpLobbyPage() {
   const updateRules = usePvpLobbyStore((s) => s.updateRules);
   const [createPassword, setCreatePassword] = useState('');
   const [scenarioSelection, setScenarioSelection] = useState<PvpScenarioSelection | null>(null);
+  const [presetScenarioCollapsed, setPresetScenarioCollapsed] = useState(true);
+  const [presetScenarioPage, setPresetScenarioPage] = useState(1);
   const [isScenarioMatching, setIsScenarioMatching] = useState(false);
   const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [showRoomBrowserModal, setShowRoomBrowserModal] = useState(false);
@@ -68,6 +73,8 @@ export function PvpLobbyPage() {
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isQuickMatching, setIsQuickMatching] = useState(false);
+
+  const scenarioPresetQuery = useScenarioPresetQuery({ enabled: rules.mode === 'scenario' });
 
   const rulesError = useMemo((): string | null => {
     const participants = Number.isFinite(rules.participants) ? Math.floor(rules.participants) : 0;
@@ -96,7 +103,7 @@ export function PvpLobbyPage() {
   const ensureScenarioSelectedIfNeeded = (): boolean => {
     if (rules.mode !== 'scenario') return true;
     if (!scenarioSelection) {
-      setError('情景模式必须选择一个在线情景（可从在线情景库选择 / 随机匹配）。');
+      setError('情景模式必须选择一个情景（可从在线情景库选择 / 随机匹配 / 使用预设情景）。');
       return false;
     }
     return true;
@@ -155,6 +162,22 @@ export function PvpLobbyPage() {
     } finally {
       setIsScenarioMatching(false);
     }
+  };
+
+  const selectedPresetScenarioFilenames =
+    scenarioSelection?.kind === 'preset' ? [scenarioSelection.filename] : [];
+
+  const handleTogglePresetScenario = (preset: ScenarioPreset) => {
+    if (isCreating) return;
+    setScenarioSelection((prev) => {
+      if (prev?.kind === 'preset' && prev.filename === preset.filename) return null;
+      return {
+        kind: 'preset',
+        filename: preset.filename,
+        name: preset.title,
+      } satisfies PvpScenarioSelection;
+    });
+    setError(null);
   };
 
   const handleCreateRoom = async () => {
@@ -413,6 +436,42 @@ export function PvpLobbyPage() {
                           isMatchingScenario={isScenarioMatching}
                           scenarioFileName={scenarioSelection?.name ?? null}
                         />
+
+                        <div className="mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setPresetScenarioCollapsed((prev) => !prev)}
+                            className="text-purple-700 hover:underline cursor-pointer font-semibold"
+                            disabled={isCreating}
+                          >
+                            {presetScenarioCollapsed ? '▶ 展开预设情景（内置）' : '▼ 折叠预设情景（内置）'}
+                          </button>
+
+                          {!presetScenarioCollapsed && (
+                            <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                              {scenarioPresetQuery.error ? (
+                                <div className="text-sm text-red-600">
+                                  无法加载预设情景：{(scenarioPresetQuery.error as Error).message}
+                                </div>
+                              ) : scenarioPresetQuery.isLoading || !scenarioPresetQuery.data ? (
+                                <div className="text-sm text-gray-500">正在加载预设情景...</div>
+                              ) : (
+                                <ScenarioPresetGridPicker
+                                  title="选择预设情景"
+                                  presets={scenarioPresetQuery.data}
+                                  currentPage={presetScenarioPage}
+                                  onPageChange={setPresetScenarioPage}
+                                  disabled={isCreating}
+                                  selectedFilenames={selectedPresetScenarioFilenames}
+                                  onToggle={handleTogglePresetScenario}
+                                />
+                              )}
+                              <div className="text-xs text-gray-500">
+                                提示：PVP 房间情景对所有回合生效；更换情景会影响后续结算叙事。
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                     <div className="col-span-2 border rounded-lg p-3 bg-gray-50">

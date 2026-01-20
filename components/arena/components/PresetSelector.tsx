@@ -14,6 +14,7 @@ export function PresetSelector() {
   const { grouped, isLoading, error } = usePresetQuery();
   const [mgPage, setMgPage] = useState(1);
   const [canshouPage, setCanshouPage] = useState(1);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
   const combatants = useBattleSelector((state) => state.combatants);
   const addCombatant = useBattleSelector((state) => state.addCombatant);
@@ -84,30 +85,56 @@ export function PresetSelector() {
     return <p className="text-sm text-gray-500 mb-6">正在加载预设...</p>;
   }
 
+  const presetFilenameSet = new Set<string>([
+    ...grouped.magicalGirl.map((p) => p.filename),
+    ...grouped.canshou.map((p) => p.filename),
+  ]);
+  const selectedPresetCount = combatantFilenames.filter((filename) => presetFilenameSet.has(filename)).length;
+
   return (
     <>
-      <PresetGridPicker
-        title="选择预设魔法少女"
-        presets={grouped.magicalGirl}
-        currentPage={mgPage}
-        onPageChange={setMgPage}
-        disabled={isGenerating}
-        maxSelected={MAX_COMBATANTS}
-        selectedFilenames={combatantFilenames}
-        loadingFilename={loadingPreset}
-        onToggle={handleSelect}
-      />
-      <PresetGridPicker
-        title="选择预设残兽"
-        presets={grouped.canshou}
-        currentPage={canshouPage}
-        onPageChange={setCanshouPage}
-        disabled={isGenerating}
-        maxSelected={MAX_COMBATANTS}
-        selectedFilenames={combatantFilenames}
-        loadingFilename={loadingPreset}
-        onToggle={handleSelect}
-      />
+      <div className="mb-2">
+        <button
+          type="button"
+          onClick={() => setIsCollapsed((prev) => !prev)}
+          className="text-purple-700 hover:underline cursor-pointer font-semibold"
+          disabled={isGenerating}
+        >
+          {isCollapsed ? '▶ 展开预设角色' : '▼ 折叠预设角色'}
+        </button>
+        {isCollapsed && (
+          <div className="text-xs text-gray-500 mt-1">
+            已选择 {selectedPresetCount} 个预设角色（上限 {MAX_COMBATANTS}）。
+          </div>
+        )}
+      </div>
+
+      {!isCollapsed && (
+        <>
+          <PresetGridPicker
+            title="选择预设魔法少女"
+            presets={grouped.magicalGirl}
+            currentPage={mgPage}
+            onPageChange={setMgPage}
+            disabled={isGenerating}
+            maxSelected={MAX_COMBATANTS}
+            selectedFilenames={combatantFilenames}
+            loadingFilename={loadingPreset}
+            onToggle={handleSelect}
+          />
+          <PresetGridPicker
+            title="选择预设残兽"
+            presets={grouped.canshou}
+            currentPage={canshouPage}
+            onPageChange={setCanshouPage}
+            disabled={isGenerating}
+            maxSelected={MAX_COMBATANTS}
+            selectedFilenames={combatantFilenames}
+            loadingFilename={loadingPreset}
+            onToggle={handleSelect}
+          />
+        </>
+      )}
     </>
   );
 }
