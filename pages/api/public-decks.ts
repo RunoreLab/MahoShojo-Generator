@@ -2,6 +2,9 @@ import { getDeckById, getDeckCardsWithAccess, getPublicDecks, getUserByAuthKey }
 
 export const runtime = 'edge';
 
+const MAX_LIMIT = 100;
+const MAX_SEARCH_LENGTH = 200;
+
 type AuthenticatedUser = { id: number; username: string };
 
 async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
@@ -12,6 +15,14 @@ async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> 
   const user = await getUserByAuthKey(authKey);
   return user;
 }
+
+const readIntParam = (value: string | null, fallback: number) => {
+  if (value == null) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.floor(parsed) : fallback;
+};
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') {
@@ -24,12 +35,25 @@ export default async function handler(req: Request): Promise<Response> {
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
-    const search = url.searchParams.get('search');
-    const sortBy = url.searchParams.get('sortBy') as 'likes' | 'favorites' | 'created_at' | null;
-    const limit = parseInt(url.searchParams.get('limit') || '12');
-    const offset = parseInt(url.searchParams.get('offset') || '0');
+    const searchRaw = url.searchParams.get('search');
+    const sortByRaw = url.searchParams.get('sortBy');
+    const limit = clamp(readIntParam(url.searchParams.get('limit'), 12), 1, MAX_LIMIT);
+    const offset = Math.max(0, readIntParam(url.searchParams.get('offset'), 0));
 
     const viewer = await getUserFromAuth(req);
+    const search = typeof searchRaw === 'string' ? searchRaw.trim() : '';
+
+    if (search.length > MAX_SEARCH_LENGTH) {
+      return new Response(JSON.stringify({ success: false, error: `搜索关键词过长（最多 ${MAX_SEARCH_LENGTH} 字符）` }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    const sortBy =
+      sortByRaw === 'likes' || sortByRaw === 'favorites' || sortByRaw === 'created_at'
+        ? sortByRaw
+        : undefined;
 
     if (id) {
       const deck = await getDeckById(id);
@@ -48,7 +72,7 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    const decks = await getPublicDecks(limit, offset, search || undefined, sortBy || undefined);
+    const decks = await getPublicDecks(limit, offset, search || undefined, sortBy);
     return new Response(JSON.stringify({ success: true, decks }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
@@ -61,4 +85,3 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 }
-
