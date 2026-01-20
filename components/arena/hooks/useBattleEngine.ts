@@ -18,6 +18,7 @@ import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateM
 import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
+import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
@@ -539,18 +540,18 @@ export const useBattleEngine = () => {
             try {
               json = JSON.parse(text);
             } catch {
-              throw new Error(
-                response.status === 524
-                  ? 'Cloudflare 超时（HTTP 524），请稍后重试。'
-                  : `服务器响应异常（HTTP ${response.status}），可能是服务暂时不可用，请稍后再试。`
-              );
+              if (response.status === 524) {
+                throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
+              }
+              const serverMessage = resolveApiErrorMessage({ payload: text, fallback: '服务器响应异常' });
+              throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '服务器响应异常' }));
             }
 
             if (json.shouldRedirect) {
               redirectToArrested(json.reason || '使用危险符文');
               return;
             }
-            const serverMessage = json.message || json.error || text;
+            const serverMessage = resolveApiErrorMessage({ payload: json, fallback: '生成失败' });
             throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
           }
 
@@ -906,18 +907,18 @@ export const useBattleEngine = () => {
         try {
           json = JSON.parse(text);
         } catch {
-          throw new Error(
-            response.status === 524
-              ? 'Cloudflare 超时（HTTP 524），请稍后重试。'
-              : `服务器响应异常（HTTP ${response.status}），可能是服务暂时不可用，请稍后再试。`
-          );
+          if (response.status === 524) {
+            throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
+          }
+          const serverMessage = resolveApiErrorMessage({ payload: text, fallback: '服务器响应异常' });
+          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '服务器响应异常' }));
         }
 
         if (json.shouldRedirect) {
           redirectToArrested(json.reason || '使用危险符文');
           return;
         }
-        const serverMessage = json.message || json.error || text;
+        const serverMessage = resolveApiErrorMessage({ payload: json, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
@@ -1048,18 +1049,18 @@ export const useBattleEngine = () => {
         try {
           json = JSON.parse(text);
         } catch {
-          throw new Error(
-            response.status === 524
-              ? 'Cloudflare 超时（HTTP 524），请稍后重试。'
-              : `服务器响应异常（HTTP ${response.status}），可能是服务暂时不可用，请稍后再试。`
-          );
+          if (response.status === 524) {
+            throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
+          }
+          const serverMessage = resolveApiErrorMessage({ payload: text, fallback: '服务器响应异常' });
+          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '服务器响应异常' }));
         }
 
         if (json.shouldRedirect) {
           redirectToArrested(json.reason || '使用危险符文');
           return;
         }
-        const serverMessage = json.message || json.error || text;
+        const serverMessage = resolveApiErrorMessage({ payload: json, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 

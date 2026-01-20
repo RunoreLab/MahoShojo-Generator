@@ -14,6 +14,7 @@ import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
 import { OFFICIAL_KEY_MAX_AI_COOLDOWN_MS, USER_PROVIDED_KEY_COOLDOWN_MS } from '@/lib/ai/cooldowns';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { buildSafeFileName } from '@/lib/client/fileName';
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { useCooldown } from '@/lib/cooldown';
@@ -660,8 +661,9 @@ export function TavernImportPanel() {
         });
 
         if (!response.ok) {
-          const errorJson = await response.json().catch(() => null as any);
-          const redirectReason = errorJson?.reason || errorJson?.message || errorJson?.error;
+          const { payload } = await readJsonOrTextFromResponse(response);
+          const errorJson = payload && typeof payload === 'object' ? (payload as any) : null;
+          const redirectReason = errorJson?.reason || errorJson?.message || errorJson?.error || resolveApiErrorMessage({ payload, fallback: '' });
           if (errorJson?.shouldRedirect || errorJson?.redirect === '/arrested') {
             void router.push({
               pathname: '/arrested',
@@ -669,14 +671,14 @@ export function TavernImportPanel() {
             });
             throw new Error('已跳转到被捕页面');
           }
-          const serverMessage = errorJson?.message || errorJson?.error;
+          const serverMessage = resolveApiErrorMessage({ payload, fallback: 'AI 转换失败' });
           throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 转换失败' }));
         }
 
         const contentType = (response.headers.get('content-type') || '').toLowerCase();
         if (contentType.includes('application/json') || contentType.includes('+json')) {
-          const errorJson = await response.json().catch(() => null as any);
-          const serverMessage = errorJson?.message || errorJson?.error;
+          const { payload } = await readJsonOrTextFromResponse(response);
+          const serverMessage = resolveApiErrorMessage({ payload, fallback: 'AI 转换失败' });
           throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 转换失败' }));
         }
 
@@ -717,8 +719,9 @@ export function TavernImportPanel() {
       });
 
       if (!response.ok) {
-        const errorJson = await response.json().catch(() => null as any);
-        const redirectReason = errorJson?.reason || errorJson?.message || errorJson?.error;
+        const { payload } = await readJsonOrTextFromResponse(response);
+        const errorJson = payload && typeof payload === 'object' ? (payload as any) : null;
+        const redirectReason = errorJson?.reason || errorJson?.message || errorJson?.error || resolveApiErrorMessage({ payload, fallback: '' });
         if (errorJson?.shouldRedirect || errorJson?.redirect === '/arrested') {
           void router.push({
             pathname: '/arrested',
@@ -726,7 +729,7 @@ export function TavernImportPanel() {
           });
           throw new Error('已跳转到被捕页面');
         }
-        const serverMessage = errorJson?.message || errorJson?.error;
+        const serverMessage = resolveApiErrorMessage({ payload, fallback: 'AI 转换失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 转换失败' }));
       }
 

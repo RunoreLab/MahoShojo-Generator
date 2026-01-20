@@ -10,6 +10,7 @@ import { OFFICIAL_KEY_MAX_AI_COOLDOWN_MS, USER_PROVIDED_KEY_COOLDOWN_MS } from '
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { authStorage } from '@/lib/auth';
 import { downloadBlob } from '@/lib/client/blobUrl';
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { useCooldown } from '@/lib/cooldown';
@@ -1016,8 +1017,9 @@ export function TavernExportPanel() {
       });
 
       if (!response.ok) {
-        const errorJson = await response.json().catch(() => null as any);
-        const redirectReason = errorJson?.reason || errorJson?.message || errorJson?.error;
+        const { payload } = await readJsonOrTextFromResponse(response);
+        const errorJson = payload && typeof payload === 'object' ? (payload as any) : null;
+        const redirectReason = errorJson?.reason || errorJson?.message || errorJson?.error || resolveApiErrorMessage({ payload, fallback: '' });
         if (errorJson?.shouldRedirect || errorJson?.redirect === '/arrested') {
           void router.push({
             pathname: '/arrested',
@@ -1025,7 +1027,7 @@ export function TavernExportPanel() {
           });
           return;
         }
-        const serverMessage = errorJson?.message || errorJson?.error;
+        const serverMessage = resolveApiErrorMessage({ payload, fallback: 'AI 补全失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 补全失败' }));
       }
 

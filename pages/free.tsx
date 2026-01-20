@@ -22,6 +22,7 @@ import { USER_PROVIDED_KEY_COOLDOWN_MS, OFFICIAL_KEY_MAX_AI_COOLDOWN_MS } from '
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt } from '@/lib/ai/attachments';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 type FreeSchemaId = 'magical-girl' | 'canshou' | 'scenario' | 'general' | 'general-scenario';
@@ -508,7 +509,8 @@ export default function FreeGeneratorPage() {
       });
 
       if (!response.ok) {
-        const errorJson = await response.json().catch(() => null as any);
+        const { payload } = await readJsonOrTextFromResponse(response);
+        const errorJson = payload && typeof payload === 'object' ? (payload as any) : null;
         if (errorJson?.shouldRedirect) {
           router.push({
             pathname: '/arrested',
@@ -516,15 +518,15 @@ export default function FreeGeneratorPage() {
           });
           return;
         }
-        const serverMessage = errorJson?.message || errorJson?.error;
+        const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
       if (generationMode === 'stream') {
         const contentType = (response.headers.get('content-type') || '').toLowerCase();
         if (contentType.includes('application/json') || contentType.includes('+json')) {
-          const errorJson = await response.json().catch(() => null as any);
-          const serverMessage = errorJson?.message || errorJson?.error;
+          const { payload } = await readJsonOrTextFromResponse(response);
+          const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
           throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 

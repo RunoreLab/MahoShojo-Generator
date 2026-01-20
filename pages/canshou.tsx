@@ -19,6 +19,7 @@ import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 // 定义问卷和问题的类型
@@ -478,20 +479,21 @@ const CanshouPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null as any);
+        const { payload } = await readJsonOrTextFromResponse(response);
+        const errorData = payload && typeof payload === 'object' ? (payload as any) : null;
         if (errorData?.shouldRedirect) {
           router.push('/arrested');
           return;
         }
-        const serverMessage = errorData?.message || errorData?.error;
+        const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
       if (generationMode === 'stream') {
         const contentType = (response.headers.get('content-type') || '').toLowerCase();
         if (contentType.includes('application/json') || contentType.includes('+json')) {
-          const errorData = await response.json().catch(() => null as any);
-          const serverMessage = errorData?.message || errorData?.error;
+          const { payload } = await readJsonOrTextFromResponse(response);
+          const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
           throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 

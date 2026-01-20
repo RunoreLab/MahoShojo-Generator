@@ -22,6 +22,7 @@ import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 interface Questionnaire {
@@ -652,7 +653,8 @@ const DetailsPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null as any);
+        const { payload } = await readJsonOrTextFromResponse(response);
+        const errorData = payload && typeof payload === 'object' ? (payload as any) : null;
 
         // 处理不同的 HTTP 状态码
         if (errorData?.shouldRedirect) {
@@ -666,19 +668,18 @@ const DetailsPage: React.FC = () => {
           throw new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`);
         } else if (response.status === 524) {
           throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
-        } else if (response.status >= 500) {
-          throw new Error(`服务器内部错误（HTTP ${response.status}），当前可能正忙，请稍后重试。`);
         } else {
-          const serverMessage = errorData?.message || errorData?.error;
-          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
+          const fallback = response.status >= 500 ? '服务器内部错误' : '生成失败';
+          const serverMessage = resolveApiErrorMessage({ payload, fallback });
+          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback }));
         }
       }
 
       if (generationMode === 'stream') {
         const contentType = (response.headers.get('content-type') || '').toLowerCase();
         if (contentType.includes('application/json') || contentType.includes('+json')) {
-          const errorData = await response.json().catch(() => null as any);
-          const serverMessage = errorData?.message || errorData?.error;
+          const { payload } = await readJsonOrTextFromResponse(response);
+          const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
           throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 

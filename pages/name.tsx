@@ -13,6 +13,7 @@ import Footer from '../components/Footer';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 
@@ -106,18 +107,18 @@ async function generateMagicalGirl(inputName: string, language: string): Promise
     });
 
       if (!response.ok) {
-      const error = await response.json().catch(() => null as any);
+      const { payload } = await readJsonOrTextFromResponse(response);
+      const error = payload && typeof payload === 'object' ? (payload as any) : null;
       // 处理不同的 HTTP 状态码
       if (response.status === 429) {
         const retryAfter = error?.retryAfter || 60;
         throw new Error(`请求过于频繁（HTTP 429）！请等待 ${retryAfter} 秒后再试。`);
       } else if (response.status === 524) {
         throw new Error('Cloudflare 超时（HTTP 524），请稍后重试。');
-      } else if (response.status >= 500) {
-        throw new Error(`服务器内部错误（HTTP ${response.status}），当前可能正忙，请稍后重试。`);
       } else {
-        const serverMessage = error?.message || error?.error;
-        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
+        const fallback = response.status >= 500 ? '服务器内部错误' : '生成失败';
+        const serverMessage = resolveApiErrorMessage({ payload, fallback });
+        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback }));
       }
     }
 
@@ -140,21 +141,12 @@ async function generateMagicalGirl(inputName: string, language: string): Promise
       levelEmoji: level.emoji
     };
   } catch (error) {
-    // 处理网络错误和其他异常
-    if (error instanceof Error) {
-      // 如果已经是我们抛出的错误，直接重新抛出
-      if (error.message.includes('请求过于频繁') ||
-        error.message.includes('服务器内部错误') ||
-        error.message.includes('生成失败')) {
-        throw error;
-      }
-    }
-    // 处理网络连接错误
     if (error instanceof TypeError && error.message.includes('fetch')) {
       throw new Error('网络连接失败，请检查网络后重试');
     }
-
-    // 其他未知错误
+    if (error instanceof Error) {
+      throw error;
+    }
     throw new Error('生成魔法少女时发生未知错误，请重试');
   }
 }

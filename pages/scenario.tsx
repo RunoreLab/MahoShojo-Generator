@@ -15,6 +15,7 @@ import { convertDataCard, createBlankDataCard } from '@/lib/data-card-converter'
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 // 定义引导性问题
@@ -228,7 +229,8 @@ const ScenarioPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorJson = await response.json().catch(() => null as any);
+        const { payload } = await readJsonOrTextFromResponse(response);
+        const errorJson = payload && typeof payload === 'object' ? (payload as any) : null;
         if (errorJson?.shouldRedirect) {
           router.push({
             pathname: '/arrested',
@@ -236,15 +238,15 @@ const ScenarioPage: React.FC = () => {
           });
           return;
         }
-        const serverMessage = errorJson?.message || errorJson?.error;
+        const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
       if (generationMode === 'stream') {
         const contentType = (response.headers.get('content-type') || '').toLowerCase();
         if (contentType.includes('application/json') || contentType.includes('+json')) {
-          const errorJson = await response.json().catch(() => null as any);
-          const serverMessage = errorJson?.message || errorJson?.error;
+          const { payload } = await readJsonOrTextFromResponse(response);
+          const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
           throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 
