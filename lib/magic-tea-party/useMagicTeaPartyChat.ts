@@ -170,16 +170,14 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
   );
 
   const resolveOutputPlanForRequest = useCallback(
-    (session: MagicTeaPartySession, outputFormat: MagicTeaPartyOutputFormat) => {
+    (session: MagicTeaPartySession) => {
       const settings = buildRequestSettings(session);
       const basePlan = settings.outputPlan ?? preferences.outputPlan;
-      if (outputFormat !== 'jsonl') {
-        return { choices: 'off', summary: 'off', updates: 'off' } as const;
-      }
+      const enableChoices = settings.enableChoices !== false;
       const summaryPlan = settings.enableSummary ? basePlan.summary : 'off';
       const updatesPlan = settings.writeArenaHistory || settings.writeCurrentState ? basePlan.updates : 'off';
       return {
-        choices: basePlan.choices,
+        choices: enableChoices ? basePlan.choices : 'off',
         summary: summaryPlan,
         updates: updatesPlan,
       } as const;
@@ -309,6 +307,219 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     }));
   }, []);
 
+  const requestChoicesFallback = useCallback(
+    async (params: { session: MagicTeaPartySession; normalizedHistory: MagicTeaPartyHistoryMessage[] }) => {
+      if (!userProviderConfig || userProviderConfig.providerId === 'system') return;
+      if (!userProviderConfig.apiKey?.trim() || !userProviderConfig.modelId?.trim()) return;
+      if (!params.normalizedHistory || params.normalizedHistory.length === 0) return;
+
+      const now = Date.now();
+      const assistantMessageId = randomUUID();
+      const lastUserMessageId = [...params.normalizedHistory].reverse().find((message) => message.role === 'user')?.id;
+      const assistantMessage: MagicTeaPartyMessage = {
+        id: assistantMessageId,
+        sessionId: params.session.id,
+        role: 'assistant',
+        content: '',
+        createdAt: now,
+        status: 'streaming',
+        ...(lastUserMessageId ? { sourceMessageId: lastUserMessageId } : {}),
+        meta: { kind: 'choices', outputFormat: 'jsonl', source: 'output-plan' },
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+      await putMagicTeaPartyMessage(assistantMessage);
+
+      const controller = new AbortController();
+      const previousController = abortControllerRef.current;
+      abortControllerRef.current = controller;
+
+      const preview = createMagicTeaPartyStreamPreview({
+        outputFormat: 'jsonl',
+        onUpdate: (update) => {
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== assistantMessageId) return m;
+              const patch: Partial<MagicTeaPartyMessage> = {
+                content: update.content,
+                ...(typeof update.status === 'string' ? { status: update.status } : {}),
+                ...(update.includeJsonl ? { segments: update.segments, choices: update.choices } : {}),
+              };
+              return { ...m, ...patch };
+            })
+          );
+          if (update.notices && update.notices.length > 0) {
+            emitNotices(update.notices);
+          }
+        },
+      });
+
+      const safety = createMagicTeaPartyStreamSafety({
+        outputFormat: 'jsonl',
+        onSafePreview: (safeText) => {
+          preview.applySafeText(safeText);
+        },
+        onBlocked: (safeText) => {
+          preview.applySafeText(safeText, 'blocked');
+          controller.abort('output-safety');
+        },
+      });
+
+      try {
+        const response = await fetch('/api/magic-tea-party/generate-choices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            sessionId: params.session.id,
+            summary: params.session.summary,
+            messages: params.normalizedHistory,
+            roles: params.session.roles ?? [],
+            scenario: params.session.scenario ?? null,
+            auxScenarios: params.session.auxScenarios ?? [],
+            protocolShadow: params.session.protocolShadow,
+            playerRoleId: params.session.playerRoleId ?? null,
+            settings: {
+              ...buildRequestSettings(params.session),
+              providerId: userProviderConfig.providerId,
+              modelId: userProviderConfig.modelId,
+              choiceCount: params.session.settings.choiceCount ?? preferences.choiceCount,
+              userDisplayName: params.session.settings.userDisplayName,
+            },
+            customProvider: {
+              providerId: userProviderConfig.providerId,
+              modelId: userProviderConfig.modelId,
+              apiKey: userProviderConfig.apiKey,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          const shouldRedirect = Boolean(payload?.shouldRedirect);
+          if (shouldRedirect) {
+            const reason = typeof payload?.reason === 'string' ? payload.reason : '使用危险符文';
+            const blockedMessage: MagicTeaPartyMessage = {
+              ...assistantMessage,
+              status: 'blocked',
+              safety: { status: 'blocked', blockedBy: 'server', blockedAt: Date.now(), action: 'redirect' },
+              error: { code: `${response.status}`, message: reason },
+            };
+            setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? blockedMessage : m)));
+            await putMagicTeaPartyMessage(blockedMessage);
+            await router.push('/arrested');
+            return;
+          }
+
+          const errorMessage =
+            typeof payload?.error === 'string'
+              ? payload.error
+              : typeof payload?.message === 'string'
+                ? payload.message
+                : `请求失败（${response.status}）`;
+
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMessageId ? { ...m, status: 'error', error: { code: `${response.status}`, message: errorMessage } } : m))
+          );
+          await putMagicTeaPartyMessage({
+            ...assistantMessage,
+            status: 'error',
+            error: { code: `${response.status}`, message: errorMessage },
+          });
+          return;
+        }
+
+        const streamedText = await readTextStreamFromResponse(response, {
+          label: '魔法茶会选项',
+          onText: (accumulated) => {
+            safety.ingest(accumulated);
+          },
+        });
+
+        const { safeText, status, blockedAt, truncatedAt } = await safety.finalize(streamedText);
+
+        const parsed = parseMagicTeaPartyJsonl(safeText);
+        const sideChannelBundle = extractMagicTeaPartySideChannelsFromJsonl(safeText);
+        const expectedCount = params.session.settings.choiceCount ?? preferences.choiceCount;
+        const extraNotices = buildChoiceNotices({
+          choices: parsed.choices ?? undefined,
+          expectedCount,
+          enableChoices: true,
+          stage: 'choices',
+        });
+        const allNotices = [...sideChannelBundle.notices, ...extraNotices];
+        emitNotices(allNotices);
+        const hasErrorNotice = allNotices.some((notice) => notice.level === 'error');
+        const hasChoices = Boolean(parsed.choices && parsed.choices.length > 0);
+        const previewText = buildMagicTeaPartyJsonlPreview(safeText);
+        const finalAssistant: MagicTeaPartyMessage = {
+          ...assistantMessage,
+          content: previewText,
+          status,
+          ...(parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+          ...(status === 'blocked'
+            ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
+            : { safety: { status: 'ok' } }),
+          ...(status === 'blocked' && typeof truncatedAt === 'number' ? { truncatedAt } : {}),
+        };
+
+        setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
+        await putMagicTeaPartyMessage(finalAssistant);
+        if (hasChoices && !hasErrorNotice && status !== 'blocked') {
+          emitNotices([
+            {
+              type: 'notice',
+              level: 'warning',
+              code: 'output_plan_fallback_choices',
+              message: 'Markdown 模式已按合并输出计划补生成选项。',
+            },
+          ]);
+        }
+      } catch (error) {
+        safety.clearTimer();
+        if (error instanceof Error && error.name === 'AbortError') {
+          const { safeText, status, blockedAt, truncatedAt } = await safety.finalizeAfterAbort(controller.signal.reason);
+          const parsed = parseMagicTeaPartyJsonl(safeText);
+          const sideChannelBundle = extractMagicTeaPartySideChannelsFromJsonl(safeText);
+          const expectedCount = params.session.settings.choiceCount ?? preferences.choiceCount;
+          const extraNotices = buildChoiceNotices({
+            choices: parsed.choices ?? undefined,
+            expectedCount,
+            enableChoices: true,
+            stage: 'choices',
+          });
+          const allNotices = [...sideChannelBundle.notices, ...extraNotices];
+          emitNotices(allNotices);
+          const previewText = buildMagicTeaPartyJsonlPreview(safeText);
+          const finalAssistant: MagicTeaPartyMessage = {
+            ...assistantMessage,
+            content: previewText,
+            status,
+            ...(parsed.segments ? { segments: parsed.segments, choices: parsed.choices ?? undefined } : {}),
+            ...(status === 'blocked'
+              ? { safety: { status: 'blocked', blockedBy: 'output', blockedAt: blockedAt ?? Date.now(), action: 'soft-block' } }
+              : { safety: { status: 'ok' } }),
+            ...(status === 'blocked' && typeof truncatedAt === 'number' ? { truncatedAt } : {}),
+          };
+          setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? finalAssistant : m)));
+          await putMagicTeaPartyMessage(finalAssistant);
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : '生成失败';
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantMessageId ? { ...m, status: 'error', error: { code: 'exception', message } } : m))
+        );
+        await putMagicTeaPartyMessage({ ...assistantMessage, status: 'error', error: { code: 'exception', message } });
+      } finally {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = previousController;
+        }
+      }
+    },
+    [buildChoiceNotices, buildRequestSettings, emitNotices, preferences.choiceCount, router, setMessages, userProviderConfig]
+  );
+
   const requestOutputPlanFallbacks = useCallback(
     async (params: {
       session: MagicTeaPartySession;
@@ -319,14 +530,17 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       summary: MagicTeaPartyOutputSummary | null;
       updates: MagicTeaPartyUpdateDraft[] | null;
     }) => {
-      if (!onSideChannels) return;
-      if (params.outputFormat !== 'jsonl') return;
-      const effectivePlan = resolveOutputPlanForRequest(params.session, params.outputFormat);
+      const hasSideChannelHandler = Boolean(onSideChannels);
+      const effectivePlan = resolveOutputPlanForRequest(params.session);
+      const isJsonl = params.outputFormat === 'jsonl';
       const hasSummary = Boolean(params.summary?.text?.trim());
       const hasUpdates = Array.isArray(params.updates) && params.updates.length > 0;
-      const needsSummary = effectivePlan.summary === 'on' && !hasSummary;
-      const needsUpdates = effectivePlan.updates === 'on' && !hasUpdates;
-      if (!needsSummary && !needsUpdates) return;
+      const wantsSummary = effectivePlan.summary === 'on' && !hasSummary;
+      const wantsUpdates = effectivePlan.updates === 'on' && !hasUpdates;
+      const wantsChoices = !isJsonl && effectivePlan.choices === 'on';
+      const needsSummary = wantsSummary && hasSideChannelHandler;
+      const needsUpdates = wantsUpdates && hasSideChannelHandler;
+      if (!needsSummary && !needsUpdates && !wantsChoices) return;
 
       if (!userProviderConfig || userProviderConfig.providerId === 'system') return;
       if (!userProviderConfig.apiKey?.trim() || !userProviderConfig.modelId?.trim()) return;
@@ -392,7 +606,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
                 },
               ]);
             } else {
-              await onSideChannels({
+              await onSideChannels?.({
                 summary: { text: summaryRaw },
                 updates: null,
                 updatesMeta: null,
@@ -404,7 +618,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
                   type: 'notice',
                   level: 'warning',
                   code: 'output_plan_fallback_summary',
-                  message: '模型未按合并输出计划返回摘要，已使用摘要接口补生成。',
+                  message: isJsonl
+                    ? '模型未按合并输出计划返回摘要，已使用摘要接口补生成。'
+                    : 'Markdown 模式已按合并输出计划补生成摘要。',
                 },
               ]);
             }
@@ -485,7 +701,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
                 },
               ]);
             } else {
-              await onSideChannels({
+              await onSideChannels?.({
                 summary: null,
                 updates: drafts,
                 updatesMeta: payload?.meta ?? null,
@@ -497,7 +713,9 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
                   type: 'notice',
                   level: 'warning',
                   code: 'output_plan_fallback_updates',
-                  message: '模型未按合并输出计划返回更新草案，已使用更新接口补生成。',
+                  message: isJsonl
+                    ? '模型未按合并输出计划返回更新草案，已使用更新接口补生成。'
+                    : 'Markdown 模式已按合并输出计划补生成更新草案。',
                 },
               ]);
             }
@@ -514,6 +732,10 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           ]);
         }
       }
+
+      if (wantsChoices) {
+        await requestChoicesFallback({ session: params.session, normalizedHistory });
+      }
     },
     [
       buildRequestSettings,
@@ -523,6 +745,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       onSideChannels,
       preferences.language,
       preferences.userDisplayName,
+      requestChoicesFallback,
       resolveOutputPlanForRequest,
       userProviderConfig,
     ]
@@ -739,11 +962,11 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           finalSession = nextSession;
         }
 
-        if (onSideChannels && isJsonl && !hasErrorNotice && status !== 'blocked') {
-          const summary = sideChannelBundle.summary ?? null;
-          const updates = sideChannelBundle.updates ?? null;
-          const updatesMeta = sideChannelBundle.updatesMeta ?? null;
-          if (summary || updates) {
+        if (!hasErrorNotice && status !== 'blocked') {
+          const summary = isJsonl ? sideChannelBundle.summary ?? null : null;
+          const updates = isJsonl ? sideChannelBundle.updates ?? null : null;
+          const updatesMeta = isJsonl ? sideChannelBundle.updatesMeta ?? null : null;
+          if (onSideChannels && isJsonl && (summary || updates)) {
             await onSideChannels({
               summary,
               updates,

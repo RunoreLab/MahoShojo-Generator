@@ -580,7 +580,6 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                     onPreferenceChange({ outputPlan, enableChoices });
                     onSessionSettingChange({ outputPlan, enableChoices });
                   }}
-                  disabled={currentOutputFormat !== 'jsonl'}
                 >
                   <option value="off">关闭</option>
                   <option value="auto">自动</option>
@@ -598,7 +597,6 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                     onPreferenceChange({ outputPlan });
                     onSessionSettingChange({ outputPlan });
                   }}
-                  disabled={currentOutputFormat !== 'jsonl'}
                 >
                   <option value="off">关闭</option>
                   <option value="auto">自动</option>
@@ -616,7 +614,6 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                     onPreferenceChange({ outputPlan });
                     onSessionSettingChange({ outputPlan });
                   }}
-                  disabled={currentOutputFormat !== 'jsonl'}
                 >
                   <option value="off">关闭</option>
                   <option value="auto">自动</option>
@@ -624,7 +621,7 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
                 </select>
               </div>
             </div>
-            <div className="mt-2 text-[11px] text-gray-500">仅对 JSONL 生效，Markdown 模式会自动降级为关闭。</div>
+            <div className="mt-2 text-[11px] text-gray-500">Markdown 模式下仅“强制”会自动补生成（额外调用，消耗更多 Tokens）。</div>
           </div>
 
           <div className="grid gap-1">
@@ -647,7 +644,7 @@ export function MagicTeaPartySessionSidebar(props: MagicTeaPartySidebarProps) {
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-xs font-semibold text-gray-600">启用选项</div>
-              <div className="text-xs text-gray-500">仅对 JSONL 模式有效</div>
+              <div className="text-xs text-gray-500">Markdown 模式需配合“选项=强制”才会自动补生成</div>
             </div>
             <input
               type="checkbox"
