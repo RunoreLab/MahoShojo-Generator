@@ -339,6 +339,22 @@ const CanshouPage: React.FC = () => {
     setCurrentAnswer(answers[question.id] || '');
   }, [currentQuestionIndex, questionnaire, answers]);
 
+  const handleCurrentAnswerChange = (value: string) => {
+    if (!questionnaire) {
+      setCurrentAnswer(value);
+      setError(null);
+      return;
+    }
+    const question = questionnaire.questions[currentQuestionIndex];
+    setCurrentAnswer(value);
+    setError(null);
+    if (!question) return;
+    setAnswers(prevAnswers => {
+      if (prevAnswers[question.id] === value) return prevAnswers;
+      return { ...prevAnswers, [question.id]: value };
+    });
+  };
+
 
   const proceedToNext = (answer: string) => {
     const currentQuestion = questionnaire!.questions[currentQuestionIndex];
@@ -761,7 +777,7 @@ const CanshouPage: React.FC = () => {
                   <div className="input-group mt-4">
                     <textarea
                       value={currentAnswer}
-                      onChange={(e) => setCurrentAnswer(e.target.value)}
+                      onChange={(e) => handleCurrentAnswerChange(e.target.value)}
                       placeholder={currentQuestion.placeholder || '请在此输入你的想法...'}
                       className="input-field resize-y min-h-[6rem]"
                       maxLength={currentMaxLength || undefined}

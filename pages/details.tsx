@@ -387,6 +387,19 @@ const DetailsPage: React.FC = () => {
     setCurrentAnswer(answers[currentQuestionIndex] || '');
   }, [currentQuestionIndex, answers]);
 
+  const handleCurrentAnswerChange = (value: string) => {
+    setCurrentAnswer(value);
+    setError(null);
+    setAnswers(prevAnswers => {
+      if (prevAnswers.length === 0) return prevAnswers;
+      if (currentQuestionIndex < 0 || currentQuestionIndex >= prevAnswers.length) return prevAnswers;
+      if (prevAnswers[currentQuestionIndex] === value) return prevAnswers;
+      const nextAnswers = [...prevAnswers];
+      nextAnswers[currentQuestionIndex] = value;
+      return nextAnswers;
+    });
+  };
+
   const handleNext = () => {
     const meta = questionMeta[currentQuestionIndex];
     const normalizedAnswer = currentAnswer.trim();
@@ -439,8 +452,7 @@ const DetailsPage: React.FC = () => {
   };
 
   const handleSuggestionFill = (value: string) => {
-    setCurrentAnswer(value);
-    setError(null);
+    handleCurrentAnswerChange(value);
   };
 
   const proceedToNextQuestion = (answer: string) => {
@@ -1020,7 +1032,7 @@ const DetailsPage: React.FC = () => {
                 <div className="input-group mt-4">
                   <textarea
                     value={currentAnswer}
-                    onChange={(e) => setCurrentAnswer(e.target.value)}
+                    onChange={(e) => handleCurrentAnswerChange(e.target.value)}
                     placeholder={currentMeta?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
                     className="input-field min-h-[6rem] resize-y"
                     maxLength={currentMaxLength}
