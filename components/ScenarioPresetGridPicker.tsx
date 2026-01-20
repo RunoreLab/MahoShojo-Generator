@@ -70,7 +70,7 @@ export function ScenarioPresetGridPicker({
               <div className="flex items-center gap-2 pr-8">
                 <p className={`font-semibold ${titleColor}`}>{isLoading ? '加载中...' : preset.title}</p>
                 <span className={`text-[11px] px-2 py-0.5 rounded-full border ${tagClass}`}>
-                  {isGeneral ? '通用情景' : 'JSON情景'}
+                  {isGeneral ? '通用' : 'JSON'}
                 </span>
               </div>
               <p className={`text-xs mt-1 ${isSelected ? (isGeneral ? 'text-purple-800' : 'text-emerald-800') : 'text-gray-600'}`}>
