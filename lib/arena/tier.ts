@@ -54,7 +54,17 @@ export async function queryArenaPublicQueenEntity(
   queue: ArenaQueue,
 ): Promise<ArenaEntityRef | null> {
   const strictPublicSinceClause =
-    queue === 'strict' ? "AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))" : '';
+    queue === 'strict'
+      ? `AND (
+        dc.public_since IS NULL
+        OR dc.public_since <= datetime('now', '-3 days')
+        OR (
+          dc.created_at IS NOT NULL
+          AND dc.public_since IS NOT NULL
+          AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
+        )
+      )`
+      : '';
 
   const sql = `
     WITH eligible AS (
