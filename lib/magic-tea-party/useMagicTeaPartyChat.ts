@@ -4,6 +4,8 @@ import type { NextRouter } from 'next/router';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { persistArrestedBackup } from '@/lib/arrested-backup';
+import { resolveApiErrorMessage } from '@/lib/client/apiError';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { randomUUID } from '@/lib/crypto';
 import { estimateMagicTeaPartyTokens, resolveMagicTeaPartyTokenBudget } from '@/lib/magic-tea-party/budget';
@@ -411,12 +413,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             return;
           }
 
-          const errorMessage =
-            typeof payload?.error === 'string'
-              ? payload.error
-              : typeof payload?.message === 'string'
-                ? payload.message
-                : `请求失败（${response.status}）`;
+          const errorMessage = resolveApiErrorMessage({ payload, fallback: `请求失败（${response.status}）` });
 
           setMessages((prev) =>
             prev.map((m) => (m.id === assistantMessageId ? { ...m, status: 'error', error: { code: `${response.status}`, message: errorMessage } } : m))
@@ -580,12 +577,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
           const payload = await response.json().catch(() => null);
           if (!response.ok) {
-            const errorMessage =
-              typeof payload?.error === 'string'
-                ? payload.error
-                : typeof payload?.message === 'string'
-                  ? payload.message
-                  : `请求失败（${response.status}）`;
+            const errorMessage = resolveApiErrorMessage({ payload, fallback: `请求失败（${response.status}）` });
             emitNotices([
               {
                 type: 'notice',
@@ -675,12 +667,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
           const payload = await response.json().catch(() => null);
           if (!response.ok) {
-            const errorMessage =
-              typeof payload?.error === 'string'
-                ? payload.error
-                : typeof payload?.message === 'string'
-                  ? payload.message
-                  : `请求失败（${response.status}）`;
+            const errorMessage = resolveApiErrorMessage({ payload, fallback: `请求失败（${response.status}）` });
             emitNotices([
               {
                 type: 'notice',
@@ -860,12 +847,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
             return finalSession;
           }
 
-          const errorMessage =
-            typeof payload?.error === 'string'
-              ? payload.error
-              : typeof payload?.message === 'string'
-                ? payload.message
-                : `请求失败（${response.status}）`;
+          const errorMessage = resolveApiErrorMessage({ payload, fallback: `请求失败（${response.status}）` });
 
           const errorMessageRecord: MagicTeaPartyMessage = {
             ...params.assistantMessage,
@@ -1168,13 +1150,8 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
 
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
-          const errorMessage =
-            typeof payload?.error === 'string'
-              ? payload.error
-              : typeof payload?.message === 'string'
-                ? payload.message
-                : `请求失败（${response.status}）`;
-          setSummaryError(errorMessage);
+          const serverMessage = resolveApiErrorMessage({ payload, fallback: '摘要生成失败' });
+          setSummaryError(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '摘要生成失败' }));
           return;
         }
 
@@ -1534,12 +1511,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
           return;
         }
 
-        const errorMessage =
-          typeof payload?.error === 'string'
-            ? payload.error
-            : typeof payload?.message === 'string'
-              ? payload.message
-              : `请求失败（${response.status}）`;
+        const errorMessage = resolveApiErrorMessage({ payload, fallback: `请求失败（${response.status}）` });
 
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantMessageId ? { ...m, status: 'error', error: { code: `${response.status}`, message: errorMessage } } : m))
@@ -1709,12 +1681,8 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       if (!response.ok) {
         const shouldRedirect = Boolean(payload?.shouldRedirect);
         const reason = typeof payload?.reason === 'string' ? payload.reason : '';
-        const errorMessage =
-          typeof payload?.error === 'string'
-            ? payload.error
-            : typeof payload?.message === 'string'
-              ? payload.message
-              : `请求失败（${response.status}）`;
+        const serverMessage = resolveApiErrorMessage({ payload, fallback: '摘要生成失败' });
+        const errorMessage = formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '摘要生成失败' });
         setSummaryError((shouldRedirect ? reason : errorMessage) || errorMessage);
         return;
       }

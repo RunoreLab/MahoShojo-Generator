@@ -19,6 +19,8 @@ import { MagicTeaPartySessionSetupPanel } from '@/components/magic-tea-party/Ses
 import { MagicTeaPartySummaryPanel } from '@/components/magic-tea-party/SummaryPanel';
 import { MagicTeaPartyTachiePanel } from '@/components/magic-tea-party/TachiePanel';
 
+import { resolveApiErrorMessage } from '@/lib/client/apiError';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { estimateMagicTeaPartyTokens, resolveMagicTeaPartyTokenBudget } from '@/lib/magic-tea-party/budget';
 import { readMagicTeaPartyDraft, writeMagicTeaPartyDraft } from '@/lib/magic-tea-party/drafts';
 import { buildMagicTeaPartyHistory } from '@/lib/magic-tea-party/history';
@@ -494,13 +496,8 @@ export default function MagicTeaPartyPage() {
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const errorMessage =
-          typeof payload?.error === 'string'
-            ? payload.error
-            : typeof payload?.message === 'string'
-              ? payload.message
-              : `请求失败（${response.status}）`;
-        setUpdateError(errorMessage);
+        const serverMessage = resolveApiErrorMessage({ payload, fallback: '更新写入失败' });
+        setUpdateError(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '更新写入失败' }));
         return;
       }
 
@@ -612,13 +609,8 @@ export default function MagicTeaPartyPage() {
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const errorMessage =
-          typeof payload?.error === 'string'
-            ? payload.error
-            : typeof payload?.message === 'string'
-              ? payload.message
-              : `请求失败（${response.status}）`;
-        setUpdateError(errorMessage);
+        const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成更新草案失败' });
+        setUpdateError(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成更新草案失败' }));
         return;
       }
 

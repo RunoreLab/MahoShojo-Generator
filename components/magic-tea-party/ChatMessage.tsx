@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { inferErrorCategoryForError } from '@/lib/error-help';
 import type {
   MagicTeaPartyMessage,
   MagicTeaPartyPreferences,
@@ -143,6 +144,7 @@ const renderAssistantFooter = (message: MagicTeaPartyMessage) => {
   if (message.status === 'error') {
     const rawCode = message.error?.code ?? '';
     const status = /^\d{3}$/.test(rawCode) ? Number(rawCode) : null;
+    const category = inferErrorCategoryForError({ message: message.error?.message, status });
     const kind =
       message.meta && typeof message.meta === 'object' && typeof (message.meta as any).kind === 'string'
         ? String((message.meta as any).kind)
@@ -160,6 +162,7 @@ const renderAssistantFooter = (message: MagicTeaPartyMessage) => {
     const lines: string[] = [`❌ ${title}`];
     if (status) lines.push(`HTTP：${status}`);
     else if (rawCode) lines.push(`错误码：${rawCode}`);
+    if (category) lines.push(`分类：${category.label}`);
     if (message.error?.message?.trim()) lines.push(`原因：${message.error.message.trim()}`);
 
     return (

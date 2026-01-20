@@ -1,4 +1,5 @@
 import type { MagicTeaPartyNotice } from '@/lib/magic-tea-party/types';
+import { ErrorMessage } from '@/components/ErrorMessage';
 
 type MagicTeaPartyNoticePanelProps = {
   notices?: MagicTeaPartyNotice[];
@@ -26,7 +27,17 @@ export function MagicTeaPartyNoticePanel({ notices = [], onClearNotices }: Magic
                 <span className="text-xs font-semibold">{style.label}</span>
                 {code ? <span className="text-xs opacity-80">{code}</span> : null}
               </div>
-              <div className="mt-1 whitespace-pre-wrap">{notice.message}</div>
+              {notice.level === 'error' ? (
+                <div className="mt-1">
+                  <ErrorMessage
+                    message={notice.message}
+                    className="text-sm"
+                    linkClassName="underline underline-offset-2 hover:opacity-95"
+                  />
+                </div>
+              ) : (
+                <div className="mt-1 whitespace-pre-wrap">{notice.message}</div>
+              )}
             </div>
           );
         })}
