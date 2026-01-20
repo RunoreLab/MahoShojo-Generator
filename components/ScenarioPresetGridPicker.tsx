@@ -46,8 +46,6 @@ export function ScenarioPresetGridPicker({
             ? (isSelected ? 'bg-purple-200 border-purple-400 hover:bg-purple-300' : 'bg-white border-gray-300 hover:border-purple-400 hover:bg-purple-50')
             : (isSelected ? 'bg-emerald-200 border-emerald-400 hover:bg-emerald-300' : 'bg-white border-gray-300 hover:border-emerald-400 hover:bg-emerald-50');
           const titleColor = isGeneral ? (isSelected ? 'text-purple-900' : 'text-purple-800') : (isSelected ? 'text-emerald-900' : 'text-emerald-800');
-          const tagClass = isGeneral ? 'bg-purple-100 text-purple-800 border-purple-200' : 'bg-emerald-100 text-emerald-800 border-emerald-200';
-
           return (
             <div
               key={preset.filename}
@@ -69,9 +67,6 @@ export function ScenarioPresetGridPicker({
 
               <div className="flex items-center gap-2 pr-8">
                 <p className={`font-semibold ${titleColor}`}>{isLoading ? '加载中...' : preset.title}</p>
-                <span className={`text-[11px] px-2 py-0.5 rounded-full border ${tagClass}`}>
-                  {isGeneral ? '通用' : 'JSON'}
-                </span>
               </div>
               <p className={`text-xs mt-1 ${isSelected ? (isGeneral ? 'text-purple-800' : 'text-emerald-800') : 'text-gray-600'}`}>
                 {preset.description}
