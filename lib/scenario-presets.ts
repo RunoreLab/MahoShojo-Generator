@@ -11,9 +11,51 @@ export interface ScenarioPreset {
 export const SCENARIO_PRESET_LIST: ScenarioPreset[] = [
   {
     title: '谨遵女王之意（A.R.E.N.A.）',
-    description: '指令系情景：任性的女王、荒诞的指令与挠痒痒的刑罚。适合娱乐/博弈/羁绊。',
+    description: '【娱乐】指令系情景，适合娱乐/博弈/羁绊。',
     filename: 'S01_queen_will.json',
     template: 'general-scenario',
+  },
+  {
+    title: '竞技场：多维战区-人之战场',
+    description: '【战斗】多战场随机竞技，体术与规则推测并重；高复杂度。',
+    filename: 'S02_multiverse_human_arena.json',
+    template: 'scenario',
+  },
+  {
+    title: '公平竞技场：魔法少女的试炼',
+    description: '【战斗】原作风格的公平竞技试炼，强调能力隐藏与试探；高难度/现实向。',
+    filename: 'S03_arena_original_v1_1.json',
+    template: 'scenario',
+  },
+  {
+    title: '拳愿八角笼：原始搏斗竞技',
+    description: '【战斗】擂台锦标赛风格，强调肉搏与读招推测；高难度、牺牲风险。',
+    filename: 'S04_kengan_gold_tournament.json',
+    template: 'scenario',
+  },
+  {
+    title: '镜中凡俗',
+    description: '【模拟养成】失去魔力后的长线日常，含适应度/SAN/结局分支；需多轮存档推进。',
+    filename: 'S05_mirror_mundane_v2.json',
+    template: 'scenario',
+  },
+  {
+    title: '魔法少女综合评估日',
+    description: '【评估】评估流程驱动，要求结构化输出（JSON/Markdown）；长 prompt 注意上下文开销。',
+    filename: 'S06_magical_girl_assessment_day.json',
+    template: 'scenario',
+  },
+  {
+    title: 'Galgame攻略难度分析报告',
+    description: '【评估】提供攻略难度评分与攻略策略建议；娱乐向的评估情景。',
+    filename: 'S07_galgame_difficulty_analysis.json',
+    template: 'scenario',
+  },
+  {
+    title: 'A[LI]CE_MSG角色卡评价与创作指导-日常篇',
+    description: '【创作者工具】非 RP，用于角色卡评价/创作指导。',
+    filename: 'S08_alice_msg_review_daily.json',
+    template: 'scenario',
   },
 ];
 
