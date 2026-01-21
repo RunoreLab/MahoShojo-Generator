@@ -11,6 +11,7 @@ import { AdjudicationResult, NarrativeHistoryEntry } from '@/types/arena';
 import { verifySignature, generateSignature } from '@/lib/signature';
 import { getSystemPrompt } from '@/lib/arena/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
+import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
 	import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
 	import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
@@ -448,13 +449,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const modelOverrideFallbacks: Array<string | undefined> = customModelOverride
             ? [customModelOverride]
             : (shouldPreferLiteModelInStrict
-                ? [
-                    'gemma-3-27b-it',
-                    'gemini-2.5-flash-lite',
-                    'glm-4.7',
-                    'gemma-3-12b-it',
-                    'gemini-2.5-flash',
-                ]
+                ? [...STRICT_RANKED_MODEL_FALLBACKS]
                 : [undefined]);
 
         const generationConfig: RawGenerationConfig = {

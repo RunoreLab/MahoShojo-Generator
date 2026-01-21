@@ -1,5 +1,7 @@
 // lib/config.ts
 
+import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
+
 // AI 提供商配置接口
 export interface AIProvider {
   name: string;
@@ -246,11 +248,7 @@ export const config = {
     },
 
     // 自动审查优先使用轻量模型
-    modelFallbacks: [
-      'gemma-3-27b-it',
-      'gemini-2.5-flash-lite',
-      'gemma-3-12b-it'
-    ],
+    modelFallbacks: [...STRICT_RANKED_MODEL_FALLBACKS],
   },
 
   // 魔法少女生成配置

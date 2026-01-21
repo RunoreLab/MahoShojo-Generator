@@ -15,6 +15,7 @@ import { generateSignature, verifySignature } from '@/lib/signature';
 import { NewsReport } from '@/components/BattleReportCard';
 import { getSystemPrompt } from '@/lib/arena/constants';
 import { buildBattleReportSchema, CustomProviderSchema } from '@/lib/arena/schemas';
+import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
 import { createPromptBuilder, processAdjudicationChain } from '@/lib/arena/logic';
 import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
 import {
@@ -219,7 +220,7 @@ interface BattleApiResponse {
             isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
         const baseModelOverride = customModelOverride ?? (isDowngrade ? 'gemini-2.5-flash-lite' : undefined);
         const modelOverrideFallbacks: Array<string | undefined> = shouldPreferLiteModelInStrict
-            ? ['gemini-2.5-flash-lite', 'gemini-2.5-flash']
+            ? [...STRICT_RANKED_MODEL_FALLBACKS]
             : [baseModelOverride];
 
         const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
