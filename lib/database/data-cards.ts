@@ -621,9 +621,6 @@ export async function getPublicDataCards(
     if (recommendedOnly && sortBy !== 'favorites') {
       // 推荐列表默认按推荐时间倒序，其次按创建时间
       orderBy = 'dc.updated_at DESC, dc.created_at DESC';
-    } else if (!recommendedOnly) {
-      // 推荐项在普通列表中仍需优先展示
-      orderBy = `dc.is_recommended DESC, ${orderBy}`;
     }
 
     sql += ` ORDER BY ${orderBy} LIMIT ? OFFSET ?`;

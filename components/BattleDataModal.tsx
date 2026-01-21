@@ -29,7 +29,7 @@ interface BattleDataModalProps {
   maxSelected?: number;
 }
 
-type BattleDataTab = 'my' | 'public' | 'favorites' | 'pvpHand';
+type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'pvpHand';
 
 const parseDataCardPayload = (raw: unknown): any => {
   if (typeof raw === 'string') {
@@ -203,6 +203,18 @@ export default function BattleDataModal({
   const [tagOptionsLoading, setTagOptionsLoading] = useState(false);
   const [tagOptionsError, setTagOptionsError] = useState<string | null>(null);
 
+  const buildPublicFilters = useCallback((source: Filters, tab: BattleDataTab) => {
+    if (tab === 'recommended') {
+      return { ...source, recommendedOnly: true };
+    }
+    if (source.recommendedOnly) {
+      return { ...source, recommendedOnly: false };
+    }
+    return source;
+  }, []);
+
+  const publicFilters = useMemo(() => buildPublicFilters(activeFilters, activeTab), [activeFilters, activeTab, buildPublicFilters]);
+
   const effectiveTabs = useMemo<BattleDataTab[]>(() => {
     const candidates = Array.isArray(visibleTabs) && visibleTabs.length > 0
       ? visibleTabs
@@ -210,6 +222,7 @@ export default function BattleDataModal({
         ...(pvpHandTab ? (['pvpHand'] as const) : []),
         ...(isAuthenticated ? (['my'] as const) : []),
         'public' as const,
+        'recommended' as const,
         ...(isAuthenticated ? (['favorites'] as const) : []),
       ] as const);
 
@@ -226,6 +239,8 @@ export default function BattleDataModal({
   }, [visibleTabs, pvpHandTab, isAuthenticated]);
 
   const isPvpHandTab = activeTab === 'pvpHand';
+  const isPublicTab = activeTab === 'public' || activeTab === 'recommended';
+  const isRecommendedTab = activeTab === 'recommended';
 
   const inferRoleType = useCallback((card: any): 'magical-girl' | 'canshou' | 'general' | null => {
     if (!card || card.type !== 'character') return null;
@@ -523,14 +538,14 @@ export default function BattleDataModal({
     if (match) {
       loadCardByIdForDisplay(match[0]);
     } else {
-      loadPublicDataCards(1, sortBy, trimmed || undefined, activeFilters, selectedTagIds, tagMatchMode);
+      loadPublicDataCards(1, sortBy, trimmed || undefined, publicFilters, selectedTagIds, tagMatchMode);
     }
-  }, [debouncedSearchQuery, isOpen, activeTab, loadUserDataCards, loadCardByIdForDisplay, loadPublicDataCards, sortBy, activeFilters, selectedTagIds, tagMatchMode]);
+  }, [debouncedSearchQuery, isOpen, activeTab, loadUserDataCards, loadCardByIdForDisplay, loadPublicDataCards, sortBy, publicFilters, selectedTagIds, tagMatchMode]);
 
   useEffect(() => {
     if (!isOpen) return;
     if (isPvpHandTab) return;
-    if (activeTab !== 'public') return;
+    if (!isPublicTab) return;
 
     const trimmed = debouncedSearchQuery.trim();
     if (trimmed) {
@@ -539,8 +554,8 @@ export default function BattleDataModal({
     }
 
     setCurrentPage(1);
-    loadPublicDataCards(1, sortBy, trimmed || undefined, activeFilters, selectedTagIds, tagMatchMode);
-  }, [activeTab, activeFilters, debouncedSearchQuery, isOpen, isPvpHandTab, loadPublicDataCards, selectedTagIds, sortBy, tagMatchMode]);
+    loadPublicDataCards(1, sortBy, trimmed || undefined, publicFilters, selectedTagIds, tagMatchMode);
+  }, [isPublicTab, publicFilters, debouncedSearchQuery, isOpen, isPvpHandTab, loadPublicDataCards, selectedTagIds, sortBy, tagMatchMode]);
 
   useEffect(() => {
     return () => {
@@ -572,7 +587,7 @@ export default function BattleDataModal({
       if (!hasUserSelectedTabRef.current) {
         return effectiveTabs.includes(desiredDefaultTab) ? desiredDefaultTab : fallbackTab;
       }
-      if (!isAuthenticated && activeTab !== 'public' && effectiveTabs.includes('public')) return 'public';
+      if (!isAuthenticated && !isPublicTab && effectiveTabs.includes('public')) return 'public';
       return effectiveTabs.includes(activeTab) ? activeTab : fallbackTab;
     })();
 
@@ -590,8 +605,9 @@ export default function BattleDataModal({
       loadFavorites(selectedType, true, sortBy);
     }
 
-    if (effectiveTabs.includes('public')) {
-      loadPublicDataCards(1, sortBy, undefined, initialFilters, [], 'any');
+    if (effectiveTabs.includes('public') || effectiveTabs.includes('recommended')) {
+      const initialPublicFilters = buildPublicFilters(initialFilters, nextTab);
+      loadPublicDataCards(1, sortBy, undefined, initialPublicFilters, [], 'any');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, selectedType, isAuthenticated]);
@@ -819,7 +835,7 @@ export default function BattleDataModal({
 
   // 【新增】处理作者点击事件
   const handleAuthorClick = (authorName: string) => {
-    if (activeTab !== 'public') return;
+    if (!isPublicTab) return;
     const newFilters = { ...initialFilters, author: authorName };
     setFilters(newFilters);
     setActiveFilters(newFilters);
@@ -891,8 +907,8 @@ export default function BattleDataModal({
   // 处理页码变化
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
-    if (activeTab === 'public' && !(activeFilters.roleType && selectedType === 'character')) {
-      loadPublicDataCards(newPage, sortBy, debouncedSearchQuery.trim() || undefined, activeFilters, selectedTagIds, tagMatchMode);
+    if (isPublicTab && !(publicFilters.roleType && selectedType === 'character')) {
+      loadPublicDataCards(newPage, sortBy, debouncedSearchQuery.trim() || undefined, publicFilters, selectedTagIds, tagMatchMode);
     }
   };
 
@@ -902,8 +918,8 @@ export default function BattleDataModal({
     setCurrentPage(1);
     if (activeTab === 'my') {
       loadUserDataCards(debouncedSearchQuery.trim() || undefined, newSortBy);
-    } else if (activeTab === 'public') {
-      loadPublicDataCards(1, newSortBy, debouncedSearchQuery.trim() || undefined, activeFilters, selectedTagIds, tagMatchMode);
+    } else if (isPublicTab) {
+      loadPublicDataCards(1, newSortBy, debouncedSearchQuery.trim() || undefined, publicFilters, selectedTagIds, tagMatchMode);
     } else if (activeTab === 'favorites') {
       setFavoriteCards((prev) => sortFavorites(prev, newSortBy));
     }
@@ -1016,18 +1032,18 @@ export default function BattleDataModal({
   );
 
   const publicPaginatedCards = useMemo(() => {
-    if (activeFilters.roleType && selectedType === 'character') {
+    if (publicFilters.roleType && selectedType === 'character') {
       return filteredPublicCards.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage);
     }
     return filteredPublicCards;
-  }, [filteredPublicCards, activeFilters.roleType, selectedType, currentPage, cardsPerPage]);
+  }, [filteredPublicCards, publicFilters.roleType, selectedType, currentPage, cardsPerPage]);
 
   const displayCards = useMemo(() => {
     if (activeTab === 'my') return paginatedUserCards;
     if (activeTab === 'favorites') return paginatedFavoriteCards;
-    if (activeTab === 'public') return publicPaginatedCards;
+    if (isPublicTab) return publicPaginatedCards;
     return [];
-  }, [activeTab, paginatedUserCards, paginatedFavoriteCards, publicPaginatedCards]);
+  }, [activeTab, isPublicTab, paginatedUserCards, paginatedFavoriteCards, publicPaginatedCards]);
 
   const displayCardIds = useMemo(() => {
     const out: string[] = [];
@@ -1103,7 +1119,7 @@ export default function BattleDataModal({
     };
   }, [isOpen, isPvpHandTab, displayCardIds, cardMetaById]);
 
-  const publicTotalPages = activeFilters.roleType && selectedType === 'character'
+  const publicTotalPages = publicFilters.roleType && selectedType === 'character'
     ? Math.max(1, Math.ceil(filteredPublicCards.length / cardsPerPage))
     : null;
 
@@ -1111,23 +1127,23 @@ export default function BattleDataModal({
     ? userTotalPages
     : activeTab === 'favorites'
       ? favoritesTotalPages
-      : activeTab === 'public'
+    : isPublicTab
         ? publicTotalPages
         : null;
   const typeLabel = selectedType === 'character' ? '角色' : selectedType === 'scenario' ? '情景' : '叙事历史';
   const isFilterActive = useMemo(() => {
     return Boolean(
-      activeFilters.author ||
-      activeFilters.minLikes ||
-      activeFilters.maxLikes ||
-      activeFilters.minUsage ||
-      activeFilters.maxUsage ||
-      activeFilters.minFavorites ||
-      activeFilters.maxFavorites ||
-      activeFilters.recommendedOnly ||
-      activeFilters.roleType
+      publicFilters.author ||
+      publicFilters.minLikes ||
+      publicFilters.maxLikes ||
+      publicFilters.minUsage ||
+      publicFilters.maxUsage ||
+      publicFilters.minFavorites ||
+      publicFilters.maxFavorites ||
+      publicFilters.recommendedOnly ||
+      publicFilters.roleType
     );
-  }, [activeFilters]);
+  }, [publicFilters]);
 
   if (!isOpen) {
     return null;
@@ -1301,7 +1317,7 @@ export default function BattleDataModal({
               </div>
             )}
             {/* 【新增】高级筛选面板 */}
-            {showAdvancedFilters && activeTab === 'public' && (
+            {showAdvancedFilters && isPublicTab && (
               <div className="p-4 bg-gray-50 rounded-lg border space-y-3 mb-2 animate-fade-in-down">
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                   <div className="space-y-1">
@@ -1345,16 +1361,6 @@ export default function BattleDataModal({
                     </select>
                   </div>
                 </div>
-                <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
-                  <input
-                    type="checkbox"
-                    name="recommendedOnly"
-                    checked={filters.recommendedOnly}
-                    onChange={handleFilterChange}
-                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                  />
-                  仅查看管理员推荐
-                </label>
                 <div className="flex justify-end gap-2 pt-2">
                   <button onClick={resetFilters} className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">重置</button>
                   <button onClick={applyFilters} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700">应用筛选</button>
@@ -1397,11 +1403,24 @@ export default function BattleDataModal({
                   hasUserSelectedTabRef.current = true;
                   setActiveTab('public');
                   setCurrentPage(1);
-                  loadPublicDataCards(1, sortBy, '', filters, selectedTagIds, tagMatchMode);
+                  loadPublicDataCards(1, sortBy, '', buildPublicFilters(filters, 'public'), selectedTagIds, tagMatchMode);
                 }}
                 className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'public' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
               >
                 公开{typeLabel}
+              </button>
+            )}
+            {effectiveTabs.includes('recommended') && (
+              <button
+                onClick={() => {
+                  hasUserSelectedTabRef.current = true;
+                  setActiveTab('recommended');
+                  setCurrentPage(1);
+                  loadPublicDataCards(1, sortBy, '', buildPublicFilters(filters, 'recommended'), selectedTagIds, tagMatchMode);
+                }}
+                className={`px-4 py-2 rounded text-sm font-medium ${activeTab === 'recommended' ? 'bg-pink-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+              >
+                管理员推荐
               </button>
             )}
             {effectiveTabs.includes('favorites') && (
@@ -1583,8 +1602,8 @@ export default function BattleDataModal({
           {(
             (activeTab === 'my' && filteredUserCards.length > cardsPerPage) ||
             (activeTab === 'favorites' && filteredFavoriteCards.length > cardsPerPage) ||
-            (activeTab === 'public' && (
-              (activeFilters.roleType && selectedType === 'character')
+            (isPublicTab && (
+              (publicFilters.roleType && selectedType === 'character')
                 ? publicPaginatedCards.length > 0 || publicTotalPages! > 1
                 : (displayCards.length >= cardsPerPage || currentPage > 1)
             ))
