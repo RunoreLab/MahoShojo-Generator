@@ -240,7 +240,6 @@ export default function BattleDataModal({
 
   const isPvpHandTab = activeTab === 'pvpHand';
   const isPublicTab = activeTab === 'public' || activeTab === 'recommended';
-  const isRecommendedTab = activeTab === 'recommended';
 
   const inferRoleType = useCallback((card: any): 'magical-girl' | 'canshou' | 'general' | null => {
     if (!card || card.type !== 'character') return null;
