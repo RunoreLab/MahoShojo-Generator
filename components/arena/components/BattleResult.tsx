@@ -4,6 +4,7 @@ import SaveToCloudButton from '@/components/SaveToCloudButton';
 import BattleReportCard, { NewsReport } from '@/components/BattleReportCard';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 
+import { useMemo } from 'react';
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
 import { getCombatantDisplayName } from '../utils/characterValidator';
@@ -37,6 +38,15 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const settings = useBattleSelector((state) => state.settings);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const scenario = useBattleSelector((state) => state.scenario);
+
+  const scenarioDisplayName = useMemo(() => {
+    if (battleMode !== 'scenario') return undefined;
+    const rawTitle = (scenario.content as any)?.title ?? (scenario.content as any)?.name;
+    if (typeof rawTitle === 'string' && rawTitle.trim()) {
+      return rawTitle.trim();
+    }
+    return scenario.fileName ?? undefined;
+  }, [battleMode, scenario.content, scenario.fileName]);
 
   const hasBattleReport = generationMode === 'stream' ? Boolean(streamingMarkdown) : Boolean(newsReport);
   const canWriteUpdates = settings.writeArenaHistory || settings.writeCurrentState;
@@ -103,7 +113,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               generationId={typeof lastGenerationId === 'string' ? lastGenerationId : null}
               onSaveImage={onSaveImage}
               mode={battleMode}
-              scenarioName={battleMode === 'scenario' ? scenario.fileName ?? undefined : undefined}
+              scenarioName={scenarioDisplayName}
               reporterInfo={streamReporterInfo}
               userGuidance={streamUserGuidance}
               characterGuidances={streamCharacterGuidances}
