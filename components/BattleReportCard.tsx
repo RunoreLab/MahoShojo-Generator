@@ -1,7 +1,6 @@
 // components/BattleReportCard.tsx
 
-import React, { useRef } from 'react';
-import { snapdom } from '@zumer/snapdom';
+import React, { useRef, useState } from 'react';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
@@ -15,7 +14,8 @@ import {
   isLikelyAudioUrl,
   isLikelyVideoUrl,
 } from '@/lib/markdown/externalMedia';
-import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
+import { capturePngBlob } from '@/lib/client/snapdomCapture';
+import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { RankedMatchReportPanel } from '@/components/ranking/RankedMatchReportPanel';
 
@@ -76,6 +76,7 @@ interface BattleReportCardProps {
 
 const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, generationId, onSaveImage, mode, liveBody }) => {
   const cardRef = useRef<HTMLDivElement>(null);
+  const [isSavingImage, setIsSavingImage] = useState(false);
 
   const headline = typeof report?.headline === 'string' && report.headline.trim() ? report.headline.trim() : '（无标题）';
   const reporterName = typeof report?.reporterInfo?.name === 'string' ? report.reporterInfo.name : '';
@@ -121,28 +122,28 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, generationI
   // 处理保存为图片的功能
   const handleSaveImage = async () => {
     if (!cardRef.current) return;
+    if (isSavingImage) return;
+
+    const buttonsContainer = cardRef.current.querySelector('.buttons-container') as HTMLElement;
+    const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
 
     try {
-      // 截图前隐藏按钮和显示Logo
-      const buttonsContainer = cardRef.current.querySelector('.buttons-container') as HTMLElement;
-      const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
+      setIsSavingImage(true);
 
+      // 截图前隐藏按钮和显示Logo
       if (buttonsContainer) buttonsContainer.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, {
+      const sanitizedTitle = headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'battle_report';
+      const filename = `魔法少女速报_${sanitizedTitle}.png`;
+
+      const blob = await capturePngBlob(cardRef.current, {
         scale: 1,
-        useProxy: getSnapdomProxyUrl(),
+        dprMax: 2,
+        fast: false,
         exclude: ['audio', 'video'],
         excludeMode: 'remove',
       });
-
-      // 截图后恢复按钮和隐藏Logo
-      if (buttonsContainer) buttonsContainer.style.display = 'flex';
-      if (logoPlaceholder) logoPlaceholder.style.display = 'none';
-
-      const imgElement = await result.toPng();
-      const imageUrl = imgElement.src;
 
       // 检测设备类型以提供最佳保存体验
       const isMobileDevice = /Mobi/i.test(window.navigator.userAgent);
@@ -150,28 +151,20 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, generationI
       if (isMobileDevice) {
         // 在移动端，调用回调函数以显示弹窗供用户长按保存
         if (onSaveImage) {
-          onSaveImage(imageUrl);
+          onSaveImage(createBlobUrl(blob));
         }
       } else {
         // 在桌面端，直接触发文件下载
-        const downloadLink = document.createElement('a');
-        downloadLink.href = imageUrl;
-        // 使用新闻标题并清理特殊字符作为文件名
-        const sanitizedTitle = headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'battle_report';
-        downloadLink.download = `魔法少女速报_${sanitizedTitle}.png`;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
+        downloadBlob(blob, filename);
       }
     } catch (err) {
       alert('生成图片失败，请重试');
-      console.error("Image generation failed:", err);
-      // 确保在出错时也恢复按钮
-      const buttonsContainer = cardRef.current?.querySelector('.buttons-container') as HTMLElement;
-      const logoPlaceholder = cardRef.current?.querySelector('.logo-placeholder') as HTMLElement;
-
+      console.error('Image generation failed:', err);
+    } finally {
+      // 截图后恢复按钮和隐藏Logo
       if (buttonsContainer) buttonsContainer.style.display = 'flex';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';
+      setIsSavingImage(false);
     }
   };
 
@@ -594,8 +587,8 @@ ${adjudicationMarkdown}
         {/* 按钮容器 */}
         <div className="buttons-container flex gap-2 justify-center mt-4" style={{ alignItems: 'stretch' }}>
           {onSaveImage && (
-            <button onClick={handleSaveImage} className="save-button" style={{ marginTop: 0, flex: 1 }}>
-              📱 保存为图片
+            <button onClick={handleSaveImage} className="save-button" style={{ marginTop: 0, flex: 1 }} disabled={isSavingImage}>
+              {isSavingImage ? '生成中...' : '📱 保存为图片'}
             </button>
           )}
           <button onClick={handleSaveMarkdown} className="save-button" style={{ marginTop: 0, flex: 1 }}>
