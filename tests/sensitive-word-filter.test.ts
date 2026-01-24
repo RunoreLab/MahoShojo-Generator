@@ -30,4 +30,9 @@ describe('sensitive-word-filter（繁体/拼音/去符号绕过）', () => {
     expect(result.hasSensitiveWords).toBe(true);
     expect(result.detectedWords.some((w) => w.includes('(拼音)'))).toBe(true);
   });
+
+  it('不应将英文名 + AI 误判为“性爱”(拼音)', async () => {
+    const result = await quickCheck('Dr. Zhang Xing 是一位 AI 专家。');
+    expect(result.hasSensitiveWords).toBe(false);
+  });
 });

@@ -454,6 +454,9 @@ export class SensitiveWordFilter {
           const endIndex = indexMap[endNormalizedInclusive] + 1;
           const sourceWord = this.pinyinToSource.get(keywordPinyin) ?? keywordPinyin;
           const matchedText = text.slice(startIndex, endIndex);
+          // “纯拼音绕过”只应基于拉丁/数字 token 及其分隔符；
+          // 若跨度内包含汉字，通常是跨语言拼接导致的误报（例如 “Xing ... AI” -> “xingai” 命中 “性爱”）。
+          if (/[\u4e00-\u9fff]/.test(matchedText)) continue;
           addDetail(sourceWord, matchedText, startIndex, endIndex, 'variant');
           if (!detectedWords.includes(`${sourceWord}(拼音)`)) detectedWords.push(`${sourceWord}(拼音)`);
           maskRange(startIndex, endIndex);
