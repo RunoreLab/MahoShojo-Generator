@@ -61,6 +61,16 @@ const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
 
 const META_EXPANDED_STORAGE_KEY = 'mahoshojo.data-card-details.meta-expanded.v1';
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const isUuid = (value: string) => UUID_PATTERN.test(value.trim());
+
+const sanitizeDownloadFilename = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return '数据卡';
+  return trimmed.replace(/[\\/:*?"<>|\n\r\t]/g, '_');
+};
+
 interface DataCardDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -101,6 +111,7 @@ export default function DataCardDetailsModal({
   const [metaError, setMetaError] = useState<string | null>(null);
   const metaRequestIdRef = useRef(0);
   const metaAbortRef = useRef<AbortController | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [allTags, setAllTags] = useState<ApiTag[]>([]);
@@ -153,6 +164,9 @@ export default function DataCardDetailsModal({
   }, []);
 
   const resolvedMetaCardId = metaCardId === undefined ? card?.id : metaCardId;
+  const resolvedCloudCardId = typeof resolvedMetaCardId === 'string' ? resolvedMetaCardId.trim() : '';
+  const isCloudDataCard = Boolean(resolvedCloudCardId) && isUuid(resolvedCloudCardId);
+  const canDownloadCard = isCloudDataCard && (Boolean(meta) || isOwner);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -163,11 +177,13 @@ export default function DataCardDetailsModal({
       setMetaLoading(false);
       setIsEditingTags(false);
       setSaveTagsError(null);
+      setDownloadError(null);
       return;
     }
     void reloadMeta(resolvedMetaCardId);
     setIsEditingTags(false);
     setSaveTagsError(null);
+    setDownloadError(null);
   }, [isOpen, metaNonce, reloadMeta, resolvedMetaCardId]);
 
   useEffect(() => {
@@ -318,6 +334,31 @@ export default function DataCardDetailsModal({
       return [...prev, tagId];
     });
   }, []);
+
+  const downloadDataCard = useCallback(() => {
+    if (!canDownloadCard) return;
+
+    setDownloadError(null);
+    try {
+      const payload = JSON.parse(card.data);
+      const jsonString = JSON.stringify(payload, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sanitizeDownloadFilename(card.name || '数据卡')}.json`;
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('下载数据卡失败:', error);
+      setDownloadError('下载失败：数据卡内容不是有效的 JSON');
+    }
+  }, [canDownloadCard, card.data, card.name]);
 
   const saveTags = useCallback(async () => {
     setSavingTags(true);
@@ -755,13 +796,44 @@ export default function DataCardDetailsModal({
         </div>
 
         {/* 底部 */}
-        <div className="p-6 border-t bg-gray-50 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-          >
-            关闭
-          </button>
+        <div className="p-6 border-t bg-gray-50 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-h-[18px]">
+            {downloadError && (
+              <div className="text-xs text-red-600">{downloadError}</div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {isCloudDataCard && (
+              <button
+                onClick={downloadDataCard}
+                disabled={!canDownloadCard}
+                className={`px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2 ${
+                  canDownloadCard
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-blue-200 text-blue-50 cursor-not-allowed'
+                }`}
+                title={
+                  canDownloadCard
+                    ? '下载数据卡 JSON'
+                    : metaLoading
+                      ? '正在校验权限...'
+                      : metaError
+                        ? '无权下载该数据卡'
+                        : '暂不可下载'
+                }
+              >
+                <Download className="w-4 h-4" />
+                <span>{metaLoading && !canDownloadCard ? '校验中...' : '下载'}</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+            >
+              关闭
+            </button>
+          </div>
         </div>
       </div>
     </div>
