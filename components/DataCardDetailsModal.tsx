@@ -166,7 +166,7 @@ export default function DataCardDetailsModal({
   const resolvedMetaCardId = metaCardId === undefined ? card?.id : metaCardId;
   const resolvedCloudCardId = typeof resolvedMetaCardId === 'string' ? resolvedMetaCardId.trim() : '';
   const isCloudDataCard = Boolean(resolvedCloudCardId) && isUuid(resolvedCloudCardId);
-  const canDownloadCard = isCloudDataCard && (Boolean(meta) || isOwner);
+  const canDownloadCard = isCloudDataCard ? (Boolean(meta) || isOwner) : true;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -804,29 +804,35 @@ export default function DataCardDetailsModal({
           </div>
 
           <div className="flex items-center gap-2">
-            {isCloudDataCard && (
-              <button
-                onClick={downloadDataCard}
-                disabled={!canDownloadCard}
-                className={`px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2 ${
-                  canDownloadCard
-                    ? 'bg-blue-600 text-white hover:bg-blue-700'
-                    : 'bg-blue-200 text-blue-50 cursor-not-allowed'
-                }`}
-                title={
-                  canDownloadCard
-                    ? '下载数据卡 JSON'
-                    : metaLoading
-                      ? '正在校验权限...'
-                      : metaError
-                        ? '无权下载该数据卡'
-                        : '暂不可下载'
-                }
-              >
-                <Download className="w-4 h-4" />
-                <span>{metaLoading && !canDownloadCard ? '校验中...' : '下载'}</span>
-              </button>
-            )}
+            <button
+              onClick={downloadDataCard}
+              disabled={!canDownloadCard}
+              className={`px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2 ${
+                canDownloadCard
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-blue-200 text-blue-50 cursor-not-allowed'
+              }`}
+              title={
+                canDownloadCard
+                  ? isCloudDataCard
+                    ? '下载云端数据卡 JSON'
+                    : '下载本地/预设数据卡 JSON'
+                  : metaLoading
+                    ? '正在校验权限...'
+                    : metaError
+                      ? '无权下载该数据卡'
+                      : '暂不可下载'
+              }
+            >
+              <Download className="w-4 h-4" />
+              <span>
+                {isCloudDataCard && metaLoading && !canDownloadCard
+                  ? '校验中...'
+                  : canDownloadCard
+                    ? '下载'
+                    : '不可下载'}
+              </span>
+            </button>
             <button
               onClick={onClose}
               className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
