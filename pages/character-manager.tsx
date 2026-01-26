@@ -778,27 +778,34 @@ const CharacterManagerPage: React.FC = () => {
         }
 
         let newPrompt = '';
-        const isMagicalGirl = !!characterData.codename;
-
-        if (isMagicalGirl && characterData.appearance) {
-            // 魔法少女的 Prompt 逻辑
-            const appearanceString = Object.entries(characterData.appearance)
-                .map(([key, value]) => `${key}: ${value}`)
-                .join(', ');
-            newPrompt = `${appearanceString}, Xiabanmo, 二次元, 魔法少女`;
-        } else if (!isMagicalGirl && characterData.name) {
-            // 残兽的 Prompt 逻辑
+        if (currentTemplate === 'magical-girl') {
+            const appearance = characterData.appearance;
+            if (appearance && typeof appearance === 'object' && !Array.isArray(appearance)) {
+                const appearanceString = Object.entries(appearance)
+                    .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+                    .join(', ');
+                newPrompt = `${appearanceString}, Xiabanmo, 二次元, 魔法少女`;
+            }
+        } else if (currentTemplate === 'canshou') {
             const parts = [
                 characterData.appearance,
                 characterData.materialAndSkin,
                 characterData.featuresAndAppendages
-            ].filter(Boolean); // 过滤掉空值
+            ]
+                .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
+                .filter(Boolean);
             newPrompt = parts.join(', ');
+        } else if (currentTemplate === 'general') {
+            const name = typeof characterData.name === 'string' ? characterData.name.trim() : '';
+            const content = typeof characterData.content === 'string' ? characterData.content.trim() : '';
+            const head = content.length > 800 ? content.slice(0, 800) : content;
+            const prefix = [name, head].filter(Boolean).join(', ');
+            newPrompt = `${prefix ? `${prefix}, ` : ''}Xiabanmo, 二次元, 角色立绘`;
         }
 
         setTachiePrompt(newPrompt);
 
-    }, [characterData]);
+    }, [characterData, currentTemplate]);
 
     /**
      * 专门用于控制“一键替换名称”按钮的显示逻辑。

@@ -99,6 +99,18 @@ export default function TachieGenerator({
       return;
     }
 
+    const normalizedPrompt = prompt.trim();
+    if (!normalizedPrompt) {
+      const nextResult = {
+        success: false,
+        error: "立绘提示词为空：请先补全角色外观/正文，或手动填写提示词后再生成。",
+      } satisfies TachieGenerationResult;
+      setResult(nextResult);
+      onResult?.(nextResult);
+      onImageUrlChange?.(null);
+      return;
+    }
+
     // 保存凭据（如果用户选择记住）
     saveCredentials();
 
@@ -113,7 +125,7 @@ export default function TachieGenerator({
         source: "liblib",
         accessKey: accessKey.trim(),
         secretKey: secretKey.trim(),
-        prompt,
+        prompt: normalizedPrompt,
         mode,
         workflowUuid,
         templateUuid,
@@ -217,7 +229,7 @@ export default function TachieGenerator({
 
       <button
         onClick={handleGenerate}
-        disabled={isGenerating || !accessKey.trim() || !secretKey.trim()}
+        disabled={isGenerating || !accessKey.trim() || !secretKey.trim() || !prompt.trim()}
         className="generate-button"
       >
         {isGenerating ? "立绘生成中，请稍后捏 (≖ᴗ≖)✧✨" : "✨ 生成立绘 ✨"}
