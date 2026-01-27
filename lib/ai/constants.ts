@@ -365,6 +365,42 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         ]
     },
     {
+        id: 'poe',
+        name: 'Poe',
+        description: 'Quora 旗下的模型聚合平台，支持订阅制的多种顶尖模型接入。',
+        docsUrl: 'https://poe.com/api_keys',
+        baseUrl: 'https://api.poe.com/v1', // 视实际接入的桥接服务地址而定
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'gemini-2.5-pro',
+                label: 'Gemini 2.5 Pro',
+                description: 'Google 旗下上一代的最先进模型系列，性能很棒棒。'
+            },
+            {
+                value: 'gemini-2.5-flash',
+                label: 'Gemini 2.5 Flash',
+                description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
+            },
+            {
+                value: 'gemini-2.5-flash-lite',
+                label: 'Gemini 2.5 Flash Lite',
+                description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+            },
+            {
+                value: 'gemini-3-pro',
+                label: 'Gemini 3.0 Pro (预览版)',
+                description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。'
+            },
+            {
+                value: 'gemini-3-flash',
+                label: 'Gemini 3.0 Flash (预览版)',
+                description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
+            },
+        ]
+    },
+    {
         id: 'mystery',
         name: '魔法国度',
         description: '神秘渠道，不定时放送。',
