@@ -132,6 +132,21 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
             {
+                value: 'gpt-5.2',
+                label: 'GPT-5.2',
+                description: 'OpenAI 的新一代通用旗舰模型，适合高质量内容生成与复杂任务。'
+            },
+            {
+                value: 'claude-sonnet-4-5',
+                label: 'Claude Sonnet 4.5',
+                description: 'Anthropic 旗下主力模型之一，写作、推理与长文本表现稳定。'
+            },
+            {
+                value: 'grok-4',
+                label: 'Grok 4',
+                description: 'xAI 旗下通用模型，适合头脑风暴、创意发散与快速问答。'
+            },
+            {
                 value: 'glm-4.5',
                 label: 'GLM-4.5',
                 description: '智谱旗下的通用对话与内容创作模型，适合轻量日常任务。'
@@ -180,8 +195,8 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
     },
     {
         id: 'yiye',
-        name: '一叶知秋 API (测试)',
-        description: '一叶知秋 API 也为用户提供了国内外广泛的模型库。',
+        name: '一叶知秋 API',
+        description: '一叶知秋 API 为用户提供了国内外广泛的模型库，性价比高但不太稳定。',
         docsUrl: 'https://88996.cloud/register?aff=ITPX',
         baseUrl: 'https://88996.cloud/v1',
         type: 'openai',
@@ -216,6 +231,21 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-2.5-flash-lite',
                 label: 'Gemini 2.5 Flash Lite',
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+            },
+            {
+                value: 'gpt-5.2',
+                label: 'GPT-5.2',
+                description: 'OpenAI 的新一代通用旗舰模型，适合高质量内容生成与复杂任务。'
+            },
+            {
+                value: 'claude-sonnet-4-5',
+                label: 'Claude Sonnet 4.5',
+                description: 'Anthropic 旗下主力模型之一，写作、推理与长文本表现稳定。'
+            },
+            {
+                value: 'grok-4',
+                label: 'Grok 4',
+                description: 'xAI 旗下通用模型，适合头脑风暴、创意发散与快速问答。'
             },
             {
                 value: 'glm-4.6',
