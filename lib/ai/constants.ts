@@ -368,7 +368,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         id: 'poe',
         name: 'Poe',
         description: 'Quora 旗下的模型聚合平台，支持订阅制的多种顶尖模型接入。',
-        docsUrl: 'https://poe.com/api_keys',
+        docsUrl: 'https://poe.com/api/keys',
         baseUrl: 'https://api.poe.com/v1', // 视实际接入的桥接服务地址而定
         type: 'openai',
         mode: 'auto',
@@ -397,6 +397,36 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-3-flash',
                 label: 'Gemini 3.0 Flash (预览版)',
                 description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
+            },
+            {
+                value: 'GPT-5.2',
+                label: 'GPT-5.2',
+                description: 'OpenAI 最新模型，综合能力更强，适合高质量生成与复杂任务。'
+            },
+            {
+                value: 'Claude-Sonnet-4.5',
+                label: 'Claude Sonnet 4.5',
+                description: 'Anthropic 旗下主力模型之一，写作与推理很稳，适合角色设定与剧情推进。'
+            },
+            {
+                value: 'Claude-Haiku-4.5',
+                label: 'Claude Haiku 4.5',
+                description: '更快更省的 Claude，适合高频对话、草稿生成与轻量改写。'
+            },
+            {
+                value: 'Claude-Opus-4.1',
+                label: 'Claude Opus 4.1',
+                description: 'Claude 系列旗舰，质量上限更高，适合长文本与复杂创作。'
+            },
+            {
+                value: 'DeepSeek-R1',
+                label: 'DeepSeek R1',
+                description: '推理强项模型，适合需要多步思考的分析、规划与推导场景。'
+            },
+            {
+                value: 'Grok-4',
+                label: 'Grok 4',
+                description: 'xAI 旗下通用模型，适合头脑风暴、创意发散与快速问答。'
             },
         ]
     },
