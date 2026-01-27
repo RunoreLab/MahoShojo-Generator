@@ -625,7 +625,7 @@ export function RankingPage() {
                             if (e.key === 'Enter') applyDraft();
                           }}
                           className="input-field mt-1"
-                          placeholder="如 900"
+                          placeholder="如 800"
                         />
                       </label>
                       <label className="text-sm text-gray-700">
@@ -638,7 +638,7 @@ export function RankingPage() {
                             if (e.key === 'Enter') applyDraft();
                           }}
                           className="input-field mt-1"
-                          placeholder="如 1600"
+                          placeholder="如 1500"
                         />
                       </label>
                       <label className="text-sm text-gray-700">
