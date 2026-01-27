@@ -10,14 +10,14 @@ export type ArenaBaseTier = '无牌' | '白牌' | '字牌' | '花牌' | '权杖'
 export type ArenaTier = ArenaBaseTier | '女王';
 
 export const ARENA_PLACEMENT_GAMES = 5;
-export const ARENA_SCEPTER_MIN_RATING = 1600;
+export const ARENA_SCEPTER_MIN_RATING = 1500;
 export const ARENA_QUEEN_MIN_SCEPTER_COUNT = 3;
 
 export function computeArenaBaseTier(rating: number, games: number): ArenaBaseTier {
-  if (games < ARENA_PLACEMENT_GAMES || rating < 900) return '无牌';
-  if (rating < 1100) return '白牌';
-  if (rating < 1300) return '字牌';
-  if (rating < 1600) return '花牌';
+  if (games < ARENA_PLACEMENT_GAMES || rating < 800) return '无牌';
+  if (rating < 1000) return '白牌';
+  if (rating < 1200) return '字牌';
+  if (rating < 1500) return '花牌';
   return '权杖';
 }
 
@@ -115,4 +115,3 @@ export async function queryArenaPublicQueenEntity(
 
   return { entityType, entityId };
 }
-
