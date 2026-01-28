@@ -19,6 +19,13 @@ describe('structured-json', () => {
     expect(result.data).toEqual({ a: 1 });
   });
 
+  it('parses object body without outer braces', () => {
+    const schema = z.object({ a: z.number(), b: z.string() });
+    const text = '"a": 1,\n"b": "ok"';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data).toEqual({ a: 1, b: 'ok' });
+  });
+
   it('repairs common JSON issues (code fence + trailing comma)', () => {
     const schema = z.object({ a: z.number() });
     const text = '```json\n{"a": 1,}\n```';
@@ -62,4 +69,3 @@ describe('structured-json', () => {
     expect(guide).toContain('d?: boolean');
   });
 });
-

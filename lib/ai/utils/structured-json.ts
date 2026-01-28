@@ -7,6 +7,14 @@ type JsonCandidate = {
   endIndex: number;
 };
 
+const escapeRegExp = (input: string) => input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const toSnakeCase = (input: string) =>
+  input
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/-/g, '_')
+    .toLowerCase();
+
 const stripCodeFences = (input: string) =>
   input
     .replace(/^\s*```[a-zA-Z]*\s*\n?/, '')
@@ -103,6 +111,82 @@ const findJsonishSpan = (text: string, searchFrom = 0): { start: number; end: nu
   }
 
   return null;
+};
+
+type ZodTypeName = z.ZodFirstPartyTypeKind | string;
+
+const unwrapToCoreSchema = (schema: z.ZodTypeAny): z.ZodTypeAny => {
+  let current: z.ZodTypeAny = schema;
+  for (let i = 0; i < 10; i++) {
+    const def: any = (current as any)?._def;
+    const typeName: ZodTypeName | undefined = def?.typeName;
+
+    if (typeName === z.ZodFirstPartyTypeKind.ZodOptional) {
+      current = def.innerType;
+      continue;
+    }
+    if (typeName === z.ZodFirstPartyTypeKind.ZodNullable) {
+      current = def.innerType;
+      continue;
+    }
+    if (typeName === z.ZodFirstPartyTypeKind.ZodDefault) {
+      current = def.innerType;
+      continue;
+    }
+    if (typeName === z.ZodFirstPartyTypeKind.ZodEffects) {
+      current = def.schema;
+      continue;
+    }
+
+    break;
+  }
+
+  return current;
+};
+
+const getTopLevelKeysFromSchema = (schema: z.ZodTypeAny): string[] => {
+  const core = unwrapToCoreSchema(schema);
+  const def: any = (core as any)?._def;
+  const typeName: ZodTypeName | undefined = def?.typeName;
+  if (typeName !== z.ZodFirstPartyTypeKind.ZodObject) return [];
+  const shape = typeof def.shape === 'function' ? def.shape() : {};
+  return Object.keys(shape);
+};
+
+const buildMissingRootObjectCandidates = (raw: string, schema: z.ZodTypeAny): JsonCandidate[] => {
+  const topLevelKeys = getTopLevelKeysFromSchema(schema);
+  if (topLevelKeys.length === 0) return [];
+
+  const keyVariants = Array.from(new Set([...topLevelKeys, ...topLevelKeys.map(toSnakeCase)]));
+  const text = normalizeJsonishText(stripCodeFences(raw));
+
+  let bestStart: number | null = null;
+  for (const key of keyVariants) {
+    const re = new RegExp(`(^|[\\s,{\\[])([\"']?)${escapeRegExp(key)}\\2\\s*:`, 'm');
+    const match = re.exec(text);
+    if (!match) continue;
+    const start = match.index + match[1].length;
+    if (bestStart === null || start < bestStart) bestStart = start;
+  }
+
+  if (bestStart === null) return [];
+
+  let body = text.slice(bestStart).trim();
+  // 常见：JSON 部分后面又跟了 ``` 或解释文本；优先截断围栏，减轻修复压力
+  const fenceIndex = body.indexOf('```');
+  if (fenceIndex !== -1) body = body.slice(0, fenceIndex).trim();
+  if (!body) return [];
+
+  return [
+    {
+      // LLM 有时会“漏掉最外层大括号”，只输出键值对列表：
+      //   "a": 1, "b": 2
+      // 这里包一层 { ... } 交给 jsonrepair + schema 校验兜底。
+      jsonText: `{${body}}`,
+      startIndex: bestStart,
+      endIndex: bestStart + body.length - 1,
+    },
+  ];
 };
 
 const extractJsonCandidates = (raw: string): JsonCandidate[] => {
@@ -225,7 +309,10 @@ export function parseStructuredJsonWithSchema<T>(
   const unwrapCandidates = options.unwrapCandidates ?? ['value', 'data', 'payload', 'result'];
   const textFieldCandidates = options.textFieldCandidates ?? ['json', 'text', 'raw', 'content', 'body'];
 
-  const candidates = extractJsonCandidates(rawText);
+  const candidates = [
+    ...extractJsonCandidates(rawText),
+    ...buildMissingRootObjectCandidates(rawText, schema),
+  ];
   if (candidates.length === 0) {
     throw new Error(`${taskName}失败：未找到可解析的 JSON 片段`);
   }
@@ -284,8 +371,6 @@ export function parseStructuredJsonWithSchema<T>(
   const suffix = lastError instanceof Error ? lastError.message : String(lastError);
   throw new Error(`${taskName}失败：JSON 解析/修复后仍无法通过 Schema 校验。${suffix ? `原因：${suffix}` : ''}`);
 }
-
-type ZodTypeName = z.ZodFirstPartyTypeKind | string;
 
 type Unwrapped = {
   schema: z.ZodTypeAny;
@@ -421,4 +506,3 @@ export function buildStructuredJsonInstructionFromZodSchema(
     `${described.type}\n`
   );
 }
-
