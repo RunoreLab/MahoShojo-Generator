@@ -426,81 +426,181 @@ export function RankingQuickActions() {
     return { willCount: localStrictReasons.length === 0, reasons: localStrictReasons, range: null, daily: null, source: 'local' as const };
   }, [localStrictReasons, strictPreflight]);
 
+  const freeRankingToggleId = 'arena-free-ranking-enabled';
+  const strictSetupReady = strictSetupMissingReasons.length === 0;
+  const strictCountReady = strictIndicator.willCount;
+
   return (
-    <div className="mt-4 rounded-lg border border-gray-200 bg-white/70 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-900">
-            排位赛
+    <section className="mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white/70 shadow-sm ring-1 ring-black/5">
+      <div className="flex flex-col gap-4 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900">排位赛</h3>
+              <span
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                  strictCountReady ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                }`}
+              >
+                {strictCountReady ? '严格可计分' : '严格不可计分'}
+              </span>
+              {strictIndicator.source === 'server' ? (
+                <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                  服务器预检
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                  本地预检
+                </span>
+              )}
+            </div>
+            <div className="mt-1 text-xs text-gray-600">
+              这里会提示严格/自由计分的准备情况，并提供“一键严格设置”来快速对齐推荐配置。
+            </div>
+          </div>
+
+          <div className="flex flex-col items-stretch gap-2 sm:items-end">
+            <button
+              type="button"
+              onClick={handleApplyStrictSetup}
+              disabled={isGenerating}
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+              title="将严格排位相关设置一键安排到位"
+            >
+              一键严格设置
+            </button>
+            <div className="text-[11px] text-gray-500 sm:text-right">会自动切换模式/语言/清空引导等，不影响角色卡数据。</div>
           </div>
         </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
-          <button
-            type="button"
-            onClick={handleApplyStrictSetup}
-            disabled={isGenerating}
-            className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
-            title="将严格排位相关设置一键安排到位"
-          >
-            严格设置
-          </button>
-          <div className="mt-1 w-full sm:w-72">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
+
+        <label
+          htmlFor={freeRankingToggleId}
+          className={`flex items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white/60 p-3 ${
+            isGenerating ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'
+          }`}
+        >
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-gray-900">自由排位计分</div>
+            <div className="mt-1 text-xs text-gray-600">开启后：即使不满足严格条件，也会尝试结算自由排位分。</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium text-gray-600">{arenaFreeRankingEnabled ? '已开启' : '已关闭'}</span>
+            <span className="relative inline-flex h-6 w-11 flex-none items-center">
               <input
+                id={freeRankingToggleId}
                 type="checkbox"
-                className="h-4 w-4 text-pink-600 border-gray-300 rounded"
+                role="switch"
                 checked={arenaFreeRankingEnabled}
                 onChange={(e) => setArenaFreeRankingEnabled(e.target.checked)}
                 disabled={isGenerating}
+                className="peer sr-only"
+                aria-label="启用自由排位计分"
               />
-              启用自由排位计分
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-2 text-xs text-gray-600">
-        {strictSetupMissingReasons.length === 0 ? (
-          <span className="text-emerald-700 font-semibold">当前设置：已满足严格排位计分基础条件</span>
-        ) : (
-          <span>
-            当前仍缺少：<span className="text-gray-800">{strictSetupMissingReasons.join('、')}</span>
-          </span>
-        )}
-      </div>
-
-      <div className="mt-2 text-xs">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className={strictIndicator.willCount ? 'text-emerald-700 font-semibold' : 'text-red-700 font-semibold'}>
-            {strictIndicator.willCount ? '严格排位计分：可以' : '严格排位计分：不行'}
-          </span>
-          {strictIndicator.source === 'server' && strictIndicator.daily?.used != null ? (
-            <span
-              className="text-gray-600"
-              title={
-                strictIndicator.daily.sinceIso
-                  ? `按 UTC 统计：每日 UTC 00:00 刷新（北京时间 08:00）；统计起点：${strictIndicator.daily.sinceIso}`
-                  : '按 UTC 统计：每日 UTC 00:00 刷新（北京时间 08:00）'
-              }
-            >
-              今日严格：{strictIndicator.daily.used}/{strictIndicator.daily.limit}
+              <span className="h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-pink-500 peer-disabled:opacity-60" />
+              <span className="absolute left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5 peer-disabled:opacity-60" />
             </span>
-          ) : null}
-          {isCheckingStrictPreflight ? <span className="text-gray-500">检查中…</span> : null}
+          </div>
+        </label>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-gray-900">严格计分基础条件</div>
+              <span
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                  strictSetupReady ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                }`}
+              >
+                {strictSetupReady ? '已就绪' : `缺少 ${strictSetupMissingReasons.length} 项`}
+              </span>
+            </div>
+            {strictSetupReady ? (
+              <div className="mt-2 text-xs text-gray-600">推荐配置已对齐，可以尝试严格计分（仍以战报与结算结果为准）。</div>
+            ) : (
+              <details className="group mt-2">
+                <summary className="flex cursor-pointer items-center justify-between gap-2 text-xs font-medium text-gray-700 hover:text-gray-900 [&::-webkit-details-marker]:hidden">
+                  <span>查看缺少项</span>
+                  <span className="text-gray-400 transition-transform group-open:rotate-180">▾</span>
+                </summary>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-gray-700">
+                  {strictSetupMissingReasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="text-xs font-semibold text-gray-900">严格排位计分</div>
+                {isCheckingStrictPreflight ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-gray-500">
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-gray-500" />
+                    检查中
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {strictIndicator.source === 'server' && strictIndicator.daily?.used != null ? (
+                  <span
+                    className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700"
+                    title={
+                      strictIndicator.daily.sinceIso
+                        ? `按 UTC 统计：每日 UTC 00:00 刷新（北京时间 08:00）；统计起点：${strictIndicator.daily.sinceIso}`
+                        : '按 UTC 统计：每日 UTC 00:00 刷新（北京时间 08:00）'
+                    }
+                  >
+                    今日严格 {strictIndicator.daily.used}/{strictIndicator.daily.limit}
+                  </span>
+                ) : null}
+                <span
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    strictCountReady ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                  }`}
+                >
+                  {strictCountReady ? '可计分' : '不可计分'}
+                </span>
+              </div>
+            </div>
+
+            {strictCountReady ? (
+              <div className="mt-2 text-xs text-gray-600">
+                备注：最终仍可能因战报未给出/无法识别胜者、或结算异常而跳过计分。
+              </div>
+            ) : (
+              <>
+                <div className="mt-2 text-xs text-gray-600">
+                  {strictIndicator.reasons.length > 0
+                    ? `原因（${strictIndicator.reasons.length} 项）：${formatStrictReasonWithDetails(strictIndicator.reasons[0], strictIndicator.range)}`
+                    : '原因：未知（建议刷新页面或稍后重试）'}
+                </div>
+                {strictIndicator.reasons.length > 1 ? (
+                  <details className="group mt-2">
+                    <summary className="flex cursor-pointer items-center justify-between gap-2 text-xs font-medium text-gray-700 hover:text-gray-900 [&::-webkit-details-marker]:hidden">
+                      <span>查看全部原因</span>
+                      <span className="text-gray-400 transition-transform group-open:rotate-180">▾</span>
+                    </summary>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-gray-700">
+                      {strictIndicator.reasons.map((reason) => (
+                        <li key={reason}>{formatStrictReasonWithDetails(reason, strictIndicator.range)}</li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+              </>
+            )}
+
+            {strictPreflight?.success === false ? (
+              <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                严格排位状态检查失败：{strictPreflight.error}
+              </div>
+            ) : null}
+          </div>
         </div>
-        {!strictIndicator.willCount ? (
-          <div className="mt-1 text-gray-600">
-            原因：<span className="text-gray-800">{strictIndicator.reasons.map((r) => formatStrictReasonWithDetails(r, strictIndicator.range)).join('、')}</span>
-          </div>
-        ) : (
-          <div className="mt-1 text-gray-500">
-            备注：最终仍可能因战报未给出/无法识别胜者、或结算异常而跳过计分。
-          </div>
-        )}
-        {strictPreflight?.success === false ? (
-          <div className="mt-1 text-xs text-red-600">严格排位状态检查失败：{strictPreflight.error}</div>
-        ) : null}
       </div>
-    </div>
+    </section>
   );
 }
