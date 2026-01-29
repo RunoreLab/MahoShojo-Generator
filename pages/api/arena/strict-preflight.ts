@@ -13,6 +13,13 @@ type ApiSuccessResponse = {
   success: true;
   willCount: boolean;
   reasons: string[];
+  range: {
+    absDiff: number;
+    maxAbsDiff: number;
+    exceededBy: number;
+    aRating: number;
+    bRating: number;
+  } | null;
   daily: {
     used: number | null;
     limit: number;
@@ -150,6 +157,7 @@ export default async function handler(req: NextRequest) {
     const user = authKey ? await getUserByAuthKey(authKey) : null;
 
     const reasons: string[] = [];
+    let range: ApiSuccessResponse['range'] = null;
     if (!user?.id) reasons.push('need-login');
     if (battleMode !== 'classic') reasons.push('mode-not-classic');
     if (!Array.isArray(combatants) || combatants.length !== 2) reasons.push('combatant-count-not-2');
@@ -206,6 +214,13 @@ export default async function handler(req: NextRequest) {
             if (!involvesPreset) {
               const absDiff = Math.abs(aRating - bRating);
               const maxAbsDiff = getStrictMaxAbsDiffForRatings({ rating: aRating, games: aGames }, { rating: bRating, games: bGames });
+              range = {
+                absDiff,
+                maxAbsDiff,
+                exceededBy: Math.max(0, absDiff - maxAbsDiff),
+                aRating,
+                bRating,
+              };
               if (absDiff > maxAbsDiff) {
                 reasons.push('strict-out-of-range');
               }
@@ -247,6 +262,7 @@ export default async function handler(req: NextRequest) {
       success: true,
       willCount: reasons.length === 0,
       reasons,
+      range,
       daily: {
         used: dailyUsage?.used ?? null,
         limit: STRICT_DAILY_LIMIT,

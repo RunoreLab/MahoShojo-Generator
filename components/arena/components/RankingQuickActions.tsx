@@ -5,12 +5,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { authStorage } from '@/lib/auth';
-import { PRESET_LIST } from '@/lib/presets';
 import { useAuth } from '@/lib/useAuth';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import type { BattleStoreState, CombatantData } from '../types';
-import { inferCombatantType, validateCanshouData, validateMagicalGirlData } from '../utils/characterValidator';
+
+type StrictRangeInfo = {
+  absDiff: number;
+  maxAbsDiff: number;
+  exceededBy: number;
+  aRating: number;
+  bRating: number;
+};
 
 type StrictPreflightResponse =
   | {
@@ -23,6 +29,7 @@ type StrictPreflightResponse =
         exceeded: boolean | null;
         sinceIso: string | null;
       };
+      range?: StrictRangeInfo | null;
     }
   | { success: false; error: string };
 
@@ -120,12 +127,22 @@ const formatStrictReason = (code: string): string => {
   return map[code] ?? code;
 };
 
-const hashString = (input: string): number => {
-  let hash = 0;
-  for (let i = 0; i < input.length; i += 1) {
-    hash = (hash * 31 + input.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
+const formatStrictReasonWithDetails = (
+  code: string,
+  range: StrictRangeInfo | null,
+): string => {
+  if (code !== 'strict-out-of-range') return formatStrictReason(code);
+  if (!range || typeof range !== 'object') return formatStrictReason(code);
+
+  const absDiff = Number.isFinite(range.absDiff) ? Math.max(0, Math.floor(range.absDiff)) : null;
+  const maxAbsDiff = Number.isFinite(range.maxAbsDiff) ? Math.max(0, Math.floor(range.maxAbsDiff)) : null;
+  if (absDiff == null || maxAbsDiff == null) return formatStrictReason(code);
+
+  const exceededBy = Math.max(0, absDiff - maxAbsDiff);
+  const aRating = Number.isFinite(range.aRating) ? Math.floor(range.aRating) : null;
+  const bRating = Number.isFinite(range.bRating) ? Math.floor(range.bRating) : null;
+  const ratings = aRating != null && bRating != null ? `；双方分 ${aRating} vs ${bRating}` : '';
+  return `对手分差过大：允许 ≤${maxAbsDiff}，当前差 ${absDiff}（超出 ${exceededBy}${ratings}）`;
 };
 
 export function RankingQuickActions() {
@@ -146,7 +163,6 @@ export function RankingQuickActions() {
   const adjudicationEvents = useBattleSelector((state) => state.adjudicationEvents);
   const setAdjudicationEvents = useBattleSelector((state) => state.setAdjudicationEvents);
   const combatants = useBattleSelector((state) => state.combatants);
-  const setCombatants = useBattleSelector((state) => state.setCombatants);
   const userProviderConfig = useBattleSelector((state) => state.userProviderConfig);
   const setUserProviderConfig = useBattleSelector((state) => state.setUserProviderConfig);
   const scenario = useBattleSelector((state) => state.scenario);
@@ -157,9 +173,6 @@ export function RankingQuickActions() {
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const setError = useBattleSelector((state) => state.setError);
 
-  const [selectedPlayerFilename, setSelectedPlayerFilename] = useState<string>('');
-  const [presetCursor, setPresetCursor] = useState<number>(0);
-  const [isSelectingOpponent, setIsSelectingOpponent] = useState(false);
   const [strictPreflight, setStrictPreflight] = useState<StrictPreflightResponse | null>(null);
   const [isCheckingStrictPreflight, setIsCheckingStrictPreflight] = useState(false);
 
@@ -176,22 +189,6 @@ export function RankingQuickActions() {
       }),
     [readableCombatants],
   );
-
-  useEffect(() => {
-    if (rankableCombatants.length <= 0) {
-      if (selectedPlayerFilename) setSelectedPlayerFilename('');
-      return;
-    }
-    const exists = rankableCombatants.some((c) => c.filename === selectedPlayerFilename);
-    if (!exists) {
-      setSelectedPlayerFilename(rankableCombatants[0]!.filename);
-    }
-  }, [rankableCombatants, selectedPlayerFilename]);
-
-  const selectedPlayer = useMemo(() => {
-    const byFilename = rankableCombatants.find((c) => c.filename === selectedPlayerFilename);
-    return byFilename ?? rankableCombatants[0] ?? null;
-  }, [rankableCombatants, selectedPlayerFilename]);
 
   const strictSetupMissingReasons = useMemo(
     () =>
@@ -421,92 +418,13 @@ export function RankingQuickActions() {
       return {
         willCount: strictPreflight.willCount,
         reasons: strictPreflight.reasons,
+        range: strictPreflight.range ?? null,
         daily: strictPreflight.daily,
         source: 'server' as const,
       };
     }
-    return { willCount: localStrictReasons.length === 0, reasons: localStrictReasons, daily: null, source: 'local' as const };
+    return { willCount: localStrictReasons.length === 0, reasons: localStrictReasons, range: null, daily: null, source: 'local' as const };
   }, [localStrictReasons, strictPreflight]);
-
-  const presetPool = useMemo(() => {
-    if (!selectedPlayer) return [];
-    const playerFilename = selectedPlayer.isPreset ? selectedPlayer.filename : '';
-    const pool = PRESET_LIST.filter((p) => p.filename !== playerFilename);
-    if (pool.length <= 0) return [];
-
-    const pivotKey = selectedPlayer.isPreset
-      ? `preset:${selectedPlayer.filename}`
-      : `data_card:${(selectedPlayer.sourceDataCardId ?? '').trim()}`;
-    const pivot = hashString(pivotKey) + presetCursor * 17;
-    const offset = pool.length > 0 ? pivot % pool.length : 0;
-    const rotated = [...pool.slice(offset), ...pool.slice(0, offset)];
-    return rotated.slice(0, Math.min(5, rotated.length));
-  }, [presetCursor, selectedPlayer]);
-
-  const recommendedPresets = useMemo(() => presetPool.slice(0, 3), [presetPool]);
-  const extraPresets = useMemo(() => presetPool.slice(3), [presetPool]);
-
-  const handlePickPresetOpponent = async (filename: string) => {
-    if (isGenerating || isSelectingOpponent) return;
-    if (!selectedPlayer) {
-      setError('❌ 请先选择 1 位参战角色（我方）。');
-      return;
-    }
-
-    const preset = PRESET_LIST.find((p) => p.filename === filename) ?? null;
-    if (!preset) {
-      setError('❌ 预设对手不存在。');
-      return;
-    }
-
-    setIsSelectingOpponent(true);
-    try {
-      handleApplyStrictSetup();
-
-      const keepPlayer: CombatantData = {
-        ...selectedPlayer,
-        teamId: undefined,
-        characterGuidance: '',
-      } as CombatantData;
-
-      const presetRes = await fetch(`/presets/${preset.filename}`);
-      if (!presetRes.ok) {
-        throw new Error(`无法加载预设对手：${preset.name}`);
-      }
-      const presetData = await presetRes.json();
-      const validation = preset.type === 'magical-girl' ? validateMagicalGirlData(presetData) : validateCanshouData(presetData);
-      if (!validation.success) {
-        throw new Error(validation.errors?.[0] || '预设对手格式校验失败');
-      }
-
-      const inferredType = inferCombatantType(validation.data ?? presetData);
-
-      const opponent: CombatantData = {
-        type: inferredType,
-        data: validation.data ?? presetData,
-        filename: preset.filename,
-        isValid: true,
-        isPreset: true,
-        teamId: undefined,
-        characterGuidance: '',
-      };
-
-      setCombatants([keepPlayer, opponent]);
-      setError(`✅ 已选择对手：${preset.name}。现在可以直接生成战报。`);
-    } catch (error) {
-      setError(`❌ 选择对手失败：${error instanceof Error ? error.message : '未知错误'}`);
-    } finally {
-      setIsSelectingOpponent(false);
-    }
-  };
-
-  const handleRefreshPresets = () => {
-    setPresetCursor((v) => v + 1);
-  };
-
-  const playerLabel = selectedPlayer
-    ? (selectedPlayer.data?.codename || selectedPlayer.data?.name || selectedPlayer.filename).toString().slice(0, 40)
-    : '';
 
   return (
     <div className="mt-4 rounded-lg border border-gray-200 bg-white/70 p-3">
@@ -515,48 +433,17 @@ export function RankingQuickActions() {
           <div className="text-sm font-semibold text-gray-900">
             排位赛
           </div>
-          <div className="mt-1 text-xs text-gray-600">
-            请自行挑选符合条件的对手。默认推荐 3 位，你也可以从上方排行榜里挑选公开角色卡作为对手。
-          </div>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
-          <select
-            className="w-full rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm sm:w-72"
-            value={selectedPlayerFilename}
-            onChange={(e) => setSelectedPlayerFilename(e.target.value)}
-            disabled={isGenerating || isSelectingOpponent || rankableCombatants.length <= 0}
-            title="选择参战角色（我方）"
+          <button
+            type="button"
+            onClick={handleApplyStrictSetup}
+            disabled={isGenerating}
+            className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+            title="将严格排位相关设置一键安排到位"
           >
-            {rankableCombatants.length <= 0 ? (
-              <option value="">暂无可计分参战者</option>
-            ) : (
-              rankableCombatants.map((c) => (
-                <option key={c.filename} value={c.filename}>
-                  {(c.data?.codename || c.data?.name || c.filename).toString().slice(0, 40)}{c.isPreset ? '（预设）' : ''}
-                </option>
-              ))
-            )}
-          </select>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleApplyStrictSetup}
-              disabled={isGenerating || isSelectingOpponent}
-              className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
-              title="将严格排位相关设置一键安排到位"
-            >
-              严格设置
-            </button>
-            <button
-              type="button"
-              onClick={handleRefreshPresets}
-              disabled={isGenerating || isSelectingOpponent || !selectedPlayer}
-              className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-              title="刷新推荐对手（来自系统预设池）"
-            >
-              换一批对手
-            </button>
-          </div>
+            严格设置
+          </button>
           <div className="mt-1 w-full sm:w-72">
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input
@@ -564,13 +451,10 @@ export function RankingQuickActions() {
                 className="h-4 w-4 text-pink-600 border-gray-300 rounded"
                 checked={arenaFreeRankingEnabled}
                 onChange={(e) => setArenaFreeRankingEnabled(e.target.checked)}
-                disabled={isGenerating || isSelectingOpponent}
+                disabled={isGenerating}
               />
-              启用自由排位计分（默认关闭）
+              启用自由排位计分
             </label>
-            <div className="mt-1 text-[11px] text-gray-500">
-              关闭可显著降低 D1 Rows Read；设置保存在浏览器。开启后，本局与后续生成会尝试结算“自由”队列计分。
-            </div>
           </div>
         </div>
       </div>
@@ -606,7 +490,7 @@ export function RankingQuickActions() {
         </div>
         {!strictIndicator.willCount ? (
           <div className="mt-1 text-gray-600">
-            原因：<span className="text-gray-800">{strictIndicator.reasons.map(formatStrictReason).join('、')}</span>
+            原因：<span className="text-gray-800">{strictIndicator.reasons.map((r) => formatStrictReasonWithDetails(r, strictIndicator.range)).join('、')}</span>
           </div>
         ) : (
           <div className="mt-1 text-gray-500">
@@ -616,51 +500,6 @@ export function RankingQuickActions() {
         {strictPreflight?.success === false ? (
           <div className="mt-1 text-xs text-red-600">严格排位状态检查失败：{strictPreflight.error}</div>
         ) : null}
-      </div>
-
-      <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
-        <div className="text-xs font-semibold text-gray-900">
-          推荐对手（系统预设池）{playerLabel ? `：${playerLabel}` : ''}
-        </div>
-        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-          {recommendedPresets.map((preset) => (
-            <button
-              key={preset.filename}
-              type="button"
-              onClick={() => void handlePickPresetOpponent(preset.filename)}
-              disabled={isGenerating || isSelectingOpponent || !selectedPlayer}
-              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm hover:bg-gray-50 disabled:opacity-50"
-              title={preset.description}
-            >
-              <div className="font-semibold text-gray-900">{preset.name}</div>
-              <div className="text-xs text-gray-600">{preset.type === 'magical-girl' ? '魔法少女' : '残兽'}</div>
-            </button>
-          ))}
-        </div>
-
-        {extraPresets.length > 0 ? (
-          <>
-            <div className="mt-2 text-[11px] text-gray-500">更多可选对手：</div>
-            <div className="mt-1 flex flex-wrap gap-2">
-              {extraPresets.map((preset) => (
-                <button
-                  key={preset.filename}
-                  type="button"
-                  onClick={() => void handlePickPresetOpponent(preset.filename)}
-                  disabled={isGenerating || isSelectingOpponent || !selectedPlayer}
-                  className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
-                  title={preset.description}
-                >
-                  {preset.name}
-                </button>
-              ))}
-            </div>
-          </>
-        ) : null}
-
-        <div className="mt-2 text-[11px] text-gray-500">
-          提示：如果你希望挑战公开角色卡，请用「快速查看排行榜」把对手加入参战列表；严格计分仍以“严格设置”为前提。
-        </div>
       </div>
     </div>
   );
