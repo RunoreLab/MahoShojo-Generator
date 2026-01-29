@@ -510,7 +510,7 @@ export function RankingQuickActions() {
               </span>
             </div>
             {strictSetupReady ? (
-              <div className="mt-2 text-xs text-gray-600">推荐配置已对齐，可以尝试严格计分（仍以战报与结算结果为准）。</div>
+              <div className="mt-2 text-xs text-gray-600">配置已对齐，可尝试计分。</div>
             ) : (
               <details className="group mt-2">
                 <summary className="flex cursor-pointer items-center justify-between gap-2 text-xs font-medium text-gray-700 hover:text-gray-900 [&::-webkit-details-marker]:hidden">
