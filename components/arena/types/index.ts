@@ -3,8 +3,6 @@ import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import type { Preset } from '@/lib/presets';
 import type { StatsData } from '@/pages/api/get-stats';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
-import type { RankedMatchTicket } from '@/lib/arena/ranked-match';
-import type { EloPredictionV1 } from '@/lib/arena/elo';
 
 export const MAX_COMBATANTS = 10;
 export const MAX_AUX_SCENARIOS = 10;
@@ -115,12 +113,6 @@ export interface BattleApiResponse {
   generationId?: string;
 }
 
-export interface RankedMatchState {
-  ticket: RankedMatchTicket;
-  lockKey: string;
-  prediction?: EloPredictionV1 | null;
-}
-
 export interface BattleStoreState {
   combatants: Combatant[];
   teams: BattleTeam[];
@@ -153,7 +145,6 @@ export interface BattleStoreState {
   loadingPreset: string | null;
   userProviderConfig: UserAIProviderConfig | null;
   stats: StatsData | null;
-  rankedMatch: RankedMatchState | null;
 
   setBattleMode: (mode: BattleMode) => void;
   setGenerationMode: (mode: GenerationMode) => void;
@@ -208,6 +199,4 @@ export interface BattleStoreState {
   setLoadingPreset: (filename: string | null) => void;
   setUserProviderConfig: (config: UserAIProviderConfig | null) => void;
   setStats: (stats: StatsData | null) => void;
-  setRankedMatch: (match: RankedMatchState | null) => void;
-  clearRankedMatch: () => void;
 }

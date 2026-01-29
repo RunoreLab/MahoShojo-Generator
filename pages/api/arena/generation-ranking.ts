@@ -77,6 +77,11 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
     }
   })();
 
+  const strictPolicy = typeof parsedExtraJson?.arenaStrictPolicy === 'string'
+    ? parsedExtraJson.arenaStrictPolicy.trim()
+    : '';
+  const isNewStrictPolicy = strictPolicy === '1+3:v1';
+
   const rankedMatchOkRaw = parsedExtraJson?.rankedMatchOk;
   const rankedMatchOk = typeof rankedMatchOkRaw === 'boolean'
     ? rankedMatchOkRaw
@@ -102,7 +107,7 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
   if (snapshot.userId == null) reasons.push('need-login');
   if ((snapshot.language ?? '').trim() !== 'zh-CN') reasons.push('language-not-zh-cn');
   if (typeof snapshot.selectedLevel === 'string' && snapshot.selectedLevel.trim()) reasons.push('level-not-default');
-  if (rankedMatchOk !== true) {
+  if (!isNewStrictPolicy && rankedMatchOk !== true) {
     if (rankedMatchReason) {
       const map: Record<string, string> = {
         missing: 'ranked-match-missing',

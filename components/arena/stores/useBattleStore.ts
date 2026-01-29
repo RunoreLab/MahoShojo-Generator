@@ -77,7 +77,6 @@ export const useBattleStore = create<BattleStoreState>()(
       loadingPreset: null,
       userProviderConfig: null,
       stats: null,
-      rankedMatch: null,
 
       setBattleMode: (mode) => set({ battleMode: mode }),
       setGenerationMode: (mode) => set({ generationMode: mode }),
@@ -147,7 +146,6 @@ export const useBattleStore = create<BattleStoreState>()(
           streamAiModel: null,
           streamNarrativeHistoryReadCount: null,
           lastGenerationId: null,
-          rankedMatch: null,
         }),
 
       updateCombatantTeam: (identifier, teamId) =>
@@ -258,8 +256,6 @@ export const useBattleStore = create<BattleStoreState>()(
       setLoadingPreset: (filename) => set({ loadingPreset: filename }),
       setUserProviderConfig: (config) => set({ userProviderConfig: config }),
       setStats: (stats) => set({ stats }),
-      setRankedMatch: (match) => set({ rankedMatch: match }),
-      clearRankedMatch: () => set({ rankedMatch: null }),
     }),
     {
       name: 'arena-storage',

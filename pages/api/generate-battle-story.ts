@@ -38,7 +38,6 @@ import {
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
-import { buildRankedMatchExtraJson, validateRankedMatchTicketForRequest } from '@/lib/arena/ranked-match';
 
 const log = getLogger('api-gen-battle-story');
 const MAX_COMBATANTS = 10;
@@ -99,7 +98,6 @@ async function handler(req: NextRequest): Promise<Response> {
             isDowngrade = false,
             adjudicationEvents,
             storyLength,
-            rankedMatch,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioSourceDataCardId,
@@ -312,7 +310,17 @@ async function handler(req: NextRequest): Promise<Response> {
             }
             : undefined;
         const isStrictRankedMatchRequest =
-            Boolean(rankedMatch) && typeof rankedMatch === 'object' && (rankedMatch as any).queue === 'strict';
+            mode === 'classic'
+            && String(language ?? '').trim() === 'zh-CN'
+            && !String(selectedLevel ?? '').trim()
+            && !String(userGuidance ?? '').trim()
+            && resolvedReadArenaHistory === false
+            && resolvedReadCurrentState === false
+            && resolvedReadNarrativeHistory === false
+            && (!Array.isArray(adjudicationEvents) || adjudicationEvents.length === 0)
+            && Array.isArray(combatants)
+            && combatants.length === 2
+            && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
         const shouldPreferLiteModelInStrict =
             isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
         const baseModelOverride = customModelOverride ?? (isDowngrade ? 'gemini-2.5-flash-lite' : undefined);
@@ -639,17 +647,6 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const recordPromise = (async () => {
             const user = authKey ? await getUserByAuthKey(authKey) : null;
-            const rankedMatchValidation = await validateRankedMatchTicketForRequest({
-                ticket: rankedMatch,
-                userId: user?.id ?? null,
-                combatants,
-                mode,
-                selectedLevel,
-                language,
-                storyLength,
-                nowMs: startedAtMs,
-            });
-            const rankedMatchExtraJson = buildRankedMatchExtraJson(rankedMatchValidation);
 
             const createdId = await createBattleReportGenerationRecord({
                 id: recordId,
@@ -720,10 +717,10 @@ async function handler(req: NextRequest): Promise<Response> {
 	                pvpMatchId: snapshotPvpMatchId,
 	                pvpRoundId: snapshotPvpRoundId,
 	                extraJson: compactExtraJson({
+                        arenaStrictPolicy: '1+3:v1',
 	                    resolvedModelOverride: usedModelOverride ?? null,
 	                    readNarrativeHistory: resolvedReadNarrativeHistory,
 	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
-                        ...(rankedMatchExtraJson ?? {}),
 	                }),
 	            });
 

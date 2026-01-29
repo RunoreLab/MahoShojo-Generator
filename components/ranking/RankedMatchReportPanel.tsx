@@ -87,6 +87,11 @@ const formatStrictEventStatus = (status: QueueResult['eventStatus'], skipReason:
       'winner-ambiguous': '胜者无法匹配参战者（跳过计分）',
       'daily-limit': '今日严格排位次数已达上限（按 UTC 00:00/北京时间 08:00 刷新；跳过计分）',
       'dedup-user-pair': '短时间同对手重复对局（跳过计分）',
+      'strict-card-missing': '数据卡不存在/已删除（跳过计分）',
+      'strict-not-character': '仅“角色”数据卡可参与严格排位（跳过计分）',
+      'strict-not-public': '严格排位仅允许公开角色卡（跳过计分）',
+      'strict-not-approved': '严格排位仅允许已审核通过的公开角色卡（跳过计分）',
+      'strict-out-of-range': '对手分差过大（跳过计分）',
       'ratings-missing': '排位记录缺失（结算失败）',
       'rating-conflict': '并发冲突（结算失败）',
     };
@@ -193,7 +198,17 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
       return raw.includes('rankedMatch');
     }
   })();
-  if (!strictEligible && !strictHasRankedMatchIssue && !hasRankedMatchMeta) return null;
+  const hasStrictPolicyMeta = (() => {
+    const raw = (data as any)?.snapshot?.extraJson;
+    if (typeof raw !== 'string' || !raw.trim()) return false;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return Boolean(parsed && typeof parsed === 'object' && typeof parsed.arenaStrictPolicy === 'string' && parsed.arenaStrictPolicy.trim());
+    } catch {
+      return raw.includes('arenaStrictPolicy');
+    }
+  })();
+  if (!strictEligible && !strictHasRankedMatchIssue && !hasRankedMatchMeta && !hasStrictPolicyMeta) return null;
 
   const strictQueue = data.participants.find((p) => p.queues.strict.eligible)?.queues.strict ?? null;
   const statusText = strictQueue ? formatStrictEventStatus(strictQueue.eventStatus, strictQueue.skipReason) : '结算中…';

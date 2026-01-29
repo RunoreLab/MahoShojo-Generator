@@ -2,6 +2,7 @@ import { queryFromD1 } from './core';
 import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGenerationCombatantRow } from './battle-report-generation-combatants';
 import { PRESET_LIST } from '@/lib/presets';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
+import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
 
 export type ArenaQueue = 'strict' | 'free';
 export type ArenaEntityType = 'data_card' | 'preset';
@@ -41,6 +42,21 @@ export const INITIAL_RATING = 1000;
 export const STRICT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const FREE_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const STRICT_DAILY_LIMIT = 80;
+
+const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
+  '无牌': 2000,
+  '白牌': 1000,
+  '字牌': 900,
+  '花牌': 800,
+  '权杖': 1000,
+};
+
+const getStrictMaxAbsDiffForRatings = (a: ArenaRatingSnapshot, b: ArenaRatingSnapshot): number => {
+  const aTier = computeArenaBaseTier(a.rating, a.games);
+  const bTier = computeArenaBaseTier(b.rating, b.games);
+  const pick = a.rating > b.rating ? aTier : b.rating > a.rating ? bTier : (a.games >= b.games ? aTier : bTier);
+  return STRICT_MAX_ABS_DIFF_BY_TIER[pick] ?? 1000;
+};
 
 export type StrictDailyUsage = {
   sinceIso: string;
@@ -507,9 +523,15 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   if (snapshot.mode !== 'classic') return false;
   if (snapshot.userId == null) return false;
 
-  // 严格排位：必须由“排位匹配”签发票据并在生成时验证通过。
-  // 缺失/无效都按“宁可漏算”处理为不具备资格（用于禁止 strict 自由挑对手）。
-  if (readExtraJsonBoolean(snapshot.extraJson, 'rankedMatchOk') !== true) return false;
+  // 兼容旧版 strict（排位匹配票据）与新版 strict（1+3 手选对手）：
+  // - 旧版：必须存在 rankedMatchOk=true
+  // - 新版：通过 arenaStrictPolicy 标记启用（避免历史战报被“回溯计分”）
+  const strictPolicy = readExtraJsonString(snapshot.extraJson, 'arenaStrictPolicy');
+  if (strictPolicy !== '1+3:v1') {
+    // 严格排位（旧版）：必须由“排位匹配”签发票据并在生成时验证通过。
+    // 缺失/无效都按“宁可漏算”处理为不具备资格（用于禁止 strict 自由挑对手）。
+    if (readExtraJsonBoolean(snapshot.extraJson, 'rankedMatchOk') !== true) return false;
+  }
 
   // 严格排位：禁止使用黑名单模型（生成逻辑不稳定，不适合作为排位依据）。
   if (isStrictRankedModelBlacklisted(readExtraJsonString(snapshot.extraJson, 'resolvedModelOverride'))) return false;
@@ -540,6 +562,55 @@ export const isFreeEligible = (snapshot: ArenaEligibilitySnapshot): boolean => {
   if (snapshot.combatantCount !== 2) return false;
   if (snapshot.ipAnonymized == null) return false;
   return true;
+};
+
+const validateStrictPublicDataCardEntities = async (
+  entities: [ArenaEntity, ArenaEntity]
+): Promise<{ ok: true } | { ok: false; skipReason: 'strict-not-public' | 'strict-not-approved' | 'strict-not-character' | 'strict-card-missing' }> => {
+  const dataCardIds = entities
+    .filter((e) => e.entityType === 'data_card')
+    .map((e) => e.entityId)
+    .filter(Boolean);
+
+  if (dataCardIds.length === 0) return { ok: true };
+
+  try {
+    const result = (await queryFromD1(
+      `SELECT id, type, is_public as isPublic, review_status as reviewStatus, deleted_at as deletedAt
+       FROM data_cards
+       WHERE id IN (${dataCardIds.map(() => '?').join(', ')})`,
+      dataCardIds
+    )) as any;
+
+    const rows = readD1Rows<{
+      id: string;
+      type: string;
+      isPublic: number | boolean | null;
+      reviewStatus: string | null;
+      deletedAt: string | null;
+    }>(result);
+
+    const byId = new Map<string, (typeof rows)[number]>();
+    rows.forEach((row) => {
+      const id = typeof row?.id === 'string' ? row.id.trim() : '';
+      if (!id) return;
+      byId.set(id, row);
+    });
+
+    for (const id of dataCardIds) {
+      const row = byId.get(id);
+      if (!row || row.deletedAt) return { ok: false, skipReason: 'strict-card-missing' };
+      if (row.type !== 'character') return { ok: false, skipReason: 'strict-not-character' };
+      const isPublic = row.isPublic === 1 || row.isPublic === true;
+      if (!isPublic) return { ok: false, skipReason: 'strict-not-public' };
+      if (row.reviewStatus !== 'approved') return { ok: false, skipReason: 'strict-not-approved' };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    console.warn('校验严格排位数据卡可用性失败（降级为不计 strict）:', error);
+    return { ok: false, skipReason: 'strict-card-missing' };
+  }
 };
 
 export async function getArenaEligibilitySnapshotByGenerationId(
@@ -961,6 +1032,7 @@ export async function settleArenaRatingsForGeneration(
     const [aEntity, bEntity] = entities as [ArenaEntity, ArenaEntity];
 
     const pairKey = buildPairKey(aEntity, bEntity);
+    const isNewStrictPolicy = readExtraJsonString(snapshot.extraJson, 'arenaStrictPolicy') === '1+3:v1';
 
     let strictEligible = isStrictEligible(snapshot, combatants);
     const freeEligible = isFreeEligible(snapshot);
@@ -1005,6 +1077,32 @@ export async function settleArenaRatingsForGeneration(
 
     const shouldApplyFree = freeEligible;
     let shouldApplyStrict = strictEligible;
+
+    if (shouldApplyStrict && isNewStrictPolicy && snapshot.userId != null) {
+      const deduped = await hasRecentAppliedEventForPair(
+        'strict',
+        pairKey,
+        { userId: snapshot.userId },
+        STRICT_DEDUP_WINDOW_MS
+      );
+      if (deduped) {
+        await insertArenaRatingEvent({
+          id: buildArenaRatingEventId(generationId, 'strict'),
+          generationId,
+          queue: 'strict',
+          status: 'skipped',
+          skipReason: 'dedup-user-pair',
+          userId: snapshot.userId,
+          ipAnonymized: snapshot.ipAnonymized,
+          pairKey,
+          a: aEntity,
+          b: bEntity,
+          winnerSlot,
+        });
+        shouldApplyStrict = false;
+        strictEligible = false;
+      }
+    }
 
     if (shouldApplyStrict && snapshot.userId != null) {
       const exceeded = await hasExceededStrictDailyLimit(snapshot.userId);
@@ -1090,6 +1188,25 @@ export async function settleArenaRatingsForGeneration(
       }
       if (existingEvent && existingEvent.status !== 'pending') {
         continue;
+      }
+
+      if (queue === 'strict' && isNewStrictPolicy) {
+        const strictEntities = await validateStrictPublicDataCardEntities([aEntity, bEntity]);
+        if (!strictEntities.ok) {
+          await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: strictEntities.skipReason });
+          continue;
+        }
+
+        const absDiff = Math.abs(aCurrent.rating - bCurrent.rating);
+        let maxAbsDiff = getStrictMaxAbsDiffForRatings(aCurrent, bCurrent);
+        if (aEntity.entityType === 'preset' || bEntity.entityType === 'preset') {
+          // 兜底：预设对手作为“永远存在的对手池”，保证 strict 不会因对手稀缺而完全无法计分。
+          maxAbsDiff = Math.max(maxAbsDiff, 2000);
+        }
+        if (absDiff > maxAbsDiff) {
+          await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
+          continue;
+        }
       }
 
       const aWinInc = winnerSlot === 1 ? 1 : 0;

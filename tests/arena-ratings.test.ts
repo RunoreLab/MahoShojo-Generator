@@ -141,6 +141,18 @@ describe('arena-ratings: 严格排位资格判定', () => {
     expect(isStrictEligible(baseSnapshot, baseCombatants)).toBe(true);
   });
 
+  test('满足：arenaStrictPolicy=1+3:v1 时不要求 rankedMatchOk', () => {
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          extraJson: JSON.stringify({ readNarrativeHistory: false, narrativeHistoryReadCount: 0, arenaStrictPolicy: '1+3:v1' }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(true);
+  });
+
   test('不满足：语言非简体中文', () => {
     expect(isStrictEligible({ ...baseSnapshot, language: 'en' }, baseCombatants)).toBe(false);
   });

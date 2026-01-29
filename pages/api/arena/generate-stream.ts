@@ -40,7 +40,6 @@ import {
 } from '@/lib/arena/battle-report-log-utils';
 import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
-import { buildRankedMatchExtraJson, validateRankedMatchTicketForRequest } from '@/lib/arena/ranked-match';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
 
@@ -97,7 +96,6 @@ async function handler(req: NextRequest): Promise<Response> {
             narrativeHistory,
             adjudicationEvents,
             storyLength,
-            rankedMatch,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioSourceDataCardId,
@@ -443,7 +441,17 @@ async function handler(req: NextRequest): Promise<Response> {
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
         const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
         const isStrictRankedMatchRequest =
-            Boolean(rankedMatch) && typeof rankedMatch === 'object' && (rankedMatch as any).queue === 'strict';
+            mode === 'classic'
+            && String(language ?? '').trim() === 'zh-CN'
+            && !String(selectedLevel ?? '').trim()
+            && !String(userGuidance ?? '').trim()
+            && resolvedReadArenaHistory === false
+            && resolvedReadCurrentState === false
+            && resolvedReadNarrativeHistory === false
+            && (!Array.isArray(adjudicationEvents) || adjudicationEvents.length === 0)
+            && Array.isArray(combatants)
+            && combatants.length === 2
+            && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
         const shouldPreferLiteModelInStrict =
             isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
         const modelOverrideFallbacks: Array<string | undefined> = customModelOverride
@@ -554,17 +562,6 @@ async function handler(req: NextRequest): Promise<Response> {
 
             const recordPromise = (async () => {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
-                const rankedMatchValidation = await validateRankedMatchTicketForRequest({
-                    ticket: rankedMatch,
-                    userId: user?.id ?? null,
-                    combatants,
-                    mode,
-                    selectedLevel,
-                    language,
-                    storyLength,
-                    nowMs: startedAtMs,
-                });
-                const rankedMatchExtraJson = buildRankedMatchExtraJson(rankedMatchValidation);
                 const usage = await resolvedUsagePromise;
 
                 const shieldResult = applyShieldWords(outputPreview);
@@ -650,10 +647,10 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    outputHasShieldWords: shieldResult.hasShieldWords,
 	                    extraJson: compactExtraJson({
 	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+                            arenaStrictPolicy: '1+3:v1',
 	                        resolvedModelOverride: usedModelOverride ?? null,
 	                        readNarrativeHistory: resolvedReadNarrativeHistory,
 	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
-                            ...(rankedMatchExtraJson ?? {}),
 	                    }),
 	                });
 

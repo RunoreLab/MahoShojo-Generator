@@ -1,9 +1,9 @@
 import type { NextRequest } from 'next/server';
 
-import { getUserByAuthKey } from '@/lib/d1';
-import { validateRankedMatchTicketForRequest } from '@/lib/arena/ranked-match';
+import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
-import { getStrictDailyUsage, STRICT_DAILY_LIMIT } from '@/lib/database/arena-ratings';
+import { buildPairKey, getStrictDailyUsage, INITIAL_RATING, STRICT_DEDUP_WINDOW_MS, STRICT_DAILY_LIMIT } from '@/lib/database/arena-ratings';
+import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
 
 export const config = {
   runtime: 'edge',
@@ -13,12 +13,6 @@ type ApiSuccessResponse = {
   success: true;
   willCount: boolean;
   reasons: string[];
-  rankedMatch: {
-    ok: boolean;
-    reason: string | null;
-    matchId: string | null;
-    expiresAt: string | null;
-  };
   daily: {
     used: number | null;
     limit: number;
@@ -38,6 +32,92 @@ const readNonNegativeInt = (value: unknown): number => {
   return Math.max(0, Math.floor(n));
 };
 
+type ArenaEntity = { entityType: 'data_card' | 'preset'; entityId: string };
+
+const isRankableCombatant = (value: unknown): boolean => {
+  if (!value || typeof value !== 'object') return false;
+  const anyValue = value as any;
+  if (anyValue.isPreset) {
+    return typeof anyValue.filename === 'string' && anyValue.filename.trim().length > 0;
+  }
+  return typeof anyValue.sourceDataCardId === 'string' && anyValue.sourceDataCardId.trim().length > 0;
+};
+
+const parseArenaEntityFromCombatant = (value: unknown): ArenaEntity | null => {
+  if (!value || typeof value !== 'object') return null;
+  const anyValue = value as any;
+  if (anyValue.isPreset) {
+    const filename = typeof anyValue.filename === 'string' ? anyValue.filename.trim() : '';
+    if (!filename) return null;
+    return { entityType: 'preset', entityId: filename };
+  }
+  const dataCardId = typeof anyValue.sourceDataCardId === 'string' ? anyValue.sourceDataCardId.trim() : '';
+  if (!dataCardId) return null;
+  return { entityType: 'data_card', entityId: dataCardId };
+};
+
+const readRows = <T,>(result: unknown): T[] => {
+  const rows = (result as any)?.result?.[0]?.results;
+  return Array.isArray(rows) ? (rows as T[]) : [];
+};
+
+const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
+  '无牌': 2000,
+  '白牌': 1000,
+  '字牌': 900,
+  '花牌': 800,
+  '权杖': 1000,
+};
+
+const getStrictMaxAbsDiffForRatings = (a: { rating: number; games: number }, b: { rating: number; games: number }): number => {
+  const aTier = computeArenaBaseTier(a.rating, a.games);
+  const bTier = computeArenaBaseTier(b.rating, b.games);
+  const pick = a.rating > b.rating ? aTier : b.rating > a.rating ? bTier : (a.games >= b.games ? aTier : bTier);
+  return STRICT_MAX_ABS_DIFF_BY_TIER[pick] ?? 1000;
+};
+
+const validateStrictPublicDataCards = async (entities: ArenaEntity[]): Promise<
+  { ok: true } | { ok: false; reason: 'strict-not-public' | 'strict-not-approved' | 'strict-not-character' | 'strict-card-missing' }
+> => {
+  const ids = entities.filter((e) => e.entityType === 'data_card').map((e) => e.entityId).filter(Boolean);
+  if (ids.length <= 0) return { ok: true };
+  try {
+    const result = await queryFromD1(
+      `SELECT id, type, is_public as isPublic, review_status as reviewStatus, deleted_at as deletedAt
+       FROM data_cards
+       WHERE id IN (${ids.map(() => '?').join(', ')})`,
+      ids
+    );
+    const rows = readRows<{
+      id: string;
+      type: string;
+      isPublic: number | boolean | null;
+      reviewStatus: string | null;
+      deletedAt: string | null;
+    }>(result);
+    const byId = new Map<string, (typeof rows)[number]>();
+    rows.forEach((row) => {
+      const id = typeof row?.id === 'string' ? row.id.trim() : '';
+      if (!id) return;
+      byId.set(id, row);
+    });
+
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (!row || row.deletedAt) return { ok: false, reason: 'strict-card-missing' };
+      if (row.type !== 'character') return { ok: false, reason: 'strict-not-character' };
+      const isPublic = row.isPublic === 1 || row.isPublic === true;
+      if (!isPublic) return { ok: false, reason: 'strict-not-public' };
+      if (row.reviewStatus !== 'approved') return { ok: false, reason: 'strict-not-approved' };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    console.warn('strict-preflight 校验数据卡可用性失败（降级为不计 strict）:', error);
+    return { ok: false, reason: 'strict-card-missing' };
+  }
+};
+
 export default async function handler(req: NextRequest) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ success: false, error: 'Method Not Allowed' } satisfies ApiErrorResponse), {
@@ -52,7 +132,6 @@ export default async function handler(req: NextRequest) {
     const battleMode = trimString(body?.battleMode ?? body?.mode);
     const selectedLevel = readString(body?.selectedLevel);
     const language = trimString(body?.language);
-    const storyLength = readString(body?.storyLength);
 
     const settings = body?.settings && typeof body.settings === 'object' ? body.settings : {};
     const userGuidance = readString(settings?.userGuidance);
@@ -69,17 +148,6 @@ export default async function handler(req: NextRequest) {
     const authHeader = req.headers.get('authorization');
     const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
     const user = authKey ? await getUserByAuthKey(authKey) : null;
-
-    const rankedMatchValidation = await validateRankedMatchTicketForRequest({
-      ticket: body?.rankedMatch ?? null,
-      userId: user?.id ?? null,
-      combatants,
-      mode: battleMode,
-      selectedLevel,
-      language,
-      storyLength,
-      nowMs: Date.now(),
-    });
 
     const reasons: string[] = [];
     if (!user?.id) reasons.push('need-login');
@@ -100,27 +168,78 @@ export default async function handler(req: NextRequest) {
       reasons.push('has-character-guidance');
     }
 
-    if (!rankedMatchValidation.ok) {
-      const map: Record<string, string> = {
-        missing: 'ranked-match-missing',
-        'invalid-shape': 'ranked-match-invalid',
-        'invalid-signature': 'ranked-match-invalid',
-        'need-login': 'need-login',
-        'user-mismatch': 'ranked-match-user-mismatch',
-        expired: 'ranked-match-expired',
-        'settings-changed': 'ranked-match-settings-changed',
-        'combatants-not-2': 'combatant-count-not-2',
-        'combatants-unrankable': 'ranked-match-unrankable',
-        'roster-changed': 'ranked-match-roster-changed',
-      };
-      const raw = rankedMatchValidation.reason ?? '';
-      const mapped = raw ? (map[raw] ?? `ranked-match:${raw}`) : 'need-ranked-match';
-      reasons.push(mapped);
+    if (Array.isArray(combatants) && combatants.length === 2 && combatants.some((c) => !isRankableCombatant(c))) {
+      reasons.push('combatants-unrankable');
     }
 
-    const dailyUsage = typeof user?.id === 'number' ? await getStrictDailyUsage(user.id) : null;
-    const shouldConsiderDailyLimit = reasons.length === 0;
-    if (shouldConsiderDailyLimit && (dailyUsage?.exceeded ?? false)) {
+    if (reasons.length === 0 && Array.isArray(combatants) && combatants.length === 2) {
+      const entities = (combatants as unknown[]).map(parseArenaEntityFromCombatant);
+      if (entities.some((e) => e == null)) {
+        reasons.push('combatants-unrankable');
+      } else {
+        const [a, b] = entities as [ArenaEntity, ArenaEntity];
+        const strictCardOk = await validateStrictPublicDataCards([a, b]);
+        if (!strictCardOk.ok) {
+          reasons.push(strictCardOk.reason);
+        } else {
+          try {
+            const ratingResult = await queryFromD1(
+              `SELECT entity_type as entityType, entity_id as entityId, rating, games
+               FROM arena_ratings
+               WHERE queue = 'strict'
+                 AND (
+                   (entity_type = ? AND entity_id = ?)
+                   OR
+                   (entity_type = ? AND entity_id = ?)
+                 )`,
+              [a.entityType, a.entityId, b.entityType, b.entityId]
+            );
+            const ratingRows = readRows<{ entityType: 'data_card' | 'preset'; entityId: string; rating: number; games: number }>(ratingResult);
+            const aRow = ratingRows.find((r) => r.entityType === a.entityType && r.entityId === a.entityId);
+            const bRow = ratingRows.find((r) => r.entityType === b.entityType && r.entityId === b.entityId);
+            const aRating = typeof aRow?.rating === 'number' ? aRow.rating : INITIAL_RATING;
+            const aGames = typeof aRow?.games === 'number' ? aRow.games : 0;
+            const bRating = typeof bRow?.rating === 'number' ? bRow.rating : INITIAL_RATING;
+            const bGames = typeof bRow?.games === 'number' ? bRow.games : 0;
+
+            const absDiff = Math.abs(aRating - bRating);
+            let maxAbsDiff = getStrictMaxAbsDiffForRatings({ rating: aRating, games: aGames }, { rating: bRating, games: bGames });
+            if (a.entityType === 'preset' || b.entityType === 'preset') {
+              maxAbsDiff = Math.max(maxAbsDiff, 2000);
+            }
+            if (absDiff > maxAbsDiff) {
+              reasons.push('strict-out-of-range');
+            }
+
+            if (typeof user?.id === 'number') {
+              const sinceIso = new Date(Date.now() - STRICT_DEDUP_WINDOW_MS).toISOString();
+              const pairKey = buildPairKey(a, b);
+              const dedupResult = await queryFromD1(
+                `SELECT 1
+                 FROM arena_rating_events
+                 WHERE queue = 'strict'
+                   AND status = 'applied'
+                   AND user_id = ?
+                   AND pair_key = ?
+                   AND created_at >= ?
+                 LIMIT 1`,
+                [user.id, pairKey, sinceIso]
+              );
+              if (readRows<unknown>(dedupResult).length > 0) {
+                reasons.push('dedup-user-pair');
+              }
+            }
+          } catch (error) {
+            console.warn('strict-preflight 检查对手区间/去重失败（降级为不计 strict）:', error);
+            reasons.push('strict-check-failed');
+          }
+        }
+      }
+    }
+
+    const shouldConsiderDailyLimit = reasons.length === 0 && typeof user?.id === 'number';
+    const dailyUsage = shouldConsiderDailyLimit ? await getStrictDailyUsage(user.id) : null;
+    if ((dailyUsage?.exceeded ?? false) === true) {
       reasons.push('daily-limit');
     }
 
@@ -128,12 +247,6 @@ export default async function handler(req: NextRequest) {
       success: true,
       willCount: reasons.length === 0,
       reasons,
-      rankedMatch: {
-        ok: rankedMatchValidation.ok,
-        reason: rankedMatchValidation.ok ? null : rankedMatchValidation.reason,
-        matchId: rankedMatchValidation.matchId,
-        expiresAt: rankedMatchValidation.expiresAt,
-      },
       daily: {
         used: dailyUsage?.used ?? null,
         limit: STRICT_DAILY_LIMIT,
@@ -151,4 +264,3 @@ export default async function handler(req: NextRequest) {
     });
   }
 }
-
