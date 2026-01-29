@@ -1197,15 +1197,14 @@ export async function settleArenaRatingsForGeneration(
           continue;
         }
 
-        const absDiff = Math.abs(aCurrent.rating - bCurrent.rating);
-        let maxAbsDiff = getStrictMaxAbsDiffForRatings(aCurrent, bCurrent);
-        if (aEntity.entityType === 'preset' || bEntity.entityType === 'preset') {
-          // 兜底：预设对手作为“永远存在的对手池”，保证 strict 不会因对手稀缺而完全无法计分。
-          maxAbsDiff = Math.max(maxAbsDiff, 2000);
-        }
-        if (absDiff > maxAbsDiff) {
-          await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
-          continue;
+        const involvesPreset = aEntity.entityType === 'preset' || bEntity.entityType === 'preset';
+        if (!involvesPreset) {
+          const absDiff = Math.abs(aCurrent.rating - bCurrent.rating);
+          const maxAbsDiff = getStrictMaxAbsDiffForRatings(aCurrent, bCurrent);
+          if (absDiff > maxAbsDiff) {
+            await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
+            continue;
+          }
         }
       }
 

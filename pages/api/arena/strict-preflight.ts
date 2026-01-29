@@ -202,13 +202,13 @@ export default async function handler(req: NextRequest) {
             const bRating = typeof bRow?.rating === 'number' ? bRow.rating : INITIAL_RATING;
             const bGames = typeof bRow?.games === 'number' ? bRow.games : 0;
 
-            const absDiff = Math.abs(aRating - bRating);
-            let maxAbsDiff = getStrictMaxAbsDiffForRatings({ rating: aRating, games: aGames }, { rating: bRating, games: bGames });
-            if (a.entityType === 'preset' || b.entityType === 'preset') {
-              maxAbsDiff = Math.max(maxAbsDiff, 2000);
-            }
-            if (absDiff > maxAbsDiff) {
-              reasons.push('strict-out-of-range');
+            const involvesPreset = a.entityType === 'preset' || b.entityType === 'preset';
+            if (!involvesPreset) {
+              const absDiff = Math.abs(aRating - bRating);
+              const maxAbsDiff = getStrictMaxAbsDiffForRatings({ rating: aRating, games: aGames }, { rating: bRating, games: bGames });
+              if (absDiff > maxAbsDiff) {
+                reasons.push('strict-out-of-range');
+              }
             }
 
             if (typeof user?.id === 'number') {

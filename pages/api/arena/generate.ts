@@ -536,7 +536,7 @@ interface BattleApiResponse {
 	                outputHasSensitiveWords: Boolean((outputSensitive as any)?.hasSensitiveWords),
 	                outputHasShieldWords: shieldResult.hasShieldWords,
 	                extraJson: compactExtraJson({
-                        arenaStrictPolicy: '1+3:v1',
+                        arenaStrictPolicy: isStrictRankedMatchRequest ? '1+3:v1' : null,
 	                    resolvedModelOverride: usedModelOverride ?? null,
 	                    readNarrativeHistory: resolvedReadNarrativeHistory,
 	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,

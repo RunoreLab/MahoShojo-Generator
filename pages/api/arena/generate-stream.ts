@@ -647,7 +647,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    outputHasShieldWords: shieldResult.hasShieldWords,
 	                    extraJson: compactExtraJson({
 	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
-                            arenaStrictPolicy: '1+3:v1',
+                            arenaStrictPolicy: isStrictRankedMatchRequest ? '1+3:v1' : null,
 	                        resolvedModelOverride: usedModelOverride ?? null,
 	                        readNarrativeHistory: resolvedReadNarrativeHistory,
 	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,

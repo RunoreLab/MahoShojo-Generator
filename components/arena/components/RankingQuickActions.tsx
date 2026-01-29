@@ -511,10 +511,10 @@ export function RankingQuickActions() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-gray-900">
-            严格排位（1+3）
+            排位赛
           </div>
           <div className="mt-1 text-xs text-gray-600">
-            已移除「排位匹配」随机匹配：现在改为手选对手。默认推荐 3 位（并保证至少 5 位可选），你也可以从上方排行榜里挑选公开角色卡作为对手。
+            请自行挑选符合条件的对手。默认推荐 3 位，你也可以从上方排行榜里挑选公开角色卡作为对手。
           </div>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
