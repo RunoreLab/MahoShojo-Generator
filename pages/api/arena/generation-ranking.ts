@@ -138,6 +138,25 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
 
 const buildFreeIneligibleReasons = (snapshot: ArenaEligibilitySnapshot): string[] => {
   const reasons: string[] = [];
+  const arenaFreeRankingEnabled = (() => {
+    const raw = typeof snapshot.extraJson === 'string' ? snapshot.extraJson.trim() : '';
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const value = parsed?.arenaFreeRankingEnabled;
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'number' && Number.isFinite(value)) return value !== 0;
+      if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1') return true;
+        if (normalized === 'false' || normalized === '0') return false;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  })();
+  if (arenaFreeRankingEnabled === false) reasons.push('free-disabled');
   if (snapshot.status !== 'completed') reasons.push('status-not-completed');
   if (snapshot.combatantCount !== 2) reasons.push('combatant-count-not-2');
   if (snapshot.ipAnonymized == null) reasons.push('ip-missing');

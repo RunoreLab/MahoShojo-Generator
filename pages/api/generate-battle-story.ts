@@ -77,11 +77,23 @@ async function handler(req: NextRequest): Promise<Response> {
 	            return trimmed ? trimmed : null;
 	        };
 
+	        const normalizeOptionalBoolean = (value: unknown, fallback: boolean): boolean => {
+	            if (typeof value === 'boolean') return value;
+	            if (typeof value === 'number' && Number.isFinite(value)) return value !== 0;
+	            if (typeof value === 'string') {
+	                const normalized = value.trim().toLowerCase();
+	                if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true;
+	                if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false;
+	            }
+	            return fallback;
+	        };
+
 	        const body = await req.json();
 	        const {
 	            combatants,
 	            selectedLevel,
             mode = 'classic',
+            arenaFreeRankingEnabled,
             userGuidance,
             scenario,
             teams,
@@ -105,6 +117,8 @@ async function handler(req: NextRequest): Promise<Response> {
             pvpContext,
             internalGuidance,
 	        } = body;
+
+            const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
 
 	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 	        snapshotLanguage = normalizeOptionalString(language);
@@ -474,6 +488,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            extraJson: compactExtraJson({
 	                                errorMessage: 'rejected by sensitive input filter',
 	                                rejectedBy: 'sensitive-input',
+	                                arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
 	                                readNarrativeHistory: resolvedReadNarrativeHistory,
 	                                narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
 	                            }),
@@ -717,6 +732,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                pvpMatchId: snapshotPvpMatchId,
 	                pvpRoundId: snapshotPvpRoundId,
 	                extraJson: compactExtraJson({
+                        arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
                         arenaStrictPolicy: isStrictRankedMatchRequest ? '1+3:v1' : null,
 	                    resolvedModelOverride: usedModelOverride ?? null,
 	                    readNarrativeHistory: resolvedReadNarrativeHistory,

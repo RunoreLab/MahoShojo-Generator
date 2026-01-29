@@ -4,6 +4,7 @@ import {
   buildPairKey,
   computeEloUpdate,
   computeKFactor,
+  isFreeEligible,
   isStrictEligible,
   parseCombatantEntity,
   parseWinnerSlot,
@@ -203,6 +204,37 @@ describe('arena-ratings: 严格排位资格判定', () => {
         baseCombatants,
       ),
     ).toBe(false);
+  });
+});
+
+describe('arena-ratings: 自由排位开关（arenaFreeRankingEnabled）', () => {
+  const baseSnapshot: ArenaEligibilitySnapshot = {
+    status: 'completed',
+    mode: 'classic',
+    userId: 1,
+    ipAnonymized: '203.0.113.0',
+    language: 'zh-CN',
+    selectedLevel: null,
+    hasUserGuidance: 0,
+    hasAdjudicationEvents: 0,
+    readArenaHistory: 0,
+    readCurrentState: 0,
+    combatantCount: 2,
+    winner: '甲',
+    extraJson: JSON.stringify({}),
+  };
+
+  test('未显式关闭（缺失 key / extraJson 为空）时按旧记录视为可结算', () => {
+    expect(isFreeEligible({ ...baseSnapshot, extraJson: JSON.stringify({}) })).toBe(true);
+    expect(isFreeEligible({ ...baseSnapshot, extraJson: null })).toBe(true);
+  });
+
+  test('显式关闭：arenaFreeRankingEnabled=false 时不可结算', () => {
+    expect(isFreeEligible({ ...baseSnapshot, extraJson: JSON.stringify({ arenaFreeRankingEnabled: false }) })).toBe(false);
+  });
+
+  test('显式开启：arenaFreeRankingEnabled=true 时可结算', () => {
+    expect(isFreeEligible({ ...baseSnapshot, extraJson: JSON.stringify({ arenaFreeRankingEnabled: true }) })).toBe(true);
   });
 });
 

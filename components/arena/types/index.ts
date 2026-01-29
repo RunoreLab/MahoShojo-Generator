@@ -120,6 +120,8 @@ export interface BattleStoreState {
   auxScenarios: AuxiliaryScenarioState[];
   battleMode: BattleMode;
   generationMode: GenerationMode;
+  /** 是否启用“自由排位”计分（默认关闭；仅影响 free 队列）。 */
+  arenaFreeRankingEnabled: boolean;
   isStreaming: boolean;
   streamingMarkdown: string | null;
   streamReporterInfo: NewsReport['reporterInfo'] | null;
@@ -148,6 +150,7 @@ export interface BattleStoreState {
 
   setBattleMode: (mode: BattleMode) => void;
   setGenerationMode: (mode: GenerationMode) => void;
+  setArenaFreeRankingEnabled: (enabled: boolean) => void;
   setIsStreaming: (state: boolean) => void;
   setStreamingMarkdown: (markdown: string | null) => void;
   setStreamReporterInfo: (info: NewsReport['reporterInfo'] | null) => void;

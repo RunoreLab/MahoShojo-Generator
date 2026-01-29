@@ -118,6 +118,7 @@ const pickTierBadge = (ratings?: { strict: ApiRating | null; free: ApiRating | n
 
 const formatIneligibleReasons = (reasons: string[]): string => {
   const map: Record<string, string> = {
+    'free-disabled': '未开启自由排位',
     'status-not-completed': '战报未完成',
     'combatant-count-not-2': '需 2 人对战',
     'ip-missing': '无法获取 IP',

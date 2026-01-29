@@ -561,6 +561,8 @@ export const isFreeEligible = (snapshot: ArenaEligibilitySnapshot): boolean => {
   if (snapshot.status !== 'completed') return false;
   if (snapshot.combatantCount !== 2) return false;
   if (snapshot.ipAnonymized == null) return false;
+  // 自由排位默认关闭：只有显式开启时才允许结算（缺失则视为旧记录，按开启处理）。
+  if (readExtraJsonBoolean(snapshot.extraJson, 'arenaFreeRankingEnabled') === false) return false;
   return true;
 };
 
@@ -1125,7 +1127,9 @@ export async function settleArenaRatingsForGeneration(
       }
     }
 
-    const queuesToApply: ArenaQueue[] = shouldApplyStrict ? ['strict', 'free'] : (shouldApplyFree ? ['free'] : []);
+    const queuesToApply: ArenaQueue[] = [];
+    if (shouldApplyStrict) queuesToApply.push('strict');
+    if (shouldApplyFree) queuesToApply.push('free');
     for (const queue of queuesToApply) {
       const eventId = buildArenaRatingEventId(generationId, queue);
 

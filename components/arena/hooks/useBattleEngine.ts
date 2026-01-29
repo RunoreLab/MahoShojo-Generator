@@ -232,6 +232,7 @@ export const useBattleEngine = () => {
   const combatants = useBattleSelector((state) => state.combatants);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const generationMode = useBattleSelector((state) => state.generationMode);
+  const arenaFreeRankingEnabled = useBattleSelector((state) => state.arenaFreeRankingEnabled);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
   const selectedLevel = useBattleSelector((state) => state.selectedLevel);
@@ -400,6 +401,7 @@ export const useBattleEngine = () => {
         })),
         selectedLevel,
         mode: battleMode,
+        arenaFreeRankingEnabled,
         userGuidance: settings.userGuidance,
         scenario: shouldUseScenario ? scenario.content : undefined,
         auxScenarios: shouldUseScenario && auxScenarios.length > 0 ? auxScenarios.map((s) => s.content) : undefined,
@@ -928,6 +930,7 @@ export const useBattleEngine = () => {
     remainingTime,
     battleMode,
     generationMode,
+    arenaFreeRankingEnabled,
     combatants,
     scenario,
     auxScenarios,

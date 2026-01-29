@@ -138,6 +138,8 @@ export function RankingQuickActions() {
   const setSelectedLevel = useBattleSelector((state) => state.setSelectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const setSelectedLanguage = useBattleSelector((state) => state.setSelectedLanguage);
+  const arenaFreeRankingEnabled = useBattleSelector((state) => state.arenaFreeRankingEnabled);
+  const setArenaFreeRankingEnabled = useBattleSelector((state) => state.setArenaFreeRankingEnabled);
   const storyLength = useBattleSelector((state) => state.storyLength);
   const settings = useBattleSelector((state) => state.settings);
   const updateSettings = useBattleSelector((state) => state.updateSettings);
@@ -554,6 +556,21 @@ export function RankingQuickActions() {
             >
               换一批对手
             </button>
+          </div>
+          <div className="mt-1 w-full sm:w-72">
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 text-pink-600 border-gray-300 rounded"
+                checked={arenaFreeRankingEnabled}
+                onChange={(e) => setArenaFreeRankingEnabled(e.target.checked)}
+                disabled={isGenerating || isSelectingOpponent}
+              />
+              启用自由排位计分（默认关闭）
+            </label>
+            <div className="mt-1 text-[11px] text-gray-500">
+              关闭可显著降低 D1 Rows Read；设置保存在浏览器。开启后，本局与后续生成会尝试结算“自由”队列计分。
+            </div>
           </div>
         </div>
       </div>
