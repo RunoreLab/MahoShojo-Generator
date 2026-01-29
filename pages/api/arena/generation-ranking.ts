@@ -67,8 +67,6 @@ type ApiResponse =
       error: string;
     };
 
-const ARENA_RANK_ORDER_BY_SQL = 'rating DESC, games DESC, updated_at DESC, entity_type ASC, entity_id ASC';
-
 const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combatants: BattleReportGenerationCombatantRow[]): string[] => {
   const parsedExtraJson = (() => {
     if (typeof snapshot.extraJson !== 'string' || !snapshot.extraJson.trim()) return null;
@@ -366,38 +364,6 @@ export default async function handler(req: NextRequest) {
       ratingByKey.set(key, { queue: row.queue, rating, games, tier: computeArenaBaseTier(rating, games) });
     });
 
-    const readRankRows = async (queue: ApiQueue) => {
-      if (entitiesForRatings.length === 0) {
-        return [] as Array<{ entity_type: 'data_card' | 'preset'; entity_id: string; rank: number; total: number }>;
-      }
-      const sql = `WITH ordered AS (
-        SELECT
-          entity_type,
-          entity_id,
-          ROW_NUMBER() OVER (ORDER BY ${ARENA_RANK_ORDER_BY_SQL}) AS rank,
-          COUNT(*) OVER () AS total
-        FROM arena_ratings
-        WHERE queue = ?
-      )
-      SELECT entity_type, entity_id, rank, total
-      FROM ordered
-      WHERE ${entitiesForRatings.map(() => `(entity_type = ? AND entity_id = ?)`).join(' OR ')}`;
-      return readRows<{ entity_type: 'data_card' | 'preset'; entity_id: string; rank: number; total: number }>(
-        await queryFromD1(sql, [queue, ...entitiesForRatings.flatMap((e) => [e.entityType, e.entityId])]),
-      );
-    };
-
-    const [strictRankRows, freeRankRows] = await Promise.all([readRankRows('strict'), readRankRows('free')]);
-    const rankByKey = new Map<string, { rank: number; total: number }>();
-    strictRankRows.forEach((row) => {
-      const entityKey = buildEntityKey({ entityType: row.entity_type, entityId: row.entity_id });
-      rankByKey.set(`strict:${entityKey}`, { rank: row.rank, total: row.total });
-    });
-    freeRankRows.forEach((row) => {
-      const entityKey = buildEntityKey({ entityType: row.entity_type, entityId: row.entity_id });
-      rankByKey.set(`free:${entityKey}`, { rank: row.rank, total: row.total });
-    });
-
     const applyEventToParticipants = (queue: ApiQueue) => {
       const event = eventByQueue.get(queue);
       if (!event) {
@@ -432,12 +398,6 @@ export default async function handler(req: NextRequest) {
             qr.rating = ratingFallback.rating;
             qr.games = ratingFallback.games;
             qr.tier = ratingFallback.tier;
-          }
-
-          const rankFallback = rankByKey.get(`${queue}:${entityKey}`);
-          if (rankFallback) {
-            qr.rank = rankFallback.rank;
-            qr.total = rankFallback.total;
           }
         }
 

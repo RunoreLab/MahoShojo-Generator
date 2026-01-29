@@ -38,6 +38,9 @@ type QueenRow = {
   entityId: unknown;
 };
 
+const QUEEN_CACHE_TTL_MS = 30_000;
+const queenCache = new Map<ArenaQueue, { value: ArenaEntityRef | null; expiresAt: number }>();
+
 const readSingleRow = <T,>(result: unknown): T | null => {
   const row = (result as any)?.result?.[0]?.results?.[0];
   return row ? (row as T) : null;
@@ -53,6 +56,10 @@ export async function queryArenaPublicQueenEntity(
   queryFromD1: QueryFromD1,
   queue: ArenaQueue,
 ): Promise<ArenaEntityRef | null> {
+  const now = Date.now();
+  const cached = queenCache.get(queue);
+  if (cached && cached.expiresAt > now) return cached.value;
+
   const strictPublicSinceClause =
     queue === 'strict'
       ? `AND (
@@ -104,14 +111,25 @@ export async function queryArenaPublicQueenEntity(
   `;
 
   const row = readSingleRow<QueenRow>(await queryFromD1(sql, [queue]));
-  if (!row) return null;
+  if (!row) {
+    queenCache.set(queue, { value: null, expiresAt: now + QUEEN_CACHE_TTL_MS });
+    return null;
+  }
 
   const scepterCount = clampInt(row.scepterCount) ?? 0;
-  if (scepterCount < ARENA_QUEEN_MIN_SCEPTER_COUNT) return null;
+  if (scepterCount < ARENA_QUEEN_MIN_SCEPTER_COUNT) {
+    queenCache.set(queue, { value: null, expiresAt: now + QUEEN_CACHE_TTL_MS });
+    return null;
+  }
 
   const entityType = row.entityType === 'data_card' || row.entityType === 'preset' ? row.entityType : null;
   const entityId = typeof row.entityId === 'string' ? row.entityId.trim() : '';
-  if (!entityType || !entityId) return null;
+  if (!entityType || !entityId) {
+    queenCache.set(queue, { value: null, expiresAt: now + QUEEN_CACHE_TTL_MS });
+    return null;
+  }
 
-  return { entityType, entityId };
+  const value: ArenaEntityRef = { entityType, entityId };
+  queenCache.set(queue, { value, expiresAt: now + QUEEN_CACHE_TTL_MS });
+  return value;
 }
