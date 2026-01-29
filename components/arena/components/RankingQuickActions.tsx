@@ -454,9 +454,6 @@ export function RankingQuickActions() {
                 </span>
               )}
             </div>
-            <div className="mt-1 text-xs text-gray-600">
-              这里会提示严格/自由计分的准备情况，并提供“一键严格设置”来快速对齐推荐配置。
-            </div>
           </div>
 
           <div className="flex flex-col items-stretch gap-2 sm:items-end">
@@ -469,7 +466,6 @@ export function RankingQuickActions() {
             >
               一键严格设置
             </button>
-            <div className="text-[11px] text-gray-500 sm:text-right">会自动切换模式/语言/清空引导等，不影响角色卡数据。</div>
           </div>
         </div>
 
@@ -481,7 +477,6 @@ export function RankingQuickActions() {
         >
           <div className="min-w-0">
             <div className="text-sm font-medium text-gray-900">自由排位计分</div>
-            <div className="mt-1 text-xs text-gray-600">开启后：即使不满足严格条件，也会尝试结算自由排位分。</div>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-medium text-gray-600">{arenaFreeRankingEnabled ? '已开启' : '已关闭'}</span>
