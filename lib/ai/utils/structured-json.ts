@@ -15,6 +15,18 @@ const toSnakeCase = (input: string) =>
     .replace(/-/g, '_')
     .toLowerCase();
 
+const toCamelCase = (input: string) => {
+  const normalized = input.replace(/-/g, '_');
+  if (!normalized.includes('_')) return input;
+  return normalized
+    .split('_')
+    .filter(Boolean)
+    .map((part, index) => (index === 0 ? part.toLowerCase() : `${part[0] ? part[0].toUpperCase() : ''}${part.slice(1)}`))
+    .join('');
+};
+
+const canonicalizeKey = (input: string) => input.replace(/[_-]/g, '').toLowerCase();
+
 const stripCodeFences = (input: string) =>
   input
     .replace(/^\s*```[a-zA-Z]*\s*\n?/, '')
@@ -248,38 +260,185 @@ const formatZodIssues = (issues: z.ZodIssue[]): string => {
   return issues.map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`).join('; ');
 };
 
-type UnwrapAttempt = { attempted: boolean; succeeded: boolean; key?: string };
+type KeyNormalizationAttempt = { attempted: boolean; succeeded: boolean };
+
+type UnwrapAttempt = {
+  attempted: boolean;
+  succeeded: boolean;
+  key?: string;
+  strategy?: 'known-key' | 'text-field' | 'single-key' | 'scan-keys';
+};
+
+type ValidationResult<T> =
+  | { ok: true; data: T; keyNormalization: KeyNormalizationAttempt }
+  | { ok: false; keyNormalization: KeyNormalizationAttempt };
+
+const normalizeKeysBySchema = (
+  value: unknown,
+  schema: z.ZodTypeAny,
+  depth: number,
+): { value: unknown; changed: boolean } => {
+  if (depth > 10) return { value, changed: false };
+
+  const core = unwrapToCoreSchema(schema);
+  const def: any = (core as any)?._def;
+  const typeName: ZodTypeName | undefined = def?.typeName;
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodArray) {
+    if (!Array.isArray(value)) return { value, changed: false };
+    const next: unknown[] = [];
+    let changed = false;
+    for (let i = 0; i < value.length; i++) {
+      const item = value[i];
+      const normalized = normalizeKeysBySchema(item, def.type, depth + 1);
+      next.push(normalized.value);
+      if (normalized.changed) changed = true;
+    }
+    return changed ? { value: next, changed: true } : { value, changed: false };
+  }
+
+  if (typeName === z.ZodFirstPartyTypeKind.ZodRecord) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { value, changed: false };
+    const record = value as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    let changed = false;
+    for (const [k, v] of Object.entries(record)) {
+      const normalized = normalizeKeysBySchema(v, def.valueType, depth + 1);
+      next[k] = normalized.value;
+      if (normalized.changed) changed = true;
+    }
+    return changed ? { value: next, changed: true } : { value, changed: false };
+  }
+
+  if (typeName !== z.ZodFirstPartyTypeKind.ZodObject) {
+    return { value, changed: false };
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { value, changed: false };
+  const record = value as Record<string, unknown>;
+  const shape = typeof def.shape === 'function' ? def.shape() : {};
+
+  let changed = false;
+  const merged: Record<string, unknown> = { ...record };
+
+  for (const [expectedKey, subSchema] of Object.entries(shape)) {
+    const variants = [expectedKey, toSnakeCase(expectedKey), toCamelCase(expectedKey)];
+    let foundKey: string | null = null;
+    for (const variant of variants) {
+      if (Object.prototype.hasOwnProperty.call(record, variant)) {
+        foundKey = variant;
+        break;
+      }
+    }
+    if (!foundKey) {
+      const expectedCanonical = canonicalizeKey(expectedKey);
+      const matches = Object.keys(record).filter((key) => canonicalizeKey(key) === expectedCanonical);
+      if (matches.length === 1) {
+        foundKey = matches[0]!;
+      }
+    }
+    if (!foundKey) continue;
+
+    const normalized = normalizeKeysBySchema(record[foundKey], subSchema as z.ZodTypeAny, depth + 1);
+    if (foundKey !== expectedKey || normalized.changed) {
+      merged[expectedKey] = normalized.value;
+      changed = true;
+    }
+  }
+
+  return changed ? { value: merged, changed: true } : { value, changed: false };
+};
+
+const validateWithNormalization = <T>(value: unknown, schema: z.ZodSchema<T>): ValidationResult<T> => {
+  const direct = schema.safeParse(value);
+  if (direct.success) {
+    return { ok: true, data: direct.data, keyNormalization: { attempted: false, succeeded: false } };
+  }
+
+  const normalized = normalizeKeysBySchema(value, schema, 0);
+  if (!normalized.changed) {
+    return { ok: false, keyNormalization: { attempted: false, succeeded: false } };
+  }
+
+  const retried = schema.safeParse(normalized.value);
+  if (retried.success) {
+    return { ok: true, data: retried.data, keyNormalization: { attempted: true, succeeded: true } };
+  }
+
+  return { ok: false, keyNormalization: { attempted: true, succeeded: false } };
+};
 
 const tryUnwrapAndValidate = <T>(
   value: unknown,
   schema: z.ZodSchema<T>,
   unwrapCandidates: readonly string[],
   textFieldCandidates: readonly string[],
-): { ok: true; data: T; unwrap: UnwrapAttempt } | { ok: false; unwrap: UnwrapAttempt } => {
+): { ok: true; data: T; unwrap: UnwrapAttempt; keyNormalization: KeyNormalizationAttempt } | { ok: false; unwrap: UnwrapAttempt } => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return { ok: false, unwrap: { attempted: false, succeeded: false } };
   }
 
   const record = value as Record<string, unknown>;
 
+  const validateInner = (
+    inner: unknown,
+    unwrap: UnwrapAttempt,
+  ): { ok: true; data: T; unwrap: UnwrapAttempt; keyNormalization: KeyNormalizationAttempt } | null => {
+    const validated = validateWithNormalization(inner, schema);
+    if (validated.ok) {
+      return { ok: true, data: validated.data, unwrap, keyNormalization: validated.keyNormalization };
+    }
+    return null;
+  };
+
+  const validateInnerText = (
+    innerText: string,
+    unwrap: UnwrapAttempt,
+  ): { ok: true; data: T; unwrap: UnwrapAttempt; keyNormalization: KeyNormalizationAttempt } | null => {
+    if (!innerText.trim()) return null;
+    try {
+      const parsedInner = tryParseJson(innerText);
+      return validateInner(parsedInner, unwrap);
+    } catch {
+      return null;
+    }
+  };
+
   for (const key of unwrapCandidates) {
     const inner = record[key];
     if (!inner) continue;
-    const parsed = schema.safeParse(inner);
-    if (parsed.success) return { ok: true, data: parsed.data, unwrap: { attempted: true, succeeded: true, key } };
+    const hit = validateInner(inner, { attempted: true, succeeded: true, key, strategy: 'known-key' });
+    if (hit) return hit;
   }
 
   for (const key of textFieldCandidates) {
     const inner = record[key];
     if (typeof inner !== 'string' || !inner.trim()) continue;
-    try {
-      const parsedInner = tryParseJson(inner);
-      const parsed = schema.safeParse(parsedInner);
-      if (parsed.success) {
-        return { ok: true, data: parsed.data, unwrap: { attempted: true, succeeded: true, key } };
-      }
-    } catch {
-      // ignore
+    const hit = validateInnerText(inner, { attempted: true, succeeded: true, key, strategy: 'text-field' });
+    if (hit) return hit;
+  }
+
+  const keys = Object.keys(record);
+  if (keys.length === 1) {
+    const key = keys[0]!;
+    const inner = record[key];
+    const hit = validateInner(inner, { attempted: true, succeeded: true, key, strategy: 'single-key' });
+    if (hit) return hit;
+    if (typeof inner === 'string') {
+      const hitText = validateInnerText(inner, { attempted: true, succeeded: true, key, strategy: 'single-key' });
+      if (hitText) return hitText;
+    }
+  }
+
+  for (const key of keys) {
+    if (unwrapCandidates.includes(key) || textFieldCandidates.includes(key)) continue;
+    const inner = record[key];
+    if (!inner) continue;
+    const hit = validateInner(inner, { attempted: true, succeeded: true, key, strategy: 'scan-keys' });
+    if (hit) return hit;
+    if (typeof inner === 'string') {
+      const hitText = validateInnerText(inner, { attempted: true, succeeded: true, key, strategy: 'scan-keys' });
+      if (hitText) return hitText;
     }
   }
 
@@ -298,6 +457,7 @@ export type ParseStructuredJsonTelemetry = {
   candidateEndIndex: number;
   usedJsonRepair: boolean;
   unwrapAttempt: UnwrapAttempt;
+  keyNormalization: KeyNormalizationAttempt;
 };
 
 export function parseStructuredJsonWithSchema<T>(
@@ -347,6 +507,7 @@ export function parseStructuredJsonWithSchema<T>(
           candidateEndIndex: candidate.endIndex,
           usedJsonRepair,
           unwrapAttempt: { attempted: false, succeeded: false },
+          keyNormalization: { attempted: false, succeeded: false },
         },
       };
     }
@@ -361,6 +522,22 @@ export function parseStructuredJsonWithSchema<T>(
           candidateEndIndex: candidate.endIndex,
           usedJsonRepair,
           unwrapAttempt: unwrapped.unwrap,
+          keyNormalization: unwrapped.keyNormalization,
+        },
+      };
+    }
+
+    const normalized = validateWithNormalization(parsedJson, schema);
+    if (normalized.ok) {
+      return {
+        data: normalized.data,
+        telemetry: {
+          usedCandidateIndex: i,
+          candidateStartIndex: candidate.startIndex,
+          candidateEndIndex: candidate.endIndex,
+          usedJsonRepair,
+          unwrapAttempt: { attempted: false, succeeded: false },
+          keyNormalization: normalized.keyNormalization,
         },
       };
     }

@@ -57,6 +57,42 @@ describe('structured-json', () => {
     expect(result.telemetry.unwrapAttempt.succeeded).toBe(true);
   });
 
+  it('unwraps unknown single-key wrappers', () => {
+    const schema = z.object({ a: z.number() });
+    const text = '{"mouhuang": {"a": 1}}';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data).toEqual({ a: 1 });
+    expect(result.telemetry.unwrapAttempt.attempted).toBe(true);
+    expect(result.telemetry.unwrapAttempt.succeeded).toBe(true);
+  });
+
+  it('unwraps unknown wrappers even when extra keys exist', () => {
+    const schema = z.object({ a: z.number() });
+    const text = '{"note": "x", "mouhuang": {"a": 1}}';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data).toEqual({ a: 1 });
+    expect(result.telemetry.unwrapAttempt.attempted).toBe(true);
+    expect(result.telemetry.unwrapAttempt.succeeded).toBe(true);
+  });
+
+  it('normalizes snake_case keys to match schema', () => {
+    const schema = z.object({ magicConstruct: z.object({ powerLevel: z.string() }) });
+    const text = '{"magic_construct": {"power_level": "S"}}';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data).toEqual({ magicConstruct: { powerLevel: 'S' } });
+    expect(result.telemetry.keyNormalization.attempted).toBe(true);
+    expect(result.telemetry.keyNormalization.succeeded).toBe(true);
+  });
+
+  it('canonicalizes common key variants (codeName -> codename)', () => {
+    const schema = z.object({ codename: z.string() });
+    const text = '{"codeName": "X"}';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data).toEqual({ codename: 'X' });
+    expect(result.telemetry.keyNormalization.attempted).toBe(true);
+    expect(result.telemetry.keyNormalization.succeeded).toBe(true);
+  });
+
   it('builds a compact schema guide with optional markers', () => {
     const schema = z.object({
       a: z.string(),
