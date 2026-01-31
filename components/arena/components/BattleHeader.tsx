@@ -4,6 +4,7 @@ import Link from 'next/link';
 
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { ThemeImage } from '@/components/shared/ThemeImage';
+import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 
 export function BattleHeader() {
   return (
@@ -15,8 +16,14 @@ export function BattleHeader() {
         </p>
       </div>
 
-      <div className="mb-6 p-4 bg-gray-200 border border-gray-300 rounded-lg text-sm text-gray-800">
-        <h3 className="font-bold mb-2">📰 使用须知</h3>
+      <CollapsibleSection
+        title="📰 使用须知"
+        description="熟悉流程后可收起，减少滚动"
+        defaultOpen
+        storageKey="arena.section.guide.open"
+        className="mb-6"
+        contentClassName="text-sm"
+      >
         <ol className="list-decimal list-inside space-y-1">
           <li>
             前往
@@ -41,7 +48,7 @@ export function BattleHeader() {
           ]}
           linkClassName="text-blue-700 hover:underline"
         />
-      </div>
+      </CollapsibleSection>
     </>
   );
 }

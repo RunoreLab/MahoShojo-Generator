@@ -13,7 +13,7 @@ interface DatabaseSelectorProps {
   combatantCount: number;
   maxCombatants?: number;
   className?: string;
-  title?: string;
+  title?: string | null;
   layout?: 'row' | 'column';
 }
 
@@ -35,7 +35,7 @@ export function DatabaseSelector({
 
   return (
     <div className={rootClassName}>
-      <h3 className="input-label">{title}</h3>
+      {title ? <h3 className="input-label">{title}</h3> : null}
       <div className={buttonsClassName}>
         <button
           onClick={onOpenCharacterModal}

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
+import { ChevronDown } from 'lucide-react';
 
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { TechBadge } from '@/components/ranking/TechBadge';
@@ -761,9 +762,14 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                 type="button"
                 className="w-full flex flex-wrap items-center gap-2 px-2 py-2"
                 onClick={() => setUnassignedCollapsed((v) => !v)}
+                aria-expanded={!unassignedCollapsed}
+                aria-controls="arena-team-unassigned-content"
               >
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span className="text-xs text-gray-700">{unassignedCollapsed ? '▶' : '▼'}</span>
+                  <ChevronDown
+                    className={`h-4 w-4 text-gray-700 transition-transform ${unassignedCollapsed ? '-rotate-90' : ''}`}
+                    aria-hidden
+                  />
                   <span className="font-semibold text-sm text-gray-700">未分队</span>
                   <span className="text-xs text-gray-500">({combatantsByTeam.unassigned.length})</span>
                 </div>
@@ -801,7 +807,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
               </button>
 
               {!unassignedCollapsed && (
-                <div className="p-2 pt-0 space-y-2">
+                <div id="arena-team-unassigned-content" className="p-2 pt-0 space-y-2">
                   {combatantsByTeam.unassigned.map((item) => renderCombatantRow(item.combatant, item.index))}
                 </div>
               )}
@@ -819,8 +825,13 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                   type="button"
                   className="flex items-center gap-2 min-w-0 flex-1"
                   onClick={() => toggleTeamCollapsed(team.id)}
+                  aria-expanded={!isCollapsed}
+                  aria-controls={`arena-team-${team.id}-content`}
                 >
-                    <span className="text-xs text-gray-700">{isCollapsed ? '▶' : '▼'}</span>
+                    <ChevronDown
+                      className={`h-4 w-4 text-gray-700 transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
+                      aria-hidden
+                    />
                     {editingTeamId === team.id ? (
                       <input
                         className="text-sm font-semibold text-gray-700 border border-gray-300 rounded px-2 py-1 bg-white w-44"
@@ -900,7 +911,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                 </div>
 
                 {!isCollapsed && (
-                  <div className="p-2 pt-0 space-y-2">
+                  <div id={`arena-team-${team.id}-content`} className="p-2 pt-0 space-y-2">
                     {members.length === 0 ? (
                       <div className="text-xs text-gray-500 px-1 py-2">暂无成员（可用右侧下拉框添加/转移）</div>
                     ) : (

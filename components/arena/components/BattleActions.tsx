@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { formatDateTime } from '@/lib/constants';
+import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
@@ -217,22 +218,32 @@ export function BattleActions() {
         >
           {getButtonText()}
         </button>
-
-        <button
-          type="button"
-          onClick={() => setShowNarrativeModal(true)}
-          className="px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white hover:bg-gray-50"
-          disabled={isGenerating}
-          title="查看/编辑叙事历史记录"
-        >
-          叙事历史：{narrativeCount} 条{narrativeLastUpdatedAt ? `｜${formatDateTime(narrativeLastUpdatedAt)}` : ''}
-        </button>
       </div>
 
-      <TokenIndicator
-        text={estimatePayloadText}
-        warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试关闭“叙事历史读取”或“历战记录读取”，或减少历史条目/参战角色。"
-      />
+      <CollapsibleSection
+        title="高级：叙事历史 / 上下文估算"
+        description="当生成失败或耗时过长时，建议从这里开始排查"
+        defaultOpen={false}
+        storageKey="arena.section.generateAdvanced.open"
+        className="mt-3"
+      >
+        <div className="flex items-center justify-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setShowNarrativeModal(true)}
+            className="px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white hover:bg-gray-50"
+            disabled={isGenerating}
+            title="查看/编辑叙事历史记录"
+          >
+            叙事历史：{narrativeCount} 条{narrativeLastUpdatedAt ? `｜${formatDateTime(narrativeLastUpdatedAt)}` : ''}
+          </button>
+        </div>
+
+        <TokenIndicator
+          text={estimatePayloadText}
+          warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试关闭“叙事历史读取”或“历战记录读取”，或减少历史条目/参战角色。"
+        />
+      </CollapsibleSection>
 
       <NarrativeHistoryModal isOpen={showNarrativeModal} onClose={() => setShowNarrativeModal(false)} />
     </>

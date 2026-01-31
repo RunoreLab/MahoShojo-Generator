@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 
+import { DisclosureButton } from '@/components/shared/CollapsibleSection';
+
 type ScenarioPickerPanelProps = {
   onOpenScenarioModal: () => void;
   onRandomMatchScenario: () => void | Promise<void>;
@@ -131,12 +133,13 @@ export function ScenarioPickerPanel({
       <div className="mb-6 mt-4">
         {enableLocalInput && (
           <>
-            <button
-              onClick={() => setIsPasteVisible(!isPasteVisible)}
-              className="text-purple-700 hover:underline cursor-pointer mb-2 font-semibold"
+            <DisclosureButton
+              open={isPasteVisible}
+              onToggle={() => setIsPasteVisible((prev) => !prev)}
+              className="text-purple-700 hover:underline mb-2"
             >
-              {isPasteVisible ? '▼ 折叠情景粘贴区域' : '▶ 展开情景粘贴区域 (手机端推荐)'}
-            </button>
+              {isPasteVisible ? '收起情景粘贴区域' : '展开情景粘贴区域（手机端推荐）'}
+            </DisclosureButton>
             {isPasteVisible && (
               <div className="input-group mt-2">
                 <textarea
