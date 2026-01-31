@@ -316,7 +316,7 @@ export function ArenaPage() {
 
             <CollapsibleSection
               title="💬 社区"
-              description="QQ群 / 腾讯频道（可折叠）"
+              description="QQ群 / 腾讯频道"
               defaultOpen={false}
               storageKey="arena.section.community.open"
               className="mt-4"

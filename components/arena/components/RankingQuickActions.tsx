@@ -442,7 +442,7 @@ export function RankingQuickActions() {
                   strictCountReady ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                 }`}
               >
-                {strictCountReady ? '严格可计分' : '严格不可计分'}
+                {strictCountReady ? '可计分' : '不计分'}
               </span>
               {strictIndicator.source === 'server' ? (
                 <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">
