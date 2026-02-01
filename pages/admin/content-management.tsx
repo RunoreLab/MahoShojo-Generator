@@ -15,7 +15,7 @@ interface DataCard {
   name: string;
   description: string;
   data: string; // 确保 data 字段存在
-  type: 'character' | 'scenario' | 'history';
+  type: 'character' | 'scenario' | 'history' | 'questionnaire';
   is_public: -1 | 0 | 1;
   review_status: 'pending' | 'approved' | 'rejected';
   username: string;
@@ -52,6 +52,19 @@ interface AiReviewResult {
     reason: string;
 }
 
+const parseQuestionnaireNativeAllowed = (rawData: string | null | undefined): boolean => {
+  if (!rawData) return false;
+  try {
+    const parsed = JSON.parse(rawData);
+    if (parsed && typeof parsed === 'object') {
+      return Boolean((parsed as any).nativeAllowed);
+    }
+  } catch {
+    return false;
+  }
+  return false;
+};
+
 const ContentManagementPage: React.FC = () => {
   const router = useRouter();
   const isComposingSearchRef = useRef(false);
@@ -87,6 +100,7 @@ const ContentManagementPage: React.FC = () => {
   const [externalReviewContent, setExternalReviewContent] = useState(''); // [新增] 外部审查粘贴内容
   const [copyStatus, setCopyStatus] = useState(''); // [新增] 复制按钮状态
   const [aiTargetSnapshotById, setAiTargetSnapshotById] = useState<Record<string, AiTargetSnapshotItem>>({});
+  const [nativeUpdatingId, setNativeUpdatingId] = useState<string | null>(null);
 
   const aiModelLabelMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -367,6 +381,37 @@ const ContentManagementPage: React.FC = () => {
       await fetchData(filters);
     } catch (error) {
       alert(`操作失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  const handleToggleQuestionnaireNative = async (card: DataCard, nextAllowed: boolean) => {
+    if (nativeUpdatingId) return;
+    const confirmText = nextAllowed
+      ? '确定要允许该问卷生成原生内容吗？'
+      : '确定要取消该问卷的原生许可吗？';
+    if (!window.confirm(confirmText)) return;
+
+    setNativeUpdatingId(card.id);
+    try {
+      const response = await fetch('/api/admin/questionnaire-native', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataCardId: card.id, nativeAllowed: nextAllowed }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload?.success === false) {
+        throw new Error(payload?.error || '更新失败');
+      }
+
+      const nextData = typeof payload?.data === 'string'
+        ? payload.data
+        : JSON.stringify({ ...(JSON.parse(card.data) as any), nativeAllowed: nextAllowed });
+
+      setDataCards((prev) => prev.map((item) => (item.id === card.id ? { ...item, data: nextData } : item)));
+    } catch (error) {
+      alert(`操作失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setNativeUpdatingId(null);
     }
   };
 
@@ -940,6 +985,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                 <option value="character">角色</option>
                 <option value="scenario">情景</option>
                 <option value="history">叙事历史</option>
+                <option value="questionnaire">问卷</option>
               </select>
               <select name="isRecommended" value={filters.isRecommended} onChange={handleFilterChange} className="input-field">
                 <option value="">推荐状态</option>
@@ -995,6 +1041,8 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                     const displayName = hasPendingUpdate ? (card.pending_update_name ?? card.name) : card.name;
                     const displayDescription = hasPendingUpdate ? (card.pending_update_description ?? card.description) : card.description;
                     const displayData = hasPendingUpdate ? (card.pending_update_data ?? card.data) : card.data;
+                    const questionnaireNativeAllowed = card.type === 'questionnaire' ? parseQuestionnaireNativeAllowed(card.data) : false;
+                    const canToggleQuestionnaireNative = card.type === 'questionnaire' && !hasPendingUpdate;
 
                     return (
                       <tr key={card.id} className="bg-white border-b hover:bg-gray-50">
@@ -1022,6 +1070,23 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                                 <span>推荐</span>
                               </span>
                             )}
+                            {card.type === 'questionnaire' && (
+                              <button
+                                type="button"
+                                disabled={!canToggleQuestionnaireNative || nativeUpdatingId === card.id}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleToggleQuestionnaireNative(card, !questionnaireNativeAllowed);
+                                }}
+                                className={`ml-2 inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full border transition-colors ${questionnaireNativeAllowed
+                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                  : 'border-gray-200 bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                } ${!canToggleQuestionnaireNative || nativeUpdatingId === card.id ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                title={canToggleQuestionnaireNative ? '点击切换问卷原生许可' : '存在待审更新，暂不可切换'}
+                              >
+                                {questionnaireNativeAllowed ? '原生许可' : '非原生'}
+                              </button>
+                            )}
                           </button>
                           <div className="text-xs text-gray-500">by {card.username}</div>
                           {hasPendingUpdate && (
@@ -1034,7 +1099,13 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                           )}
                         </td>
                         <td className="px-6 py-4">
-                          {card.type === 'character' ? '角色' : card.type === 'scenario' ? '情景' : '叙事历史'}
+                          {card.type === 'character'
+                            ? '角色'
+                            : card.type === 'scenario'
+                              ? '情景'
+                              : card.type === 'history'
+                                ? '叙事历史'
+                                : '问卷'}
                         </td>
                         <td className="px-6 py-4">{getPublicStatusBadge(card.is_public)}</td>
                         <td className="px-6 py-4">
@@ -1052,7 +1123,7 @@ ${JSON.stringify(cardsToCopy, null, 2)}
                         </td>
                         <td className="px-6 py-4 text-xs text-gray-500 max-w-xs">
                           {(() => {
-                              const defaultDescriptions = ['角色数据卡', '情景数据卡', '叙事历史数据卡'];
+                              const defaultDescriptions = ['角色数据卡', '情景数据卡', '叙事历史数据卡', '问卷数据卡'];
                               const normalizedDescription = (displayDescription || '').trim();
                               const isMeaningfulDescription = normalizedDescription && !defaultDescriptions.includes(normalizedDescription);
 

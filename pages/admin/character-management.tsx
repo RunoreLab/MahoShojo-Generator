@@ -8,7 +8,7 @@ import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 interface DataCard {
   id: string;
   user_id: number;
-  type: 'character' | 'scenario' | 'history';
+  type: 'character' | 'scenario' | 'history' | 'questionnaire';
   name: string;
   description: string;
   data: string;
@@ -38,7 +38,7 @@ export default function CharacterManagement() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [typeFilter, setTypeFilter] = useState<'all' | 'character' | 'scenario' | 'history'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'character' | 'scenario' | 'history' | 'questionnaire'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'public' | 'private' | 'banned'>('all');
   const [viewingData, setViewingData] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -212,7 +212,7 @@ export default function CharacterManagement() {
             <Database className="w-8 h-8 text-purple-600" />
             数据卡管理系统
           </h1>
-          <p className="text-gray-600">管理和审核所有用户创建的角色卡、情景卡与叙事历史卡</p>
+          <p className="text-gray-600">管理和审核所有用户创建的角色卡、情景卡、叙事历史卡与问卷卡</p>
         </div>
 
         {message && (
@@ -276,6 +276,7 @@ export default function CharacterManagement() {
                     <option value="character">角色卡</option>
                     <option value="scenario">情景卡</option>
                     <option value="history">叙事历史</option>
+                    <option value="questionnaire">问卷</option>
                   </select>
 
                   <select
@@ -336,7 +337,13 @@ export default function CharacterManagement() {
                           </div>
                         </div>
                         <div className="text-xs text-gray-500 mb-1">
-                          {card.type === 'character' ? '角色卡' : card.type === 'scenario' ? '情景卡' : '叙事历史'} | 作者: {card.username}
+                          {card.type === 'character'
+                            ? '角色卡'
+                            : card.type === 'scenario'
+                              ? '情景卡'
+                              : card.type === 'history'
+                                ? '叙事历史'
+                                : '问卷'} | 作者: {card.username}
                         </div>
                         <div className="text-xs text-gray-400">
                           ❤️ {card.like_count} | ⭐ {card.favorite_count} | 📥 {card.usage_count}
@@ -432,7 +439,13 @@ export default function CharacterManagement() {
                       <label className="block text-sm font-medium text-gray-700 mb-1">类型</label>
                       <input
                         type="text"
-                        value={selectedCard.type === 'character' ? '角色卡' : selectedCard.type === 'scenario' ? '情景卡' : '叙事历史'}
+                        value={selectedCard.type === 'character'
+                          ? '角色卡'
+                          : selectedCard.type === 'scenario'
+                            ? '情景卡'
+                            : selectedCard.type === 'history'
+                              ? '叙事历史'
+                              : '问卷'}
                         disabled
                         className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50"
                       />

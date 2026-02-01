@@ -49,7 +49,7 @@ export default async function handler(req: NextRequest) {
       reviewStatus: searchParams.get('reviewStatus') as 'pending' | 'approved' | 'rejected' | undefined,
       isPublic: isPublicValue, // <-- 使用处理后的 isPublicValue
       isRecommended: searchParams.get('isRecommended') as '0' | '1' | undefined,
-      type: searchParams.get('type') as 'character' | 'scenario' | 'history' | undefined,
+      type: searchParams.get('type') as 'character' | 'scenario' | 'history' | 'questionnaire' | undefined,
       search: searchParams.get('search') || undefined,
       includePendingUpdates: searchParams.get('includePendingUpdates') === '1',
     };

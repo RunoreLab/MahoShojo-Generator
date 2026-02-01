@@ -49,7 +49,7 @@ export default async function handler(req: NextRequest) {
     const placeholders = ids.map(() => '?').join(', ');
     const cardRows = readRows<{
       id: string;
-      type: 'character' | 'scenario' | 'history';
+      type: 'character' | 'scenario' | 'history' | 'questionnaire';
       data: string;
       updated_at: string;
     }>(
