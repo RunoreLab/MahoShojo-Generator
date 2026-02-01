@@ -103,7 +103,12 @@ export async function getUserFavorites(
 ): Promise<any[]> {
   try {
     let sql = `
-      SELECT dc.*, u.username, f.created_at AS favorited_at
+      SELECT dc.*, u.username, f.created_at AS favorited_at,
+             (
+               SELECT group_concat(DISTINCT dct.tag_id)
+               FROM data_card_tags dct
+               WHERE dct.data_card_id = dc.id
+             ) AS tag_ids
       FROM favorites f
       JOIN data_cards dc ON f.data_card_id = dc.id
       JOIN users u ON dc.user_id = u.id
@@ -124,7 +129,15 @@ export async function getUserFavorites(
     const result = await queryFromD1(sql, params) as any;
 
     if (result?.success && result.result?.[0]?.results) {
-      return result.result[0].results;
+      const rows = result.result[0].results as any[];
+      return rows.map((row) => {
+        const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
+        const tagIds = raw
+          .split(',')
+          .map((id: string) => id.trim())
+          .filter(Boolean);
+        return { ...row, tagIds };
+      });
     }
 
     return [];

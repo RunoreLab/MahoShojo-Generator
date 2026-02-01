@@ -6,6 +6,7 @@ import '@/styles/blue-theme.css';
 import '@/styles/gradient-buttons.css';
 import 'katex/dist/katex.min.css';
 import { GoogleAnalytics } from '@next/third-parties/google';
+import { ColorModeSwitcher } from '@/components/shared/ColorModeSwitcher';
 // 1. 引入新组件
 import AnnouncementTicker from '@/components/Announcement/AnnouncementTicker';
 
@@ -28,6 +29,7 @@ export default function App({ Component, pageProps }: AppProps) {
       </Head>
 
       <div className={isDetailsPage ? 'blue-theme' : ''}>
+        <ColorModeSwitcher />
         <Component {...pageProps} />
         {/* 3. 在此处添加公告组件，并根据页面路径进行条件渲染 */}
         {!isArrestedPage && <AnnouncementTicker />}

@@ -1,7 +1,7 @@
 # 站内功能速览（从生成到对战）
 
 > 作者：[末伏之夜](https://github.com/notuhao)  
-> 更新时间：2026-01-04
+> 更新时间：2026-01-14
 
 如果你是第一次来，可以把本站理解成三件事：
 
@@ -24,6 +24,13 @@
 - `/details`：奇妙妖精大调查（深度问卷，更像“人物小传”）
 - `/canshou`：危险残兽大调查（生成宿敌/对手）
 - `/scenario`：箱庭物语（情景生成器，生成“情景文件”）
+- `/free`：自由生成（任意提示词 + 选择 Schema 生成数据卡）
+
+### 创作辅助（0.7.0+）
+
+- `/magic-tea-party`：魔法茶会（长期剧情对话；角色/情景自由组合；自备 API Key；本地保存会话）
+- `/character-party`：角色组队（把多张角色卡拼成“队伍卡”）
+- `/tavern`：酒馆生态（SillyTavern 角色卡 PNG 导入/导出）
 
 ### 对战竞技
 
@@ -59,6 +66,11 @@
 ## 相关条目
 
 - 角色生成（/name、/details、/canshou）：`/encyclopedia/character-generator`
+- 通用数据卡（Markdown）：`/encyclopedia/general-cards`
+- 自由生成：`/encyclopedia/free-generator`
+- 魔法茶会（功能与快速开始）：`/encyclopedia/magic-tea-party`
+- 角色组队：`/encyclopedia/character-party`
+- 酒馆生态联动（SillyTavern）：`/encyclopedia/tavern-ecosystem`
 - 档案馆（角色管理）：`/encyclopedia/archive`
 - 竞技场：`/encyclopedia/arena`
 - 排位与排行榜：`/encyclopedia/ranking`

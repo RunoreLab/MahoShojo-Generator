@@ -1,0 +1,61 @@
+import { SYSTEM_PROMPTS } from '@/lib/arena/constants';
+import { buildArenaDefaultScenario, buildArenaWorldbook } from '@/lib/tavern-card';
+import type { TavernCharacterBook } from '@/lib/tavern-card';
+import type { MagicTeaPartyChoiceCount } from '@/lib/magic-tea-party/types';
+
+export type MagicTeaPartyPresetId = 'arena-classic' | 'arena-kizuna' | 'arena-daily';
+
+export type MagicTeaPartyPreset = {
+  id: MagicTeaPartyPresetId;
+  title: string;
+  description: string;
+  systemPrompt: string;
+  worldbookPresetId: 'arena-core';
+  worldbook: TavernCharacterBook;
+  defaultScenario: { title: string; content: string };
+  defaultSettings: {
+    outputFormat: 'jsonl' | 'markdown';
+    enableChoices: boolean;
+    choiceCount: MagicTeaPartyChoiceCount;
+  };
+};
+
+export const MAGIC_TEA_PARTY_PRESETS: MagicTeaPartyPreset[] = [
+  {
+    id: 'arena-classic',
+    title: '经典战报',
+    description: '复刻竞技场经典战报口吻，偏叙事。',
+    systemPrompt: SYSTEM_PROMPTS.classic,
+    worldbookPresetId: 'arena-core',
+    worldbook: buildArenaWorldbook({ includeCore: true }),
+    defaultScenario: { title: 'A.R.E.N.A.', content: buildArenaDefaultScenario() },
+    defaultSettings: { outputFormat: 'jsonl', enableChoices: true, choiceCount: 3 },
+  },
+  {
+    id: 'arena-kizuna',
+    title: '羁绊战报',
+    description: '更强调感情与羁绊的战斗故事。',
+    systemPrompt: SYSTEM_PROMPTS.kizuna,
+    worldbookPresetId: 'arena-core',
+    worldbook: buildArenaWorldbook({ includeCore: true }),
+    defaultScenario: { title: 'A.R.E.N.A.', content: buildArenaDefaultScenario() },
+    defaultSettings: { outputFormat: 'jsonl', enableChoices: true, choiceCount: 3 },
+  },
+  {
+    id: 'arena-daily',
+    title: '日常互动',
+    description: '偏日常互动的轻量模式。',
+    systemPrompt: SYSTEM_PROMPTS.daily,
+    worldbookPresetId: 'arena-core',
+    worldbook: buildArenaWorldbook({ includeCore: true }),
+    defaultScenario: { title: 'A.R.E.N.A.', content: buildArenaDefaultScenario() },
+    defaultSettings: { outputFormat: 'jsonl', enableChoices: true, choiceCount: 4 },
+  },
+];
+
+export const getMagicTeaPartyPreset = (id: string | null | undefined): MagicTeaPartyPreset | null => {
+  const needle = typeof id === 'string' ? id.trim() : '';
+  if (!needle) return null;
+  return MAGIC_TEA_PARTY_PRESETS.find((preset) => preset.id === needle) ?? null;
+};
+

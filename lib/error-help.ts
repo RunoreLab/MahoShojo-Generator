@@ -10,6 +10,26 @@ export type ErrorHelpLink = {
   title: string;
 };
 
+export type ErrorCategoryId =
+  | 'validation'
+  | 'auth'
+  | 'forbidden'
+  | 'network'
+  | 'rate_limit'
+  | 'timeout'
+  | 'cloudflare'
+  | 'ai_api_call'
+  | 'ai_refusal'
+  | 'ai_empty_output'
+  | 'ai_output_format'
+  | 'data_card'
+  | 'ai';
+
+export type ErrorCategory = {
+  id: ErrorCategoryId;
+  label: string;
+};
+
 const CLOUDFLARE_OTHER_STATUSES = new Set([520, 521, 522, 523, 525, 526, 530]);
 const SERVER_ERROR_STATUSES = new Set([500, 502, 503, 504]);
 
@@ -134,6 +154,51 @@ function inferSlugFromStatus(status: number): string | null {
 
 function includesAny(message: string, hints: readonly string[]) {
   return hints.some((hint) => message.includes(hint));
+}
+
+export function inferErrorCategoryForError(input: ErrorHelpInput): ErrorCategory | null {
+  const rawMessage = typeof input.message === 'string' ? input.message : '';
+  const message = rawMessage.trim() ? normalizeMessage(rawMessage) : '';
+  const statusInput = typeof input.status === 'number' ? input.status : null;
+  const statusFromMessage = rawMessage.trim() ? extractHttpStatusFromMessage(rawMessage) : null;
+  const status = statusInput ?? statusFromMessage;
+  const isAiApiCallError = message ? includesAny(message, AI_API_CALL_ERROR_MESSAGE_HINTS) : false;
+
+  if (status === 400) return { id: 'validation', label: '请求参数无效 / 校验失败' };
+  if (status === 401) return { id: 'auth', label: '鉴权失败 / API Key 问题' };
+  if (status === 403) return { id: 'forbidden', label: '权限不足 / Key 不可用' };
+  if (status === 524) return { id: 'timeout', label: 'Cloudflare 超时' };
+  if (status === 429) return { id: 'rate_limit', label: '请求过于频繁 / 限流' };
+
+  if (
+    typeof status === 'number'
+    && (CLOUDFLARE_OTHER_STATUSES.has(status) || SERVER_ERROR_STATUSES.has(status))
+  ) {
+    if (isAiApiCallError) return { id: 'ai_api_call', label: '上游 AI 接口调用失败' };
+    return { id: 'cloudflare', label: 'Cloudflare/服务器错误' };
+  }
+
+  if (!message) return null;
+
+  if (includesAny(message, NETWORK_MESSAGE_HINTS)) return { id: 'network', label: '网络连接问题' };
+  if (includesAny(message, RATE_LIMIT_MESSAGE_HINTS)) return { id: 'rate_limit', label: '请求过于频繁 / 限流' };
+  if (message.includes('cloudflare') || message.includes('cf-ray') || message.includes('52x') || message.includes('5xx')) {
+    return isAiApiCallError ? { id: 'ai_api_call', label: '上游 AI 接口调用失败' } : { id: 'cloudflare', label: 'Cloudflare/服务器错误' };
+  }
+
+  if (isAiApiCallError) return { id: 'ai_api_call', label: '上游 AI 接口调用失败' };
+  if (includesAny(message, AI_EMPTY_OUTPUT_MESSAGE_HINTS)) return { id: 'ai_empty_output', label: 'AI 空输出 / 空对象' };
+  if (message.includes('服务端返回信息') && (message.includes('{}') || message.includes('[]'))) {
+    return { id: 'ai_empty_output', label: 'AI 空输出 / 空对象' };
+  }
+  if (includesAny(message, AI_REFUSAL_MESSAGE_HINTS)) return { id: 'ai_refusal', label: 'AI 拒答 / 安全策略' };
+  if (includesAny(message, AI_OUTPUT_FORMAT_MESSAGE_HINTS) && includesAny(message, AI_OUTPUT_FORMAT_CONTEXT_HINTS)) {
+    return { id: 'ai_output_format', label: 'AI 输出格式异常' };
+  }
+  if (includesAny(message, DATA_CARD_MESSAGE_HINTS)) return { id: 'data_card', label: '数据卡/导入解析问题' };
+  if (includesAny(message, AI_MESSAGE_HINTS)) return { id: 'ai', label: 'AI 生成失败' };
+
+  return null;
 }
 
 export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | null {

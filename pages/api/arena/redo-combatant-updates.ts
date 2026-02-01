@@ -8,6 +8,7 @@ import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '@/lib/ai'
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import { buildPolicySafetyCheckText } from '@/lib/content-safety/server';
 import { verifySignature } from '@/lib/signature';
 
 import { CustomProviderSchema } from '@/lib/arena/schemas';
@@ -154,22 +155,13 @@ async function handler(req: NextRequest): Promise<Response> {
       inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: Boolean(c.isNative) });
     });
 
-    const policy = appConfig.SAFETY_CHECK_POLICY;
-    const contentsToAIFlag = inputsToCheck.filter((input) => {
-      const checkPolicy = policy[input.type];
-      return checkPolicy === 'all' || (checkPolicy === 'non-native-only' && !input.isNative);
+    const { combinedText, usedBundle } = buildPolicySafetyCheckText(inputsToCheck, {
+      policy: appConfig.SAFETY_CHECK_POLICY,
+      enableBundle: appConfig.ENABLE_BUNDLE_SAFETY_CHECK,
     });
-
-    const textForFinalCheck: string[] = [];
-    if (contentsToAIFlag.length > 0 && appConfig.ENABLE_BUNDLE_SAFETY_CHECK) {
+    if (usedBundle) {
       log.info('触发"连坐"机制，打包所有非原生内容进行检查。');
-      const nonNativeContents = inputsToCheck.filter((i) => !i.isNative).map((i) => i.content);
-      textForFinalCheck.push(...nonNativeContents);
-    } else {
-      textForFinalCheck.push(...contentsToAIFlag.map((i) => i.content));
     }
-
-    const combinedText = textForFinalCheck.join('\n\n');
     if (combinedText) {
       if (appConfig.ENABLE_SENSITIVE_WORD_FILTER && (await quickCheck(combinedText)).hasSensitiveWords) {
         log.warn('检测到敏感词 (本地过滤)，请求被拒绝', { text: combinedText });
@@ -208,7 +200,6 @@ async function handler(req: NextRequest): Promise<Response> {
         }),
       schema,
       taskName: '重做角色更新',
-      maxOutputTokens: 1200,
       modelOverride: customModelOverride,
     };
 

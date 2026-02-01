@@ -3,19 +3,27 @@
 import Link from 'next/link';
 
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
+import { ThemeImage } from '@/components/shared/ThemeImage';
+import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 
 export function BattleHeader() {
   return (
     <>
       <div className="text-center mb-4">
-        <img src="/arena-black.svg" width={320} height={90} alt="魔法少女竞技场" />
+        <ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />
         <p className="subtitle" style={{ marginBottom: '1rem', marginTop: '1rem' }}>
           能亲眼见到强者之战，这下就算死也会值回票价呀！
         </p>
       </div>
 
-      <div className="mb-6 p-4 bg-gray-200 border border-gray-300 rounded-lg text-sm text-gray-800">
-        <h3 className="font-bold mb-2">📰 使用须知</h3>
+      <CollapsibleSection
+        title="📰 使用须知"
+        description="熟悉流程后可收起，减少滚动"
+        defaultOpen
+        storageKey="arena.section.guide.open"
+        className="mb-6"
+        contentClassName="text-sm"
+      >
         <ol className="list-decimal list-inside space-y-1">
           <li>
             前往
@@ -40,7 +48,7 @@ export function BattleHeader() {
           ]}
           linkClassName="text-blue-700 hover:underline"
         />
-      </div>
+      </CollapsibleSection>
     </>
   );
 }

@@ -13,11 +13,13 @@ import { buildCardRefKey, requiresPvpSubmissionPhase } from '@/lib/pvp/logic';
 import { getRequestOrigin } from '@/lib/pvp/origin';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { parsePvpScenarioSelection } from '@/lib/pvp/scenario';
+import { loadScenarioPresetPayload } from '@/lib/pvp/scenario-preset';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import { extractScenarioAdjudicationEvents, mergeAdjudicationEvents } from '@/lib/pvp/adjudication-events';
 import { parsePvpRules } from '@/lib/pvp/validate';
 import type { PvpSubmissionPayload } from '@/lib/pvp/types';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
+import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
 
 export const runtime = 'edge';
 
@@ -95,23 +97,35 @@ async function rulesHandler(req: Request): Promise<Response> {
   if ('_scenario' in safePatch && safePatch._scenario !== null && safePatch._scenario !== undefined) {
     const parsedScenario = parsePvpScenarioSelection(safePatch._scenario);
     if (!parsedScenario) return json({ error: '情景数据无效' }, { status: 400 });
-    const row = await getPvpEligibleScenarioDataCard(parsedScenario.id, auth.user.id);
-    if (!row) {
-      return json({ error: '情景数据卡不存在/不可用/无权访问，或未通过审查/已被封禁', code: 'SCENARIO_NOT_ELIGIBLE' }, { status: 403 });
+    if (parsedScenario.kind === 'preset') {
+      const preset = getScenarioPresetByFilename(parsedScenario.filename);
+      if (!preset) {
+        return json({ error: '预设情景不存在或不可用', code: 'SCENARIO_PRESET_NOT_FOUND' }, { status: 400 });
+      }
+      safePatch._scenario = {
+        kind: 'preset',
+        filename: preset.filename,
+        name: preset.title,
+      } as any;
+    } else {
+      const row = await getPvpEligibleScenarioDataCard(parsedScenario.id, auth.user.id);
+      if (!row) {
+        return json({ error: '情景数据卡不存在/不可用/无权访问，或未通过审查/已被封禁', code: 'SCENARIO_NOT_ELIGIBLE' }, { status: 403 });
+      }
+      const expectedUpdatedAt = typeof parsedScenario.updatedAt === 'string' ? parsedScenario.updatedAt : null;
+      const actualUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
+      if (expectedUpdatedAt && actualUpdatedAt && expectedUpdatedAt !== actualUpdatedAt) {
+        return json({ error: '情景数据卡版本已变更，请重新选择后保存', code: 'SCENARIO_VERSION_MISMATCH', expected: expectedUpdatedAt, actual: actualUpdatedAt }, { status: 409 });
+      }
+      safePatch._scenario = {
+        kind: 'data_card',
+        id: row.id,
+        updatedAt: actualUpdatedAt,
+        name: typeof row.name === 'string' ? row.name : null,
+        isPublic: Number(row.is_public) === 1,
+        author: typeof row.username === 'string' ? row.username : null,
+      } as any;
     }
-    const expectedUpdatedAt = typeof parsedScenario.updatedAt === 'string' ? parsedScenario.updatedAt : null;
-    const actualUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
-    if (expectedUpdatedAt && actualUpdatedAt && expectedUpdatedAt !== actualUpdatedAt) {
-      return json({ error: '情景数据卡版本已变更，请重新选择后保存', code: 'SCENARIO_VERSION_MISMATCH', expected: expectedUpdatedAt, actual: actualUpdatedAt }, { status: 409 });
-    }
-    safePatch._scenario = {
-      kind: 'data_card',
-      id: row.id,
-      updatedAt: actualUpdatedAt,
-      name: typeof row.name === 'string' ? row.name : null,
-      isPublic: Number(row.is_public) === 1,
-      author: typeof row.username === 'string' ? row.username : null,
-    } as any;
   }
   const mergedRaw = { ...(internal.raw || {}), ...safePatch } as Record<string, unknown>;
   if ('_scenario' in safePatch && safePatch._scenario === null) {
@@ -119,7 +133,11 @@ async function rulesHandler(req: Request): Promise<Response> {
   }
 
   const scenarioSelection = parsePvpScenarioSelection((mergedRaw as any)?._scenario);
-  const scenarioKey = scenarioSelection ? `${scenarioSelection.id}|${scenarioSelection.updatedAt ?? ''}` : '';
+  const scenarioKey = scenarioSelection
+    ? (scenarioSelection.kind === 'preset'
+        ? `preset:${scenarioSelection.filename}`
+        : `${scenarioSelection.id}|${scenarioSelection.updatedAt ?? ''}`)
+    : '';
   const importedFor = typeof (mergedRaw as any)?._scenarioAdjudicationImportedFor === 'string'
     ? String((mergedRaw as any)._scenarioAdjudicationImportedFor).trim()
     : '';
@@ -127,17 +145,23 @@ async function rulesHandler(req: Request): Promise<Response> {
   // 与 /arena 逻辑保持一致：当情景卡包含 adjudicationEvents 时，将其导入判定器（并持久化到房间规则中）。
   // 为避免重复导入，使用 _scenarioAdjudicationImportedFor 标记“已导入的情景版本”。
   if (scenarioSelection && scenarioKey && importedFor !== scenarioKey) {
-    const row = await getPvpEligibleScenarioDataCard(scenarioSelection.id, auth.user.id);
-    if (row && typeof row.data === 'string') {
-      try {
-        const parsedScenario = JSON.parse(row.data);
-        const scenarioPayload = stripPrivateKeys(parsedScenario);
-        const scenarioEvents = extractScenarioAdjudicationEvents(scenarioPayload);
-        mergedRaw.adjudicationEvents = mergeAdjudicationEvents(mergedRaw.adjudicationEvents, scenarioEvents);
-        (mergedRaw as any)._scenarioAdjudicationImportedFor = scenarioKey;
-      } catch {
-        // ignore：解析失败则不导入（但也不写入标记，避免吞掉未来修复机会）
+    try {
+      let scenarioPayload: any | null = null;
+      if (scenarioSelection.kind === 'preset') {
+        const origin = getRequestOrigin(req);
+        scenarioPayload = stripPrivateKeys(await loadScenarioPresetPayload(origin, scenarioSelection.filename));
+      } else {
+        const row = await getPvpEligibleScenarioDataCard(scenarioSelection.id, auth.user.id);
+        if (row && typeof row.data === 'string') {
+          scenarioPayload = stripPrivateKeys(JSON.parse(row.data));
+        }
       }
+
+      const scenarioEvents = extractScenarioAdjudicationEvents(scenarioPayload);
+      mergedRaw.adjudicationEvents = mergeAdjudicationEvents(mergedRaw.adjudicationEvents, scenarioEvents);
+      (mergedRaw as any)._scenarioAdjudicationImportedFor = scenarioKey;
+    } catch {
+      // ignore：解析失败则不导入（但也不写入标记，避免吞掉未来修复机会）
     }
   }
   if (!scenarioSelection && (mergedRaw as any)?._scenarioAdjudicationImportedFor) {

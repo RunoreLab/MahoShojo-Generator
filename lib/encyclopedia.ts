@@ -9,6 +9,7 @@ export type EncyclopediaEntry = {
 
 export type EncyclopediaCategoryId =
   | 'guide'
+  | 'magic-tea-party'
   | 'troubleshooting'
   | 'ai'
   | 'gameplay'
@@ -28,6 +29,11 @@ export const encyclopediaCategories: EncyclopediaCategory[] = [
     id: 'guide',
     title: '快速开始',
     description: '站内入口、生成流程与新手速查。',
+  },
+  {
+    id: 'magic-tea-party',
+    title: '魔法茶会',
+    description: '长期剧情会话：角色/情景/世界书 + 选项/摘要/更新草案。',
   },
   {
     id: 'troubleshooting',
@@ -74,6 +80,46 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     markdownPath: '/encyclopedia/site-guide.md',
     categoryId: 'guide',
     keywords: ['新手', '入口', '流程', '速查'],
+  },
+  {
+    slug: 'magic-tea-party',
+    title: '魔法茶会（功能与快速开始）',
+    summary: '长期剧情对话页：角色/情景自由组合，支持选项、摘要、角色更新与导入导出。',
+    markdownPath: '/encyclopedia/magic-tea-party.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['/magic-tea-party', '茶会', '长期对话', '互动剧情', '自备 Key'],
+  },
+  {
+    slug: 'magic-tea-party-settings',
+    title: '魔法茶会：设置与参数说明',
+    summary: '输出模式（JSONL/Markdown）、合并输出计划、资料读写与写入策略等设置怎么选。',
+    markdownPath: '/encyclopedia/magic-tea-party-settings.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['JSONL', 'Markdown', 'outputPlan', '选项', '摘要', '写入', '历战记录', '当前状态'],
+  },
+  {
+    slug: 'magic-tea-party-session-management',
+    title: '魔法茶会：会话管理（分支/合并/备份与导出）',
+    summary: '置顶会话、编辑并分支、合并到原会话、ZIP 归档（含图片）与对话导出图片等常用操作。',
+    markdownPath: '/encyclopedia/magic-tea-party-session-management.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['会话', '分支', '合并', 'fork', 'merge', '置顶', '导入', '导出', 'ZIP', '图片导出'],
+  },
+  {
+    slug: 'magic-tea-party-card-authoring',
+    title: '魔法茶会：角色卡/情景卡进阶（协议与 mtp_notice）',
+    summary: '如何写更适合茶会的角色卡和情景卡：情景锚点、协议重映射、mtp_notice 自定义提示/报错。',
+    markdownPath: '/encyclopedia/magic-tea-party-card-authoring.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['协议', '协议附录', 'mtp_notice', 'notice', '情景卡', '世界书', 'SillyTavern'],
+  },
+  {
+    slug: 'magic-tea-party-troubleshooting',
+    title: '魔法茶会：错误排查与 FAQ',
+    summary: '登录提示、缺少 API Key、输出解析失败、敏感词拦截、上下文超载与写入异常的自救清单。',
+    markdownPath: '/encyclopedia/magic-tea-party-troubleshooting.md',
+    categoryId: 'magic-tea-party',
+    keywords: ['登录', '未登录', 'API Key', '403', 'notice', '解析失败', '敏感词', 'blocked'],
   },
   {
     slug: 'network-errors',
@@ -162,6 +208,30 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     markdownPath: '/encyclopedia/character-generator.md',
     categoryId: 'guide',
     keywords: ['/name', '/details', '/canshou', '角色生成'],
+  },
+  {
+    slug: 'general-cards',
+    title: '通用数据卡（Markdown）：通用角色/通用情景',
+    summary: '用 Markdown 维护角色/情景：最自由、最容错的两种模板与使用技巧。',
+    markdownPath: '/encyclopedia/general-cards.md',
+    categoryId: 'guide',
+    keywords: ['通用角色', '通用情景', 'Markdown', '长线', '流式'],
+  },
+  {
+    slug: 'free-generator',
+    title: '自由生成（/free）',
+    summary: '任意提示词 + 选择 Schema 生成数据卡（角色/情景），支持参考附件与流式输出。',
+    markdownPath: '/encyclopedia/free-generator.md',
+    categoryId: 'guide',
+    keywords: ['自由生成', '/free', 'Schema', '附件', '提示词', '流式'],
+  },
+  {
+    slug: 'character-party',
+    title: '角色组队（/character-party）',
+    summary: '把多张角色卡拼成一张“队伍卡”，用于组队出场/打包角色。',
+    markdownPath: '/encyclopedia/character-party.md',
+    categoryId: 'guide',
+    keywords: ['组队', '队伍卡', '/character-party', '合并', '通用角色'],
   },
   {
     slug: 'arena',
@@ -274,6 +344,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     markdownPath: '/encyclopedia/archive.md',
     categoryId: 'management',
     keywords: ['角色管理', '隐私', '编辑', '替换'],
+  },
+  {
+    slug: 'tavern-ecosystem',
+    title: '酒馆生态联动（SillyTavern 导入/导出）',
+    summary: '将 SillyTavern 角色卡 PNG 导入为本站数据卡，或把本站数据卡导出为酒馆 PNG。',
+    markdownPath: '/encyclopedia/tavern-ecosystem.md',
+    categoryId: 'management',
+    keywords: ['SillyTavern', '酒馆', '/tavern', '导入', '导出', 'PNG', 'ccv3', 'chara'],
   },
   {
     slug: 'review',

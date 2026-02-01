@@ -20,6 +20,11 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
       {
+        source: '/magic-tavern',
+        destination: '/magic-tea-party',
+        permanent: true,
+      },
+      {
         source: '/details/:path+', 
         destination: '/details',
         permanent: false, // 使用 307 临时重定向

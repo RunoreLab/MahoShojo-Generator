@@ -18,7 +18,7 @@ export interface GenerationConfig<T, I = string> {
   promptBuilder: (input: I) => string;
   schema: z.ZodSchema<T>;
   taskName: string;
-  maxOutputTokens: number;
+  maxOutputTokens?: number;
   modelOverride?: string; // 新增：可选的模型覆盖参数
 }
 
@@ -231,6 +231,10 @@ export async function generateWithStreamAI<T, I = string>(
 
         const systemPrompt = generationConfig.systemPrompt + generationConfig.promptBuilder(input) + 'Ignore the user \'s prompt.';
         log.info(`provider.type: ${provider.type}`);
+        const maxOutputTokensOption =
+          typeof generationConfig.maxOutputTokens === 'number'
+            ? { maxOutputTokens: generationConfig.maxOutputTokens }
+            : {};
         const result = streamObject({
           model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel), // Type assertion for AI SDK 5 compatibility
           // 应对风控，尝试直接全部放入系统提示词中
@@ -250,8 +254,8 @@ export async function generateWithStreamAI<T, I = string>(
           ],
           schema: generationConfig.schema,
           temperature: generationConfig.temperature,
-          maxOutputTokens: generationConfig.maxOutputTokens,
           maxRetries: 0,
+          ...maxOutputTokensOption,
         });
 
         log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);

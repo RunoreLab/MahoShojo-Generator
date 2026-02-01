@@ -23,6 +23,43 @@ const DEFAULT_SANITIZATION_OPTIONS: Required<SignatureSanitizationOptions> = {
     ignoreKeyPrefixes: ['_']
 };
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+type SignaturePayload = {
+    signatures: string[];
+    candidates: object[];
+};
+
+const extractSignaturePayload = (dataWithSignature: any): SignaturePayload | null => {
+    if (!isPlainObject(dataWithSignature)) return null;
+
+    const topSignature = typeof dataWithSignature.signature === 'string' ? dataWithSignature.signature : null;
+    const metadataSignature =
+        isPlainObject(dataWithSignature.metadata) && typeof dataWithSignature.metadata.signature === 'string'
+            ? dataWithSignature.metadata.signature
+            : null;
+
+    if (!topSignature && !metadataSignature) return null;
+
+    const dataWithoutSignature = { ...dataWithSignature } as Record<string, unknown>;
+    delete dataWithoutSignature.signature;
+    const candidates: object[] = [dataWithoutSignature];
+
+    if (metadataSignature && isPlainObject(dataWithoutSignature.metadata) && 'signature' in dataWithoutSignature.metadata) {
+        const nextMetadata = { ...dataWithoutSignature.metadata } as Record<string, unknown>;
+        delete nextMetadata.signature;
+        candidates.push({ ...dataWithoutSignature, metadata: nextMetadata });
+    }
+
+    const signatures: string[] = [];
+    if (topSignature) signatures.push(topSignature);
+    if (metadataSignature && metadataSignature !== topSignature) signatures.push(metadataSignature);
+
+    return { signatures, candidates };
+};
+
 /**
  * 判断某个键在签名过程中是否应该被忽略。
  * @param key - 当前字段名。
@@ -218,40 +255,42 @@ export const verifySignature = async (dataWithSignature: any): Promise<boolean> 
     const key = await getSecretKey();
     if (!key) return false; // 如果没有密钥，所有内容都视为无效
 
-    if (typeof dataWithSignature !== 'object' || dataWithSignature === null || typeof dataWithSignature.signature !== 'string') {
-        return false; // 没有签名或格式不正确则无效
-    }
+    const payload = extractSignaturePayload(dataWithSignature);
+    if (!payload) return false; // 没有签名或格式不正确则无效
 
-    const { signature, ...dataToVerify } = dataWithSignature;
+    const { signatures, candidates } = payload;
+    const expandedCandidates: object[] = [...candidates];
 
-    const candidates: object[] = [dataToVerify];
+    for (const candidate of candidates) {
+        const { value: sanitizedWithoutPrivateFields, changed: removedPrivateFields } = stripIgnoredKeysDeep(
+            candidate,
+            DEFAULT_SANITIZATION_OPTIONS
+        );
 
-    const { value: sanitizedWithoutPrivateFields, changed: removedPrivateFields } = stripIgnoredKeysDeep(
-        dataToVerify,
-        DEFAULT_SANITIZATION_OPTIONS
-    );
-
-    if (removedPrivateFields) {
-        candidates.push(sanitizedWithoutPrivateFields);
+        if (removedPrivateFields) {
+            expandedCandidates.push(sanitizedWithoutPrivateFields);
+        }
     }
     const modes: GenerateSignatureOptions[] = [
         { sanitizeIgnoredKeys: true },
         { sanitizeIgnoredKeys: false }
     ];
 
-    for (const candidate of candidates) {
+    for (const candidate of expandedCandidates) {
         for (const mode of modes) {
             const expectedSignature = await generateSignature(candidate, mode);
             if (!expectedSignature) {
                 continue;
             }
 
-            if (signature.length !== expectedSignature.length) {
-                continue;
-            }
+            for (const signature of signatures) {
+                if (signature.length !== expectedSignature.length) {
+                    continue;
+                }
 
-            if (signature === expectedSignature) {
-                return true;
+                if (signature === expectedSignature) {
+                    return true;
+                }
             }
         }
     }

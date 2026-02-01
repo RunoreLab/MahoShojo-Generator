@@ -169,11 +169,17 @@ export interface PvpWinnerResolution {
   error?: string | null;
 }
 
-export type PvpScenarioSelection = {
-  kind: 'data_card';
-  id: string;
-  updatedAt: string | null;
-  name: string | null;
-  isPublic: boolean | null;
-  author: string | null;
-};
+export type PvpScenarioSelection =
+  | {
+      kind: 'data_card';
+      id: string;
+      updatedAt: string | null;
+      name: string | null;
+      isPublic: boolean | null;
+      author: string | null;
+    }
+  | {
+      kind: 'preset';
+      filename: string;
+      name: string | null;
+    };

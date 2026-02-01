@@ -80,11 +80,6 @@ export interface GenerateParams {
 }
 
 export interface ComfyUIAppParams {
-  105?: {
-    class_type: string;
-    inputs: {
-      text: string;
-    };
-  };
   workflowUuid?: string;
+  [key: string]: unknown;
 }

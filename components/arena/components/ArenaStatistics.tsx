@@ -2,6 +2,7 @@
 
 import Leaderboard from '@/components/Leaderboard';
 import { StatsData } from '@/pages/api/get-stats';
+import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 
 interface ArenaStatisticsProps {
   stats: StatsData | undefined;
@@ -26,23 +27,32 @@ export function ArenaStatistics({ stats, isLoading, presetInfo }: ArenaStatistic
 
   return (
     <div className="card mt-6">
-      <h3 className="text-xl font-bold text-gray-800 text-center mb-4">竞技场数据中心</h3>
-      <div className="grid grid-cols-2 gap-4 text-center mb-6">
-        <div className="p-4 bg-gray-100 rounded-lg">
-          <p className="text-2xl font-bold text-pink-500">{stats.totalBattles || 0}</p>
-          <p className="text-sm text-gray-600">故事/战斗总场数</p>
+      <CollapsibleSection
+        title="竞技场数据中心"
+        description="统计数据较长，默认收起以减少滚动"
+        defaultOpen={false}
+        storageKey="arena.section.statistics.open"
+        variant="plain"
+        titleClassName="text-xl font-bold text-gray-800 text-center"
+        headerClassName="mb-4"
+      >
+        <div className="grid grid-cols-2 gap-4 text-center mb-6">
+          <div className="p-4 bg-gray-100 rounded-lg">
+            <p className="text-2xl font-bold text-pink-500">{stats.totalBattles || 0}</p>
+            <p className="text-sm text-gray-600">故事/战斗总场数</p>
+          </div>
+          <div className="p-4 bg-gray-100 rounded-lg">
+            <p className="text-2xl font-bold text-blue-500">{stats.totalParticipants || 0}</p>
+            <p className="text-sm text-gray-600">总登场人次</p>
+          </div>
         </div>
-        <div className="p-4 bg-gray-100 rounded-lg">
-          <p className="text-2xl font-bold text-blue-500">{stats.totalParticipants || 0}</p>
-          <p className="text-sm text-gray-600">总登场人次</p>
+        <div className="grid md:grid-cols-2 gap-4">
+          <Leaderboard title="🏆 胜率排行榜" data={stats.winRateRank || []} presetInfo={presetInfo} />
+          <Leaderboard title="⚔️ 登场数排行榜" data={stats.participationRank || []} presetInfo={presetInfo} />
+          <Leaderboard title="🥇 胜利榜" data={stats.winsRank || []} presetInfo={presetInfo} />
+          <Leaderboard title="💔 战败榜" data={stats.lossesRank || []} presetInfo={presetInfo} />
         </div>
-      </div>
-      <div className="grid md:grid-cols-2 gap-4">
-        <Leaderboard title="🏆 胜率排行榜" data={stats.winRateRank || []} presetInfo={presetInfo} />
-        <Leaderboard title="⚔️ 登场数排行榜" data={stats.participationRank || []} presetInfo={presetInfo} />
-        <Leaderboard title="🥇 胜利榜" data={stats.winsRank || []} presetInfo={presetInfo} />
-        <Leaderboard title="💔 战败榜" data={stats.lossesRank || []} presetInfo={presetInfo} />
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }

@@ -1,0 +1,76 @@
+<svg width="360" height="80" viewBox="0 0 360 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="titleGradientParty" x1="0" y1="0" x2="360" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.98"/>
+      <stop offset="0.5" stop-color="#FDF2F8" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.98"/>
+    </linearGradient>
+    <filter id="shadowParty" x="-20%" y="-50%" width="140%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0F172A" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#shadowParty)">
+    <path
+      d="M46 18C40.4772 18 36 22.4772 36 28V52C36 57.5228 40.4772 62 46 62H314C319.523 62 324 57.5228 324 52V28C324 22.4772 319.523 18 314 18H46Z"
+      fill="#0F172A"
+      fill-opacity="0.18"
+    />
+    <path
+      d="M48 22C43.5817 22 40 25.5817 40 30V50C40 54.4183 43.5817 58 48 58H312C316.418 58 320 54.4183 320 50V30C320 25.5817 316.418 22 312 22H48Z"
+      fill="#FFFFFF"
+      fill-opacity="0.12"
+      stroke="#FFFFFF"
+      stroke-opacity="0.30"
+    />
+
+    <!-- 组队图标 -->
+    <g transform="translate(58, 23)">
+      <circle cx="14" cy="12" r="7" fill="#FFFFFF" fill-opacity="0.92" />
+      <circle cx="34" cy="12" r="7" fill="#FFFFFF" fill-opacity="0.86" />
+      <circle cx="24" cy="24" r="7" fill="#FFFFFF" fill-opacity="0.78" />
+      <path
+        d="M4 40C4 33.3726 9.37258 28 16 28H20C26.6274 28 32 33.3726 32 40"
+        stroke="#0F172A"
+        stroke-opacity="0.28"
+        stroke-width="2.5"
+        stroke-linecap="round"
+      />
+      <path
+        d="M24 40C24 34.4772 28.4772 30 34 30H36C41.5228 30 46 34.4772 46 40"
+        stroke="#0F172A"
+        stroke-opacity="0.22"
+        stroke-width="2.5"
+        stroke-linecap="round"
+      />
+      <path
+        d="M20 36H28"
+        stroke="#0F172A"
+        stroke-opacity="0.28"
+        stroke-width="2.5"
+        stroke-linecap="round"
+      />
+      <path
+        d="M24 32V40"
+        stroke="#0F172A"
+        stroke-opacity="0.28"
+        stroke-width="2.5"
+        stroke-linecap="round"
+      />
+    </g>
+
+    <text
+      x="220"
+      y="44"
+      text-anchor="middle"
+      dominant-baseline="middle"
+      font-size="28"
+      font-weight="800"
+      letter-spacing="2"
+      fill="url(#titleGradientParty)"
+    >
+      角色组队
+    </text>
+  </g>
+</svg>
+

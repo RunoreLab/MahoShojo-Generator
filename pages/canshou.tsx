@@ -1,5 +1,5 @@
 // pages/canshou.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useCooldown } from '../lib/cooldown';
@@ -16,8 +16,11 @@ import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { ThemeImage } from '@/components/shared/ThemeImage';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 // 定义问卷和问题的类型
 interface Question {
@@ -136,6 +139,7 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ data, mode, recommended
 };
 
 const LOCAL_STORAGE_KEY = 'canshouAnswersDraft'; // 定义本地存储的键
+const CANSHOU_PREFERENCE_KEY = 'mahoshojo.canshou.preferences.v1';
 
 const CanshouPage: React.FC = () => {
   const router = useRouter();
@@ -210,9 +214,74 @@ const CanshouPage: React.FC = () => {
     const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(userAgent);
     const detectedType: DeviceType = isMobileDevice ? 'mobile' : 'desktop';
     setDeviceType(detectedType);
-    setImageSaveMode(isMobileDevice ? 'modal' : 'download');
-    setJsonSaveMode(isMobileDevice ? 'text' : 'download');
+    const defaultImageMode: ImageSaveMode = isMobileDevice ? 'modal' : 'download';
+    const defaultJsonMode: JsonSaveMode = isMobileDevice ? 'text' : 'download';
+
+    try {
+      const saved = window.localStorage.getItem(CANSHOU_PREFERENCE_KEY);
+      if (!saved) {
+        setImageSaveMode(defaultImageMode);
+        setJsonSaveMode(defaultJsonMode);
+        return;
+      }
+      const parsed = JSON.parse(saved);
+      if (parsed?.generationMode === 'stream' || parsed?.generationMode === 'non-stream') {
+        setGenerationMode(parsed.generationMode);
+      }
+      if (typeof parsed?.selectedLanguage === 'string') {
+        setSelectedLanguage(parsed.selectedLanguage);
+      }
+      if (parsed?.imageSaveMode === 'download' || parsed?.imageSaveMode === 'modal') {
+        setImageSaveMode(parsed.imageSaveMode);
+      } else {
+        setImageSaveMode(defaultImageMode);
+      }
+      if (parsed?.jsonSaveMode === 'download' || parsed?.jsonSaveMode === 'text') {
+        setJsonSaveMode(parsed.jsonSaveMode);
+      } else {
+        setJsonSaveMode(defaultJsonMode);
+      }
+      if (typeof parsed?.showLanguageSection === 'boolean') {
+        setShowLanguageSection(parsed.showLanguageSection);
+      }
+      if (typeof parsed?.showBulkFillSection === 'boolean') {
+        setShowBulkFillSection(parsed.showBulkFillSection);
+      }
+      if (typeof parsed?.showAnswerReview === 'boolean') {
+        setShowAnswerReview(parsed.showAnswerReview);
+      }
+    } catch (error) {
+      console.warn('读取残兽生成偏好失败', error);
+      setImageSaveMode(defaultImageMode);
+      setJsonSaveMode(defaultJsonMode);
+    }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const payload = {
+        generationMode,
+        selectedLanguage,
+        imageSaveMode,
+        jsonSaveMode,
+        showLanguageSection,
+        showBulkFillSection,
+        showAnswerReview,
+      };
+      window.localStorage.setItem(CANSHOU_PREFERENCE_KEY, JSON.stringify(payload));
+    } catch {
+      // localStorage 可能不可用，忽略
+    }
+  }, [
+    generationMode,
+    selectedLanguage,
+    imageSaveMode,
+    jsonSaveMode,
+    showLanguageSection,
+    showBulkFillSection,
+    showAnswerReview,
+  ]);
 
   // 加载问卷文件
   useEffect(() => {
@@ -271,6 +340,22 @@ const CanshouPage: React.FC = () => {
     setCurrentAnswer(answers[question.id] || '');
   }, [currentQuestionIndex, questionnaire, answers]);
 
+  const handleCurrentAnswerChange = (value: string) => {
+    if (!questionnaire) {
+      setCurrentAnswer(value);
+      setError(null);
+      return;
+    }
+    const question = questionnaire.questions[currentQuestionIndex];
+    setCurrentAnswer(value);
+    setError(null);
+    if (!question) return;
+    setAnswers(prevAnswers => {
+      if (prevAnswers[question.id] === value) return prevAnswers;
+      return { ...prevAnswers, [question.id]: value };
+    });
+  };
+
 
   const proceedToNext = (answer: string) => {
     const currentQuestion = questionnaire!.questions[currentQuestionIndex];
@@ -322,6 +407,25 @@ const CanshouPage: React.FC = () => {
     setCurrentAnswer(option);
     setTimeout(() => proceedToNext(option), 100);
   };
+
+  const resignDataCard = useCallback(async (data: any) => {
+    const response = await fetch('/api/resign-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null as any);
+      if (errorData?.shouldRedirect) {
+        router.push('/arrested');
+        return null;
+      }
+      throw new Error(errorData?.message || '签名服务器认证失败');
+    }
+
+    return response.json();
+  }, [router]);
 
   const handleNavigateToQuestion = (index: number) => {
     if (!questionnaire) return;
@@ -375,21 +479,22 @@ const CanshouPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null as any);
+        const { payload } = await readJsonOrTextFromResponse(response);
+        const errorData = payload && typeof payload === 'object' ? (payload as any) : null;
         if (errorData?.shouldRedirect) {
           router.push('/arrested');
           return;
         }
-        const serverMessage = errorData?.message || errorData?.error;
-        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+        const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
+        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
       if (generationMode === 'stream') {
         const contentType = (response.headers.get('content-type') || '').toLowerCase();
         if (contentType.includes('application/json') || contentType.includes('+json')) {
-          const errorData = await response.json().catch(() => null as any);
-          const serverMessage = errorData?.message || errorData?.error;
-          throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+          const { payload } = await readJsonOrTextFromResponse(response);
+          const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
+          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 
         setStreamingMarkdown('');
@@ -403,7 +508,17 @@ const CanshouPage: React.FC = () => {
           defaultName: '残兽',
         });
 
-        setStreamedGeneralCard(card);
+        let signedCard = card;
+        try {
+          const result = await resignDataCard(card);
+          if (!result) return;
+          signedCard = result;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '签名失败';
+          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+        }
+
+        setStreamedGeneralCard(signedCard);
         startCooldown();
         return;
       }
@@ -538,7 +653,7 @@ const CanshouPage: React.FC = () => {
         <div className="container">
           <div className="card">
             <div className="text-center mb-4">
-              <img src="/beast-logo.svg" className="w-full px-8" alt="残兽调查" />
+              <ThemeImage lightSrc="/beast-logo.svg" darkSrc="/beast-logo-white.svg" className="w-full px-8" alt="残兽调查" />
               <p className="text-gray-600 mt-2">{questionnaire.description}</p>
             </div>
 
@@ -664,7 +779,7 @@ const CanshouPage: React.FC = () => {
                   <div className="input-group mt-4">
                     <textarea
                       value={currentAnswer}
-                      onChange={(e) => setCurrentAnswer(e.target.value)}
+                      onChange={(e) => handleCurrentAnswerChange(e.target.value)}
                       placeholder={currentQuestion.placeholder || '请在此输入你的想法...'}
                       className="input-field resize-y min-h-[6rem]"
                       maxLength={currentMaxLength || undefined}
@@ -855,9 +970,9 @@ const CanshouPage: React.FC = () => {
                         >
                           {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
                         </button>
-                        <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                        <div className="mt-2 pt-6 border-t border-gray-200">
                           <p className="text-sm text-gray-600 mb-2">保存好你的档案了吗？</p>
-                          <Link href="/battle" className="footer-link" style={{ color: '#c026d3', fontSize: '1.125rem' }}>
+                          <Link href="/battle" className="footer-link text-lg text-purple-600">
                             前往竞技场，让它大闹一场！→
                           </Link>
                         </div>
@@ -934,7 +1049,7 @@ const CanshouPage: React.FC = () => {
                           <p className="mt-2 text-xs text-gray-500">两种方式都可跨终端使用，可随时切换体验。</p>
                         </div>
 
-                        <p className="text-xs text-gray-400 text-center">提示：偏好设置仅在当前页面有效，切换不会触发重新生成。</p>
+                        <p className="text-xs text-gray-400 text-center">提示：偏好设置已保存到浏览器，刷新后仍会保留；切换不会触发重新生成。</p>
                       </div>
                     </div>
                     <div className="card" style={{ marginTop: '1rem' }}>
@@ -964,11 +1079,11 @@ const CanshouPage: React.FC = () => {
                         >
                           {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
                         </button>
-                        <div style={{ marginTop: '0.5rem', paddingTop: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                        <div className="mt-2 pt-6 border-t border-gray-200">
                           <p className="text-sm text-gray-600 mb-2">
                             保存好你的档案了吗？
                           </p>
-                          <Link href="/battle" className="footer-link" style={{ color: '#c026d3', fontSize: '1.125rem' }}>
+                          <Link href="/battle" className="footer-link text-lg text-purple-600">
                             前往竞技场，让它大闹一场！→
                           </Link>
                         </div>

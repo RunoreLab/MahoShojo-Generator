@@ -15,6 +15,20 @@ describe('data-card-converter', () => {
     expect(blank.content.length).toBeGreaterThan(0);
   });
 
+  it('does not attach arena fields when creating new blank character cards', () => {
+    const magicalGirl = createBlankDataCard('magical-girl') as any;
+    expect('current_state' in magicalGirl).toBe(false);
+    expect('arena_history' in magicalGirl).toBe(false);
+
+    const canshou = createBlankDataCard('canshou') as any;
+    expect('current_state' in canshou).toBe(false);
+    expect('arena_history' in canshou).toBe(false);
+
+    const general = createBlankDataCard('general') as any;
+    expect('current_state' in general).toBe(false);
+    expect('arena_history' in general).toBe(false);
+  });
+
   it('creates a blank general scenario card with default content', () => {
     const blank = createBlankDataCard('general-scenario');
     expect(blank.templateId).toBe('通用情景');
@@ -69,6 +83,26 @@ describe('data-card-converter', () => {
     const { data: magical } = convertDataCard(source, 'magical-girl', 'magical-girl');
     expect(magical.analysis?.predictionBasis).toContain('unknownField');
     expect(magical.analysis?.predictionBasis).toContain('额外的设定');
+  });
+
+  it('does not inject arena fields when converting to magical girl/canshou', () => {
+    const sourceMg = {
+      codename: '未写入竞技场的少女',
+      appearance: { outfit: '外套' },
+    };
+
+    const { data: magical } = convertDataCard(sourceMg, 'magical-girl', 'unknown');
+    expect('current_state' in magical).toBe(false);
+    expect('arena_history' in magical).toBe(false);
+
+    const sourceCs = {
+      name: '未写入竞技场的残兽',
+      appearance: '雾状',
+    };
+
+    const { data: canshou } = convertDataCard(sourceCs, 'canshou', 'unknown');
+    expect('current_state' in canshou).toBe(false);
+    expect('arena_history' in canshou).toBe(false);
   });
 
   it('validateDataCard can detect general character type', () => {

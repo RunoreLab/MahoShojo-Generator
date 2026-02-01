@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getEncyclopediaHelpForError, inferEncyclopediaSlugForError } from '@/lib/error-help';
+import { getEncyclopediaHelpForError, inferEncyclopediaSlugForError, inferErrorCategoryForError } from '@/lib/error-help';
 
 describe('error-help', () => {
   test('infer by status: 524', () => {
@@ -75,5 +75,17 @@ describe('error-help', () => {
     const help = getEncyclopediaHelpForError({ message: 'Cloudflare 超时（HTTP 524），请稍后重试。' });
     expect(help?.slug).toBe('cloudflare-524-timeout');
     expect(help?.title).toContain('524');
+  });
+
+  test('category: timeout', () => {
+    expect(inferErrorCategoryForError({ status: 524, message: 'whatever' })?.id).toBe('timeout');
+  });
+
+  test('category: ai api call error', () => {
+    expect(inferErrorCategoryForError({ status: 500, message: '失败:AI_APICallError：余额不足(HTTP500)' })?.id).toBe('ai_api_call');
+  });
+
+  test('category: network', () => {
+    expect(inferErrorCategoryForError({ message: 'TypeError: Failed to fetch' })?.id).toBe('network');
   });
 });

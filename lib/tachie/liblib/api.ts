@@ -1,17 +1,30 @@
 import type { GenerateResponse, StatusResponse } from "./types";
 import { GenerateStatus, getStatusDescription } from "./types";
 
+export type LibLibTachieMode = 'tachie' | 'illustration';
+
+export type LibLibTachieGenerateOptions = {
+  mode?: LibLibTachieMode;
+  workflowUuid?: string;
+  templateUuid?: string;
+  promptNodeId?: number;
+  negativePrompt?: string;
+  negativePromptNodeId?: number;
+};
+
 /**
  * 文生图接口 - 提交生图任务
  * @param accessKey LibLib Access Key
  * @param secretKey LibLib Secret Key
  * @param prompt 提示词
+ * @param options 可选：模式/工作流/节点参数（用于不同工作流与插画生成）
  * @returns 生图任务UUID
  */
 export const generateText2Image = async (
   accessKey: string,
   secretKey: string,
-  prompt: string
+  prompt: string,
+  options?: LibLibTachieGenerateOptions
 ): Promise<string> => {
   const response = await fetch("/api/tachie/generate", {
     method: "POST",
@@ -22,6 +35,7 @@ export const generateText2Image = async (
       accessKey,
       secretKey,
       prompt,
+      ...(options && typeof options === 'object' ? options : {}),
     }),
   });
 

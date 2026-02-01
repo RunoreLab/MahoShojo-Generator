@@ -5,11 +5,13 @@ import questionnaire from '@/public/questionnaire.json';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import { buildPolicySafetyCheckText } from '@/lib/content-safety/server';
 import { NextRequest } from 'next/server';
 import { AdjudicationResult, NarrativeHistoryEntry } from '@/types/arena';
 import { verifySignature, generateSignature } from '@/lib/signature';
 import { getSystemPrompt } from '@/lib/arena/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
+import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
 	import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
 	import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
@@ -38,7 +40,6 @@ import {
 } from '@/lib/arena/battle-report-log-utils';
 import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
-import { buildRankedMatchExtraJson, validateRankedMatchTicketForRequest } from '@/lib/arena/ranked-match';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
 
@@ -73,11 +74,23 @@ async function handler(req: NextRequest): Promise<Response> {
                 return trimmed ? trimmed : null;
             };
 
+            const normalizeOptionalBoolean = (value: unknown, fallback: boolean): boolean => {
+                if (typeof value === 'boolean') return value;
+                if (typeof value === 'number' && Number.isFinite(value)) return value !== 0;
+                if (typeof value === 'string') {
+                    const normalized = value.trim().toLowerCase();
+                    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true;
+                    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false;
+                }
+                return fallback;
+            };
+
             const body = await req.json();
             const {
                 combatants,
             selectedLevel,
             mode = 'classic',
+            arenaFreeRankingEnabled,
             userGuidance,
             internalGuidance,
             scenario,
@@ -95,7 +108,6 @@ async function handler(req: NextRequest): Promise<Response> {
             narrativeHistory,
             adjudicationEvents,
             storyLength,
-            rankedMatch,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioSourceDataCardId,
@@ -103,6 +115,8 @@ async function handler(req: NextRequest): Promise<Response> {
               pvpContext,
               forceStreamMeta,
 	        } = body;
+
+            const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
 
 	          const normalizedAuxScenarios = Array.isArray(auxScenarios)
 	              ? auxScenarios.filter((item) => item && typeof item === 'object')
@@ -313,24 +327,14 @@ async function handler(req: NextRequest): Promise<Response> {
             inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
         });
 
-        const policy = appConfig.SAFETY_CHECK_POLICY;
-        const contentsToAIFlag = inputsToCheck.filter(input => {
-            const checkPolicy = policy[input.type];
-            return checkPolicy === 'all' || (checkPolicy === 'non-native-only' && !input.isNative);
-        });
-
-        const textForFinalCheck: string[] = [];
-
-        if (contentsToAIFlag.length > 0 && appConfig.ENABLE_BUNDLE_SAFETY_CHECK) {
-            log.info('触发"连坐"机制，打包所有非原生内容进行检查。');
-            const nonNativeContents = inputsToCheck.filter(i => !i.isNative).map(i => i.content);
-            textForFinalCheck.push(...nonNativeContents);
-        } else {
-            textForFinalCheck.push(...contentsToAIFlag.map(i => i.content));
-        }
-
-        const combinedText = textForFinalCheck.join('\n\n');
-        const needsWorldviewWarning = false;
+	        const { combinedText, usedBundle } = buildPolicySafetyCheckText(inputsToCheck, {
+	            policy: appConfig.SAFETY_CHECK_POLICY,
+	            enableBundle: appConfig.ENABLE_BUNDLE_SAFETY_CHECK,
+	        });
+	        if (usedBundle) {
+	            log.info('触发"连坐"机制，打包所有非原生内容进行检查。');
+	        }
+	        const needsWorldviewWarning = false;
 
 	        if (combinedText) {
 	            if (appConfig.ENABLE_SENSITIVE_WORD_FILTER && (await quickCheck(combinedText)).hasSensitiveWords) {
@@ -393,6 +397,7 @@ async function handler(req: NextRequest): Promise<Response> {
 		                            extraJson: compactExtraJson({
 		                                errorMessage: 'rejected by sensitive input filter',
 		                                rejectedBy: 'sensitive-input',
+		                                arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
 		                                readNarrativeHistory: resolvedReadNarrativeHistory,
 		                                narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
 		                            }),
@@ -451,24 +456,28 @@ async function handler(req: NextRequest): Promise<Response> {
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
         const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
         const isStrictRankedMatchRequest =
-            Boolean(rankedMatch) && typeof rankedMatch === 'object' && (rankedMatch as any).queue === 'strict';
+            mode === 'classic'
+            && String(language ?? '').trim() === 'zh-CN'
+            && !String(selectedLevel ?? '').trim()
+            && !String(userGuidance ?? '').trim()
+            && resolvedReadArenaHistory === false
+            && resolvedReadCurrentState === false
+            && resolvedReadNarrativeHistory === false
+            && (!Array.isArray(adjudicationEvents) || adjudicationEvents.length === 0)
+            && Array.isArray(combatants)
+            && combatants.length === 2
+            && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
         const shouldPreferLiteModelInStrict =
             isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
         const modelOverrideFallbacks: Array<string | undefined> = customModelOverride
             ? [customModelOverride]
             : (shouldPreferLiteModelInStrict
-                ? [
-                    'gemma-3-27b-it',
-                    'gemini-2.5-flash-lite',
-                    'gemma-3-12b-it',
-                    'gemini-2.5-flash',
-                ]
+                ? [...STRICT_RANKED_MODEL_FALLBACKS]
                 : [undefined]);
 
         const generationConfig: RawGenerationConfig = {
             prompt: `${systemPrompt}\n\n${prompt}`,
             temperature: 0.9,
-            maxOutputTokens: 8192,
         };
 
         let usedModelOverride: string | undefined;
@@ -568,17 +577,6 @@ async function handler(req: NextRequest): Promise<Response> {
 
             const recordPromise = (async () => {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
-                const rankedMatchValidation = await validateRankedMatchTicketForRequest({
-                    ticket: rankedMatch,
-                    userId: user?.id ?? null,
-                    combatants,
-                    mode,
-                    selectedLevel,
-                    language,
-                    storyLength,
-                    nowMs: startedAtMs,
-                });
-                const rankedMatchExtraJson = buildRankedMatchExtraJson(rankedMatchValidation);
                 const usage = await resolvedUsagePromise;
 
                 const shieldResult = applyShieldWords(outputPreview);
@@ -664,10 +662,11 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    outputHasShieldWords: shieldResult.hasShieldWords,
 	                    extraJson: compactExtraJson({
 	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+                            arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
+                            arenaStrictPolicy: isStrictRankedMatchRequest ? '1+3:v1' : null,
 	                        resolvedModelOverride: usedModelOverride ?? null,
 	                        readNarrativeHistory: resolvedReadNarrativeHistory,
 	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
-                            ...(rankedMatchExtraJson ?? {}),
 	                    }),
 	                });
 

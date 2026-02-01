@@ -16,7 +16,7 @@ const log = getLogger('ai');
 export interface RawGenerationConfig {
     prompt: string;
     temperature: number;
-    maxOutputTokens: number;
+    maxOutputTokens?: number;
     modelOverride?: string; // 新增：可选的模型覆盖参数
 }
 
@@ -242,6 +242,10 @@ export async function generateWithStreamAI(
                 }
 
                 const llm = createAIClient(provider);
+                const maxOutputTokensOption =
+                    typeof generationConfig.maxOutputTokens === 'number'
+                        ? { maxOutputTokens: generationConfig.maxOutputTokens }
+                        : {};
 
                 // 捕获 onError 回调中的错误，用于后续提取错误信息
                 let capturedError: any = null;
@@ -255,8 +259,8 @@ export async function generateWithStreamAI(
                         },
                     ],
                     temperature: generationConfig.temperature,
-                    maxOutputTokens: generationConfig.maxOutputTokens,
                     maxRetries: 0,
+                    ...maxOutputTokensOption,
                     onError: ({ error }) => {
                         capturedError = error;
                         log.error(`流式传输过程中出错: 提供商: ${provider.name} 模型: ${selectedModel}`, { error });

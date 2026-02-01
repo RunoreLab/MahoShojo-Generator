@@ -4,8 +4,8 @@ import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
 import { getLogger } from '@/lib/logger';
-import { quickCheck } from '@/lib/sensitive-word-filter';
-import { config as appConfig, type AIProvider } from '@/lib/config';
+import { type AIProvider } from '@/lib/config';
+import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 
@@ -54,6 +54,7 @@ async function handler(req: NextRequest): Promise<Response> {
     const {
       language = 'zh-CN',
       userGuidance = '',
+      narrativeHistory = '',
       fieldsToPreserve = [],
       isDowngrade = false,
       allowReshapeNames = false,
@@ -64,6 +65,7 @@ async function handler(req: NextRequest): Promise<Response> {
     } = body ?? {};
 
     const finalUserGuidance = typeof userGuidance === 'string' ? userGuidance.trim().slice(0, 4000) : '';
+    const finalNarrativeHistory = typeof narrativeHistory === 'string' ? narrativeHistory.trim().slice(0, 8000) : '';
     const normalizedFieldsToPreserve = Array.isArray(fieldsToPreserve)
       ? fieldsToPreserve.filter((item: unknown) => typeof item === 'string' && item.trim()).slice(0, 64)
       : [];
@@ -75,16 +77,14 @@ async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    if (appConfig.ENABLE_SENSITIVE_WORD_FILTER) {
-      const checkText = `${JSON.stringify(originalCharacterData)} ${finalUserGuidance}`;
-      const checkResult = await quickCheck(checkText);
-      if (checkResult.hasSensitiveWords) {
-        return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '上传的角色档案或引导内容包含危险符文' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-    }
+    const checkText = `${JSON.stringify(originalCharacterData)} ${finalUserGuidance} ${finalNarrativeHistory}`;
+    const safetyResponse = await enforceTextSafety({
+      text: checkText,
+      log,
+      enableAiSafetyCheck: false,
+      sensitiveWordReason: '上传的角色档案或引导内容包含危险符文',
+    });
+    if (safetyResponse) return safetyResponse;
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;
@@ -150,6 +150,7 @@ async function handler(req: NextRequest): Promise<Response> {
       typeof sourceTemplate === 'string' && sourceTemplate.trim() ? `- 来源模板: ${sourceTemplate.trim()}` : null,
       typeof targetTemplate === 'string' && targetTemplate.trim() ? `- 目标模板: ${targetTemplate.trim()}` : null,
       `- 允许重塑名称: ${allowReshapeNames === true ? '是' : '否'}`,
+      `- 叙事历史: ${finalNarrativeHistory ? '已提供' : '未提供'}`,
       normalizedFieldsToPreserve.length > 0 ? `- 勾选保留字段: ${normalizedFieldsToPreserve.join('、')}` : null,
     ].filter(Boolean).join('\n');
 
@@ -177,6 +178,9 @@ ${sourceJson}
 【用户引导】
 ${finalUserGuidance || '（无）'}
 
+【叙事历史（用户补充）】
+${finalNarrativeHistory || '（无）'}
+
 【附加提示】
 ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
 `.trim();
@@ -193,7 +197,6 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
       {
         prompt,
         temperature: 0.7,
-        maxOutputTokens: 4096,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       },
       providerOptions
@@ -211,4 +214,3 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
 }
 
 export default handler;
-

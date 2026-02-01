@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
+import { ChevronDown } from 'lucide-react';
 
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { TechBadge } from '@/components/ranking/TechBadge';
@@ -118,6 +119,7 @@ const pickTierBadge = (ratings?: { strict: ApiRating | null; free: ApiRating | n
 
 const formatIneligibleReasons = (reasons: string[]): string => {
   const map: Record<string, string> = {
+    'free-disabled': '未开启自由排位',
     'status-not-completed': '战报未完成',
     'combatant-count-not-2': '需 2 人对战',
     'ip-missing': '无法获取 IP',
@@ -152,6 +154,11 @@ const formatSkipReason = (reason: string | null): string => {
     'winner-ambiguous': '胜者无法匹配参战者',
     'daily-limit': '今日严格排位次数已达上限（按 UTC 00:00/北京时间 08:00 刷新）',
     'dedup-user-pair': '短时间同一对手重复对局（严格去重）',
+    'strict-card-missing': '数据卡不存在/已删除（严格排位不计分）',
+    'strict-not-character': '仅“角色”数据卡可参与严格排位计分',
+    'strict-not-public': '严格排位仅允许公开角色卡',
+    'strict-not-approved': '严格排位仅允许已审核通过的公开角色卡',
+    'strict-out-of-range': '对手分差过大（不计严格排位）',
     'dedup-ip-pair': '短时间同 IP 重复对局（自由去重）',
     'ratings-missing': '排位记录缺失',
     'rating-conflict': '排位并发冲突',
@@ -451,6 +458,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
     const isPlaceholder = 'id' in combatant;
     const key = getCombatantKey(combatant);
     const data = isPlaceholder ? null : (combatant as CombatantData);
+    const guidanceValue = data?.characterGuidance ?? '';
     const displayName = isPlaceholder ? combatant.filename : getCombatantDisplayName(data?.data);
     const entityKey = !isPlaceholder && data ? buildEntityKeyForCombatant(data) : null;
     const meta = entityKey ? metaByEntityKey.get(entityKey) : null;
@@ -513,7 +521,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                   )}
                   {!isPlaceholder && data?.wasCorrected && <span className="text-yellow-600 whitespace-nowrap">(格式已修正)</span>}
                   {!isPlaceholder && tierToShow && (
-                    <span className="flex items-center gap-1">
+                    <span className="flex flex-wrap items-center gap-1 min-w-0">
                       <TierBadge tier={tierToShow} />
                       {typeof techLevel === 'string' && techLevel.trim() ? (
                         <TechBadge mode="level" techScore={techScore} techLevel={techLevel} />
@@ -583,11 +591,11 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
 
             {!isPlaceholder && (
               <div className="mt-1 text-xs text-gray-600">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <span className="whitespace-nowrap">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+                  <span className="whitespace-normal break-words sm:whitespace-nowrap">
                     技术值：{typeof techScore === 'number' ? techScore : '-'}
                   </span>
-                  <span className="whitespace-nowrap">
+                  <span className="whitespace-normal break-words sm:whitespace-nowrap">
                     严格：{generationParticipant?.queues.strict.rating ?? meta?.ratings.strict?.rating ?? '-'}
                     {(() => {
                       const q = generationParticipant?.queues.strict;
@@ -611,7 +619,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                       return null;
                     })()}
                   </span>
-                  <span className="whitespace-nowrap">
+                  <span className="whitespace-normal break-words sm:whitespace-nowrap">
                     自由：{generationParticipant?.queues.free.rating ?? meta?.ratings.free?.rating ?? '-'}
                     {(() => {
                       const q = generationParticipant?.queues.free;
@@ -667,19 +675,31 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
               maxLength={100}
               disabled={isGenerating}
               placeholder="例如：谨慎试探、优先保护同伴、尽量不杀、被恐惧支配、隐藏身份等"
-              value={data?.characterGuidance ?? ''}
+              value={guidanceValue}
               onChange={(e) => updateCombatantCharacterGuidance((combatant as CombatantData).filename, e.target.value)}
             />
-            <div className="mt-1 flex justify-between items-center text-xs text-gray-500">
-              <span>{Array.from((data?.characterGuidance ?? '')).length}/100</span>
-              <button
-                type="button"
-                className="px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                onClick={() => setGuidanceOpenFor(null)}
-                disabled={isGenerating}
-              >
-                收起
-              </button>
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+              <span>{Array.from(guidanceValue).length}/100</span>
+              <div className="flex items-center gap-2">
+                {guidanceValue.trim() ? (
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50"
+                    onClick={() => updateCombatantCharacterGuidance((combatant as CombatantData).filename, '')}
+                    disabled={isGenerating}
+                  >
+                    清空
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+                  onClick={() => setGuidanceOpenFor(null)}
+                  disabled={isGenerating}
+                >
+                  收起
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -740,11 +760,16 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
             <div className="rounded-lg border border-gray-300 bg-white/50">
               <button
                 type="button"
-                className="w-full flex items-center justify-between px-2 py-2"
+                className="w-full flex flex-wrap items-center gap-2 px-2 py-2"
                 onClick={() => setUnassignedCollapsed((v) => !v)}
+                aria-expanded={!unassignedCollapsed}
+                aria-controls="arena-team-unassigned-content"
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-xs text-gray-700">{unassignedCollapsed ? '▶' : '▼'}</span>
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <ChevronDown
+                    className={`h-4 w-4 text-gray-700 transition-transform ${unassignedCollapsed ? '-rotate-90' : ''}`}
+                    aria-hidden
+                  />
                   <span className="font-semibold text-sm text-gray-700">未分队</span>
                   <span className="text-xs text-gray-500">({combatantsByTeam.unassigned.length})</span>
                 </div>
@@ -752,7 +777,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                 {teams.length > 0 && (
                   <select
                     defaultValue=""
-                    className="text-xs border border-gray-300 rounded px-1 py-1 bg-white disabled:opacity-50"
+                    className="text-xs border border-gray-300 rounded px-1 py-1 bg-white disabled:opacity-50 w-full sm:w-44 min-w-0 max-w-full truncate sm:ml-auto"
                     disabled={isGenerating || indexedCombatants.every((item) => !item.combatant.teamId)}
                     onChange={(e) => {
                       const value = e.currentTarget.value;
@@ -782,7 +807,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
               </button>
 
               {!unassignedCollapsed && (
-                <div className="p-2 pt-0 space-y-2">
+                <div id="arena-team-unassigned-content" className="p-2 pt-0 space-y-2">
                   {combatantsByTeam.unassigned.map((item) => renderCombatantRow(item.combatant, item.index))}
                 </div>
               )}
@@ -795,13 +820,18 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
 
             return (
               <div key={team.id} className="rounded-lg border border-gray-300 bg-white/50">
-                <div className="flex items-center justify-between px-2 py-2 gap-2">
-                  <button
-                    type="button"
-                    className="flex items-center gap-2 min-w-0"
-                    onClick={() => toggleTeamCollapsed(team.id)}
-                  >
-                    <span className="text-xs text-gray-700">{isCollapsed ? '▶' : '▼'}</span>
+              <div className="flex flex-wrap items-center gap-2 px-2 py-2">
+                <button
+                  type="button"
+                  className="flex items-center gap-2 min-w-0 flex-1"
+                  onClick={() => toggleTeamCollapsed(team.id)}
+                  aria-expanded={!isCollapsed}
+                  aria-controls={`arena-team-${team.id}-content`}
+                >
+                    <ChevronDown
+                      className={`h-4 w-4 text-gray-700 transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
+                      aria-hidden
+                    />
                     {editingTeamId === team.id ? (
                       <input
                         className="text-sm font-semibold text-gray-700 border border-gray-300 rounded px-2 py-1 bg-white w-44"
@@ -828,10 +858,10 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                     <span className="text-xs text-gray-500">({members.length})</span>
                   </button>
 
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex w-full sm:w-auto flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:ml-auto min-w-0">
                     <select
                       defaultValue=""
-                      className="text-xs border border-gray-300 rounded px-1 py-1 bg-white disabled:opacity-50"
+                      className="text-xs border border-gray-300 rounded px-1 py-1 bg-white disabled:opacity-50 w-full sm:w-44 min-w-0 max-w-full truncate"
                       disabled={isGenerating || indexedCombatants.length === 0}
                       onChange={(e) => {
                         const value = e.currentTarget.value;
@@ -881,7 +911,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
                 </div>
 
                 {!isCollapsed && (
-                  <div className="p-2 pt-0 space-y-2">
+                  <div id={`arena-team-${team.id}-content`} className="p-2 pt-0 space-y-2">
                     {members.length === 0 ? (
                       <div className="text-xs text-gray-500 px-1 py-2">暂无成员（可用右侧下拉框添加/转移）</div>
                     ) : (

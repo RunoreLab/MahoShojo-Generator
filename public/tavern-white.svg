@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="100" viewBox="0 0 240 100">
+  <g fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 30h36v42c0 6-4 10-10 10H38c-6 0-10-4-10-10V30z" />
+    <path d="M64 40h10c8 0 14 6 14 14s-6 14-14 14H64" />
+    <path d="M28 30h36" />
+    <path d="M36 22h20" />
+  </g>
+  <text x="96" y="56" fill="#ffffff" font-family="Arial, sans-serif" font-size="26" font-weight="700">酒馆生态</text>
+  <text x="96" y="78" fill="#ffffff" opacity="0.9" font-family="Arial, sans-serif" font-size="12" font-weight="600">SillyTavern</text>
+</svg>
+

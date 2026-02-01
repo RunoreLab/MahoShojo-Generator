@@ -4,8 +4,8 @@ import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
 import { getLogger } from '@/lib/logger';
-import { quickCheck } from '@/lib/sensitive-word-filter';
-import { config as appConfig, type AIProvider } from '@/lib/config';
+import { type AIProvider } from '@/lib/config';
+import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
@@ -41,17 +41,14 @@ async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    if (appConfig.ENABLE_SENSITIVE_WORD_FILTER) {
-      const answersString = Object.values(answers as Record<string, unknown>).join(' ');
-      const checkResult = await quickCheck(answersString);
-      if (checkResult.hasSensitiveWords) {
-        log.warn('检测到敏感词，请求被拒绝', { detected: checkResult.detectedWords });
-        return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '在残兽问卷中使用了危险符文' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-    }
+    const answersString = Object.values(answers as Record<string, unknown>).join(' ');
+    const safetyResponse = await enforceTextSafety({
+      text: answersString,
+      log,
+      enableAiSafetyCheck: false,
+      sensitiveWordReason: '在残兽问卷中使用了危险符文',
+    });
+    if (safetyResponse) return safetyResponse;
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;
@@ -136,7 +133,6 @@ ${answerText}
       {
         prompt,
         temperature: 0.8,
-        maxOutputTokens: 4096,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       },
       providerOptions

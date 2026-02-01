@@ -53,6 +53,7 @@ export const useBattleStore = create<BattleStoreState>()(
       auxScenarios: [],
       battleMode: 'classic',
       generationMode: 'non-stream',
+      arenaFreeRankingEnabled: false,
       isStreaming: false,
       streamingMarkdown: null,
       streamReporterInfo: null,
@@ -77,10 +78,10 @@ export const useBattleStore = create<BattleStoreState>()(
       loadingPreset: null,
       userProviderConfig: null,
       stats: null,
-      rankedMatch: null,
 
       setBattleMode: (mode) => set({ battleMode: mode }),
       setGenerationMode: (mode) => set({ generationMode: mode }),
+      setArenaFreeRankingEnabled: (enabled) => set({ arenaFreeRankingEnabled: enabled }),
       setIsStreaming: (stateValue) => set({ isStreaming: stateValue }),
       setStreamingMarkdown: (markdown) => set({ streamingMarkdown: markdown }),
       setStreamReporterInfo: (info) => set({ streamReporterInfo: info }),
@@ -147,7 +148,6 @@ export const useBattleStore = create<BattleStoreState>()(
           streamAiModel: null,
           streamNarrativeHistoryReadCount: null,
           lastGenerationId: null,
-          rankedMatch: null,
         }),
 
       updateCombatantTeam: (identifier, teamId) =>
@@ -258,8 +258,6 @@ export const useBattleStore = create<BattleStoreState>()(
       setLoadingPreset: (filename) => set({ loadingPreset: filename }),
       setUserProviderConfig: (config) => set({ userProviderConfig: config }),
       setStats: (stats) => set({ stats }),
-      setRankedMatch: (match) => set({ rankedMatch: match }),
-      clearRankedMatch: () => set({ rankedMatch: null }),
     }),
     {
       name: 'arena-storage',
@@ -267,6 +265,7 @@ export const useBattleStore = create<BattleStoreState>()(
       partialize: (state) => ({
         battleMode: state.battleMode,
         generationMode: state.generationMode,
+        arenaFreeRankingEnabled: state.arenaFreeRankingEnabled,
         storyLength: state.storyLength,
         selectedLevel: state.selectedLevel,
         selectedLanguage: state.selectedLanguage,

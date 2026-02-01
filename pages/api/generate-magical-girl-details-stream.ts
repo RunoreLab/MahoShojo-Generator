@@ -5,11 +5,12 @@ import { NextRequest } from 'next/server';
 
 import questionnaire from '@/public/questionnaire.json';
 import { getLogger } from '@/lib/logger';
-import { quickCheck } from '@/lib/sensitive-word-filter';
 import { buildMagicalQuestionMeta } from '@/lib/questionnaires';
-import { config as appConfig, type AIProvider } from '@/lib/config';
+import { type AIProvider } from '@/lib/config';
+import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 
 const log = getLogger('api-gen-details-stream');
 
@@ -73,15 +74,13 @@ async function handler(req: NextRequest): Promise<Response> {
       normalizedAnswers.push(trimmedAnswer);
     }
 
-    if (appConfig.ENABLE_SENSITIVE_WORD_FILTER) {
-      const checkResult = await quickCheck(normalizedAnswers.join(' '));
-      if (checkResult.hasSensitiveWords) {
-        return new Response(JSON.stringify({ error: '输入内容不合规', shouldRedirect: true, reason: '在问卷中使用了危险符文' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-    }
+    const safetyResponse = await enforceTextSafety({
+      text: normalizedAnswers.join(' '),
+      log,
+      enableAiSafetyCheck: false,
+      sensitiveWordReason: '在问卷中使用了危险符文',
+    });
+    if (safetyResponse) return safetyResponse;
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;
@@ -140,6 +139,8 @@ async function handler(req: NextRequest): Promise<Response> {
       })
       .join('\n\n');
 
+    const flowers = getRandomFlowers();
+
     const prompt = `
 你是魔法国度的妖精，你准备通过问卷调查的形式，事先通过问卷结果分析某人成为魔法少女后的能力等各项素质。魔法少女的性格倾向、经历背景、行事准则等等都会影响到她们在魔法少女道路上的潜力和表现。
 
@@ -152,7 +153,10 @@ async function handler(req: NextRequest): Promise<Response> {
    - 名字：...
 5) 正文建议包含：外观、性格与信念、羁绊、能力与限制、战斗风格、魔装、奇境规则、繁开形态、关键经历、成长方向。
 
-你需要根据下列内容说明提供你的分析和预测，预测结果中的具体内容解释如下。
+代号说明：代号是魔法少女对应的一种花的名字，根据性格、理念匹配合适的花语对应的花名。可以从提供给你的花名中选取最合适的一个，也可以生成一个其他的更合适的花名或代号。
+可选花名与花语（供代号挑选）：\n${flowers}
+
+【世界观关键概念】你需要根据下列内容说明提供你的分析和预测，预测结果需要包含：
 1.魔力构装（简称魔装）：魔法少女的本相魔力所孕育的能力具现，是魔法少女能力体系的基础。一般呈现为魔法少女在现实生活中接触过，在冥冥之中与其命运关联或映射的物体，并且与魔法少女特色能力相关。例如，泡泡机形态的魔装可以使魔法少女制造魔法泡泡，而这些泡泡可以拥有产生幻象、缓冲防护、束缚困敌等能力。这部分的内容需包含魔装的名字（通常为2字词），魔装的形态，魔装的基本能力。
 2.奇境规则：魔法少女的本相灵魂所孕育的能力，是魔装能力的一体两面。奇境是魔装能力在规则层面上的升华，体现为与魔装相关的规则领域，而规则的倾向则会根据魔法少女的倾向而有不同的发展。例如，泡泡机形态的魔装升华而来的奇境规则可以是倾向于守护的“戳破泡泡的东西将会立即无效化”，也可以是倾向于进攻的“沾到身上的泡泡被戳破会立即遭受伤害”。
 3.繁开：是魔法少女魔装能力的二段进化与解放，无论是作为魔法少女的魔力衣装还是魔装的武器外形都会发生改变。需包含繁开状态魔装名（需要包含原魔装名的每个字），繁开后的进化能力，繁开后的魔装形态，繁开后的魔法少女衣装样式（在通常变身外观上的升级与改变）。
@@ -178,7 +182,6 @@ ${qaText}
       {
         prompt,
         temperature: 0.75,
-        maxOutputTokens: 4096,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       },
       providerOptions
@@ -196,4 +199,3 @@ ${qaText}
 }
 
 export default handler;
-

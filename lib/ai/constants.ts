@@ -56,33 +56,38 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
             {
+                value: 'glm-4.7',
+                label: 'GLM-4.7',
+                description: '智谱旗下通用模型的更新版本，适合复杂指令、多轮对话与综合写作场景。'
+            },
+            {
                 value: 'gemini-2.0-flash-exp',
                 label: 'Gemini 2.0 Flash Exp',
                 description: 'Google 旗下的上两代模型，但是真的好快！'
             },
             {
                 value: 'gemma-3-27b-it',
-                label: 'Gemma 3 27B IT (仅流式)',
+                label: 'Gemma 3 27B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅作为流式输出的备用选择。'
             },
             {
                 value: 'gemma-3-12b-it',
-                label: 'Gemma 3 12B IT (仅流式)',
+                label: 'Gemma 3 12B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（12B），建议仅作为流式输出的备用选择。'
             },
             {
                 value: 'gemma-3-4b-it',
-                label: 'Gemma 3 4B IT (仅流式)',
+                label: 'Gemma 3 4B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（4B），这已经有点挑战极限了。'
             },
             {
                 value: 'gemma-3-1b-it',
-                label: 'Gemma 3 1B IT (仅流式)',
+                label: 'Gemma 3 1B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（1B），这真的会有人用吗？！'
             },
             {
                 value: 'gemma-3-270m-it',
-                label: 'Gemma 3 270M IT (仅流式)',
+                label: 'Gemma 3 270M IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（270M），这真的会有人用吗？！'
             }
         ]
@@ -98,13 +103,13 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         models: [
             {
                 value: 'gemini-3-pro-preview',
-                label: '【大概已修复】Gemini 3.0 Pro (预览版)',
-                description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
+                label: 'Gemini 3.0 Pro (预览版)',
+                description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。'
             },
             {
                 value: 'gemini-3-flash-preview',
-                label: 'Gemini 3.0 Flash (推荐流式使用)',
-                description: 'Google 迄今为止最智能的模型系列的略轻量的模型。'
+                label: 'Gemini 3.0 Flash',
+                description: 'Google 迄今为止最智能的模型系列的略轻量的模型，推荐流式使用。'
             },
             {
                 value: 'gemini-2.5-pro',
@@ -127,51 +132,71 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
             {
-                value: 'deepseek-chat',
-                label: 'DeepSeek Chat (非流式可能存在问题)',
-                description: 'DeepSeek 最新版本。'
+                value: 'gpt-5.2',
+                label: 'GPT-5.2',
+                description: 'OpenAI 的新一代通用旗舰模型，适合高质量内容生成与复杂任务。'
+            },
+            {
+                value: 'claude-sonnet-4-5',
+                label: 'Claude Sonnet 4.5',
+                description: 'Anthropic 旗下主力模型之一，写作、推理与长文本表现稳定。'
+            },
+            {
+                value: 'grok-4',
+                label: 'Grok 4',
+                description: 'xAI 旗下通用模型，适合头脑风暴、创意发散与快速问答。'
+            },
+            {
+                value: 'glm-4.5',
+                label: 'GLM-4.5',
+                description: '智谱旗下的通用对话与内容创作模型，适合轻量日常任务。'
+            },
+            {
+                value: 'glm-4.6',
+                label: 'GLM-4.6',
+                description: '智谱旗下的通用指令模型，指令跟随与结构化输出更稳，适合中长文本任务。'
+            },
+            {
+                value: 'glm-4.7',
+                label: 'GLM-4.7',
+                description: '智谱旗下通用模型的更新版本，适合复杂指令、多轮对话与综合写作场景。'
             },
             {
                 value: 'deepseek-chat',
-                label: 'DeepSeek Chat (非流式可能存在问题)',
-                description: 'DeepSeek 最新版本。'
+                label: 'DeepSeek Chat',
+                description: '通用对话与分析模型，中文写作稳定；非流式可能不稳定，建议优先流式使用。'
             },
             {
                 value: 'doubao-seed-1-6',
-                label: 'Doubao Seed 1.6 (非流式可能存在问题)',
-                description: '字节跳动旗下的大模型。'
+                label: 'Doubao Seed 1.6',
+                description: '字节跳动旗下的通用对话模型，响应较快；非流式可能不稳定，建议优先流式使用。'
             },
             {
                 value: 'doubao-seed-1-6-flash',
-                label: 'Doubao Seed 1.6 Flash (非流式可能存在问题)',
-                description: '字节跳动旗下的大模型。'
+                label: 'Doubao Seed 1.6 Flash',
+                description: '更轻量的快速版本豆包，适合高频对话或草稿生成，质量略低于标准版；非流式可能不稳定，建议流式使用。'
             },
-            // {
-            //     value: 'deepseek-v3.2-exp',
-            //     label: 'DeepSeek V3.2 Exp',
-            //     description: 'DeepSeek 最新版本。'
-            // },
-            // {
-            //     value: 'deepseek-r1',
-            //     label: 'DeepSeek R1',
-            //     description: 'DeepSeek 思考版本。'
-            // },
-            // {
-            //     value: 'kimi-k2',
-            //     label: 'Kimi K2',
-            //     description: 'Moonshot 旗下的大模型，可以看出我懒得写描述了。'
-            // },
-            // {
-            //     value: 'doubao-seed-1-6',
-            //     label: 'Doubao Seed 1.6',
-            //     description: '怎么还有豆包(暂不稳定，不推荐使用)'
-            // },
+            {
+                value: 'deepseek-v3.2-exp',
+                label: 'DeepSeek V3.2 Exp',
+                description: 'DeepSeek 最新版本。'
+            },
+            {
+                value: 'deepseek-r1',
+                label: 'DeepSeek R1',
+                description: 'DeepSeek 思考版本。'
+            },
+            {
+                value: 'kimi-k2',
+                label: 'Kimi K2',
+                description: 'Moonshot 旗下的大模型，可以看出我懒得写描述了。'
+            },
         ]
     },
     {
         id: 'yiye',
-        name: '一叶知秋 API (测试)',
-        description: '一叶知秋 API 也为用户提供了国内外广泛的模型库。',
+        name: '一叶知秋 API',
+        description: '一叶知秋 API 为用户提供了国内外广泛的模型库，性价比高但不太稳定。',
         docsUrl: 'https://88996.cloud/register?aff=ITPX',
         baseUrl: 'https://88996.cloud/v1',
         type: 'openai',
@@ -180,12 +205,12 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'gemini-3-pro-preview',
                 label: 'Gemini 3.0 Pro (测试)',
-                description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
+                description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。'
             },
             {
                 value: 'gemini-3-flash-preview',
-                label: 'Gemini 3.0 Flash (推荐流式使用)',
-                description: 'Google 迄今为止最智能的模型系列的略轻量的模型。'
+                label: 'Gemini 3.0 Flash',
+                description: 'Google 迄今为止最智能的模型系列的略轻量的模型，推荐流式使用。'
             },
             {
                 value: 'gemini-2.5-pro',
@@ -207,16 +232,31 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 label: 'Gemini 2.5 Flash Lite',
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
-            // {
-            //     value: 'glm-4.6',
-            //     label: 'GLM-4.6',
-            //     description: '智谱旗下的大模型。'
-            // },
-            // {
-            //     value: 'deepseek-v3.2-exp',
-            //     label: 'DeepSeek V3.2 Exp',
-            //     description: 'DeepSeek 最新版本。'
-            // },
+            {
+                value: 'gpt-5.2',
+                label: 'GPT-5.2',
+                description: 'OpenAI 的新一代通用旗舰模型，适合高质量内容生成与复杂任务。'
+            },
+            {
+                value: 'claude-sonnet-4-5',
+                label: 'Claude Sonnet 4.5',
+                description: 'Anthropic 旗下主力模型之一，写作、推理与长文本表现稳定。'
+            },
+            {
+                value: 'grok-4',
+                label: 'Grok 4',
+                description: 'xAI 旗下通用模型，适合头脑风暴、创意发散与快速问答。'
+            },
+            {
+                value: 'glm-4.6',
+                label: 'GLM-4.6',
+                description: '通用指令模型，适合中文对话、总结与结构化输出。'
+            },
+            {
+                value: 'deepseek-ai/DeepSeek-V3.2',
+                label: 'DeepSeek V3.2',
+                description: '通用对话与推理模型，适合分析、总结与多轮交互。'
+            },
         ]
     },
     {
@@ -231,33 +271,28 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
                 label: '通义千问 3 235B',
-                description: '阿里旗下的通义千问大模型。'
+                description: '旗舰级指令模型，擅长中文对话、写作与复杂指令，适合长文本与结构化任务。'
             },
             {
                 value: 'ZhipuAI/GLM-4.6',
                 label: 'GLM-4.6',
-                description: '智谱旗下的大模型。'
+                description: '面向中文场景的通用模型，适合对话、改写与信息整理。'
             },
             {
                 value: 'deepseek-ai/DeepSeek-V3.2',
-                label: 'DeepSeek V3.2 (非流式可能存在问题)',
+                label: 'DeepSeek V3.2',
+                description: '通用对话与推理模型，适合分析、总结与多轮交互。'
+            },
+            {
+                value: 'MiniMax/MiniMax-M2',
+                label: 'MiniMax-M2',
                 description: 'DeepSeek 最新版本。'
-            }
-            // {
-            //     value: 'MiniMax/MiniMax-M2',
-            //     label: 'MiniMax-M2',
-            //     description: 'DeepSeek 最新版本。'
-            // },
-            // {
-            //     value: 'deepseek-ai/DeepSeek-V3.2',
-            //     label: 'DeepSeek V3.2',
-            //     description: 'DeepSeek 最新版本。'
-            // },
-            // {
-            //     value: 'moonshotai/Kimi-K2-Thinking',
-            //     label: 'Kimi K2 Thinking',
-            //     description: 'Moonshot 旗下的大模型，可以看出我懒得写描述了。'
-            // },
+            },
+            {
+                value: 'moonshotai/Kimi-K2-Thinking',
+                label: 'Kimi K2 Thinking',
+                description: 'Moonshot 旗下的大模型，可以看出我懒得写描述了。'
+            },
         ]
     },
     {
@@ -271,7 +306,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             {
                 value: 'gemini-3-pro-preview',
                 label: 'Gemini 3.0 Pro (预览版)',
-                description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。'
+                description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。'
             },
             {
                 value: 'gemini-3-flash-preview',
@@ -305,27 +340,27 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
             },
             {
                 value: 'gemma-3-27b-it',
-                label: 'Gemma 3 27B IT (仅流式)',
+                label: 'Gemma 3 27B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅用于流式生成的备用通道。'
             },
             {
                 value: 'gemma-3-12b-it',
-                label: 'Gemma 3 12B IT (仅流式)',
+                label: 'Gemma 3 12B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（12B），建议仅用于流式生成的备用通道。'
             },
             {
                 value: 'gemma-3-4b-it',
-                label: 'Gemma 3 4B IT (仅流式)',
+                label: 'Gemma 3 4B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（4B），这已经有点挑战极限了。'
             },
             {
                 value: 'gemma-3-1b-it',
-                label: 'Gemma 3 1B IT (仅流式)',
+                label: 'Gemma 3 1B IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（1B），这真的会有人用吗？！'
             },
             {
                 value: 'gemma-3-270m-it',
-                label: 'Gemma 3 270M IT (仅流式)',
+                label: 'Gemma 3 270M IT',
                 description: '更便宜但也更弱的 Gemma 3 指令模型（270M），这真的会有人用吗？！'
             },
         ]
@@ -339,8 +374,8 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'deepseek',
         mode: 'auto',
         models: [
-            { value: 'deepseek-chat', label: 'DeepSeek-V3.2', description: 'DeepSeek 最新版本。' },
-            { value: 'deepseek-reasoner', label: 'DeepSeek-V3.2 思考模式', description: 'DeepSeek 最新版本思考模式。' },
+            { value: 'deepseek-chat', label: 'DeepSeek-V3.2', description: '通用对话与分析模型，适合日常问答、写作与总结。' },
+            { value: 'deepseek-reasoner', label: 'DeepSeek-V3.2 思考模式', description: '思考模式会拉长推理链路，适合复杂问题与多步分析。' },
         ]
     },
     {
@@ -352,11 +387,77 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'openai',
         mode: 'auto',
         models: [
-            { value: 'google/gemini-3-pro-preview', label: 'Gemini 3.0 Pro (预览版)', description: 'Google 迄今为止最智能的模型系列，以先进的推理能力为基础，可将任何想法变为现实。' },
+            { value: 'google/gemini-3-pro-preview', label: 'Gemini 3.0 Pro (预览版)', description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。' },
             { value: 'google/gemini-3-flash-preview', label: 'Gemini 3.0 Flash (预览版)', description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。' },
             { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Google 旗下上一代的最先进模型系列，性能很棒棒。' },
             { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。' },
             { value: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。' },
+        ]
+    },
+    {
+        id: 'poe',
+        name: 'Poe',
+        description: 'Quora 旗下的模型聚合平台，支持订阅制的多种顶尖模型接入。',
+        docsUrl: 'https://poe.com/api/keys',
+        baseUrl: 'https://api.poe.com/v1', // 视实际接入的桥接服务地址而定
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'gemini-2.5-pro',
+                label: 'Gemini 2.5 Pro',
+                description: 'Google 旗下上一代的最先进模型系列，性能很棒棒。'
+            },
+            {
+                value: 'gemini-2.5-flash',
+                label: 'Gemini 2.5 Flash',
+                description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
+            },
+            {
+                value: 'gemini-2.5-flash-lite',
+                label: 'Gemini 2.5 Flash Lite',
+                description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+            },
+            {
+                value: 'gemini-3-pro',
+                label: 'Gemini 3.0 Pro (预览版)',
+                description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。'
+            },
+            {
+                value: 'gemini-3-flash',
+                label: 'Gemini 3.0 Flash (预览版)',
+                description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。'
+            },
+            {
+                value: 'GPT-5.2',
+                label: 'GPT-5.2',
+                description: 'OpenAI 最新模型，综合能力更强，适合高质量生成与复杂任务。'
+            },
+            {
+                value: 'Claude-Sonnet-4.5',
+                label: 'Claude Sonnet 4.5',
+                description: 'Anthropic 旗下主力模型之一，写作与推理很稳，适合角色设定与剧情推进。'
+            },
+            {
+                value: 'Claude-Haiku-4.5',
+                label: 'Claude Haiku 4.5',
+                description: '更快更省的 Claude，适合高频对话、草稿生成与轻量改写。'
+            },
+            {
+                value: 'Claude-Opus-4.1',
+                label: 'Claude Opus 4.1',
+                description: 'Claude 系列旗舰，质量上限更高，适合长文本与复杂创作。'
+            },
+            {
+                value: 'DeepSeek-R1',
+                label: 'DeepSeek R1',
+                description: '推理强项模型，适合需要多步思考的分析、规划与推导场景。'
+            },
+            {
+                value: 'Grok-4',
+                label: 'Grok 4',
+                description: 'xAI 旗下通用模型，适合头脑风暴、创意发散与快速问答。'
+            },
         ]
     },
     {

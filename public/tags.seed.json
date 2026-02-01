@@ -14,6 +14,10 @@
     { "id": "style:cyberpunk", "name": "赛博朋克", "description": "高科技、低生活、企业/义体等要素", "category": "题材/风格", "scope": "user", "isActive": true },
     { "id": "style:scifi", "name": "科幻向", "description": "以科技设定与未来议题为核心", "category": "题材/风格", "scope": "user", "isActive": true },
     { "id": "style:fantasy", "name": "奇幻向", "description": "魔法/异世界/神话等奇幻要素突出", "category": "题材/风格", "scope": "user", "isActive": true },
+    { "id": "style:guofeng", "name": "国风", "description": "东方审美/传统文化意象与氛围", "category": "题材/风格", "scope": "user", "isActive": true },
+    { "id": "style:martial-arts", "name": "武道", "description": "以武术/武学/门派修行为核心", "category": "题材/风格", "scope": "user", "isActive": true },
+    { "id": "style:japanese", "name": "日系", "description": "偏日式审美/叙事风格", "category": "题材/风格", "scope": "user", "isActive": true },
+    { "id": "style:faithful", "name": "还原向", "description": "强调贴近原设/原作的还原度", "category": "题材/风格", "scope": "user", "isActive": true },
     { "id": "theme:friendship", "name": "战友情", "description": "强调并肩作战/羁绊", "category": "题材/风格", "scope": "user", "isActive": true },
     { "id": "theme:growth", "name": "成长向", "description": "强调角色成长、代价与蜕变", "category": "题材/风格", "scope": "user", "isActive": true },
     { "id": "theme:redemption", "name": "救赎向", "description": "强调救赎、和解与自我修复", "category": "题材/风格", "scope": "user", "isActive": true },
@@ -61,7 +65,8 @@
     { "id": "ability:technology", "name": "科技系能力", "description": "装备/机巧/科技手段为主的能力表达", "category": "设定/能力倾向", "scope": "user", "isActive": true },
 
     { "id": "attr:mortal", "name": "凡人", "description": "设定上无超凡要素或极弱", "category": "卡片属性", "scope": "user", "isActive": true },
-    { "id": "attr:original", "name": "自设", "description": "原创设定/原创角色", "category": "卡片属性", "scope": "user", "isActive": true },
+    { "id": "attr:original", "name": "自设", "description": "以用户自己为原型的角色设定（自我投射/自我认知/理想化自我）", "category": "卡片属性", "scope": "user", "isActive": true },
+    { "id": "attr:oc", "name": "OC", "description": "原创设定/原创角色", "category": "卡片属性", "scope": "user", "isActive": true },
     { "id": "attr:veteran", "name": "历战王", "description": "强调战斗经验/历战设定", "category": "卡片属性", "scope": "user", "isActive": true },
     { "id": "attr:rookie", "name": "新人", "description": "缺乏经验、成长空间大", "category": "卡片属性", "scope": "user", "isActive": true },
     { "id": "attr:genius", "name": "天才型", "description": "学习/成长速度极快或悟性突出", "category": "卡片属性", "scope": "user", "isActive": true },
@@ -70,9 +75,9 @@
     { "id": "attr:limited", "name": "有代价", "description": "能力或胜利需要付出代价/有明显限制", "category": "卡片属性", "scope": "user", "isActive": true },
     { "id": "attr:overpowered", "name": "超规格", "description": "能力或资源明显超出同级平均水平", "category": "卡片属性", "scope": "user", "isActive": true },
 
-    { "id": "risk:meta", "name": "元叙事", "description": "含元叙事/元角色/对 AI 的显式声明等", "category": "风险提示", "scope": "system", "isActive": true },
-    { "id": "risk:prompt-engineering", "name": "提示词工程", "description": "含大量提示词工程/格式约束", "category": "风险提示", "scope": "system", "isActive": true },
-    { "id": "risk:code-kill", "name": "代码杀", "description": "含显式代码/规则武器化以影响裁判的内容", "category": "风险提示", "scope": "system", "isActive": true }
+    { "id": "risk:meta", "name": "元叙事", "description": "含元叙事/元角色/对 AI 的显式声明等", "category": "风险提示", "scope": "user", "isActive": true },
+    { "id": "risk:prompt-engineering", "name": "提示词工程", "description": "含大量提示词工程/格式约束", "category": "风险提示", "scope": "user", "isActive": true },
+    { "id": "risk:code-kill", "name": "代码杀", "description": "含显式代码/规则武器化以影响裁判的内容", "category": "风险提示", "scope": "user", "isActive": true }
   ],
   "aliases": [
     { "alias": "元角色", "tagId": "risk:meta" },
@@ -87,8 +92,23 @@
     { "alias": "赛博", "tagId": "style:cyberpunk" },
     { "alias": "悬疑", "tagId": "style:mystery" },
     { "alias": "治愈", "tagId": "style:healing" },
+    { "alias": "国风", "tagId": "style:guofeng" },
+    { "alias": "古风", "tagId": "style:guofeng" },
+    { "alias": "中式", "tagId": "style:guofeng" },
+    { "alias": "武道", "tagId": "style:martial-arts" },
+    { "alias": "武术", "tagId": "style:martial-arts" },
+    { "alias": "武侠", "tagId": "style:martial-arts" },
+    { "alias": "日系", "tagId": "style:japanese" },
+    { "alias": "日式", "tagId": "style:japanese" },
+    { "alias": "和风", "tagId": "style:japanese" },
+    { "alias": "日漫", "tagId": "style:japanese" },
+    { "alias": "还原向", "tagId": "style:faithful" },
+    { "alias": "原作向", "tagId": "style:faithful" },
+    { "alias": "高还原", "tagId": "style:faithful" },
     { "alias": "师徒", "tagId": "rel:mentor" },
     { "alias": "宿敌", "tagId": "rel:rivals" },
-    { "alias": "百合", "tagId": "rel:yuri" }
+    { "alias": "百合", "tagId": "rel:yuri" },
+    { "alias": "原创角色", "tagId": "attr:oc" },
+    { "alias": "Original Character", "tagId": "attr:oc" }
   ]
 }

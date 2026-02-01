@@ -2,6 +2,8 @@
 
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 
+import { DisclosureButton } from '@/components/shared/CollapsibleSection';
+
 import { useBattleStore } from '../stores/useBattleStore';
 import { BattleStoreState, MAX_COMBATANTS } from '../types';
 import { useBattleActions } from '../hooks/useBattleActions';
@@ -73,12 +75,13 @@ export function RosterUploader() {
       </div>
 
       <div className="mb-6">
-        <button
-          onClick={() => setIsPasteVisible(!isPasteVisible)}
-          className="text-pink-700 hover:underline cursor-pointer mb-2 font-semibold"
+        <DisclosureButton
+          open={isPasteVisible}
+          onToggle={() => setIsPasteVisible((prev) => !prev)}
+          className="text-pink-700 hover:underline mb-2"
         >
-          {isPasteVisible ? '▼ 折叠角色粘贴区域' : '▶ 展开角色粘贴区域 (手机端推荐)'}
-        </button>
+          {isPasteVisible ? '收起角色粘贴区域' : '展开角色粘贴区域（手机端推荐）'}
+        </DisclosureButton>
         {isPasteVisible && (
           <div className="input-group mt-2">
             <textarea

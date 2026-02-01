@@ -82,14 +82,16 @@ async function startHandler(req: Request): Promise<Response> {
     return json({ error: '当前为情景模式，但尚未选择情景', code: 'SCENARIO_MISSING' }, { status: 409 });
   }
   if (rules.mode === 'scenario' && scenarioSelection) {
-    const row = await getPvpEligibleScenarioDataCard(scenarioSelection.id, auth.user.id);
-    if (!row) {
-      return json({ error: '所选情景已不可用（可能未通过审查/已被封禁/已删除），请重新选择情景', code: 'SCENARIO_NOT_ELIGIBLE' }, { status: 409 });
-    }
-    const expectedUpdatedAt = typeof scenarioSelection.updatedAt === 'string' ? scenarioSelection.updatedAt : null;
-    const actualUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
-    if (expectedUpdatedAt && actualUpdatedAt && expectedUpdatedAt !== actualUpdatedAt) {
-      return json({ error: '情景数据卡版本已变更，请重新选择情景后再开始对局', code: 'SCENARIO_VERSION_MISMATCH', expected: expectedUpdatedAt, actual: actualUpdatedAt }, { status: 409 });
+    if (scenarioSelection.kind === 'data_card') {
+      const row = await getPvpEligibleScenarioDataCard(scenarioSelection.id, auth.user.id);
+      if (!row) {
+        return json({ error: '所选情景已不可用（可能未通过审查/已被封禁/已删除），请重新选择情景', code: 'SCENARIO_NOT_ELIGIBLE' }, { status: 409 });
+      }
+      const expectedUpdatedAt = typeof scenarioSelection.updatedAt === 'string' ? scenarioSelection.updatedAt : null;
+      const actualUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
+      if (expectedUpdatedAt && actualUpdatedAt && expectedUpdatedAt !== actualUpdatedAt) {
+        return json({ error: '情景数据卡版本已变更，请重新选择情景后再开始对局', code: 'SCENARIO_VERSION_MISMATCH', expected: expectedUpdatedAt, actual: actualUpdatedAt }, { status: 409 });
+      }
     }
   }
 

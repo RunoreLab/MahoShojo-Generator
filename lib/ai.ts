@@ -20,7 +20,7 @@ export interface GenerationConfig<T, I = string> {
   promptBuilder: (input: I) => string;
   schema: z.ZodSchema<T>;
   taskName: string;
-  maxOutputTokens: number;
+  maxOutputTokens?: number;
   modelOverride?: string; // 新增：可选的模型覆盖参数
 }
 
@@ -63,11 +63,19 @@ const isJsonModeNotSupportedError = (error: unknown): boolean => {
   if (lowered.includes('json mode is not enabled')) return true;
 
   // OpenAI-compatible providers / OpenRouter: response_format not supported
-  if (lowered.includes('response_format') && lowered.includes('not')) return true;
+  if (
+    lowered.includes('response_format') &&
+    (lowered.includes('not') || lowered.includes('unsupported') || lowered.includes('unknown') || lowered.includes('invalid'))
+  )
+    return true;
+
+  // OpenAI-compatible providers: json_schema / response_format json_schema not supported
+  if (lowered.includes('json_schema') && (lowered.includes('not') || lowered.includes('unsupported'))) return true;
 
   // 通用：明确声明“不支持 JSON/JSON schema/structured output”
   if (lowered.includes('does not support') && (lowered.includes('json') || lowered.includes('schema'))) return true;
   if (lowered.includes('not supported') && (lowered.includes('json') || lowered.includes('schema'))) return true;
+  if (lowered.includes('unsupported') && (lowered.includes('json') || lowered.includes('schema') || lowered.includes('structured'))) return true;
 
   return false;
 };
@@ -78,6 +86,10 @@ const shouldForceTextJsonFallback = (modelId: string): boolean => {
   // Gemma 系列（尤其是通过 Google Generative Language API）普遍不支持 JSON mode，
   // 但仍可通过纯文本输出 JSON + 本地解析/修复 的方式完成结构化任务。
   if (normalized.includes('gemma')) return true;
+
+  // GLM 系列目前也倾向于不支持 JSON mode（如 glm-4.x / ZhipuAI/GLM-4.x / chatglm），
+  // 统一走“文本 JSON + 本地解析/修复”以避免硬错误与重复请求。
+  if (normalized.includes('glm')) return true;
 
   return false;
 };
@@ -306,6 +318,10 @@ export async function generateWithAI<T, I = string>(
             })(),
           },
         ]);
+        const maxOutputTokensOption =
+          typeof generationConfig.maxOutputTokens === 'number'
+            ? { maxOutputTokens: generationConfig.maxOutputTokens }
+            : {};
 
         const tryGenerateObject = async () => {
           return await generateObject({
@@ -314,12 +330,12 @@ export async function generateWithAI<T, I = string>(
             prompt: buildPromptMessages(systemPrompt),
             schema: generationConfig.schema,
             temperature: generationConfig.temperature,
-            maxOutputTokens: generationConfig.maxOutputTokens,
             maxRetries: 0,
+            ...maxOutputTokensOption,
           });
         };
 
-        // 0) 预判：某些模型（如 Gemma）不支持 JSON mode，直接走“文本 JSON + 本地解析”避免硬错误与二次请求
+        // 0) 预判：某些模型（如 Gemma / GLM）不支持 JSON mode，直接走“文本 JSON + 本地解析”避免硬错误与二次请求
         if (shouldForceTextJsonFallback(selectedModel)) {
           log.warn('检测到模型可能不支持 JSON mode，直接启用兼容回退（文本生成 JSON + 本地解析）', {
             provider: provider.name,
@@ -334,8 +350,8 @@ export async function generateWithAI<T, I = string>(
             model,
             prompt: buildPromptMessages(guidedPrompt),
             temperature: generationConfig.temperature,
-            maxOutputTokens: generationConfig.maxOutputTokens,
             maxRetries: 0,
+            ...maxOutputTokensOption,
           });
 
           const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
@@ -409,8 +425,8 @@ export async function generateWithAI<T, I = string>(
               model,
               prompt: buildPromptMessages(guidedPrompt),
               temperature: generationConfig.temperature,
-              maxOutputTokens: generationConfig.maxOutputTokens,
               maxRetries: 0,
+              ...maxOutputTokensOption,
             });
 
             const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
@@ -430,6 +446,56 @@ export async function generateWithAI<T, I = string>(
             }
 
             return parsed.data as T;
+          }
+
+          // 3) 部分供应商在 JSON schema / response_format 路径会直接报 APICallError（甚至是 5xx），
+          //    此时再尝试走“文本 JSON + 本地解析”作为兜底，有机会恢复成功。
+          const maybeApiCallError = rawError as any;
+          const apiCallStatusCode = typeof maybeApiCallError?.statusCode === 'number' ? maybeApiCallError.statusCode : null;
+          const shouldTryTextFallback =
+            maybeApiCallError?.name === 'AI_APICallError' && apiCallStatusCode !== 401 && apiCallStatusCode !== 403 && apiCallStatusCode !== 429;
+
+          if (shouldTryTextFallback) {
+            log.warn('generateObject 触发 APICallError，尝试兼容回退（文本生成 JSON + 本地解析）', {
+              provider: provider.name,
+              model: selectedModel,
+              statusCode: apiCallStatusCode,
+              error: enhancedError.message,
+            });
+
+            try {
+              const guidedPrompt =
+                `${systemPrompt}\n\n` +
+                buildStructuredJsonInstructionFromZodSchema(generationConfig.schema);
+
+              const textResult = await generateText({
+                model,
+                prompt: buildPromptMessages(guidedPrompt),
+                temperature: generationConfig.temperature,
+                maxRetries: 0,
+                ...maxOutputTokensOption,
+              });
+
+              const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
+                taskName: generationConfig.taskName,
+              });
+
+              log.info('兜底兼容回退解析成功（APICallError 分支）', {
+                provider: provider.name,
+                model: selectedModel,
+                usedJsonRepair: parsed.telemetry.usedJsonRepair,
+                unwrap: parsed.telemetry.unwrapAttempt,
+              });
+
+              if (options?.telemetry) {
+                options.telemetry.usage = textResult.usage;
+                options.telemetry.finishReason = textResult.finishReason;
+              }
+
+              return parsed.data as T;
+            } catch {
+              // ignore，继续抛出增强后的错误
+            }
           }
 
           throw enhancedError;

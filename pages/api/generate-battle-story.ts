@@ -8,6 +8,7 @@ import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
+import { buildPolicySafetyCheckText } from '@/lib/content-safety/server';
 import { NextRequest } from 'next/server';
 import { AdjudicationResult, NarrativeHistoryEntry } from '@/types/arena';
 import { generateSignature, verifySignature } from '@/lib/signature';
@@ -37,7 +38,6 @@ import {
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
-import { buildRankedMatchExtraJson, validateRankedMatchTicketForRequest } from '@/lib/arena/ranked-match';
 
 const log = getLogger('api-gen-battle-story');
 const MAX_COMBATANTS = 10;
@@ -77,11 +77,23 @@ async function handler(req: NextRequest): Promise<Response> {
 	            return trimmed ? trimmed : null;
 	        };
 
+	        const normalizeOptionalBoolean = (value: unknown, fallback: boolean): boolean => {
+	            if (typeof value === 'boolean') return value;
+	            if (typeof value === 'number' && Number.isFinite(value)) return value !== 0;
+	            if (typeof value === 'string') {
+	                const normalized = value.trim().toLowerCase();
+	                if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true;
+	                if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false;
+	            }
+	            return fallback;
+	        };
+
 	        const body = await req.json();
 	        const {
 	            combatants,
 	            selectedLevel,
             mode = 'classic',
+            arenaFreeRankingEnabled,
             userGuidance,
             scenario,
             teams,
@@ -98,7 +110,6 @@ async function handler(req: NextRequest): Promise<Response> {
             isDowngrade = false,
             adjudicationEvents,
             storyLength,
-            rankedMatch,
             customProvider: customProviderPayload,
             scenarioTitle,
             scenarioSourceDataCardId,
@@ -106,6 +117,8 @@ async function handler(req: NextRequest): Promise<Response> {
             pvpContext,
             internalGuidance,
 	        } = body;
+
+            const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
 
 	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 	        snapshotLanguage = normalizeOptionalString(language);
@@ -311,7 +324,17 @@ async function handler(req: NextRequest): Promise<Response> {
             }
             : undefined;
         const isStrictRankedMatchRequest =
-            Boolean(rankedMatch) && typeof rankedMatch === 'object' && (rankedMatch as any).queue === 'strict';
+            mode === 'classic'
+            && String(language ?? '').trim() === 'zh-CN'
+            && !String(selectedLevel ?? '').trim()
+            && !String(userGuidance ?? '').trim()
+            && resolvedReadArenaHistory === false
+            && resolvedReadCurrentState === false
+            && resolvedReadNarrativeHistory === false
+            && (!Array.isArray(adjudicationEvents) || adjudicationEvents.length === 0)
+            && Array.isArray(combatants)
+            && combatants.length === 2
+            && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
         const shouldPreferLiteModelInStrict =
             isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
         const baseModelOverride = customModelOverride ?? (isDowngrade ? 'gemini-2.5-flash-lite' : undefined);
@@ -393,26 +416,15 @@ async function handler(req: NextRequest): Promise<Response> {
             inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
         });
 
-        // 2. 根据策略决定哪些内容需要检查 (SRS 3.1.1)
-        const policy = appConfig.SAFETY_CHECK_POLICY;
-        const contentsToAIFlag = inputsToCheck.filter(input => {
-            const checkPolicy = policy[input.type];
-            return checkPolicy === 'all' || (checkPolicy === 'non-native-only' && !input.isNative);
-        });
-
-        const textForFinalCheck: string[] = [];
-
-        // 3. 应用“连坐”机制 (SRS 3.1.2)
-        if (contentsToAIFlag.length > 0 && appConfig.ENABLE_BUNDLE_SAFETY_CHECK) {
-            log.info('触发“连坐”机制，打包所有非原生内容进行检查。');
-            const nonNativeContents = inputsToCheck.filter(i => !i.isNative).map(i => i.content);
-            textForFinalCheck.push(...nonNativeContents);
-        } else {
-            textForFinalCheck.push(...contentsToAIFlag.map(i => i.content));
-        }
-
-        const combinedText = textForFinalCheck.join('\n\n');
-        const needsWorldviewWarning = false;
+	        // 2. 根据策略决定哪些内容需要检查 (SRS 3.1.1)
+	        const { combinedText, usedBundle } = buildPolicySafetyCheckText(inputsToCheck, {
+	            policy: appConfig.SAFETY_CHECK_POLICY,
+	            enableBundle: appConfig.ENABLE_BUNDLE_SAFETY_CHECK,
+	        });
+	        if (usedBundle) {
+	            log.info('触发“连坐”机制，打包所有非原生内容进行检查。');
+	        }
+	        const needsWorldviewWarning = false;
 
         // 4. 执行检查
         if (combinedText) {
@@ -476,6 +488,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            extraJson: compactExtraJson({
 	                                errorMessage: 'rejected by sensitive input filter',
 	                                rejectedBy: 'sensitive-input',
+	                                arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
 	                                readNarrativeHistory: resolvedReadNarrativeHistory,
 	                                narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
 	                            }),
@@ -533,7 +546,6 @@ async function handler(req: NextRequest): Promise<Response> {
             ),
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,
-            maxOutputTokens: 8192,
         };
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
@@ -650,17 +662,6 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const recordPromise = (async () => {
             const user = authKey ? await getUserByAuthKey(authKey) : null;
-            const rankedMatchValidation = await validateRankedMatchTicketForRequest({
-                ticket: rankedMatch,
-                userId: user?.id ?? null,
-                combatants,
-                mode,
-                selectedLevel,
-                language,
-                storyLength,
-                nowMs: startedAtMs,
-            });
-            const rankedMatchExtraJson = buildRankedMatchExtraJson(rankedMatchValidation);
 
             const createdId = await createBattleReportGenerationRecord({
                 id: recordId,
@@ -731,10 +732,11 @@ async function handler(req: NextRequest): Promise<Response> {
 	                pvpMatchId: snapshotPvpMatchId,
 	                pvpRoundId: snapshotPvpRoundId,
 	                extraJson: compactExtraJson({
+                        arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
+                        arenaStrictPolicy: isStrictRankedMatchRequest ? '1+3:v1' : null,
 	                    resolvedModelOverride: usedModelOverride ?? null,
 	                    readNarrativeHistory: resolvedReadNarrativeHistory,
 	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
-                        ...(rankedMatchExtraJson ?? {}),
 	                }),
 	            });
 

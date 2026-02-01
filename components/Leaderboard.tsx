@@ -1,5 +1,6 @@
 import React from 'react';
 import { CharacterRank } from '../pages/api/get-stats';
+import { buildTitleDisplay } from '@/lib/text';
 
 interface LeaderboardProps {
   title: string;
@@ -14,29 +15,29 @@ interface LeaderboardProps {
  * @param presetInfo - 预设角色的描述信息
  */
 const Leaderboard: React.FC<LeaderboardProps> = ({ title, data, presetInfo }) => (
-  <div style={{ padding: '1rem', backgroundColor: 'rgba(255, 255, 255, 0.5)', borderRadius: '0.5rem', boxShadow: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)' }}>
-    <h4 style={{ fontWeight: 'bold', color: '#374151', textAlign: 'center', marginBottom: '0.5rem' }}>{title}</h4>
+  <div className="rounded-lg bg-white/60 p-4 shadow-inner">
+    <h4 className="text-center text-sm font-bold text-gray-700 mb-2">{title}</h4>
     {data && data.length > 0 ? (
-      <ol style={{ listStyleType: 'decimal', paddingLeft: '1.5rem', marginTop: '0.25rem', fontSize: '0.875rem', color: '#1f2937' }}>
-        {data.map((item, index) => (
-          <li 
-            key={index} 
-            style={{ 
-              overflow: 'hidden', 
-              textOverflow: 'ellipsis', 
-              whiteSpace: 'nowrap',
-              marginBottom: '0.25rem'
-            }} 
-            title={`${item.name}${item.is_preset ? ` (${presetInfo.get(item.name)})` : ''}`}
-          >
-            <span style={{ fontWeight: '600' }}>{item.name}</span>
-            {item.is_preset && <span style={{ fontSize: '0.75rem', color: '#7c3aed', marginLeft: '0.25rem' }}>[预设]</span>}
-            <span style={{ float: 'right', color: '#4b5563' }}>{item.value}</span>
-          </li>
-        ))}
+      <ol className="mt-1 list-decimal pl-6 text-sm text-gray-800">
+        {data.map((item, index) => {
+          const { display, full } = buildTitleDisplay(item.name || '未命名');
+          return (
+            <li
+              key={index}
+              className="mb-1 flex items-center justify-between gap-2"
+              title={`${full}${item.is_preset ? ` (${presetInfo.get(item.name)})` : ''}`}
+            >
+              <span className="min-w-0 truncate font-semibold">
+                {display}
+                {item.is_preset && <span className="ml-1 text-xs text-purple-600">[预设]</span>}
+              </span>
+              <span className="shrink-0 text-gray-600">{item.value}</span>
+            </li>
+          );
+        })}
       </ol>
     ) : (
-      <p style={{ fontSize: '0.75rem', color: '#6b7280', textAlign: 'center' }}>暂无数据</p>
+      <p className="text-center text-xs text-gray-500">暂无数据</p>
     )}
   </div>
 );

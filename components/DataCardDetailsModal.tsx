@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Info, Star, Heart, Download } from 'lucide-react';
+import { X, Info, Star, Heart, Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
 import { formatDateTime } from '@/lib/constants';
 import { authStorage } from '@/lib/auth';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { buildTitleDisplay } from '@/lib/text';
 
 type ApiTag = {
   id: string;
@@ -58,6 +59,18 @@ const fetchJson = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   return json;
 };
 
+const META_EXPANDED_STORAGE_KEY = 'mahoshojo.data-card-details.meta-expanded.v1';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const isUuid = (value: string) => UUID_PATTERN.test(value.trim());
+
+const sanitizeDownloadFilename = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return '数据卡';
+  return trimmed.replace(/[\\/:*?"<>|\n\r\t]/g, '_');
+};
+
 interface DataCardDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -98,6 +111,7 @@ export default function DataCardDetailsModal({
   const [metaError, setMetaError] = useState<string | null>(null);
   const metaRequestIdRef = useRef(0);
   const metaAbortRef = useRef<AbortController | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [allTags, setAllTags] = useState<ApiTag[]>([]);
@@ -107,6 +121,12 @@ export default function DataCardDetailsModal({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [savingTags, setSavingTags] = useState(false);
   const [saveTagsError, setSaveTagsError] = useState<string | null>(null);
+  const [isMetaExpanded, setIsMetaExpanded] = useState(true);
+  const { display: displayName, full: fullName } = buildTitleDisplay(card.name || '未命名');
+  const cardTypeLabel = card.type === 'character' ? '角色' : card.type === 'scenario' ? '剧本' : '历史';
+  const descriptionText = card.description?.trim() ? card.description : '暂无简介';
+  const tagSectionRef = useRef<HTMLDivElement | null>(null);
+  const tagSearchInputRef = useRef<HTMLInputElement | null>(null);
 
   const reloadMeta = useCallback(async (dataCardId: string) => {
     const requestId = (metaRequestIdRef.current += 1);
@@ -144,6 +164,9 @@ export default function DataCardDetailsModal({
   }, []);
 
   const resolvedMetaCardId = metaCardId === undefined ? card?.id : metaCardId;
+  const resolvedCloudCardId = typeof resolvedMetaCardId === 'string' ? resolvedMetaCardId.trim() : '';
+  const isCloudDataCard = Boolean(resolvedCloudCardId) && isUuid(resolvedCloudCardId);
+  const canDownloadCard = isCloudDataCard ? (Boolean(meta) || isOwner) : true;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -154,12 +177,32 @@ export default function DataCardDetailsModal({
       setMetaLoading(false);
       setIsEditingTags(false);
       setSaveTagsError(null);
+      setDownloadError(null);
       return;
     }
     void reloadMeta(resolvedMetaCardId);
     setIsEditingTags(false);
     setSaveTagsError(null);
+    setDownloadError(null);
   }, [isOpen, metaNonce, reloadMeta, resolvedMetaCardId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (typeof window === 'undefined') return;
+    let nextExpanded: boolean | null = null;
+    try {
+      const stored = window.localStorage.getItem(META_EXPANDED_STORAGE_KEY);
+      if (stored === '1' || stored === '0') {
+        nextExpanded = stored === '1';
+      }
+    } catch {
+      nextExpanded = null;
+    }
+    if (nextExpanded == null) {
+      nextExpanded = window.innerWidth >= 768;
+    }
+    setIsMetaExpanded(nextExpanded);
+  }, [isOpen]);
 
   useEffect(() => {
     return () => metaAbortRef.current?.abort();
@@ -170,10 +213,50 @@ export default function DataCardDetailsModal({
     setSelectedTagIds(meta.tags.filter((t) => t.scope === tagScope).map((t) => t.id));
   }, [meta, isEditingTags, tagScope]);
 
+  useEffect(() => {
+    if (!isOpen || !isEditingTags) return;
+    const prefersReducedMotion = typeof window !== 'undefined'
+      && window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (tagSectionRef.current) {
+      tagSectionRef.current.scrollIntoView({
+        behavior: prefersReducedMotion ? 'auto' : 'smooth',
+        block: 'start',
+      });
+    }
+    if (tagSearchInputRef.current) {
+      const focusInput = () => tagSearchInputRef.current?.focus();
+      if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+        window.requestAnimationFrame(focusInput);
+      } else {
+        focusInput();
+      }
+    }
+  }, [isEditingTags, isOpen]);
+
   const visibleTags = useMemo(() => {
     if (!meta?.tags) return [];
     return meta.tags;
   }, [meta?.tags]);
+
+  const metaSummary = useMemo(() => {
+    if (metaLoading) return '指标加载中...';
+    if (metaError) return '指标加载失败';
+    if (!meta) return '暂无指标';
+    const parts: string[] = [];
+    if (meta.metrics) {
+      parts.push(`技术值 ${meta.metrics.techScore}${meta.metrics.techLevel ? `/${meta.metrics.techLevel}` : ''}`);
+    } else {
+      parts.push('技术值 —');
+    }
+    if (card.type === 'character') {
+      const strictRating = meta.ratings.strict?.rating ?? '—';
+      const freeRating = meta.ratings.free?.rating ?? '—';
+      parts.push(`排位 严格${strictRating} / 自由${freeRating}`);
+    }
+    parts.push(`标签 ${visibleTags.length}`);
+    return parts.join(' · ');
+  }, [card.type, meta, metaError, metaLoading, visibleTags.length]);
 
   const formatSignedDelta = (value: number) => (value >= 0 ? `+${value}` : String(value));
 
@@ -227,6 +310,22 @@ export default function DataCardDetailsModal({
 
   const selectedTagCount = selectedTagIds.length;
   const isTagLimitReached = selectedTagCount >= 30;
+  const showMetaDetails = isMetaExpanded || isEditingTags;
+
+  const toggleMetaExpanded = useCallback(() => {
+    if (isEditingTags) return;
+    setIsMetaExpanded((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(META_EXPANDED_STORAGE_KEY, next ? '1' : '0');
+        } catch {
+          // ignore storage errors
+        }
+      }
+      return next;
+    });
+  }, [isEditingTags]);
 
   const toggleSelectTag = useCallback((tagId: string) => {
     setSelectedTagIds((prev) => {
@@ -235,6 +334,31 @@ export default function DataCardDetailsModal({
       return [...prev, tagId];
     });
   }, []);
+
+  const downloadDataCard = useCallback(() => {
+    if (!canDownloadCard) return;
+
+    setDownloadError(null);
+    try {
+      const payload = JSON.parse(card.data);
+      const jsonString = JSON.stringify(payload, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sanitizeDownloadFilename(card.name || '数据卡')}.json`;
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('下载数据卡失败:', error);
+      setDownloadError('下载失败：数据卡内容不是有效的 JSON');
+    }
+  }, [canDownloadCard, card.data, card.name]);
 
   const saveTags = useCallback(async () => {
     setSavingTags(true);
@@ -360,7 +484,7 @@ export default function DataCardDetailsModal({
       <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* 头部 */}
         <div className="flex items-center justify-between p-6 border-b">
-          <div className="flex items-start gap-3">
+          <div className="flex items-center gap-3">
             <div
               className={`p-2 mt-1 rounded-lg ${
                 card.type === 'character' ? 'bg-pink-100' : card.type === 'scenario' ? 'bg-purple-100' : 'bg-emerald-100'
@@ -377,26 +501,70 @@ export default function DataCardDetailsModal({
               />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-800">
-                {card.name}
+              <h2 className="text-xl font-bold text-gray-800" title={fullName}>
+                {displayName}
               </h2>
-              <p className="text-sm text-gray-500">
-                {card.description}
-              </p>
-              <p className="text-xs text-gray-500 mt-2">
-                作者：{card.author}
-              </p>
-              <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
-                <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{card.likeCount ?? 0}</span>
-                <span className="flex items-center gap-1"><Star className="w-3 h-3" />{card.favoriteCount ?? 0}</span>
-                <span className="flex items-center gap-1"><Download className="w-3 h-3" />{card.usageCount ?? 0}</span>
-              </div>
-              <div className="flex items-center gap-4 mt-2 text-[11px] text-gray-500">
-                <span>创建：{formatDateTime(card.createdAt)}</span>
-                <span>更新：{formatDateTime(card.updatedAt)}</span>
-              </div>
+              <p className="text-xs text-gray-500 mt-1">类型：{cardTypeLabel}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
-              <div className="mt-2 text-[11px] text-gray-600 space-y-1">
+        {/* 内容区 */}
+        <div className="flex-1 overflow-auto p-6 space-y-6">
+          {pendingNotice && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm px-3 py-2">
+              {pendingNotice}
+            </div>
+          )}
+
+          <section className="space-y-2">
+            <h3 className="font-medium text-gray-700 flex items-center gap-2">
+              <span>概览</span>
+            </h3>
+            <p className="text-sm text-gray-600 whitespace-pre-wrap">
+              {descriptionText}
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+              <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{card.likeCount ?? 0}</span>
+              <span className="flex items-center gap-1"><Star className="w-3 h-3" />{card.favoriteCount ?? 0}</span>
+              <span className="flex items-center gap-1"><Download className="w-3 h-3" />{card.usageCount ?? 0}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-4 text-[11px] text-gray-500">
+              <span>作者：{card.author ?? '未知'}</span>
+              <span>创建：{formatDateTime(card.createdAt)}</span>
+              <span>更新：{formatDateTime(card.updatedAt)}</span>
+            </div>
+          </section>
+
+          <section className="space-y-2" ref={tagSectionRef}>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <h3 className="font-medium text-gray-700 flex items-center gap-2">
+                <span>技术与标签</span>
+              </h3>
+              <button
+                type="button"
+                onClick={toggleMetaExpanded}
+                className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                aria-expanded={showMetaDetails}
+                disabled={isEditingTags}
+              >
+                {showMetaDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                <span>{showMetaDetails ? '收起信息' : '展开信息'}</span>
+              </button>
+            </div>
+
+            {!showMetaDetails && (
+              <div className="text-[11px] text-gray-500">{metaSummary}</div>
+            )}
+
+            {showMetaDetails && (
+              <div className="text-[11px] text-gray-600 space-y-2">
                 {metaLoading ? (
                   <div className="text-gray-500">正在加载技术值/标签/排位...</div>
                 ) : metaError ? (
@@ -477,11 +645,11 @@ export default function DataCardDetailsModal({
 
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-gray-500">标签：</span>
-                    {visibleTags.length === 0 ? (
-                      <span className="text-gray-400">暂无</span>
-                    ) : (
-                      visibleTags.map((tag) => (
-                        <span
+                      {visibleTags.length === 0 ? (
+                        <span className="text-gray-400">暂无</span>
+                      ) : (
+                        visibleTags.map((tag) => (
+                          <span
                             key={tag.id}
                             className="px-2 py-0.5 rounded-full border border-gray-200 bg-white text-gray-700"
                             title={tag.description ?? undefined}
@@ -556,6 +724,7 @@ export default function DataCardDetailsModal({
                         )}
 
                         <input
+                          ref={tagSearchInputRef}
                           value={tagSearch}
                           onChange={(e) => setTagSearch(e.target.value)}
                           placeholder="搜索标签..."
@@ -604,51 +773,73 @@ export default function DataCardDetailsModal({
                         )}
                       </div>
                     )}
-                  </>
-                ) : null}
-              </div>
+                </>
+              ) : null}
             </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+          )}
+          </section>
 
-        {/* 详细设定内容 */}
-        <div className="flex-1 overflow-auto p-6">
-          <div className="mb-3 space-y-2">
-            {pendingNotice && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm px-3 py-2">
-                {pendingNotice}
-              </div>
-            )}
+          <section className="space-y-2">
             <h3 className="font-medium text-gray-700 flex items-center gap-2">
               <span>{card.type === 'history' ? '内容' : '详细设定'}</span>
             </h3>
-          </div>
-
-          <div className="bg-gray-50 rounded-lg p-4">
-            {Object.keys(parsedData).length > 0 ? (
-              renderObjectContent(parsedData)
-            ) : (
-              <p className="text-gray-500 text-center py-8">
-                暂无详细设定数据
-              </p>
-            )}
-          </div>
+            <div className="bg-gray-50 rounded-lg p-4">
+              {Object.keys(parsedData).length > 0 ? (
+                renderObjectContent(parsedData)
+              ) : (
+                <p className="text-gray-500 text-center py-8">
+                  暂无详细设定数据
+                </p>
+              )}
+            </div>
+          </section>
         </div>
 
         {/* 底部 */}
-        <div className="p-6 border-t bg-gray-50 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-          >
-            关闭
-          </button>
+        <div className="p-6 border-t bg-gray-50 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-h-[18px]">
+            {downloadError && (
+              <div className="text-xs text-red-600">{downloadError}</div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={downloadDataCard}
+              disabled={!canDownloadCard}
+              className={`px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2 ${
+                canDownloadCard
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-blue-200 text-blue-50 cursor-not-allowed'
+              }`}
+              title={
+                canDownloadCard
+                  ? isCloudDataCard
+                    ? '下载云端数据卡 JSON'
+                    : '下载本地/预设数据卡 JSON'
+                  : metaLoading
+                    ? '正在校验权限...'
+                    : metaError
+                      ? '无权下载该数据卡'
+                      : '暂不可下载'
+              }
+            >
+              <Download className="w-4 h-4" />
+              <span>
+                {isCloudDataCard && metaLoading && !canDownloadCard
+                  ? '校验中...'
+                  : canDownloadCard
+                    ? '下载'
+                    : '不可下载'}
+              </span>
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+            >
+              关闭
+            </button>
+          </div>
         </div>
       </div>
     </div>

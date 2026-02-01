@@ -80,14 +80,22 @@ async function getRoomHandler(req: Request): Promise<Response> {
       ? String((parsed.internal.raw as any)._scenarioAdjudicationImportedFor).trim() || null
       : null;
   const scenario = scenarioSelection
-    ? {
-        title: getPvpScenarioTitle(scenarioSelection),
-        sourceDataCardId: scenarioSelection.id,
-        sourceDataCardUpdatedAt: scenarioSelection.updatedAt,
-        sourceDataCardName: scenarioSelection.name,
-        sourceIsPublic: scenarioSelection.isPublic,
-        sourceAuthor: scenarioSelection.author,
-      }
+    ? (scenarioSelection.kind === 'preset'
+      ? {
+          kind: 'preset',
+          title: getPvpScenarioTitle(scenarioSelection),
+          presetFilename: scenarioSelection.filename,
+          presetName: scenarioSelection.name,
+        }
+      : {
+          kind: 'data_card',
+          title: getPvpScenarioTitle(scenarioSelection),
+          sourceDataCardId: scenarioSelection.id,
+          sourceDataCardUpdatedAt: scenarioSelection.updatedAt,
+          sourceDataCardName: scenarioSelection.name,
+          sourceIsPublic: scenarioSelection.isPublic,
+          sourceAuthor: scenarioSelection.author,
+        })
     : null;
 
   const members = await getPvpRoomMembers(roomId);

@@ -1,13 +1,15 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 
 import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
+import { buildTitleDisplay } from '@/lib/text';
 import type { Preset } from '@/lib/presets';
 import type { SeasonsConfig } from '@/lib/seasons';
 import { formatSeasonTitle, getCurrentSeason } from '@/lib/seasons';
@@ -20,6 +22,8 @@ import { validateCanshouData, validateMagicalGirlData } from '../utils/character
 
 type Queue = 'strict' | 'free';
 type Sort = 'rating' | 'tech';
+
+type ArenaEntity = { entityType: 'data_card' | 'preset'; entityId: string };
 
 type LeaderboardItem = {
   rank: number;
@@ -48,12 +52,43 @@ type Tag = {
   isActive: boolean;
 };
 
+type StrictRangeDetails = {
+  ok: boolean;
+  absDiff: number;
+  maxAbsDiff: number;
+  exceededBy: number;
+};
+
+const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
+  '无牌': 2000,
+  '白牌': 1000,
+  '字牌': 900,
+  '花牌': 800,
+  '权杖': 1000,
+};
+
+const getStrictMaxAbsDiffForRatings = (a: { rating: number; games: number }, b: { rating: number; games: number }): number => {
+  const aTier = computeArenaBaseTier(a.rating, a.games);
+  const bTier = computeArenaBaseTier(b.rating, b.games);
+  const pick = a.rating > b.rating ? aTier : b.rating > a.rating ? bTier : (a.games >= b.games ? aTier : bTier);
+  return STRICT_MAX_ABS_DIFF_BY_TIER[pick] ?? 1000;
+};
+
+const computeStrictRangeDetails = (a: { rating: number; games: number }, b: { rating: number; games: number }): StrictRangeDetails => {
+  const absDiff = Math.abs(a.rating - b.rating);
+  const maxAbsDiff = getStrictMaxAbsDiffForRatings(a, b);
+  const exceededBy = Math.max(0, absDiff - maxAbsDiff);
+  return { ok: absDiff <= maxAbsDiff, absDiff, maxAbsDiff, exceededBy };
+};
+
 const fetchJson = async <T,>(url: string): Promise<T> => {
   const res = await fetch(url);
   const json = (await res.json()) as T;
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
   return json;
 };
+
+const EMPTY_ITEMS: LeaderboardItem[] = [];
 
 export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void }) {
   const { isOpen, onClose } = props;
@@ -70,6 +105,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
   const [queue, setQueue] = useState<Queue>('strict');
   const [sort, setSort] = useState<Sort>('rating');
   const [includePresets, setIncludePresets] = useState(true);
+  const [strictCountableOnly, setStrictCountableOnly] = useState(false);
   const [isNative, setIsNative] = useState<'any' | '1' | '0'>('any');
   const [includeTagIds, setIncludeTagIds] = useState<string[]>([]);
   const [excludeTagIds, setExcludeTagIds] = useState<string[]>([]);
@@ -102,6 +138,38 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
         .filter((id): id is string => Boolean(id)),
     );
   }, [combatants]);
+
+  const rankableRosterEntities = useMemo<ArenaEntity[]>(() => {
+    const list: ArenaEntity[] = [];
+    for (const item of combatants) {
+      if (!item || typeof item !== 'object') continue;
+      if (!('data' in item)) continue;
+      const combatant = item as CombatantData;
+      if (combatant.isPreset) {
+        const id = (combatant.filename ?? '').toString().trim();
+        if (!id) continue;
+        list.push({ entityType: 'preset', entityId: id });
+        continue;
+      }
+      const id = (combatant.sourceDataCardId ?? '').toString().trim();
+      if (!id) continue;
+      list.push({ entityType: 'data_card', entityId: id });
+    }
+    return list;
+  }, [combatants]);
+
+  const strictRangePivotCandidate = useMemo<ArenaEntity | null>(() => {
+    if (queue !== 'strict') return null;
+    if (rankableRosterEntities.length !== 1) return null;
+    return rankableRosterEntities[0] ?? null;
+  }, [queue, rankableRosterEntities]);
+
+  useEffect(() => {
+    if (!strictCountableOnly) return;
+    if (queue !== 'strict' || !strictRangePivotCandidate) {
+      setStrictCountableOnly(false);
+    }
+  }, [queue, strictCountableOnly, strictRangePivotCandidate]);
 
   const presetByFilename = useMemo(() => {
     const map = new Map<string, Preset>();
@@ -198,7 +266,69 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
     enabled: isOpen,
   });
 
-  const items = leaderboardQuery.data?.items ?? [];
+  const items = leaderboardQuery.data?.items ?? EMPTY_ITEMS;
+
+  const strictRangePivotFromCurrentPage = useMemo<{ rating: number; games: number } | null>(() => {
+    if (queue !== 'strict') return null;
+    if (!strictCountableOnly) return null;
+    if (!strictRangePivotCandidate) return null;
+    const found = items.find((it) => it.entityType === strictRangePivotCandidate.entityType && it.entityId === strictRangePivotCandidate.entityId);
+    if (!found) return null;
+    return { rating: found.rating, games: found.games };
+  }, [items, queue, strictCountableOnly, strictRangePivotCandidate]);
+
+  const strictRangePivotRatingQuery = useQuery({
+    queryKey: [
+      'arenaStrictRangePivotRating',
+      strictRangePivotCandidate?.entityType ?? 'none',
+      strictRangePivotCandidate?.entityId ?? '',
+    ],
+    queryFn: async () => {
+      const pivot = strictRangePivotCandidate;
+      if (!pivot) throw new Error('缺少我方参战者');
+      const params = new URLSearchParams();
+      params.set('queue', 'strict');
+      params.set('entityType', pivot.entityType);
+      params.set('entityId', pivot.entityId);
+      return fetchJson<{ success: true; rating: number; games: number }>(`/api/arena/entity-rating?${params.toString()}`);
+    },
+    staleTime: 30_000,
+    enabled:
+      isOpen &&
+      queue === 'strict' &&
+      strictCountableOnly &&
+      Boolean(strictRangePivotCandidate) &&
+      strictRangePivotCandidate?.entityType === 'data_card' &&
+      strictRangePivotFromCurrentPage == null,
+  });
+
+  const visibleItems = useMemo(() => {
+    if (queue !== 'strict' || !strictCountableOnly) return items;
+    if (!strictRangePivotCandidate) return items;
+
+    const pivotKey = `${strictRangePivotCandidate.entityType}:${strictRangePivotCandidate.entityId}`;
+
+    const pivotRating = strictRangePivotFromCurrentPage
+      ?? (strictRangePivotCandidate.entityType === 'data_card' && strictRangePivotRatingQuery.data
+        ? { rating: strictRangePivotRatingQuery.data.rating, games: strictRangePivotRatingQuery.data.games }
+        : null);
+
+    return items.filter((it) => {
+      const key = `${it.entityType}:${it.entityId}`;
+      if (key === pivotKey) return false;
+      if (it.entityType === 'preset' || strictRangePivotCandidate.entityType === 'preset') return true;
+      if (!pivotRating) return true;
+      const range = computeStrictRangeDetails(pivotRating, { rating: it.rating, games: it.games });
+      return range.ok;
+    });
+  }, [
+    items,
+    queue,
+    strictCountableOnly,
+    strictRangePivotCandidate,
+    strictRangePivotFromCurrentPage,
+    strictRangePivotRatingQuery.data,
+  ]);
 
   const canGoPrev = offset > 0;
   const canGoNext = items.length >= limit;
@@ -413,7 +543,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                   setMinRating(e.target.value);
                 }}
                 className="input-field mt-1"
-                placeholder="如 900"
+                placeholder="如 800"
               />
             </label>
             <label className="text-sm text-gray-700">
@@ -426,7 +556,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                   setMaxRating(e.target.value);
                 }}
                 className="input-field mt-1"
-                placeholder="如 1600"
+                placeholder="如 1500"
               />
             </label>
             <label className="text-sm text-gray-700">
@@ -484,17 +614,42 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
-            <label className="text-sm text-gray-700 flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={includePresets}
-                onChange={(e) => {
-                  setOffset(0);
-                  setIncludePresets(e.target.checked);
-                }}
-              />
-              <span>包含预设</span>
-            </label>
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="text-sm text-gray-700 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={includePresets}
+                  onChange={(e) => {
+                    setOffset(0);
+                    setIncludePresets(e.target.checked);
+                  }}
+                />
+                <span>包含预设</span>
+              </label>
+
+              <label
+                className={[
+                  'text-sm text-gray-700 flex items-center gap-2',
+                  (queue !== 'strict' || !strictRangePivotCandidate) ? 'opacity-60' : '',
+                ].join(' ')}
+                title={
+                  queue !== 'strict'
+                    ? '仅严格天梯可用'
+                    : (!strictRangePivotCandidate ? '需先在参战列表中只保留 1 位参战者作为我方' : '按严格分差区间筛选对手')
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={strictCountableOnly}
+                  onChange={(e) => {
+                    setOffset(0);
+                    setStrictCountableOnly(e.target.checked);
+                  }}
+                  disabled={queue !== 'strict' || !strictRangePivotCandidate}
+                />
+                <span>仅显示严格可计分对手</span>
+              </label>
+            </div>
 
             <div className="flex items-center gap-3">
               <div className="text-xs text-gray-500">标签筛选只作用于数据卡；预设不会被标签包含/排除。</div>
@@ -636,6 +791,17 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
               <div className="text-sm text-red-600">加载失败：{String(leaderboardQuery.error)}</div>
             ) : (
               <div className="overflow-auto rounded-lg border border-gray-200">
+                {queue === 'strict' && strictCountableOnly && strictRangePivotCandidate?.entityType === 'data_card' && strictRangePivotFromCurrentPage == null ? (
+                  strictRangePivotRatingQuery.isLoading ? (
+                    <div className="px-3 py-2 text-xs text-gray-500 border-b">
+                      正在读取我方排位分，用于筛选「严格可计分对手」…
+                    </div>
+                  ) : strictRangePivotRatingQuery.isError ? (
+                    <div className="px-3 py-2 text-xs text-amber-700 bg-amber-50 border-b">
+                      无法读取我方排位分，已降级为不筛选严格范围：{String(strictRangePivotRatingQuery.error)}
+                    </div>
+                  ) : null
+                ) : null}
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr className="text-left text-gray-600 border-b">
@@ -650,13 +816,14 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                       <th className="py-2 px-3">操作</th>
                     </tr>
                   </thead>
-	                  <tbody>
-	                    {items.map((item) => {
-	                      const isSelected =
-	                        item.entityType === 'preset'
-	                          ? selectedPresetFilenames.has(item.entityId)
-	                          : selectedDataCardIds.has(item.entityId);
+		                  <tbody>
+		                    {visibleItems.map((item) => {
+		                      const isSelected =
+		                        item.entityType === 'preset'
+		                          ? selectedPresetFilenames.has(item.entityId)
+		                          : selectedDataCardIds.has(item.entityId);
 	                      const isBusy = addingKey === `${item.entityType}:${item.entityId}`;
+	                      const { display: displayName, full: fullName } = buildTitleDisplay(item.displayName || '未命名');
 	                      const authorName =
 	                        item.entityType === 'preset'
 	                          ? '官方'
@@ -693,9 +860,10 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
 	                                });
 	                              }}
 	                              className="block w-full text-left font-medium text-gray-800 hover:underline underline-offset-2"
-	                              aria-label={`查看角色详情：${item.displayName}`}
+	                              aria-label={`查看角色详情：${fullName}`}
+	                              title={fullName}
 	                            >
-	                              {item.displayName}
+	                              {displayName}
 	                            </button>
 	                            <div className="text-xs text-gray-500">
 	                              {item.entityType === 'preset' ? '预设' : '数据卡'} · 作者：{authorName}
@@ -730,10 +898,12 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                         </tr>
                       );
                     })}
-                    {items.length === 0 && (
+                    {visibleItems.length === 0 && (
                       <tr>
                         <td colSpan={9} className="py-6 text-center text-gray-500">
-                          暂无数据
+                          {queue === 'strict' && strictCountableOnly && items.length > 0
+                            ? '本页暂无符合严格计分范围的对手，可尝试翻页或调整筛选'
+                            : '暂无数据'}
                         </td>
                       </tr>
                     )}

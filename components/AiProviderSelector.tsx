@@ -10,15 +10,12 @@ export interface UserAIProviderConfig {
 
 interface AiProviderSelectorProps {
     onConfigChange: (config: UserAIProviderConfig | null) => void;
+    storageNamespace?: string;
+    allowSystemProvider?: boolean;
+    label?: string;
 }
 
-const STORAGE_SELECTED_PROVIDER = 'arena.customProvider.selected';
-const STORAGE_API_KEY_PREFIX = 'arena.customProvider.apiKey.';
-const STORAGE_MODEL_PREFIX = 'arena.customProvider.model.';
 const PROVIDER_SELECTOR_SYNC_EVENT = 'mahoshojo:set-ai-provider-config';
-
-const getApiKeyStorageKey = (providerId: string) => `${STORAGE_API_KEY_PREFIX}${providerId}`;
-const getModelStorageKey = (providerId: string) => `${STORAGE_MODEL_PREFIX}${providerId}`;
 
 interface CustomSelectOption {
     value: string;
@@ -91,9 +88,9 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ options, value, onChange, p
             {isOpen && (
                 <div className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-lg border border-pink-200 bg-white shadow-lg">
                     <div role="listbox">
-                        {options.map(option => (
+                        {options.map((option, index) => (
                             <button
-                                key={option.value}
+                                key={`${option.value}-${index}`}
                                 type="button"
                                 role="option"
                                 aria-selected={option.value === value}
@@ -121,27 +118,60 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ options, value, onChange, p
     );
 };
 
-const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange }) => {
-    const providerOptions = useMemo<AIProviderOption[]>(() => AI_PROVIDER_CATALOG, []);
-    const [selectedProviderId, setSelectedProviderId] = useState<string>('system');
+const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({
+    onConfigChange,
+    storageNamespace = 'arena.customProvider',
+    allowSystemProvider = true,
+    label = '自定义 AI 能力提供商 (可选)',
+}) => {
+
+    const providerOptions = useMemo<AIProviderOption[]>(() => {
+        const options = AI_PROVIDER_CATALOG;
+        if (allowSystemProvider) return options;
+        return options.filter((item) => item.id !== 'system');
+    }, [allowSystemProvider]);
+
+    const storageKeys = useMemo(() => {
+        return {
+            selectedProvider: `${storageNamespace}.selected`,
+            apiKeyPrefix: `${storageNamespace}.apiKey.`,
+            modelPrefix: `${storageNamespace}.model.`,
+        };
+    }, [storageNamespace]);
+
+    const getApiKeyStorageKey = useCallback((providerId: string) => `${storageKeys.apiKeyPrefix}${providerId}`, [storageKeys.apiKeyPrefix]);
+    const getModelStorageKey = useCallback((providerId: string) => `${storageKeys.modelPrefix}${providerId}`, [storageKeys.modelPrefix]);
+
+    const defaultProviderId = useMemo(() => {
+        if (allowSystemProvider) return 'system';
+        return providerOptions[0]?.id || 'system';
+    }, [allowSystemProvider, providerOptions]);
+
+    const [selectedProviderId, setSelectedProviderId] = useState<string>(defaultProviderId);
     const [selectedModel, setSelectedModel] = useState<string>('');
     const [apiKey, setApiKey] = useState<string>('');
     const [isHydrated, setIsHydrated] = useState<boolean>(false);
+    const onConfigChangeRef = useRef(onConfigChange);
+    const lastEmittedConfigKeyRef = useRef<string>('');
 
     const activeProvider = providerOptions.find(provider => provider.id === selectedProviderId) ?? null;
+
+    useEffect(() => {
+        onConfigChangeRef.current = onConfigChange;
+    }, [onConfigChange]);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
             return;
         }
 
-        const savedProviderId = window.localStorage.getItem(STORAGE_SELECTED_PROVIDER);
+        const savedProviderId = window.localStorage.getItem(storageKeys.selectedProvider);
         const validProvider = savedProviderId
             ? providerOptions.find(item => item.id === savedProviderId)
             : null;
 
         if (!savedProviderId) {
-            window.localStorage.setItem(STORAGE_SELECTED_PROVIDER, 'system');
+            window.localStorage.setItem(storageKeys.selectedProvider, defaultProviderId);
         }
 
         if (validProvider) {
@@ -153,15 +183,15 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
             setSelectedModel(storedModel);
         } else {
             if (savedProviderId) {
-                window.localStorage.setItem(STORAGE_SELECTED_PROVIDER, 'system');
+                window.localStorage.setItem(storageKeys.selectedProvider, defaultProviderId);
             }
-            setSelectedProviderId('system');
+            setSelectedProviderId(defaultProviderId);
             setApiKey('');
             setSelectedModel('');
         }
 
         setIsHydrated(true);
-    }, [providerOptions]);
+    }, [defaultProviderId, getApiKeyStorageKey, getModelStorageKey, providerOptions, storageKeys.selectedProvider]);
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -179,6 +209,10 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
                 return;
             }
 
+            if (!allowSystemProvider && nextProviderId === 'system') {
+                return;
+            }
+
             const provider = providerOptions.find(item => item.id === nextProviderId) ?? null;
             if (!provider) {
                 return;
@@ -188,7 +222,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
             const apiKeyFromEvent = typeof detail.apiKey === 'string' ? detail.apiKey : null;
 
             try {
-                window.localStorage.setItem(STORAGE_SELECTED_PROVIDER, nextProviderId);
+                window.localStorage.setItem(storageKeys.selectedProvider, nextProviderId);
                 if (apiKeyFromEvent != null) {
                     window.localStorage.setItem(getApiKeyStorageKey(nextProviderId), apiKeyFromEvent);
                 }
@@ -215,48 +249,68 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
 
         window.addEventListener(PROVIDER_SELECTOR_SYNC_EVENT, handler as EventListener);
         return () => window.removeEventListener(PROVIDER_SELECTOR_SYNC_EVENT, handler as EventListener);
-    }, [providerOptions]);
+    }, [allowSystemProvider, getApiKeyStorageKey, getModelStorageKey, providerOptions, storageKeys.selectedProvider]);
 
     useEffect(() => {
         if (!isHydrated || typeof window === 'undefined') {
             return;
         }
 
-        window.localStorage.setItem(STORAGE_SELECTED_PROVIDER, selectedProviderId);
-
         if (!activeProvider) {
             setApiKey('');
             setSelectedModel('');
-            onConfigChange(null);
             return;
         }
 
-        const storedApiKey = window.localStorage.getItem(getApiKeyStorageKey(activeProvider.id)) || '';
-        const storedModel = window.localStorage.getItem(getModelStorageKey(activeProvider.id)) || activeProvider.models[0]?.value || '';
+        let storedApiKey = '';
+        let storedModel = activeProvider.models[0]?.value || '';
+
+        try {
+            window.localStorage.setItem(storageKeys.selectedProvider, selectedProviderId);
+            storedApiKey = window.localStorage.getItem(getApiKeyStorageKey(activeProvider.id)) || '';
+            storedModel = window.localStorage.getItem(getModelStorageKey(activeProvider.id)) || storedModel;
+        } catch {
+            // localStorage 在部分隐私模式/受限环境下可能不可用，忽略即可
+        }
 
         setApiKey(storedApiKey);
         setSelectedModel(storedModel);
-    }, [activeProvider, isHydrated, onConfigChange, selectedProviderId]);
+    }, [activeProvider, getApiKeyStorageKey, getModelStorageKey, isHydrated, selectedProviderId, storageKeys.selectedProvider]);
 
     useEffect(() => {
-        if (!isHydrated || !activeProvider) {
+        if (!isHydrated) {
+            return;
+        }
+
+        if (!activeProvider) {
+            const configKey = 'null';
+            if (configKey === lastEmittedConfigKeyRef.current) {
+                return;
+            }
+            lastEmittedConfigKeyRef.current = configKey;
+            onConfigChangeRef.current(null);
             return;
         }
 
         const effectiveModel = selectedModel || activeProvider.models[0]?.value || '';
-        onConfigChange({
+        const configKey = `${activeProvider.id}::${effectiveModel}::${apiKey.trim()}`;
+        if (configKey === lastEmittedConfigKeyRef.current) {
+            return;
+        }
+        lastEmittedConfigKeyRef.current = configKey;
+        onConfigChangeRef.current({
             providerId: activeProvider.id,
             modelId: effectiveModel,
             apiKey: apiKey.trim(),
         });
-    }, [activeProvider, apiKey, isHydrated, onConfigChange, selectedModel]);
+    }, [activeProvider, apiKey, isHydrated, selectedModel]);
 
     useEffect(() => {
         if (!isHydrated || !activeProvider || typeof window === 'undefined') {
             return;
         }
         window.localStorage.setItem(getApiKeyStorageKey(activeProvider.id), apiKey);
-    }, [activeProvider, apiKey, isHydrated]);
+    }, [activeProvider, apiKey, getApiKeyStorageKey, isHydrated]);
 
     useEffect(() => {
         if (!isHydrated || !activeProvider || typeof window === 'undefined') {
@@ -266,7 +320,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
             return;
         }
         window.localStorage.setItem(getModelStorageKey(activeProvider.id), selectedModel);
-    }, [activeProvider, isHydrated, selectedModel]);
+    }, [activeProvider, getModelStorageKey, isHydrated, selectedModel]);
 
     const providerSelectOptions = useMemo<CustomSelectOption[]>(() => {
         return providerOptions.map((provider): CustomSelectOption => ({
@@ -287,7 +341,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
 
     return (
         <div className="input-group">
-            <label className="input-label">自定义 AI 能力提供商 (可选)</label>
+            <label className="input-label">{label}</label>
             <CustomSelect
                 options={providerSelectOptions}
                 value={selectedProviderId}
@@ -333,7 +387,7 @@ const AiProviderSelector: React.FC<AiProviderSelectorProps> = ({ onConfigChange 
                                 onChange={(event) => setApiKey(event.target.value)}
                             />
                             <p className="mt-1 text-xs text-gray-500">
-                                API Key 仅存储于本地浏览器 localStorage，不会上传到服务器。
+                                API Key 仅存储于本地浏览器；请求时会随 HTTPS 发送到边缘函数用于转发调用，不会写入数据库或日志。
                             </p>
                         </div>
                     )

@@ -4,6 +4,13 @@ import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import {
+  formatMarkdownImage,
+  formatMarkdownLink,
+  isAllowedExternalMediaUrl,
+  isLikelyAudioUrl,
+  isLikelyVideoUrl,
+} from '@/lib/markdown/externalMedia';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
@@ -50,6 +57,16 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
     ? `my-4 overflow-x-auto rounded-lg border ${borderClass} bg-black/10 p-3 text-xs leading-relaxed ${textClass}`
     : `my-2 overflow-x-auto rounded-lg border ${borderClass} bg-black/10 p-3 text-xs leading-relaxed ${textClass}`;
 
+  const getLinkText = (children: React.ReactNode) => {
+    if (typeof children === 'string') return children;
+    if (Array.isArray(children)) {
+      return children.filter((child): child is string => typeof child === 'string').join('');
+    }
+    return '';
+  };
+
+  const normalizeHref = (href: string) => (href.startsWith('//') ? `https:${href}` : href);
+
   const components: Components = {
     h1: ({ children }) =>
       isArticle ? (
@@ -73,8 +90,90 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
     ul: ({ children }) => <ul className={unorderedListClass}>{children}</ul>,
     ol: ({ children }) => <ol className={orderedListClass}>{children}</ol>,
     li: ({ children }) => <li className="break-words">{children}</li>,
-    a: ({ href, children, ...props }) => {
-      const isExternal = typeof href === 'string' && /^https?:\/\//i.test(href);
+    a: ({ href, title, children, ...props }) => {
+      const rawHref = typeof href === 'string' ? href : '';
+      const isExternal = /^https?:\/\//i.test(rawHref);
+      const isAudioLink = Boolean(rawHref && isLikelyAudioUrl(rawHref));
+      const isVideoLink = Boolean(rawHref && isLikelyVideoUrl(rawHref));
+      const normalizedHref = rawHref ? normalizeHref(rawHref) : '';
+      const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
+      const isVideoAllowed = isVideoLink && isAllowedExternalMediaUrl(rawHref, 'video');
+      const linkText = getLinkText(children) || '播放音频';
+
+      if (isAudioLink) {
+        if (!isAudioAllowed) {
+          return (
+            <code
+              className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
+                variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
+              }`}
+            >
+              {formatMarkdownLink(linkText, rawHref, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <audio
+              controls
+              preload="none"
+              src={normalizedHref}
+              className="h-8 max-w-full"
+            />
+            <a
+              href={normalizedHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`text-[11px] underline underline-offset-2 ${
+                variant === 'light' ? 'text-blue-700' : 'text-blue-200'
+              }`}
+              {...props}
+            >
+              {linkText}
+            </a>
+          </span>
+        );
+      }
+
+      if (isVideoLink) {
+        const videoLabel = getLinkText(children) || '播放视频';
+        if (!isVideoAllowed) {
+          return (
+            <code
+              className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
+                variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
+              }`}
+            >
+              {formatMarkdownLink(videoLabel, rawHref, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <video
+              controls
+              preload="metadata"
+              playsInline
+              src={normalizedHref}
+              className={`my-2 max-w-full rounded-md border ${borderClass}`}
+            />
+            <a
+              href={normalizedHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`text-[11px] underline underline-offset-2 ${
+                variant === 'light' ? 'text-blue-700' : 'text-blue-200'
+              }`}
+              {...props}
+            >
+              {videoLabel}
+            </a>
+          </span>
+        );
+      }
+
       return (
         <a
           href={href}
@@ -157,6 +256,108 @@ export function MarkdownBlock({ content, variant = 'dark', mode = 'compact', cla
         {children}
       </td>
     ),
+    img: ({ src, alt, title, ...props }) => {
+      const rawSrc = typeof src === 'string' ? src : '';
+      const isAudioLink = Boolean(rawSrc && isLikelyAudioUrl(rawSrc));
+      const isVideoLink = Boolean(rawSrc && isLikelyVideoUrl(rawSrc));
+      if (isAudioLink) {
+        const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
+        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const audioLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放音频';
+
+        if (!isAudioAllowed) {
+          return (
+            <code
+              className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
+                variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
+              }`}
+            >
+              {formatMarkdownImage(alt, rawSrc, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <audio controls preload="none" src={normalizedSrc} className="h-8 max-w-full" />
+            <a
+              href={normalizedSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`text-[11px] underline underline-offset-2 ${
+                variant === 'light' ? 'text-blue-700' : 'text-blue-200'
+              }`}
+            >
+              {audioLabel}
+            </a>
+          </span>
+        );
+      }
+
+      if (isVideoLink) {
+        const isVideoAllowed = isAllowedExternalMediaUrl(rawSrc, 'video');
+        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const videoLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放视频';
+
+        if (!isVideoAllowed) {
+          return (
+            <code
+              className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
+                variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
+              }`}
+            >
+              {formatMarkdownImage(alt, rawSrc, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <video
+              controls
+              preload="metadata"
+              playsInline
+              src={normalizedSrc}
+              className={`my-2 max-w-full rounded-md border ${borderClass}`}
+            />
+            <a
+              href={normalizedSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`text-[11px] underline underline-offset-2 ${
+                variant === 'light' ? 'text-blue-700' : 'text-blue-200'
+              }`}
+            >
+              {videoLabel}
+            </a>
+          </span>
+        );
+      }
+
+      const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
+      if (!isAllowed) {
+        return (
+          <code
+            className={`font-mono text-xs rounded px-1 py-0.5 break-all ${
+              variant === 'light' ? 'bg-gray-100 text-gray-800' : 'bg-white/10 text-pink-200'
+            }`}
+          >
+            {formatMarkdownImage(alt, rawSrc, title)}
+          </code>
+        );
+      }
+
+      return (
+        <img
+          src={src}
+          alt={typeof alt === 'string' ? alt : ''}
+          title={typeof title === 'string' ? title : undefined}
+          className={`my-2 max-w-full rounded-md border ${variant === 'light' ? 'border-gray-200' : 'border-white/10'}`}
+          loading="lazy"
+          {...props}
+        />
+      );
+    },
   };
 
   return (

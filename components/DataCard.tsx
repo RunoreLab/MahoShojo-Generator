@@ -5,6 +5,7 @@ import { isCardLiked, addLikedCard } from '@/lib/localStorage';
 import { getDataCardStatus } from '@/lib/database/data-cards';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { buildTitleDisplay } from '@/lib/text';
 
 interface DataCardProps {
   id: string; // Changed from number to string for UUID
@@ -36,6 +37,7 @@ interface DataCardProps {
   techScore?: number | null;
   techLevel?: string | null;
   strictTier?: string | null;
+  isNative?: boolean | null;
   hot?: boolean;
   pending?: boolean;
   onReplace?: () => void;
@@ -89,6 +91,7 @@ export default function DataCard({
   techScore = null,
   techLevel = null,
   strictTier = null,
+  isNative = null,
   hot = false,
   pending = false,
   onReplace,
@@ -100,6 +103,8 @@ export default function DataCard({
   const [favoriting, setFavoriting] = useState(false);
   const cardStatus = getDataCardStatus({ is_public: isPublic });
   const canDownload = Boolean(onDownload);
+  const resolvedName = name?.trim() ? name : '未命名';
+  const { display: displayName, full: fullName } = buildTitleDisplay(resolvedName);
 
   // 检查本地存储中的点赞状态
   useEffect(() => {
@@ -254,7 +259,9 @@ export default function DataCard({
       {/* 主要内容区域 */}
       <div className="flex-1">
         <div className="mb-2">
-          <h4 className={`font-semibold text-lg ${textColor}`}>{name}</h4>
+          <h4 className={`font-semibold text-lg ${textColor}`} title={fullName}>
+            {displayName}
+          </h4>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {hot && (
               <span className="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-800 border border-orange-200">
@@ -321,6 +328,11 @@ export default function DataCard({
             {type === 'character' && roleType && (
               <span className={`text-xs px-2 py-1 rounded ${roleTypeStyleMap[roleType]}`}>
                 {roleTypeLabelMap[roleType]}
+              </span>
+            )}
+            {isNative === true && (
+              <span className="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-700">
+                原生
               </span>
             )}
             {isRecommended && (

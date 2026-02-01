@@ -55,10 +55,27 @@ describe('pvp: scenario selection', () => {
     expect(parsePvpScenarioSelection({ kind: 'snapshot', id: 'x' })).toBeNull();
   });
 
+  test('accepts preset selection format', () => {
+    const parsed = parsePvpScenarioSelection({
+      kind: 'preset',
+      filename: 'S01_queen_will.json',
+      name: '预设情景（测试别名）',
+    });
+    expect(parsed).toEqual({
+      kind: 'preset',
+      filename: 'S01_queen_will.json',
+      name: '预设情景（测试别名）',
+    });
+    expect(getPvpScenarioTitle(parsed!)).toBe('预设情景（测试别名）');
+  });
+
+  test('rejects unknown preset filename', () => {
+    expect(parsePvpScenarioSelection({ kind: 'preset', filename: 'does-not-exist.json' })).toBeNull();
+  });
+
   test('title falls back to id', () => {
     const parsed = parsePvpScenarioSelection({ id: 'card_2' });
     expect(parsed?.name).toBeNull();
     expect(getPvpScenarioTitle(parsed!)).toBe('card_2');
   });
 });
-

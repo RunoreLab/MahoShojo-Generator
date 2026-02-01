@@ -1,13 +1,21 @@
 // components/BattleReportCard.tsx
 
-import React, { useRef } from 'react';
-import { snapdom } from '@zumer/snapdom';
+import React, { useRef, useState } from 'react';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 // 1. [新增] 导入随机判定结果的类型定义
 import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
+import {
+  formatMarkdownImage,
+  formatMarkdownLink,
+  isAllowedExternalMediaUrl,
+  isLikelyAudioUrl,
+  isLikelyVideoUrl,
+} from '@/lib/markdown/externalMedia';
+import { capturePngBlob } from '@/lib/client/snapdomCapture';
+import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { RankedMatchReportPanel } from '@/components/ranking/RankedMatchReportPanel';
 
@@ -68,6 +76,7 @@ interface BattleReportCardProps {
 
 const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, generationId, onSaveImage, mode, liveBody }) => {
   const cardRef = useRef<HTMLDivElement>(null);
+  const [isSavingImage, setIsSavingImage] = useState(false);
 
   const headline = typeof report?.headline === 'string' && report.headline.trim() ? report.headline.trim() : '（无标题）';
   const reporterName = typeof report?.reporterInfo?.name === 'string' ? report.reporterInfo.name : '';
@@ -113,23 +122,28 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, generationI
   // 处理保存为图片的功能
   const handleSaveImage = async () => {
     if (!cardRef.current) return;
+    if (isSavingImage) return;
+
+    const buttonsContainer = cardRef.current.querySelector('.buttons-container') as HTMLElement;
+    const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
 
     try {
-      // 截图前隐藏按钮和显示Logo
-      const buttonsContainer = cardRef.current.querySelector('.buttons-container') as HTMLElement;
-      const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
+      setIsSavingImage(true);
 
+      // 截图前隐藏按钮和显示Logo
       if (buttonsContainer) buttonsContainer.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, { scale: 1 });
+      const sanitizedTitle = headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'battle_report';
+      const filename = `魔法少女速报_${sanitizedTitle}.png`;
 
-      // 截图后恢复按钮和隐藏Logo
-      if (buttonsContainer) buttonsContainer.style.display = 'flex';
-      if (logoPlaceholder) logoPlaceholder.style.display = 'none';
-
-      const imgElement = await result.toPng();
-      const imageUrl = imgElement.src;
+      const blob = await capturePngBlob(cardRef.current, {
+        scale: 1,
+        dprMax: 2,
+        fast: false,
+        exclude: ['audio', 'video'],
+        excludeMode: 'remove',
+      });
 
       // 检测设备类型以提供最佳保存体验
       const isMobileDevice = /Mobi/i.test(window.navigator.userAgent);
@@ -137,28 +151,20 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, generationI
       if (isMobileDevice) {
         // 在移动端，调用回调函数以显示弹窗供用户长按保存
         if (onSaveImage) {
-          onSaveImage(imageUrl);
+          onSaveImage(createBlobUrl(blob));
         }
       } else {
         // 在桌面端，直接触发文件下载
-        const downloadLink = document.createElement('a');
-        downloadLink.href = imageUrl;
-        // 使用新闻标题并清理特殊字符作为文件名
-        const sanitizedTitle = headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'battle_report';
-        downloadLink.download = `魔法少女速报_${sanitizedTitle}.png`;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
+        downloadBlob(blob, filename);
       }
     } catch (err) {
       alert('生成图片失败，请重试');
-      console.error("Image generation failed:", err);
-      // 确保在出错时也恢复按钮
-      const buttonsContainer = cardRef.current?.querySelector('.buttons-container') as HTMLElement;
-      const logoPlaceholder = cardRef.current?.querySelector('.logo-placeholder') as HTMLElement;
-
+      console.error('Image generation failed:', err);
+    } finally {
+      // 截图后恢复按钮和隐藏Logo
       if (buttonsContainer) buttonsContainer.style.display = 'flex';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';
+      setIsSavingImage(false);
     }
   };
 
@@ -231,6 +237,84 @@ ${adjudicationMarkdown}
   };
 
   const markdownComponents: Components = {
+    a: ({ href, title, children, ...props }) => {
+      const rawHref = typeof href === 'string' ? href : '';
+      const isExternal = /^https?:\/\//i.test(rawHref);
+      const isAudioLink = Boolean(rawHref && isLikelyAudioUrl(rawHref));
+      const isVideoLink = Boolean(rawHref && isLikelyVideoUrl(rawHref));
+      const normalizedHref = rawHref.startsWith('//') ? `https:${rawHref}` : rawHref;
+      const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
+      const isVideoAllowed = isVideoLink && isAllowedExternalMediaUrl(rawHref, 'video');
+      const linkText =
+        typeof children === 'string'
+          ? children
+          : Array.isArray(children)
+            ? children.filter((child): child is string => typeof child === 'string').join('')
+            : '';
+
+      if (isAudioLink) {
+        if (!isAudioAllowed) {
+          return (
+            <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
+              {formatMarkdownLink(linkText || '播放音频', rawHref, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <audio controls preload="none" src={normalizedHref} className="h-8 max-w-full" />
+            <a
+              href={normalizedHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] underline underline-offset-2 text-blue-200"
+              {...props}
+            >
+              {linkText || '打开音频链接'}
+            </a>
+          </span>
+        );
+      }
+
+      if (isVideoLink) {
+        const videoLabel = linkText || '播放视频';
+        if (!isVideoAllowed) {
+          return (
+            <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
+              {formatMarkdownLink(videoLabel, rawHref, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <video controls preload="metadata" playsInline src={normalizedHref} className="my-2 max-w-full rounded-md border border-white/15" />
+            <a
+              href={normalizedHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] underline underline-offset-2 text-blue-200"
+              {...props}
+            >
+              {videoLabel}
+            </a>
+          </span>
+        );
+      }
+
+      return (
+        <a
+          href={href}
+          target={isExternal ? '_blank' : undefined}
+          rel={isExternal ? 'noopener noreferrer' : undefined}
+          className="underline underline-offset-2 text-blue-200 opacity-90 hover:opacity-100"
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    },
     h1: ({ children }) => <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>,
     h2: ({ children }) => <h4 className="text-base font-semibold mt-4 mb-2">{children}</h4>,
     h3: ({ children }) => <h5 className="text-sm font-semibold mt-3 mb-1 opacity-95">{children}</h5>,
@@ -287,6 +371,86 @@ ${adjudicationMarkdown}
     td: ({ children }) => (
       <td className="px-3 py-2 text-gray-100/90 align-top border-b border-white/5 whitespace-pre-wrap break-words">{children}</td>
     ),
+    img: ({ src, alt, title, ...props }) => {
+      const rawSrc = typeof src === 'string' ? src : '';
+      const isAudioLink = Boolean(rawSrc && isLikelyAudioUrl(rawSrc));
+      const isVideoLink = Boolean(rawSrc && isLikelyVideoUrl(rawSrc));
+      if (isAudioLink) {
+        const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
+        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const audioLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放音频';
+
+        if (!isAudioAllowed) {
+          return (
+            <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
+              {formatMarkdownImage(alt, rawSrc, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <audio controls preload="none" src={normalizedSrc} className="h-8 max-w-full" />
+            <a
+              href={normalizedSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] underline underline-offset-2 text-blue-200"
+            >
+              {audioLabel}
+            </a>
+          </span>
+        );
+      }
+
+      if (isVideoLink) {
+        const isVideoAllowed = isAllowedExternalMediaUrl(rawSrc, 'video');
+        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const videoLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放视频';
+
+        if (!isVideoAllowed) {
+          return (
+            <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
+              {formatMarkdownImage(alt, rawSrc, title)}
+            </code>
+          );
+        }
+
+        return (
+          <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+            <video controls preload="metadata" playsInline src={normalizedSrc} className="my-2 max-w-full rounded-md border border-white/15" />
+            <a
+              href={normalizedSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] underline underline-offset-2 text-blue-200"
+            >
+              {videoLabel}
+            </a>
+          </span>
+        );
+      }
+
+      const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
+      if (!isAllowed) {
+        return (
+          <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
+            {formatMarkdownImage(alt, rawSrc, title)}
+          </code>
+        );
+      }
+
+      return (
+        <img
+          src={src}
+          alt={typeof alt === 'string' ? alt : ''}
+          title={typeof title === 'string' ? title : undefined}
+          className="my-2 max-w-full rounded-md border border-white/15"
+          loading="lazy"
+          {...props}
+        />
+      );
+    },
   };
 
   return (
@@ -423,8 +587,8 @@ ${adjudicationMarkdown}
         {/* 按钮容器 */}
         <div className="buttons-container flex gap-2 justify-center mt-4" style={{ alignItems: 'stretch' }}>
           {onSaveImage && (
-            <button onClick={handleSaveImage} className="save-button" style={{ marginTop: 0, flex: 1 }}>
-              📱 保存为图片
+            <button onClick={handleSaveImage} className="save-button" style={{ marginTop: 0, flex: 1 }} disabled={isSavingImage}>
+              {isSavingImage ? '生成中...' : '📱 保存为图片'}
             </button>
           )}
           <button onClick={handleSaveMarkdown} className="save-button" style={{ marginTop: 0, flex: 1 }}>

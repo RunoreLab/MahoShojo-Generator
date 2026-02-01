@@ -1,13 +1,13 @@
 // pages/sublimation.tsx
 
-import React, { useState, ChangeEvent, useEffect, useMemo } from 'react';
+import React, { useState, ChangeEvent, useEffect, useMemo, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
-import { quickCheck } from '@/lib/sensitive-word-filter';
+import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { useCooldown } from '../lib/cooldown';
 import { config as appConfig } from '../lib/config';
 import SaveToCloudButton from '../components/SaveToCloudButton';
@@ -17,8 +17,11 @@ import { useAuth } from '@/lib/useAuth';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { ThemeImage } from '@/components/shared/ThemeImage';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import {
 	    inferTemplate,
 	    TEMPLATE_LABELS,
@@ -78,6 +81,27 @@ const extractTextForCheck = (data: any): string => {
     }
     return textContent;
 };
+
+type NativenessStatus = 'native' | 'derived' | 'checking' | 'unknown';
+
+const NATIVENESS_BADGE_CONFIG: Record<NativenessStatus, { label: string; className: string }> = {
+    native: { label: '原生数据', className: 'text-green-800 bg-green-100' },
+    derived: { label: '衍生数据', className: 'text-yellow-800 bg-yellow-100' },
+    checking: { label: '原生性校验中', className: 'text-gray-600 bg-gray-100' },
+    unknown: { label: '原生性未知', className: 'text-gray-600 bg-gray-100' },
+};
+
+const NativenessBadge: React.FC<{ status: NativenessStatus }> = ({ status }) => {
+    const config = NATIVENESS_BADGE_CONFIG[status];
+    return (
+        <span className={`px-3 py-1 text-xs font-semibold rounded-full ${config.className}`}>
+            {config.label}
+        </span>
+    );
+};
+
+const hasNativeSignature = (data: any) =>
+    typeof data?.signature === 'string' && data.signature.trim().length > 0;
 
 // API响应和结果状态的类型
 interface SublimationResponse {
@@ -140,6 +164,7 @@ const getDefaultTargetTemplate = (source: InferableTemplate): SupportedTargetTem
 };
 
 const SUBLIMATION_STATE_PREF_KEY = 'sublimation-history-state-preferences-v1';
+const SUBLIMATION_PREFERENCE_KEY = 'mahoshojo.sublimation.preferences.v1';
 
 
 const SublimationPage: React.FC = () => {
@@ -158,6 +183,8 @@ const SublimationPage: React.FC = () => {
     const [pastedJson, setPastedJson] = useState('');
     const [isPasteAreaVisible, setIsPasteAreaVisible] = useState(false);
     const [userGuidance, setUserGuidance] = useState('');
+    const [narrativeHistory, setNarrativeHistory] = useState('');
+    const [narrativeHistoryFileName, setNarrativeHistoryFileName] = useState<string | null>(null);
 
     // 数据库选择相关状态
     const [showBattleDataModal, setShowBattleDataModal] = useState(false);
@@ -175,6 +202,8 @@ const SublimationPage: React.FC = () => {
     const [writeArenaHistory, setWriteArenaHistory] = useState(true);
     const [readCurrentState, setReadCurrentState] = useState(true);
     const [writeCurrentState, setWriteCurrentState] = useState(true);
+    const [isSourceNative, setIsSourceNative] = useState<boolean | null>(null);
+    const [isSourceNativeChecking, setIsSourceNativeChecking] = useState(false);
 
     const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
     const sublimationCooldownMs = isUserCustomKey ? 3000 : 60000;
@@ -182,6 +211,7 @@ const SublimationPage: React.FC = () => {
     const { isCooldown, startCooldown, remainingTime } = useCooldown(sublimationCooldownKey, sublimationCooldownMs);
     const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
     const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
+    const hasStoredSublimationPrefsRef = useRef(false);
 
     const streamedGeneralCardForDisplay = useMemo(() => {
         if (generationMode !== 'stream') return null;
@@ -219,6 +249,40 @@ const SublimationPage: React.FC = () => {
     useEffect(() => {
         if (typeof window === 'undefined') return;
         try {
+            const saved = window.localStorage.getItem(SUBLIMATION_PREFERENCE_KEY);
+            if (!saved) return;
+            const parsed = JSON.parse(saved);
+            hasStoredSublimationPrefsRef.current = true;
+            if (parsed?.generationMode === 'stream' || parsed?.generationMode === 'non-stream') {
+                setGenerationMode(parsed.generationMode);
+            }
+            if (typeof parsed?.selectedLanguage === 'string') {
+                setSelectedLanguage(parsed.selectedLanguage);
+            }
+            if (typeof parsed?.userGuidance === 'string') {
+                setUserGuidance(parsed.userGuidance);
+            }
+            if (typeof parsed?.isAdvancedVisible === 'boolean') {
+                setIsAdvancedVisible(parsed.isAdvancedVisible);
+            }
+            if (typeof parsed?.allowReshapeNames === 'boolean') {
+                setAllowReshapeNames(parsed.allowReshapeNames);
+            }
+            if (parsed?.targetTemplate && TARGET_TEMPLATE_OPTIONS.includes(parsed.targetTemplate)) {
+                setTargetTemplate(parsed.targetTemplate);
+            }
+            if (Array.isArray(parsed?.fieldsToPreserve)) {
+                const filtered = parsed.fieldsToPreserve.filter((value: unknown) => typeof value === 'string');
+                setFieldsToPreserve(filtered);
+            }
+        } catch (error) {
+            console.warn('读取升华偏好失败', error);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
             const saved = window.localStorage.getItem(SUBLIMATION_STATE_PREF_KEY);
             if (!saved) return;
             const parsed = JSON.parse(saved);
@@ -243,11 +307,116 @@ const SublimationPage: React.FC = () => {
     }, [readArenaHistory, writeArenaHistory, readCurrentState, writeCurrentState]);
 
     useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const payload = {
+                generationMode,
+                selectedLanguage,
+                userGuidance,
+                isAdvancedVisible,
+                allowReshapeNames,
+                targetTemplate,
+                fieldsToPreserve,
+            };
+            window.localStorage.setItem(SUBLIMATION_PREFERENCE_KEY, JSON.stringify(payload));
+            hasStoredSublimationPrefsRef.current = true;
+        } catch {
+            // localStorage 可能不可用，忽略
+        }
+    }, [
+        generationMode,
+        selectedLanguage,
+        userGuidance,
+        isAdvancedVisible,
+        allowReshapeNames,
+        targetTemplate,
+        fieldsToPreserve,
+    ]);
+
+    useEffect(() => {
         setFieldsToPreserve(prev => {
             const allowed = new Set(PRESERVABLE_FIELDS_CONFIG[targetTemplate].map(item => item.id));
             return prev.filter(field => allowed.has(field));
         });
     }, [targetTemplate]);
+
+    const verifyOrigin = useCallback(async (data: any): Promise<boolean> => {
+        try {
+            const response = await fetch('/api/verify-origin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+            if (!response.ok) return false;
+            const result = await response.json().catch(() => null as any);
+            return Boolean(result?.isValid);
+        } catch (error) {
+            console.warn('原生性校验失败，将按非原生处理', error);
+            return false;
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!characterData) {
+            setIsSourceNative(null);
+            setIsSourceNativeChecking(false);
+            return;
+        }
+
+        let isActive = true;
+        setIsSourceNative(null);
+        setIsSourceNativeChecking(true);
+        verifyOrigin(characterData)
+            .then((isValid) => {
+                if (!isActive) return;
+                setIsSourceNative(isValid);
+            })
+            .finally(() => {
+                if (!isActive) return;
+                setIsSourceNativeChecking(false);
+            });
+
+        return () => {
+            isActive = false;
+        };
+    }, [characterData, verifyOrigin]);
+
+    const resignDataCard = useCallback(async (data: any) => {
+        const response = await fetch('/api/resign-data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null as any);
+            if (errorData?.shouldRedirect) {
+                router.push({
+                    pathname: '/arrested',
+                    query: { reason: errorData.reason || '编辑内容不合规' }
+                });
+                return null;
+            }
+            throw new Error(errorData?.message || '签名服务器认证失败');
+        }
+
+        return response.json();
+    }, [router]);
+
+    const shouldResignStreamedCard = useCallback(async () => {
+        if (!characterData) return false;
+        const isNative = await verifyOrigin(characterData);
+        if (!isNative) return false;
+        const trimmedGuidance = typeof userGuidance === 'string' ? userGuidance.trim() : '';
+        const trimmedNarrativeHistory = typeof narrativeHistory === 'string' ? narrativeHistory.trim() : '';
+        if (trimmedNarrativeHistory) {
+            return false;
+        }
+        if (trimmedGuidance) {
+            return appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
+        }
+        return true;
+    }, [characterData, userGuidance, narrativeHistory, verifyOrigin]);
 
     const processJsonData = (jsonText: string) => {
         try {
@@ -256,14 +425,19 @@ const SublimationPage: React.FC = () => {
             setFileName('粘贴的内容');
             setError(null);
             setResultData(null);
-            setAllowReshapeNames(false);
 
             const inferred = inferTemplate(json);
             setSourceTemplate(inferred);
 
             const defaultTarget = getDefaultTargetTemplate(inferred);
-            setTargetTemplate(defaultTarget);
-            setFieldsToPreserve(getDefaultPreserveFields(defaultTarget));
+            const nextTarget = hasStoredSublimationPrefsRef.current ? targetTemplate : defaultTarget;
+            setTargetTemplate(nextTarget);
+            const isCrossTemplateSelection = inferred !== nextTarget;
+            if (isCrossTemplateSelection) {
+                setFieldsToPreserve([]);
+            } else if (!hasStoredSublimationPrefsRef.current) {
+                setFieldsToPreserve(getDefaultPreserveFields(nextTarget));
+            }
 
             return true;
         } catch (err) {
@@ -297,6 +471,28 @@ const SublimationPage: React.FC = () => {
         if (processJsonData(pastedJson)) {
             setPastedJson('');
         }
+    };
+
+    const handleNarrativeFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const text = await file.text();
+        let normalizedText = text;
+        if (file.name.toLowerCase().endsWith('.json')) {
+            try {
+                normalizedText = JSON.stringify(JSON.parse(text), null, 2);
+            } catch {
+                normalizedText = text;
+            }
+        }
+        setNarrativeHistory(normalizedText);
+        setNarrativeHistoryFileName(file.name);
+        event.target.value = '';
+    };
+
+    const handleClearNarrativeHistory = () => {
+        setNarrativeHistory('');
+        setNarrativeHistoryFileName(null);
     };
 
     // 打开角色数据卡选择器
@@ -357,13 +553,18 @@ const SublimationPage: React.FC = () => {
             setFileName(`${card._cardName || '未命名'}(来自数据库)`); // 使用内部传递的_cardName
             setShowBattleDataModal(false);
             setError(null);
-            setAllowReshapeNames(false);
 
             const inferred = inferTemplate(cleanedCardData);
             setSourceTemplate(inferred);
             const defaultTarget = getDefaultTargetTemplate(inferred);
-            setTargetTemplate(defaultTarget);
-            setFieldsToPreserve(getDefaultPreserveFields(defaultTarget));
+            const nextTarget = hasStoredSublimationPrefsRef.current ? targetTemplate : defaultTarget;
+            setTargetTemplate(nextTarget);
+            const isCrossTemplateSelection = inferred !== nextTarget;
+            if (isCrossTemplateSelection) {
+                setFieldsToPreserve([]);
+            } else if (!hasStoredSublimationPrefsRef.current) {
+                setFieldsToPreserve(getDefaultPreserveFields(nextTarget));
+            }
 
         } catch (err) {
             setError(`❌ 数据卡加载失败: ${err instanceof Error ? err.message : '未知错误'}`);
@@ -389,15 +590,15 @@ const SublimationPage: React.FC = () => {
         setStreamingMarkdown(null);
         setStreamedGeneralCard(null);
 
-        try {
-            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance;
-            if ((await quickCheck(textToCheck)).hasSensitiveWords) {
-                router.push({
-                    pathname: '/arrested',
-                    query: { reason: '上传的角色档案或引导内容包含危险符文' }
-                });
-                return;
-            }
+	        try {
+	            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance + " " + narrativeHistory;
+	            const redirectTarget = await getSensitiveWordRedirectTarget(textToCheck, {
+	                reason: '上传的角色档案或引导内容包含危险符文',
+	            });
+	            if (redirectTarget) {
+	                router.push(redirectTarget);
+	                return;
+	            }
 
             const allowedFieldSet = new Set(currentFieldsConfig.map(item => item.id));
             const filteredFieldsToPreserve = fieldsToPreserve.filter(field => allowedFieldSet.has(field));
@@ -406,6 +607,7 @@ const SublimationPage: React.FC = () => {
                 ...characterData,
                 language: selectedLanguage,
                 userGuidance: userGuidance.trim(),
+                narrativeHistory: narrativeHistory.trim(),
                 fieldsToPreserve: filteredFieldsToPreserve,
                 allowReshapeNames,
                 isDowngrade: isDowngrade,
@@ -437,7 +639,8 @@ const SublimationPage: React.FC = () => {
             });
 
             if (!response.ok) {
-                const errorJson = await response.json().catch(() => null as any);
+                const { payload } = await readJsonOrTextFromResponse(response);
+                const errorJson = payload && typeof payload === 'object' ? (payload as any) : null;
                 if (errorJson?.shouldRedirect) {
                     router.push({
                         pathname: '/arrested',
@@ -445,16 +648,16 @@ const SublimationPage: React.FC = () => {
                     });
                     return;
                 }
-                const serverMessage = errorJson?.message || errorJson?.error;
-                throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `升华失败（HTTP ${response.status}）`);
+                const serverMessage = resolveApiErrorMessage({ payload, fallback: '升华失败' });
+                throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '升华失败' }));
             }
 
             if (generationMode === 'stream') {
                 const contentType = (response.headers.get('content-type') || '').toLowerCase();
                 if (contentType.includes('application/json') || contentType.includes('+json')) {
-                    const errorJson = await response.json().catch(() => null as any);
-                    const serverMessage = errorJson?.message || errorJson?.error;
-                    throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `升华失败（HTTP ${response.status}）`);
+                    const { payload } = await readJsonOrTextFromResponse(response);
+                    const serverMessage = resolveApiErrorMessage({ payload, fallback: '升华失败' });
+                    throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '升华失败' }));
                 }
 
                 setStreamingMarkdown('');
@@ -482,7 +685,25 @@ const SublimationPage: React.FC = () => {
                     defaultName,
                 });
 
-                setStreamedGeneralCard(card);
+                let signedCard = card;
+                let hasSignError = false;
+                try {
+                    const shouldSign = await shouldResignStreamedCard();
+                    if (shouldSign) {
+                        const result = await resignDataCard(card);
+                        if (!result) return;
+                        signedCard = result;
+                    }
+                } catch (err) {
+                    const message = err instanceof Error ? err.message : '签名失败';
+                    setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+                    hasSignError = true;
+                }
+
+                setStreamedGeneralCard(signedCard);
+                if (!hasSignError) {
+                    setError(null);
+                }
                 startCooldown();
                 return;
             }
@@ -556,7 +777,7 @@ const SublimationPage: React.FC = () => {
         } else if (targetTemplate === 'canshou' && data.name && data.templateId !== GENERAL_CHARACTER_TEMPLATE_ID) {
             return <CanshouCard canshou={data} onSaveImage={handleSaveImage} />;
         } else if (targetTemplate === 'general') {
-            return <GeneralCharacterCard general={data} />;
+            return <GeneralCharacterCard general={data} onSaveImage={handleSaveImage} />;
         }
         return (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
@@ -571,6 +792,42 @@ const SublimationPage: React.FC = () => {
     const targetTemplateLabel = TARGET_TEMPLATE_LABELS[targetTemplate];
     const hasCrossTemplateSelection = Boolean(characterData && sourceTemplate !== targetTemplate);
     const currentFieldsConfig = PRESERVABLE_FIELDS_CONFIG[targetTemplate];
+    const trimmedGuidance = userGuidance.trim();
+    const hasGuidance = trimmedGuidance.length > 0;
+    const trimmedNarrativeHistory = narrativeHistory.trim();
+    const hasNarrativeHistory = trimmedNarrativeHistory.length > 0;
+    const shouldWarnGuidanceNativeness =
+        hasGuidance
+        && !hasNarrativeHistory
+        && isSourceNative === true
+        && !appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
+    const shouldConfirmGuidanceNativeness =
+        hasGuidance
+        && !hasNarrativeHistory
+        && isSourceNative === true
+        && appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
+    const shouldWarnNarrativeNativeness =
+        hasNarrativeHistory
+        && isSourceNative === true;
+    const sourceNativenessStatus: NativenessStatus | null = characterData
+        ? (isSourceNativeChecking
+            ? 'checking'
+            : isSourceNative === null
+                ? 'unknown'
+                : isSourceNative
+                    ? 'native'
+                    : 'derived')
+        : null;
+    const nonStreamResultNativenessStatus: NativenessStatus | null = resultData?.sublimatedData
+        ? (hasNativeSignature(resultData.sublimatedData) ? 'native' : 'derived')
+        : null;
+    const streamResultNativenessStatus: NativenessStatus | null = streamedGeneralCardForDisplay
+        ? (streamedGeneralCard
+            ? (hasNativeSignature(streamedGeneralCard) ? 'native' : 'derived')
+            : isGenerating
+                ? 'checking'
+                : 'unknown')
+        : null;
 
     return (
         <>
@@ -583,7 +840,7 @@ const SublimationPage: React.FC = () => {
                     <div className="card">
                         <div className="text-center mb-4">
                             <div className="flex justify-center items-center" style={{ marginBottom: '1rem' }}>
-                                <img src="/sublimation.svg" width={360} height={40} alt="角色成长升华" />
+                                <ThemeImage lightSrc="/sublimation.svg" darkSrc="/sublimation-white.svg" width={360} height={40} alt="角色成长升华" />
                             </div>
                             <p className="subtitle mt-2">角色成长升华，见证她们在战斗与经历中完成的蜕变</p>
                         </div>
@@ -592,7 +849,8 @@ const SublimationPage: React.FC = () => {
                             <ol className="list-decimal list-inside space-y-1">
                                 <li>上传任意.json格式的设定文件（部分兼容非规范文件），历战记录 <span className="font-semibold">可选</span>，如存在会增强升华叙事。</li>
                                 <li>选择目标模板（默认沿用原模板，无匹配时自动切换为通用角色），并可指定需要保留的字段。如果希望借此切换角色模板，建议选择【完全重塑】。</li>
-                                <li>AI 将结合设定、历战记录与可选的成长引导，生成“升华后”的新形态设定。</li>
+                                <li>可额外提供叙事历史（手动输入或上传），AI 将结合设定、历战记录与成长引导生成“升华后”的新形态设定。</li>
+                                <li>若提供叙事历史，本次升华结果将标记为<strong>非原生</strong>。</li>
                             </ol>
                             <div className="mt-3 flex flex-wrap gap-3 text-xs">
                                 <Link href="/encyclopedia/sublimation" className="text-blue-700 hover:underline">百科：成长升华</Link>
@@ -606,7 +864,12 @@ const SublimationPage: React.FC = () => {
                         <div className="input-group">
                             <label htmlFor="character-upload" className="input-label">上传设定文件</label>
                             <input id="character-upload" type="file" accept=".json" onChange={handleFileChange} className="input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100" />
-                            {fileName && (<p className="text-xs text-gray-500 mt-2">已加载角色: {fileName}</p>)}
+                            {fileName && (
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                    <span className="text-gray-500">已加载角色: {fileName}</span>
+                                    {sourceNativenessStatus && <NativenessBadge status={sourceNativenessStatus} />}
+                                </div>
+                            )}
                         </div>
                         <div className="mb-6">
                             <button onClick={() => setIsPasteAreaVisible(!isPasteAreaVisible)} className="text-purple-700 hover:underline cursor-pointer mb-2 font-semibold">
@@ -692,11 +955,86 @@ const SublimationPage: React.FC = () => {
                         {/* 成长方向引导输入框 */}
                         <div className="input-group">
                             <label htmlFor="user-guidance" className="input-label">成长方向引导 (可选)</label>
-                            <input id="user-guidance" type="text" value={userGuidance} onChange={(e) => setUserGuidance(e.target.value)} className="input-field" placeholder="输入关键词或一句话 (最多30字)" maxLength={30} disabled={isGenerating} />
-                            {userGuidance && appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                                <input
+                                    id="user-guidance"
+                                    type="text"
+                                    value={userGuidance}
+                                    onChange={(e) => setUserGuidance(e.target.value)}
+                                    className="input-field flex-1 min-w-[12rem]"
+                                    placeholder="输入关键词或一句话 (最多30字)"
+                                    maxLength={30}
+                                    disabled={isGenerating}
+                                />
+                                {userGuidance.trim() ? (
+                                    <button
+                                        type="button"
+                                        className="px-3 py-2 text-xs font-semibold rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                                        onClick={() => setUserGuidance('')}
+                                        disabled={isGenerating}
+                                    >
+                                        清空
+                                    </button>
+                                ) : null}
+                            </div>
+                            {shouldConfirmGuidanceNativeness && (
                                 <p className="text-xs text-green-700 mt-1">✅ 管理员已允许引导升华保留原生签名。</p>
-                            ) : (
-                                <p className="text-xs text-yellow-700 mt-1">⚠️ 注意: 提供引导将使生成的角色变为“衍生数据”，并移除其原生签名。</p>
+                            )}
+                            {shouldWarnGuidanceNativeness && (
+                                <p className="text-xs text-yellow-700 mt-1">
+                                    ⚠️ 当前素材为原生，提供引导将使升华结果变为“衍生数据”（非原生），并移除原生签名。
+                                </p>
+                            )}
+                        </div>
+
+                        {/* 叙事历史输入框 */}
+                        <div className="input-group">
+                            <label htmlFor="narrative-history" className="input-label">叙事历史（可选）</label>
+                            <textarea
+                                id="narrative-history"
+                                value={narrativeHistory}
+                                onChange={(e) => {
+                                    setNarrativeHistory(e.target.value);
+                                    if (narrativeHistoryFileName) {
+                                        setNarrativeHistoryFileName(null);
+                                    }
+                                }}
+                                placeholder="输入或粘贴角色的叙事历史（可多段文字），也可使用下方上传文件"
+                                className="input-field resize-y h-28"
+                                disabled={isGenerating}
+                            />
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                <input
+                                    id="narrative-history-upload"
+                                    type="file"
+                                    accept=".txt,.md,.json"
+                                    onChange={handleNarrativeFileChange}
+                                    className="text-xs"
+                                    disabled={isGenerating}
+                                />
+                                {narrativeHistoryFileName && (
+                                    <span className="text-gray-500">已加载叙事历史文件: {narrativeHistoryFileName}</span>
+                                )}
+                                {(narrativeHistory || narrativeHistoryFileName) && (
+                                    <button
+                                        type="button"
+                                        onClick={handleClearNarrativeHistory}
+                                        className="text-purple-700 hover:underline"
+                                        disabled={isGenerating}
+                                    >
+                                        清空叙事历史
+                                    </button>
+                                )}
+                            </div>
+                            {shouldWarnNarrativeNativeness && (
+                                <p className="text-xs text-yellow-700 mt-1">
+                                    ⚠️ 已提供叙事历史，本次升华结果将标记为“衍生数据”（非原生），并移除原生签名。
+                                </p>
+                            )}
+                            {!shouldWarnNarrativeNativeness && hasNarrativeHistory && (
+                                <p className="text-xs text-gray-600 mt-1">
+                                    已加入叙事历史，本次升华结果将标记为“衍生数据”（非原生），AI 将据此补充升华背景。
+                                </p>
                             )}
                         </div>
 
@@ -868,6 +1206,12 @@ const SublimationPage: React.FC = () => {
                         <>
                             {streamedGeneralCardForDisplay && (
                                 <div className="card mt-6">
+                                    {streamResultNativenessStatus && (
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h3 className="text-sm font-semibold text-gray-700">升华结果原生性</h3>
+                                            <NativenessBadge status={streamResultNativenessStatus} />
+                                        </div>
+                                    )}
                                     <GeneralCharacterCard
                                         general={streamedGeneralCardForDisplay}
                                         onSaveImage={handleSaveImage}
@@ -911,6 +1255,12 @@ const SublimationPage: React.FC = () => {
                                     <ul className="list-disc list-inside text-xs text-blue-600 mt-2 pl-2">
                                         {resultData.unchangedFields.map(field => <li key={field}>{field}</li>)}
                                     </ul>
+                                </div>
+                            )}
+                            {nonStreamResultNativenessStatus && (
+                                <div className="card mt-6 flex items-center justify-between">
+                                    <h3 className="text-sm font-semibold text-gray-700">升华结果原生性</h3>
+                                    <NativenessBadge status={nonStreamResultNativenessStatus} />
                                 </div>
                             )}
                             {renderResultCard()}

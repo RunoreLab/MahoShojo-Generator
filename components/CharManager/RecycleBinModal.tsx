@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import DataCardDetailsModal from '../DataCardDetailsModal';
+import { buildTitleDisplay } from '@/lib/text';
 
 interface RecycleBinModalProps {
   isOpen: boolean;
@@ -72,15 +73,19 @@ export default function RecycleBinModal({
         ) : (
           <div className="flex-1 overflow-y-auto">
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-              {parsedCards.map((card) => (
-                <div key={card.id} className="border border-gray-200 rounded-lg p-4 flex flex-col h-full bg-gray-50">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1">
-                      <h3 className="text-base font-semibold text-gray-800 break-words">{card.name}</h3>
-                      <p className="text-xs text-gray-500 mt-1">类型：{card.type === 'scenario' ? '情景' : '角色'}</p>
+              {parsedCards.map((card) => {
+                const { display, full } = buildTitleDisplay(card.name || '未命名');
+                return (
+                  <div key={card.id} className="border border-gray-200 rounded-lg p-4 flex flex-col h-full bg-gray-50">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <h3 className="text-base font-semibold text-gray-800 break-words" title={full}>
+                          {display}
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-1">类型：{card.type === 'scenario' ? '情景' : '角色'}</p>
+                      </div>
+                      <span className="text-xs text-gray-500 whitespace-nowrap">删除于 {formatDateTime(card.deleted_at)}</span>
                     </div>
-                    <span className="text-xs text-gray-500 whitespace-nowrap">删除于 {formatDateTime(card.deleted_at)}</span>
-                  </div>
                   <p className="text-sm text-gray-600 mt-3 line-clamp-2 min-h-[40px]">
                     {card.description || '（无描述）'}
                   </p>
@@ -105,7 +110,8 @@ export default function RecycleBinModal({
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

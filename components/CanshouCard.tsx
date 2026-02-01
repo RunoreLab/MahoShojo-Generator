@@ -4,7 +4,9 @@ import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
+import { InlineField } from '@/components/shared/InlineField';
 
 export interface CanshouDetails {
   name: string;
@@ -34,6 +36,7 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
   const cardRef = useRef<HTMLDivElement>(null);
   // 新增：用于控制历战记录可见性的状态
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
+  const labelClassName = 'text-sm opacity-90';
 
   /**
    * 截图残兽档案，并根据 imageSaveMode 决定保存方式。
@@ -50,7 +53,7 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
       if (saveButton) saveButton.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, { scale: 1 });
+      const result = await snapdom(cardRef.current, { scale: 1, useProxy: getSnapdomProxyUrl() });
 
       // 截图后恢复按钮和隐藏Logo
       if (saveButton) saveButton.style.display = 'block';
@@ -105,86 +108,107 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
 	        </div>
 
 	        <div className="result-item">
-	          <div className="result-label">名称</div>
-	          <div className="result-value">{canshou.name}</div>
+            <InlineField label="名称" content={canshou.name} labelClassName={labelClassName} />
 	        </div>
 
         <div className="flex">
         <div className="result-item w-full mr-4">
-          <div className="result-label">核心概念</div>
-          <div className="result-value text-sm">
-            <MarkdownBlock content={canshou.coreConcept} variant="dark" />
-          </div>
+          <InlineField
+            label="核心概念"
+            content={canshou.coreConcept}
+            labelClassName={labelClassName}
+            contentClassName="text-sm"
+          />
         </div>
         <div className="result-item w-full">
-          <div className="result-label">核心情感/欲望</div>
-          <div className="result-value text-sm">
-            <MarkdownBlock content={canshou.coreEmotion} variant="dark" />
-          </div>
+          <InlineField
+            label="核心情感/欲望"
+            content={canshou.coreEmotion}
+            labelClassName={labelClassName}
+            contentClassName="text-sm"
+          />
         </div>
       </div>
 
       <div className="result-item">
-        <div className="result-label">进化阶段</div>
-        <div className="result-value text-sm">
-          <MarkdownBlock content={canshou.evolutionStage} variant="dark" />
-        </div>
+        <InlineField
+          label="进化阶段"
+          content={canshou.evolutionStage}
+          labelClassName={labelClassName}
+          contentClassName="text-sm"
+        />
       </div>
 
       <div className="result-item">
-        <div className="result-label">外貌描述</div>
-        <div className="result-value text-sm">
-          <MarkdownBlock content={canshou.appearance} variant="dark" />
-        </div>
+        <InlineField
+          label="外貌描述"
+          content={canshou.appearance}
+          labelClassName={labelClassName}
+          contentClassName="text-sm"
+        />
       </div>
 
       <div className="result-item">
-        <div className="result-label">材质/表皮</div>
-        <div className="result-value text-sm">
-          <MarkdownBlock content={canshou.materialAndSkin} variant="dark" />
-        </div>
+        <InlineField
+          label="材质/表皮"
+          content={canshou.materialAndSkin}
+          labelClassName={labelClassName}
+          contentClassName="text-sm"
+        />
       </div>
 
       <div className="result-item">
-        <div className="result-label">特征/附属物</div>
-        <div className="result-value text-sm">
-          <MarkdownBlock content={canshou.featuresAndAppendages} variant="dark" />
-        </div>
+        <InlineField
+          label="特征/附属物"
+          content={canshou.featuresAndAppendages}
+          labelClassName={labelClassName}
+          contentClassName="text-sm"
+        />
       </div>
 
       <div className="result-item">
-        <div className="result-label">攻击方式</div>
-        <div className="result-value text-sm">
-          <MarkdownBlock content={canshou.attackMethod} variant="dark" />
-        </div>
+        <InlineField
+          label="攻击方式"
+          content={canshou.attackMethod}
+          labelClassName={labelClassName}
+          contentClassName="text-sm"
+        />
       </div>
 
       <div className="result-item">
-        <div className="result-label">特殊能力</div>
-        <div className="result-value text-sm">
-          <MarkdownBlock content={canshou.specialAbility} variant="dark" />
-        </div>
+        <InlineField
+          label="特殊能力"
+          content={canshou.specialAbility}
+          labelClassName={labelClassName}
+          contentClassName="text-sm"
+        />
       </div>
 
       <div className="result-item">
-        <div className="result-label">起源</div>
-        <div className="result-value text-sm">
-          <MarkdownBlock content={canshou.origin} variant="dark" />
-        </div>
+        <InlineField
+          label="起源"
+          content={canshou.origin}
+          labelClassName={labelClassName}
+          contentClassName="text-sm"
+        />
       </div>
 
       <div className="result-item">
-        <div className="result-label">诞生环境</div>
-        <div className="result-value text-sm">
-          <MarkdownBlock content={canshou.birthEnvironment} variant="dark" />
-        </div>
+        <InlineField
+          label="诞生环境"
+          content={canshou.birthEnvironment}
+          labelClassName={labelClassName}
+          contentClassName="text-sm"
+        />
       </div>
 
       <div className="result-item border-l-4 border-red-400">
-        <div className="result-label">研究员笔记</div>
-        <div className="result-value text-sm italic">
-          <MarkdownBlock content={canshou.researcherNotes} variant="dark" />
-        </div>
+        <InlineField
+          label="研究员笔记"
+          content={canshou.researcherNotes}
+          labelClassName={labelClassName}
+          contentClassName="text-sm italic"
+        />
       </div>
         
         <CurrentStatePanel state={canshou.current_state} variant="dark" />

@@ -1,6 +1,6 @@
 {
     "name": "mahoshojo-generator",
-    "version": "0.6.0",
+    "version": "0.7.1",
     "private": true,
     "scripts": {
         "dev": "next dev --turbopack",
@@ -28,6 +28,7 @@
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "esbuild": "^0.27.2",
+        "fflate": "^0.8.2",
         "jieba-wasm": "^2.4.0",
         "jsonrepair": "^3.13.1",
         "katex": "^0.16.27",

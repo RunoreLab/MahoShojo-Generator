@@ -71,32 +71,42 @@ const assertD1Config = (): D1Config => {
   throw new Error(`缺少 Cloudflare 配置信息：${missing.join(', ') || '未知'}`);
 };
 
+const TABLE_NAME_RE = /^[A-Za-z0-9_]+$/;
+
+const assertSafeTableName = (table: string): string => {
+  if (!TABLE_NAME_RE.test(table)) {
+    throw new Error(`非法 table 名称: ${table}`);
+  }
+  return table;
+};
+
+const fillRandomBytes = (arr: Uint8Array): Uint8Array => {
+  const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+    return cryptoObj.getRandomValues(arr);
+  }
+  for (let i = 0; i < arr.length; i++) {
+    arr[i] = Math.floor(Math.random() * 256);
+  }
+  return arr;
+};
+
 // 生成 32 位包含大小写字母和数字的随机字符串
 export function generateRandomId(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = new Uint8Array(32);
+  fillRandomBytes(bytes);
   let result = '';
-  for (let i = 0; i < 32; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  for (let i = 0; i < bytes.length; i++) {
+    result += chars.charAt(bytes[i] % chars.length);
   }
   return result;
 }
 
 // 生成 UUID v4 格式的字符串 (xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
 export function generateUUID(): string {
-  // 使用加密安全的随机数生成器
-  const getRandomValues = (arr: Uint8Array) => {
-    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-      return crypto.getRandomValues(arr);
-    }
-    // Fallback for environments without crypto.getRandomValues
-    for (let i = 0; i < arr.length; i++) {
-      arr[i] = Math.floor(Math.random() * 256);
-    }
-    return arr;
-  };
-
   const randomBytes = new Uint8Array(16);
-  getRandomValues(randomBytes);
+  fillRandomBytes(randomBytes);
   
   // Set version (4) and variant bits
   randomBytes[6] = (randomBytes[6] & 0x0f) | 0x40; // Version 4
@@ -162,11 +172,12 @@ export async function createWithCustomId(data: string, table: string): Promise<s
       return null;
     }
 
+    const safeTable = assertSafeTableName(table);
     const customId = generateRandomId();
     const timestamp = new Date().toISOString();
     
     const response = await query(
-      `INSERT INTO ${table} (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO ${safeTable} (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)`,
       [customId, data, timestamp, timestamp]
     );
 
@@ -196,10 +207,11 @@ export async function updateById(id: string, data: string, table: string): Promi
       return false;
     }
 
+    const safeTable = assertSafeTableName(table);
     const timestamp = new Date().toISOString();
     
     const response = await query(
-      `UPDATE ${table} SET data = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE ${safeTable} SET data = ?, updated_at = ? WHERE id = ?`,
       [data, timestamp, id]
     );
 
@@ -224,7 +236,8 @@ export async function updateById(id: string, data: string, table: string): Promi
 
 export async function getRecordById(id: string, table: string): Promise<unknown> {
   try {
-    const response = await query(`SELECT * FROM ${table} WHERE id = ?`, [id]);
+    const safeTable = assertSafeTableName(table);
+    const response = await query(`SELECT * FROM ${safeTable} WHERE id = ?`, [id]);
     if (response.ok) {
       const result = await response.json();
       if (result.result && result.result.length > 0) {

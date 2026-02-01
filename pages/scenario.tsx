@@ -1,10 +1,10 @@
 // pages/scenario.tsx
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { quickCheck } from '@/lib/sensitive-word-filter';
+import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { useCooldown } from '../lib/cooldown';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
@@ -15,6 +15,8 @@ import { convertDataCard, createBlankDataCard } from '@/lib/data-card-converter'
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { formatHttpErrorMessage } from '@/lib/client/httpError';
 
 // 定义引导性问题
 const scenarioQuestions = [
@@ -35,6 +37,8 @@ const optionalFields = [
   { label: '故事氛围', value: 'elements.atmosphere' },
   { label: '发展方向', value: 'elements.development' },
 ];
+
+const SCENARIO_PREFERENCE_KEY = 'mahoshojo.scenario.preferences.v1';
 
 const ScenarioPage: React.FC = () => {
   const router = useRouter();
@@ -70,9 +74,91 @@ const ScenarioPage: React.FC = () => {
       .catch(err => console.error("Failed to load languages:", err));
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = window.localStorage.getItem(SCENARIO_PREFERENCE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (parsed?.generationMode === 'stream' || parsed?.generationMode === 'non-stream') {
+        setGenerationMode(parsed.generationMode);
+      }
+      if (typeof parsed?.scenarioTitleHint === 'string') {
+        setScenarioTitleHint(parsed.scenarioTitleHint);
+      }
+      if (typeof parsed?.selectedLanguage === 'string') {
+        setSelectedLanguage(parsed.selectedLanguage);
+      }
+      if (typeof parsed?.isAdvancedVisible === 'boolean') {
+        setIsAdvancedVisible(parsed.isAdvancedVisible);
+      }
+      if (Array.isArray(parsed?.fieldsToKeepEmpty)) {
+        const allowed = new Set(optionalFields.map(field => field.value));
+        const filtered = parsed.fieldsToKeepEmpty.filter((value: unknown) => typeof value === 'string' && allowed.has(value));
+        setFieldsToKeepEmpty(filtered);
+      }
+    } catch (error) {
+      console.warn('读取情景生成偏好失败', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const payload = {
+        generationMode,
+        scenarioTitleHint,
+        selectedLanguage,
+        isAdvancedVisible,
+        fieldsToKeepEmpty,
+      };
+      window.localStorage.setItem(SCENARIO_PREFERENCE_KEY, JSON.stringify(payload));
+    } catch {
+      // localStorage 可能不可用，忽略
+    }
+  }, [generationMode, scenarioTitleHint, selectedLanguage, isAdvancedVisible, fieldsToKeepEmpty]);
+
   const handleAnswerChange = (id: string, value: string) => {
     setAnswers(prev => ({ ...prev, [id]: value }));
   };
+
+  const verifyOrigin = useCallback(async (data: any): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/verify-origin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) return false;
+      const result = await response.json().catch(() => null as any);
+      return Boolean(result?.isValid);
+    } catch (err) {
+      console.warn('原生性校验失败，将按非原生处理', err);
+      return false;
+    }
+  }, []);
+
+  const resignDataCard = useCallback(async (data: any) => {
+    const response = await fetch('/api/resign-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null as any);
+      if (errorData?.shouldRedirect) {
+        router.push({
+          pathname: '/arrested',
+          query: { reason: errorData.reason || '编辑内容不合规' }
+        });
+        return null;
+      }
+      throw new Error(errorData?.message || '签名服务器认证失败');
+    }
+
+    return response.json();
+  }, [router]);
 
   // 处理留空字段复选框的点击事件
   const handleOptionalFieldChange = (fieldValue: string) => {
@@ -106,11 +192,11 @@ const ScenarioPage: React.FC = () => {
     }
 
     try {
-      if ((await quickCheck(JSON.stringify(answers))).hasSensitiveWords) {
-        router.push({
-          pathname: '/arrested',
-          query: { reason: '在情景问卷中使用了危险符文' }
-        });
+      const redirectTarget = await getSensitiveWordRedirectTarget(JSON.stringify(answers), {
+        reason: '在情景问卷中使用了危险符文',
+      });
+      if (redirectTarget) {
+        router.push(redirectTarget);
         return;
       }
 
@@ -143,7 +229,8 @@ const ScenarioPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorJson = await response.json().catch(() => null as any);
+        const { payload } = await readJsonOrTextFromResponse(response);
+        const errorJson = payload && typeof payload === 'object' ? (payload as any) : null;
         if (errorJson?.shouldRedirect) {
           router.push({
             pathname: '/arrested',
@@ -151,16 +238,16 @@ const ScenarioPage: React.FC = () => {
           });
           return;
         }
-        const serverMessage = errorJson?.message || errorJson?.error;
-        throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+        const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
+        throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
       }
 
       if (generationMode === 'stream') {
         const contentType = (response.headers.get('content-type') || '').toLowerCase();
         if (contentType.includes('application/json') || contentType.includes('+json')) {
-          const errorJson = await response.json().catch(() => null as any);
-          const serverMessage = errorJson?.message || errorJson?.error;
-          throw new Error(serverMessage ? `${serverMessage}（HTTP ${response.status}）` : `生成失败（HTTP ${response.status}）`);
+          const { payload } = await readJsonOrTextFromResponse(response);
+          const serverMessage = resolveApiErrorMessage({ payload, fallback: '生成失败' });
+          throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 
         const markdown = await readTextStreamFromResponse(response, {
@@ -176,7 +263,17 @@ const ScenarioPage: React.FC = () => {
           defaultTitle: '情景',
         });
 
-        setGeneralScenarioDraft(card);
+        let signedCard = card;
+        try {
+          const result = await resignDataCard(card);
+          if (!result) return;
+          signedCard = result;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '签名失败';
+          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+        }
+
+        setGeneralScenarioDraft(signedCard);
         startCooldown();
         return;
       }
@@ -219,16 +316,29 @@ const ScenarioPage: React.FC = () => {
     setGeneralScenarioDraft(blank);
   };
 
-  const handleConvertToGeneralScenario = () => {
+  const handleConvertToGeneralScenario = useCallback(async () => {
     if (!resultData) return;
     try {
       const { data: converted } = convertDataCard(resultData, 'general-scenario', 'scenario');
-      setGeneralScenarioDraft(converted);
+      let finalConverted = converted;
+      const shouldResign = await verifyOrigin(resultData);
+      if (shouldResign) {
+        try {
+          const signed = await resignDataCard(converted);
+          if (!signed) return;
+          finalConverted = signed;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '签名失败';
+          setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+        }
+      }
+
+      setGeneralScenarioDraft(finalConverted);
     } catch (err) {
       const message = err instanceof Error ? err.message : '转换失败';
       setError(`✨ 转换失败！${message}`);
     }
-  };
+  }, [resultData, resignDataCard, verifyOrigin]);
 
   return (
     <>
@@ -395,7 +505,7 @@ const ScenarioPage: React.FC = () => {
                     创建空白通用情景卡
                   </button>
                   <button
-                    onClick={handleConvertToGeneralScenario}
+                    onClick={() => void handleConvertToGeneralScenario()}
                     disabled={!resultData}
                     className="generate-button flex-1"
                     style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}

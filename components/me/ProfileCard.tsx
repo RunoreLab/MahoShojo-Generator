@@ -101,6 +101,8 @@ export type MeProfileCardPayload = {
       scenarios: number;
       history: number;
       publicCards: number;
+      publicFavoriteTotal: number;
+      publicUsageTotal: number;
       magicalGirl: number;
       canshou: number;
       general: number;

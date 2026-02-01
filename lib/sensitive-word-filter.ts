@@ -59,7 +59,6 @@ const sensitiveWordsConfig = {
     "6KO45L2T",
     "5rer6I2h",
     "57+75aKZ",
-    "VlBO",
     "56eR5a2m5LiK572R",
     "5oyC5qKv5a2Q",
     "R0ZX",
@@ -72,7 +71,6 @@ const sensitiveWordsConfig = {
     "5aaT5aWz",
     "57K+5ray",
     "5rer5Lmx",
-    "5rer6I2h",
     "5by65aW4",
     "552h5aW4",
     "5oCn5L61",
@@ -82,7 +80,6 @@ const sensitiveWordsConfig = {
     "5aiH5ZCf",
     "5r2u5ZC5",
     "6IuX5bqK",
-    "5qao5Y+W",
     "6Zi06YGT",
     "5oCn5b+r5oSf",
     "6IKJ5L6/5Zmo",
@@ -118,6 +115,21 @@ const sensitiveWordsConfig = {
     "54q55aSq",
     "56eN5peP54Gt57ud",
     "57qz57K5",
+    // 魅魔相关
+    "5rer57q5",
+    "5rer5Y+r",
+    "6a2F6a2U5YyW",
+    "6a2F6a2U5Zug5a2Q",
+    "5qao57K+",
+    // 奶牛相关
+    "5qao5Lmz",
+    "5rOM5Lmz",
+    "5YKs5Lmz",
+    "5qao5aW2",
+    "5rOM5aW2",
+    "5YKs5aW2",
+    // 其他
+    "5aqa6I2v",
   ],
   encoding: "base64",
   original_count: 71
@@ -442,6 +454,9 @@ export class SensitiveWordFilter {
           const endIndex = indexMap[endNormalizedInclusive] + 1;
           const sourceWord = this.pinyinToSource.get(keywordPinyin) ?? keywordPinyin;
           const matchedText = text.slice(startIndex, endIndex);
+          // “纯拼音绕过”只应基于拉丁/数字 token 及其分隔符；
+          // 若跨度内包含汉字，通常是跨语言拼接导致的误报（例如 “Xing ... AI” -> “xingai” 命中 “性爱”）。
+          if (/[\u4e00-\u9fff]/.test(matchedText)) continue;
           addDetail(sourceWord, matchedText, startIndex, endIndex, 'variant');
           if (!detectedWords.includes(`${sourceWord}(拼音)`)) detectedWords.push(`${sourceWord}(拼音)`);
           maskRange(startIndex, endIndex);

@@ -8,16 +8,49 @@ interface GeneratedByUserBadgeProps {
   className?: string;
   variant?: Variant;
   label?: string;
+  fallbackUsername?: string;
 }
 
 export function GeneratedByUserBadge({
   className = '',
   variant = 'dark',
   label = '生成者：',
+  fallbackUsername,
 }: GeneratedByUserBadgeProps) {
   const { user, userBadges, isAuthenticated, loading } = useAuth();
 
-  if (loading || !isAuthenticated || !user) return null;
+  const fallback = (fallbackUsername || '').trim();
+  if (loading) {
+    if (!fallback) return null;
+    const baseTextClass = variant === 'light' ? 'text-gray-700' : 'text-white/85';
+    const labelClass = variant === 'light' ? 'text-gray-500' : 'text-white/55';
+    const usernameClass = variant === 'light' ? 'text-gray-800' : 'text-white/90';
+
+    return (
+      <div className={['w-full text-center text-xs drop-shadow', baseTextClass, className].filter(Boolean).join(' ')}>
+        <div className={['leading-tight', labelClass].filter(Boolean).join(' ')}>{label}</div>
+        <div className="mt-1 inline-flex flex-wrap items-center justify-center gap-1.5">
+          <span className={['font-medium', usernameClass].filter(Boolean).join(' ')}>{fallback}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated || !user) {
+    if (!fallback) return null;
+    const baseTextClass = variant === 'light' ? 'text-gray-700' : 'text-white/85';
+    const labelClass = variant === 'light' ? 'text-gray-500' : 'text-white/55';
+    const usernameClass = variant === 'light' ? 'text-gray-800' : 'text-white/90';
+
+    return (
+      <div className={['w-full text-center text-xs drop-shadow', baseTextClass, className].filter(Boolean).join(' ')}>
+        <div className={['leading-tight', labelClass].filter(Boolean).join(' ')}>{label}</div>
+        <div className="mt-1 inline-flex flex-wrap items-center justify-center gap-1.5">
+          <span className={['font-medium', usernameClass].filter(Boolean).join(' ')}>{fallback}</span>
+        </div>
+      </div>
+    );
+  }
 
   const baseTextClass = variant === 'light' ? 'text-gray-700' : 'text-white/85';
   const labelClass = variant === 'light' ? 'text-gray-500' : 'text-white/55';
@@ -44,4 +77,3 @@ export function GeneratedByUserBadge({
     </div>
   );
 }
-

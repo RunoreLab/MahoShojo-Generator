@@ -4,6 +4,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 
 import { interpolateWithQQGroups } from '@/lib/communityGroups';
+import { formatMarkdownImage, formatMarkdownLink, isAllowedExternalMediaUrl, isLikelyVideoUrl } from '@/lib/markdown/externalMedia';
 
 interface Announcement {
   id: string;
@@ -202,16 +203,119 @@ const AnnouncementTicker: React.FC = () => {
                       ul: ({ children }) => <ul className="list-disc pl-8 mb-4">{children}</ul>,
                       li: ({ children }) => <li className="mb-2">{children}</li>,
                       code: ({ children }) => <code className="bg-gray-100 px-2 py-1 rounded text-sm">{children}</code>,
-                      a: ({ children, href }) => (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline"
-                        >
-                          {children}
-                        </a>
-                      ),
+                      a: ({ children, href, title, ...props }) => {
+                        const rawHref = typeof href === 'string' ? href : '';
+                        const isVideoLink = Boolean(rawHref && isLikelyVideoUrl(rawHref));
+                        const normalizedHref = rawHref.startsWith('//') ? `https:${rawHref}` : rawHref;
+                        const isVideoAllowed = isVideoLink && isAllowedExternalMediaUrl(rawHref, 'video');
+                        const linkText =
+                          typeof children === 'string'
+                            ? children
+                            : Array.isArray(children)
+                              ? children.filter((child): child is string => typeof child === 'string').join('')
+                              : '';
+
+                        if (isVideoLink) {
+                          const videoLabel = linkText || '播放视频';
+                          if (!isVideoAllowed) {
+                            return (
+                              <code className="font-mono text-xs bg-gray-100 px-2 py-1 rounded text-gray-800 break-all">
+                                {formatMarkdownLink(videoLabel, rawHref, title)}
+                              </code>
+                            );
+                          }
+
+                          return (
+                            <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+                              <video
+                                controls
+                                preload="metadata"
+                                playsInline
+                                src={normalizedHref}
+                                className="my-2 max-w-full rounded-md border border-gray-200"
+                              />
+                              <a
+                                href={normalizedHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[11px] underline underline-offset-2 text-blue-600"
+                                {...props}
+                              >
+                                {videoLabel}
+                              </a>
+                            </span>
+                          );
+                        }
+
+                        return (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline"
+                            {...props}
+                          >
+                            {children}
+                          </a>
+                        );
+                      },
+                      img: ({ src, alt, title, ...props }) => {
+                        const rawSrc = typeof src === 'string' ? src : '';
+                        const isVideoLink = Boolean(rawSrc && isLikelyVideoUrl(rawSrc));
+                        if (isVideoLink) {
+                          const isVideoAllowed = isAllowedExternalMediaUrl(rawSrc, 'video');
+                          const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+                          const videoLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放视频';
+
+                          if (!isVideoAllowed) {
+                            return (
+                              <code className="font-mono text-xs bg-gray-100 px-2 py-1 rounded text-gray-800 break-all">
+                                {formatMarkdownImage(alt, rawSrc, title)}
+                              </code>
+                            );
+                          }
+
+                          return (
+                            <span className="inline-flex max-w-full flex-col gap-1 align-middle">
+                              <video
+                                controls
+                                preload="metadata"
+                                playsInline
+                                src={normalizedSrc}
+                                className="my-2 max-w-full rounded-md border border-gray-200"
+                              />
+                              <a
+                                href={normalizedSrc}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[11px] underline underline-offset-2 text-blue-600"
+                              >
+                                {videoLabel}
+                              </a>
+                            </span>
+                          );
+                        }
+
+                        const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
+                        if (!isAllowed) {
+                          return (
+                            <code className="font-mono text-xs bg-gray-100 px-2 py-1 rounded text-gray-800 break-all">
+                              {formatMarkdownImage(alt, rawSrc, title)}
+                            </code>
+                          );
+                        }
+
+                        return (
+                          <img
+                            src={src}
+                            alt={typeof alt === 'string' ? alt : ''}
+                            title={typeof title === 'string' ? title : undefined}
+                            className="my-2 max-w-full rounded-md border border-gray-200"
+                            loading="lazy"
+                            {...props}
+                          />
+                        );
+                      },
                     }}
                   >
                     {interpolateWithQQGroups(selectedAnnouncement.content)}

@@ -2,6 +2,7 @@ import { queryFromD1 } from './core';
 import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGenerationCombatantRow } from './battle-report-generation-combatants';
 import { PRESET_LIST } from '@/lib/presets';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
+import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
 
 export type ArenaQueue = 'strict' | 'free';
 export type ArenaEntityType = 'data_card' | 'preset';
@@ -41,6 +42,21 @@ export const INITIAL_RATING = 1000;
 export const STRICT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const FREE_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export const STRICT_DAILY_LIMIT = 80;
+
+const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
+  '无牌': 2000,
+  '白牌': 1000,
+  '字牌': 900,
+  '花牌': 800,
+  '权杖': 1000,
+};
+
+const getStrictMaxAbsDiffForRatings = (a: ArenaRatingSnapshot, b: ArenaRatingSnapshot): number => {
+  const aTier = computeArenaBaseTier(a.rating, a.games);
+  const bTier = computeArenaBaseTier(b.rating, b.games);
+  const pick = a.rating > b.rating ? aTier : b.rating > a.rating ? bTier : (a.games >= b.games ? aTier : bTier);
+  return STRICT_MAX_ABS_DIFF_BY_TIER[pick] ?? 1000;
+};
 
 export type StrictDailyUsage = {
   sinceIso: string;
@@ -161,8 +177,6 @@ export const buildPairKey = (a: ArenaEntity, b: ArenaEntity): string => {
 };
 
 export const buildArenaRatingEventId = (generationId: string, queue: ArenaQueue): string => `${generationId}:${queue}`;
-
-const ARENA_RANK_ORDER_BY_SQL = 'rating DESC, games DESC, updated_at DESC, entity_type ASC, entity_id ASC';
 
 export const computeKFactor = (games: number): number => {
   if (!Number.isFinite(games) || games < 0) return 16;
@@ -543,9 +557,15 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   if (snapshot.mode !== 'classic') return false;
   if (snapshot.userId == null) return false;
 
-  // 严格排位：必须由“排位匹配”签发票据并在生成时验证通过。
-  // 缺失/无效都按“宁可漏算”处理为不具备资格（用于禁止 strict 自由挑对手）。
-  if (readExtraJsonBoolean(snapshot.extraJson, 'rankedMatchOk') !== true) return false;
+  // 兼容旧版 strict（排位匹配票据）与新版 strict（1+3 手选对手）：
+  // - 旧版：必须存在 rankedMatchOk=true
+  // - 新版：通过 arenaStrictPolicy 标记启用（避免历史战报被“回溯计分”）
+  const strictPolicy = readExtraJsonString(snapshot.extraJson, 'arenaStrictPolicy');
+  if (strictPolicy !== '1+3:v1') {
+    // 严格排位（旧版）：必须由“排位匹配”签发票据并在生成时验证通过。
+    // 缺失/无效都按“宁可漏算”处理为不具备资格（用于禁止 strict 自由挑对手）。
+    if (readExtraJsonBoolean(snapshot.extraJson, 'rankedMatchOk') !== true) return false;
+  }
 
   // 严格排位：禁止使用黑名单模型（生成逻辑不稳定，不适合作为排位依据）。
   if (isStrictRankedModelBlacklisted(readExtraJsonString(snapshot.extraJson, 'resolvedModelOverride'))) return false;
@@ -575,7 +595,58 @@ export const isFreeEligible = (snapshot: ArenaEligibilitySnapshot): boolean => {
   if (snapshot.status !== 'completed') return false;
   if (snapshot.combatantCount !== 2) return false;
   if (snapshot.ipAnonymized == null) return false;
+  // 自由排位默认关闭：只有显式开启时才允许结算（缺失则视为旧记录，按开启处理）。
+  if (readExtraJsonBoolean(snapshot.extraJson, 'arenaFreeRankingEnabled') === false) return false;
   return true;
+};
+
+const validateStrictPublicDataCardEntities = async (
+  entities: [ArenaEntity, ArenaEntity]
+): Promise<{ ok: true } | { ok: false; skipReason: 'strict-not-public' | 'strict-not-approved' | 'strict-not-character' | 'strict-card-missing' }> => {
+  const dataCardIds = entities
+    .filter((e) => e.entityType === 'data_card')
+    .map((e) => e.entityId)
+    .filter(Boolean);
+
+  if (dataCardIds.length === 0) return { ok: true };
+
+  try {
+    const result = (await queryFromD1(
+      `SELECT id, type, is_public as isPublic, review_status as reviewStatus, deleted_at as deletedAt
+       FROM data_cards
+       WHERE id IN (${dataCardIds.map(() => '?').join(', ')})`,
+      dataCardIds
+    )) as any;
+
+    const rows = readD1Rows<{
+      id: string;
+      type: string;
+      isPublic: number | boolean | null;
+      reviewStatus: string | null;
+      deletedAt: string | null;
+    }>(result);
+
+    const byId = new Map<string, (typeof rows)[number]>();
+    rows.forEach((row) => {
+      const id = typeof row?.id === 'string' ? row.id.trim() : '';
+      if (!id) return;
+      byId.set(id, row);
+    });
+
+    for (const id of dataCardIds) {
+      const row = byId.get(id);
+      if (!row || row.deletedAt) return { ok: false, skipReason: 'strict-card-missing' };
+      if (row.type !== 'character') return { ok: false, skipReason: 'strict-not-character' };
+      const isPublic = row.isPublic === 1 || row.isPublic === true;
+      if (!isPublic) return { ok: false, skipReason: 'strict-not-public' };
+      if (row.reviewStatus !== 'approved') return { ok: false, skipReason: 'strict-not-approved' };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    console.warn('校验严格排位数据卡可用性失败（降级为不计 strict）:', error);
+    return { ok: false, skipReason: 'strict-card-missing' };
+  }
 };
 
 export async function getArenaEligibilitySnapshotByGenerationId(
@@ -626,54 +697,6 @@ const ensureArenaRatingsExist = async (queue: ArenaQueue, entities: [ArenaEntity
       b.entityType, b.entityId, queue, INITIAL_RATING, nowIso, nowIso,
     ]
   );
-};
-
-type ArenaRankRow = {
-  entity_type: 'data_card' | 'preset';
-  entity_id: string;
-  rank: number;
-  total: number;
-};
-
-const getArenaRanksForEntities = async (
-  queue: ArenaQueue,
-  entities: [ArenaEntity, ArenaEntity],
-): Promise<{ total: number; byEntityKey: Map<string, number> } | null> => {
-  const [a, b] = entities;
-  try {
-    const result = (await queryFromD1(
-      `WITH ordered AS (
-        SELECT
-          entity_type,
-          entity_id,
-          ROW_NUMBER() OVER (ORDER BY ${ARENA_RANK_ORDER_BY_SQL}) AS rank,
-          COUNT(*) OVER () AS total
-        FROM arena_ratings
-        WHERE queue = ?
-      )
-      SELECT entity_type, entity_id, rank, total
-      FROM ordered
-      WHERE (entity_type = ? AND entity_id = ?)
-         OR (entity_type = ? AND entity_id = ?)`,
-      [queue, a.entityType, a.entityId, b.entityType, b.entityId],
-    )) as any;
-    const rows = readD1Rows<ArenaRankRow>(result);
-    if (!Array.isArray(rows) || rows.length === 0) return null;
-
-    const total = typeof rows[0]?.total === 'number' ? rows[0].total : 0;
-    const byEntityKey = new Map<string, number>();
-    rows.forEach((row) => {
-      if (!row) return;
-      if (typeof row.entity_id !== 'string') return;
-      if (typeof row.rank !== 'number') return;
-      byEntityKey.set(buildEntityKey({ entityType: row.entity_type, entityId: row.entity_id }), row.rank);
-    });
-
-    return { total, byEntityKey };
-  } catch (error) {
-    console.warn('读取 arena_ratings 排名失败（降级为不展示）:', { queue, error });
-    return null;
-  }
 };
 
 const getArenaRatings = async (queue: ArenaQueue, entities: [ArenaEntity, ArenaEntity]): Promise<[ArenaRatingSnapshot, ArenaRatingSnapshot] | null> => {
@@ -851,19 +874,6 @@ const getArenaRatingEventById = async (eventId: string): Promise<ArenaRatingEven
   } catch (error) {
     console.error('读取 arena_rating_events 失败:', { eventId, error });
     return null;
-  }
-};
-
-const updateArenaRatingEventDetailsJson = async (eventId: string, detailsJson: Record<string, unknown>): Promise<void> => {
-  try {
-    await queryFromD1(
-      `UPDATE arena_rating_events
-       SET details_json = ?
-       WHERE id = ?`,
-      [JSON.stringify(detailsJson), eventId],
-    );
-  } catch (error) {
-    console.warn('更新 arena_rating_events.details_json 失败（降级为忽略）:', { eventId, error });
   }
 };
 
@@ -1058,6 +1068,7 @@ export async function settleArenaRatingsForGeneration(
     const [aEntity, bEntity] = entities as [ArenaEntity, ArenaEntity];
 
     const pairKey = buildPairKey(aEntity, bEntity);
+    const isNewStrictPolicy = readExtraJsonString(snapshot.extraJson, 'arenaStrictPolicy') === '1+3:v1';
 
     let strictEligible = isStrictEligible(snapshot, combatants);
     const freeEligible = isFreeEligible(snapshot);
@@ -1103,6 +1114,32 @@ export async function settleArenaRatingsForGeneration(
     const shouldApplyFree = freeEligible;
     let shouldApplyStrict = strictEligible;
 
+    if (shouldApplyStrict && isNewStrictPolicy && snapshot.userId != null) {
+      const deduped = await hasRecentAppliedEventForPair(
+        'strict',
+        pairKey,
+        { userId: snapshot.userId },
+        STRICT_DEDUP_WINDOW_MS
+      );
+      if (deduped) {
+        await insertArenaRatingEvent({
+          id: buildArenaRatingEventId(generationId, 'strict'),
+          generationId,
+          queue: 'strict',
+          status: 'skipped',
+          skipReason: 'dedup-user-pair',
+          userId: snapshot.userId,
+          ipAnonymized: snapshot.ipAnonymized,
+          pairKey,
+          a: aEntity,
+          b: bEntity,
+          winnerSlot,
+        });
+        shouldApplyStrict = false;
+        strictEligible = false;
+      }
+    }
+
     if (shouldApplyStrict && snapshot.userId != null) {
       const exceeded = await hasExceededStrictDailyLimit(snapshot.userId);
       if (exceeded) {
@@ -1124,7 +1161,9 @@ export async function settleArenaRatingsForGeneration(
       }
     }
 
-    const queuesToApply: ArenaQueue[] = shouldApplyStrict ? ['strict', 'free'] : (shouldApplyFree ? ['free'] : []);
+    const queuesToApply: ArenaQueue[] = [];
+    if (shouldApplyStrict) queuesToApply.push('strict');
+    if (shouldApplyFree) queuesToApply.push('free');
     for (const queue of queuesToApply) {
       const eventId = buildArenaRatingEventId(generationId, queue);
 
@@ -1189,6 +1228,24 @@ export async function settleArenaRatingsForGeneration(
         continue;
       }
 
+      if (queue === 'strict' && isNewStrictPolicy) {
+        const strictEntities = await validateStrictPublicDataCardEntities([aEntity, bEntity]);
+        if (!strictEntities.ok) {
+          await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: strictEntities.skipReason });
+          continue;
+        }
+
+        const involvesPreset = aEntity.entityType === 'preset' || bEntity.entityType === 'preset';
+        if (!involvesPreset) {
+          const absDiff = Math.abs(aCurrent.rating - bCurrent.rating);
+          const maxAbsDiff = getStrictMaxAbsDiffForRatings(aCurrent, bCurrent);
+          if (absDiff > maxAbsDiff) {
+            await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
+            continue;
+          }
+        }
+      }
+
       const aWinInc = winnerSlot === 1 ? 1 : 0;
       const aLossInc = winnerSlot === 2 ? 1 : 0;
       const aDrawInc = winnerSlot === 0 ? 1 : 0;
@@ -1217,29 +1274,6 @@ export async function settleArenaRatingsForGeneration(
           bCurrent.rating === existingEvent.b_after_rating &&
           bCurrent.games === existingEvent.b_after_games;
         if (alreadyApplied) {
-          const parsedDetails = (() => {
-            const raw = typeof existingEvent.details_json === 'string' ? existingEvent.details_json.trim() : '';
-            if (!raw) return { version: 2 } as Record<string, unknown>;
-            try {
-              const parsed = JSON.parse(raw);
-              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
-              return { version: 2 } as Record<string, unknown>;
-            } catch {
-              return { version: 2 } as Record<string, unknown>;
-            }
-          })();
-          const afterRanks = await getArenaRanksForEntities(queue, [aEntity, bEntity]);
-          if (afterRanks) {
-            const aKey = buildEntityKey(aEntity);
-            const bKey = buildEntityKey(bEntity);
-            parsedDetails.ranks = {
-              orderBy: ARENA_RANK_ORDER_BY_SQL,
-              total: afterRanks.total,
-              a: { after: afterRanks.byEntityKey.get(aKey) ?? null },
-              b: { after: afterRanks.byEntityKey.get(bKey) ?? null },
-            };
-            await updateArenaRatingEventDetailsJson(eventId, parsedDetails);
-          }
           await markArenaRatingEventStatus(eventId, 'applied');
           continue;
         }
@@ -1314,41 +1348,10 @@ export async function settleArenaRatingsForGeneration(
         };
       }
 
-      const beforeRanks = await getArenaRanksForEntities(queue, [aEntity, bEntity]);
-      if (beforeRanks) {
-        const aKey = buildEntityKey(aEntity);
-        const bKey = buildEntityKey(bEntity);
-        computed.detailsJson.ranks = {
-          orderBy: ARENA_RANK_ORDER_BY_SQL,
-          total: beforeRanks.total,
-          a: { before: beforeRanks.byEntityKey.get(aKey) ?? null },
-          b: { before: beforeRanks.byEntityKey.get(bKey) ?? null },
-        };
-      }
-
       await updateArenaRatingEventComputedFields(eventId, computed);
 
       const applied = await applyArenaRatingsUpdateIfBothMatch(queue, [aEntity, bEntity], computed);
       if (applied === 'applied' || applied === 'already-applied') {
-        const afterRanks = await getArenaRanksForEntities(queue, [aEntity, bEntity]);
-        if (afterRanks) {
-          const aKey = buildEntityKey(aEntity);
-          const bKey = buildEntityKey(bEntity);
-          const currentRanks = (computed.detailsJson as any)?.ranks as any;
-          computed.detailsJson.ranks = {
-            orderBy: ARENA_RANK_ORDER_BY_SQL,
-            total: afterRanks.total,
-            a: {
-              ...(currentRanks?.a ?? {}),
-              after: afterRanks.byEntityKey.get(aKey) ?? null,
-            },
-            b: {
-              ...(currentRanks?.b ?? {}),
-              after: afterRanks.byEntityKey.get(bKey) ?? null,
-            },
-          };
-          await updateArenaRatingEventDetailsJson(eventId, computed.detailsJson);
-        }
         await markArenaRatingEventStatus(eventId, 'applied');
       } else {
         await markArenaRatingEventStatus(eventId, 'failed', { skipReason: 'rating-conflict' });

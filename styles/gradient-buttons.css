@@ -159,6 +159,33 @@
       #fdf2f8 100%);
 }
 
+.tavern-ecosystem .gradient-overlay {
+  background: linear-gradient(45deg,
+      #fff7ed 0%,
+      #fed7aa 25%,
+      #fb7185 50%,
+      #c084fc 75%,
+      #38bdf8 100%);
+}
+
+.magic-tea-party .gradient-overlay {
+  background: linear-gradient(45deg,
+      #0ea5e9 0%,
+      #22c55e 25%,
+      #a855f7 50%,
+      #fb7185 75%,
+      #0ea5e9 100%);
+}
+
+.character-party .gradient-overlay {
+  background: linear-gradient(45deg,
+      #e0f2fe 0%,
+      #a7f3d0 25%,
+      #fce7f3 50%,
+      #ddd6fe 75%,
+      #e0f2fe 100%);
+}
+
 .card-duel .gradient-overlay {
   /* 优化版：柔和的蓝到粉渐变，中间偏白，适合深色前景 */
   background: linear-gradient(45deg,

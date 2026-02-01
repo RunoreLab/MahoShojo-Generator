@@ -10,14 +10,14 @@ export type ArenaBaseTier = '无牌' | '白牌' | '字牌' | '花牌' | '权杖'
 export type ArenaTier = ArenaBaseTier | '女王';
 
 export const ARENA_PLACEMENT_GAMES = 5;
-export const ARENA_SCEPTER_MIN_RATING = 1600;
+export const ARENA_SCEPTER_MIN_RATING = 1500;
 export const ARENA_QUEEN_MIN_SCEPTER_COUNT = 3;
 
 export function computeArenaBaseTier(rating: number, games: number): ArenaBaseTier {
-  if (games < ARENA_PLACEMENT_GAMES || rating < 900) return '无牌';
-  if (rating < 1100) return '白牌';
-  if (rating < 1300) return '字牌';
-  if (rating < 1600) return '花牌';
+  if (games < ARENA_PLACEMENT_GAMES || rating < 800) return '无牌';
+  if (rating < 1000) return '白牌';
+  if (rating < 1200) return '字牌';
+  if (rating < 1500) return '花牌';
   return '权杖';
 }
 
@@ -38,6 +38,9 @@ type QueenRow = {
   entityId: unknown;
 };
 
+const QUEEN_CACHE_TTL_MS = 30_000;
+const queenCache = new Map<ArenaQueue, { value: ArenaEntityRef | null; expiresAt: number }>();
+
 const readSingleRow = <T,>(result: unknown): T | null => {
   const row = (result as any)?.result?.[0]?.results?.[0];
   return row ? (row as T) : null;
@@ -53,8 +56,22 @@ export async function queryArenaPublicQueenEntity(
   queryFromD1: QueryFromD1,
   queue: ArenaQueue,
 ): Promise<ArenaEntityRef | null> {
+  const now = Date.now();
+  const cached = queenCache.get(queue);
+  if (cached && cached.expiresAt > now) return cached.value;
+
   const strictPublicSinceClause =
-    queue === 'strict' ? "AND (dc.public_since IS NULL OR dc.public_since <= datetime('now', '-3 days'))" : '';
+    queue === 'strict'
+      ? `AND (
+        dc.public_since IS NULL
+        OR dc.public_since <= datetime('now', '-3 days')
+        OR (
+          dc.created_at IS NOT NULL
+          AND dc.public_since IS NOT NULL
+          AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
+        )
+      )`
+      : '';
 
   const sql = `
     WITH eligible AS (
@@ -94,15 +111,25 @@ export async function queryArenaPublicQueenEntity(
   `;
 
   const row = readSingleRow<QueenRow>(await queryFromD1(sql, [queue]));
-  if (!row) return null;
+  if (!row) {
+    queenCache.set(queue, { value: null, expiresAt: now + QUEEN_CACHE_TTL_MS });
+    return null;
+  }
 
   const scepterCount = clampInt(row.scepterCount) ?? 0;
-  if (scepterCount < ARENA_QUEEN_MIN_SCEPTER_COUNT) return null;
+  if (scepterCount < ARENA_QUEEN_MIN_SCEPTER_COUNT) {
+    queenCache.set(queue, { value: null, expiresAt: now + QUEEN_CACHE_TTL_MS });
+    return null;
+  }
 
   const entityType = row.entityType === 'data_card' || row.entityType === 'preset' ? row.entityType : null;
   const entityId = typeof row.entityId === 'string' ? row.entityId.trim() : '';
-  if (!entityType || !entityId) return null;
+  if (!entityType || !entityId) {
+    queenCache.set(queue, { value: null, expiresAt: now + QUEEN_CACHE_TTL_MS });
+    return null;
+  }
 
-  return { entityType, entityId };
+  const value: ArenaEntityRef = { entityType, entityId };
+  queenCache.set(queue, { value, expiresAt: now + QUEEN_CACHE_TTL_MS });
+  return value;
 }
-

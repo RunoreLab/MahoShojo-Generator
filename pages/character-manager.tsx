@@ -15,6 +15,7 @@ import Footer from '../components/Footer';
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
+import { ThemeImage } from '@/components/shared/ThemeImage';
 import { MainColor } from '@/lib/main-color';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, authStorage } from '@/lib/auth';
@@ -777,27 +778,34 @@ const CharacterManagerPage: React.FC = () => {
         }
 
         let newPrompt = '';
-        const isMagicalGirl = !!characterData.codename;
-
-        if (isMagicalGirl && characterData.appearance) {
-            // 魔法少女的 Prompt 逻辑
-            const appearanceString = Object.entries(characterData.appearance)
-                .map(([key, value]) => `${key}: ${value}`)
-                .join(', ');
-            newPrompt = `${appearanceString}, Xiabanmo, 二次元, 魔法少女`;
-        } else if (!isMagicalGirl && characterData.name) {
-            // 残兽的 Prompt 逻辑
+        if (currentTemplate === 'magical-girl') {
+            const appearance = characterData.appearance;
+            if (appearance && typeof appearance === 'object' && !Array.isArray(appearance)) {
+                const appearanceString = Object.entries(appearance)
+                    .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+                    .join(', ');
+                newPrompt = `${appearanceString}, Xiabanmo, 二次元, 魔法少女`;
+            }
+        } else if (currentTemplate === 'canshou') {
             const parts = [
                 characterData.appearance,
                 characterData.materialAndSkin,
                 characterData.featuresAndAppendages
-            ].filter(Boolean); // 过滤掉空值
+            ]
+                .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
+                .filter(Boolean);
             newPrompt = parts.join(', ');
+        } else if (currentTemplate === 'general') {
+            const name = typeof characterData.name === 'string' ? characterData.name.trim() : '';
+            const content = typeof characterData.content === 'string' ? characterData.content.trim() : '';
+            const head = content.length > 800 ? content.slice(0, 800) : content;
+            const prefix = [name, head].filter(Boolean).join(', ');
+            newPrompt = `${prefix ? `${prefix}, ` : ''}Xiabanmo, 二次元, 角色立绘`;
         }
 
         setTachiePrompt(newPrompt);
 
-    }, [characterData]);
+    }, [characterData, currentTemplate]);
 
     /**
      * 专门用于控制“一键替换名称”按钮的显示逻辑。
@@ -1573,7 +1581,14 @@ const CharacterManagerPage: React.FC = () => {
             }
 
             // 3. 执行下载或复制操作
-            const name = finalData.codename || finalData.name;
+            const isScenario = isScenarioData(finalData);
+            const nameCandidates = [
+                typeof finalData.codename === 'string' ? finalData.codename : '',
+                typeof finalData.name === 'string' ? finalData.name : '',
+                typeof finalData.title === 'string' ? finalData.title : '',
+            ];
+            const resolvedName = nameCandidates.map((item) => item.trim()).find((item) => item) || (isScenario ? '未命名情景' : '未命名角色');
+            const filenamePrefix = isScenario ? '情景档案' : '角色档案';
             const jsonData = JSON.stringify(finalData, null, 2);
 
             if (type === 'download') {
@@ -1581,7 +1596,7 @@ const CharacterManagerPage: React.FC = () => {
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
-                link.download = `角色档案_${name}_已编辑.json`;
+                link.download = `${filenamePrefix}_${resolvedName}_已编辑.json`;
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -1622,7 +1637,7 @@ const CharacterManagerPage: React.FC = () => {
                     <div className="card">
                         <div className="text-center mb-4">
                             <div className="flex justify-center items-center mt-4" style={{ marginBottom: '1rem' }}>
-                                <img src="/character-manager.svg" width={320} height={40} alt="角色数据管理" />
+                                <ThemeImage lightSrc="/character-manager.svg" darkSrc="/character-manager-white.svg" width={320} height={40} alt="角色数据管理" />
                             </div>
                             <p className="subtitle mt-2">在这里查看、编辑和维护你的角色档案</p>
                             {/* 实验性警告 */}

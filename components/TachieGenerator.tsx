@@ -6,9 +6,27 @@ import { ErrorMessage } from "@/components/ErrorMessage";
 
 interface TachieGeneratorProps {
   prompt: string;
+  mode?: 'tachie' | 'illustration';
+  workflowUuid?: string;
+  templateUuid?: string;
+  promptNodeId?: number;
+  negativePrompt?: string;
+  negativePromptNodeId?: number;
+  onImageUrlChange?: (imageUrl: string | null) => void;
+  onResult?: (result: TachieGenerationResult) => void;
 }
 
-export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
+export default function TachieGenerator({
+  prompt,
+  mode,
+  workflowUuid,
+  templateUuid,
+  promptNodeId,
+  negativePrompt,
+  negativePromptNodeId,
+  onImageUrlChange,
+  onResult,
+}: TachieGeneratorProps) {
   const [accessKey, setAccessKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -71,10 +89,25 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
 
   const handleGenerate = async () => {
     if (!accessKey.trim() || !secretKey.trim()) {
-      setResult({
+      const nextResult = {
         success: false,
         error: "请填写 Access Key 和 Secret Key",
-      });
+      } satisfies TachieGenerationResult;
+      setResult(nextResult);
+      onResult?.(nextResult);
+      onImageUrlChange?.(null);
+      return;
+    }
+
+    const normalizedPrompt = prompt.trim();
+    if (!normalizedPrompt) {
+      const nextResult = {
+        success: false,
+        error: "立绘提示词为空：请先补全角色外观/正文，或手动填写提示词后再生成。",
+      } satisfies TachieGenerationResult;
+      setResult(nextResult);
+      onResult?.(nextResult);
+      onImageUrlChange?.(null);
       return;
     }
 
@@ -83,6 +116,7 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
 
     setIsGenerating(true);
     setResult(null);
+    onImageUrlChange?.(null);
     setProgress(0);
     setProgressStatus("正在提交生成任务...");
 
@@ -91,17 +125,28 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
         source: "liblib",
         accessKey: accessKey.trim(),
         secretKey: secretKey.trim(),
-        prompt,
+        prompt: normalizedPrompt,
+        mode,
+        workflowUuid,
+        templateUuid,
+        promptNodeId,
+        negativePrompt,
+        negativePromptNodeId,
       }, (progress, status) => {
         setProgress(progress);
         setProgressStatus(status);
       });
       setResult(generationResult);
+      onResult?.(generationResult);
+      onImageUrlChange?.(generationResult.success ? (generationResult.imageUrl ?? null) : null);
     } catch (error) {
-      setResult({
+      const nextResult = {
         success: false,
         error: error instanceof Error ? error.message : "生成失败",
-      });
+      } satisfies TachieGenerationResult;
+      setResult(nextResult);
+      onResult?.(nextResult);
+      onImageUrlChange?.(null);
     } finally {
       setIsGenerating(false);
       setProgress(0);
@@ -112,7 +157,7 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
   return (
     <div>
       <div style={{ marginBottom: '1.5rem' }}>
-        <p className="text-center" style={{ fontSize: '0.875rem', color: '#666', marginTop: '1rem', lineHeight: 1.5 }}>
+        <p className="text-center text-sm text-gray-500 mt-4 leading-relaxed">
           请前往&nbsp;
           <a
             href="https://www.liblib.art/apis"
@@ -161,8 +206,8 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
       </div>
 
       {/* 记住凭据选项 */}
-      <div className="input-group" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '0.875rem', color: '#666' }}>
+      <div className="input-group flex items-center justify-between">
+        <label className="flex items-center cursor-pointer text-sm text-gray-500">
           <input
             type="checkbox"
             checked={rememberCredentials}
@@ -175,14 +220,7 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
           <button
             type="button"
             onClick={clearSavedCredentials}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#ff6b6b',
-              fontSize: '0.75rem',
-              cursor: 'pointer',
-              textDecoration: 'underline'
-            }}
+            className="bg-transparent border-0 text-xs text-pink-600 underline hover:text-pink-500"
           >
             清除已保存的凭据
           </button>
@@ -191,36 +229,22 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
 
       <button
         onClick={handleGenerate}
-        disabled={isGenerating || !accessKey.trim() || !secretKey.trim()}
+        disabled={isGenerating || !accessKey.trim() || !secretKey.trim() || !prompt.trim()}
         className="generate-button"
       >
         {isGenerating ? "立绘生成中，请稍后捏 (≖ᴗ≖)✧✨" : "✨ 生成立绘 ✨"}
       </button>
 
       {isGenerating && (
-        <div style={{
-          marginTop: '1rem',
-          padding: '1rem',
-          background: 'rgba(255, 255, 255, 0.9)',
-          borderRadius: '16px',
-          border: '1px solid rgba(255, 107, 107, 0.2)',
-          textAlign: 'center'
-        }}>
+        <div className="mt-4 p-4 rounded-2xl border border-pink-200 bg-white/90 text-center">
           <div style={{ marginBottom: '0.75rem' }}>
-            <span style={{ fontSize: '0.875rem', color: '#ff6b6b', fontWeight: '600' }}>
+            <span className="text-sm font-semibold text-pink-600">
               {progressStatus || "立绘生成中，请稍后捏 (≖ᴗ≖)✧"}
             </span>
           </div>
           
           {/* 进度条 */}
-          <div style={{
-            width: '100%',
-            height: '8px',
-            background: 'rgba(255, 107, 107, 0.1)',
-            borderRadius: '4px',
-            overflow: 'hidden',
-            marginBottom: '0.5rem'
-          }}>
+          <div className="w-full h-2 rounded bg-pink-100/60 overflow-hidden mb-2">
             <div style={{
               width: `${Math.max(progress, 5)}%`, // 最小显示5%，让用户看到有进度
               height: '100%',
@@ -232,7 +256,7 @@ export default function TachieGenerator({ prompt }: TachieGeneratorProps) {
           </div>
 
           {/* 进度百分比 */}
-          <div style={{ fontSize: '0.75rem', color: '#666' }}>
+          <div className="text-xs text-gray-500">
             {progress > 0 ? `${progress}%` : "准备中..."}
           </div>
         </div>
