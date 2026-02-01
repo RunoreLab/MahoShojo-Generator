@@ -13,6 +13,9 @@ import { config as appConfig } from '../lib/config';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import BattleDataModal from '../components/BattleDataModal';
+import { NarrativeHistoryModal } from '@/components/arena/components/NarrativeHistoryModal';
+import { NarrativeHistoryPickerModal } from '@/components/arena/components/NarrativeHistoryPickerModal';
+import { useNarrativeHistoryStore } from '@/components/arena/stores/useNarrativeHistoryStore';
 import { useAuth } from '@/lib/useAuth';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { ErrorMessage } from '@/components/ErrorMessage';
@@ -22,6 +25,8 @@ import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { formatDateTime } from '@/lib/constants';
+import { formatNarrativeHistoryEntriesForReference, mergeNarrativeHistoryText } from '@/lib/narrative-history';
 import {
 	    inferTemplate,
 	    TEMPLATE_LABELS,
@@ -185,6 +190,12 @@ const SublimationPage: React.FC = () => {
     const [userGuidance, setUserGuidance] = useState('');
     const [narrativeHistory, setNarrativeHistory] = useState('');
     const [narrativeHistoryFileName, setNarrativeHistoryFileName] = useState<string | null>(null);
+    const [showArenaNarrativePicker, setShowArenaNarrativePicker] = useState(false);
+    const [showArenaNarrativeManager, setShowArenaNarrativeManager] = useState(false);
+    const [arenaNarrativeSelectedIds, setArenaNarrativeSelectedIds] = useState<string[]>([]);
+    const arenaNarrativeEntries = useNarrativeHistoryStore((state) => state.entries);
+    const arenaNarrativeCount = useNarrativeHistoryStore((state) => state.entries.length);
+    const arenaNarrativeLastUpdatedAt = useNarrativeHistoryStore((state) => state.lastUpdatedAt);
 
     // 数据库选择相关状态
     const [showBattleDataModal, setShowBattleDataModal] = useState(false);
@@ -409,14 +420,15 @@ const SublimationPage: React.FC = () => {
         if (!isNative) return false;
         const trimmedGuidance = typeof userGuidance === 'string' ? userGuidance.trim() : '';
         const trimmedNarrativeHistory = typeof narrativeHistory === 'string' ? narrativeHistory.trim() : '';
-        if (trimmedNarrativeHistory) {
+        const hasArenaNarrativeSelection = Array.isArray(arenaNarrativeSelectedIds) && arenaNarrativeSelectedIds.length > 0;
+        if (trimmedNarrativeHistory || hasArenaNarrativeSelection) {
             return false;
         }
         if (trimmedGuidance) {
             return appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
         }
         return true;
-    }, [characterData, userGuidance, narrativeHistory, verifyOrigin]);
+    }, [characterData, userGuidance, narrativeHistory, arenaNarrativeSelectedIds, verifyOrigin]);
 
     const processJsonData = (jsonText: string) => {
         try {
@@ -493,6 +505,7 @@ const SublimationPage: React.FC = () => {
     const handleClearNarrativeHistory = () => {
         setNarrativeHistory('');
         setNarrativeHistoryFileName(null);
+        setArenaNarrativeSelectedIds([]);
     };
 
     // 打开角色数据卡选择器
@@ -591,7 +604,18 @@ const SublimationPage: React.FC = () => {
         setStreamedGeneralCard(null);
 
 	        try {
-	            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance + " " + narrativeHistory;
+                const selectedArenaNarrativeEntryIds = new Set(
+                    Array.isArray(arenaNarrativeSelectedIds) ? arenaNarrativeSelectedIds : []
+                );
+                const selectedArenaNarrativeEntries = Array.isArray(arenaNarrativeEntries)
+                    ? arenaNarrativeEntries.filter((entry) => entry && selectedArenaNarrativeEntryIds.has(entry.id))
+                    : [];
+                const arenaNarrativeText = formatNarrativeHistoryEntriesForReference(selectedArenaNarrativeEntries, {
+                    sourceLabel: '竞技场叙事历史',
+                });
+                const finalNarrativeHistoryText = mergeNarrativeHistoryText(arenaNarrativeText, narrativeHistory);
+
+	            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance + " " + finalNarrativeHistoryText;
 	            const redirectTarget = await getSensitiveWordRedirectTarget(textToCheck, {
 	                reason: '上传的角色档案或引导内容包含危险符文',
 	            });
@@ -607,7 +631,7 @@ const SublimationPage: React.FC = () => {
                 ...characterData,
                 language: selectedLanguage,
                 userGuidance: userGuidance.trim(),
-                narrativeHistory: narrativeHistory.trim(),
+                narrativeHistory: finalNarrativeHistoryText.trim(),
                 fieldsToPreserve: filteredFieldsToPreserve,
                 allowReshapeNames,
                 isDowngrade: isDowngrade,
@@ -795,7 +819,8 @@ const SublimationPage: React.FC = () => {
     const trimmedGuidance = userGuidance.trim();
     const hasGuidance = trimmedGuidance.length > 0;
     const trimmedNarrativeHistory = narrativeHistory.trim();
-    const hasNarrativeHistory = trimmedNarrativeHistory.length > 0;
+    const hasArenaNarrativeSelection = Array.isArray(arenaNarrativeSelectedIds) && arenaNarrativeSelectedIds.length > 0;
+    const hasNarrativeHistory = trimmedNarrativeHistory.length > 0 || hasArenaNarrativeSelection;
     const shouldWarnGuidanceNativeness =
         hasGuidance
         && !hasNarrativeHistory
@@ -987,49 +1012,76 @@ const SublimationPage: React.FC = () => {
                             )}
                         </div>
 
-                        {/* 叙事历史输入框 */}
-                        <div className="input-group">
-                            <label htmlFor="narrative-history" className="input-label">叙事历史（可选）</label>
-                            <textarea
-                                id="narrative-history"
-                                value={narrativeHistory}
-                                onChange={(e) => {
-                                    setNarrativeHistory(e.target.value);
-                                    if (narrativeHistoryFileName) {
-                                        setNarrativeHistoryFileName(null);
-                                    }
-                                }}
-                                placeholder="输入或粘贴角色的叙事历史（可多段文字），也可使用下方上传文件"
-                                className="input-field resize-y h-28"
-                                disabled={isGenerating}
-                            />
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                                <input
-                                    id="narrative-history-upload"
+	                        {/* 叙事历史输入框 */}
+	                        <div className="input-group">
+	                            <label htmlFor="narrative-history" className="input-label">叙事历史（可选）</label>
+	                            <textarea
+	                                id="narrative-history"
+	                                value={narrativeHistory}
+	                                onChange={(e) => {
+	                                    setNarrativeHistory(e.target.value);
+	                                    if (narrativeHistoryFileName) {
+	                                        setNarrativeHistoryFileName(null);
+	                                    }
+	                                }}
+	                                placeholder="输入或粘贴叙事历史（可多段文字），也可使用下方上传文件或从竞技场叙事历史中选择"
+	                                className="input-field resize-y h-28"
+	                                disabled={isGenerating}
+	                            />
+	                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+	                                <input
+	                                    id="narrative-history-upload"
                                     type="file"
                                     accept=".txt,.md,.json"
                                     onChange={handleNarrativeFileChange}
                                     className="text-xs"
                                     disabled={isGenerating}
                                 />
-                                {narrativeHistoryFileName && (
-                                    <span className="text-gray-500">已加载叙事历史文件: {narrativeHistoryFileName}</span>
-                                )}
-                                {(narrativeHistory || narrativeHistoryFileName) && (
+	                                {narrativeHistoryFileName && (
+	                                    <span className="text-gray-500">已加载叙事历史文件: {narrativeHistoryFileName}</span>
+	                                )}
+	                                {(narrativeHistory || narrativeHistoryFileName || hasArenaNarrativeSelection) && (
+	                                    <button
+	                                        type="button"
+	                                        onClick={handleClearNarrativeHistory}
+	                                        className="text-purple-700 hover:underline"
+	                                        disabled={isGenerating}
+                                    >
+	                                        清空叙事历史
+	                                    </button>
+	                                )}
+	                            </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                                     <button
                                         type="button"
-                                        onClick={handleClearNarrativeHistory}
-                                        className="text-purple-700 hover:underline"
+                                        onClick={() => setShowArenaNarrativePicker(true)}
+                                        className="px-3 py-2 text-xs font-semibold rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
                                         disabled={isGenerating}
                                     >
-                                        清空叙事历史
+                                        从竞技场叙事历史选择
                                     </button>
-                                )}
-                            </div>
-                            {shouldWarnNarrativeNativeness && (
-                                <p className="text-xs text-yellow-700 mt-1">
-                                    ⚠️ 已提供叙事历史，本次升华结果将标记为“衍生数据”（非原生），并移除原生签名。
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowArenaNarrativeManager(true)}
+                                        className="px-3 py-2 text-xs font-semibold rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                                        disabled={isGenerating}
+                                    >
+                                        查看/编辑竞技场叙事历史
+                                    </button>
+                                    <span className="text-gray-500">
+                                        竞技场缓存：{arenaNarrativeCount} 条{arenaNarrativeLastUpdatedAt ? `｜最近更新：${formatDateTime(arenaNarrativeLastUpdatedAt)}` : ''}
+                                    </span>
+                                    {hasArenaNarrativeSelection && (
+                                        <span className="text-gray-500">已选：{arenaNarrativeSelectedIds.length} 条</span>
+                                    )}
+                                </div>
+                                <p className="text-[11px] text-gray-500 mt-1">
+                                    最终会合并“竞技场勾选条目 + 文本框/上传内容”作为升华参考；不勾选则不会引用竞技场叙事历史。
                                 </p>
+	                            {shouldWarnNarrativeNativeness && (
+	                                <p className="text-xs text-yellow-700 mt-1">
+	                                    ⚠️ 已提供叙事历史，本次升华结果将标记为“衍生数据”（非原生），并移除原生签名。
+	                                </p>
                             )}
                             {!shouldWarnNarrativeNativeness && hasNarrativeHistory && (
                                 <p className="text-xs text-gray-600 mt-1">
@@ -1311,15 +1363,29 @@ const SublimationPage: React.FC = () => {
                 <Footer />
 
                 {/* 数据库数据选择模态框 */}
-                <BattleDataModal
-                    isOpen={showBattleDataModal}
-                    onClose={() => setShowBattleDataModal(false)}
-                    onSelectCard={handleSelectDataCard}
-                    selectedType={modalType}
-                />
-            </div>
-        </>
-    );
-};
+	                <BattleDataModal
+	                    isOpen={showBattleDataModal}
+	                    onClose={() => setShowBattleDataModal(false)}
+	                    onSelectCard={handleSelectDataCard}
+	                    selectedType={modalType}
+	                />
+
+                    <NarrativeHistoryPickerModal
+                        isOpen={showArenaNarrativePicker}
+                        onClose={() => setShowArenaNarrativePicker(false)}
+                        initialSelectedIds={arenaNarrativeSelectedIds}
+                        onConfirm={(entries) => {
+                            setArenaNarrativeSelectedIds(entries.map((entry) => entry.id));
+                            setShowArenaNarrativePicker(false);
+                        }}
+                    />
+                    <NarrativeHistoryModal
+                        isOpen={showArenaNarrativeManager}
+                        onClose={() => setShowArenaNarrativeManager(false)}
+                    />
+	            </div>
+	        </>
+	    );
+	};
 
 export default SublimationPage;
