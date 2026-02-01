@@ -23,8 +23,10 @@ import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import {
   buildQuestionKey,
+  buildQuestionnaireFlow,
   normalizeQuestionnaireDefinition,
   normalizeUserAnswers,
+  resolveQuestionnaireReferences,
   type QuestionnaireAnswerItem,
   type QuestionnaireDefinition,
   type QuestionnairePresetEntry,
@@ -163,6 +165,7 @@ const CanshouPage: React.FC = () => {
   const [answersByKey, setAnswersByKey] = useState<Record<string, string>>({});
   const [selectionReady, setSelectionReady] = useState(false);
   const draftRestoredRef = useRef(false);
+  const currentQuestionKeyRef = useRef<string | null>(null);
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
   const [questionnairePickerTab, setQuestionnairePickerTab] = useState<'public' | 'private'>('public');
@@ -201,7 +204,7 @@ const CanshouPage: React.FC = () => {
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
   const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`;
 
-  const mergedQuestions = useMemo<QuestionnaireContextItem[]>(() => {
+  const questionnaireItems = useMemo<QuestionnaireContextItem[]>(() => {
     return selectedQuestionnaires.flatMap((selection) =>
       selection.questionnaire.questions.map((question, index) => ({
         key: buildQuestionKey(selection.questionnaire.id, question.id, index),
@@ -212,6 +215,21 @@ const CanshouPage: React.FC = () => {
       }))
     );
   }, [selectedQuestionnaires]);
+
+  const resolvedQuestionItems = useMemo(
+    () => resolveQuestionnaireReferences(questionnaireItems),
+    [questionnaireItems]
+  );
+
+  const getQuestionnaireFlow = useCallback(
+    (answers: Record<string, string>) => buildQuestionnaireFlow(resolvedQuestionItems, answers),
+    [resolvedQuestionItems]
+  );
+
+  const {
+    flow: mergedQuestions,
+    indexByKey: mergedQuestionIndexByKey,
+  } = useMemo(() => getQuestionnaireFlow(answersByKey), [answersByKey, getQuestionnaireFlow]);
 
   const answerItems = useMemo<QuestionnaireAnswerItem[]>(() => {
     const items: QuestionnaireAnswerItem[] = [];
@@ -239,13 +257,13 @@ const CanshouPage: React.FC = () => {
     if (!canshouDetails) return null;
     const serverAnswers = normalizeUserAnswers(
       canshouDetails.userAnswers,
-      mergedQuestions.map((item) => item.question.question)
+      questionnaireItems.map((item) => item.question.question)
     );
     return {
       ...canshouDetails,
       userAnswers: serverAnswers.length > 0 ? serverAnswers : answerItems,
     };
-  }, [canshouDetails, answerItems, mergedQuestions]);
+  }, [canshouDetails, answerItems, questionnaireItems]);
 
   const streamedGeneralCardForDisplay = useMemo(() => {
     if (generationMode !== 'stream') return null;
@@ -610,10 +628,28 @@ const CanshouPage: React.FC = () => {
   }, [allowMultipleQuestionnaires, selectedQuestionnaires]);
 
   useEffect(() => {
-    if (currentQuestionIndex >= mergedQuestions.length) {
+    if (mergedQuestions.length === 0) {
+      currentQuestionKeyRef.current = null;
+      return;
+    }
+    const previousKey = currentQuestionKeyRef.current;
+    if (!previousKey) {
+      if (currentQuestionIndex !== 0) setCurrentQuestionIndex(0);
+      return;
+    }
+    const nextIndex = mergedQuestionIndexByKey.get(previousKey);
+    if (typeof nextIndex === 'number' && nextIndex !== currentQuestionIndex) {
+      setCurrentQuestionIndex(nextIndex);
+      return;
+    }
+    if (nextIndex === undefined && currentQuestionIndex !== 0) {
       setCurrentQuestionIndex(0);
     }
-  }, [currentQuestionIndex, mergedQuestions.length]);
+  }, [mergedQuestions, mergedQuestionIndexByKey, currentQuestionIndex]);
+
+  useEffect(() => {
+    currentQuestionKeyRef.current = mergedQuestions[currentQuestionIndex]?.key ?? null;
+  }, [mergedQuestions, currentQuestionIndex]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -724,18 +760,24 @@ const CanshouPage: React.FC = () => {
   };
 
   const proceedToNextQuestion = (nextAnswers: Record<string, string>) => {
-    if (currentQuestionIndex < mergedQuestions.length - 1) {
+    const currentKey = mergedQuestions[currentQuestionIndex]?.key;
+    const { flow: nextFlow, indexByKey: nextIndexByKey } = getQuestionnaireFlow(nextAnswers);
+    const currentFlowIndex = currentKey ? (nextIndexByKey.get(currentKey) ?? -1) : -1;
+    const nextIndex = currentFlowIndex + 1;
+
+    if (nextIndex >= 0 && nextIndex < nextFlow.length) {
       setIsTransitioning(true);
       setTimeout(() => {
-        const nextIndex = currentQuestionIndex + 1;
+        const nextKey = nextFlow[nextIndex]?.key ?? null;
+        currentQuestionKeyRef.current = nextKey;
         setCurrentQuestionIndex(nextIndex);
-        const nextKey = mergedQuestions[nextIndex]?.key;
         setCurrentAnswer(nextKey ? nextAnswers[nextKey] || '' : '');
         setIsTransitioning(false);
       }, 250);
-    } else {
-      handleSubmit(nextAnswers);
+      return;
     }
+
+    handleSubmit(nextAnswers);
   };
 
   const handleNext = () => {
@@ -764,8 +806,9 @@ const CanshouPage: React.FC = () => {
     const nextAnswers = commitAnswerSnapshot();
     setAnswersByKey(nextAnswers);
     const previousIndex = currentQuestionIndex - 1;
-    setCurrentQuestionIndex(previousIndex);
     const prevKey = mergedQuestions[previousIndex]?.key;
+    currentQuestionKeyRef.current = prevKey ?? null;
+    setCurrentQuestionIndex(previousIndex);
     setCurrentAnswer(prevKey ? nextAnswers[prevKey] || '' : '');
     setError(null);
   };
@@ -803,6 +846,7 @@ const CanshouPage: React.FC = () => {
     setAnswersByKey(nextAnswers);
     setCurrentQuestionIndex(index);
     const nextKey = mergedQuestions[index]?.key;
+    currentQuestionKeyRef.current = nextKey ?? null;
     setCurrentAnswer(nextKey ? nextAnswers[nextKey] || '' : '');
     setError(null);
   };
@@ -1062,10 +1106,17 @@ const CanshouPage: React.FC = () => {
     );
   }
 
-  if (mergedQuestions.length === 0) {
+  if (resolvedQuestionItems.length === 0) {
     return (
       <div className="magic-background-dark">
         <div className="container"><div className="card text-center">加载问卷失败</div></div>
+      </div>
+    );
+  }
+  if (mergedQuestions.length === 0) {
+    return (
+      <div className="magic-background-dark">
+        <div className="container"><div className="card text-center">当前没有可作答的题目，请检查问卷条件设置</div></div>
       </div>
     );
   }

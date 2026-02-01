@@ -258,6 +258,8 @@ const QuestionnaireEditorPage: React.FC = () => {
                 <li>问卷由「题目列表」组成，每道题可设置提示、选项与字数限制。</li>
                 <li><code className="bg-slate-200 px-1 rounded">placeholder</code> 用于输入框提示，<code className="bg-slate-200 px-1 rounded">helperText</code> 用于补充说明。</li>
                 <li><code className="bg-slate-200 px-1 rounded">suggestions</code> 会显示为灵感按钮；<code className="bg-slate-200 px-1 rounded">options</code> 用于推荐选项。</li>
+                <li><code className="bg-slate-200 px-1 rounded">displayIf</code> 支持条件显示；<code className="bg-slate-200 px-1 rounded">jump</code> 可设置跳题规则。</li>
+                <li><code className="bg-slate-200 px-1 rounded">optionsFrom</code> / <code className="bg-slate-200 px-1 rounded">suggestionsFrom</code> 可引用其他题目的选项或灵感。</li>
                 <li>最大字数留空表示无限制；关闭「允许自定义」即可只使用选项作答。</li>
                 <li>更多高级字段可写入「额外字段 JSON」，会并入该题的最终结构。</li>
               </ul>
@@ -430,7 +432,7 @@ const QuestionnaireEditorPage: React.FC = () => {
                         value={question.extraJson}
                         onChange={(e) => updateQuestion(index, { extraJson: e.target.value })}
                         className="input-field mt-1 h-20"
-                        placeholder='例如：{ "metadata": { "tag": "情绪" } }'
+                        placeholder='例如：{ "displayIf": { "questionId": "MG-1", "operator": "equals", "value": "是" } }'
                       />
                     </div>
                   </div>
