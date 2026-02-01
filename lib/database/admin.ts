@@ -433,7 +433,7 @@ export async function getAdminDataCards(filters: {
   reviewStatus?: 'pending' | 'approved' | 'rejected';
   isPublic?: '0' | '1' | '-1'; // 0=私有, 1=公开, -1=封禁
   isRecommended?: '0' | '1';
-  type?: 'character' | 'scenario' | 'history';
+  type?: 'character' | 'scenario' | 'history' | 'questionnaire';
   search?: string; // 搜索名称、描述或作者名
   includePendingUpdates?: boolean; // 是否将待审核更新信息合并进列表
 }): Promise<{ cards: any[], total: number }> {

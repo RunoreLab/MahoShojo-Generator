@@ -1,26 +1,48 @@
-import { NextApiRequest, NextApiResponse } from 'next';
 import { queryFromD1 } from '../../../../lib/database/core';
 import { reviewDataCardUpdate } from '@/lib/database/admin';
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const { id } = req.query;
-  
-  if (!id || typeof id !== 'string') {
-    return res.status(400).json({ error: '角色卡ID参数无效' });
+export const runtime = 'edge';
+
+const jsonResponse = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+const getIdFromUrl = (url: string): string | null => {
+  try {
+    const parts = new URL(url).pathname.split('/').filter(Boolean);
+    const idx = parts.findIndex((part) => part === 'data-cards');
+    if (idx === -1) return null;
+    return parts[idx + 1] || null;
+  } catch {
+    return null;
+  }
+};
+
+export default async function handler(req: Request): Promise<Response> {
+  const id = getIdFromUrl(req.url);
+
+  if (!id) {
+    return jsonResponse({ error: '角色卡ID参数无效' }, 400);
   }
 
   if (req.method === 'PUT') {
     // 更新角色卡信息
     try {
-      const { name, description, is_public, update_action, update_id } = req.body;
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== 'object') {
+        return jsonResponse({ error: '请求体解析失败' }, 400);
+      }
+      const { name, description, is_public, update_action, update_id } = body as Record<string, any>;
 
       // 如果是审核更新记录
       if (update_action && update_id) {
         const ok = await reviewDataCardUpdate(update_id, update_action === 'approve' ? 'approve' : 'reject');
         if (!ok) {
-          return res.status(400).json({ error: '处理更新记录失败' });
+          return jsonResponse({ error: '处理更新记录失败' }, 400);
         }
-        return res.status(200).json({ success: true });
+        return jsonResponse({ success: true }, 200);
       }
 
       // 验证输入数据
@@ -43,7 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       if (updates.length === 0) {
-        return res.status(400).json({ error: '没有要更新的字段' });
+        return jsonResponse({ error: '没有要更新的字段' }, 400);
       }
 
       // 添加更新时间
@@ -67,18 +89,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         
         if (cardResult.success && cardResult.result && cardResult.result[0]?.results?.length > 0) {
           const updatedCard = cardResult.result[0].results[0];
-          res.status(200).json(updatedCard);
-        } else {
-          res.status(404).json({ error: '角色卡未找到' });
+          return jsonResponse(updatedCard, 200);
         }
-      } else {
-        res.status(404).json({ error: '角色卡未找到或无权限更新' });
+        return jsonResponse({ error: '角色卡未找到' }, 404);
       }
+      return jsonResponse({ error: '角色卡未找到或无权限更新' }, 404);
     } catch (error) {
       console.error('更新角色卡信息失败:', error);
-      res.status(500).json({ error: '更新角色卡信息失败' });
+      return jsonResponse({ error: '更新角色卡信息失败' }, 500);
     }
-  } else if (req.method === 'GET') {
+  }
+
+  if (req.method === 'GET') {
     // 获取单个角色卡信息
     try {
       const query = `
@@ -91,15 +113,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       
       if (result.success && result.result && result.result[0]?.results?.length > 0) {
         const card = result.result[0].results[0];
-        res.status(200).json(card);
-      } else {
-        res.status(404).json({ error: '角色卡未找到' });
+        return jsonResponse(card, 200);
       }
+      return jsonResponse({ error: '角色卡未找到' }, 404);
     } catch (error) {
       console.error('获取角色卡信息失败:', error);
-      res.status(500).json({ error: '获取角色卡信息失败' });
+      return jsonResponse({ error: '获取角色卡信息失败' }, 500);
     }
-  } else if (req.method === 'DELETE') {
+  }
+
+  if (req.method === 'DELETE') {
     // 删除角色卡（管理员功能）
     try {
       const result = await queryFromD1(
@@ -108,15 +131,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ) as any;
       
       if (result.success && result.result && result.result[0]?.meta?.changes > 0) {
-        res.status(200).json({ success: true, message: '角色卡删除成功' });
-      } else {
-        res.status(404).json({ error: '角色卡未找到' });
+        return jsonResponse({ success: true, message: '角色卡删除成功' }, 200);
       }
+      return jsonResponse({ error: '角色卡未找到' }, 404);
     } catch (error) {
       console.error('删除角色卡失败:', error);
-      res.status(500).json({ error: '删除角色卡失败' });
+      return jsonResponse({ error: '删除角色卡失败' }, 500);
     }
-  } else {
-    res.status(405).json({ error: '方法不被允许' });
   }
+
+  return jsonResponse({ error: '方法不被允许' }, 405);
 }

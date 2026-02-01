@@ -1,5 +1,23 @@
 import { queryFromD1 } from '@/lib/d1';
-import type { NextApiRequest, NextApiResponse } from 'next';
+
+export const runtime = 'edge';
+
+const jsonResponse = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+const getIdFromUrl = (url: string): string | null => {
+  try {
+    const parts = new URL(url).pathname.split('/').filter(Boolean);
+    const idx = parts.findIndex((part) => part === 'badges');
+    if (idx === -1) return null;
+    return parts[idx + 1] || null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * 管理员单个徽章操作 API
@@ -7,11 +25,11 @@ import type { NextApiRequest, NextApiResponse } from 'next';
  * PUT - 更新徽章信息
  * DELETE - 删除徽章
  */
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const { id } = req.query;
+export default async function handler(req: Request): Promise<Response> {
+  const id = getIdFromUrl(req.url);
 
-  if (typeof id !== 'string') {
-    return res.status(400).json({ error: '无效的徽章ID' });
+  if (!id) {
+    return jsonResponse({ error: '无效的徽章ID' }, 400);
   }
 
   if (req.method === 'GET') {
@@ -37,7 +55,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const badge = cards.length > 0 ? cards[0] : null;
 
       if (!badge) {
-        return res.status(404).json({ error: '徽章不存在' });
+        return jsonResponse({ error: '徽章不存在' }, 404);
       }
 
       // 安全地解析 JSON 字段
@@ -81,15 +99,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         createdAt: badge.createdAt
       };
 
-      return res.status(200).json({ success: true, badge: badgeData });
+      return jsonResponse({ success: true, badge: badgeData }, 200);
     } catch (error) {
       console.error('获取徽章详情失败:', error);
-      return res.status(500).json({ error: '获取徽章详情失败' });
+      return jsonResponse({ error: '获取徽章详情失败' }, 500);
     }
   }
 
   if (req.method === 'PUT') {
     try {
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== 'object') {
+        return jsonResponse({ error: '请求体解析失败' }, 400);
+      }
       const {
         name,
         description,
@@ -100,13 +122,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         rarity,
         sortOrder,
         isActive
-      } = req.body;
+      } = body as Record<string, any>;
 
       // 检查徽章是否存在（PUT 方法）
       const existingQuery = await queryFromD1('SELECT id FROM badges WHERE id = ?', [id]) as any;
       const existingResults = existingQuery.success ? existingQuery.result[0]?.results || [] : [];
       if (!existingResults || existingResults.length === 0) {
-        return res.status(404).json({ error: '徽章不存在' });
+        return jsonResponse({ error: '徽章不存在' }, 404);
       }
 
       // 更新徽章
@@ -135,10 +157,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         id
       ]);
 
-      return res.status(200).json({ success: true, message: '徽章更新成功' });
+      return jsonResponse({ success: true, message: '徽章更新成功' }, 200);
     } catch (error) {
       console.error('更新徽章失败:', error);
-      return res.status(500).json({ error: '更新徽章失败' });
+      return jsonResponse({ error: '更新徽章失败' }, 500);
     }
   }
 
@@ -148,18 +170,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const existingQuery = await queryFromD1('SELECT id FROM badges WHERE id = ?', [id]) as any;
       const existingResults = existingQuery.success ? existingQuery.result[0]?.results || [] : [];
       if (!existingResults || existingResults.length === 0) {
-        return res.status(404).json({ error: '徽章不存在' });
+        return jsonResponse({ error: '徽章不存在' }, 404);
       }
 
       // 删除徽章（会级联删除 user_badges 中的关联记录）
       await queryFromD1('DELETE FROM badges WHERE id = ?', [id]);
 
-      return res.status(200).json({ success: true, message: '徽章删除成功' });
+      return jsonResponse({ success: true, message: '徽章删除成功' }, 200);
     } catch (error) {
       console.error('删除徽章失败:', error);
-      return res.status(500).json({ error: '删除徽章失败' });
+      return jsonResponse({ error: '删除徽章失败' }, 500);
     }
   }
 
-  return res.status(405).json({ error: 'Method not allowed' });
+  return jsonResponse({ error: 'Method not allowed' }, 405);
 }

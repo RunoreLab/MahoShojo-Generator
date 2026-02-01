@@ -1,22 +1,44 @@
-import { NextApiRequest, NextApiResponse } from 'next';
 import { queryFromD1 } from '../../../../lib/database/core';
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const { id } = req.query;
+export const runtime = 'edge';
+
+const jsonResponse = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+const getIdFromUrl = (url: string): string | null => {
+  try {
+    const parts = new URL(url).pathname.split('/').filter(Boolean);
+    const idx = parts.findIndex((part) => part === 'users');
+    if (idx === -1) return null;
+    return parts[idx + 1] || null;
+  } catch {
+    return null;
+  }
+};
+
+export default async function handler(req: Request): Promise<Response> {
+  const id = getIdFromUrl(req.url);
   
-  if (!id || typeof id !== 'string') {
-    return res.status(400).json({ error: '用户ID参数无效' });
+  if (!id) {
+    return jsonResponse({ error: '用户ID参数无效' }, 400);
   }
 
-  const userId = parseInt(id, 10);
-  if (isNaN(userId)) {
-    return res.status(400).json({ error: '用户ID必须是数字' });
+  const userId = Number.parseInt(id, 10);
+  if (!Number.isFinite(userId)) {
+    return jsonResponse({ error: '用户ID必须是数字' }, 400);
   }
 
   if (req.method === 'PUT') {
     // 更新用户信息
     try {
-      const { is_banned, slot_count, prefix } = req.body;
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== 'object') {
+        return jsonResponse({ error: '请求体解析失败' }, 400);
+      }
+      const { is_banned, slot_count, prefix } = body as Record<string, any>;
 
       // 验证输入数据
       const updates: string[] = [];
@@ -29,7 +51,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (slot_count !== undefined) {
         updates.push('slot_count = ?');
-        params.push(slot_count ? parseInt(slot_count, 10) : null);
+        params.push(slot_count ? Number.parseInt(slot_count, 10) : null);
       }
 
       if (prefix !== undefined) {
@@ -38,7 +60,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       if (updates.length === 0) {
-        return res.status(400).json({ error: '没有要更新的字段' });
+        return jsonResponse({ error: '没有要更新的字段' }, 400);
       }
 
       // 添加用户ID到参数
@@ -54,18 +76,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         
         if (userResult.success && userResult.result && userResult.result[0]?.results?.length > 0) {
           const updatedUser = userResult.result[0].results[0];
-          res.status(200).json(updatedUser);
-        } else {
-          res.status(404).json({ error: '用户未找到' });
+          return jsonResponse(updatedUser, 200);
         }
-      } else {
-        res.status(500).json({ error: '更新用户信息失败' });
+        return jsonResponse({ error: '用户未找到' }, 404);
       }
+      return jsonResponse({ error: '更新用户信息失败' }, 500);
     } catch (error) {
       console.error('更新用户信息失败:', error);
-      res.status(500).json({ error: '更新用户信息失败' });
+      return jsonResponse({ error: '更新用户信息失败' }, 500);
     }
-  } else if (req.method === 'GET') {
+  }
+
+  if (req.method === 'GET') {
     // 获取单个用户信息
     try {
       const query = 'SELECT * FROM users WHERE id = ?';
@@ -73,15 +95,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       
       if (result.success && result.result && result.result[0]?.results?.length > 0) {
         const user = result.result[0].results[0];
-        res.status(200).json(user);
-      } else {
-        res.status(404).json({ error: '用户未找到' });
+        return jsonResponse(user, 200);
       }
+      return jsonResponse({ error: '用户未找到' }, 404);
     } catch (error) {
       console.error('获取用户信息失败:', error);
-      res.status(500).json({ error: '获取用户信息失败' });
+      return jsonResponse({ error: '获取用户信息失败' }, 500);
     }
-  } else {
-    res.status(405).json({ error: '方法不被允许' });
   }
+
+  return jsonResponse({ error: '方法不被允许' }, 405);
 }
