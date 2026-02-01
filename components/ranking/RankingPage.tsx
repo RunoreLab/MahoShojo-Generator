@@ -11,6 +11,7 @@ import { TierBadge } from '@/components/ranking/TierBadge';
 import { getArenaApproxRankLabel, getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
 import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
+import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
 import { buildTitleDisplay } from '@/lib/text';
 
 type Queue = 'strict' | 'free';
@@ -84,6 +85,17 @@ const normalizeFilters = (filters: RankingFilters): RankingFilters => ({
 
 const filtersKey = (filters: RankingFilters) => JSON.stringify(filters);
 
+const formatBattleModeLabel = (mode: string): string => {
+  const normalized = mode.trim();
+  const map: Record<string, string> = {
+    classic: '经典',
+    scenario: '情景',
+    daily: '日常',
+    kizuna: '羁绊',
+  };
+  return map[normalized] ?? normalized;
+};
+
 export function RankingPage() {
   const [draftFilters, setDraftFilters] = useState<RankingFilters>(defaultFilters);
   const [appliedFilters, setAppliedFilters] = useState<RankingFilters>(defaultFilters);
@@ -142,6 +154,12 @@ export function RankingPage() {
   const isHistoryMode = selectedSeason?.status === 'history';
   const [historyQueue, setHistoryQueue] = useState<Queue>('strict');
   const [historySection, setHistorySection] = useState<'top' | 'bottom'>('top');
+
+  const selectedSeasonScenarioPreset = useMemo(() => {
+    const filename = selectedSeason?.specialRules?.scenarioPresetFilename;
+    if (typeof filename !== 'string' || !filename.trim()) return null;
+    return getScenarioPresetByFilename(filename);
+  }, [selectedSeason?.specialRules?.scenarioPresetFilename]);
 
   const archiveQuery = useQuery({
     queryKey: ['seasonArchive', selectedSeasonId],
@@ -567,6 +585,59 @@ export function RankingPage() {
                       </span>
                     </div>
                     <div className="mt-1 text-xs text-gray-500">{selectedSeason.description}</div>
+                    <div className="mt-2 border-t border-gray-200/70 pt-2 text-xs text-gray-600">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-gray-800">特殊规则</span>
+                        {!selectedSeason.specialRules ||
+                        typeof selectedSeason.specialRules !== 'object' ||
+                        Object.keys(selectedSeason.specialRules).length === 0 ? (
+                          <span className="text-gray-500">无</span>
+                        ) : null}
+                      </div>
+                      {selectedSeason.specialRules && typeof selectedSeason.specialRules === 'object' ? (
+                        <div className="mt-1 grid gap-1">
+                          {typeof selectedSeason.specialRules.mode === 'string' && selectedSeason.specialRules.mode.trim() ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-gray-500">指定模式</span>
+                              <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-gray-800 ring-1 ring-gray-200">
+                                {formatBattleModeLabel(selectedSeason.specialRules.mode)}
+                              </span>
+                            </div>
+                          ) : null}
+
+                          {typeof selectedSeason.specialRules.scenarioPresetFilename === 'string' &&
+                          selectedSeason.specialRules.scenarioPresetFilename.trim() ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-gray-500">预设情景</span>
+                              <Link
+                                href={`/scenario-presets/${encodeURIComponent(
+                                  selectedSeasonScenarioPreset?.filename ?? selectedSeason.specialRules.scenarioPresetFilename.trim(),
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-gray-800 ring-1 ring-gray-200 hover:bg-gray-50"
+                                title="打开预设情景"
+                              >
+                                {selectedSeasonScenarioPreset?.title ?? selectedSeason.specialRules.scenarioPresetFilename.trim()}
+                                <span className="text-gray-400">↗</span>
+                              </Link>
+                            </div>
+                          ) : null}
+
+                          {typeof selectedSeason.specialRules.storyGuidance === 'string' && selectedSeason.specialRules.storyGuidance.trim() ? (
+                            <details className="group rounded-lg bg-white px-2 py-1 ring-1 ring-gray-200">
+                              <summary className="flex cursor-pointer items-center justify-between gap-2 text-[11px] font-medium text-gray-700 hover:text-gray-900 [&::-webkit-details-marker]:hidden">
+                                <span>赛季故事引导（点开查看）</span>
+                                <span className="text-gray-400 transition-transform group-open:rotate-180">▾</span>
+                              </summary>
+                              <pre className="mt-1 whitespace-pre-wrap break-words text-[11px] text-gray-700">
+                                {selectedSeason.specialRules.storyGuidance.trim()}
+                              </pre>
+                            </details>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 ) : seasonsQuery.isError ? (
                   <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">

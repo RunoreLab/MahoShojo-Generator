@@ -99,11 +99,27 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
     ? parsedExtraJson.resolvedModelOverride.trim()
     : '';
 
+  const seasonModeRaw = typeof parsedExtraJson?.seasonMode === 'string' ? parsedExtraJson.seasonMode.trim() : '';
+  const requiredMode =
+    seasonModeRaw === 'classic' || seasonModeRaw === 'kizuna' || seasonModeRaw === 'daily' || seasonModeRaw === 'scenario'
+      ? seasonModeRaw
+      : 'classic';
+
+  const seasonStoryGuidance = typeof parsedExtraJson?.seasonStoryGuidance === 'string' ? parsedExtraJson.seasonStoryGuidance.trim() : '';
+  const seasonScenarioPreset = typeof parsedExtraJson?.seasonScenarioPreset === 'string' ? parsedExtraJson.seasonScenarioPreset.trim() : '';
+  const scenarioFileName = typeof parsedExtraJson?.scenarioFileName === 'string' ? parsedExtraJson.scenarioFileName.trim() : '';
+  const hasAuxScenarios = (() => {
+    const raw = parsedExtraJson?.auxScenarioCount;
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw > 0;
+    if (typeof raw === 'string') return Boolean(raw.trim() && Number(raw) > 0);
+    return false;
+  })();
+
   const reasons: string[] = [];
   if (snapshot.status !== 'completed') reasons.push('status-not-completed');
   if (snapshot.combatantCount !== 2) reasons.push('combatant-count-not-2');
   if (snapshot.ipAnonymized == null) reasons.push('ip-missing');
-  if (snapshot.mode !== 'classic') reasons.push('mode-not-classic');
+  if ((snapshot.mode ?? '').trim() !== requiredMode) reasons.push(requiredMode === 'classic' ? 'mode-not-classic' : 'mode-not-season');
   if (snapshot.userId == null) reasons.push('need-login');
   if ((snapshot.language ?? '').trim() !== 'zh-CN') reasons.push('language-not-zh-cn');
   if (typeof snapshot.selectedLevel === 'string' && snapshot.selectedLevel.trim()) reasons.push('level-not-default');
@@ -126,7 +142,25 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
       reasons.push('need-ranked-match');
     }
   }
-  if (snapshot.hasUserGuidance !== 0) reasons.push('has-user-guidance');
+
+  if (seasonStoryGuidance) {
+    const actual = typeof snapshot.userGuidancePreview === 'string' ? snapshot.userGuidancePreview.trim() : '';
+    if (!actual) reasons.push('season-user-guidance-missing');
+    else if (actual !== seasonStoryGuidance) reasons.push('season-user-guidance-mismatch');
+  } else {
+    if (snapshot.hasUserGuidance !== 0) reasons.push('has-user-guidance');
+  }
+
+  if (requiredMode === 'scenario') {
+    const hasScenario = snapshot.hasScenario === 1 || snapshot.hasScenario === true;
+    if (!hasScenario) reasons.push('season-scenario-missing');
+
+    if (seasonScenarioPreset) {
+      if (!scenarioFileName || scenarioFileName !== seasonScenarioPreset) reasons.push('season-scenario-preset-mismatch');
+    }
+    if (hasAuxScenarios) reasons.push('season-aux-scenarios-not-allowed');
+  }
+
   if (snapshot.hasAdjudicationEvents !== 0) reasons.push('has-adjudication-events');
   if (snapshot.readArenaHistory !== 0) reasons.push('read-arena-history');
   if (snapshot.readCurrentState !== 0) reasons.push('read-current-state');

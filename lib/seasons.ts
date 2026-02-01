@@ -1,4 +1,32 @@
+import { normalizeScenarioPresetFilename } from '@/lib/scenario-presets';
+
 export type SeasonStatus = 'current' | 'history';
+
+export type SeasonBattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
+
+export type SeasonSpecialRules = {
+  /**
+   * 指定赛季排位要求使用的模式。
+   * - 未填写：默认仍按严格排位的经典模式规则处理。
+   */
+  mode?: SeasonBattleMode;
+  /**
+   * 指定赛季排位要求使用的故事引导（会与严格排位计分校验联动）。
+   * - 空字符串/未填写：表示不要求，严格排位默认要求“无故事引导”。
+   */
+  storyGuidance?: string;
+  /**
+   * 指定赛季排位要求使用的预设情景文件名（仅在 mode='scenario' 下生效）。
+   * 支持省略 .json 扩展名（会自动补齐并校验存在性）。
+   */
+  scenarioPresetFilename?: string;
+};
+
+export type SeasonStrictRules = {
+  mode: SeasonBattleMode;
+  storyGuidance: string;
+  scenarioPresetFilename: string | null;
+};
 
 export type SeasonMeta = {
   id: string;
@@ -7,6 +35,7 @@ export type SeasonMeta = {
   endsAt: string | null;
   status: SeasonStatus;
   description: string;
+  specialRules?: SeasonSpecialRules | null;
   archivedAt?: string | null;
 };
 
@@ -43,11 +72,45 @@ export type SeasonArchiveItem = {
 export type SeasonArchive = {
   schemaVersion: 1;
   generatedAt: string;
-  season: Pick<SeasonMeta, 'id' | 'name' | 'startsAt' | 'endsAt' | 'description'>;
+  season: Pick<SeasonMeta, 'id' | 'name' | 'startsAt' | 'endsAt' | 'description' | 'specialRules'>;
   leaderboards: {
     strict: SeasonArchiveLeaderboard;
     free: SeasonArchiveLeaderboard;
   };
+};
+
+const normalizeSeasonBattleMode = (value: unknown): SeasonBattleMode | null => {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return null;
+  if (raw === 'classic' || raw === 'kizuna' || raw === 'daily' || raw === 'scenario') return raw;
+  return null;
+};
+
+const normalizeSeasonStoryGuidance = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed.slice(0, 200);
+};
+
+const normalizeSeasonScenarioPresetFilename = (mode: SeasonBattleMode, value: unknown): string | null => {
+  if (mode !== 'scenario') return null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return normalizeScenarioPresetFilename(trimmed);
+  } catch {
+    return null;
+  }
+};
+
+export const deriveSeasonStrictRules = (season: SeasonMeta | null | undefined): SeasonStrictRules => {
+  const special = season?.specialRules && typeof season.specialRules === 'object' ? season.specialRules : null;
+  const mode = normalizeSeasonBattleMode(special?.mode) ?? 'classic';
+  const storyGuidance = normalizeSeasonStoryGuidance(special?.storyGuidance);
+  const scenarioPresetFilename = normalizeSeasonScenarioPresetFilename(mode, special?.scenarioPresetFilename);
+  return { mode, storyGuidance, scenarioPresetFilename };
 };
 
 export const isSafeSeasonId = (value: string): boolean => {

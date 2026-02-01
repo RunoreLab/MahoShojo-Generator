@@ -39,6 +39,8 @@ import {
 import { buildOutputPreviewForStorage } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
+import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
+import { deriveSeasonStrictRules } from '@/lib/seasons';
 
 const log = getLogger('api-gen-battle-story');
 const MAX_COMBATANTS = 10;
@@ -104,6 +106,7 @@ interface BattleApiResponse {
             storyLength,
             customProvider: customProviderPayload,
             scenarioTitle,
+            scenarioFileName,
             scenarioSourceDataCardId,
             scenarioSourceDataCardUpdatedAt,
         } = body;
@@ -483,6 +486,18 @@ interface BattleApiResponse {
         const recordPromise = (async () => {
             const user = authKey ? await getUserByAuthKey(authKey) : null;
             const recordId = generateUUID();
+            const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
+            const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
+
+            const normalizedScenarioFileName = (() => {
+              if (typeof scenarioFileName !== 'string') return null;
+              const trimmed = scenarioFileName.trim();
+              if (!trimmed) return null;
+              if (trimmed.length > 128) return trimmed.slice(0, 128);
+              if (trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes('..')) return null;
+              return trimmed;
+            })();
+            const auxScenarioCount = normalizedAuxScenarios ? normalizedAuxScenarios.length : 0;
 
 	            const createdId = await createBattleReportGenerationRecord({
                 id: recordId,
@@ -552,6 +567,12 @@ interface BattleApiResponse {
 	                extraJson: compactExtraJson({
                         arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
                         arenaStrictPolicy: isStrictRankedMatchRequest ? '1+3:v1' : null,
+                        seasonId: typeof currentSeason?.id === 'string' ? currentSeason.id : null,
+                        seasonMode: seasonStrictRules.mode !== 'classic' ? seasonStrictRules.mode : null,
+                        seasonStoryGuidance: seasonStrictRules.storyGuidance || null,
+                        seasonScenarioPreset: seasonStrictRules.scenarioPresetFilename ?? null,
+                        scenarioFileName: normalizedScenarioFileName,
+                        auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                    resolvedModelOverride: usedModelOverride ?? null,
 	                    readNarrativeHistory: resolvedReadNarrativeHistory,
 	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,

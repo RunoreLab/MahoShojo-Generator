@@ -406,6 +406,7 @@ export const useBattleEngine = () => {
         scenario: shouldUseScenario ? scenario.content : undefined,
         auxScenarios: shouldUseScenario && auxScenarios.length > 0 ? auxScenarios.map((s) => s.content) : undefined,
         scenarioTitle: shouldUseScenario ? scenarioDisplayName : undefined,
+        scenarioFileName: shouldUseScenario ? scenario.fileName : undefined,
         scenarioSourceDataCardId: shouldUseScenario ? scenario.sourceDataCardId : undefined,
         scenarioSourceDataCardUpdatedAt: shouldUseScenario ? scenario.sourceDataCardUpdatedAt : undefined,
         teams: Object.keys(teams).length > 0 ? teams : undefined,

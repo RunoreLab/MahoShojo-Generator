@@ -29,7 +29,9 @@ export interface ArenaEligibilitySnapshot {
   ipAnonymized: string | null;
   language: string | null;
   selectedLevel: string | null;
+  hasScenario: number | boolean | null;
   hasUserGuidance: number | null;
+  userGuidancePreview: string | null;
   hasAdjudicationEvents: number | null;
   readArenaHistory: number | null;
   readCurrentState: number | null;
@@ -520,8 +522,13 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   if (snapshot.status !== 'completed') return false;
   if (snapshot.combatantCount !== 2) return false;
   if (snapshot.ipAnonymized == null) return false;
-  if (snapshot.mode !== 'classic') return false;
   if (snapshot.userId == null) return false;
+
+  const seasonMode = readExtraJsonString(snapshot.extraJson, 'seasonMode');
+  const requiredMode = seasonMode === 'classic' || seasonMode === 'kizuna' || seasonMode === 'daily' || seasonMode === 'scenario'
+    ? seasonMode
+    : 'classic';
+  if ((snapshot.mode ?? '').trim() !== requiredMode) return false;
 
   // 兼容旧版 strict（排位匹配票据）与新版 strict（1+3 手选对手）：
   // - 旧版：必须存在 rankedMatchOk=true
@@ -542,7 +549,29 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   // 严格排位：等级必须为默认/未指定（selected_level 为空或 NULL）。
   if (typeof snapshot.selectedLevel === 'string' && snapshot.selectedLevel.trim()) return false;
 
-  if (snapshot.hasUserGuidance !== 0) return false;
+  const requiredStoryGuidance = readExtraJsonString(snapshot.extraJson, 'seasonStoryGuidance');
+  if (requiredStoryGuidance) {
+    const actual = typeof snapshot.userGuidancePreview === 'string' ? snapshot.userGuidancePreview.trim() : '';
+    if (!actual) return false;
+    if (actual !== requiredStoryGuidance) return false;
+  } else {
+    if (snapshot.hasUserGuidance !== 0) return false;
+  }
+
+  if (requiredMode === 'scenario') {
+    const hasScenario = snapshot.hasScenario === 1 || snapshot.hasScenario === true;
+    if (!hasScenario) return false;
+
+    const requiredPreset = readExtraJsonString(snapshot.extraJson, 'seasonScenarioPreset');
+    if (requiredPreset) {
+      const actualFileName = readExtraJsonString(snapshot.extraJson, 'scenarioFileName');
+      if (!actualFileName || actualFileName !== requiredPreset) return false;
+    }
+
+    // 严格排位：情景模式下也禁止辅助情景（缺失则视为无辅助情景）。
+    if (readExtraJsonBoolean(snapshot.extraJson, 'auxScenarioCount') === true) return false;
+  }
+
   if (snapshot.hasAdjudicationEvents !== 0) return false;
   if (snapshot.readArenaHistory !== 0) return false;
   if (snapshot.readCurrentState !== 0) return false;
@@ -627,7 +656,9 @@ export async function getArenaEligibilitySnapshotByGenerationId(
         ip_anonymized as ipAnonymized,
         language,
         selected_level as selectedLevel,
+        has_scenario as hasScenario,
         has_user_guidance as hasUserGuidance,
+        user_guidance_preview as userGuidancePreview,
         has_adjudication_events as hasAdjudicationEvents,
         read_arena_history as readArenaHistory,
         read_current_state as readCurrentState,
