@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { upsertArenaRankCacheFromGenerationRanking } from '@/lib/arena/rank-cache';
 
 type Queue = 'strict' | 'free';
 
@@ -14,6 +15,7 @@ type QueueResult = {
   eventStatus: 'missing' | 'pending' | 'applied' | 'skipped' | 'failed';
   skipReason: string | null;
   rating: number | null;
+  games: number | null;
   tier: string | null;
   delta: number | null;
   rank: number | null;
@@ -28,6 +30,8 @@ type GenerationRankingReady = {
   snapshot?: { extraJson?: string | null } | null;
   participants: Array<{
     displayName: string;
+    entityType: 'data_card' | 'preset' | 'unknown';
+    entityId: string | null;
     techScore: number | null;
     techLevel: string | null;
     queues: Record<Queue, QueueResult>;
@@ -152,6 +156,33 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
       if (timeoutRef.current != null) window.clearTimeout(timeoutRef.current);
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!data || data.success !== true) return;
+    if (data.state !== 'ready') return;
+    if (!Array.isArray(data.participants) || data.participants.length === 0) return;
+
+    upsertArenaRankCacheFromGenerationRanking({
+      participants: data.participants.map((p) => ({
+        entityType: p.entityType,
+        entityId: p.entityId,
+        queues: {
+          strict: {
+            rating: p.queues.strict.rating,
+            games: p.queues.strict.games,
+            tier: p.queues.strict.tier,
+            rank: p.queues.strict.rank,
+          },
+          free: {
+            rating: p.queues.free.rating,
+            games: p.queues.free.games,
+            tier: p.queues.free.tier,
+            rank: p.queues.free.rank,
+          },
+        },
+      })),
+    });
+  }, [data]);
 
   useEffect(() => {
     if (!id) return;

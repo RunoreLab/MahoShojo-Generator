@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
 import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { buildTitleDisplay } from '@/lib/text';
@@ -267,6 +268,52 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
   });
 
   const items = leaderboardQuery.data?.items ?? EMPTY_ITEMS;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!Array.isArray(items) || items.length === 0) return;
+
+    if (
+      !isCanonicalPublicLeaderboardQuery({
+        sort,
+        order: 'desc',
+        includePresets,
+        isNative,
+        includeTagIds,
+        excludeTagIds,
+        minRating,
+        maxRating,
+        minGames,
+        maxGames,
+        minTechScore,
+        maxTechScore,
+      })
+    ) {
+      return;
+    }
+
+    upsertArenaRankCacheFromLeaderboard({
+      queue,
+      items,
+      maxRankSeen: offset + items.length,
+    });
+  }, [
+    excludeTagIds,
+    includePresets,
+    includeTagIds,
+    isNative,
+    isOpen,
+    items,
+    maxGames,
+    maxRating,
+    maxTechScore,
+    minGames,
+    minRating,
+    minTechScore,
+    offset,
+    queue,
+    sort,
+  ]);
 
   const strictRangePivotFromCurrentPage = useMemo<{ rating: number; games: number } | null>(() => {
     if (queue !== 'strict') return null;

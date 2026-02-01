@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
 import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
 import { buildTitleDisplay } from '@/lib/text';
@@ -303,6 +304,36 @@ export function RankingPage() {
   }, [archiveQuery.data, historyQueue, historySection, isHistoryMode, leaderboardQuery.data?.items]);
 
   useEffect(() => {
+    if (isHistoryMode) return;
+    const list = leaderboardQuery.data?.items;
+    if (!Array.isArray(list) || list.length === 0) return;
+    if (
+      !isCanonicalPublicLeaderboardQuery({
+        sort: appliedFilters.sort,
+        order: appliedFilters.order,
+        includePresets: appliedFilters.includePresets,
+        isNative: appliedFilters.isNative,
+        includeTagIds: appliedFilters.includeTagIds,
+        excludeTagIds: appliedFilters.excludeTagIds,
+        minRating: appliedFilters.minRating,
+        maxRating: appliedFilters.maxRating,
+        minGames: appliedFilters.minGames,
+        maxGames: appliedFilters.maxGames,
+        minTechScore: appliedFilters.minTechScore,
+        maxTechScore: appliedFilters.maxTechScore,
+      })
+    ) {
+      return;
+    }
+
+    upsertArenaRankCacheFromLeaderboard({
+      queue: appliedFilters.queue,
+      items: list,
+      maxRankSeen: offset + list.length,
+    });
+  }, [appliedFilters, isHistoryMode, leaderboardQuery.data?.items, offset]);
+
+  useEffect(() => {
     setSearchResults(null);
     setSearchError(null);
     setFocusRowKey(null);
@@ -405,7 +436,30 @@ export function RankingPage() {
         setSearchError(data.error ?? '搜索失败');
         return;
       }
-      setSearchResults(Array.isArray(data.items) ? data.items : []);
+      const nextItems = Array.isArray(data.items) ? data.items : [];
+      setSearchResults(nextItems);
+      if (
+        nextItems.length > 0 &&
+        isCanonicalPublicLeaderboardQuery({
+          sort: appliedFilters.sort,
+          order: appliedFilters.order,
+          includePresets: appliedFilters.includePresets,
+          isNative: appliedFilters.isNative,
+          includeTagIds: appliedFilters.includeTagIds,
+          excludeTagIds: appliedFilters.excludeTagIds,
+          minRating: appliedFilters.minRating,
+          maxRating: appliedFilters.maxRating,
+          minGames: appliedFilters.minGames,
+          maxGames: appliedFilters.maxGames,
+          minTechScore: appliedFilters.minTechScore,
+          maxTechScore: appliedFilters.maxTechScore,
+        })
+      ) {
+        upsertArenaRankCacheFromLeaderboard({
+          queue: appliedFilters.queue,
+          items: nextItems,
+        });
+      }
     } catch (err) {
       setSearchResults([]);
       setSearchError(String(err));

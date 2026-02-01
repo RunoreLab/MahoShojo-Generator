@@ -224,59 +224,6 @@ export default async function handler(req: NextRequest) {
         return promise;
       };
 
-      const publicTotals: Record<Queue, number | null> = { strict: null, free: null };
-      if (cardRow.type === 'character') {
-        const computePublicTotal = async (queue: Queue): Promise<number | null> => {
-          try {
-            const strictPublicSinceClause = queue === 'strict'
-              ? `AND (
-                dc.public_since IS NULL
-                OR dc.public_since <= datetime('now', '-3 days')
-                OR (
-                  dc.created_at IS NOT NULL
-                  AND dc.public_since IS NOT NULL
-                  AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
-                )
-              )`
-              : '';
-            const totalResult = (await queryFromD1(
-              `SELECT COUNT(*) as total
-               FROM arena_ratings ar
-               LEFT JOIN data_cards dc
-                 ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-               WHERE ar.queue = ?
-                 AND (
-                   ar.entity_type = 'preset'
-                   OR (
-                     dc.id IS NOT NULL
-                     AND dc.type = 'character'
-                     AND dc.is_public = 1
-                     AND dc.review_status = 'approved'
-                     AND dc.deleted_at IS NULL
-                     ${strictPublicSinceClause}
-                   )
-                 )`,
-              [queue],
-            )) as any;
-            const row = readSingleRow<{ total: unknown }>(totalResult);
-            const total =
-              typeof row?.total === 'number'
-                ? row.total
-                : typeof row?.total === 'string'
-                  ? Number(row.total)
-                  : null;
-            return Number.isFinite(total) ? Math.max(0, Math.floor(total as number)) : null;
-          } catch (error) {
-            console.warn('计算公共榜总人数失败（降级为 null）:', error);
-            return null;
-          }
-        };
-
-        // 单卡接口允许多查一次；但避免在循环里重复查
-        publicTotals.strict = await computePublicTotal('strict');
-        publicTotals.free = await computePublicTotal('free');
-      }
-
       const lastEventsByQueue = new Map<Queue, { delta: number; appliedAt: string | null }>();
       if (cardRow.type === 'character') {
         try {
@@ -343,7 +290,6 @@ export default async function handler(req: NextRequest) {
         const queue: Queue = row.queue === 'free' ? 'free' : 'strict';
         const rating = typeof row.rating === 'number' ? row.rating : 0;
         const games = typeof row.games === 'number' ? row.games : 0;
-        const ratingUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : null;
         const last = lastEventsByQueue.get(queue);
         const baseTier = computeArenaBaseTier(rating, games);
         const queen = baseTier === '权杖' ? await getQueen(queue) : null;
@@ -360,75 +306,10 @@ export default async function handler(req: NextRequest) {
           lastDelta: typeof last?.delta === 'number' ? last.delta : null,
           lastAppliedAt: typeof last?.appliedAt === 'string' ? last.appliedAt : null,
           publicRank: null,
-          publicTotal: queue === 'free' ? publicTotals.free : publicTotals.strict,
+          publicTotal: null,
         };
         if (item.queue === 'strict') ratings.strict = item;
         else ratings.free = item;
-
-        // 仅角色卡计算公共榜位置（不影响公共榜展示）
-        if (cardRow.type === 'character' && ratingUpdatedAt) {
-          try {
-            const strictPublicSinceClause = item.queue === 'strict'
-              ? `AND (
-                dc.public_since IS NULL
-                OR dc.public_since <= datetime('now', '-3 days')
-                OR (
-                  dc.created_at IS NOT NULL
-                  AND dc.public_since IS NOT NULL
-                  AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
-                )
-              )`
-              : '';
-            const rankResult = (await queryFromD1(
-              `SELECT COUNT(*) as higherCount
-               FROM arena_ratings ar
-               LEFT JOIN data_cards dc
-                 ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-               WHERE ar.queue = ?
-                 AND (
-                   ar.entity_type = 'preset'
-                   OR (
-                     dc.id IS NOT NULL
-                     AND dc.type = 'character'
-                     AND dc.is_public = 1
-                     AND dc.review_status = 'approved'
-                     AND dc.deleted_at IS NULL
-                     ${strictPublicSinceClause}
-                   )
-                 )
-                 AND (
-                   ar.rating > ?
-                   OR (ar.rating = ? AND ar.games > ?)
-                   OR (ar.rating = ? AND ar.games = ? AND ar.updated_at > ?)
-                   OR (
-                     ar.rating = ? AND ar.games = ? AND ar.updated_at = ?
-                     AND (
-                       ar.entity_type < 'data_card'
-                       OR (ar.entity_type = 'data_card' AND ar.entity_id < ?)
-                     )
-                   )
-                 )`,
-              [
-                item.queue,
-                item.rating,
-                item.rating,
-                item.games,
-                item.rating,
-                item.games,
-                ratingUpdatedAt,
-                item.rating,
-                item.games,
-                ratingUpdatedAt,
-                dataCardId,
-              ],
-            )) as any;
-            const row = readSingleRow<{ higherCount: number }>(rankResult);
-            const higherCount = typeof row?.higherCount === 'number' ? row.higherCount : 0;
-            item.publicRank = Math.max(1, Math.floor(higherCount) + 1);
-          } catch (error) {
-            console.warn('计算公共榜位置失败（降级为 null）:', error);
-          }
-        }
       }
     } catch (error) {
       console.warn('读取排位失败（降级为 null）:', error);

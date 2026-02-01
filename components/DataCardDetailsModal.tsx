@@ -4,6 +4,7 @@ import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
 import { formatDateTime } from '@/lib/constants';
 import { authStorage } from '@/lib/auth';
+import { getArenaApproxRankLabel, upsertArenaRankCacheFromMeta } from '@/lib/arena/rank-cache';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { buildTitleDisplay } from '@/lib/text';
 
@@ -167,6 +168,37 @@ export default function DataCardDetailsModal({
   const resolvedCloudCardId = typeof resolvedMetaCardId === 'string' ? resolvedMetaCardId.trim() : '';
   const isCloudDataCard = Boolean(resolvedCloudCardId) && isUuid(resolvedCloudCardId);
   const canDownloadCard = isCloudDataCard ? (Boolean(meta) || isOwner) : true;
+
+  useEffect(() => {
+    if (!isCloudDataCard) return;
+    if (!meta) return;
+    if (card.type !== 'character') return;
+
+    const entityId = resolvedCloudCardId;
+    const strict = meta.ratings.strict;
+    if (strict) {
+      upsertArenaRankCacheFromMeta({
+        entityType: 'data_card',
+        entityId,
+        queue: 'strict',
+        rating: typeof strict.rating === 'number' ? strict.rating : null,
+        games: typeof strict.games === 'number' ? strict.games : null,
+        tier: typeof strict.tier === 'string' ? strict.tier : null,
+      });
+    }
+
+    const free = meta.ratings.free;
+    if (free) {
+      upsertArenaRankCacheFromMeta({
+        entityType: 'data_card',
+        entityId,
+        queue: 'free',
+        rating: typeof free.rating === 'number' ? free.rating : null,
+        games: typeof free.games === 'number' ? free.games : null,
+        tier: typeof free.tier === 'string' ? free.tier : null,
+      });
+    }
+  }, [card.type, isCloudDataCard, meta, resolvedCloudCardId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -603,12 +635,14 @@ export default function DataCardDetailsModal({
                               {meta.ratings.strict.lastDelta != null ? (
                                 <span>，Δ{formatSignedDelta(meta.ratings.strict.lastDelta)}</span>
                               ) : null}
-                              {meta.ratings.strict.publicRank != null ? (
-                                <span>
-                                  ，公共排名#{meta.ratings.strict.publicRank}
-                                  {meta.ratings.strict.publicTotal != null ? `/${meta.ratings.strict.publicTotal}` : ''}
-                                </span>
-                              ) : null}
+                              {isCloudDataCard && Boolean(card.isPublic) ? (() => {
+                                const approx = getArenaApproxRankLabel({
+                                  queue: 'strict',
+                                  entityType: 'data_card',
+                                  entityId: resolvedCloudCardId,
+                                });
+                                return approx ? <span title={approx.title}>，公共排名{approx.label}</span> : null;
+                              })() : null}
                               ）
                             </span>
                           ) : (
@@ -628,12 +662,14 @@ export default function DataCardDetailsModal({
                               {meta.ratings.free.lastDelta != null ? (
                                 <span>，Δ{formatSignedDelta(meta.ratings.free.lastDelta)}</span>
                               ) : null}
-                              {meta.ratings.free.publicRank != null ? (
-                                <span>
-                                  ，公共排名#{meta.ratings.free.publicRank}
-                                  {meta.ratings.free.publicTotal != null ? `/${meta.ratings.free.publicTotal}` : ''}
-                                </span>
-                              ) : null}
+                              {isCloudDataCard && Boolean(card.isPublic) ? (() => {
+                                const approx = getArenaApproxRankLabel({
+                                  queue: 'free',
+                                  entityType: 'data_card',
+                                  entityId: resolvedCloudCardId,
+                                });
+                                return approx ? <span title={approx.title}>，公共排名{approx.label}</span> : null;
+                              })() : null}
                               ）
                             </span>
                           ) : (
