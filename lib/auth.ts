@@ -289,7 +289,7 @@ export const dataCardApi = {
   },
 
   // 创建数据卡
-  async createCard(type: 'character' | 'scenario' | 'history', name: string, description: string, data: any, isPublic: number = 0): Promise<{
+  async createCard(type: 'character' | 'scenario' | 'history' | 'questionnaire', name: string, description: string, data: any, isPublic: number = 0): Promise<{
     success: boolean;
     id?: number;
     error?: string;
@@ -472,7 +472,7 @@ export const dataCardApi = {
 };
 
 export const favoritesApi = {
-  async getFavorites(options?: { type?: 'character' | 'scenario' | 'history'; idsOnly?: boolean }) {
+  async getFavorites(options?: { type?: 'character' | 'scenario' | 'history' | 'questionnaire'; idsOnly?: boolean }) {
     const authHeader = await authStorage.getAuthHeader();
     if (!authHeader) return { success: false, favorites: [] };
 

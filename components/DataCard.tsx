@@ -11,7 +11,7 @@ interface DataCardProps {
   id: string; // Changed from number to string for UUID
   name: string;
   description: string;
-  type: 'character' | 'scenario' | 'history';
+  type: 'character' | 'scenario' | 'history' | 'questionnaire';
   roleType?: 'magical-girl' | 'canshou' | 'general';
   isPublic: boolean | number; // 支持 -1 表示封禁
   reviewStatus?: 'pending' | 'approved' | 'rejected'; // 新增：审查状态属性
@@ -47,7 +47,8 @@ const typeMap = {
   character: '角色',
   scenario: '情景',
   history: '叙事历史',
-}
+  questionnaire: '问卷',
+};
 
 const roleTypeLabelMap: Record<NonNullable<DataCardProps['roleType']>, string> = {
   'magical-girl': '魔法少女',

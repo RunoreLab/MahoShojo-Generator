@@ -12,9 +12,17 @@ import {
   GENERAL_SCENARIO_TEMPLATE_ID,
 } from './general-scenario';
 import { NarrativeHistorySchema, type NarrativeHistoryData } from './narrative-history';
+import { QuestionnaireSchema, type QuestionnaireData } from './questionnaire';
 
-export type DataCardType = 'character' | 'canshou' | 'general' | 'scenario' | 'history';
-export type DataCardData = CanshouData | MagicalGirlData | GeneralCharacterData | ScenarioData | GeneralScenarioData | NarrativeHistoryData;
+export type DataCardType = 'character' | 'canshou' | 'general' | 'scenario' | 'history' | 'questionnaire';
+export type DataCardData =
+  | CanshouData
+  | MagicalGirlData
+  | GeneralCharacterData
+  | ScenarioData
+  | GeneralScenarioData
+  | NarrativeHistoryData
+  | QuestionnaireData;
 
 export type TemplateId =
   | typeof GENERAL_CHARACTER_TEMPLATE_ID
@@ -173,6 +181,16 @@ export function validateDataCard(content: unknown): ValidationResult {
       success: true,
       data: narrativeHistoryResult.data,
       type: 'history'
+    };
+  }
+
+  // 尝试验证问卷格式
+  const questionnaireResult = QuestionnaireSchema.safeParse(content);
+  if (questionnaireResult.success) {
+    return {
+      success: true,
+      data: questionnaireResult.data,
+      type: 'questionnaire',
     };
   }
 

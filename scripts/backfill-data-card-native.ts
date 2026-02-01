@@ -5,7 +5,7 @@ import { loadEnvConfig } from '@next/env';
 import { queryFromD1 } from '@/lib/d1';
 import { verifySignature } from '@/lib/signature';
 
-type DataCardType = 'character' | 'scenario' | 'history';
+type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
 
 interface CliOptions {
   dryRun: boolean;
@@ -348,4 +348,3 @@ main().catch((error) => {
   console.error('[backfill-native] 脚本执行失败:', error);
   process.exitCode = 1;
 });
-

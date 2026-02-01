@@ -1,3 +1,48 @@
+export type QuestionnaireKind = 'magical-girl' | 'canshou';
+
+export type QuestionnaireOption = string | { value: string; label: string; disabled?: boolean };
+
+export interface QuestionnaireQuestion {
+  id: string;
+  question: string;
+  type?: 'text' | 'select';
+  options?: QuestionnaireOption[];
+  placeholder?: string;
+  suggestions?: string[];
+  allowCustom?: boolean;
+  helperText?: string;
+  maxLength?: number | null;
+  required?: boolean;
+}
+
+export interface QuestionnaireDefinition {
+  id: string;
+  kind: QuestionnaireKind;
+  title: string;
+  description?: string;
+  logoUrl?: string;
+  version?: string;
+  nativeAllowed?: boolean | null;
+  questions: QuestionnaireQuestion[];
+}
+
+export interface QuestionnairePresetEntry {
+  id: string;
+  kind: QuestionnaireKind;
+  title: string;
+  description?: string;
+  path: string;
+  isDefault?: boolean;
+}
+
+export interface QuestionnaireAnswerItem {
+  question: string;
+  answer: string;
+  questionId?: string;
+  questionnaireId?: string;
+  questionnaireTitle?: string;
+}
+
 export interface MagicalQuestionMeta {
   id: string;
   placeholder?: string;
@@ -200,4 +245,188 @@ export const buildMagicalQuestionMeta = (length: number): MagicalQuestionMeta[] 
       maxLength: catalogMeta?.maxLength ?? 200
     };
   });
+};
+
+export const buildQuestionKey = (questionnaireId: string | undefined, questionId: string | undefined, index: number) => {
+  const base = (questionId ?? '').trim() || `Q${index + 1}`;
+  const prefix = (questionnaireId ?? '').trim();
+  return prefix ? `${prefix}::${base}` : base;
+};
+
+export const normalizeQuestionnaireDefinition = (
+  raw: unknown,
+  options: {
+    fallbackId?: string;
+    fallbackKind?: QuestionnaireKind;
+    fallbackTitle?: string;
+    applyMagicalMeta?: boolean;
+    nativeAllowed?: boolean | null;
+  } = {}
+): QuestionnaireDefinition | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const record = raw as Record<string, unknown>;
+  const rawQuestions = record.questions;
+  if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) return null;
+
+  const resolvedKind = (record.kind as QuestionnaireKind) || options.fallbackKind;
+  if (resolvedKind !== 'magical-girl' && resolvedKind !== 'canshou') return null;
+
+  const resolvedId = typeof record.id === 'string' && record.id.trim()
+    ? record.id.trim()
+    : (options.fallbackId?.trim() || `${resolvedKind}-custom`);
+  const resolvedTitle = typeof record.title === 'string' && record.title.trim()
+    ? record.title.trim()
+    : (options.fallbackTitle?.trim() || '未命名问卷');
+
+  const baseQuestions: QuestionnaireQuestion[] = rawQuestions.map((item, index) => {
+    if (typeof item === 'string') {
+      return {
+        id: `${resolvedKind === 'magical-girl' ? 'MG' : 'Q'}-${index + 1}`,
+        question: item,
+        required: true,
+      };
+    }
+    if (!item || typeof item !== 'object') {
+      return {
+        id: `${resolvedKind === 'magical-girl' ? 'MG' : 'Q'}-${index + 1}`,
+        question: `问题 ${index + 1}`,
+        required: true,
+      };
+    }
+    const q = item as Record<string, unknown>;
+    const id = typeof q.id === 'string' && q.id.trim() ? q.id.trim() : `${resolvedKind === 'magical-girl' ? 'MG' : 'Q'}-${index + 1}`;
+    const question = typeof q.question === 'string' && q.question.trim() ? q.question.trim() : `问题 ${index + 1}`;
+    const required = typeof q.required === 'boolean' ? q.required : true;
+    const maxLength = typeof q.maxLength === 'number' && Number.isFinite(q.maxLength)
+      ? Math.max(0, Math.floor(q.maxLength))
+      : q.maxLength === null
+        ? null
+        : undefined;
+
+    return {
+      id,
+      question,
+      type: typeof q.type === 'string' ? (q.type as 'text' | 'select') : undefined,
+      options: Array.isArray(q.options) ? (q.options as QuestionnaireOption[]) : undefined,
+      placeholder: typeof q.placeholder === 'string' ? q.placeholder : undefined,
+      suggestions: Array.isArray(q.suggestions) ? (q.suggestions as string[]) : undefined,
+      allowCustom: typeof q.allowCustom === 'boolean' ? q.allowCustom : undefined,
+      helperText: typeof q.helperText === 'string' ? q.helperText : undefined,
+      maxLength: maxLength === undefined ? undefined : maxLength,
+      required,
+    };
+  });
+
+  const questions = options.applyMagicalMeta
+    ? applyMagicalMeta(baseQuestions)
+    : baseQuestions.map((question) => ({
+      ...question,
+      maxLength: question.maxLength === undefined ? null : question.maxLength,
+    }));
+
+  return {
+    id: resolvedId,
+    kind: resolvedKind,
+    title: resolvedTitle,
+    description: typeof record.description === 'string' ? record.description.trim() : undefined,
+    logoUrl: typeof record.logoUrl === 'string' ? record.logoUrl.trim() : undefined,
+    version: typeof record.version === 'string' ? record.version.trim() : undefined,
+    nativeAllowed: typeof record.nativeAllowed === 'boolean' ? record.nativeAllowed : options.nativeAllowed ?? null,
+    questions,
+  };
+};
+
+const applyMagicalMeta = (questions: QuestionnaireQuestion[]): QuestionnaireQuestion[] => {
+  const metaList = buildMagicalQuestionMeta(questions.length);
+  return questions.map((question, index) => {
+    const meta = metaList[index];
+    return {
+      ...question,
+      id: question.id || meta?.id || `MG-${index + 1}`,
+      placeholder: question.placeholder ?? meta?.placeholder,
+      suggestions: question.suggestions ?? meta?.suggestions,
+      options: question.options ?? meta?.options,
+      allowCustom: question.allowCustom ?? meta?.allowCustom,
+      helperText: question.helperText ?? meta?.helperText,
+      maxLength: question.maxLength ?? meta?.maxLength ?? 200,
+      required: question.required ?? true,
+    };
+  });
+};
+
+export const normalizeUserAnswers = (userAnswers: unknown, fallbackQuestions: string[] = []): QuestionnaireAnswerItem[] => {
+  if (!userAnswers) return [];
+
+  if (Array.isArray(userAnswers)) {
+    const normalizedArray = userAnswers.map((item, index) => {
+      if (typeof item === 'string') {
+        const question = fallbackQuestions[index] || `问题 ${index + 1}`;
+        return { question, answer: item };
+      }
+      if (item && typeof item === 'object') {
+        const record = item as Record<string, unknown>;
+        const answer = typeof record.answer === 'string' ? record.answer : '';
+        const question = typeof record.question === 'string'
+          ? record.question
+          : fallbackQuestions[index] || `问题 ${index + 1}`;
+        return {
+          question,
+          answer,
+          questionId: typeof record.questionId === 'string' ? record.questionId : undefined,
+          questionnaireId: typeof record.questionnaireId === 'string' ? record.questionnaireId : undefined,
+          questionnaireTitle: typeof record.questionnaireTitle === 'string' ? record.questionnaireTitle : undefined,
+        };
+      }
+      const question = fallbackQuestions[index] || `问题 ${index + 1}`;
+      return { question, answer: '' };
+    });
+    return normalizedArray.filter((item) => item.answer.trim().length > 0);
+  }
+
+  if (typeof userAnswers === 'object') {
+    const entries = Object.entries(userAnswers as Record<string, unknown>);
+    return entries
+      .map(([key, value]) => {
+        if (value && typeof value === 'object') {
+          const record = value as Record<string, unknown>;
+          const answer = typeof record.answer === 'string' ? record.answer : '';
+          const question = typeof record.question === 'string' ? record.question : key;
+          return {
+            question,
+            answer,
+            questionId: typeof record.questionId === 'string' ? record.questionId : undefined,
+            questionnaireId: typeof record.questionnaireId === 'string' ? record.questionnaireId : undefined,
+            questionnaireTitle: typeof record.questionnaireTitle === 'string' ? record.questionnaireTitle : undefined,
+          };
+        }
+        const answerText = typeof value === 'string' ? value : JSON.stringify(value);
+        return { question: key, answer: answerText };
+      })
+      .filter((item) => item.answer.trim().length > 0);
+  }
+
+  return [];
+};
+
+export const formatQuestionnaireAnswers = (answers: QuestionnaireAnswerItem[]): string => {
+  if (!answers.length) return '';
+  const grouped = new Map<string, QuestionnaireAnswerItem[]>();
+  for (const item of answers) {
+    const groupKey = item.questionnaireTitle?.trim() || '';
+    if (!grouped.has(groupKey)) grouped.set(groupKey, []);
+    grouped.get(groupKey)!.push(item);
+  }
+
+  const blocks: string[] = [];
+  for (const [groupTitle, items] of grouped.entries()) {
+    if (groupTitle) {
+      blocks.push(`【${groupTitle}】`);
+    }
+    items.forEach((item, index) => {
+      const qLabel = item.question?.trim() ? item.question.trim() : `问题 ${index + 1}`;
+      blocks.push(`Q: ${qLabel}`);
+      blocks.push(`A: ${item.answer}`);
+    });
+  }
+  return blocks.join('\n');
 };

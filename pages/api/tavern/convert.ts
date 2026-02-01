@@ -1,8 +1,8 @@
 import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
-import questionnaire from '@/public/questionnaire.json';
-import canshouQuestionnaire from '@/public/canshou_questionnaire.json';
+import questionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
+import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-default.json';
 import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
@@ -14,6 +14,7 @@ import { createBlankDataCard } from '@/lib/data-card-converter';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 import { TAVERN_IMPORT_ATTACHMENT_LIMITS } from '@/lib/tavern-card/limits';
+import { normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
 import {
   CanshouSchema as AppCanshouSchema,
   GeneralCharacterSchema as AppGeneralCharacterSchema,
@@ -84,14 +85,33 @@ const RequestBodySchema = z.object({
 
 const safeString = (value: unknown): string => (typeof value === 'string' ? value : '');
 
+const QuestionnaireAnswerItemSchema = z.object({
+  question: z.string(),
+  answer: z.string(),
+  questionId: z.string().optional(),
+  questionnaireId: z.string().optional(),
+  questionnaireTitle: z.string().optional(),
+});
+
 const getMagicalGirlQuestionList = (): string[] => {
   const list = Array.isArray((questionnaire as any)?.questions) ? ((questionnaire as any).questions as unknown[]) : [];
   return list
-    .map((item) => safeString(item).trim())
+    .map((item) => safeString(typeof item === 'string' ? item : (item as any)?.question).trim())
     .filter(Boolean);
 };
 
 type CanshouQuestion = { id: string; question: string };
+
+const getMagicalGirlQuestionPairs = (): CanshouQuestion[] => {
+  const raw = (questionnaire as any)?.questions;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item: any, index: number) => ({
+      id: safeString(item?.id || `MG-${index + 1}`).trim(),
+      question: safeString(typeof item === 'string' ? item : item?.question).trim(),
+    }))
+    .filter((item: CanshouQuestion) => item.id && item.question);
+};
 
 const getCanshouQuestions = (): CanshouQuestion[] => {
   const raw = (canshouQuestionnaire as any)?.questions;
@@ -148,9 +168,12 @@ const buildMagicalGirlImportSchema = (questionCount: number) =>
       }).describe("角色的背景故事，用以丰富角色的立体形象与人物弧光，体现角色的信念与感情。")
     }),
     userAnswers: z
-      .array(z.string())
-      .length(questionCount)
-      .describe(`问卷回答数组，长度必须为 ${questionCount}；每项为对应问题的回答字符串。`),
+      .union([
+        z.array(z.string()).max(questionCount),
+        z.array(QuestionnaireAnswerItemSchema).max(questionCount),
+        z.record(z.union([z.string(), QuestionnaireAnswerItemSchema])),
+      ])
+      .describe(`问卷回答：推荐输出为问答对象数组，或使用题目 id 作为键；可只回答部分问题（最多 ${questionCount} 题）。`),
   });
 
 const buildCanshouImportSchema = (questionIds: string[]) => {
@@ -172,7 +195,10 @@ const buildCanshouImportSchema = (questionIds: string[]) => {
     origin: z.string().describe('起源故事的详细阐述（野生/黑烬黎明/爪痕/未知等）'),
     birthEnvironment: z.string().describe('诞生环境的详细描述'),
     researcherNotes: z.string().describe('作为研究员的分析、预测和警告'),
-    userAnswers: z.object(userAnswersShape).describe('问卷回答：键为问卷问题 id。'),
+    userAnswers: z.union([
+      z.object(userAnswersShape),
+      z.array(QuestionnaireAnswerItemSchema),
+    ]).describe('问卷回答：推荐输出为问答对象数组；也可使用问题 id 作为键；未回答的问题可省略。'),
   });
 };
 
@@ -245,8 +271,9 @@ ${questionLines}
 角色名提示：${params.sourceName ? `原角色名为「${params.sourceName}」。` : '原角色名未提供。'}
 可选花名与花语（供代号挑选）：\n${flowers}
 
-你还需要为该角色补全一组【问卷回答】（userAnswers），要求：
-- userAnswers 必须严格按题号顺序给出对应回答（数组下标 0 对应第 1 题）。
+你还需要为该角色补全一组【问卷回答】（userAnswers），建议输出为对象数组：
+- 每一项为对象格式：{ "question": 题目文本, "answer": 回答文本, "questionId": 题目 id }。
+- 建议按题目顺序输出；未回答的问题可省略。也可使用 { "题目id": "回答" } 的键值对形式。
 - 回答必须是该角色“如果被问卷询问”时的第一人称口吻；尽量体现其性格与价值观；若无法推断可写“未指定”或空字符串。
 - 回答内容必须与原始设定信息保持一致；不要为了凑答案而凭空捏造关键背景。
 
@@ -281,7 +308,7 @@ ${CANSHOU_LORE}
 
 角色名提示：${params.sourceName ? `原角色名为「${params.sourceName}」。` : '原角色名未提供。'}
 
-你还需要为该残兽补全一组【残兽调查问卷回答】（userAnswers），键为问题 id，要求尽量贴合残兽设定并与正文一致：
+你还需要为该残兽补全一组【残兽调查问卷回答】（userAnswers），推荐输出为对象数组：{ question, answer, questionId }；也可使用题目 id 作为键；未回答的问题可省略，要求尽量贴合残兽设定并与正文一致：
 ${questionLines}
 
 ${attachmentSection}
@@ -497,10 +524,21 @@ export default async function handler(req: NextRequest): Promise<Response> {
       };
 
       const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+      const questionPairs = getMagicalGirlQuestionPairs();
+      const fallbackQuestions = questionPairs.map((item) => item.question);
+      const normalizedAnswers = normalizeUserAnswers((generated as any).userAnswers, fallbackQuestions);
+      const enrichedAnswers: QuestionnaireAnswerItem[] = normalizedAnswers.map((item, index) => ({
+        ...item,
+        question: item.question || fallbackQuestions[index] || `问题 ${index + 1}`,
+        questionId: item.questionId ?? questionPairs[index]?.id,
+        questionnaireId: item.questionnaireId ?? (questionnaire as any)?.id,
+        questionnaireTitle: item.questionnaireTitle ?? (questionnaire as any)?.title,
+      }));
       const base = createBlankDataCard('magical-girl') as any;
       const merged = {
         ...base,
         ...generated,
+        userAnswers: enrichedAnswers,
         templateId: base.templateId,
       };
 
@@ -534,10 +572,21 @@ export default async function handler(req: NextRequest): Promise<Response> {
       };
 
       const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+      const questionPairs = getCanshouQuestions();
+      const fallbackQuestions = questionPairs.map((item) => item.question);
+      const normalizedAnswers = normalizeUserAnswers((generated as any).userAnswers, fallbackQuestions);
+      const enrichedAnswers: QuestionnaireAnswerItem[] = normalizedAnswers.map((item, index) => ({
+        ...item,
+        question: item.question || fallbackQuestions[index] || `问题 ${index + 1}`,
+        questionId: item.questionId ?? questionPairs[index]?.id,
+        questionnaireId: item.questionnaireId ?? (canshouQuestionnaire as any)?.id,
+        questionnaireTitle: item.questionnaireTitle ?? (canshouQuestionnaire as any)?.title,
+      }));
       const base = createBlankDataCard('canshou') as any;
       const merged = {
         ...base,
         ...generated,
+        userAnswers: enrichedAnswers,
         templateId: base.templateId,
       };
 

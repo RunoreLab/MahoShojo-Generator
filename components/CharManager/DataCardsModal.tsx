@@ -29,7 +29,7 @@ interface DataCardsModalProps {
   recycleLimit?: number;
 }
 
-type CardTypeFilter = '' | 'character' | 'scenario' | 'history';
+type CardTypeFilter = '' | 'character' | 'scenario' | 'history' | 'questionnaire';
 type CardVisibilityFilter = '' | 'private' | 'public' | 'banned';
 type CardRoleType = 'magical-girl' | 'canshou' | 'general';
 type RoleTypeFilter = '' | CardRoleType;
@@ -512,6 +512,7 @@ export default function DataCardsModal({
                         <option value="character">角色</option>
                         <option value="scenario">情景</option>
                         <option value="history">叙事历史</option>
+                        <option value="questionnaire">问卷</option>
                       </select>
                     </div>
                     <div className="space-y-1">

@@ -57,7 +57,17 @@ export const MagicalGirlSchema = z.object({
     }).optional(),
   }).optional(),
   templateId: z.string().optional(),
-  userAnswers: z.array(z.string()).optional(),
+  userAnswers: z.union([
+    z.array(z.string()),
+    z.array(z.object({
+      question: z.string(),
+      answer: z.string(),
+      questionId: z.string().optional(),
+      questionnaireId: z.string().optional(),
+      questionnaireTitle: z.string().optional(),
+    })),
+    z.record(z.string()),
+  ]).optional(),
   signature: z.string().optional(),
   isPreset: z.boolean().optional(),
   current_state: CurrentStateSchema.optional(),

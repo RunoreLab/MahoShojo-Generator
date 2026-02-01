@@ -1,5 +1,6 @@
 import { AdjudicatorEvent, AdjudicationResult, ArenaHistory, CharacterCurrentState, NarrativeHistoryEntry } from '@/types/arena';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas';
+import { formatQuestionnaireAnswers, normalizeUserAnswers } from '@/lib/questionnaires';
 
 const isGeneralScenarioCard = (value: unknown): value is { templateId: string; title?: string; name?: string; content: string } => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -201,28 +202,11 @@ export const formatNarrativeHistoryForPrompt = (history: NarrativeHistoryEntry[]
 
 export const formatUserAnswersForPrompt = (userAnswers: unknown, questions: string[]): string => {
     if (!userAnswers) return '';
-
-    if (Array.isArray(userAnswers)) {
-        if (userAnswers.length === 0) return '';
-        const lines = userAnswers.map((answer, i) => {
-            const question = questions[i] || `问题 ${i + 1}`;
-            const answerText = typeof answer === 'string' ? answer : JSON.stringify(answer);
-            return `Q: ${question}\nA: ${answerText}`;
-        });
-        return `\n// 问卷回答 (用于理解角色深层性格与理念)\n${lines.join('\n')}\n`;
-    }
-
-    if (typeof userAnswers === 'object') {
-        const entries = Object.entries(userAnswers as Record<string, unknown>);
-        if (entries.length === 0) return '';
-        const lines = entries.map(([key, value]) => {
-            const answerText = typeof value === 'string' ? value : JSON.stringify(value);
-            return `- ${key}: ${answerText}`;
-        });
-        return `\n// 问卷回答 (用于理解角色深层性格与理念)\n${lines.join('\n')}\n`;
-    }
-
-    return '';
+    const normalized = normalizeUserAnswers(userAnswers, questions);
+    if (normalized.length === 0) return '';
+    const answerText = formatQuestionnaireAnswers(normalized);
+    if (!answerText) return '';
+    return `\n// 问卷回答 (用于理解角色深层性格与理念)\n${answerText}\n`;
 };
 
 export const createPromptBuilder = (
@@ -283,10 +267,8 @@ export const createPromptBuilder = (
             }
 
             profileString += `// 核心设定\n${JSON.stringify(restOfProfile, null, 2)}\n`;
-            if (userAnswers && Array.isArray(userAnswers)) {
-                profileString += `\n// 问卷回答 (用于理解角色深层性格与理念)\n`;
-                profileString += userAnswers.map((answer, i) => `Q: ${questions[i] || `问题 ${i + 1}`}\nA: ${answer}`).join('\n');
-            }
+            const userAnswersText = formatUserAnswersForPrompt(userAnswers, questions);
+            if (userAnswersText) profileString += userAnswersText;
         } else {
             if (type === 'general-character' && typeof data.content === 'string') {
                 profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
@@ -466,10 +448,8 @@ export const createStreamPromptBuilder = (
             }
 
             profileString += `// 核心设定\n${JSON.stringify(restOfProfile, null, 2)}\n`;
-            if (userAnswers && Array.isArray(userAnswers)) {
-                profileString += `\n// 问卷回答 (用于理解角色深层性格与理念)\n`;
-                profileString += userAnswers.map((answer, i) => `Q: ${questions[i] || `问题 ${i + 1}`}\nA: ${answer}`).join('\n');
-            }
+            const userAnswersText = formatUserAnswersForPrompt(userAnswers, questions);
+            if (userAnswersText) profileString += userAnswersText;
         } else {
             if (type === 'general-character' && typeof data.content === 'string') {
                 profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;

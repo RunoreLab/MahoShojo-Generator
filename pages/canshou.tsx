@@ -1,5 +1,5 @@
 // pages/canshou.tsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useCooldown } from '../lib/cooldown';
@@ -21,22 +21,33 @@ import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import {
+  buildQuestionKey,
+  normalizeQuestionnaireDefinition,
+  normalizeUserAnswers,
+  type QuestionnaireAnswerItem,
+  type QuestionnaireDefinition,
+  type QuestionnairePresetEntry,
+  type QuestionnaireQuestion,
+} from '@/lib/questionnaires';
 
-// 定义问卷和问题的类型
-interface Question {
-  id: string;
-  question: string;
-  options?: (string | { value: string; label: string; disabled?: boolean })[];
-  type?: 'text';
-  placeholder?: string;
-  allowCustom?: boolean;
-}
+type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
-interface CanshouQuestionnaire {
-  title: string;
-  description: string;
-  questions: Question[];
-}
+type QuestionnaireSelection = {
+  source: QuestionnaireSelectionSource;
+  questionnaire: QuestionnaireDefinition;
+  dataCardId?: string;
+  dataCardName?: string;
+  dataCardAuthor?: string;
+};
+
+type QuestionnaireContextItem = {
+  key: string;
+  questionnaireId: string;
+  questionnaireTitle: string;
+  indexInQuestionnaire: number;
+  question: QuestionnaireQuestion;
+};
 
 type JsonSaveMode = 'download' | 'text';
 type ImageSaveMode = 'download' | 'modal';
@@ -45,7 +56,7 @@ type DeviceType = 'mobile' | 'desktop' | 'unknown';
 type CanshouResultPayload = CanshouDetails & {
   templateId?: string;
   signature?: string | null;
-  userAnswers?: Record<string, string>;
+  userAnswers?: QuestionnaireAnswerItem[] | string[] | Record<string, string>;
 };
 
 interface SaveJsonButtonProps {
@@ -143,10 +154,23 @@ const CANSHOU_PREFERENCE_KEY = 'mahoshojo.canshou.preferences.v1';
 
 const CanshouPage: React.FC = () => {
   const router = useRouter();
-  const [questionnaire, setQuestionnaire] = useState<CanshouQuestionnaire | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<QuestionnaireSelection[]>([]);
+  const [presetEntries, setPresetEntries] = useState<QuestionnairePresetEntry[]>([]);
+  const [allowMultipleQuestionnaires, setAllowMultipleQuestionnaires] = useState(false);
+  const [showQuestionnaireSettings, setShowQuestionnaireSettings] = useState(false);
+  const [questionnaireLoadError, setQuestionnaireLoadError] = useState<string | null>(null);
+  const [answersByKey, setAnswersByKey] = useState<Record<string, string>>({});
+  const [selectionReady, setSelectionReady] = useState(false);
+  const draftRestoredRef = useRef(false);
   const [currentAnswer, setCurrentAnswer] = useState('');
+  const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
+  const [questionnairePickerTab, setQuestionnairePickerTab] = useState<'public' | 'private'>('public');
+  const [questionnaireSearch, setQuestionnaireSearch] = useState('');
+  const [questionnaireLoading, setQuestionnaireLoading] = useState(false);
+  const [questionnairePickerError, setQuestionnairePickerError] = useState<string | null>(null);
+  const [publicQuestionnaireCards, setPublicQuestionnaireCards] = useState<any[]>([]);
+  const [privateQuestionnaireCards, setPrivateQuestionnaireCards] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -177,16 +201,51 @@ const CanshouPage: React.FC = () => {
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
   const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`;
 
+  const mergedQuestions = useMemo<QuestionnaireContextItem[]>(() => {
+    return selectedQuestionnaires.flatMap((selection) =>
+      selection.questionnaire.questions.map((question, index) => ({
+        key: buildQuestionKey(selection.questionnaire.id, question.id, index),
+        questionnaireId: selection.questionnaire.id,
+        questionnaireTitle: selection.questionnaire.title,
+        indexInQuestionnaire: index,
+        question,
+      }))
+    );
+  }, [selectedQuestionnaires]);
+
+  const answerItems = useMemo<QuestionnaireAnswerItem[]>(() => {
+    const items: QuestionnaireAnswerItem[] = [];
+    mergedQuestions.forEach((item) => {
+      const raw = answersByKey[item.key];
+      const answer = typeof raw === 'string' ? raw.trim() : '';
+      if (!answer) return;
+      items.push({
+        question: item.question.question,
+        answer,
+        questionId: item.question.id,
+        questionnaireId: item.questionnaireId,
+        questionnaireTitle: item.questionnaireTitle,
+      });
+    });
+    return items;
+  }, [mergedQuestions, answersByKey]);
+
+  const allowNativeSignature = useMemo(() => {
+    if (selectedQuestionnaires.length === 0) return false;
+    return selectedQuestionnaires.every((selection) => selection.questionnaire.nativeAllowed === true);
+  }, [selectedQuestionnaires]);
+
   const resolvedResultPayload = useMemo(() => {
     if (!canshouDetails) return null;
-    const serverAnswers = canshouDetails.userAnswers && Object.keys(canshouDetails.userAnswers).length > 0
-      ? canshouDetails.userAnswers
-      : null;
+    const serverAnswers = normalizeUserAnswers(
+      canshouDetails.userAnswers,
+      mergedQuestions.map((item) => item.question.question)
+    );
     return {
       ...canshouDetails,
-      userAnswers: serverAnswers ?? answers,
+      userAnswers: serverAnswers.length > 0 ? serverAnswers : answerItems,
     };
-  }, [canshouDetails, answers]);
+  }, [canshouDetails, answerItems, mergedQuestions]);
 
   const streamedGeneralCardForDisplay = useMemo(() => {
     if (generationMode !== 'stream') return null;
@@ -250,6 +309,45 @@ const CanshouPage: React.FC = () => {
       if (typeof parsed?.showAnswerReview === 'boolean') {
         setShowAnswerReview(parsed.showAnswerReview);
       }
+      if (typeof parsed?.allowMultipleQuestionnaires === 'boolean') {
+        setAllowMultipleQuestionnaires(parsed.allowMultipleQuestionnaires);
+      }
+      if (typeof parsed?.showQuestionnaireSettings === 'boolean') {
+        setShowQuestionnaireSettings(parsed.showQuestionnaireSettings);
+      }
+      if (Array.isArray(parsed?.questionnaireSelections)) {
+        const restored = parsed.questionnaireSelections
+          .map((raw: any) => {
+            if (!raw || typeof raw !== 'object') return null;
+            const source: QuestionnaireSelectionSource =
+              raw.source === 'upload' || raw.source === 'database' || raw.source === 'preset'
+                ? raw.source
+                : 'preset';
+            const normalized = normalizeQuestionnaireDefinition(raw.questionnaire, {
+              fallbackKind: 'canshou',
+              fallbackId: typeof raw.questionnaire?.id === 'string' ? raw.questionnaire.id : 'canshou-custom',
+              fallbackTitle: typeof raw.questionnaire?.title === 'string' ? raw.questionnaire.title : '未命名问卷',
+              applyMagicalMeta: false,
+              nativeAllowed: source === 'preset' ? true : false,
+            });
+            if (!normalized) return null;
+            if (source === 'preset') normalized.nativeAllowed = true;
+            if (source === 'upload') normalized.nativeAllowed = false;
+            if (source === 'database' && normalized.nativeAllowed == null) normalized.nativeAllowed = false;
+            return {
+              source,
+              questionnaire: normalized,
+              dataCardId: typeof raw.dataCardId === 'string' ? raw.dataCardId : undefined,
+              dataCardName: typeof raw.dataCardName === 'string' ? raw.dataCardName : undefined,
+              dataCardAuthor: typeof raw.dataCardAuthor === 'string' ? raw.dataCardAuthor : undefined,
+            } satisfies QuestionnaireSelection;
+          })
+          .filter(Boolean) as QuestionnaireSelection[];
+        if (restored.length > 0) {
+          setSelectedQuestionnaires(restored);
+          setSelectionReady(true);
+        }
+      }
     } catch (error) {
       console.warn('读取残兽生成偏好失败', error);
       setImageSaveMode(defaultImageMode);
@@ -268,6 +366,9 @@ const CanshouPage: React.FC = () => {
         showLanguageSection,
         showBulkFillSection,
         showAnswerReview,
+        allowMultipleQuestionnaires,
+        showQuestionnaireSettings,
+        questionnaireSelections: selectedQuestionnaires,
       };
       window.localStorage.setItem(CANSHOU_PREFERENCE_KEY, JSON.stringify(payload));
     } catch {
@@ -281,131 +382,400 @@ const CanshouPage: React.FC = () => {
     showLanguageSection,
     showBulkFillSection,
     showAnswerReview,
+    allowMultipleQuestionnaires,
+    showQuestionnaireSettings,
+    selectedQuestionnaires,
   ]);
 
-  // 加载问卷文件
   useEffect(() => {
-    const fetchData = async () => {
+    let cancelled = false;
+    const loadPresetIndex = async () => {
+      setQuestionnaireLoadError(null);
       try {
-        const questionnaireRes = await fetch('/canshou_questionnaire.json');
-
-        if (!questionnaireRes.ok) throw new Error('加载问卷文件失败');
-        const questionnaireData: CanshouQuestionnaire = await questionnaireRes.json();
-        setQuestionnaire(questionnaireData);
-
-        // 初始化答案对象
-        const initialAnswers = questionnaireData.questions.reduce((acc, q) => ({ ...acc, [q.id]: '' }), {});
-
-        // 从localStorage加载存档
-        const savedDraft = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (savedDraft) {
-          const parsedAnswers = JSON.parse(savedDraft);
-          // 合并存档和初始答案，以防问卷更新
-          const mergedAnswers = { ...initialAnswers, ...parsedAnswers };
-          setAnswers(mergedAnswers);
-          // 关键修正：确保在currentQuestionIndex变化时，也能正确加载当前问题的答案
-          if (questionnaireData.questions[currentQuestionIndex]) {
-            setCurrentAnswer(mergedAnswers[questionnaireData.questions[currentQuestionIndex].id] || '');
-          }
-        } else {
-          setAnswers(initialAnswers);
-        }
-
+        const response = await fetch('/questionnaires/presets/index.json');
+        if (!response.ok) throw new Error('加载预设问卷索引失败');
+        const data = await response.json();
+        const list = Array.isArray(data?.presets) ? (data.presets as QuestionnairePresetEntry[]) : [];
+        const filtered = list.filter((item) => item.kind === 'canshou');
+        if (!cancelled) setPresetEntries(filtered);
       } catch (error) {
-        console.error('加载页面数据失败:', error);
-        setError('📋 加载问卷失败，请刷新页面重试');
-      } finally {
-        setLoading(false);
+        console.error('加载预设问卷失败:', error);
+        if (!cancelled) {
+          setPresetEntries([]);
+          setQuestionnaireLoadError('📋 预设问卷加载失败，请刷新页面重试');
+        }
       }
     };
-    fetchData();
-  }, [currentQuestionIndex]); // 依赖为空，只在初次加载时执行
+    void loadPresetIndex();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // 答案变化时，自动保存到 localStorage
+  useEffect(() => {
+    if (selectionReady) return;
+    if (selectedQuestionnaires.length > 0) {
+      setSelectionReady(true);
+      return;
+    }
+    if (presetEntries.length === 0) return;
+    let cancelled = false;
+    const loadDefaultPreset = async () => {
+      const defaultPreset = presetEntries.find((item) => item.isDefault) ?? presetEntries[0];
+      if (!defaultPreset) {
+        if (!cancelled) setSelectionReady(true);
+        return;
+      }
+      try {
+        const response = await fetch(defaultPreset.path);
+        if (!response.ok) throw new Error('加载预设问卷失败');
+        const data = await response.json();
+        const normalized = normalizeQuestionnaireDefinition(data, {
+          fallbackId: defaultPreset.id,
+          fallbackKind: defaultPreset.kind,
+          fallbackTitle: defaultPreset.title,
+          applyMagicalMeta: false,
+          nativeAllowed: true,
+        });
+        if (!normalized) throw new Error('预设问卷解析失败');
+        if (cancelled) return;
+        setSelectedQuestionnaires([{ source: 'preset', questionnaire: normalized }]);
+        setSelectionReady(true);
+      } catch (error) {
+        console.error('加载默认问卷失败:', error);
+        if (!cancelled) {
+          setQuestionnaireLoadError('📋 默认问卷加载失败，请刷新页面重试');
+          setSelectionReady(true);
+        }
+      }
+    };
+    void loadDefaultPreset();
+    return () => {
+      cancelled = true;
+    };
+  }, [presetEntries, selectedQuestionnaires.length, selectionReady]);
+
+  useEffect(() => {
+    if (selectionReady) setLoading(false);
+  }, [selectionReady]);
+
+  const applySelection = (selection: QuestionnaireSelection) => {
+    setSelectedQuestionnaires((prev) => {
+      if (allowMultipleQuestionnaires) {
+        return [...prev, selection];
+      }
+      return [selection];
+    });
+    setShowIntroduction(false);
+    setShowQuestionnaireSettings(false);
+  };
+
+  const handleRemoveSelection = (index: number) => {
+    setSelectedQuestionnaires((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const fetchQuestionnaireCardList = useCallback(async (tab: 'public' | 'private', search: string) => {
+    const query = search.trim();
+    setQuestionnaireLoading(true);
+    setQuestionnairePickerError(null);
+    try {
+      if (tab === 'public') {
+        const params = new URLSearchParams({ type: 'questionnaire', limit: '30' });
+        if (query) params.set('search', query);
+        const res = await fetch(`/api/public-data-cards?${params.toString()}`);
+        const json = await res.json();
+        if (!res.ok || !json?.success) throw new Error(json?.error || '加载公开问卷失败');
+        setPublicQuestionnaireCards(Array.isArray(json.cards) ? json.cards : []);
+      } else {
+        const { authStorage } = await import('@/lib/auth');
+        const authHeader = await authStorage.getAuthHeader();
+        if (!authHeader) {
+          setPrivateQuestionnaireCards([]);
+          setQuestionnairePickerError('请先登录以查看私有问卷');
+          return;
+        }
+        const url = new URL('/api/data-cards', window.location.origin);
+        const res = await fetch(url.toString(), {
+          headers: { Authorization: authHeader },
+        });
+        const json = await res.json();
+        if (!res.ok || !json?.success) throw new Error(json?.error || '加载私有问卷失败');
+        const list = Array.isArray(json.cards) ? json.cards : [];
+        const filtered = list.filter((card: any) => card?.type === 'questionnaire');
+        const searched = query
+          ? filtered.filter((card: any) => {
+              const text = `${card?.name || ''} ${card?.description || ''}`.toLowerCase();
+              return text.includes(query.toLowerCase());
+            })
+          : filtered;
+        setPrivateQuestionnaireCards(searched);
+      }
+    } catch (err) {
+      setQuestionnairePickerError(err instanceof Error ? err.message : '加载问卷失败');
+    } finally {
+      setQuestionnaireLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showQuestionnairePicker) return;
+    void fetchQuestionnaireCardList(questionnairePickerTab, questionnaireSearch);
+  }, [showQuestionnairePicker, questionnairePickerTab, questionnaireSearch, fetchQuestionnaireCardList]);
+
+  const handleSelectQuestionnaireCard = async (card: any) => {
+    try {
+      const rawData = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
+      const normalized = normalizeQuestionnaireDefinition(rawData, {
+        fallbackKind: 'canshou',
+        fallbackId: typeof rawData?.id === 'string' ? rawData.id : `canshou-card-${card?.id ?? ''}`,
+        fallbackTitle: typeof rawData?.title === 'string' ? rawData.title : card?.name || '未命名问卷',
+        applyMagicalMeta: false,
+        nativeAllowed: typeof rawData?.nativeAllowed === 'boolean' ? rawData.nativeAllowed : false,
+      });
+      if (!normalized) throw new Error('问卷数据卡解析失败');
+      applySelection({
+        source: 'database',
+        questionnaire: normalized,
+        dataCardId: card?.id,
+        dataCardName: card?.name,
+        dataCardAuthor: card?.username,
+      });
+      setShowQuestionnairePicker(false);
+    } catch (error) {
+      setQuestionnairePickerError(error instanceof Error ? error.message : '解析问卷失败');
+    }
+  };
+
+  const handleUploadQuestionnaire = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const normalized = normalizeQuestionnaireDefinition(parsed, {
+        fallbackKind: 'canshou',
+        fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'canshou-upload',
+        fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : file.name.replace(/\.[^.]+$/, ''),
+        applyMagicalMeta: false,
+        nativeAllowed: false,
+      });
+      if (!normalized) throw new Error('问卷文件解析失败');
+      applySelection({
+        source: 'upload',
+        questionnaire: normalized,
+      });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '问卷文件解析失败');
+    }
+  };
+
+  const handleAddPreset = async (presetId: string) => {
+    const preset = presetEntries.find((item) => item.id === presetId);
+    if (!preset) return;
+    try {
+      const response = await fetch(preset.path);
+      if (!response.ok) throw new Error('加载预设问卷失败');
+      const data = await response.json();
+      const normalized = normalizeQuestionnaireDefinition(data, {
+        fallbackId: preset.id,
+        fallbackKind: preset.kind,
+        fallbackTitle: preset.title,
+        applyMagicalMeta: false,
+        nativeAllowed: true,
+      });
+      if (!normalized) throw new Error('预设问卷解析失败');
+      applySelection({ source: 'preset', questionnaire: normalized });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '加载预设问卷失败');
+    }
+  };
+
+  const getQuestionnaireCardSummary = (card: any) => {
+    try {
+      const rawData = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
+      const title = typeof rawData?.title === 'string' ? rawData.title : card?.name || '未命名问卷';
+      const kind = rawData?.kind === 'magical-girl' || rawData?.kind === 'canshou' ? rawData.kind : 'canshou';
+      const nativeAllowed = typeof rawData?.nativeAllowed === 'boolean' ? rawData.nativeAllowed : false;
+      const description = typeof rawData?.description === 'string' ? rawData.description : card?.description || '';
+      return { title, kind, nativeAllowed, description };
+    } catch {
+      return { title: card?.name || '未命名问卷', kind: 'canshou', nativeAllowed: false, description: card?.description || '' };
+    }
+  };
+
+  useEffect(() => {
+    if (!allowMultipleQuestionnaires && selectedQuestionnaires.length > 1) {
+      setSelectedQuestionnaires([selectedQuestionnaires[0]]);
+      setCurrentQuestionIndex(0);
+    }
+  }, [allowMultipleQuestionnaires, selectedQuestionnaires]);
+
+  useEffect(() => {
+    if (currentQuestionIndex >= mergedQuestions.length) {
+      setCurrentQuestionIndex(0);
+    }
+  }, [currentQuestionIndex, mergedQuestions.length]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!mergedQuestions.length) return;
+    if (draftRestoredRef.current) return;
+    draftRestoredRef.current = true;
+
+    try {
+      const savedDraft = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (!savedDraft) return;
+      const parsed = JSON.parse(savedDraft);
+      const nextAnswers: Record<string, string> = {};
+
+      if (Array.isArray(parsed)) {
+        parsed.forEach((value, index) => {
+          const item = mergedQuestions[index];
+          if (!item) return;
+          if (typeof value === 'string' && value.trim()) {
+            nextAnswers[item.key] = value;
+          }
+        });
+      } else if (parsed && typeof parsed === 'object') {
+        const direct = (parsed as any).answersByKey;
+        if (direct && typeof direct === 'object') {
+          Object.entries(direct as Record<string, unknown>).forEach(([key, value]) => {
+            if (typeof value === 'string' && value.trim()) {
+              nextAnswers[key] = value;
+            }
+          });
+        } else {
+          mergedQuestions.forEach((item, index) => {
+            const candidates = [
+              item.question.id,
+              `${index}`,
+              `${index + 1}`,
+              `CS-${index + 1}`,
+            ];
+            for (const key of candidates) {
+              const value = (parsed as any)[key];
+              if (typeof value === 'string' && value.trim()) {
+                nextAnswers[item.key] = value;
+                break;
+              }
+            }
+          });
+        }
+      }
+
+      if (Object.keys(nextAnswers).length > 0) {
+        setAnswersByKey((prev) => ({ ...prev, ...nextAnswers }));
+        const firstKey = mergedQuestions[0]?.key;
+        if (firstKey) setCurrentAnswer(nextAnswers[firstKey] || '');
+      }
+    } catch (e) {
+      console.error("Failed to load answers from localStorage", e);
+    }
+  }, [mergedQuestions]);
+
   useEffect(() => {
     try {
-      if (Object.values(answers).some(answer => answer.trim() !== '')) {
-        const dataToSave = JSON.stringify(answers);
+      const hasAnswers = Object.values(answersByKey).some((value) => typeof value === 'string' && value.trim() !== '');
+      if (hasAnswers) {
+        const dataToSave = JSON.stringify({ version: 2, answersByKey });
         localStorage.setItem(LOCAL_STORAGE_KEY, dataToSave);
       }
     } catch (e) {
       console.error("Failed to save answers to localStorage", e);
     }
-  }, [answers]);
+  }, [answersByKey]);
 
   useEffect(() => {
-    if (!questionnaire) return;
-    const question = questionnaire.questions[currentQuestionIndex];
-    if (!question) return;
-    setCurrentAnswer(answers[question.id] || '');
-  }, [currentQuestionIndex, questionnaire, answers]);
-
-  const handleCurrentAnswerChange = (value: string) => {
-    if (!questionnaire) {
-      setCurrentAnswer(value);
-      setError(null);
+    const currentKey = mergedQuestions[currentQuestionIndex]?.key;
+    if (!currentKey) {
+      setCurrentAnswer('');
       return;
     }
-    const question = questionnaire.questions[currentQuestionIndex];
+    setCurrentAnswer(answersByKey[currentKey] || '');
+  }, [currentQuestionIndex, mergedQuestions, answersByKey]);
+
+  const commitAnswerSnapshot = (override?: string) => {
+    const item = mergedQuestions[currentQuestionIndex];
+    if (!item) return answersByKey;
+    const raw = override ?? currentAnswer;
+    const normalized = raw.trim();
+    const nextAnswers = { ...answersByKey };
+    if (normalized.length > 0) {
+      nextAnswers[item.key] = raw;
+    } else {
+      delete nextAnswers[item.key];
+    }
+    return nextAnswers;
+  };
+
+  const handleCurrentAnswerChange = (value: string) => {
     setCurrentAnswer(value);
     setError(null);
-    if (!question) return;
-    setAnswers(prevAnswers => {
-      if (prevAnswers[question.id] === value) return prevAnswers;
-      return { ...prevAnswers, [question.id]: value };
+    const item = mergedQuestions[currentQuestionIndex];
+    if (!item) return;
+    setAnswersByKey((prev) => {
+      const next = { ...prev };
+      if (value.trim()) {
+        next[item.key] = value;
+      } else {
+        delete next[item.key];
+      }
+      return next;
     });
   };
 
-
-  const proceedToNext = (answer: string) => {
-    const currentQuestion = questionnaire!.questions[currentQuestionIndex];
-    const newAnswers = { ...answers, [currentQuestion.id]: answer };
-    setAnswers(newAnswers);
-
-    if (currentQuestionIndex < questionnaire!.questions.length - 1) {
+  const proceedToNextQuestion = (nextAnswers: Record<string, string>) => {
+    if (currentQuestionIndex < mergedQuestions.length - 1) {
       setIsTransitioning(true);
       setTimeout(() => {
         const nextIndex = currentQuestionIndex + 1;
         setCurrentQuestionIndex(nextIndex);
-        setCurrentAnswer(newAnswers[questionnaire!.questions[nextIndex].id] || '');
+        const nextKey = mergedQuestions[nextIndex]?.key;
+        setCurrentAnswer(nextKey ? nextAnswers[nextKey] || '' : '');
         setIsTransitioning(false);
       }, 250);
     } else {
-      handleSubmit(newAnswers);
+      handleSubmit(nextAnswers);
     }
   };
 
   const handleNext = () => {
-    if (currentAnswer.trim().length === 0) {
+    const item = mergedQuestions[currentQuestionIndex];
+    if (!item) return;
+    const normalizedAnswer = currentAnswer.trim();
+    const isRequired = item.question.required !== false;
+
+    if (isRequired && normalizedAnswer.length === 0) {
       setError('⚠️ 请输入或选择一个答案');
       return;
     }
-    if (allowCustomInput && currentMaxLength && currentAnswer.trim().length > currentMaxLength) {
-      setError(`⚠️ 答案不能超过${currentMaxLength}字`);
+    const maxLength = item.question.maxLength;
+    if (normalizedAnswer.length > 0 && typeof maxLength === 'number' && maxLength > 0 && normalizedAnswer.length > maxLength) {
+      setError(`⚠️ 答案不能超过${maxLength}字`);
       return;
     }
+    const nextAnswers = commitAnswerSnapshot(currentAnswer);
+    setAnswersByKey(nextAnswers);
     setError(null);
-    proceedToNext(currentAnswer.trim());
+    proceedToNextQuestion(nextAnswers);
   };
 
   const handlePreviousQuestion = () => {
-    if (!questionnaire || currentQuestionIndex === 0) return;
-
-    const currentQuestion = questionnaire.questions[currentQuestionIndex];
-    const trimmed = currentAnswer.trim();
-    const updatedAnswers = { ...answers, [currentQuestion.id]: trimmed };
-    setAnswers(updatedAnswers);
-
+    if (currentQuestionIndex === 0) return;
+    const nextAnswers = commitAnswerSnapshot();
+    setAnswersByKey(nextAnswers);
     const previousIndex = currentQuestionIndex - 1;
-    const previousQuestion = questionnaire.questions[previousIndex];
     setCurrentQuestionIndex(previousIndex);
-    setCurrentAnswer(updatedAnswers[previousQuestion.id] || '');
+    const prevKey = mergedQuestions[previousIndex]?.key;
+    setCurrentAnswer(prevKey ? nextAnswers[prevKey] || '' : '');
     setError(null);
   };
 
   const handleOptionClick = (option: string) => {
     setCurrentAnswer(option);
-    setTimeout(() => proceedToNext(option), 100);
+    setError(null);
+    const nextAnswers = commitAnswerSnapshot(option);
+    setAnswersByKey(nextAnswers);
+    proceedToNextQuestion(nextAnswers);
   };
 
   const resignDataCard = useCallback(async (data: any) => {
@@ -428,20 +798,16 @@ const CanshouPage: React.FC = () => {
   }, [router]);
 
   const handleNavigateToQuestion = (index: number) => {
-    if (!questionnaire) return;
-    if (index === currentQuestionIndex || index < 0 || index >= questionnaire.questions.length) return;
-
-    const currentQuestion = questionnaire.questions[currentQuestionIndex];
-    const updatedAnswers = { ...answers, [currentQuestion.id]: currentAnswer.trim() };
-    setAnswers(updatedAnswers);
-
-    const targetQuestion = questionnaire.questions[index];
+    if (index === currentQuestionIndex || index < 0 || index >= mergedQuestions.length) return;
+    const nextAnswers = commitAnswerSnapshot();
+    setAnswersByKey(nextAnswers);
     setCurrentQuestionIndex(index);
-    setCurrentAnswer(updatedAnswers[targetQuestion.id] || '');
+    const nextKey = mergedQuestions[index]?.key;
+    setCurrentAnswer(nextKey ? nextAnswers[nextKey] || '' : '');
     setError(null);
   };
 
-  const handleSubmit = async (finalAnswers: Record<string, string>) => {
+  const handleSubmit = async (answersSnapshot?: Record<string, string>) => {
     if (isCooldown) {
       setError(`请等待 ${remainingTime} 秒后再生成`);
       return;
@@ -457,6 +823,26 @@ const CanshouPage: React.FC = () => {
     setStreamedGeneralCard(null);
 
     try {
+      const snapshot = answersSnapshot ?? answersByKey;
+      const finalAnswerItems: QuestionnaireAnswerItem[] = [];
+      mergedQuestions.forEach((item) => {
+        const raw = snapshot[item.key];
+        const answer = typeof raw === 'string' ? raw.trim() : '';
+        if (!answer) return;
+        finalAnswerItems.push({
+          question: item.question.question,
+          answer,
+          questionId: item.question.id,
+          questionnaireId: item.questionnaireId,
+          questionnaireTitle: item.questionnaireTitle,
+        });
+      });
+
+      if (finalAnswerItems.length === 0) {
+        setError('⚠️ 请至少填写一题后再生成');
+        return;
+      }
+
       const customProviderPayload = (
         userProviderConfig
         && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
@@ -472,7 +858,19 @@ const CanshouPage: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          answers: finalAnswers,
+          answers: finalAnswerItems,
+          questionnaires: selectedQuestionnaires.map((selection) => ({
+            id: selection.questionnaire.id,
+            title: selection.questionnaire.title,
+            kind: selection.questionnaire.kind,
+            questions: selection.questionnaire.questions.map((question) => ({
+              id: question.id,
+              question: question.question,
+              required: question.required !== false,
+              maxLength: question.maxLength ?? null,
+            })),
+          })),
+          allowNativeSignature,
           language: selectedLanguage,
           customProvider: customProviderPayload,
         }),
@@ -509,10 +907,17 @@ const CanshouPage: React.FC = () => {
         });
         const cardWithAnswers = {
           ...card,
-          userAnswers: finalAnswers,
+          userAnswers: finalAnswerItems,
         };
+        if (!allowNativeSignature) {
+          setStreamedGeneralCard(cardWithAnswers);
+          setError(null);
+          startCooldown();
+          return;
+        }
 
         let signedCard = cardWithAnswers;
+        let hasSignError = false;
         try {
           const result = await resignDataCard(cardWithAnswers);
           if (!result) return;
@@ -520,9 +925,13 @@ const CanshouPage: React.FC = () => {
         } catch (err) {
           const message = err instanceof Error ? err.message : '签名失败';
           setError(`⚠️ 原生性签名失败，已降级为非原生：${message}`);
+          hasSignError = true;
         }
 
         setStreamedGeneralCard(signedCard);
+        if (!hasSignError) {
+          setError(null);
+        }
         startCooldown();
         return;
       }
@@ -538,7 +947,7 @@ const CanshouPage: React.FC = () => {
   };
 
   const handleRegenerate = () => {
-    handleSubmit(answers);
+    handleSubmit(answersByKey);
   };
 
   const handleSaveImage = (imageUrl: string) => {
@@ -583,40 +992,56 @@ const CanshouPage: React.FC = () => {
   const handleClearDraft = () => {
     if (window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) {
       localStorage.removeItem(LOCAL_STORAGE_KEY);
-      const emptyAnswers = questionnaire!.questions.reduce((acc, q) => ({ ...acc, [q.id]: '' }), {});
-      setAnswers(emptyAnswers);
+      setAnswersByKey({});
       setCurrentAnswer('');
       alert('存档已清空！');
     }
   };
 
   const handleBulkFill = () => {
+    if (mergedQuestions.length === 0) {
+      setError('⚠️ 当前没有可填充的题目，请先选择问卷。');
+      return;
+    }
     const parsed = parseBulkQuestionnaireAnswers(bulkAnswers, {
-      expectedCount: questionnaire!.questions.length,
-      orderedQuestionIds: questionnaire!.questions.map(question => question.id),
+      expectedCount: mergedQuestions.length,
+      orderedQuestionIds: mergedQuestions.map((item) => item.question.id),
+      orderedQuestionKeys: mergedQuestions.map((item) => item.key),
     });
 
     if (parsed.entries.length === 0) {
-      setError('⚠️ 未识别到可填充的答案。支持逐行答案、Q/A 格式、编号列表，以及 JSON（数组/含 userAnswers/按问题 id）。');
+      setError('⚠️ 未识别到可填充的答案。支持逐行答案、Q/A 格式、编号列表，以及 JSON（数组/含 userAnswers/问卷回答）。');
       return;
     }
 
-    const newAnswers = { ...answers };
+    const newAnswers = { ...answersByKey };
     let appliedCount = 0;
     let ignoredCount = 0;
     parsed.entries.forEach(entry => {
-      if (entry.index < 0 || entry.index >= questionnaire!.questions.length) {
+      if (entry.index < 0 || entry.index >= mergedQuestions.length) {
         ignoredCount += 1;
         return;
       }
-      const questionDef = questionnaire!.questions[entry.index];
-      const questionId = questionDef.id;
-      const limit = (questionDef.type === 'text' || questionDef.allowCustom) ? 240 : 180;
-      newAnswers[questionId] = entry.value.slice(0, limit);
+      const item = mergedQuestions[entry.index];
+      if (!item) {
+        ignoredCount += 1;
+        return;
+      }
+      const maxLength = item.question.maxLength;
+      const trimmed = entry.value.trim();
+      if (!trimmed) {
+        ignoredCount += 1;
+        return;
+      }
+      const finalValue = typeof maxLength === 'number' && maxLength > 0
+        ? entry.value.slice(0, maxLength)
+        : entry.value;
+      newAnswers[item.key] = finalValue;
       appliedCount += 1;
     });
-    setAnswers(newAnswers);
-    setCurrentAnswer(newAnswers[questionnaire!.questions[currentQuestionIndex].id] || '');
+    setAnswersByKey(newAnswers);
+    const currentKey = mergedQuestions[currentQuestionIndex]?.key;
+    setCurrentAnswer(currentKey ? newAnswers[currentKey] || '' : '');
     setError(null);
     const formatLabel = parsed.format === 'qa'
       ? 'Q/A'
@@ -629,7 +1054,7 @@ const CanshouPage: React.FC = () => {
     setBulkAnswers('');
   };
 
-  if (loading || !questionnaire) {
+  if (loading) {
     return (
       <div className="magic-background-dark">
         <div className="container"><div className="card text-center">加载中...</div></div>
@@ -637,16 +1062,37 @@ const CanshouPage: React.FC = () => {
     );
   }
 
-  const currentQuestion = questionnaire.questions[currentQuestionIndex];
-  const isLastQuestion = currentQuestionIndex === questionnaire.questions.length - 1;
-  const progressPercent = Math.round(((currentQuestionIndex + 1) / questionnaire.questions.length) * 100);
-  const navigatorItems = questionnaire.questions.map((question, index) => ({
-    id: question.id || `CS-${index + 1}`,
-    label: question.question
+  if (mergedQuestions.length === 0) {
+    return (
+      <div className="magic-background-dark">
+        <div className="container"><div className="card text-center">加载问卷失败</div></div>
+      </div>
+    );
+  }
+
+  const currentQuestionItem = mergedQuestions[currentQuestionIndex];
+  const currentQuestion = currentQuestionItem?.question;
+  const currentQuestionnaireTitle = currentQuestionItem?.questionnaireTitle ?? '';
+  const primaryQuestionnaire = selectedQuestionnaires[0]?.questionnaire;
+  const isLastQuestion = currentQuestionIndex === mergedQuestions.length - 1;
+  const progressPercent = Math.round(((currentQuestionIndex + 1) / mergedQuestions.length) * 100);
+  const navigatorItems = mergedQuestions.map((item) => ({
+    id: item.key,
+    label: item.questionnaireTitle ? `${item.questionnaireTitle} · ${item.question.question}` : item.question.question
   }));
-  const allowCustomInput = currentQuestion.type === 'text' || currentQuestion.allowCustom;
-  const currentMaxLength = allowCustomInput ? 240 : undefined;
+  const allowCustomInput = currentQuestion?.allowCustom !== false;
+  const currentMaxLength = typeof currentQuestion?.maxLength === 'number' && currentQuestion.maxLength > 0 ? currentQuestion.maxLength : null;
+  const isCurrentRequired = currentQuestion?.required !== false;
+  const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
+  const showTextInput = allowCustomInput || !hasOptions;
   const fallbackQuickOptions = allowCustomInput ? ['记录未知', '稍后补充'] : [];
+  const nextButtonLabel = isCooldown
+    ? `冷却中 (${remainingTime}s)`
+    : submitting
+      ? '生成中...'
+      : isLastQuestion
+        ? (isCurrentRequired || currentAnswer.trim() ? '生成档案' : '跳过并生成')
+        : (!isCurrentRequired && !currentAnswer.trim() ? '跳过并继续' : '下一题');
 
   return (
     <>
@@ -658,7 +1104,9 @@ const CanshouPage: React.FC = () => {
           <div className="card">
             <div className="text-center mb-4">
               <ThemeImage lightSrc="/beast-logo.svg" darkSrc="/beast-logo-white.svg" className="w-full px-8" alt="残兽调查" />
-              <p className="text-gray-600 mt-2">{questionnaire.description}</p>
+              {primaryQuestionnaire?.description && (
+                <p className="text-gray-600 mt-2">{primaryQuestionnaire.description}</p>
+              )}
             </div>
 
             {showIntroduction ? (
@@ -709,16 +1157,105 @@ const CanshouPage: React.FC = () => {
                   currentIndex={currentQuestionIndex}
                   onNavigate={handleNavigateToQuestion}
                   isAnswered={(index) => {
-                    const q = questionnaire.questions[index];
-                    return q ? (answers[q.id]?.trim()?.length ?? 0) > 0 : false;
+                    const key = mergedQuestions[index]?.key;
+                    return key ? Boolean(answersByKey[key]?.trim()) : false;
                   }}
                   theme="dark"
                 />
 
+                <div className="my-4 rounded-xl border border-slate-700 bg-slate-900/70 p-4 text-sm text-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setShowQuestionnaireSettings(!showQuestionnaireSettings)}
+                    className="flex w-full items-center justify-between font-semibold text-emerald-300"
+                  >
+                    <span>问卷设置</span>
+                    <span>{showQuestionnaireSettings ? '▲' : '▼'}</span>
+                  </button>
+                  {showQuestionnaireSettings && (
+                    <div className="mt-3 space-y-3 text-xs text-slate-400">
+                      <p>你可以选择预设、上传或从云端问卷库挑选。若启用多问卷，将按顺序依次出题。</p>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={allowMultipleQuestionnaires}
+                            onChange={(e) => setAllowMultipleQuestionnaires(e.target.checked)}
+                          />
+                          允许同时回答多份问卷
+                        </label>
+                        {!allowNativeSignature && (
+                          <span className="text-rose-400">提示：当前问卷未获得原生许可，生成结果将不具备原生性。</span>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        {selectedQuestionnaires.map((selection, index) => (
+                          <div key={`${selection.questionnaire.id}-${index}`} className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2">
+                            <div>
+                              <div className="font-semibold text-emerald-200">{selection.questionnaire.title}</div>
+                              <div className="text-[11px] text-slate-500">
+                                来源：{selection.source === 'preset' ? '预设' : selection.source === 'upload' ? '本地上传' : '云端问卷'}
+                                {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
+                                {selection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={selectedQuestionnaires.length <= 1}
+                              onClick={() => handleRemoveSelection(index)}
+                              className={`text-xs ${selectedQuestionnaires.length <= 1 ? 'text-slate-700' : 'text-rose-400 hover:underline'}`}
+                            >
+                              移除
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          className="input-field text-xs"
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              void handleAddPreset(e.target.value);
+                              e.currentTarget.value = '';
+                            }
+                          }}
+                          defaultValue=""
+                        >
+                          <option value="" disabled>选择预设问卷</option>
+                          {presetEntries.map((preset) => (
+                            <option key={preset.id} value={preset.id}>{preset.title}</option>
+                          ))}
+                        </select>
+                        <label className="text-xs">
+                          <span className="mr-2">上传问卷 JSON</span>
+                          <input
+                            type="file"
+                            accept="application/json"
+                            onChange={(e) => void handleUploadQuestionnaire(e.target.files?.[0] ?? null)}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowQuestionnairePicker(true)}
+                          className="rounded-lg border border-emerald-500/40 bg-slate-900 px-3 py-1 text-xs text-emerald-300 hover:border-emerald-400"
+                        >
+                          从云端问卷库选择
+                        </button>
+                        <Link href="/questionnaire-editor" className="text-xs text-emerald-300 hover:underline">
+                          打开问卷编辑器
+                        </Link>
+                      </div>
+                      {questionnaireLoadError && (
+                        <p className="text-rose-400">{questionnaireLoadError}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="mt-4 space-y-4">
                   <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4 shadow-sm">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-slate-200">
-                      <span>问题 {currentQuestionIndex + 1} / {questionnaire.questions.length}</span>
+                      <span>问题 {currentQuestionIndex + 1} / {mergedQuestions.length}</span>
                       <span>进度 {progressPercent}%</span>
                     </div>
                     <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-800">
@@ -729,12 +1266,21 @@ const CanshouPage: React.FC = () => {
                     </div>
                     <div className={`mt-4 min-h-[60px] flex items-center justify-center transition-opacity duration-200 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
                       <h3 className="text-xl font-semibold text-center text-slate-100">
-                        {currentQuestion.question}
+                        {currentQuestion?.question || '未加载题目'}
                       </h3>
                     </div>
+                    {currentQuestionnaireTitle && (
+                      <p className="text-center text-xs text-slate-500">问卷来源：{currentQuestionnaireTitle}</p>
+                    )}
                     <p className="text-xs text-center text-slate-400 mt-2">
                       请基于您构想的虚拟档案回答，并确保内容符合公序良俗，请勿使用任何真实信息。
                     </p>
+                    {currentQuestion?.helperText && (
+                      <p className="mt-2 text-sm text-slate-300 text-center">{currentQuestion.helperText}</p>
+                    )}
+                    {!isCurrentRequired && (
+                      <p className="mt-2 text-xs text-emerald-300 text-center">本题可跳过，不作答将不会记录</p>
+                    )}
                     {allowCustomInput && fallbackQuickOptions.length > 0 && (
                       <div className="mt-3 flex flex-wrap justify-center gap-3 text-xs">
                         {fallbackQuickOptions.map(option => (
@@ -752,11 +1298,11 @@ const CanshouPage: React.FC = () => {
                     )}
                   </div>
 
-                  {currentQuestion.options && (
+                  {hasOptions && (
                     <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4 shadow-sm">
                       <p className="text-xs text-slate-400 mb-3">推荐选项（点击后将自动进入下一题，可在下方补充）</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {currentQuestion.options.map((option, index) => {
+                        {currentQuestion?.options?.map((option, index) => {
                           const value = typeof option === 'string' ? option : option.value;
                           const label = typeof option === 'string' ? option : option.label;
                           const disabled = typeof option !== 'string' && option.disabled;
@@ -779,21 +1325,22 @@ const CanshouPage: React.FC = () => {
                   )}
                 </div>
 
-                {allowCustomInput && (
+                {showTextInput && (
                   <div className="input-group mt-4">
                     <textarea
                       value={currentAnswer}
                       onChange={(e) => handleCurrentAnswerChange(e.target.value)}
-                      placeholder={currentQuestion.placeholder || '请在此输入你的想法...'}
+                      placeholder={currentQuestion?.placeholder || '请在此输入你的想法...'}
                       className="input-field resize-y min-h-[6rem]"
-                      maxLength={currentMaxLength || undefined}
+                      maxLength={currentMaxLength ?? undefined}
                     />
-                    {currentMaxLength ? (
-                      <div className="mt-1 text-right text-xs text-gray-500">
-                        {currentAnswer.length}/{currentMaxLength}
-                      </div>
-                    ) : null}
+                    <div className="mt-1 text-right text-xs text-gray-500">
+                      {currentAnswer.length}/{currentMaxLength ?? '不限'}
+                    </div>
                   </div>
+                )}
+                {!showTextInput && (
+                  <div className="mt-3 text-center text-xs text-slate-500">本题仅可从选项中选择，无需填写文本。</div>
                 )}
                 <div className="mt-4 flex flex-col sm:flex-row gap-2">
                   <button
@@ -805,10 +1352,10 @@ const CanshouPage: React.FC = () => {
                   </button>
                   <button
                     onClick={handleNext}
-                    disabled={submitting || isCooldown || !currentAnswer.trim()}
+                    disabled={submitting || isCooldown || (isCurrentRequired && !currentAnswer.trim())}
                     className="generate-button flex-1"
                   >
-                    {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '生成中...' : isLastQuestion ? '生成档案' : '下一题'}
+                    {nextButtonLabel}
                   </button>
                 </div>
 
@@ -905,12 +1452,16 @@ const CanshouPage: React.FC = () => {
                   </button>
                   {showAnswerReview && (
                     <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1 text-sm">
-                      {questionnaire.questions.map((question, index) => (
-                        <div key={`canshou-review-${question.id}`} className="rounded-lg border border-slate-700 bg-slate-900/80 p-3">
+                      {mergedQuestions.map((item, index) => (
+                        <div key={`canshou-review-${item.key}`} className="rounded-lg border border-slate-700 bg-slate-900/80 p-3">
                           <div className="text-xs font-semibold text-emerald-300">Q{index + 1}</div>
-                          <div className="mt-1 text-xs text-slate-300">{question.question}</div>
+                          <div className="mt-1 text-xs text-slate-300">
+                            {item.questionnaireTitle ? `(${item.questionnaireTitle}) ` : ''}{item.question.question}
+                          </div>
                           <div className="mt-2 text-slate-100 whitespace-pre-wrap">
-                            {answers[question.id] && answers[question.id].trim().length > 0 ? answers[question.id] : <span className="text-slate-500">尚未填写</span>}
+                            {answersByKey[item.key] && answersByKey[item.key].trim().length > 0
+                              ? answersByKey[item.key]
+                              : <span className="text-slate-500">尚未填写</span>}
                           </div>
                           <div className="mt-2 text-right">
                             <button
@@ -1115,6 +1666,87 @@ const CanshouPage: React.FC = () => {
           <Footer textWhite={true} />
         </div>
       </div>
+
+      {showQuestionnairePicker && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 px-4 py-6">
+          <div className="w-full max-w-2xl rounded-2xl bg-slate-900 p-4 text-slate-200 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-700 pb-2">
+              <h3 className="text-base font-semibold text-emerald-200">选择云端问卷</h3>
+              <button
+                type="button"
+                onClick={() => setShowQuestionnairePicker(false)}
+                className="text-lg text-slate-400 hover:text-slate-200"
+              >
+                ×
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setQuestionnairePickerTab('public')}
+                className={`rounded-full px-3 py-1 ${questionnairePickerTab === 'public' ? 'bg-emerald-700/40 text-emerald-200' : 'bg-slate-800 text-slate-400'}`}
+              >
+                公开问卷
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuestionnairePickerTab('private')}
+                className={`rounded-full px-3 py-1 ${questionnairePickerTab === 'private' ? 'bg-emerald-700/40 text-emerald-200' : 'bg-slate-800 text-slate-400'}`}
+              >
+                私有问卷
+              </button>
+              <input
+                value={questionnaireSearch}
+                onChange={(e) => setQuestionnaireSearch(e.target.value)}
+                placeholder="搜索问卷名称/描述"
+                className="input-field flex-1 text-xs"
+              />
+              <button
+                type="button"
+                onClick={() => void fetchQuestionnaireCardList(questionnairePickerTab, questionnaireSearch)}
+                className="rounded-lg border border-emerald-500/40 px-3 py-1 text-emerald-200"
+              >
+                刷新
+              </button>
+            </div>
+            {questionnairePickerError && (
+              <p className="mt-3 text-xs text-rose-400">{questionnairePickerError}</p>
+            )}
+            <div className="mt-3 max-h-[50vh] space-y-2 overflow-y-auto pr-2 text-xs">
+              {questionnaireLoading ? (
+                <div className="text-center text-slate-400">加载中...</div>
+              ) : (
+                (questionnairePickerTab === 'public' ? publicQuestionnaireCards : privateQuestionnaireCards).map((card: any) => {
+                  const summary = getQuestionnaireCardSummary(card);
+                  return (
+                    <button
+                      type="button"
+                      key={card?.id}
+                      onClick={() => void handleSelectQuestionnaireCard(card)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-left hover:border-emerald-400 hover:bg-slate-800"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold text-slate-100">{summary.title}</div>
+                        <span className="text-[11px] text-slate-400">
+                          {summary.kind === 'magical-girl' ? '魔法少女' : '残兽'}
+                          {summary.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
+                        </span>
+                      </div>
+                      {summary.description && (
+                        <div className="mt-1 text-[11px] text-slate-400">{summary.description}</div>
+                      )}
+                      <div className="mt-1 text-[11px] text-slate-500">作者：{card?.username || '未知'}</div>
+                    </button>
+                  );
+                })
+              )}
+              {!questionnaireLoading && (questionnairePickerTab === 'public' ? publicQuestionnaireCards : privateQuestionnaireCards).length === 0 && (
+                <div className="text-center text-slate-500">暂无可用问卷</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showImageModal && savedImageUrl && (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">

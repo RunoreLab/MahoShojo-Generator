@@ -1,7 +1,7 @@
 // pages/api/arena/generate-stream.ts
 
 import { getLogger } from '@/lib/logger';
-import questionnaire from '@/public/questionnaire.json';
+import magicalGirlQuestionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -433,8 +433,14 @@ async function handler(req: NextRequest): Promise<Response> {
             adjudicationResults: adjudicationResults || undefined,
         };
 
+        const fallbackQuestions = Array.isArray((magicalGirlQuestionnaire as any)?.questions)
+            ? ((magicalGirlQuestionnaire as any).questions as unknown[])
+                .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
+                .filter((item) => typeof item === 'string' && item.trim())
+            : [];
+
         const prompt = createStreamPromptBuilder(
-            questionnaire.questions,
+            fallbackQuestions,
             finalUserGuidance,
             finalInternalGuidance,
             needsWorldviewWarning,

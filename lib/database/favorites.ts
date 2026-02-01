@@ -99,7 +99,7 @@ export async function removeFavorite(userId: number, cardId: string): Promise<Fa
  */
 export async function getUserFavorites(
   userId: number,
-  type?: 'character' | 'scenario' | 'history'
+  type?: 'character' | 'scenario' | 'history' | 'questionnaire'
 ): Promise<any[]> {
   try {
     let sql = `
@@ -152,7 +152,7 @@ export async function getUserFavorites(
  */
 export async function getUserFavoriteIds(
   userId: number,
-  type?: 'character' | 'scenario' | 'history'
+  type?: 'character' | 'scenario' | 'history' | 'questionnaire'
 ): Promise<string[]> {
   try {
     let sql = 'SELECT f.data_card_id FROM favorites f';

@@ -144,7 +144,7 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
-        if (type !== 'character' && type !== 'scenario' && type !== 'history') {
+        if (type !== 'character' && type !== 'scenario' && type !== 'history' && type !== 'questionnaire') {
           return new Response(JSON.stringify({ error: '无效的数据卡类型' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' }

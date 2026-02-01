@@ -7,7 +7,7 @@ interface ReplaceCardModalProps {
   isOpen: boolean;
   onClose: () => void;
   cards: any[];
-  targetType: 'character' | 'scenario' | 'history';
+  targetType: 'character' | 'scenario' | 'history' | 'questionnaire';
   onConfirm: (cardId: string, opts: { name?: string; description?: string; isPublic?: number }) => Promise<void>;
   isSaving?: boolean;
 }

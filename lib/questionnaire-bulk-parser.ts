@@ -8,6 +8,7 @@ export type BulkParseEntry = {
 export type BulkParseOptions = {
   expectedCount?: number;
   orderedQuestionIds?: string[];
+  orderedQuestionKeys?: string[];
 };
 
 export type BulkParseResult = {
@@ -59,15 +60,46 @@ const parseFromJson = (raw: string, options: BulkParseOptions): BulkParseResult 
     const parsed = JSON.parse(raw) as unknown;
 
     if (Array.isArray(parsed)) {
-      const entries = parsed.map((value, index) => ({ index, value: coerceToString(value).trim() }));
+      const entries = parsed.map((value, index) => {
+        if (value && typeof value === 'object') {
+          const record = value as Record<string, unknown>;
+          const answer = coerceToString(record.answer ?? record.value ?? '').trim();
+          return { index, value: answer };
+        }
+        return { index, value: coerceToString(value).trim() };
+      });
       return { entries, format: 'json', warnings: [] };
     }
 
     if (isPlainObject(parsed)) {
-      const directUserAnswers = parsed.userAnswers;
+      const directUserAnswers = parsed.userAnswers ?? parsed.answers ?? parsed.answerItems;
       if (Array.isArray(directUserAnswers)) {
-        const entries = directUserAnswers.map((value, index) => ({ index, value: coerceToString(value).trim() }));
+        const entries = directUserAnswers.map((value, index) => {
+          if (value && typeof value === 'object') {
+            const record = value as Record<string, unknown>;
+            const answer = coerceToString(record.answer ?? record.value ?? '').trim();
+            return { index, value: answer };
+          }
+          return { index, value: coerceToString(value).trim() };
+        });
         return { entries, format: 'json', warnings: [] };
+      }
+
+      const directAnswerMap = parsed.answersByKey;
+      if (isPlainObject(directAnswerMap)) {
+        const orderedKeys = options.orderedQuestionKeys ?? [];
+        if (orderedKeys.length > 0) {
+          const entries: BulkParseEntry[] = [];
+          orderedKeys.forEach((key, index) => {
+            if (Object.prototype.hasOwnProperty.call(directAnswerMap, key)) {
+              const value = coerceToString((directAnswerMap as Record<string, unknown>)[key]).trim();
+              if (value.length > 0 || (directAnswerMap as Record<string, unknown>)[key] === '') {
+                entries.push({ index, value });
+              }
+            }
+          });
+          if (entries.length > 0) return { entries, format: 'json', warnings: [] };
+        }
       }
 
       const orderedIds = options.orderedQuestionIds ?? [];
