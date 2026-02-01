@@ -302,11 +302,15 @@ export default async function handler(req: NextRequest) {
           ar.draws as draws,
           ar.updated_at as updatedAt,
           dc.name as dataCardName,
-          MAX(u.username) as authorName,
+          u.username as authorName,
           dcm.tech_score as techScore,
           dcm.tech_level as techLevel,
           dcm.is_native as isNative,
-          group_concat(DISTINCT dct.tag_id) as tagIds
+          CASE WHEN ar.entity_type = 'data_card' THEN (
+            SELECT group_concat(DISTINCT dct.tag_id)
+            FROM data_card_tags dct
+            WHERE dct.data_card_id = ar.entity_id
+          ) ELSE NULL END as tagIds
         FROM arena_ratings ar
         LEFT JOIN data_cards dc
           ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
@@ -314,10 +318,7 @@ export default async function handler(req: NextRequest) {
           ON dc.user_id = u.id
         LEFT JOIN data_card_metrics dcm
           ON ar.entity_type = 'data_card' AND dcm.data_card_id = ar.entity_id
-        LEFT JOIN data_card_tags dct
-          ON ar.entity_type = 'data_card' AND dct.data_card_id = ar.entity_id
         ${whereSql}
-        GROUP BY ar.entity_type, ar.entity_id, ar.queue
       ),
       ranked AS (
         SELECT

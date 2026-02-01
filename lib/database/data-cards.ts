@@ -114,14 +114,13 @@ export async function getUserDataCards(
              du.name AS pending_name, 
              du.description AS pending_description, 
              du.updated_at AS pending_updated_at,
-             tag_map.tag_ids AS tag_ids
+             (
+               SELECT group_concat(DISTINCT dct.tag_id)
+               FROM data_card_tags dct
+               WHERE dct.data_card_id = dc.id
+             ) AS tag_ids
       FROM data_cards dc
       LEFT JOIN data_card_updates du ON du.data_card_id = dc.id
-      LEFT JOIN (
-        SELECT data_card_id, group_concat(DISTINCT tag_id) AS tag_ids
-        FROM data_card_tags
-        GROUP BY data_card_id
-      ) tag_map ON tag_map.data_card_id = dc.id
       WHERE dc.user_id = ? AND dc.deleted_at IS NULL`;
     const params: any[] = [userId];
     
@@ -439,14 +438,14 @@ export async function verifyCardOwnership(cardId: string, userId: number): Promi
 export async function getDataCardById(cardId: string, isPublic: boolean = false): Promise<any | null> {
   try {
     let sql = `
-      SELECT dc.*, u.username, tag_map.tag_ids AS tag_ids
+      SELECT dc.*, u.username,
+             (
+               SELECT group_concat(DISTINCT dct.tag_id)
+               FROM data_card_tags dct
+               WHERE dct.data_card_id = dc.id
+             ) AS tag_ids
       FROM data_cards dc
       JOIN users u ON dc.user_id = u.id
-      LEFT JOIN (
-        SELECT data_card_id, group_concat(DISTINCT tag_id) AS tag_ids
-        FROM data_card_tags
-        GROUP BY data_card_id
-      ) tag_map ON tag_map.data_card_id = dc.id
       WHERE dc.id = ? AND dc.deleted_at IS NULL`;
     const params: any[] = [cardId];
 
@@ -533,14 +532,14 @@ export async function getPublicDataCards(
   try {
     // 基础查询语句
     let sql = `
-      SELECT dc.*, u.username, tag_map.tag_ids AS tag_ids
+      SELECT dc.*, u.username,
+             (
+               SELECT group_concat(DISTINCT dct.tag_id)
+               FROM data_card_tags dct
+               WHERE dct.data_card_id = dc.id
+             ) AS tag_ids
       FROM data_cards dc
       JOIN users u ON dc.user_id = u.id
-      LEFT JOIN (
-        SELECT data_card_id, group_concat(DISTINCT tag_id) AS tag_ids
-        FROM data_card_tags
-        GROUP BY data_card_id
-      ) tag_map ON tag_map.data_card_id = dc.id
       WHERE dc.is_public = 1 AND dc.review_status = 'approved' AND dc.deleted_at IS NULL`;
     const params: any[] = [];
     

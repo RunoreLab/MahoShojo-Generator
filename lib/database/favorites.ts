@@ -103,15 +103,15 @@ export async function getUserFavorites(
 ): Promise<any[]> {
   try {
     let sql = `
-      SELECT dc.*, u.username, f.created_at AS favorited_at, tag_map.tag_ids AS tag_ids
+      SELECT dc.*, u.username, f.created_at AS favorited_at,
+             (
+               SELECT group_concat(DISTINCT dct.tag_id)
+               FROM data_card_tags dct
+               WHERE dct.data_card_id = dc.id
+             ) AS tag_ids
       FROM favorites f
       JOIN data_cards dc ON f.data_card_id = dc.id
       JOIN users u ON dc.user_id = u.id
-      LEFT JOIN (
-        SELECT data_card_id, group_concat(DISTINCT tag_id) AS tag_ids
-        FROM data_card_tags
-        GROUP BY data_card_id
-      ) tag_map ON tag_map.data_card_id = dc.id
       WHERE f.user_id = ?
         AND dc.is_public = 1
         AND dc.review_status = 'approved'
