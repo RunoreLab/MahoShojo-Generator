@@ -1,4 +1,65 @@
+import { isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
+
 export type QuestionnaireKind = 'magical-girl' | 'canshou';
+
+export type QuestionnaireLogoPreset = {
+  id: string;
+  label: string;
+  url: string;
+  kind: QuestionnaireKind | 'common';
+};
+
+export const DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND: Record<QuestionnaireKind, string> = {
+  'magical-girl': '/questionnaire-logo.svg',
+  'canshou': '/beast-logo.svg',
+};
+
+export const QUESTIONNAIRE_LOGO_PRESETS: QuestionnaireLogoPreset[] = [
+  {
+    id: 'magical-girl-default',
+    label: '魔法少女预设问卷（默认）',
+    url: '/questionnaire-logo.svg',
+    kind: 'magical-girl',
+  },
+  {
+    id: 'magical-girl-title',
+    label: '魔法少女问卷标题',
+    url: '/questionnaire-title.svg',
+    kind: 'magical-girl',
+  },
+  {
+    id: 'canshou-default',
+    label: '残兽预设问卷',
+    url: '/beast-logo.svg',
+    kind: 'canshou',
+  },
+  {
+    id: 'canshou-title',
+    label: '残兽问卷标题',
+    url: '/beast-title.svg',
+    kind: 'canshou',
+  },
+  {
+    id: 'project-logo',
+    label: '项目 Logo',
+    url: '/logo.svg',
+    kind: 'common',
+  },
+  {
+    id: 'project-logo-white',
+    label: '项目 Logo（白色）',
+    url: '/logo-white.svg',
+    kind: 'common',
+  },
+];
+
+export const sanitizeQuestionnaireLogoUrl = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (!isAllowedExternalMediaUrl(trimmed, 'image')) return undefined;
+  return trimmed;
+};
 
 export type QuestionnaireOption = string | { value: string; label: string; disabled?: boolean };
 
@@ -658,7 +719,7 @@ export const normalizeQuestionnaireDefinition = (
     kind: resolvedKind,
     title: resolvedTitle,
     description: typeof record.description === 'string' ? record.description.trim() : undefined,
-    logoUrl: typeof record.logoUrl === 'string' ? record.logoUrl.trim() : undefined,
+    logoUrl: sanitizeQuestionnaireLogoUrl(record.logoUrl),
     version: typeof record.version === 'string' ? record.version.trim() : undefined,
     nativeAllowed: typeof record.nativeAllowed === 'boolean' ? record.nativeAllowed : options.nativeAllowed ?? null,
     questions,

@@ -1,11 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import Footer from '@/components/Footer';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import {
+  DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND,
+  QUESTIONNAIRE_LOGO_PRESETS,
   normalizeQuestionnaireDefinition,
+  sanitizeQuestionnaireLogoUrl,
   type QuestionnaireConditionOperator,
   type QuestionnaireCondition,
   type QuestionnaireDefinition,
@@ -184,11 +187,34 @@ const QuestionnaireEditorPage: React.FC = () => {
   const [questionnaireId, setQuestionnaireId] = useState('magical-girl-custom');
   const [title, setTitle] = useState('未命名问卷');
   const [description, setDescription] = useState('');
-  const [logoUrl, setLogoUrl] = useState('');
+  const [logoUrl, setLogoUrl] = useState(DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND['magical-girl']);
   const [version, setVersion] = useState('');
   const [questions, setQuestions] = useState<EditableQuestion[]>([createEmptyQuestion(0, 'magical-girl')]);
   const [importText, setImportText] = useState('');
   const [editorError, setEditorError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLogoUrl((prev) => {
+      const trimmed = prev.trim();
+      const shouldAutoSwitch = trimmed === DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND['magical-girl']
+        || trimmed === DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND['canshou'];
+      if (!shouldAutoSwitch) return prev;
+      return DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND[kind];
+    });
+  }, [kind]);
+
+  const logoPresets = useMemo(
+    () => QUESTIONNAIRE_LOGO_PRESETS.filter((item) => item.kind === kind || item.kind === 'common'),
+    [kind]
+  );
+
+  const normalizedLogoUrl = useMemo(() => sanitizeQuestionnaireLogoUrl(logoUrl), [logoUrl]);
+  const logoWarning = useMemo(() => {
+    const trimmed = logoUrl.trim();
+    if (!trimmed) return null;
+    return normalizedLogoUrl ? null : '⚠️ 当前 Logo URL 不可信，已在导出时忽略。';
+  }, [logoUrl, normalizedLogoUrl]);
+  const trimmedLogoUrl = logoUrl.trim();
 
   const updateQuestion = (index: number, patch: Partial<EditableQuestion>) => {
     setQuestions((prev) => prev.map((q, i) => (i === index ? { ...q, ...patch } : q)));
@@ -307,7 +333,7 @@ const QuestionnaireEditorPage: React.FC = () => {
       kind,
       title: title.trim() || '未命名问卷',
       description: description.trim() || undefined,
-      logoUrl: logoUrl.trim() || undefined,
+      logoUrl: normalizedLogoUrl || undefined,
       version: version.trim() || undefined,
       nativeAllowed: false,
       questions: cleanedQuestions,
@@ -317,7 +343,7 @@ const QuestionnaireEditorPage: React.FC = () => {
       questionnaireData: payload,
       jsonError: errors.length > 0 ? errors[0] : null,
     };
-  }, [questions, questionnaireId, kind, title, description, logoUrl, version]);
+  }, [questions, questionnaireId, kind, title, description, normalizedLogoUrl, version]);
 
   const jsonPreview = useMemo(() => JSON.stringify(questionnaireData, null, 2), [questionnaireData]);
 
@@ -430,6 +456,7 @@ const QuestionnaireEditorPage: React.FC = () => {
                 <li><code className="bg-slate-200 px-1 rounded">displayIf</code> 支持条件显示；<code className="bg-slate-200 px-1 rounded">jump</code> 可设置跳题规则。</li>
                 <li><code className="bg-slate-200 px-1 rounded">optionsFrom</code> / <code className="bg-slate-200 px-1 rounded">suggestionsFrom</code> 可引用其他题目的选项或灵感。</li>
                 <li>最大字数为建议上限，超出仍可提交但会影响原生性；留空表示不设题目上限（仍受统一原生上限影响）。</li>
+                <li>Logo 仅支持站内路径或可信 HTTPS 外链，推荐使用下方快捷 Logo。</li>
                 <li>更多高级字段可写入「额外字段 JSON」，会并入该题的最终结构。</li>
               </ul>
             </div>
@@ -485,6 +512,42 @@ const QuestionnaireEditorPage: React.FC = () => {
                   onChange={(e) => setLogoUrl(e.target.value)}
                   className="input-field mt-1"
                 />
+                <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                    <span>快捷选择（点击即可填入）</span>
+                    <button
+                      type="button"
+                      onClick={() => setLogoUrl('')}
+                      className="text-slate-500 hover:text-slate-700"
+                    >
+                      清空
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {logoPresets.map((preset) => {
+                      const isActive = trimmedLogoUrl === preset.url;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => setLogoUrl(preset.url)}
+                          className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition ${
+                            isActive
+                              ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                              : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:text-slate-700'
+                          }`}
+                        >
+                          <span>{preset.label}</span>
+                          <span className="flex items-center justify-center rounded bg-white/70 px-1">
+                            <img src={preset.url} alt={preset.label} className="h-4 w-auto" />
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">仅允许站内路径（/ 开头）或可信 HTTPS 外链，其他地址会被忽略。</p>
+                  {logoWarning && <p className="mt-1 text-xs text-rose-500">{logoWarning}</p>}
+                </div>
               </div>
             </div>
 
