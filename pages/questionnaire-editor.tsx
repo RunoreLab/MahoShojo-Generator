@@ -429,7 +429,7 @@ const QuestionnaireEditorPage: React.FC = () => {
                 <li><code className="bg-slate-200 px-1 rounded">suggestions</code> 会显示为灵感按钮；<code className="bg-slate-200 px-1 rounded">options</code> 用于推荐选项。</li>
                 <li><code className="bg-slate-200 px-1 rounded">displayIf</code> 支持条件显示；<code className="bg-slate-200 px-1 rounded">jump</code> 可设置跳题规则。</li>
                 <li><code className="bg-slate-200 px-1 rounded">optionsFrom</code> / <code className="bg-slate-200 px-1 rounded">suggestionsFrom</code> 可引用其他题目的选项或灵感。</li>
-                <li>最大字数留空表示无限制；关闭「允许自定义」即可只使用选项作答。</li>
+                <li>最大字数为建议上限，超出仍可提交但会影响原生性；留空表示不设题目上限（仍受统一原生上限影响）。</li>
                 <li>更多高级字段可写入「额外字段 JSON」，会并入该题的最终结构。</li>
               </ul>
             </div>
@@ -543,7 +543,7 @@ const QuestionnaireEditorPage: React.FC = () => {
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs text-slate-500">最大字数（留空=无限制）</label>
+                      <label className="text-xs text-slate-500">最大字数（建议上限，留空=不设题目上限）</label>
                       <input
                         value={question.maxLengthText}
                         onChange={(e) => updateQuestion(index, { maxLengthText: e.target.value })}

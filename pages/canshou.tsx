@@ -16,6 +16,7 @@ import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
@@ -24,6 +25,7 @@ import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import {
   buildQuestionKey,
   buildQuestionnaireFlow,
+  formatQuestionnaireAnswers,
   normalizeQuestionnaireDefinition,
   normalizeUserAnswers,
   resolveQuestionnaireReferences,
@@ -32,6 +34,7 @@ import {
   type QuestionnairePresetEntry,
   type QuestionnaireQuestion,
 } from '@/lib/questionnaires';
+import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 
 type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -248,10 +251,34 @@ const CanshouPage: React.FC = () => {
     return items;
   }, [mergedQuestions, answersByKey]);
 
-  const allowNativeSignature = useMemo(() => {
+  const buildOverLimitItems = useCallback((answers: Record<string, string>) => {
+    return mergedQuestions.flatMap((item) => {
+      const raw = answers[item.key];
+      const answer = typeof raw === 'string' ? raw.trim() : '';
+      if (!answer) return [];
+      if (!isAnswerOverLimit(answer, item.question.maxLength ?? null)) return [];
+      const limitInfo = getAnswerLimitInfo(item.question.maxLength ?? null);
+      if (!limitInfo.limit) return [];
+      return [{
+        key: item.key,
+        question: item.question.question,
+        questionnaireTitle: item.questionnaireTitle,
+        limit: limitInfo.limit,
+        source: limitInfo.source,
+        length: answer.length,
+      }];
+    });
+  }, [mergedQuestions]);
+
+  const overLimitItems = useMemo(() => buildOverLimitItems(answersByKey), [answersByKey, buildOverLimitItems]);
+  const hasOverLimitAnswer = overLimitItems.length > 0;
+
+  const isQuestionnaireNativeAllowed = useMemo(() => {
     if (selectedQuestionnaires.length === 0) return false;
     return selectedQuestionnaires.every((selection) => selection.questionnaire.nativeAllowed === true);
   }, [selectedQuestionnaires]);
+
+  const tokenEstimateText = useMemo(() => formatQuestionnaireAnswers(answerItems), [answerItems]);
 
   const resolvedResultPayload = useMemo(() => {
     if (!canshouDetails) return null;
@@ -790,11 +817,6 @@ const CanshouPage: React.FC = () => {
       setError('⚠️ 请输入或选择一个答案');
       return;
     }
-    const maxLength = item.question.maxLength;
-    if (normalizedAnswer.length > 0 && typeof maxLength === 'number' && maxLength > 0 && normalizedAnswer.length > maxLength) {
-      setError(`⚠️ 答案不能超过${maxLength}字`);
-      return;
-    }
     const nextAnswers = commitAnswerSnapshot(currentAnswer);
     setAnswersByKey(nextAnswers);
     setError(null);
@@ -887,6 +909,9 @@ const CanshouPage: React.FC = () => {
         return;
       }
 
+      const overLimitForSubmit = buildOverLimitItems(snapshot);
+      const allowNativeSignatureForSubmit = isQuestionnaireNativeAllowed && overLimitForSubmit.length === 0;
+
       const customProviderPayload = (
         userProviderConfig
         && (userProviderConfig.apiKey || userProviderConfig.providerId === 'system')
@@ -914,7 +939,7 @@ const CanshouPage: React.FC = () => {
               maxLength: question.maxLength ?? null,
             })),
           })),
-          allowNativeSignature,
+          allowNativeSignature: allowNativeSignatureForSubmit,
           language: selectedLanguage,
           customProvider: customProviderPayload,
         }),
@@ -953,7 +978,7 @@ const CanshouPage: React.FC = () => {
           ...card,
           userAnswers: finalAnswerItems,
         };
-        if (!allowNativeSignature) {
+        if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);
           setError(null);
           startCooldown();
@@ -1071,16 +1096,12 @@ const CanshouPage: React.FC = () => {
         ignoredCount += 1;
         return;
       }
-      const maxLength = item.question.maxLength;
       const trimmed = entry.value.trim();
       if (!trimmed) {
         ignoredCount += 1;
         return;
       }
-      const finalValue = typeof maxLength === 'number' && maxLength > 0
-        ? entry.value.slice(0, maxLength)
-        : entry.value;
-      newAnswers[item.key] = finalValue;
+      newAnswers[item.key] = entry.value;
       appliedCount += 1;
     });
     setAnswersByKey(newAnswers);
@@ -1132,7 +1153,15 @@ const CanshouPage: React.FC = () => {
     label: item.questionnaireTitle ? `${item.questionnaireTitle} · ${item.question.question}` : item.question.question
   }));
   const allowCustomInput = currentQuestion?.allowCustom !== false;
-  const currentMaxLength = typeof currentQuestion?.maxLength === 'number' && currentQuestion.maxLength > 0 ? currentQuestion.maxLength : null;
+  const currentLimitInfo = getAnswerLimitInfo(currentQuestion?.maxLength ?? null);
+  const currentMaxLength = currentLimitInfo.limit;
+  const currentAnswerLength = currentAnswer.trim().length;
+  const isCurrentOverLimit = Boolean(currentMaxLength && currentAnswerLength > currentMaxLength);
+  const currentLimitLabel = currentLimitInfo.source === 'question'
+    ? `题目上限 ${currentMaxLength} 字`
+    : currentLimitInfo.source === 'global'
+      ? `原生统一上限 ${currentMaxLength} 字`
+      : '不限';
   const isCurrentRequired = currentQuestion?.required !== false;
   const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
   const showTextInput = allowCustomInput || !hasOptions;
@@ -1235,8 +1264,11 @@ const CanshouPage: React.FC = () => {
                           />
                           允许同时回答多份问卷
                         </label>
-                        {!allowNativeSignature && (
+                        {!isQuestionnaireNativeAllowed && (
                           <span className="text-rose-400">提示：当前问卷未获得原生许可，生成结果将不具备原生性。</span>
+                        )}
+                        {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
+                          <span className="text-amber-300">提示：已有答案超过字数上限（原生统一上限 {QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS} 字），生成结果将不具备原生性。</span>
                         )}
                       </div>
                       <div className="space-y-2">
@@ -1383,11 +1415,18 @@ const CanshouPage: React.FC = () => {
                       onChange={(e) => handleCurrentAnswerChange(e.target.value)}
                       placeholder={currentQuestion?.placeholder || '请在此输入你的想法...'}
                       className="input-field resize-y min-h-[6rem]"
-                      maxLength={currentMaxLength ?? undefined}
                     />
-                    <div className="mt-1 text-right text-xs text-gray-500">
-                      {currentAnswer.length}/{currentMaxLength ?? '不限'}
+                    <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
+                      <span>有效字数：{currentAnswerLength}/{currentMaxLength ?? '不限'}</span>
+                      {currentLimitInfo.source !== 'none' && currentMaxLength ? (
+                        <span className="text-[11px] text-gray-400">{currentLimitLabel}</span>
+                      ) : null}
                     </div>
+                    {isCurrentOverLimit && (
+                      <div className="mt-1 text-right text-xs text-amber-300">
+                        ⚠️ 已超过{currentLimitLabel}，继续提交将导致生成内容丧失原生性。
+                      </div>
+                    )}
                   </div>
                 )}
                 {!showTextInput && (
@@ -1409,6 +1448,11 @@ const CanshouPage: React.FC = () => {
                     {nextButtonLabel}
                   </button>
                 </div>
+
+                <TokenIndicator
+                  text={tokenEstimateText}
+                  warningText="⚠️ 预计问卷回答较长，可能更易超时/失败。可尝试精简答案或减少问卷数量。"
+                />
 
                 {generationMode === 'stream' && streamedGeneralCardForDisplay && (
                   <div className="my-6">
@@ -1530,6 +1574,11 @@ const CanshouPage: React.FC = () => {
                 </div>
 
                 {error && <ErrorMessage message={error} />}
+                {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+                    ⚠️ 已有 {overLimitItems.length} 条答案超过字数上限，继续提交将导致生成内容丧失原生性。
+                  </div>
+                )}
 
                 <div className="mt-8 text-center">
                   <Link href="/" className="footer-link">返回首页</Link>

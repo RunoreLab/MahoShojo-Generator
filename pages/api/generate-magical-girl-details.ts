@@ -6,6 +6,7 @@ import { getRandomFlowers } from '../../lib/random-choose-hana-name';
 import { getLogger } from '../../lib/logger';
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
 import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '../../lib/questionnaires';
+import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { type AIProvider } from '@/lib/config';
 
@@ -183,7 +184,10 @@ const resolveAnswerItems = (
   return resolvedItems;
 };
 
-const validateAnswerLengths = (items: QuestionnaireAnswerItem[], questionnaires: RequestQuestionnaire[]): string | null => {
+const findOverLimitAnswer = (
+  items: QuestionnaireAnswerItem[],
+  questionnaires: RequestQuestionnaire[]
+) => {
   if (items.length === 0) return null;
   const lookup = buildQuestionLookup(questionnaires);
   for (const [index, item] of items.entries()) {
@@ -201,11 +205,15 @@ const validateAnswerLengths = (items: QuestionnaireAnswerItem[], questionnaires:
     if (!resolved && lookup.ordered[index]) {
       resolved = lookup.ordered[index];
     }
-    const maxLength = resolved?.maxLength;
-    if (typeof maxLength === 'number' && maxLength > 0 && item.answer.length > maxLength) {
-      const questionLabel = resolved?.question || item.question || `问题 ${index + 1}`;
-      return `答案字数超过限制（${questionLabel} 最多 ${maxLength} 字）`;
-    }
+    if (!isAnswerOverLimit(item.answer, resolved?.maxLength ?? null)) continue;
+    const limitInfo = getAnswerLimitInfo(resolved?.maxLength ?? null);
+    const questionLabel = resolved?.question || item.question || `问题 ${index + 1}`;
+    return {
+      questionLabel,
+      limit: limitInfo.limit ?? 0,
+      length: item.answer.length,
+      source: limitInfo.source,
+    };
   }
   return null;
 };
@@ -248,7 +256,7 @@ async function handler(req: Request): Promise<Response> {
   const body = await req.json();
   const rawAnswers = body?.answers;
   const rawQuestionnaires = body?.questionnaires;
-  const allowNativeSignature = body?.allowNativeSignature === true;
+  const requestedNativeSignature = body?.allowNativeSignature === true;
   const language = body?.language ?? 'zh-CN';
   const customProviderPayload = body?.customProvider;
 
@@ -262,12 +270,10 @@ async function handler(req: Request): Promise<Response> {
     });
   }
 
-  const lengthError = validateAnswerLengths(normalizedAnswers, questionnaires);
-  if (lengthError) {
-    return new Response(JSON.stringify({ error: lengthError }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' }
-    });
+  const overLimitAnswer = findOverLimitAnswer(normalizedAnswers, questionnaires);
+  const allowNativeSignature = requestedNativeSignature && !overLimitAnswer;
+  if (overLimitAnswer) {
+    log.info('问卷答案超过字数上限，已取消原生签名', overLimitAnswer);
   }
 
   try {
