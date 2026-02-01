@@ -162,13 +162,6 @@ export function ArenaPage() {
                 </Link>
               </div>
             </div>
-            {error && (
-              <ErrorMessage
-                message={error}
-                className={`p-4 rounded-md my-4 text-sm ${error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
-                  }`}
-              />
-            )}
 
             <CollapsibleSection
               title="🎴 预设角色（内置）"
@@ -312,6 +305,14 @@ export function ArenaPage() {
               className="mt-4"
             >
               <BattleActions />
+              {error && (
+                <ErrorMessage
+                  message={error}
+                  className={`p-4 rounded-md mt-3 text-sm ${
+                    error.startsWith('❌') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                  }`}
+                />
+              )}
             </CollapsibleSection>
 
             <CollapsibleSection
