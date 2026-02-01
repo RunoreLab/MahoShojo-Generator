@@ -747,6 +747,17 @@ const applyMagicalMeta = (questions: QuestionnaireQuestion[]): QuestionnaireQues
 export const normalizeUserAnswers = (userAnswers: unknown, fallbackQuestions: string[] = []): QuestionnaireAnswerItem[] => {
   if (!userAnswers) return [];
 
+  const coerceAnswerText = (value: unknown): string => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
+
   if (Array.isArray(userAnswers)) {
     const normalizedArray = userAnswers.map((item, index) => {
       if (typeof item === 'string') {
@@ -755,7 +766,7 @@ export const normalizeUserAnswers = (userAnswers: unknown, fallbackQuestions: st
       }
       if (item && typeof item === 'object') {
         const record = item as Record<string, unknown>;
-        const answer = typeof record.answer === 'string' ? record.answer : '';
+        const answer = coerceAnswerText(record.answer ?? record.value ?? '');
         const question = typeof record.question === 'string'
           ? record.question
           : fallbackQuestions[index] || `问题 ${index + 1}`;
@@ -779,7 +790,7 @@ export const normalizeUserAnswers = (userAnswers: unknown, fallbackQuestions: st
       .map(([key, value]) => {
         if (value && typeof value === 'object') {
           const record = value as Record<string, unknown>;
-          const answer = typeof record.answer === 'string' ? record.answer : '';
+          const answer = coerceAnswerText(record.answer ?? record.value ?? '');
           const question = typeof record.question === 'string' ? record.question : key;
           return {
             question,
@@ -789,7 +800,7 @@ export const normalizeUserAnswers = (userAnswers: unknown, fallbackQuestions: st
             questionnaireTitle: typeof record.questionnaireTitle === 'string' ? record.questionnaireTitle : undefined,
           };
         }
-        const answerText = typeof value === 'string' ? value : JSON.stringify(value);
+        const answerText = coerceAnswerText(value);
         return { question: key, answer: answerText };
       })
       .filter((item) => item.answer.trim().length > 0);

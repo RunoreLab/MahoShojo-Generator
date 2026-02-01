@@ -1376,8 +1376,8 @@ const DetailsPage: React.FC = () => {
     label: item.questionnaireTitle ? `${item.questionnaireTitle} · ${item.question.question}` : item.question.question
   }));
   const progressPercent = Math.round(((currentQuestionIndex + 1) / mergedQuestions.length) * 100);
-  const fallbackQuickOptions = ['还没想好', '不想回答'];
-  const suggestionPool = quickSuggestions.filter(Boolean);
+  const fallbackQuickOptions = allowCustomInput ? ['还没想好', '不想回答'] : [];
+  const suggestionPool = showTextInput ? quickSuggestions.filter(Boolean) : [];
   const nextButtonLabel = isCooldown
     ? `请等待 ${remainingTime} 秒`
     : submitting
@@ -1606,24 +1606,30 @@ const DetailsPage: React.FC = () => {
                     {!isCurrentRequired && (
                       <p className="mt-2 text-xs text-pink-500 text-center">本题可跳过，不作答将不会记录</p>
                     )}
-                    <div className="mt-3 flex flex-wrap justify-center gap-3 text-xs">
-                      {fallbackQuickOptions.map(option => (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => handleQuickOption(option)}
-                          disabled={submitting || isTransitioning || isCooldown}
-                          className="rounded-full border border-pink-200 bg-white px-4 py-1.5 font-medium text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50"
-                        >
-                          {option}
-                        </button>
-                      ))}
-                    </div>
+                    {fallbackQuickOptions.length > 0 && (
+                      <div className="mt-3 flex flex-wrap justify-center gap-3 text-xs">
+                        {fallbackQuickOptions.map(option => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => handleQuickOption(option)}
+                            disabled={submitting || isTransitioning || isCooldown}
+                            className="rounded-full border border-pink-200 bg-white px-4 py-1.5 font-medium text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50"
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {hasOptions && (
                     <div className="rounded-2xl border border-pink-100 bg-white p-4 shadow-sm">
-                      <p className="text-xs text-gray-500 mb-2">推荐选项（点击后自动跳转下一题，也可继续补充文本）</p>
+                      <p className="text-xs text-gray-500 mb-2">
+                        {allowCustomInput
+                          ? '推荐选项（点击后自动跳转下一题，也可继续补充文本）'
+                          : '推荐选项（点击后自动跳转下一题，本题仅可从选项中选择）'}
+                      </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {currentQuestion?.options?.map((option, index) => {
                           const value = typeof option === 'string' ? option : option.value;

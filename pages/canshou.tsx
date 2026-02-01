@@ -843,6 +843,10 @@ const CanshouPage: React.FC = () => {
     proceedToNextQuestion(nextAnswers);
   };
 
+  const handleSuggestionFill = (value: string) => {
+    handleCurrentAnswerChange(value);
+  };
+
   const resignDataCard = useCallback(async (data: any) => {
     const response = await fetch('/api/resign-data', {
       method: 'POST',
@@ -1166,6 +1170,7 @@ const CanshouPage: React.FC = () => {
   const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
   const showTextInput = allowCustomInput || !hasOptions;
   const fallbackQuickOptions = allowCustomInput ? ['记录未知', '稍后补充'] : [];
+  const suggestionPool = showTextInput ? (currentQuestion?.suggestions ?? []).filter(Boolean) : [];
   const nextButtonLabel = isCooldown
     ? `冷却中 (${remainingTime}s)`
     : submitting
@@ -1383,7 +1388,11 @@ const CanshouPage: React.FC = () => {
 
                   {hasOptions && (
                     <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4 shadow-sm">
-                      <p className="text-xs text-slate-400 mb-3">推荐选项（点击后将自动进入下一题，可在下方补充）</p>
+                      <p className="text-xs text-slate-400 mb-3">
+                        {allowCustomInput
+                          ? '推荐选项（点击后将自动进入下一题，可在下方补充）'
+                          : '推荐选项（点击后将自动进入下一题，本题仅可从选项中选择）'}
+                      </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {currentQuestion?.options?.map((option, index) => {
                           const value = typeof option === 'string' ? option : option.value;
@@ -1403,6 +1412,24 @@ const CanshouPage: React.FC = () => {
                             </button>
                           );
                         })}
+                      </div>
+                    </div>
+                  )}
+
+                  {suggestionPool.length > 0 && (
+                    <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-3 shadow-sm">
+                      <p className="text-xs text-slate-400 mb-2">灵感提示（点击将内容填入文本框，可再编辑）</p>
+                      <div className="flex flex-wrap gap-2">
+                        {suggestionPool.map((suggestion) => (
+                          <button
+                            key={suggestion}
+                            type="button"
+                            onClick={() => handleSuggestionFill(suggestion)}
+                            className="rounded-full border border-slate-600 bg-slate-900 px-3 py-1.5 text-xs text-emerald-200 transition-colors hover:border-emerald-400 hover:text-emerald-100"
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}
