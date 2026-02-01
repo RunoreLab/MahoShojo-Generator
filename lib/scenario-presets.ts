@@ -30,7 +30,7 @@ export const SCENARIO_PRESET_LIST: ScenarioPreset[] = [
   {
     title: '拳愿八角笼：原始搏斗竞技',
     description: '【战斗】擂台锦标赛风格，强调肉搏与读招推测；高难度、牺牲风险。',
-    filename: 'S04_kengan_gold_tournament.json',
+    filename: 'S04_kengan_gold_tournament_v3.json',
     template: 'scenario',
   },
   {
@@ -55,6 +55,30 @@ export const SCENARIO_PRESET_LIST: ScenarioPreset[] = [
     title: 'A[LI]CE_MSG角色卡评价与创作指导-日常篇',
     description: '【创作者工具】非 RP，用于角色卡评价/创作指导。',
     filename: 'S08_alice_msg_review_daily.json',
+    template: 'scenario',
+  },
+  {
+    title: '安可的番剧鉴赏会',
+    description: '【日常】角色档案鉴赏 + 番剧/特摄定位，最终输出鉴定报告与吐槽。',
+    filename: 'S09_anko_anime_review_v3.json',
+    template: 'scenario',
+  },
+  {
+    title: '不变身魔法少女的日常直播 版本3.1',
+    description: '【日常】直播经营与成长循环，含阶段/目标/健康等系统化规则。',
+    filename: 'S10_everyday_streaming_v3_1.json',
+    template: 'scenario',
+  },
+  {
+    title: '朝生暮死，岂知晦朔',
+    description: '【BOSS战】“绝对公平”的残酷模拟训练；五章制推进并生成后日谈。',
+    filename: 'S11_mayfly_bossfight_v1.json',
+    template: 'scenario',
+  },
+  {
+    title: '元对话：与系统核心的质询',
+    description: '【工具】系统核心元对话（Q/A 档案式），适合设定研讨与安全协议质询。',
+    filename: 'S12_system_core_meta_dialogue_v4_2.json',
     template: 'scenario',
   },
 ];
