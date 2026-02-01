@@ -147,33 +147,6 @@ const resolveAnswerItems = (
   return resolvedItems;
 };
 
-const validateAnswerLengths = (items: QuestionnaireAnswerItem[], questionnaires: RequestQuestionnaire[]): string | null => {
-  if (items.length === 0) return null;
-  const lookup = buildQuestionLookup(questionnaires);
-  for (const [index, item] of items.entries()) {
-    if (!item.answer) continue;
-    let resolved = null as (RequestQuestion & { questionnaireId: string; questionnaireTitle: string }) | null;
-    if (item.questionnaireId && item.questionId) {
-      resolved = lookup.byCompositeId.get(`${item.questionnaireId}::${item.questionId}`) ?? null;
-    }
-    if (!resolved && item.questionId) {
-      resolved = lookup.byId.get(item.questionId) ?? null;
-    }
-    if (!resolved && item.question) {
-      resolved = lookup.byQuestion.get(item.question.trim()) ?? null;
-    }
-    if (!resolved && lookup.ordered[index]) {
-      resolved = lookup.ordered[index];
-    }
-    const maxLength = resolved?.maxLength;
-    if (typeof maxLength === 'number' && maxLength > 0 && item.answer.length > maxLength) {
-      const questionLabel = resolved?.question || item.question || `问题 ${index + 1}`;
-      return `答案字数超过限制（${questionLabel} 最多 ${maxLength} 字）`;
-    }
-  }
-  return null;
-};
-
 async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -191,14 +164,6 @@ async function handler(req: NextRequest): Promise<Response> {
 
     if (normalizedAnswers.length === 0) {
       return new Response(JSON.stringify({ error: 'Answers array is required' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    const lengthError = validateAnswerLengths(normalizedAnswers, questionnaires);
-    if (lengthError) {
-      return new Response(JSON.stringify({ error: lengthError }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });

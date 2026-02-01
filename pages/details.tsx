@@ -15,8 +15,11 @@ import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
 import {
   buildQuestionKey,
+  buildQuestionnaireFlow,
+  formatQuestionnaireAnswers,
   normalizeQuestionnaireDefinition,
   normalizeUserAnswers,
+  resolveQuestionnaireReferences,
   type QuestionnaireAnswerItem,
   type QuestionnaireDefinition,
   type QuestionnairePresetEntry,
@@ -28,10 +31,12 @@ import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
+import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 
 type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -200,6 +205,7 @@ const DetailsPage: React.FC = () => {
   const [answersByKey, setAnswersByKey] = useState<Record<string, string>>({});
   const [selectionReady, setSelectionReady] = useState(false);
   const draftRestoredRef = useRef(false);
+  const currentQuestionKeyRef = useRef<string | null>(null);
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
   const [questionnairePickerTab, setQuestionnairePickerTab] = useState<'public' | 'private'>('public');
@@ -242,7 +248,7 @@ const DetailsPage: React.FC = () => {
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
   const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600'}`;
 
-  const mergedQuestions = useMemo<QuestionnaireContextItem[]>(() => {
+  const questionnaireItems = useMemo<QuestionnaireContextItem[]>(() => {
     return selectedQuestionnaires.flatMap((selection) =>
       selection.questionnaire.questions.map((question, index) => ({
         key: buildQuestionKey(selection.questionnaire.id, question.id, index),
@@ -253,6 +259,21 @@ const DetailsPage: React.FC = () => {
       }))
     );
   }, [selectedQuestionnaires]);
+
+  const resolvedQuestionItems = useMemo(
+    () => resolveQuestionnaireReferences(questionnaireItems),
+    [questionnaireItems]
+  );
+
+  const getQuestionnaireFlow = useCallback(
+    (answers: Record<string, string>) => buildQuestionnaireFlow(resolvedQuestionItems, answers),
+    [resolvedQuestionItems]
+  );
+
+  const {
+    flow: mergedQuestions,
+    indexByKey: mergedQuestionIndexByKey,
+  } = useMemo(() => getQuestionnaireFlow(answersByKey), [answersByKey, getQuestionnaireFlow]);
 
   const answerItems = useMemo<QuestionnaireAnswerItem[]>(() => {
     const items: QuestionnaireAnswerItem[] = [];
@@ -271,10 +292,34 @@ const DetailsPage: React.FC = () => {
     return items;
   }, [mergedQuestions, answersByKey]);
 
-  const allowNativeSignature = useMemo(() => {
+  const buildOverLimitItems = useCallback((answers: Record<string, string>) => {
+    return mergedQuestions.flatMap((item) => {
+      const raw = answers[item.key];
+      const answer = typeof raw === 'string' ? raw.trim() : '';
+      if (!answer) return [];
+      if (!isAnswerOverLimit(answer, item.question.maxLength ?? null)) return [];
+      const limitInfo = getAnswerLimitInfo(item.question.maxLength ?? null);
+      if (!limitInfo.limit) return [];
+      return [{
+        key: item.key,
+        question: item.question.question,
+        questionnaireTitle: item.questionnaireTitle,
+        limit: limitInfo.limit,
+        source: limitInfo.source,
+        length: answer.length,
+      }];
+    });
+  }, [mergedQuestions]);
+
+  const overLimitItems = useMemo(() => buildOverLimitItems(answersByKey), [answersByKey, buildOverLimitItems]);
+  const hasOverLimitAnswer = overLimitItems.length > 0;
+
+  const isQuestionnaireNativeAllowed = useMemo(() => {
     if (selectedQuestionnaires.length === 0) return false;
     return selectedQuestionnaires.every((selection) => selection.questionnaire.nativeAllowed === true);
   }, [selectedQuestionnaires]);
+
+  const tokenEstimateText = useMemo(() => formatQuestionnaireAnswers(answerItems), [answerItems]);
 
   const shouldDisableRemove = selectedQuestionnaires.length <= 1;
 
@@ -282,13 +327,13 @@ const DetailsPage: React.FC = () => {
     if (!magicalGirlDetails) return null;
     const serverAnswers = normalizeUserAnswers(
       magicalGirlDetails.userAnswers,
-      mergedQuestions.map((item) => item.question.question)
+      questionnaireItems.map((item) => item.question.question)
     );
     return {
       ...magicalGirlDetails,
       userAnswers: serverAnswers.length > 0 ? serverAnswers : answerItems,
     };
-  }, [magicalGirlDetails, answerItems, mergedQuestions]);
+  }, [magicalGirlDetails, answerItems, questionnaireItems]);
 
   const streamedGeneralCardForDisplay = useMemo(() => {
     if (generationMode !== 'stream') return null;
@@ -444,10 +489,28 @@ const DetailsPage: React.FC = () => {
   }, [allowMultipleQuestionnaires, selectedQuestionnaires]);
 
   useEffect(() => {
-    if (currentQuestionIndex >= mergedQuestions.length) {
+    if (mergedQuestions.length === 0) {
+      currentQuestionKeyRef.current = null;
+      return;
+    }
+    const previousKey = currentQuestionKeyRef.current;
+    if (!previousKey) {
+      if (currentQuestionIndex !== 0) setCurrentQuestionIndex(0);
+      return;
+    }
+    const nextIndex = mergedQuestionIndexByKey.get(previousKey);
+    if (typeof nextIndex === 'number' && nextIndex !== currentQuestionIndex) {
+      setCurrentQuestionIndex(nextIndex);
+      return;
+    }
+    if (nextIndex === undefined && currentQuestionIndex !== 0) {
       setCurrentQuestionIndex(0);
     }
-  }, [currentQuestionIndex, mergedQuestions.length]);
+  }, [mergedQuestions, mergedQuestionIndexByKey, currentQuestionIndex]);
+
+  useEffect(() => {
+    currentQuestionKeyRef.current = mergedQuestions[currentQuestionIndex]?.key ?? null;
+  }, [mergedQuestions, currentQuestionIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -785,12 +848,6 @@ const DetailsPage: React.FC = () => {
       return;
     }
 
-    const maxLength = item.question.maxLength;
-    if (normalizedAnswer.length > 0 && typeof maxLength === 'number' && maxLength > 0 && normalizedAnswer.length > maxLength) {
-      setError(`⚠️ 答案不能超过${maxLength}字`);
-      return;
-    }
-
     const nextAnswers = commitAnswerSnapshot(currentAnswer);
     setAnswersByKey(nextAnswers);
     setError(null);
@@ -804,8 +861,9 @@ const DetailsPage: React.FC = () => {
     setAnswersByKey(nextAnswers);
 
     const prevIndex = currentQuestionIndex - 1;
-    setCurrentQuestionIndex(prevIndex);
     const prevKey = mergedQuestions[prevIndex]?.key;
+    currentQuestionKeyRef.current = prevKey ?? null;
+    setCurrentQuestionIndex(prevIndex);
     setCurrentAnswer(prevKey ? nextAnswers[prevKey] || '' : '');
     setError(null);
   };
@@ -824,6 +882,7 @@ const DetailsPage: React.FC = () => {
     setAnswersByKey(nextAnswers);
     setCurrentQuestionIndex(index);
     const nextKey = mergedQuestions[index]?.key;
+    currentQuestionKeyRef.current = nextKey ?? null;
     setCurrentAnswer(nextKey ? nextAnswers[nextKey] || '' : '');
     setError(null);
   };
@@ -833,22 +892,28 @@ const DetailsPage: React.FC = () => {
   };
 
   const proceedToNextQuestion = (nextAnswers: Record<string, string>) => {
-    if (currentQuestionIndex < mergedQuestions.length - 1) {
+    const currentKey = mergedQuestions[currentQuestionIndex]?.key;
+    const { flow: nextFlow, indexByKey: nextIndexByKey } = getQuestionnaireFlow(nextAnswers);
+    const currentFlowIndex = currentKey ? (nextIndexByKey.get(currentKey) ?? -1) : -1;
+    const nextIndex = currentFlowIndex + 1;
+
+    if (nextIndex >= 0 && nextIndex < nextFlow.length) {
       setIsTransitioning(true);
 
       setTimeout(() => {
-        const nextIndex = currentQuestionIndex + 1;
+        const nextKey = nextFlow[nextIndex]?.key ?? null;
+        currentQuestionKeyRef.current = nextKey;
         setCurrentQuestionIndex(nextIndex);
-        const nextKey = mergedQuestions[nextIndex]?.key;
         setCurrentAnswer(nextKey ? nextAnswers[nextKey] || '' : '');
 
         setTimeout(() => {
           setIsTransitioning(false);
         }, 50);
       }, 250);
-    } else {
-      handleSubmit(nextAnswers);
+      return;
     }
+
+    handleSubmit(nextAnswers);
   };
 
   const redirectToArrested = useCallback((reason?: string, withBackup?: boolean) => {
@@ -967,16 +1032,12 @@ const DetailsPage: React.FC = () => {
         ignoredCount += 1;
         return;
       }
-      const maxLength = item.question.maxLength;
       const trimmed = entry.value.trim();
       if (!trimmed) {
         ignoredCount += 1;
         return;
       }
-      const finalValue = typeof maxLength === 'number' && maxLength > 0
-        ? entry.value.slice(0, maxLength)
-        : entry.value;
-      nextAnswers[item.key] = finalValue;
+      nextAnswers[item.key] = entry.value;
       appliedCount += 1;
     });
     setAnswersByKey(nextAnswers);
@@ -1024,6 +1085,9 @@ const DetailsPage: React.FC = () => {
       return;
     }
 
+    const overLimitForSubmit = buildOverLimitItems(snapshot);
+    const allowNativeSignatureForSubmit = isQuestionnaireNativeAllowed && overLimitForSubmit.length === 0;
+
     setSubmitting(true);
     setError(null);
     setMagicalGirlDetails(null);
@@ -1066,9 +1130,9 @@ const DetailsPage: React.FC = () => {
               question: question.question,
               required: question.required !== false,
               maxLength: question.maxLength ?? null,
-            })),
           })),
-          allowNativeSignature: allowNativeSignature,
+        })),
+          allowNativeSignature: allowNativeSignatureForSubmit,
           language: selectedLanguage,
           customProvider: customProviderPayload,
         }),
@@ -1128,7 +1192,7 @@ const DetailsPage: React.FC = () => {
           ...card,
           userAnswers: finalAnswerItems,
         };
-        if (!allowNativeSignature) {
+        if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);
           setError(null);
           return;
@@ -1266,7 +1330,7 @@ const DetailsPage: React.FC = () => {
     );
   }
 
-  if (mergedQuestions.length === 0) {
+  if (resolvedQuestionItems.length === 0) {
     return (
       <div className="magic-background">
         <div className="container">
@@ -1277,12 +1341,31 @@ const DetailsPage: React.FC = () => {
       </div>
     );
   }
+  if (mergedQuestions.length === 0) {
+    return (
+      <div className="magic-background">
+        <div className="container">
+          <div className="card">
+            <div className="error-message">当前没有可作答的题目，请检查问卷条件设置</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const isLastQuestion = currentQuestionIndex === mergedQuestions.length - 1;
   const currentQuestionItem = mergedQuestions[currentQuestionIndex];
   const currentQuestion = currentQuestionItem?.question;
   const currentQuestionnaireTitle = currentQuestionItem?.questionnaireTitle ?? '';
-  const currentMaxLength = typeof currentQuestion?.maxLength === 'number' && currentQuestion.maxLength > 0 ? currentQuestion.maxLength : null;
+  const currentLimitInfo = getAnswerLimitInfo(currentQuestion?.maxLength ?? null);
+  const currentMaxLength = currentLimitInfo.limit;
+  const currentAnswerLength = currentAnswer.trim().length;
+  const isCurrentOverLimit = Boolean(currentMaxLength && currentAnswerLength > currentMaxLength);
+  const currentLimitLabel = currentLimitInfo.source === 'question'
+    ? `题目上限 ${currentMaxLength} 字`
+    : currentLimitInfo.source === 'global'
+      ? `原生统一上限 ${currentMaxLength} 字`
+      : '不限';
   const quickSuggestions = currentQuestion?.suggestions ?? [];
   const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
   const allowCustomInput = currentQuestion?.allowCustom !== false;
@@ -1416,8 +1499,11 @@ const DetailsPage: React.FC = () => {
                           />
                           允许同时回答多份问卷
                         </label>
-                        {!allowNativeSignature && (
+                        {!isQuestionnaireNativeAllowed && (
                           <span className="text-rose-500">提示：当前问卷未获得原生许可，生成结果将不具备原生性。</span>
+                        )}
+                        {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
+                          <span className="text-amber-600">提示：已有答案超过字数上限（原生统一上限 {QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS} 字），生成结果将不具备原生性。</span>
                         )}
                       </div>
                       <div className="space-y-2">
@@ -1586,11 +1672,18 @@ const DetailsPage: React.FC = () => {
                       onChange={(e) => handleCurrentAnswerChange(e.target.value)}
                       placeholder={currentQuestion?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
                       className="input-field min-h-[6rem] resize-y"
-                      maxLength={currentMaxLength ?? undefined}
                     />
-                    <div className="mt-1 text-right text-xs text-gray-500">
-                      {currentAnswer.length}/{currentMaxLength ?? '不限'}
+                    <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
+                      <span>有效字数：{currentAnswerLength}/{currentMaxLength ?? '不限'}</span>
+                      {currentLimitInfo.source !== 'none' && currentMaxLength ? (
+                        <span className="text-[11px] text-gray-400">{currentLimitLabel}</span>
+                      ) : null}
                     </div>
+                    {isCurrentOverLimit && (
+                      <div className="mt-1 text-right text-xs text-amber-600">
+                        ⚠️ 已超过{currentLimitLabel}，继续提交将导致生成内容丧失原生性。
+                      </div>
+                    )}
                   </div>
                 )}
                 {!showTextInput && (
@@ -1617,6 +1710,11 @@ const DetailsPage: React.FC = () => {
                     ) : nextButtonLabel}
                   </button>
                 </div>
+
+                <TokenIndicator
+                  text={tokenEstimateText}
+                  warningText="⚠️ 预计问卷回答较长，可能更易超时/失败。可尝试精简答案或减少问卷数量。"
+                />
 
                 {/* 多语言支持 */}
                 <div className="my-4 bg-gray-100 rounded-lg p-3">
@@ -1732,6 +1830,11 @@ const DetailsPage: React.FC = () => {
                 {/* 错误信息显示 */}
                 {error && (
                   <ErrorMessage message={error} />
+                )}
+                {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+                    ⚠️ 已有 {overLimitItems.length} 条答案超过字数上限，继续提交将导致生成内容丧失原生性。
+                  </div>
                 )}
 
                 {/* 复制已填写内容 */}

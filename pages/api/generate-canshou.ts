@@ -9,6 +9,7 @@ import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
+import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 
 const log = getLogger('api-gen-canshou');
 
@@ -165,7 +166,10 @@ const resolveAnswerItems = (
   return resolvedItems;
 };
 
-const validateAnswerLengths = (items: QuestionnaireAnswerItem[], questionnaires: RequestQuestionnaire[]): string | null => {
+const findOverLimitAnswer = (
+  items: QuestionnaireAnswerItem[],
+  questionnaires: RequestQuestionnaire[]
+) => {
   if (items.length === 0) return null;
   const lookup = buildQuestionLookup(questionnaires);
   for (const [index, item] of items.entries()) {
@@ -183,11 +187,15 @@ const validateAnswerLengths = (items: QuestionnaireAnswerItem[], questionnaires:
     if (!resolved && lookup.ordered[index]) {
       resolved = lookup.ordered[index];
     }
-    const maxLength = resolved?.maxLength;
-    if (typeof maxLength === 'number' && maxLength > 0 && item.answer.length > maxLength) {
-      const questionLabel = resolved?.question || item.question || `问题 ${index + 1}`;
-      return `答案字数超过限制（${questionLabel} 最多 ${maxLength} 字）`;
-    }
+    if (!isAnswerOverLimit(item.answer, resolved?.maxLength ?? null)) continue;
+    const limitInfo = getAnswerLimitInfo(resolved?.maxLength ?? null);
+    const questionLabel = resolved?.question || item.question || `问题 ${index + 1}`;
+    return {
+      questionLabel,
+      limit: limitInfo.limit ?? 0,
+      length: item.answer.length,
+      source: limitInfo.source,
+    };
   }
   return null;
 };
@@ -219,7 +227,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
   try {
     const parsedBody = await req.json();
-    const { answers: rawAnswers, questionnaires: rawQuestionnaires, allowNativeSignature, language = 'zh-CN', customProvider: customProviderPayload } = parsedBody;
+    const { answers: rawAnswers, questionnaires: rawQuestionnaires, allowNativeSignature: requestedNativeSignature, language = 'zh-CN', customProvider: customProviderPayload } = parsedBody;
 
     const questionnaires = normalizeQuestionnaires(rawQuestionnaires);
     const normalizedAnswers = resolveAnswerItems(rawAnswers, questionnaires);
@@ -231,12 +239,10 @@ async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    const lengthError = validateAnswerLengths(normalizedAnswers, questionnaires);
-    if (lengthError) {
-      return new Response(JSON.stringify({ error: lengthError }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
+    const overLimitAnswer = findOverLimitAnswer(normalizedAnswers, questionnaires);
+    const allowNativeSignature = requestedNativeSignature === true && !overLimitAnswer;
+    if (overLimitAnswer) {
+      log.info('问卷答案超过字数上限，已取消原生签名', overLimitAnswer);
     }
 
 	    // 安全检查：检查用户输入是否包含敏感词
