@@ -8,8 +8,10 @@ import { useQuery } from '@tanstack/react-query';
 import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { getArenaApproxRankLabel, getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
 import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
+import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
 import { buildTitleDisplay } from '@/lib/text';
 
 type Queue = 'strict' | 'free';
@@ -83,6 +85,17 @@ const normalizeFilters = (filters: RankingFilters): RankingFilters => ({
 
 const filtersKey = (filters: RankingFilters) => JSON.stringify(filters);
 
+const formatBattleModeLabel = (mode: string): string => {
+  const normalized = mode.trim();
+  const map: Record<string, string> = {
+    classic: '经典',
+    scenario: '情景',
+    daily: '日常',
+    kizuna: '羁绊',
+  };
+  return map[normalized] ?? normalized;
+};
+
 export function RankingPage() {
   const [draftFilters, setDraftFilters] = useState<RankingFilters>(defaultFilters);
   const [appliedFilters, setAppliedFilters] = useState<RankingFilters>(defaultFilters);
@@ -141,6 +154,12 @@ export function RankingPage() {
   const isHistoryMode = selectedSeason?.status === 'history';
   const [historyQueue, setHistoryQueue] = useState<Queue>('strict');
   const [historySection, setHistorySection] = useState<'top' | 'bottom'>('top');
+
+  const selectedSeasonScenarioPreset = useMemo(() => {
+    const filename = selectedSeason?.specialRules?.scenarioPresetFilename;
+    if (typeof filename !== 'string' || !filename.trim()) return null;
+    return getScenarioPresetByFilename(filename);
+  }, [selectedSeason?.specialRules?.scenarioPresetFilename]);
 
   const archiveQuery = useQuery({
     queryKey: ['seasonArchive', selectedSeasonId],
@@ -302,6 +321,37 @@ export function RankingPage() {
     return historySection === 'bottom' ? board.bottom : board.top;
   }, [archiveQuery.data, historyQueue, historySection, isHistoryMode, leaderboardQuery.data?.items]);
 
+  const isCanonicalPublicQuery = useMemo(() => {
+    if (isHistoryMode) return false;
+    return isCanonicalPublicLeaderboardQuery({
+      sort: appliedFilters.sort,
+      order: appliedFilters.order,
+      includePresets: appliedFilters.includePresets,
+      isNative: appliedFilters.isNative,
+      includeTagIds: appliedFilters.includeTagIds,
+      excludeTagIds: appliedFilters.excludeTagIds,
+      minRating: appliedFilters.minRating,
+      maxRating: appliedFilters.maxRating,
+      minGames: appliedFilters.minGames,
+      maxGames: appliedFilters.maxGames,
+      minTechScore: appliedFilters.minTechScore,
+      maxTechScore: appliedFilters.maxTechScore,
+    });
+  }, [appliedFilters, isHistoryMode]);
+
+  useEffect(() => {
+    if (isHistoryMode) return;
+    const list = leaderboardQuery.data?.items;
+    if (!Array.isArray(list) || list.length === 0) return;
+    if (!isCanonicalPublicQuery) return;
+
+    upsertArenaRankCacheFromLeaderboard({
+      queue: appliedFilters.queue,
+      items: list,
+      maxRankSeen: offset + list.length,
+    });
+  }, [appliedFilters.queue, isCanonicalPublicQuery, isHistoryMode, leaderboardQuery.data?.items, offset]);
+
   useEffect(() => {
     setSearchResults(null);
     setSearchError(null);
@@ -405,7 +455,8 @@ export function RankingPage() {
         setSearchError(data.error ?? '搜索失败');
         return;
       }
-      setSearchResults(Array.isArray(data.items) ? data.items : []);
+      const nextItems = Array.isArray(data.items) ? data.items : [];
+      setSearchResults(nextItems);
     } catch (err) {
       setSearchResults([]);
       setSearchError(String(err));
@@ -418,11 +469,33 @@ export function RankingPage() {
     const rowKey = `${item.entityType}:${item.entityId}`;
     setFocusRowKey(rowKey);
 
-    if (!isHistoryMode) {
-      const rank = typeof item.rank === 'number' ? item.rank : 0;
-      const targetOffset = rank > 0 ? Math.floor((rank - 1) / limit) * limit : 0;
+    if (isHistoryMode) return;
+
+    const rankFromItem = typeof item.rank === 'number' && Number.isFinite(item.rank) ? Math.floor(item.rank) : 0;
+    const cachedRank = rankFromItem > 0 || !isCanonicalPublicQuery
+      ? null
+      : getArenaCachedRank({
+        queue: appliedFilters.queue,
+        entityType: item.entityType,
+        entityId: item.entityId,
+      });
+    const rank = rankFromItem > 0 ? rankFromItem : cachedRank ?? 0;
+
+    if (rank > 0) {
+      const targetOffset = Math.floor((rank - 1) / limit) * limit;
       setOffset(targetOffset);
+      return;
     }
+
+    const winRate = item.games > 0 ? Math.round((item.wins / item.games) * 1000) / 10 : null;
+    const detailsNotice = `搜索结果：段位 ${item.tier} · 分 ${item.rating} · 局 ${item.games} · W/L/D ${item.wins}/${item.losses}/${item.draws}${winRate == null ? '' : ` · 胜率 ${winRate}%`}`;
+    setDetailsEntity({
+      entityType: item.entityType,
+      entityId: item.entityId,
+      displayName: item.displayName,
+      authorName: item.authorName ?? null,
+      pendingNotice: detailsNotice,
+    });
   };
 
   const listIsLoading = isHistoryMode ? archiveQuery.isLoading : leaderboardQuery.isLoading;
@@ -512,6 +585,59 @@ export function RankingPage() {
                       </span>
                     </div>
                     <div className="mt-1 text-xs text-gray-500">{selectedSeason.description}</div>
+                    <div className="mt-2 border-t border-gray-200/70 pt-2 text-xs text-gray-600">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-gray-800">特殊规则</span>
+                        {!selectedSeason.specialRules ||
+                        typeof selectedSeason.specialRules !== 'object' ||
+                        Object.keys(selectedSeason.specialRules).length === 0 ? (
+                          <span className="text-gray-500">无</span>
+                        ) : null}
+                      </div>
+                      {selectedSeason.specialRules && typeof selectedSeason.specialRules === 'object' ? (
+                        <div className="mt-1 grid gap-1">
+                          {typeof selectedSeason.specialRules.mode === 'string' && selectedSeason.specialRules.mode.trim() ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-gray-500">指定模式</span>
+                              <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-gray-800 ring-1 ring-gray-200">
+                                {formatBattleModeLabel(selectedSeason.specialRules.mode)}
+                              </span>
+                            </div>
+                          ) : null}
+
+                          {typeof selectedSeason.specialRules.scenarioPresetFilename === 'string' &&
+                          selectedSeason.specialRules.scenarioPresetFilename.trim() ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-gray-500">预设情景</span>
+                              <Link
+                                href={`/scenario-presets/${encodeURIComponent(
+                                  selectedSeasonScenarioPreset?.filename ?? selectedSeason.specialRules.scenarioPresetFilename.trim(),
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-gray-800 ring-1 ring-gray-200 hover:bg-gray-50"
+                                title="打开预设情景"
+                              >
+                                {selectedSeasonScenarioPreset?.title ?? selectedSeason.specialRules.scenarioPresetFilename.trim()}
+                                <span className="text-gray-400">↗</span>
+                              </Link>
+                            </div>
+                          ) : null}
+
+                          {typeof selectedSeason.specialRules.storyGuidance === 'string' && selectedSeason.specialRules.storyGuidance.trim() ? (
+                            <details className="group rounded-lg bg-white px-2 py-1 ring-1 ring-gray-200">
+                              <summary className="flex cursor-pointer items-center justify-between gap-2 text-[11px] font-medium text-gray-700 hover:text-gray-900 [&::-webkit-details-marker]:hidden">
+                                <span>赛季故事引导（点开查看）</span>
+                                <span className="text-gray-400 transition-transform group-open:rotate-180">▾</span>
+                              </summary>
+                              <pre className="mt-1 whitespace-pre-wrap break-words text-[11px] text-gray-700">
+                                {selectedSeason.specialRules.storyGuidance.trim()}
+                              </pre>
+                            </details>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 ) : seasonsQuery.isError ? (
                   <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">
@@ -943,7 +1069,7 @@ export function RankingPage() {
                             }
                           }}
                           className="input-field h-9 w-full sm:w-[320px]"
-                          placeholder={isHistoryMode ? '搜索角色名 / 作者 / ID（仅当前列表）' : '搜索角色名 / 作者 / ID（可跳转到全榜位置）'}
+                          placeholder={isHistoryMode ? '搜索角色名 / 作者 / ID（仅当前列表）' : '搜索角色名 / 作者 / ID'}
                           aria-label="排行榜搜索"
                         />
                         <button
@@ -968,7 +1094,7 @@ export function RankingPage() {
                         <span className="text-xs text-gray-500">
                           {isHistoryMode
                             ? '提示：历史赛季榜单只会在当前 Top/Bottom 列表内搜索。'
-                            : '提示：搜索结果会显示该角色在当前筛选条件下的全榜名次，点击即可跳转并高亮定位。'}
+                            : '提示：搜索结果默认不计算全榜名次；若本地已缓存名次，可点击尝试跳转，否则将打开详情。'}
                         </span>
                       </form>
 
@@ -986,6 +1112,12 @@ export function RankingPage() {
                             <div className="grid gap-2">
                               {searchResults.map((item) => {
                                 const author = formatAuthorLabel(item);
+                                const approx = !isHistoryMode && isCanonicalPublicQuery
+                                  ? getArenaApproxRankLabel({ queue: appliedFilters.queue, entityType: item.entityType, entityId: item.entityId })
+                                  : null;
+                                const rankTitle = approx?.title ?? (item.rank > 0 ? `全榜 #${item.rank}` : '名次未计算');
+                                const rankLabel = item.rank > 0 ? `#${item.rank}` : approx?.label ?? '#—';
+                                const canJump = item.rank > 0 || Boolean(approx);
                                 const { display: displayName, full: fullName } = buildTitleDisplay(item.displayName || '未命名');
                                 return (
                                   <button
@@ -996,7 +1128,7 @@ export function RankingPage() {
                                   >
                                     <div className="min-w-0">
                                       <div className="truncate text-sm font-semibold text-gray-900" title={fullName}>
-                                        #{item.rank} · {displayName}
+                                        <span title={rankTitle}>{rankLabel}</span> · {displayName}
                                       </div>
                                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
                                         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
@@ -1008,7 +1140,7 @@ export function RankingPage() {
                                         <span className="hidden md:inline">id：{item.entityId}</span>
                                       </div>
                                     </div>
-                                    <span className="text-xs text-gray-500">点击跳转</span>
+                                    <span className="text-xs text-gray-500">{canJump ? '点击跳转' : '查看详情'}</span>
                                   </button>
                                 );
                               })}

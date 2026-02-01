@@ -1,12 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { authStorage } from '@/lib/auth';
+import { deriveSeasonStrictRules, formatSeasonTitle, getCurrentSeason, type SeasonBattleMode, type SeasonsConfig } from '@/lib/seasons';
+import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
 import { useAuth } from '@/lib/useAuth';
 
+import { useBattleActions } from '../hooks/useBattleActions';
 import { useBattleStore } from '../stores/useBattleStore';
 import type { BattleStoreState, CombatantData } from '../types';
 
@@ -33,9 +37,36 @@ type StrictPreflightResponse =
     }
   | { success: false; error: string };
 
+const fetchJson = async <T,>(url: string): Promise<T> => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as T;
+};
+
+const normalizeStrictStoryGuidance = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed.slice(0, 200);
+};
+
+const formatBattleModeLabel = (mode: SeasonBattleMode): string => {
+  const map: Record<SeasonBattleMode, string> = {
+    classic: '经典',
+    scenario: '情景',
+    daily: '日常',
+    kizuna: '羁绊',
+  };
+  return map[mode] ?? mode;
+};
+
 const buildStrictSetupMissingReasons = (input: {
   isAuthenticated: boolean;
   battleMode: string;
+  requiredMode: SeasonBattleMode;
+  requiredStoryGuidance: string;
+  requiredScenarioPresetFilename: string | null;
+  scenarioFileName: string | null;
   rankableCombatants: CombatantData[];
   userGuidance: string;
   selectedLevel: string;
@@ -50,17 +81,36 @@ const buildStrictSetupMissingReasons = (input: {
 }): string[] => {
   const reasons: string[] = [];
   if (!input.isAuthenticated) reasons.push('需要先登录');
-  if (input.battleMode !== 'classic') reasons.push('模式需为「经典」');
+  if (input.battleMode !== input.requiredMode) reasons.push(`模式需为「${formatBattleModeLabel(input.requiredMode)}」`);
   if (input.rankableCombatants.length <= 0) reasons.push('需先选择 1 位可计分的参战角色（数据卡/预设）');
   if (input.selectedLevel.trim()) reasons.push('等级需为「默认」');
   if (input.selectedLanguage !== 'zh-CN') reasons.push('生成语言需为「简体中文」');
-  if (input.userGuidance.trim()) reasons.push('需清空「故事引导」');
+
+  const actualStoryGuidance = normalizeStrictStoryGuidance(input.userGuidance);
+  if (input.requiredStoryGuidance) {
+    if (actualStoryGuidance !== input.requiredStoryGuidance) {
+      reasons.push('需使用赛季指定的「故事引导」');
+    }
+  } else if (actualStoryGuidance) {
+    reasons.push('需清空「故事引导」');
+  }
+
   if (input.readArenaHistory) reasons.push('需关闭「读取历战」');
   if (input.readCurrentState) reasons.push('需关闭「读取当前状态」');
   if (input.readNarrativeHistory) reasons.push('需关闭「读取叙事历史」');
   if (input.adjudicationEventCount > 0) reasons.push('需清空「随机判定器事件」');
   if (input.rankableCombatants.some((c) => (c.characterGuidance ?? '').trim())) reasons.push('需清空「角色行动引导」');
-  if (input.scenarioEnabled) reasons.push('需关闭「情景模式」');
+
+  if (input.requiredMode === 'scenario') {
+    if (!input.scenarioEnabled) reasons.push('需启用「情景模式」并选择主情景');
+    if (input.requiredScenarioPresetFilename) {
+      const fileName = typeof input.scenarioFileName === 'string' ? input.scenarioFileName.trim() : '';
+      if (fileName !== input.requiredScenarioPresetFilename) reasons.push('需选择赛季指定的「预设情景」');
+    }
+  } else if (input.scenarioEnabled) {
+    reasons.push('需关闭「情景模式」');
+  }
+
   if (input.auxScenarioCount > 0) reasons.push('需移除「辅助情景」');
   if (input.userProviderConfigModelId && isStrictRankedModelBlacklisted(input.userProviderConfigModelId)) {
     reasons.push('需改用支持严格排位计分的 AI 模型');
@@ -104,6 +154,7 @@ const formatStrictReason = (code: string): string => {
   const map: Record<string, string> = {
     'need-login': '需要先登录',
     'mode-not-classic': '需使用「经典模式」',
+    'mode-not-season': '需使用赛季指定模式',
     'combatant-count-not-2': '需 2 人对战',
     'combatants-unrankable': '参战者需为数据卡/预设',
     'strict-card-missing': '数据卡不存在/已删除（严格排位不计分）',
@@ -116,11 +167,16 @@ const formatStrictReason = (code: string): string => {
     'language-not-zh-cn': '生成语言需为「简体中文」',
     'level-not-default': '等级需为「默认」',
     'has-user-guidance': '需清空「故事引导」',
+    'season-user-guidance-missing': '需填写赛季指定「故事引导」',
+    'season-user-guidance-mismatch': '「故事引导」与赛季规则不一致',
     'has-adjudication-events': '需清空「随机判定器事件」',
     'read-arena-history': '需关闭「读取历战」',
     'read-current-state': '需关闭「读取当前状态」',
     'read-narrative-history': '需关闭「读取叙事历史」',
     'has-character-guidance': '需清空「角色行动引导」',
+    'season-scenario-missing': '需选择主情景（赛季规则）',
+    'season-scenario-preset-mismatch': '主情景需为赛季指定预设',
+    'season-aux-scenarios-not-allowed': '需移除「辅助情景」（赛季规则）',
     'daily-limit': '今日严格排位计分次数已达上限（按 UTC 00:00/北京时间 08:00 刷新）',
     'ai-model-blacklisted': '选择了不支持严格排位计分的模型',
   };
@@ -148,6 +204,7 @@ const formatStrictReasonWithDetails = (
 export function RankingQuickActions() {
   const { isAuthenticated } = useAuth();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const { handleScenarioPaste } = useBattleActions();
 
   const battleMode = useBattleSelector((state) => state.battleMode);
   const setBattleMode = useBattleSelector((state) => state.setBattleMode);
@@ -173,6 +230,14 @@ export function RankingQuickActions() {
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const setError = useBattleSelector((state) => state.setError);
 
+  const seasonsQuery = useQuery({
+    queryKey: ['seasonsConfig'],
+    queryFn: () => fetchJson<SeasonsConfig>('/config/seasons.json'),
+    staleTime: 60_000,
+  });
+  const currentSeason = useMemo(() => getCurrentSeason(seasonsQuery.data), [seasonsQuery.data]);
+  const seasonStrictRules = useMemo(() => deriveSeasonStrictRules(currentSeason), [currentSeason]);
+
   const [strictPreflight, setStrictPreflight] = useState<StrictPreflightResponse | null>(null);
   const [isCheckingStrictPreflight, setIsCheckingStrictPreflight] = useState(false);
 
@@ -195,6 +260,10 @@ export function RankingQuickActions() {
       buildStrictSetupMissingReasons({
         isAuthenticated,
         battleMode,
+        requiredMode: seasonStrictRules.mode,
+        requiredStoryGuidance: seasonStrictRules.storyGuidance,
+        requiredScenarioPresetFilename: seasonStrictRules.scenarioPresetFilename,
+        scenarioFileName: typeof scenario.fileName === 'string' ? scenario.fileName : null,
         rankableCombatants,
         userGuidance: settings.userGuidance,
         selectedLevel,
@@ -214,8 +283,12 @@ export function RankingQuickActions() {
       isAuthenticated,
       rankableCombatants,
       scenario.content,
+      scenario.fileName,
       selectedLanguage,
       selectedLevel,
+      seasonStrictRules.mode,
+      seasonStrictRules.scenarioPresetFilename,
+      seasonStrictRules.storyGuidance,
       settings.readArenaHistory,
       settings.readCurrentState,
       settings.readNarrativeHistory,
@@ -224,8 +297,13 @@ export function RankingQuickActions() {
     ],
   );
 
-  const handleApplyStrictSetup = () => {
+  const handleApplyStrictSetup = async () => {
     if (isGenerating) return;
+
+    const seasonLabel = currentSeason ? formatSeasonTitle(currentSeason) : null;
+    const seasonPreset = seasonStrictRules.scenarioPresetFilename
+      ? getScenarioPresetByFilename(seasonStrictRules.scenarioPresetFilename)
+      : null;
 
     const shouldFixBlacklistedModel = Boolean(
       userProviderConfig && userProviderConfig.modelId !== 'default' && isStrictRankedModelBlacklisted(userProviderConfig.modelId),
@@ -262,21 +340,55 @@ export function RankingQuickActions() {
       }
     }
 
-    setBattleMode('classic');
+    setBattleMode(seasonStrictRules.mode);
     setSelectedLevel('');
     setSelectedLanguage('zh-CN');
     updateSettings({
-      userGuidance: '',
+      userGuidance: seasonStrictRules.storyGuidance ? seasonStrictRules.storyGuidance : '',
       readArenaHistory: false,
       readCurrentState: false,
       readNarrativeHistory: false,
     });
     setAdjudicationEvents([]);
     readableCombatants.forEach((c) => updateCombatantCharacterGuidance(c.filename, ''));
-    clearScenario();
+    if (seasonStrictRules.mode !== 'scenario') {
+      clearScenario();
+    }
     clearAuxScenarios();
+
+    let seasonRuleMessage: string | null = null;
+    if (seasonLabel) {
+      const parts: string[] = [];
+      parts.push(`赛季：${seasonLabel}`);
+      if (seasonStrictRules.mode !== 'classic') parts.push(`模式：${formatBattleModeLabel(seasonStrictRules.mode)}`);
+      if (seasonStrictRules.storyGuidance) parts.push('已应用赛季故事引导');
+      if (seasonPreset) parts.push(`预设情景：${seasonPreset.title}`);
+      seasonRuleMessage = parts.length > 0 ? parts.join(' / ') : null;
+    }
+
+    if (seasonStrictRules.mode === 'scenario' && seasonStrictRules.scenarioPresetFilename) {
+      try {
+        const filename = seasonStrictRules.scenarioPresetFilename;
+        const res = await fetch(`/scenario-presets/${encodeURIComponent(filename)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        await handleScenarioPaste(text, { fileName: filename });
+        setAdjudicationEvents([]);
+      } catch (error) {
+        setError(`❌ 无法应用赛季预设情景：${error instanceof Error ? error.message : '未知错误'}`);
+        return;
+      }
+    } else if (seasonStrictRules.mode === 'scenario') {
+      setError('✅ 已切换为情景模式（赛季规则）：请继续选择主情景后再开始排位。');
+      return;
+    }
+
     setError(
-      `✅ 已应用严格排位设置：经典模式 / 默认等级 / 简体中文 / 清空引导 / 关闭读取 / 清空判定与行动引导${modelFixMessage ? ` / ${modelFixMessage}` : ''}`,
+      `✅ 已应用严格排位设置：${formatBattleModeLabel(seasonStrictRules.mode)}模式 / 默认等级 / 简体中文 / ${
+        seasonStrictRules.storyGuidance ? '应用赛季故事引导' : '清空引导'
+      } / 关闭读取 / 清空判定与行动引导${
+        seasonRuleMessage ? ` / ${seasonRuleMessage}` : ''
+      }${modelFixMessage ? ` / ${modelFixMessage}` : ''}`,
     );
   };
 
@@ -298,6 +410,9 @@ export function RankingQuickActions() {
       selectedLevel,
       language: selectedLanguage,
       storyLength,
+      scenarioEnabled: battleMode === 'scenario' && Boolean(scenario.content),
+      scenarioFileName: battleMode === 'scenario' ? scenario.fileName : null,
+      auxScenarioCount: auxScenarios.length,
       settings: {
         userGuidance: settings.userGuidance,
         readArenaHistory: settings.readArenaHistory,
@@ -312,8 +427,11 @@ export function RankingQuickActions() {
     };
   }, [
     adjudicationEvents,
+    auxScenarios.length,
     battleMode,
     combatants,
+    scenario.content,
+    scenario.fileName,
     selectedLanguage,
     selectedLevel,
     settings.readArenaHistory,
@@ -327,11 +445,21 @@ export function RankingQuickActions() {
   const localStrictReasons = useMemo(() => {
     const reasons: string[] = [];
     if (!isAuthenticated) reasons.push('need-login');
-    if (battleMode !== 'classic') reasons.push('mode-not-classic');
+    if (battleMode !== seasonStrictRules.mode) {
+      reasons.push(seasonStrictRules.mode === 'classic' ? 'mode-not-classic' : 'mode-not-season');
+    }
     if (combatants.length !== 2) reasons.push('combatant-count-not-2');
     if (selectedLanguage !== 'zh-CN') reasons.push('language-not-zh-cn');
     if (selectedLevel.trim()) reasons.push('level-not-default');
-    if (settings.userGuidance.trim()) reasons.push('has-user-guidance');
+
+    const actualStoryGuidance = normalizeStrictStoryGuidance(settings.userGuidance);
+    if (seasonStrictRules.storyGuidance) {
+      if (!actualStoryGuidance) reasons.push('season-user-guidance-missing');
+      else if (actualStoryGuidance !== seasonStrictRules.storyGuidance) reasons.push('season-user-guidance-mismatch');
+    } else if (actualStoryGuidance) {
+      reasons.push('has-user-guidance');
+    }
+
     if (settings.readArenaHistory) reasons.push('read-arena-history');
     if (settings.readCurrentState) reasons.push('read-current-state');
     if (settings.readNarrativeHistory) reasons.push('read-narrative-history');
@@ -339,6 +467,15 @@ export function RankingQuickActions() {
     if (readableCombatants.some((c) => (c.characterGuidance ?? '').trim())) reasons.push('has-character-guidance');
     if (userProviderConfig?.modelId && userProviderConfig.modelId !== 'default' && isStrictRankedModelBlacklisted(userProviderConfig.modelId)) {
       reasons.push('ai-model-blacklisted');
+    }
+
+    if (seasonStrictRules.mode === 'scenario') {
+      if (!scenario.content) reasons.push('season-scenario-missing');
+      if (seasonStrictRules.scenarioPresetFilename) {
+        const fileName = typeof scenario.fileName === 'string' ? scenario.fileName.trim() : '';
+        if (fileName !== seasonStrictRules.scenarioPresetFilename) reasons.push('season-scenario-preset-mismatch');
+      }
+      if (auxScenarios.length > 0) reasons.push('season-aux-scenarios-not-allowed');
     }
 
     if (combatants.length === 2) {
@@ -352,12 +489,18 @@ export function RankingQuickActions() {
     return reasons;
   }, [
     adjudicationEvents,
+    auxScenarios.length,
     battleMode,
     combatants.length,
     isAuthenticated,
     readableCombatants,
+    scenario.content,
+    scenario.fileName,
     selectedLanguage,
     selectedLevel,
+    seasonStrictRules.mode,
+    seasonStrictRules.scenarioPresetFilename,
+    seasonStrictRules.storyGuidance,
     settings.readArenaHistory,
     settings.readCurrentState,
     settings.readNarrativeHistory,

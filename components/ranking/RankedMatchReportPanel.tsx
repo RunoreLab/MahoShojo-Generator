@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
+import { upsertArenaRankCacheFromGenerationRanking } from '@/lib/arena/rank-cache';
 
 type Queue = 'strict' | 'free';
 
@@ -14,6 +15,7 @@ type QueueResult = {
   eventStatus: 'missing' | 'pending' | 'applied' | 'skipped' | 'failed';
   skipReason: string | null;
   rating: number | null;
+  games: number | null;
   tier: string | null;
   delta: number | null;
   rank: number | null;
@@ -28,6 +30,8 @@ type GenerationRankingReady = {
   snapshot?: { extraJson?: string | null } | null;
   participants: Array<{
     displayName: string;
+    entityType: 'data_card' | 'preset' | 'unknown';
+    entityId: string | null;
     techScore: number | null;
     techLevel: string | null;
     queues: Record<Queue, QueueResult>;
@@ -54,6 +58,7 @@ const formatIneligibleReasons = (reasons: string[]): string => {
     'combatant-count-not-2': '需 2 人对战',
     'ip-missing': '无法获取 IP',
     'mode-not-classic': '需经典模式',
+    'mode-not-season': '模式不符合赛季规则',
     'need-login': '需登录',
     'need-ranked-match': '需先进行排位匹配',
     'ranked-match-missing': '未进行排位匹配',
@@ -66,6 +71,11 @@ const formatIneligibleReasons = (reasons: string[]): string => {
     'language-not-zh-cn': '需简体中文',
     'level-not-default': '等级非默认',
     'has-user-guidance': '存在故事引导',
+    'season-user-guidance-missing': '缺少赛季故事引导',
+    'season-user-guidance-mismatch': '故事引导不符合赛季规则',
+    'season-scenario-missing': '缺少主情景（赛季规则）',
+    'season-scenario-preset-mismatch': '主情景不是赛季指定预设',
+    'season-aux-scenarios-not-allowed': '存在辅助情景（赛季规则不允许）',
     'has-adjudication-events': '存在随机判定器事件',
     'read-arena-history': '开启读取历战',
     'read-current-state': '开启读取当前状态',
@@ -152,6 +162,33 @@ export function RankedMatchReportPanel({ generationId }: { generationId?: string
       if (timeoutRef.current != null) window.clearTimeout(timeoutRef.current);
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!data || data.success !== true) return;
+    if (data.state !== 'ready') return;
+    if (!Array.isArray(data.participants) || data.participants.length === 0) return;
+
+    upsertArenaRankCacheFromGenerationRanking({
+      participants: data.participants.map((p) => ({
+        entityType: p.entityType,
+        entityId: p.entityId,
+        queues: {
+          strict: {
+            rating: p.queues.strict.rating,
+            games: p.queues.strict.games,
+            tier: p.queues.strict.tier,
+            rank: p.queues.strict.rank,
+          },
+          free: {
+            rating: p.queues.free.rating,
+            games: p.queues.free.games,
+            tier: p.queues.free.tier,
+            rank: p.queues.free.rank,
+          },
+        },
+      })),
+    });
+  }, [data]);
 
   useEffect(() => {
     if (!id) return;

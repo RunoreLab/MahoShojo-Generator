@@ -38,6 +38,8 @@ import {
     compactExtraJson,
     normalizeUsage,
 } from '@/lib/arena/battle-report-log-utils';
+import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
+import { deriveSeasonStrictRules } from '@/lib/seasons';
 import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
@@ -110,6 +112,7 @@ async function handler(req: NextRequest): Promise<Response> {
             storyLength,
             customProvider: customProviderPayload,
             scenarioTitle,
+            scenarioFileName,
             scenarioSourceDataCardId,
 	            scenarioSourceDataCardUpdatedAt,
               pvpContext,
@@ -578,6 +581,18 @@ async function handler(req: NextRequest): Promise<Response> {
             const recordPromise = (async () => {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
                 const usage = await resolvedUsagePromise;
+                const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
+                const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
+
+                const normalizedScenarioFileName = (() => {
+                  if (typeof scenarioFileName !== 'string') return null;
+                  const trimmed = scenarioFileName.trim();
+                  if (!trimmed) return null;
+                  if (trimmed.length > 128) return trimmed.slice(0, 128);
+                  if (trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes('..')) return null;
+                  return trimmed;
+                })();
+                const auxScenarioCount = normalizedAuxScenarios ? normalizedAuxScenarios.length : 0;
 
                 const shieldResult = applyShieldWords(outputPreview);
                 const outputSensitive = appConfig.ENABLE_SENSITIVE_WORD_FILTER
@@ -664,6 +679,12 @@ async function handler(req: NextRequest): Promise<Response> {
 	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
                             arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
                             arenaStrictPolicy: isStrictRankedMatchRequest ? '1+3:v1' : null,
+                            seasonId: typeof currentSeason?.id === 'string' ? currentSeason.id : null,
+                            seasonMode: seasonStrictRules.mode !== 'classic' ? seasonStrictRules.mode : null,
+                            seasonStoryGuidance: seasonStrictRules.storyGuidance || null,
+                            seasonScenarioPreset: seasonStrictRules.scenarioPresetFilename ?? null,
+                            scenarioFileName: normalizedScenarioFileName,
+                            auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                        resolvedModelOverride: usedModelOverride ?? null,
 	                        readNarrativeHistory: resolvedReadNarrativeHistory,
 	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,

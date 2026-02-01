@@ -32,25 +32,13 @@ export function isArenaScepterTier(rating: number, games: number): boolean {
 
 type QueryFromD1 = (sql: string, params?: unknown[]) => Promise<unknown>;
 
-type QueenRow = {
-  scepterCount: unknown;
-  entityType: unknown;
-  entityId: unknown;
-};
-
 const QUEEN_CACHE_TTL_MS = 30_000;
 const queenCache = new Map<ArenaQueue, { value: ArenaEntityRef | null; expiresAt: number }>();
 
-const readSingleRow = <T,>(result: unknown): T | null => {
-  const row = (result as any)?.result?.[0]?.results?.[0];
-  return row ? (row as T) : null;
+const readRows = <T,>(result: unknown): T[] => {
+  const rows = (result as any)?.result?.[0]?.results;
+  return Array.isArray(rows) ? (rows as T[]) : [];
 };
-
-function clampInt(value: unknown): number | null {
-  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
-  if (!Number.isFinite(n)) return null;
-  return Math.max(0, Math.floor(n));
-}
 
 export async function queryArenaPublicQueenEntity(
   queryFromD1: QueryFromD1,
@@ -74,50 +62,36 @@ export async function queryArenaPublicQueenEntity(
       : '';
 
   const sql = `
-    WITH eligible AS (
-      SELECT ar.entity_type AS entityType, ar.entity_id AS entityId, ar.rating AS rating, ar.games AS games, ar.updated_at AS updatedAt
-      FROM arena_ratings ar
-      LEFT JOIN data_cards dc
-        ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-      WHERE ar.queue = ?
-        AND (
-          ar.entity_type = 'preset'
-          OR (
-            dc.id IS NOT NULL
-            AND dc.type = 'character'
-            AND dc.is_public = 1
-            AND dc.review_status = 'approved'
-            AND dc.deleted_at IS NULL
-            ${strictPublicSinceClause}
-          )
+    SELECT ar.entity_type AS entityType, ar.entity_id AS entityId
+    FROM arena_ratings ar
+    LEFT JOIN data_cards dc
+      ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
+    WHERE ar.queue = ?
+      AND (
+        ar.entity_type = 'preset'
+        OR (
+          dc.id IS NOT NULL
+          AND dc.type = 'character'
+          AND dc.is_public = 1
+          AND dc.review_status = 'approved'
+          AND dc.deleted_at IS NULL
+          ${strictPublicSinceClause}
         )
-    ),
-    scepter AS (
-      SELECT * FROM eligible
-      WHERE games >= ${ARENA_PLACEMENT_GAMES} AND rating >= ${ARENA_SCEPTER_MIN_RATING}
-    ),
-    stats AS (
-      SELECT COUNT(*) AS scepterCount FROM scepter
-    ),
-    queen AS (
-      SELECT entityType, entityId
-      FROM scepter
-      ORDER BY rating DESC, games DESC, updatedAt DESC, entityType ASC, entityId ASC
-      LIMIT 1
-    )
-    SELECT stats.scepterCount AS scepterCount, queen.entityType AS entityType, queen.entityId AS entityId
-    FROM stats
-    LEFT JOIN queen ON 1=1;
+      )
+      AND ar.games >= ${ARENA_PLACEMENT_GAMES}
+      AND ar.rating >= ${ARENA_SCEPTER_MIN_RATING}
+    ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC
+    LIMIT ${ARENA_QUEEN_MIN_SCEPTER_COUNT};
   `;
 
-  const row = readSingleRow<QueenRow>(await queryFromD1(sql, [queue]));
-  if (!row) {
+  const rows = readRows<{ entityType: unknown; entityId: unknown }>(await queryFromD1(sql, [queue]));
+  if (rows.length < ARENA_QUEEN_MIN_SCEPTER_COUNT) {
     queenCache.set(queue, { value: null, expiresAt: now + QUEEN_CACHE_TTL_MS });
     return null;
   }
 
-  const scepterCount = clampInt(row.scepterCount) ?? 0;
-  if (scepterCount < ARENA_QUEEN_MIN_SCEPTER_COUNT) {
+  const row = rows[0];
+  if (!row) {
     queenCache.set(queue, { value: null, expiresAt: now + QUEEN_CACHE_TTL_MS });
     return null;
   }

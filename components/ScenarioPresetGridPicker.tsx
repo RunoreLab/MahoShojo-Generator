@@ -41,11 +41,12 @@ export function ScenarioPresetGridPicker({
           const isSelected = selectedFilenames.includes(preset.filename);
           const isLoading = loadingFilename === preset.filename;
           const itemDisabled = disabled;
-          const isGeneral = preset.template === 'general-scenario';
-          const bgColor = isGeneral
-            ? (isSelected ? 'bg-purple-200 border-purple-400 hover:bg-purple-300' : 'bg-white border-gray-300 hover:border-purple-400 hover:bg-purple-50')
-            : (isSelected ? 'bg-emerald-200 border-emerald-400 hover:bg-emerald-300' : 'bg-white border-gray-300 hover:border-emerald-400 hover:bg-emerald-50');
-          const titleColor = isGeneral ? (isSelected ? 'text-purple-900' : 'text-purple-800') : (isSelected ? 'text-emerald-900' : 'text-emerald-800');
+          const templateLabel = preset.template === 'general-scenario' ? '通用情景' : '情景卡';
+          const bgColor = isSelected
+            ? 'bg-purple-200 border-purple-400 hover:bg-purple-300'
+            : 'bg-white border-gray-300 hover:border-purple-400 hover:bg-purple-50';
+          const titleColor = isSelected ? 'text-purple-900' : 'text-purple-800';
+          const descriptionColor = isSelected ? 'text-purple-800' : 'text-gray-600';
           return (
             <div
               key={preset.filename}
@@ -67,8 +68,11 @@ export function ScenarioPresetGridPicker({
 
               <div className="flex items-center gap-2 pr-8">
                 <p className={`font-semibold ${titleColor}`}>{isLoading ? '加载中...' : preset.title}</p>
+                <span className="inline-flex items-center rounded-full border border-gray-200 bg-white/70 px-2 py-0.5 text-[10px] font-medium text-gray-700">
+                  {templateLabel}
+                </span>
               </div>
-              <p className={`text-xs mt-1 ${isSelected ? (isGeneral ? 'text-purple-800' : 'text-emerald-800') : 'text-gray-600'}`}>
+              <p className={`text-xs mt-1 ${descriptionColor}`}>
                 {preset.description}
               </p>
             </div>

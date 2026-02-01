@@ -276,6 +276,7 @@ const main = async () => {
       startsAt: target.startsAt,
       endsAt: target.endsAt,
       description: target.description,
+      ...(target.specialRules ? { specialRules: target.specialRules } : {}),
     },
     leaderboards: {
       strict: { queue: 'strict', total: 0, top: [], bottom: [] },

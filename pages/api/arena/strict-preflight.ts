@@ -4,6 +4,8 @@ import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { buildPairKey, getStrictDailyUsage, INITIAL_RATING, STRICT_DEDUP_WINDOW_MS, STRICT_DAILY_LIMIT } from '@/lib/database/arena-ratings';
 import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
+import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
+import { deriveSeasonStrictRules } from '@/lib/seasons';
 
 export const config = {
   runtime: 'edge',
@@ -37,6 +39,12 @@ const readNonNegativeInt = (value: unknown): number => {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.floor(n));
+};
+
+const normalizeStrictStoryGuidance = (value: unknown): string => {
+  const trimmed = trimString(value);
+  if (!trimmed) return '';
+  return trimmed.slice(0, 200);
 };
 
 type ArenaEntity = { entityType: 'data_card' | 'preset'; entityId: string };
@@ -139,6 +147,13 @@ export default async function handler(req: NextRequest) {
     const battleMode = trimString(body?.battleMode ?? body?.mode);
     const selectedLevel = readString(body?.selectedLevel);
     const language = trimString(body?.language);
+    const scenarioEnabled = readBoolean(body?.scenarioEnabled);
+    const scenarioFileName = trimString(body?.scenarioFileName);
+    const auxScenarioCount = readNonNegativeInt(body?.auxScenarioCount);
+
+    const origin = new URL(req.url).origin;
+    const currentSeason = await fetchCurrentSeasonFromOrigin(origin);
+    const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
 
     const settings = body?.settings && typeof body.settings === 'object' ? body.settings : {};
     const userGuidance = readString(settings?.userGuidance);
@@ -159,11 +174,29 @@ export default async function handler(req: NextRequest) {
     const reasons: string[] = [];
     let range: ApiSuccessResponse['range'] = null;
     if (!user?.id) reasons.push('need-login');
-    if (battleMode !== 'classic') reasons.push('mode-not-classic');
+    if (battleMode !== seasonStrictRules.mode) {
+      reasons.push(seasonStrictRules.mode === 'classic' ? 'mode-not-classic' : 'mode-not-season');
+    }
     if (!Array.isArray(combatants) || combatants.length !== 2) reasons.push('combatant-count-not-2');
     if (trimString(language) !== 'zh-CN') reasons.push('language-not-zh-cn');
     if (trimString(selectedLevel)) reasons.push('level-not-default');
-    if (trimString(userGuidance)) reasons.push('has-user-guidance');
+
+    const actualStoryGuidance = normalizeStrictStoryGuidance(userGuidance);
+    if (seasonStrictRules.storyGuidance) {
+      if (!actualStoryGuidance) reasons.push('season-user-guidance-missing');
+      else if (actualStoryGuidance !== seasonStrictRules.storyGuidance) reasons.push('season-user-guidance-mismatch');
+    } else if (actualStoryGuidance) {
+      reasons.push('has-user-guidance');
+    }
+
+    if (seasonStrictRules.mode === 'scenario') {
+      if (!scenarioEnabled) reasons.push('season-scenario-missing');
+      if (seasonStrictRules.scenarioPresetFilename) {
+        if (scenarioFileName !== seasonStrictRules.scenarioPresetFilename) reasons.push('season-scenario-preset-mismatch');
+      }
+      if (auxScenarioCount > 0) reasons.push('season-aux-scenarios-not-allowed');
+    }
+
     if (readArenaHistory) reasons.push('read-arena-history');
     if (readCurrentState) reasons.push('read-current-state');
     if (readNarrativeHistory) reasons.push('read-narrative-history');
