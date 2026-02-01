@@ -210,6 +210,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['/name', '/details', '/canshou', '角色生成'],
   },
   {
+    slug: 'questionnaire',
+    title: '问卷系统与自定义问卷（编辑器 / 云端问卷库）',
+    summary: '自定义问卷、条件显示/跳题、云端问卷库与字数上限等新功能说明。',
+    markdownPath: '/encyclopedia/questionnaire.md',
+    categoryId: 'guide',
+    keywords: ['问卷', '自定义问卷', 'questionnaire', '/questionnaire-editor', '条件显示', '跳题', '云端问卷'],
+  },
+  {
     slug: 'general-cards',
     title: '通用数据卡（Markdown）：通用角色/通用情景',
     summary: '用 Markdown 维护角色/情景：最自由、最容错的两种模板与使用技巧。',
