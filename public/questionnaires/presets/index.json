@@ -1,0 +1,20 @@
+{
+  "presets": [
+    {
+      "id": "magical-girl-default",
+      "kind": "magical-girl",
+      "title": "魔法少女调查问卷 ~ 奇妙妖精大调查",
+      "description": "回答问卷，生成您的专属魔法少女",
+      "path": "/questionnaires/presets/magical-girl-default.json",
+      "isDefault": true
+    },
+    {
+      "id": "canshou-default",
+      "kind": "canshou",
+      "title": "研究院残兽调查",
+      "description": "前进吧，残兽！",
+      "path": "/questionnaires/presets/canshou-default.json",
+      "isDefault": true
+    }
+  ]
+}

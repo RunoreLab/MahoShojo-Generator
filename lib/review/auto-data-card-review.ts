@@ -29,7 +29,7 @@ type PendingDataCardUpdateRow = {
   name: string;
   description: string | null;
   data: string;
-  type: 'character' | 'scenario' | 'history' | null;
+  type: 'character' | 'scenario' | 'history' | 'questionnaire' | null;
 };
 
 const readInt = (value: unknown): number => {

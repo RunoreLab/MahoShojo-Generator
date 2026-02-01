@@ -1746,6 +1746,7 @@ const CharacterManagerPage: React.FC = () => {
                                             <li><span className="font-semibold">一键换名：</span>修改名称后，可一键替换档案中所有旧名称。</li>
                                             <li><span className="font-semibold">生成立绘：</span>加载角色后，展开下方的“立绘生成”模块，可为你的角色创建立绘。</li>
                                             <li><span className="font-semibold">编辑情景：</span>响应用户呼声，现在可以在这里编辑情景文件了。</li>
+                                            <li><span className="font-semibold">问卷编辑器：</span><Link href="/questionnaire-editor" className="text-purple-600 hover:text-purple-700 underline">创建与调整自定义问卷</Link>，可导出或保存为云端问卷数据卡。</li>
                                             <li><span className="font-semibold">保存与导出：</span>完成修改后，可下载新的 <code>.json</code> 文件或将内容复制到剪贴板。</li>
                                         </ul>
                                     </div>

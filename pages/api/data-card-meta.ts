@@ -70,7 +70,7 @@ export default async function handler(req: NextRequest) {
     const cardRow = readSingleRow<{
       id: string;
       user_id: number;
-      type: 'character' | 'scenario' | 'history';
+      type: 'character' | 'scenario' | 'history' | 'questionnaire';
       is_public: number;
       review_status: 'pending' | 'approved' | 'rejected';
       updated_at: string;

@@ -43,7 +43,7 @@ export default async function handler(req: Request): Promise<Response> {
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get('id'); // 单个数据卡ID
-    const typeRaw = url.searchParams.get('type'); // 'character' | 'scenario' | 'history'
+    const typeRaw = url.searchParams.get('type'); // 'character' | 'scenario' | 'history' | 'questionnaire'
     const searchRaw = url.searchParams.get('search'); // 搜索关键词
     const sortByRaw = url.searchParams.get('sortBy'); // 排序方式
     const limit = clamp(readIntParam(url.searchParams.get('limit'), 12), 1, MAX_LIMIT);
@@ -84,7 +84,7 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     const type =
-      typeRaw === 'character' || typeRaw === 'scenario' || typeRaw === 'history'
+      typeRaw === 'character' || typeRaw === 'scenario' || typeRaw === 'history' || typeRaw === 'questionnaire'
         ? typeRaw
         : undefined;
 

@@ -3,9 +3,8 @@
 import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
-import questionnaire from '@/public/questionnaire.json';
 import { getLogger } from '@/lib/logger';
-import { buildMagicalQuestionMeta } from '@/lib/questionnaires';
+import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
@@ -24,6 +23,157 @@ const CustomProviderSchema = z.object({
   apiKey: z.string(),
 });
 
+type RequestQuestion = {
+  id: string;
+  question: string;
+  required: boolean;
+  maxLength: number | null;
+};
+
+type RequestQuestionnaire = {
+  id: string;
+  title: string;
+  kind: 'magical-girl' | 'canshou';
+  questions: RequestQuestion[];
+};
+
+const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      const kind = record.kind === 'magical-girl' || record.kind === 'canshou' ? record.kind : null;
+      if (!kind) return null;
+      const id = typeof record.id === 'string' && record.id.trim() ? record.id.trim() : '';
+      const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim() : '';
+      if (!id || !title) return null;
+      const rawQuestions = Array.isArray(record.questions) ? record.questions : [];
+      const questions = rawQuestions.map((q, index) => {
+        if (!q || typeof q !== 'object') {
+          return {
+            id: `Q-${index + 1}`,
+            question: `问题 ${index + 1}`,
+            required: true,
+            maxLength: null,
+          };
+        }
+        const qRecord = q as Record<string, unknown>;
+        const qid = typeof qRecord.id === 'string' && qRecord.id.trim() ? qRecord.id.trim() : `Q-${index + 1}`;
+        const qText = typeof qRecord.question === 'string' && qRecord.question.trim() ? qRecord.question.trim() : `问题 ${index + 1}`;
+        const required = typeof qRecord.required === 'boolean' ? qRecord.required : true;
+        const maxLengthRaw = qRecord.maxLength;
+        const maxLength = typeof maxLengthRaw === 'number' && Number.isFinite(maxLengthRaw)
+          ? Math.max(0, Math.floor(maxLengthRaw))
+          : maxLengthRaw === null
+            ? null
+            : null;
+        return { id: qid, question: qText, required, maxLength };
+      });
+      return { id, title, kind, questions } satisfies RequestQuestionnaire;
+    })
+    .filter((item): item is RequestQuestionnaire => Boolean(item));
+};
+
+type QuestionLookup = {
+  byId: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
+  byCompositeId: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
+  byQuestion: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
+  ordered: Array<RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
+};
+
+const buildQuestionLookup = (questionnaires: RequestQuestionnaire[]): QuestionLookup => {
+  const byId = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
+  const byCompositeId = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
+  const byQuestion = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
+  const ordered: Array<RequestQuestion & { questionnaireId: string; questionnaireTitle: string }> = [];
+
+  questionnaires.forEach((questionnaire) => {
+    questionnaire.questions.forEach((question) => {
+      const payload = {
+        ...question,
+        questionnaireId: questionnaire.id,
+        questionnaireTitle: questionnaire.title,
+      };
+      ordered.push(payload);
+      byCompositeId.set(`${questionnaire.id}::${question.id}`, payload);
+      if (!byId.has(question.id)) {
+        byId.set(question.id, payload);
+      }
+      const textKey = question.question.trim();
+      if (textKey && !byQuestion.has(textKey)) {
+        byQuestion.set(textKey, payload);
+      }
+    });
+  });
+
+  return { byId, byCompositeId, byQuestion, ordered };
+};
+
+const resolveAnswerItems = (
+  rawAnswers: unknown,
+  questionnaires: RequestQuestionnaire[]
+): QuestionnaireAnswerItem[] => {
+  const fallbackQuestions = questionnaires.flatMap((q) => q.questions.map((item) => item.question));
+  const normalized = normalizeUserAnswers(rawAnswers, fallbackQuestions);
+  if (normalized.length === 0) return [];
+  const lookup = buildQuestionLookup(questionnaires);
+  const resolvedItems: QuestionnaireAnswerItem[] = [];
+  normalized.forEach((item, index) => {
+    const answer = item.answer?.trim() ?? '';
+    if (!answer) return;
+    let resolved = null as (RequestQuestion & { questionnaireId: string; questionnaireTitle: string }) | null;
+    if (item.questionnaireId && item.questionId) {
+      resolved = lookup.byCompositeId.get(`${item.questionnaireId}::${item.questionId}`) ?? null;
+    }
+    if (!resolved && item.questionId) {
+      resolved = lookup.byId.get(item.questionId) ?? null;
+    }
+    if (!resolved && item.question) {
+      resolved = lookup.byQuestion.get(item.question.trim()) ?? null;
+    }
+    if (!resolved && lookup.ordered[index]) {
+      resolved = lookup.ordered[index];
+    }
+    const question = item.question?.trim() || resolved?.question || `问题 ${index + 1}`;
+    resolvedItems.push({
+      question,
+      answer,
+      questionId: item.questionId ?? resolved?.id,
+      questionnaireId: item.questionnaireId ?? resolved?.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle ?? resolved?.questionnaireTitle,
+    });
+  });
+  return resolvedItems;
+};
+
+const validateAnswerLengths = (items: QuestionnaireAnswerItem[], questionnaires: RequestQuestionnaire[]): string | null => {
+  if (items.length === 0) return null;
+  const lookup = buildQuestionLookup(questionnaires);
+  for (const [index, item] of items.entries()) {
+    if (!item.answer) continue;
+    let resolved = null as (RequestQuestion & { questionnaireId: string; questionnaireTitle: string }) | null;
+    if (item.questionnaireId && item.questionId) {
+      resolved = lookup.byCompositeId.get(`${item.questionnaireId}::${item.questionId}`) ?? null;
+    }
+    if (!resolved && item.questionId) {
+      resolved = lookup.byId.get(item.questionId) ?? null;
+    }
+    if (!resolved && item.question) {
+      resolved = lookup.byQuestion.get(item.question.trim()) ?? null;
+    }
+    if (!resolved && lookup.ordered[index]) {
+      resolved = lookup.ordered[index];
+    }
+    const maxLength = resolved?.maxLength;
+    if (typeof maxLength === 'number' && maxLength > 0 && item.answer.length > maxLength) {
+      const questionLabel = resolved?.question || item.question || `问题 ${index + 1}`;
+      return `答案字数超过限制（${questionLabel} 最多 ${maxLength} 字）`;
+    }
+  }
+  return null;
+};
+
 async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -34,48 +184,28 @@ async function handler(req: NextRequest): Promise<Response> {
 
   try {
     const parsedBody = await req.json();
-    const { answers: rawAnswers, language = 'zh-CN', customProvider: customProviderPayload } = parsedBody ?? {};
+    const { answers: rawAnswers, questionnaires: rawQuestionnaires, language = 'zh-CN', customProvider: customProviderPayload } = parsedBody ?? {};
 
-    if (!Array.isArray(rawAnswers) || rawAnswers.length === 0) {
+    const questionnaires = normalizeQuestionnaires(rawQuestionnaires);
+    const normalizedAnswers = resolveAnswerItems(rawAnswers, questionnaires);
+
+    if (normalizedAnswers.length === 0) {
       return new Response(JSON.stringify({ error: 'Answers array is required' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    const questionMeta = buildMagicalQuestionMeta(rawAnswers.length);
-    const normalizedAnswers: string[] = [];
-
-    for (const [index, answer] of rawAnswers.entries()) {
-      if (typeof answer !== 'string') {
-        return new Response(JSON.stringify({ error: 'All answers must be non-empty strings' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      const trimmedAnswer = answer.trim();
-      if (!trimmedAnswer) {
-        return new Response(JSON.stringify({ error: 'All answers must be non-empty strings' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      const meta = questionMeta[index];
-      const maxAllowedLength = Math.max(meta?.maxLength ?? 200, 150);
-      if (trimmedAnswer.length > maxAllowedLength) {
-        return new Response(JSON.stringify({ error: `第 ${index + 1} 题的答案字数超过限制（最多 ${maxAllowedLength} 字）` }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      normalizedAnswers.push(trimmedAnswer);
+    const lengthError = validateAnswerLengths(normalizedAnswers, questionnaires);
+    if (lengthError) {
+      return new Response(JSON.stringify({ error: lengthError }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     const safetyResponse = await enforceTextSafety({
-      text: normalizedAnswers.join(' '),
+      text: normalizedAnswers.map((item) => item.answer).join(' '),
       log,
       enableAiSafetyCheck: false,
       sensitiveWordReason: '在问卷中使用了危险符文',
@@ -131,13 +261,7 @@ async function handler(req: NextRequest): Promise<Response> {
       }
     }
 
-    const questionList = Array.isArray((questionnaire as any)?.questions) ? ((questionnaire as any).questions as string[]) : [];
-    const qaText = normalizedAnswers
-      .map((answer, index) => {
-        const question = questionList[index] ? String(questionList[index]).trim() : `问题 ${index + 1}`;
-        return `Q${index + 1}. ${question}\nA: ${answer}`;
-      })
-      .join('\n\n');
+    const qaText = formatQuestionnaireAnswers(normalizedAnswers);
 
     const flowers = getRandomFlowers();
 

@@ -38,7 +38,17 @@ export const CanshouSchema = z.object({
   birthEnvironment: z.string().optional(),
   researcherNotes: z.string().optional(),
   templateId: z.string().optional(),
-  userAnswers: z.union([z.record(z.string()), z.array(z.string())]).optional(),
+  userAnswers: z.union([
+    z.record(z.string()),
+    z.array(z.string()),
+    z.array(z.object({
+      question: z.string(),
+      answer: z.string(),
+      questionId: z.string().optional(),
+      questionnaireId: z.string().optional(),
+      questionnaireTitle: z.string().optional(),
+    })),
+  ]).optional(),
   isPreset: z.boolean().optional(),
   signature: z.string().optional(),
   adjudicationEvents: z.array(AdjudicatorEventSchema).optional(),

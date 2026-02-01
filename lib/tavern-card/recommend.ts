@@ -1,5 +1,6 @@
-import magicalQuestionnaire from '../../public/questionnaire.json';
-import canshouQuestionnaire from '../../public/canshou_questionnaire.json';
+import magicalQuestionnaire from '../../public/questionnaires/presets/magical-girl-default.json';
+import canshouQuestionnaire from '../../public/questionnaires/presets/canshou-default.json';
+import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
 
 export interface TavernExportRecommendations {
   tags: string[];
@@ -26,6 +27,13 @@ const safeStringArray = (value: unknown): string[] => {
   return value
     .filter((item): item is string => typeof item === 'string')
     .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const getQuestionTexts = (raw: unknown): string[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => safeString(typeof item === 'string' ? item : (item as any)?.question).trim())
     .filter(Boolean);
 };
 
@@ -85,26 +93,24 @@ const findByKeywordRules = (text: string): string[] => {
   return hits;
 };
 
-const buildMagicalGirlDialogueFromUserAnswers = (answers: string[]): TavernExportRecommendations => {
+const buildMagicalGirlDialogueFromUserAnswers = (answers: QuestionnaireAnswerItem[]): TavernExportRecommendations => {
   const stripLeadingQuestionNumber = (value: string, index: number): string => {
     const n = index + 1;
     const re = new RegExp(`^${n}\\s*[\\.．、\\)）\\]】:：\\-–—]\\s*`);
     return value.replace(re, '').trim();
   };
 
-  const cleaned = answers.map((answer, idx) => stripLeadingQuestionNumber(answer.trim(), idx));
+  const cleaned = answers.map((item, idx) => stripLeadingQuestionNumber(item.answer.trim(), idx));
   const first = cleaned[0] ? cleaned[0] : '';
 
-  const questions: string[] = Array.isArray(magicalQuestionnaire.questions) ? magicalQuestionnaire.questions : [];
   const pairs: string[] = [];
-  const maxPairs = Math.min(cleaned.length, questions.length);
-  for (let i = 0; i < maxPairs; i += 1) {
-    const answer = cleaned[i];
-    if (!answer) continue;
-    const rawQuestion = questions[i] ? String(questions[i]) : `问题 ${i + 1}`;
-    const question = stripLeadingQuestionNumber(rawQuestion.trim(), i) || rawQuestion.trim();
+  answers.forEach((item, index) => {
+    const answer = cleaned[index];
+    if (!answer) return;
+    const rawQuestion = item.question ? String(item.question) : `问题 ${index + 1}`;
+    const question = stripLeadingQuestionNumber(rawQuestion.trim(), index) || rawQuestion.trim();
     pairs.push(`{{user}}: ${question}\n{{char}}: ${answer}`);
-  }
+  });
 
   const mesExample = pairs.length > 0 ? pairs.join('\n\n') : '';
   return {
@@ -172,17 +178,12 @@ const buildTextCorpus = (template: string, card: Record<string, unknown>): strin
       analysis ? safeString(analysis.personalityAnalysis) : '',
       analysis ? safeString(analysis.abilityReasoning) : '',
       analysis ? safeString(analysis.predictionBasis) : '',
-      safeStringArray(card.userAnswers).join('\n'),
+      formatQuestionnaireAnswers(normalizeUserAnswers(card.userAnswers, getQuestionTexts((magicalQuestionnaire as any)?.questions))),
     ]);
   }
 
   if (template === 'canshou') {
-    const userAnswers = (() => {
-      const value = card.userAnswers;
-      if (Array.isArray(value)) return safeStringArray(value).join('\n');
-      if (isRecord(value)) return collectText(Object.values(value).map((item) => safeString(item)));
-      return '';
-    })();
+    const userAnswers = formatQuestionnaireAnswers(normalizeUserAnswers(card.userAnswers, getQuestionTexts((canshouQuestionnaire as any)?.questions)));
 
     return collectText([
       safeString(card.name),
@@ -261,7 +262,7 @@ export function recommendTavernExportFields(
   const recommendations: TavernExportRecommendations = { tags: uniqueStrings(tagList).slice(0, 50) };
 
   if (template === 'magical-girl') {
-    const userAnswers = safeStringArray(dataCard.userAnswers);
+    const userAnswers = normalizeUserAnswers(dataCard.userAnswers, getQuestionTexts((magicalQuestionnaire as any)?.questions));
     const derived = userAnswers.length > 0 ? buildMagicalGirlDialogueFromUserAnswers(userAnswers) : null;
     if (derived?.firstMes) recommendations.firstMes = derived.firstMes;
     if (derived?.mesExample) recommendations.mesExample = derived.mesExample;

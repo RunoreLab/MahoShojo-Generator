@@ -7,7 +7,7 @@ import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 
-type DataCardType = 'character' | 'scenario' | 'history';
+type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
 
 interface CliOptions {
   dryRun: boolean;

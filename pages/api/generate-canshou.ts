@@ -8,6 +8,7 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
+import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
 
 const log = getLogger('api-gen-canshou');
 
@@ -40,18 +41,167 @@ const CustomProviderSchema = z.object({
 
 type CanshouDetails = z.infer<typeof CanshouSchema>;
 
+type RequestQuestion = {
+  id: string;
+  question: string;
+  required: boolean;
+  maxLength: number | null;
+};
+
+type RequestQuestionnaire = {
+  id: string;
+  title: string;
+  kind: 'magical-girl' | 'canshou';
+  questions: RequestQuestion[];
+};
+
+const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      const kind = record.kind === 'magical-girl' || record.kind === 'canshou' ? record.kind : null;
+      if (!kind) return null;
+      const id = typeof record.id === 'string' && record.id.trim() ? record.id.trim() : '';
+      const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim() : '';
+      if (!id || !title) return null;
+      const rawQuestions = Array.isArray(record.questions) ? record.questions : [];
+      const questions = rawQuestions.map((q, index) => {
+        if (!q || typeof q !== 'object') {
+          return {
+            id: `Q-${index + 1}`,
+            question: `问题 ${index + 1}`,
+            required: true,
+            maxLength: null,
+          };
+        }
+        const qRecord = q as Record<string, unknown>;
+        const qid = typeof qRecord.id === 'string' && qRecord.id.trim() ? qRecord.id.trim() : `Q-${index + 1}`;
+        const qText = typeof qRecord.question === 'string' && qRecord.question.trim() ? qRecord.question.trim() : `问题 ${index + 1}`;
+        const required = typeof qRecord.required === 'boolean' ? qRecord.required : true;
+        const maxLengthRaw = qRecord.maxLength;
+        const maxLength = typeof maxLengthRaw === 'number' && Number.isFinite(maxLengthRaw)
+          ? Math.max(0, Math.floor(maxLengthRaw))
+          : maxLengthRaw === null
+            ? null
+            : null;
+        return { id: qid, question: qText, required, maxLength };
+      });
+      return { id, title, kind, questions } satisfies RequestQuestionnaire;
+    })
+    .filter((item): item is RequestQuestionnaire => Boolean(item));
+};
+
+type QuestionLookup = {
+  byId: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
+  byCompositeId: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
+  byQuestion: Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
+  ordered: Array<RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>;
+};
+
+const buildQuestionLookup = (questionnaires: RequestQuestionnaire[]): QuestionLookup => {
+  const byId = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
+  const byCompositeId = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
+  const byQuestion = new Map<string, RequestQuestion & { questionnaireId: string; questionnaireTitle: string }>();
+  const ordered: Array<RequestQuestion & { questionnaireId: string; questionnaireTitle: string }> = [];
+
+  questionnaires.forEach((questionnaire) => {
+    questionnaire.questions.forEach((question) => {
+      const payload = {
+        ...question,
+        questionnaireId: questionnaire.id,
+        questionnaireTitle: questionnaire.title,
+      };
+      ordered.push(payload);
+      byCompositeId.set(`${questionnaire.id}::${question.id}`, payload);
+      if (!byId.has(question.id)) {
+        byId.set(question.id, payload);
+      }
+      const textKey = question.question.trim();
+      if (textKey && !byQuestion.has(textKey)) {
+        byQuestion.set(textKey, payload);
+      }
+    });
+  });
+
+  return { byId, byCompositeId, byQuestion, ordered };
+};
+
+const resolveAnswerItems = (
+  rawAnswers: unknown,
+  questionnaires: RequestQuestionnaire[]
+): QuestionnaireAnswerItem[] => {
+  const fallbackQuestions = questionnaires.flatMap((q) => q.questions.map((item) => item.question));
+  const normalized = normalizeUserAnswers(rawAnswers, fallbackQuestions);
+  if (normalized.length === 0) return [];
+  const lookup = buildQuestionLookup(questionnaires);
+  const resolvedItems: QuestionnaireAnswerItem[] = [];
+  normalized.forEach((item, index) => {
+    const answer = item.answer?.trim() ?? '';
+    if (!answer) return;
+    let resolved = null as (RequestQuestion & { questionnaireId: string; questionnaireTitle: string }) | null;
+    if (item.questionnaireId && item.questionId) {
+      resolved = lookup.byCompositeId.get(`${item.questionnaireId}::${item.questionId}`) ?? null;
+    }
+    if (!resolved && item.questionId) {
+      resolved = lookup.byId.get(item.questionId) ?? null;
+    }
+    if (!resolved && item.question) {
+      resolved = lookup.byQuestion.get(item.question.trim()) ?? null;
+    }
+    if (!resolved && lookup.ordered[index]) {
+      resolved = lookup.ordered[index];
+    }
+    const question = item.question?.trim() || resolved?.question || `问题 ${index + 1}`;
+    resolvedItems.push({
+      question,
+      answer,
+      questionId: item.questionId ?? resolved?.id,
+      questionnaireId: item.questionnaireId ?? resolved?.questionnaireId,
+      questionnaireTitle: item.questionnaireTitle ?? resolved?.questionnaireTitle,
+    });
+  });
+  return resolvedItems;
+};
+
+const validateAnswerLengths = (items: QuestionnaireAnswerItem[], questionnaires: RequestQuestionnaire[]): string | null => {
+  if (items.length === 0) return null;
+  const lookup = buildQuestionLookup(questionnaires);
+  for (const [index, item] of items.entries()) {
+    if (!item.answer) continue;
+    let resolved = null as (RequestQuestion & { questionnaireId: string; questionnaireTitle: string }) | null;
+    if (item.questionnaireId && item.questionId) {
+      resolved = lookup.byCompositeId.get(`${item.questionnaireId}::${item.questionId}`) ?? null;
+    }
+    if (!resolved && item.questionId) {
+      resolved = lookup.byId.get(item.questionId) ?? null;
+    }
+    if (!resolved && item.question) {
+      resolved = lookup.byQuestion.get(item.question.trim()) ?? null;
+    }
+    if (!resolved && lookup.ordered[index]) {
+      resolved = lookup.ordered[index];
+    }
+    const maxLength = resolved?.maxLength;
+    if (typeof maxLength === 'number' && maxLength > 0 && item.answer.length > maxLength) {
+      const questionLabel = resolved?.question || item.question || `问题 ${index + 1}`;
+      return `答案字数超过限制（${questionLabel} 最多 ${maxLength} 字）`;
+    }
+  }
+  return null;
+};
+
 // AI生成配置
-const canshouGenerationConfig: GenerationConfig<CanshouDetails, { answers: Record<string, string>, language: string }> = {
+const canshouGenerationConfig: GenerationConfig<CanshouDetails, { answers: QuestionnaireAnswerItem[], language: string }> = {
   systemPrompt: `你是一名魔法国度的研究学者，你的任务是根据一线调查员提交的问卷报告，分析并生成一份详细的档案。
   首先，这是关于残兽的基础设定，你必须严格遵守：
   ${CANSHOU_LORE}
 
   请根据用户提供的问卷答案，以结构化的JSON格式返回详细设定，包括对其各项特征的详细描述和你作为研究学者的专业分析笔记。`,
   temperature: 0.8,
-  promptBuilder: ({ answers, language }: { answers: Record<string, string>, language: string }) => {
-    const answerText = Object.entries(answers)
-      .map(([key, value]) => `- ${key}: ${value}`)
-      .join('\n');
+  promptBuilder: ({ answers, language }: { answers: QuestionnaireAnswerItem[], language: string }) => {
+    const answerText = formatQuestionnaireAnswers(answers);
     return `以下是调查员提交的问卷报告，请基于此进行分析：\n${answerText}\n\n【重要指令】请你必须使用【${language}】进行内容创作。`;
   },
   schema: CanshouSchema,
@@ -69,17 +219,28 @@ async function handler(req: NextRequest): Promise<Response> {
 
   try {
     const parsedBody = await req.json();
-    const { answers, language = 'zh-CN', customProvider: customProviderPayload } = parsedBody;
+    const { answers: rawAnswers, questionnaires: rawQuestionnaires, allowNativeSignature, language = 'zh-CN', customProvider: customProviderPayload } = parsedBody;
 
-    if (!answers || typeof answers !== 'object' || Object.keys(answers).length === 0) {
-      return new Response(JSON.stringify({ error: 'Answers object is required' }), {
+    const questionnaires = normalizeQuestionnaires(rawQuestionnaires);
+    const normalizedAnswers = resolveAnswerItems(rawAnswers, questionnaires);
+
+    if (normalizedAnswers.length === 0) {
+      return new Response(JSON.stringify({ error: 'Answers array is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const lengthError = validateAnswerLengths(normalizedAnswers, questionnaires);
+    if (lengthError) {
+      return new Response(JSON.stringify({ error: lengthError }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
 	    // 安全检查：检查用户输入是否包含敏感词
-	    const answersString = Object.values(answers).join(' ');
+	    const answersString = normalizedAnswers.map((item) => item.answer).join(' ');
 	    const safetyResponse = await enforceTextSafety({
 	      text: answersString,
 	      log,
@@ -145,7 +306,7 @@ async function handler(req: NextRequest): Promise<Response> {
       : undefined;
 
     // 调用通用AI生成函数
-    const canshouDetails = await generateWithAI({ answers, language }, {
+    const canshouDetails = await generateWithAI({ answers: normalizedAnswers, language }, {
       ...canshouGenerationConfig,
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
     }, providerOptions);
@@ -154,8 +315,15 @@ async function handler(req: NextRequest): Promise<Response> {
     const dataToSign = {
         ...canshouDetails,
         templateId: "魔法少女/心之花/残兽（问卷生成）", // 添加模板ID
-        userAnswers: answers
+        userAnswers: normalizedAnswers
     };
+
+    if (allowNativeSignature !== true) {
+      return new Response(JSON.stringify(dataToSign), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     // 为合并后的数据生成签名
     const signature = await generateSignature(dataToSign);

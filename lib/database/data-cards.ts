@@ -4,7 +4,7 @@ import { inferCharacterKind } from '@/lib/schemas';
 // 检查公开数据卡是否存在同名
 export async function checkPublicCardNameExists(
   name: string,
-  type: 'character' | 'scenario' | 'history'
+  type: 'character' | 'scenario' | 'history' | 'questionnaire'
 ): Promise<boolean> {
   try {
     const result = await queryFromD1(
@@ -26,7 +26,7 @@ export async function checkPublicCardNameExists(
 export async function createDataCardWithAuthor(
   userId: number,
   username: string,
-  type: 'character' | 'scenario' | 'history',
+  type: 'character' | 'scenario' | 'history' | 'questionnaire',
   name: string,
   description: string,
   data: string,
@@ -74,7 +74,7 @@ export async function createDataCardWithAuthor(
 // 创建数据卡（基础版，向后兼容）
 export async function createDataCard(
   userId: number,
-  type: 'character' | 'scenario' | 'history',
+  type: 'character' | 'scenario' | 'history' | 'questionnaire',
   name: string,
   description: string,
   data: string,
@@ -515,7 +515,7 @@ export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
 export async function getPublicDataCards(
   limit: number = 20,
   offset: number = 0,
-  type?: 'character' | 'scenario' | 'history',
+  type?: 'character' | 'scenario' | 'history' | 'questionnaire',
   search?: string,
   sortBy?: 'likes' | 'usage' | 'favorites' | 'created_at',
   tagIds?: string[],
@@ -651,7 +651,7 @@ export async function getPublicDataCards(
  * @returns {Promise<any | null>} 返回一个随机的数据卡对象，如果没有符合条件的则返回 null。
  */
 export async function getRandomPublicCard(
-  type: 'character' | 'scenario' | 'history',
+  type: 'character' | 'scenario' | 'history' | 'questionnaire',
   options?: {
     minLikeCount?: number | null;
     maxLikeCount?: number | null;
@@ -721,7 +721,7 @@ export async function getRandomPublicCard(
  * 说明：用于需要“抽取不重复公开卡”的场景（如 PVP 补牌）。
  */
 export async function getRandomPublicCardExcluding(
-  type: 'character' | 'scenario' | 'history',
+  type: 'character' | 'scenario' | 'history' | 'questionnaire',
   excludeIds: string[],
   options?: {
     minLikeCount?: number | null;
@@ -811,7 +811,7 @@ export async function getDataCardStatsByIds(ids: string[]): Promise<Array<{ id: 
 
 export type UserTopDataCardRow = {
   id: string;
-  type: 'character' | 'scenario' | 'history';
+  type: 'character' | 'scenario' | 'history' | 'questionnaire';
   name: string;
   description: string | null;
   is_public: number;

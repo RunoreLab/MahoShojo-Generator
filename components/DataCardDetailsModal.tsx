@@ -82,7 +82,7 @@ interface DataCardDetailsModalProps {
     id: string;
     name: string;
     description: string;
-    type: 'character' | 'scenario' | 'history';
+    type: 'character' | 'scenario' | 'history' | 'questionnaire';
     data: string; // JSON字符串
     isPublic: boolean;
     usageCount?: number;
@@ -124,7 +124,14 @@ export default function DataCardDetailsModal({
   const [saveTagsError, setSaveTagsError] = useState<string | null>(null);
   const [isMetaExpanded, setIsMetaExpanded] = useState(true);
   const { display: displayName, full: fullName } = buildTitleDisplay(card.name || '未命名');
-  const cardTypeLabel = card.type === 'character' ? '角色' : card.type === 'scenario' ? '剧本' : '历史';
+  const cardTypeLabel =
+    card.type === 'character'
+      ? '角色'
+      : card.type === 'scenario'
+        ? '剧本'
+        : card.type === 'history'
+          ? '历史'
+          : '问卷';
   const descriptionText = card.description?.trim() ? card.description : '暂无简介';
   const tagSectionRef = useRef<HTMLDivElement | null>(null);
   const tagSearchInputRef = useRef<HTMLInputElement | null>(null);

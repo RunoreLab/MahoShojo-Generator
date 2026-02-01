@@ -10,7 +10,7 @@ import { config } from '@/lib/config';
 interface SaveToCloudButtonProps {
   data: any;
   getData?: () => Promise<any>;
-  cardType?: 'character' | 'scenario' | 'history';
+  cardType?: 'character' | 'scenario' | 'history' | 'questionnaire';
   buttonText?: string;
   defaultName?: string;
   defaultDescription?: string;
@@ -123,9 +123,17 @@ export default function SaveToCloudButton({
         ? (resolvedData?.title || resolvedData?.name || '叙事历史')
         : type === 'scenario'
           ? (resolvedData?.title || resolvedData?.name || '')
-          : (resolvedData?.codename || resolvedData?.name || '');
+          : type === 'questionnaire'
+            ? (resolvedData?.title || resolvedData?.name || '问卷')
+            : (resolvedData?.codename || resolvedData?.name || '');
     const inferredDescription =
-      type === 'history' ? '叙事历史数据卡' : `${type === 'character' ? '角色' : '情景'}数据卡`;
+      type === 'history'
+        ? '叙事历史数据卡'
+        : type === 'scenario'
+          ? '情景数据卡'
+          : type === 'questionnaire'
+            ? '问卷数据卡'
+            : '角色数据卡';
 
     setCardName((defaultName && defaultName.trim()) ? defaultName : inferredName);
     setCardDescription((defaultDescription && defaultDescription.trim()) ? defaultDescription : inferredDescription);

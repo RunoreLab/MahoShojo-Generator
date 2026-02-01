@@ -1,4 +1,6 @@
 {
+  "id": "canshou-default",
+  "kind": "canshou",
   "title": "研究院残兽调查",
   "description": "前进吧，残兽！",
   "logoUrl": "/questionnaire-logo.svg",
@@ -19,13 +21,13 @@
       "id": "evolutionStage",
       "question": "它的进化阶段处于？",
       "options": [
-        {"value": "卵", "label": "卵"},
-        {"value": "蠖", "label": "蠖"},
-        {"value": "蛹", "label": "蛹"},
-        {"value": "半蜕", "label": "半蜕"},
-        {"value": "蜕", "label": "蜕"},
-        {"value": "王蜕", "label": "王蜕"},
-        {"value": "羽", "label": "羽 (不可选)", "disabled": true}
+        { "value": "卵", "label": "卵" },
+        { "value": "蠖", "label": "蠖" },
+        { "value": "蛹", "label": "蛹" },
+        { "value": "半蜕", "label": "半蜕" },
+        { "value": "蜕", "label": "蜕" },
+        { "value": "王蜕", "label": "王蜕" },
+        { "value": "羽", "label": "羽 (不可选)", "disabled": true }
       ],
       "allowCustom": false
     },

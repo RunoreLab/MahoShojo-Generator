@@ -3,7 +3,7 @@
 import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
 import { getLogger } from '@/lib/logger';
-import questionnaire from '@/public/questionnaire.json';
+import magicalGirlQuestionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
@@ -525,11 +525,17 @@ async function handler(req: NextRequest): Promise<Response> {
 
         type BattleReportResult = z.infer<typeof battleReportSchema>;
 
+        const fallbackQuestions = Array.isArray((magicalGirlQuestionnaire as any)?.questions)
+            ? ((magicalGirlQuestionnaire as any).questions as unknown[])
+                .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
+                .filter((item) => typeof item === 'string' && item.trim())
+            : [];
+
         const generationConfig: GenerationConfig<BattleReportResult, any> = {
             systemPrompt,
             temperature: 0.9,
             promptBuilder: createPromptBuilder(
-                questionnaire.questions,
+                fallbackQuestions,
                 finalUserGuidance,
                 resolvedInternalGuidance,
                 needsWorldviewWarning,

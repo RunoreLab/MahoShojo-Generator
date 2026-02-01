@@ -5,7 +5,9 @@ import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib
 import { getLogger } from '../../lib/logger';
 import { NextRequest } from 'next/server';
 import { generateSignature, verifySignature } from '@/lib/signature';
-import magicalGirlQuestionnaire from '../../public/questionnaire.json';
+import { formatQuestionnaireAnswers, normalizeUserAnswers } from '@/lib/questionnaires';
+import magicalGirlQuestionnaire from '../../public/questionnaires/presets/magical-girl-default.json';
+import canshouQuestionnaire from '../../public/questionnaires/presets/canshou-default.json';
 import { config as appConfig, type AIProvider } from '../../lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
@@ -109,7 +111,16 @@ const FullMagicalGirlSublimationPayloadSchemaFactory = (allowReshapeNames: boole
       bonds: z.string().describe("角色情感羁绊的变化。"),
     }).describe("角色背景故事的演进。")
   }).describe("对角色分析的全面更新。"),
-  userAnswers: z.array(z.string()).optional().describe("根据角色的成长，对问卷问题的全新回答。"),
+  userAnswers: z.union([
+    z.array(z.string()),
+    z.array(z.object({
+      question: z.string(),
+      answer: z.string(),
+      questionId: z.string().optional(),
+      questionnaireId: z.string().optional(),
+      questionnaireTitle: z.string().optional(),
+    })),
+  ]).optional().describe("根据角色的成长，对问卷问题的全新回答。"),
   current_state: CurrentStateUpdateSchema,
 });
 
@@ -129,7 +140,16 @@ const FullCanshouSublimationPayloadSchema = z.object({
   origin: z.string(),
   birthEnvironment: z.string(),
   researcherNotes: z.string().describe("研究员对这次升华的补充笔记。"),
-  userAnswers: z.array(z.string()).optional().describe("根据残兽的成长，对问卷问题的全新回答。"),
+  userAnswers: z.union([
+    z.array(z.string()),
+    z.array(z.object({
+      question: z.string(),
+      answer: z.string(),
+      questionId: z.string().optional(),
+      questionnaireId: z.string().optional(),
+      questionnaireTitle: z.string().optional(),
+    })),
+  ]).optional().describe("根据残兽的成长，对问卷问题的全新回答。"),
   current_state: CurrentStateUpdateSchema,
 });
 
@@ -295,15 +315,18 @@ const createGenerationConfig = (
 
     let userAnswersReviewSection = '';
     const allowUserAnswersInPrompt = !promptOmissionSet.has('userAnswers');
-    if (allowUserAnswersInPrompt && Array.isArray(dataForPrompt?.userAnswers) && dataForPrompt.userAnswers.length > 0) {
-      const questions = magicalGirlQuestionnaire.questions;
-      const userAnswersText = dataForPrompt.userAnswers
-        .map((answer: string, index: number) => {
-          const question = questions[index] || `问题 ${index + 1}`;
-          return `Q: ${question}\nA: ${answer}`;
-        })
-        .join('\n');
-      userAnswersReviewSection = `\n## 问卷回答回顾 (用于理解角色深层性格)\n${userAnswersText}`;
+    if (allowUserAnswersInPrompt && dataForPrompt?.userAnswers) {
+      const fallbackSource = sourceTemplate === 'canshou' ? canshouQuestionnaire : magicalGirlQuestionnaire;
+      const fallbackQuestions = Array.isArray((fallbackSource as any)?.questions)
+        ? ((fallbackSource as any).questions as unknown[])
+            .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
+            .filter((item) => typeof item === 'string' && item.trim())
+        : [];
+      const normalizedAnswers = normalizeUserAnswers(dataForPrompt.userAnswers, fallbackQuestions);
+      const userAnswersText = formatQuestionnaireAnswers(normalizedAnswers);
+      if (userAnswersText) {
+        userAnswersReviewSection = `\n## 问卷回答回顾 (用于理解角色深层性格)\n${userAnswersText}`;
+      }
     }
 
     let guidanceInstruction = '';
@@ -590,6 +613,15 @@ async function handler(req: NextRequest): Promise<Response> {
 
     const aiResult = await generateWithAI(null, generationConfig, providerOptions);
     const updatedDataFromAI = aiResult.updatedCharacterData;
+    if (updatedDataFromAI && 'userAnswers' in updatedDataFromAI && updatedDataFromAI.userAnswers) {
+      const fallbackSource = sourceTemplate === 'canshou' ? canshouQuestionnaire : magicalGirlQuestionnaire;
+      const fallbackQuestions = Array.isArray((fallbackSource as any)?.questions)
+        ? ((fallbackSource as any).questions as unknown[])
+            .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
+            .filter((item) => typeof item === 'string' && item.trim())
+        : [];
+      updatedDataFromAI.userAnswers = normalizeUserAnswers(updatedDataFromAI.userAnswers, fallbackQuestions);
+    }
 
     // --- 数据整合与签名 ---
     // 1. 创建目标模板的数据副本作为基础
