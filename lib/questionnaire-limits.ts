@@ -1,17 +1,6 @@
-const DEFAULT_NATIVE_MAX_ANSWER_CHARS = 2000;
+import { QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/config/questionnaire';
 
-const parsePositiveInt = (value?: string | null) => {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return parsed;
-};
-
-const envLimit =
-  parsePositiveInt(process.env.NEXT_PUBLIC_QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS)
-  ?? parsePositiveInt(process.env.QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS);
-
-export const QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS = envLimit ?? DEFAULT_NATIVE_MAX_ANSWER_CHARS;
+export { QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS };
 
 export type AnswerLimitSource = 'question' | 'global' | 'none';
 
