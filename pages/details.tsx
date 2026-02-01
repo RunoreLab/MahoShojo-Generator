@@ -37,6 +37,10 @@ import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-car
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
+import {
+  DETAILS_QUESTIONNAIRE_THEME,
+  QuestionnaireQuestionPanel,
+} from '@/components/questionnaire/QuestionnaireQuestionPanel';
 
 type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -1385,6 +1389,19 @@ const DetailsPage: React.FC = () => {
       : isLastQuestion
         ? (isCurrentRequired || currentAnswer.trim() ? '提交' : '跳过并提交')
         : (!isCurrentRequired && !currentAnswer.trim() ? '跳过并继续' : '下一题');
+  const optionsHintText = allowCustomInput
+    ? '推荐选项（点击后自动跳转下一题，也可继续补充文本）'
+    : '推荐选项（点击后自动跳转下一题，本题仅可从选项中选择）';
+  const overLimitText = `⚠️ 已超过${currentLimitLabel}，继续提交将导致生成内容丧失原生性。`;
+  const nextButtonContent = submitting ? (
+    <span className="flex items-center justify-center">
+      <svg className="animate-spin h-4 w-4 text-white" style={{ marginLeft: '-0.25rem', marginRight: '0.5rem' }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      提交中...
+    </span>
+  ) : nextButtonLabel;
 
   return (
     <>
@@ -1570,152 +1587,52 @@ const DetailsPage: React.FC = () => {
                   )}
                 </div>
 
-                <div className="mt-4 space-y-4">
-                  <div className="rounded-2xl border border-pink-100 bg-white/90 p-4 shadow-sm">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600">
-                      <span>问题 {currentQuestionIndex + 1} / {mergedQuestions.length}</span>
-                      <span>进度 {progressPercent}%</span>
-                      {autoSaveTimestamp && (
-                        <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
-                      )}
-                    </div>
-                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-pink-100">
-                      <div
-                        className="h-full rounded-full bg-pink-400 transition-all duration-300 ease-out"
-                        style={{ width: `${progressPercent}%` }}
-                      />
-                    </div>
-                    <h2
-                      className="mt-4 text-xl font-semibold leading-relaxed text-center text-pink-700 transition-all duration-300 ease-out"
-                      style={{
-                        opacity: isTransitioning ? 0 : 1,
-                        transform: isTransitioning ? 'translateX(-16px)' : 'translateX(0)'
-                      }}
-                    >
-                      {currentQuestion?.question || '未加载题目'}
-                    </h2>
-                    {currentQuestionnaireTitle && (
-                      <p className="mt-1 text-center text-xs text-gray-400">问卷来源：{currentQuestionnaireTitle}</p>
-                    )}
-                    <p className="text-xs text-center text-gray-500 mt-2">
-                      请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。
-                    </p>
-                    {currentQuestion?.helperText && (
-                      <p className="mt-2 text-sm text-gray-600 text-center">{currentQuestion.helperText}</p>
-                    )}
-                    {!isCurrentRequired && (
-                      <p className="mt-2 text-xs text-pink-500 text-center">本题可跳过，不作答将不会记录</p>
-                    )}
-                    {fallbackQuickOptions.length > 0 && (
-                      <div className="mt-3 flex flex-wrap justify-center gap-3 text-xs">
-                        {fallbackQuickOptions.map(option => (
-                          <button
-                            key={option}
-                            type="button"
-                            onClick={() => handleQuickOption(option)}
-                            disabled={submitting || isTransitioning || isCooldown}
-                            className="rounded-full border border-pink-200 bg-white px-4 py-1.5 font-medium text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50"
-                          >
-                            {option}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {hasOptions && (
-                    <div className="rounded-2xl border border-pink-100 bg-white p-4 shadow-sm">
-                      <p className="text-xs text-gray-500 mb-2">
-                        {allowCustomInput
-                          ? '推荐选项（点击后自动跳转下一题，也可继续补充文本）'
-                          : '推荐选项（点击后自动跳转下一题，本题仅可从选项中选择）'}
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {currentQuestion?.options?.map((option, index) => {
-                          const value = typeof option === 'string' ? option : option.value;
-                          const label = typeof option === 'string' ? option : option.label;
-                          const disabled = typeof option !== 'string' && option.disabled;
-                          return (
-                            <button
-                              type="button"
-                              key={`${value}-${index}`}
-                              onClick={() => !disabled && handleQuickOption(value)}
-                              disabled={disabled}
-                              className={`rounded-lg border px-3 py-2 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 ${disabled ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed' : 'border-pink-200 bg-white text-gray-700 hover:border-pink-400 hover:bg-pink-50'}`}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {suggestionPool.length > 0 && (
-                    <div className="rounded-2xl border border-pink-100 bg-white/80 p-3 shadow-sm">
-                      <p className="text-xs text-gray-500 mb-2">灵感提示（点击将内容填入文本框，可再编辑）</p>
-                      <div className="flex flex-wrap gap-2">
-                        {suggestionPool.map(suggestion => (
-                          <button
-                            type="button"
-                            key={suggestion}
-                            onClick={() => handleSuggestionFill(suggestion)}
-                            className="rounded-full border border-pink-200 bg-white px-3 py-1.5 text-xs text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50"
-                          >
-                            {suggestion}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 输入框 */}
-                {showTextInput && (
-                  <div className="input-group mt-4">
-                    <textarea
-                      value={currentAnswer}
-                      onChange={(e) => handleCurrentAnswerChange(e.target.value)}
-                      placeholder={currentQuestion?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
-                      className="input-field min-h-[6rem] resize-y"
-                    />
-                    <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
-                      <span>有效字数：{currentAnswerLength}/{currentMaxLength ?? '不限'}</span>
-                      {currentLimitInfo.source !== 'none' && currentMaxLength ? (
-                        <span className="text-[11px] text-gray-400">{currentLimitLabel}</span>
-                      ) : null}
-                    </div>
-                    {isCurrentOverLimit && (
-                      <div className="mt-1 text-right text-xs text-amber-600">
-                        ⚠️ 已超过{currentLimitLabel}，继续提交将导致生成内容丧失原生性。
-                      </div>
-                    )}
-                  </div>
-                )}
-                {!showTextInput && (
-                  <div className="mt-3 text-center text-xs text-gray-500">本题仅可从选项中选择，无需填写文本。</div>
-                )}
-                {/* 下一题按钮 */}
-                <div className="mt-4 flex flex-col sm:flex-row gap-2">
-                  <button className="generate-button w-1/4" onClick={handlePreviousQuestion} disabled={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}>
-                    返回上题
-                  </button>
-                  <button
-                    onClick={handleNext}
-                    disabled={submitting || isTransitioning || isCooldown || (isCurrentRequired && currentAnswer.trim().length === 0)}
-                    className="generate-button"
-                  >
-                    {submitting ? (
-                      <span className="flex items-center justify-center">
-                        <svg className="animate-spin h-4 w-4 text-white" style={{ marginLeft: '-0.25rem', marginRight: '0.5rem' }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        提交中...
-                      </span>
-                    ) : nextButtonLabel}
-                  </button>
-                </div>
+                <QuestionnaireQuestionPanel
+                  theme={DETAILS_QUESTIONNAIRE_THEME}
+                  progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
+                  progressPercent={progressPercent}
+                  progressExtra={autoSaveTimestamp ? (
+                    <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
+                  ) : null}
+                  questionText={currentQuestion?.question || '未加载题目'}
+                  questionnaireTitle={currentQuestionnaireTitle}
+                  noticeText="请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。"
+                  helperText={currentQuestion?.helperText}
+                  isRequired={isCurrentRequired}
+                  skipText="本题可跳过，不作答将不会记录"
+                  quickOptions={fallbackQuickOptions}
+                  quickOptionDisabled={submitting || isTransitioning || isCooldown}
+                  onQuickOption={handleQuickOption}
+                  options={currentQuestion?.options}
+                  optionsHintText={optionsHintText}
+                  onOptionSelect={handleQuickOption}
+                  suggestions={suggestionPool}
+                  onSuggestionSelect={handleSuggestionFill}
+                  showTextInput={showTextInput}
+                  answer={currentAnswer}
+                  onAnswerChange={handleCurrentAnswerChange}
+                  placeholder={currentQuestion?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
+                  answerLength={currentAnswerLength}
+                  maxLength={currentMaxLength}
+                  limitLabel={currentLimitLabel}
+                  showLimitLabel={currentLimitInfo.source !== 'none' && Boolean(currentMaxLength)}
+                  isOverLimit={isCurrentOverLimit}
+                  overLimitText={overLimitText}
+                  isTransitioning={isTransitioning}
+                  transitionClassName="transition-all duration-300 ease-out"
+                  transitionStyle={{
+                    opacity: isTransitioning ? 0 : 1,
+                    transform: isTransitioning ? 'translateX(-16px)' : 'translateX(0)',
+                  }}
+                  prevLabel="返回上题"
+                  nextButtonContent={nextButtonContent}
+                  onPrev={handlePreviousQuestion}
+                  onNext={handleNext}
+                  disablePrev={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}
+                  disableNext={submitting || isTransitioning || isCooldown || (isCurrentRequired && currentAnswer.trim().length === 0)}
+                  prevButtonClass="generate-button w-1/4"
+                  nextButtonClass="generate-button"
+                />
 
                 <TokenIndicator
                   text={tokenEstimateText}
