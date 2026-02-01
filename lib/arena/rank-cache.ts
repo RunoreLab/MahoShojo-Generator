@@ -361,3 +361,20 @@ export const getArenaApproxRankLabel = (input: {
   };
 };
 
+export const getArenaCachedRank = (input: {
+  queue: ArenaQueue;
+  entityType: ArenaEntityType;
+  entityId: string;
+}): number | null => {
+  if (typeof window === 'undefined') return null;
+  const queue = normalizeQueue(input.queue);
+  if (!queue) return null;
+  const entityType = normalizeEntityType(input.entityType);
+  const entityId = normalizeEntityId(input.entityId);
+  if (!entityType || !entityId) return null;
+
+  const state = readCache();
+  const entry = state.entries[queue]?.[buildEntityKey(entityType, entityId)];
+  const rank = typeof entry?.rank === 'number' && Number.isFinite(entry.rank) && entry.rank > 0 ? Math.floor(entry.rank) : null;
+  return rank;
+};

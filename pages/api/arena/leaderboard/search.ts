@@ -276,66 +276,55 @@ export default async function handler(req: NextRequest) {
       const searchParts: string[] = [];
       const searchParams: unknown[] = [];
       const like = `%${qLower}%`;
-      searchParts.push('LOWER(COALESCE(dataCardName, \'\')) LIKE ?');
+      searchParts.push("LOWER(COALESCE(dc.name, '')) LIKE ?");
       searchParams.push(like);
-      searchParts.push('LOWER(COALESCE(authorName, \'\')) LIKE ?');
+      searchParts.push("LOWER(COALESCE(u.username, '')) LIKE ?");
       searchParams.push(like);
-      searchParts.push('LOWER(entityId) LIKE ?');
+      searchParts.push('LOWER(ar.entity_id) LIKE ?');
       searchParams.push(like);
       if (matchedPresetIds.length > 0) {
         const placeholders = matchedPresetIds.map(() => '?').join(', ');
-        searchParts.push(`(entityType = 'preset' AND entityId IN (${placeholders}))`);
+        searchParts.push(`(ar.entity_type = 'preset' AND ar.entity_id IN (${placeholders}))`);
         searchParams.push(...matchedPresetIds);
       }
 
       const searchSql = searchParts.length ? `(${searchParts.join(' OR ')})` : '1=0';
 
       const sql = `
-      WITH base AS (
-        SELECT
-          ar.entity_type as entityType,
-          ar.entity_id as entityId,
-          ar.rating as rating,
-          ar.games as games,
-          ar.wins as wins,
-          ar.losses as losses,
-          ar.draws as draws,
-          ar.updated_at as updatedAt,
-          dc.name as dataCardName,
-          u.username as authorName,
-          dcm.tech_score as techScore,
-          dcm.tech_level as techLevel,
-          dcm.is_native as isNative,
-          CASE WHEN ar.entity_type = 'data_card' THEN (
-            SELECT group_concat(DISTINCT dct.tag_id)
-            FROM data_card_tags dct
-            WHERE dct.data_card_id = ar.entity_id
-          ) ELSE NULL END as tagIds
-        FROM arena_ratings ar
-        LEFT JOIN data_cards dc
-          ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-        LEFT JOIN users u
-          ON dc.user_id = u.id
-        LEFT JOIN data_card_metrics dcm
-          ON ar.entity_type = 'data_card' AND dcm.data_card_id = ar.entity_id
-        ${whereSql}
-      ),
-      ranked AS (
-        SELECT
-          *,
-          ROW_NUMBER() OVER (${orderBy}) as rank
-        FROM base
-      )
-      SELECT *
-      FROM ranked
-      WHERE ${searchSql}
-      ORDER BY rank ASC
+      SELECT
+        ar.entity_type as entityType,
+        ar.entity_id as entityId,
+        ar.rating as rating,
+        ar.games as games,
+        ar.wins as wins,
+        ar.losses as losses,
+        ar.draws as draws,
+        ar.updated_at as updatedAt,
+        dc.name as dataCardName,
+        u.username as authorName,
+        dcm.tech_score as techScore,
+        dcm.tech_level as techLevel,
+        dcm.is_native as isNative,
+        CASE WHEN ar.entity_type = 'data_card' THEN (
+          SELECT group_concat(DISTINCT dct.tag_id)
+          FROM data_card_tags dct
+          WHERE dct.data_card_id = ar.entity_id
+        ) ELSE NULL END as tagIds
+      FROM arena_ratings ar
+      LEFT JOIN data_cards dc
+        ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
+      LEFT JOIN users u
+        ON dc.user_id = u.id
+      LEFT JOIN data_card_metrics dcm
+        ON ar.entity_type = 'data_card' AND dcm.data_card_id = ar.entity_id
+      ${whereSql}
+        AND ${searchSql}
+      ${orderBy}
       LIMIT ?;
     `;
 
       const result = (await queryFromD1(sql, [...params, ...searchParams, limit])) as any;
       const rows = (result?.result?.[0]?.results ?? []) as Array<{
-        rank: number;
         entityType: 'data_card' | 'preset';
         entityId: string;
         rating: number;
@@ -376,7 +365,7 @@ export default async function handler(req: NextRequest) {
           : [];
 
         return {
-          rank: typeof row.rank === 'number' ? row.rank : 0,
+          rank: 0,
           entityType: row.entityType,
           entityId: row.entityId,
           displayName,

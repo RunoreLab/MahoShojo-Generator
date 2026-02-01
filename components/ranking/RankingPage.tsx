@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
-import { isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
+import { getArenaApproxRankLabel, getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
 import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
 import { buildTitleDisplay } from '@/lib/text';
@@ -303,35 +303,36 @@ export function RankingPage() {
     return historySection === 'bottom' ? board.bottom : board.top;
   }, [archiveQuery.data, historyQueue, historySection, isHistoryMode, leaderboardQuery.data?.items]);
 
+  const isCanonicalPublicQuery = useMemo(() => {
+    if (isHistoryMode) return false;
+    return isCanonicalPublicLeaderboardQuery({
+      sort: appliedFilters.sort,
+      order: appliedFilters.order,
+      includePresets: appliedFilters.includePresets,
+      isNative: appliedFilters.isNative,
+      includeTagIds: appliedFilters.includeTagIds,
+      excludeTagIds: appliedFilters.excludeTagIds,
+      minRating: appliedFilters.minRating,
+      maxRating: appliedFilters.maxRating,
+      minGames: appliedFilters.minGames,
+      maxGames: appliedFilters.maxGames,
+      minTechScore: appliedFilters.minTechScore,
+      maxTechScore: appliedFilters.maxTechScore,
+    });
+  }, [appliedFilters, isHistoryMode]);
+
   useEffect(() => {
     if (isHistoryMode) return;
     const list = leaderboardQuery.data?.items;
     if (!Array.isArray(list) || list.length === 0) return;
-    if (
-      !isCanonicalPublicLeaderboardQuery({
-        sort: appliedFilters.sort,
-        order: appliedFilters.order,
-        includePresets: appliedFilters.includePresets,
-        isNative: appliedFilters.isNative,
-        includeTagIds: appliedFilters.includeTagIds,
-        excludeTagIds: appliedFilters.excludeTagIds,
-        minRating: appliedFilters.minRating,
-        maxRating: appliedFilters.maxRating,
-        minGames: appliedFilters.minGames,
-        maxGames: appliedFilters.maxGames,
-        minTechScore: appliedFilters.minTechScore,
-        maxTechScore: appliedFilters.maxTechScore,
-      })
-    ) {
-      return;
-    }
+    if (!isCanonicalPublicQuery) return;
 
     upsertArenaRankCacheFromLeaderboard({
       queue: appliedFilters.queue,
       items: list,
       maxRankSeen: offset + list.length,
     });
-  }, [appliedFilters, isHistoryMode, leaderboardQuery.data?.items, offset]);
+  }, [appliedFilters.queue, isCanonicalPublicQuery, isHistoryMode, leaderboardQuery.data?.items, offset]);
 
   useEffect(() => {
     setSearchResults(null);
@@ -438,28 +439,6 @@ export function RankingPage() {
       }
       const nextItems = Array.isArray(data.items) ? data.items : [];
       setSearchResults(nextItems);
-      if (
-        nextItems.length > 0 &&
-        isCanonicalPublicLeaderboardQuery({
-          sort: appliedFilters.sort,
-          order: appliedFilters.order,
-          includePresets: appliedFilters.includePresets,
-          isNative: appliedFilters.isNative,
-          includeTagIds: appliedFilters.includeTagIds,
-          excludeTagIds: appliedFilters.excludeTagIds,
-          minRating: appliedFilters.minRating,
-          maxRating: appliedFilters.maxRating,
-          minGames: appliedFilters.minGames,
-          maxGames: appliedFilters.maxGames,
-          minTechScore: appliedFilters.minTechScore,
-          maxTechScore: appliedFilters.maxTechScore,
-        })
-      ) {
-        upsertArenaRankCacheFromLeaderboard({
-          queue: appliedFilters.queue,
-          items: nextItems,
-        });
-      }
     } catch (err) {
       setSearchResults([]);
       setSearchError(String(err));
@@ -472,11 +451,33 @@ export function RankingPage() {
     const rowKey = `${item.entityType}:${item.entityId}`;
     setFocusRowKey(rowKey);
 
-    if (!isHistoryMode) {
-      const rank = typeof item.rank === 'number' ? item.rank : 0;
-      const targetOffset = rank > 0 ? Math.floor((rank - 1) / limit) * limit : 0;
+    if (isHistoryMode) return;
+
+    const rankFromItem = typeof item.rank === 'number' && Number.isFinite(item.rank) ? Math.floor(item.rank) : 0;
+    const cachedRank = rankFromItem > 0 || !isCanonicalPublicQuery
+      ? null
+      : getArenaCachedRank({
+        queue: appliedFilters.queue,
+        entityType: item.entityType,
+        entityId: item.entityId,
+      });
+    const rank = rankFromItem > 0 ? rankFromItem : cachedRank ?? 0;
+
+    if (rank > 0) {
+      const targetOffset = Math.floor((rank - 1) / limit) * limit;
       setOffset(targetOffset);
+      return;
     }
+
+    const winRate = item.games > 0 ? Math.round((item.wins / item.games) * 1000) / 10 : null;
+    const detailsNotice = `搜索结果：段位 ${item.tier} · 分 ${item.rating} · 局 ${item.games} · W/L/D ${item.wins}/${item.losses}/${item.draws}${winRate == null ? '' : ` · 胜率 ${winRate}%`}`;
+    setDetailsEntity({
+      entityType: item.entityType,
+      entityId: item.entityId,
+      displayName: item.displayName,
+      authorName: item.authorName ?? null,
+      pendingNotice: detailsNotice,
+    });
   };
 
   const listIsLoading = isHistoryMode ? archiveQuery.isLoading : leaderboardQuery.isLoading;
@@ -997,7 +998,7 @@ export function RankingPage() {
                             }
                           }}
                           className="input-field h-9 w-full sm:w-[320px]"
-                          placeholder={isHistoryMode ? '搜索角色名 / 作者 / ID（仅当前列表）' : '搜索角色名 / 作者 / ID（可跳转到全榜位置）'}
+                          placeholder={isHistoryMode ? '搜索角色名 / 作者 / ID（仅当前列表）' : '搜索角色名 / 作者 / ID'}
                           aria-label="排行榜搜索"
                         />
                         <button
@@ -1022,7 +1023,7 @@ export function RankingPage() {
                         <span className="text-xs text-gray-500">
                           {isHistoryMode
                             ? '提示：历史赛季榜单只会在当前 Top/Bottom 列表内搜索。'
-                            : '提示：搜索结果会显示该角色在当前筛选条件下的全榜名次，点击即可跳转并高亮定位。'}
+                            : '提示：搜索结果默认不计算全榜名次；若本地已缓存名次，可点击尝试跳转，否则将打开详情。'}
                         </span>
                       </form>
 
@@ -1040,6 +1041,12 @@ export function RankingPage() {
                             <div className="grid gap-2">
                               {searchResults.map((item) => {
                                 const author = formatAuthorLabel(item);
+                                const approx = !isHistoryMode && isCanonicalPublicQuery
+                                  ? getArenaApproxRankLabel({ queue: appliedFilters.queue, entityType: item.entityType, entityId: item.entityId })
+                                  : null;
+                                const rankTitle = approx?.title ?? (item.rank > 0 ? `全榜 #${item.rank}` : '名次未计算');
+                                const rankLabel = item.rank > 0 ? `#${item.rank}` : approx?.label ?? '#—';
+                                const canJump = item.rank > 0 || Boolean(approx);
                                 const { display: displayName, full: fullName } = buildTitleDisplay(item.displayName || '未命名');
                                 return (
                                   <button
@@ -1050,7 +1057,7 @@ export function RankingPage() {
                                   >
                                     <div className="min-w-0">
                                       <div className="truncate text-sm font-semibold text-gray-900" title={fullName}>
-                                        #{item.rank} · {displayName}
+                                        <span title={rankTitle}>{rankLabel}</span> · {displayName}
                                       </div>
                                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
                                         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200">
@@ -1062,7 +1069,7 @@ export function RankingPage() {
                                         <span className="hidden md:inline">id：{item.entityId}</span>
                                       </div>
                                     </div>
-                                    <span className="text-xs text-gray-500">点击跳转</span>
+                                    <span className="text-xs text-gray-500">{canJump ? '点击跳转' : '查看详情'}</span>
                                   </button>
                                 );
                               })}
