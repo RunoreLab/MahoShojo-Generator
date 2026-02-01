@@ -199,6 +199,32 @@ export const formatNarrativeHistoryForPrompt = (history: NarrativeHistoryEntry[]
     ].join('\n');
 };
 
+export const formatUserAnswersForPrompt = (userAnswers: unknown, questions: string[]): string => {
+    if (!userAnswers) return '';
+
+    if (Array.isArray(userAnswers)) {
+        if (userAnswers.length === 0) return '';
+        const lines = userAnswers.map((answer, i) => {
+            const question = questions[i] || `问题 ${i + 1}`;
+            const answerText = typeof answer === 'string' ? answer : JSON.stringify(answer);
+            return `Q: ${question}\nA: ${answerText}`;
+        });
+        return `\n// 问卷回答 (用于理解角色深层性格与理念)\n${lines.join('\n')}\n`;
+    }
+
+    if (typeof userAnswers === 'object') {
+        const entries = Object.entries(userAnswers as Record<string, unknown>);
+        if (entries.length === 0) return '';
+        const lines = entries.map(([key, value]) => {
+            const answerText = typeof value === 'string' ? value : JSON.stringify(value);
+            return `- ${key}: ${answerText}`;
+        });
+        return `\n// 问卷回答 (用于理解角色深层性格与理念)\n${lines.join('\n')}\n`;
+    }
+
+    return '';
+};
+
 export const createPromptBuilder = (
     questions: string[],
     userGuidance: string | null,
@@ -264,6 +290,7 @@ export const createPromptBuilder = (
         } else {
             if (type === 'general-character' && typeof data.content === 'string') {
                 profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
+                profileString += formatUserAnswersForPrompt((data as any).userAnswers, questions);
             } else {
                 let fallbackData: unknown = data;
                 if (typeof fallbackData === 'object' && fallbackData !== null) {
@@ -446,6 +473,7 @@ export const createStreamPromptBuilder = (
         } else {
             if (type === 'general-character' && typeof data.content === 'string') {
                 profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
+                profileString += formatUserAnswersForPrompt((data as any).userAnswers, questions);
             } else {
                 let fallbackData: unknown = data;
                 if (typeof fallbackData === 'object' && fallbackData !== null) {

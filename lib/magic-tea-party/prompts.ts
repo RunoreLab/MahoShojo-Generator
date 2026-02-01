@@ -7,7 +7,7 @@ import type {
   MagicTeaPartyUpdateDraft,
 } from '@/lib/magic-tea-party/types';
 import { inferTemplate } from '@/lib/data-card-converter';
-import { filterAndFormatHistory, formatCurrentStateForPrompt } from '@/lib/arena/logic';
+import { filterAndFormatHistory, formatCurrentStateForPrompt, formatUserAnswersForPrompt } from '@/lib/arena/logic';
 
 // 取消卡片内容截断上限；如需恢复可参考以下阈值：
 // const MAX_FIELD_CHARS = 2_000;
@@ -111,6 +111,8 @@ export const buildRoleProfileText = (
     if (content) {
       lines.push('// 通用角色设定（Markdown）');
       lines.push(content);
+      const userAnswersText = formatUserAnswersForPrompt((cardForPrompt as any).userAnswers, []).trim();
+      if (userAnswersText) lines.push(userAnswersText);
     } else {
       lines.push('// 核心设定');
       lines.push(JSON.stringify(cardForPrompt, null, 2));
