@@ -171,6 +171,18 @@ LEFT JOIN (
    - 用户完成一局排位：把本局双方最新 `rating/games/tier` 写入 localStorage（不用额外查）。
 4) **显示精度建议**：即使最终 UI 文案使用 `约 1234 名`，也建议内部按“数据新鲜度”做动态取整（例如：缓存 > 6 小时则四舍五入到十位/百位），避免“伪精确”。
 
+进一步的 UI 折中（更推荐）：**优先显示比例式估算（`约前 12%`）而不是名次数字**。  
+理由：在“仅依赖本地缓存”的前提下，名次数字很容易显得“伪精确”；比例展示更符合“估算”的直觉，也更容易解释误差来源。
+
+仅用本地缓存计算比例的可行口径（不新增任何线上查询）：
+
+- 当实体在本地缓存里有明确 `rank`（例如曾在排行榜页被加载过）：记录该次浏览时的 `maxRankSeen`（用户滚动到的最深名次），并计算：
+  - `topPercentBound = rank / maxRankSeen`
+  - UI 展示为：`至少前 12%` / `≤ 前 12%`（这是一个保守上界；真实全局百分比通常更好）
+- 当实体只有 `rating/games` 但没有 `rank`：不展示比例（或展示 `暂无估算`），避免用不可靠启发式硬算。
+
+如果后续允许引入一个“低频、强缓存”的总人数/分位点数据（例如 `/api/arena/leaderboard-stats`），则可以把 `topPercentBound` 升级为更接近全局的 `rank / total` 或 `percentileHint(rating,games)`，但这属于增强项，不是本地估算的必要条件。
+
 收益预期（对 Rows Read）：  
 只要 `pages/api/data-card-meta.ts` 与 `pages/api/me/profile-card.ts` 不再做 `higherCount/publicTotal` 的 COUNT 统计，通常会出现明显下降；localStorage 方案能让“砍查询”更容易被用户接受。
 
