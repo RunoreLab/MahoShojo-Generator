@@ -702,10 +702,14 @@ const DetailsPage: React.FC = () => {
           fallbackName,
           defaultName: '魔法少女',
         });
-        let signedCard = card;
+        const cardWithAnswers = {
+          ...card,
+          userAnswers: finalAnswers.map((answer) => answer.trim()),
+        };
+        let signedCard = cardWithAnswers;
         let hasSignError = false;
         try {
-          const result = await resignDataCard(card);
+          const result = await resignDataCard(cardWithAnswers);
           if (!result) return;
           signedCard = result;
         } catch (err) {

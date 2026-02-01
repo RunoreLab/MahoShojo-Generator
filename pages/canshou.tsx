@@ -507,10 +507,14 @@ const CanshouPage: React.FC = () => {
           markdown,
           defaultName: '残兽',
         });
+        const cardWithAnswers = {
+          ...card,
+          userAnswers: finalAnswers,
+        };
 
-        let signedCard = card;
+        let signedCard = cardWithAnswers;
         try {
-          const result = await resignDataCard(card);
+          const result = await resignDataCard(cardWithAnswers);
           if (!result) return;
           signedCard = result;
         } catch (err) {
