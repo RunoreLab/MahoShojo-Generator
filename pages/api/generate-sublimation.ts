@@ -5,7 +5,7 @@ import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib
 import { getLogger } from '../../lib/logger';
 import { NextRequest } from 'next/server';
 import { generateSignature, verifySignature } from '@/lib/signature';
-import { formatQuestionnaireAnswers, normalizeUserAnswers } from '@/lib/questionnaires';
+import { extractQuestionTextsFromUserAnswers, formatQuestionnaireAnswers, normalizeUserAnswers } from '@/lib/questionnaires';
 import magicalGirlQuestionnaire from '../../public/questionnaires/presets/magical-girl-default.json';
 import canshouQuestionnaire from '../../public/questionnaires/presets/canshou-default.json';
 import { config as appConfig, type AIProvider } from '../../lib/config';
@@ -62,6 +62,14 @@ const CurrentStateUpdateSchema = z.object({
   summary: z.string().describe('角色当前状态的摘要，1-2句话描述角色身体状况、心境或想法等。')
 }).partial().optional();
 
+const QuestionnaireAnswerItemSchema = z.object({
+  question: z.string(),
+  answer: z.string(),
+  questionId: z.string().optional(),
+  questionnaireId: z.string().optional(),
+  questionnaireTitle: z.string().optional(),
+});
+
 const FullMagicalGirlSublimationPayloadSchemaFactory = (allowReshapeNames: boolean) => z.object({
   codename: z.string().describe("角色的新代号，必须包含原始代号并在后面加上一个「称号」。例如，如果原始代号是'代号'，新代号可以是'代号「称号」'。"),
   appearance: z.object({
@@ -113,13 +121,18 @@ const FullMagicalGirlSublimationPayloadSchemaFactory = (allowReshapeNames: boole
   }).describe("对角色分析的全面更新。"),
   userAnswers: z.union([
     z.array(z.string()),
-    z.array(z.object({
-      question: z.string(),
-      answer: z.string(),
-      questionId: z.string().optional(),
-      questionnaireId: z.string().optional(),
-      questionnaireTitle: z.string().optional(),
-    })),
+    z.array(QuestionnaireAnswerItemSchema),
+    z.record(z.union([
+      z.string(),
+      z.object({
+        question: z.string().optional(),
+        answer: z.string().optional(),
+        value: z.string().optional(),
+        questionId: z.string().optional(),
+        questionnaireId: z.string().optional(),
+        questionnaireTitle: z.string().optional(),
+      }),
+    ])),
   ]).optional().describe("根据角色的成长，对问卷问题的全新回答。"),
   current_state: CurrentStateUpdateSchema,
 });
@@ -142,13 +155,18 @@ const FullCanshouSublimationPayloadSchema = z.object({
   researcherNotes: z.string().describe("研究员对这次升华的补充笔记。"),
   userAnswers: z.union([
     z.array(z.string()),
-    z.array(z.object({
-      question: z.string(),
-      answer: z.string(),
-      questionId: z.string().optional(),
-      questionnaireId: z.string().optional(),
-      questionnaireTitle: z.string().optional(),
-    })),
+    z.array(QuestionnaireAnswerItemSchema),
+    z.record(z.union([
+      z.string(),
+      z.object({
+        question: z.string().optional(),
+        answer: z.string().optional(),
+        value: z.string().optional(),
+        questionId: z.string().optional(),
+        questionnaireId: z.string().optional(),
+        questionnaireTitle: z.string().optional(),
+      }),
+    ])),
   ]).optional().describe("根据残兽的成长，对问卷问题的全新回答。"),
   current_state: CurrentStateUpdateSchema,
 });
@@ -316,12 +334,14 @@ const createGenerationConfig = (
     let userAnswersReviewSection = '';
     const allowUserAnswersInPrompt = !promptOmissionSet.has('userAnswers');
     if (allowUserAnswersInPrompt && dataForPrompt?.userAnswers) {
+      const embeddedQuestions = extractQuestionTextsFromUserAnswers(dataForPrompt.userAnswers);
       const fallbackSource = sourceTemplate === 'canshou' ? canshouQuestionnaire : magicalGirlQuestionnaire;
-      const fallbackQuestions = Array.isArray((fallbackSource as any)?.questions)
+      const defaultFallbackQuestions = Array.isArray((fallbackSource as any)?.questions)
         ? ((fallbackSource as any).questions as unknown[])
             .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
             .filter((item) => typeof item === 'string' && item.trim())
         : [];
+      const fallbackQuestions = embeddedQuestions.length > 0 ? embeddedQuestions : defaultFallbackQuestions;
       const normalizedAnswers = normalizeUserAnswers(dataForPrompt.userAnswers, fallbackQuestions);
       const userAnswersText = formatQuestionnaireAnswers(normalizedAnswers);
       if (userAnswersText) {
@@ -614,12 +634,14 @@ async function handler(req: NextRequest): Promise<Response> {
     const aiResult = await generateWithAI(null, generationConfig, providerOptions);
     const updatedDataFromAI = aiResult.updatedCharacterData;
     if (updatedDataFromAI && 'userAnswers' in updatedDataFromAI && updatedDataFromAI.userAnswers) {
-      const fallbackSource = sourceTemplate === 'canshou' ? canshouQuestionnaire : magicalGirlQuestionnaire;
-      const fallbackQuestions = Array.isArray((fallbackSource as any)?.questions)
+      const embeddedQuestions = extractQuestionTextsFromUserAnswers(originalCharacterData?.userAnswers);
+      const fallbackSource = targetTemplate === 'canshou' ? canshouQuestionnaire : magicalGirlQuestionnaire;
+      const defaultFallbackQuestions = Array.isArray((fallbackSource as any)?.questions)
         ? ((fallbackSource as any).questions as unknown[])
             .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
             .filter((item) => typeof item === 'string' && item.trim())
         : [];
+      const fallbackQuestions = embeddedQuestions.length > 0 ? embeddedQuestions : defaultFallbackQuestions;
       updatedDataFromAI.userAnswers = normalizeUserAnswers(updatedDataFromAI.userAnswers, fallbackQuestions);
     }
 

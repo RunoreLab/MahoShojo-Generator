@@ -584,6 +584,44 @@ export const normalizeUserAnswers = (userAnswers: unknown, fallbackQuestions: st
   return [];
 };
 
+export const extractQuestionTextsFromUserAnswers = (userAnswers: unknown): string[] => {
+  if (!userAnswers) return [];
+
+  const addIfValid = (items: string[], value: unknown) => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    items.push(trimmed);
+  };
+
+  if (Array.isArray(userAnswers)) {
+    const questions: string[] = [];
+    for (const item of userAnswers) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      addIfValid(questions, (item as Record<string, unknown>).question);
+    }
+    return questions;
+  }
+
+  if (typeof userAnswers === 'object') {
+    const questions: string[] = [];
+    for (const [key, value] of Object.entries(userAnswers as Record<string, unknown>)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const record = value as Record<string, unknown>;
+        const question = typeof record.question === 'string' ? record.question.trim() : '';
+        if (question) {
+          questions.push(question);
+          continue;
+        }
+      }
+      addIfValid(questions, key);
+    }
+    return questions;
+  }
+
+  return [];
+};
+
 export const formatQuestionnaireAnswers = (answers: QuestionnaireAnswerItem[]): string => {
   if (!answers.length) return '';
   const grouped = new Map<string, QuestionnaireAnswerItem[]>();

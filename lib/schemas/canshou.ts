@@ -24,6 +24,14 @@ const keyList = [
   'adjudicationEvents'
 ];
 // 残兽数据卡的 Zod Schema
+const QuestionnaireAnswerItemSchema = z.object({
+  question: z.string(),
+  answer: z.string(),
+  questionId: z.string().optional(),
+  questionnaireId: z.string().optional(),
+  questionnaireTitle: z.string().optional(),
+});
+
 export const CanshouSchema = z.object({
   name: z.string(),
   appearance: z.string().optional(),
@@ -39,15 +47,19 @@ export const CanshouSchema = z.object({
   researcherNotes: z.string().optional(),
   templateId: z.string().optional(),
   userAnswers: z.union([
-    z.record(z.string()),
     z.array(z.string()),
-    z.array(z.object({
-      question: z.string(),
-      answer: z.string(),
-      questionId: z.string().optional(),
-      questionnaireId: z.string().optional(),
-      questionnaireTitle: z.string().optional(),
-    })),
+    z.array(QuestionnaireAnswerItemSchema),
+    z.record(z.union([
+      z.string(),
+      z.object({
+        question: z.string().optional(),
+        answer: z.string().optional(),
+        value: z.string().optional(),
+        questionId: z.string().optional(),
+        questionnaireId: z.string().optional(),
+        questionnaireTitle: z.string().optional(),
+      }),
+    ])),
   ]).optional(),
   isPreset: z.boolean().optional(),
   signature: z.string().optional(),

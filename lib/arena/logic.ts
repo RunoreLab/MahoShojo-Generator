@@ -2,6 +2,21 @@ import { AdjudicatorEvent, AdjudicationResult, ArenaHistory, CharacterCurrentSta
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas';
 import { formatQuestionnaireAnswers, normalizeUserAnswers } from '@/lib/questionnaires';
 
+type PromptFallbackQuestions =
+    | string[]
+    | {
+        magicalGirl?: string[];
+        canshou?: string[];
+        default?: string[];
+    };
+
+const resolveFallbackQuestions = (fallback: PromptFallbackQuestions, type: string): string[] => {
+    if (Array.isArray(fallback)) return fallback;
+    if (type === 'canshou') return fallback.canshou ?? fallback.default ?? [];
+    if (type === 'magical-girl') return fallback.magicalGirl ?? fallback.default ?? [];
+    return fallback.default ?? [];
+};
+
 const isGeneralScenarioCard = (value: unknown): value is { templateId: string; title?: string; name?: string; content: string } => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     const record = value as Record<string, unknown>;
@@ -210,7 +225,7 @@ export const formatUserAnswersForPrompt = (userAnswers: unknown, questions: stri
 };
 
 export const createPromptBuilder = (
-    questions: string[],
+    questions: PromptFallbackQuestions,
     userGuidance: string | null,
     internalGuidance: string | null,
     worldviewWarning: boolean,
@@ -239,6 +254,7 @@ export const createPromptBuilder = (
         const characterName = data.codename || data.name;
         const otherNames = allNames.filter(name => name !== characterName);
         const typeDisplay = type === 'magical-girl' ? '魔法少女' : type === 'canshou' ? '残兽' : '通用角色';
+        const fallbackQuestions = resolveFallbackQuestions(questions, type);
         const characterGuidance =
             typeof (c as any)?.characterGuidance === 'string' ? (c as any).characterGuidance.trim().slice(0, 100) : '';
         let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
@@ -267,12 +283,12 @@ export const createPromptBuilder = (
             }
 
             profileString += `// 核心设定\n${JSON.stringify(restOfProfile, null, 2)}\n`;
-            const userAnswersText = formatUserAnswersForPrompt(userAnswers, questions);
+            const userAnswersText = formatUserAnswersForPrompt(userAnswers, fallbackQuestions);
             if (userAnswersText) profileString += userAnswersText;
         } else {
             if (type === 'general-character' && typeof data.content === 'string') {
                 profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
-                profileString += formatUserAnswersForPrompt((data as any).userAnswers, questions);
+                profileString += formatUserAnswersForPrompt((data as any).userAnswers, fallbackQuestions);
             } else {
                 let fallbackData: unknown = data;
                 if (typeof fallbackData === 'object' && fallbackData !== null) {
@@ -389,7 +405,7 @@ export const createPromptBuilder = (
 
 // 专门用于流式输出战报的 Prompt Builder
 export const createStreamPromptBuilder = (
-    questions: string[],
+    questions: PromptFallbackQuestions,
     userGuidance: string | null,
     internalGuidance: string | null,
     worldviewWarning: boolean,
@@ -420,6 +436,7 @@ export const createStreamPromptBuilder = (
         const characterName = data.codename || data.name;
         const otherNames = allNames.filter(name => name !== characterName);
         const typeDisplay = type === 'magical-girl' ? '魔法少女' : type === 'canshou' ? '残兽' : '通用角色';
+        const fallbackQuestions = resolveFallbackQuestions(questions, type);
         const characterGuidance =
             typeof (c as any)?.characterGuidance === 'string' ? (c as any).characterGuidance.trim().slice(0, 100) : '';
         let profileString = `--- 登场角色 #${index + 1}: ${characterName} (${typeDisplay}) ---\n`;
@@ -448,12 +465,12 @@ export const createStreamPromptBuilder = (
             }
 
             profileString += `// 核心设定\n${JSON.stringify(restOfProfile, null, 2)}\n`;
-            const userAnswersText = formatUserAnswersForPrompt(userAnswers, questions);
+            const userAnswersText = formatUserAnswersForPrompt(userAnswers, fallbackQuestions);
             if (userAnswersText) profileString += userAnswersText;
         } else {
             if (type === 'general-character' && typeof data.content === 'string') {
                 profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
-                profileString += formatUserAnswersForPrompt((data as any).userAnswers, questions);
+                profileString += formatUserAnswersForPrompt((data as any).userAnswers, fallbackQuestions);
             } else {
                 let fallbackData: unknown = data;
                 if (typeof fallbackData === 'object' && fallbackData !== null) {

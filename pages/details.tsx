@@ -454,7 +454,6 @@ const DetailsPage: React.FC = () => {
                 ? rawRecord.source
                 : 'preset';
             const rawQuestionnaire = rawRecord.questionnaire as { id?: unknown; title?: unknown } | null;
-            const presetQuestionnaireId = typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : undefined;
             const normalized = normalizeQuestionnaireDefinition(rawRecord.questionnaire, {
               fallbackKind: 'magical-girl',
               fallbackId: typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : 'magical-girl-custom',
