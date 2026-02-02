@@ -11,6 +11,7 @@ import { generateRandomCanshou } from '../lib/random-character-generator';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
+import BattleDataModal from '@/components/BattleDataModal';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
@@ -175,12 +176,7 @@ const CanshouPage: React.FC = () => {
   const currentQuestionKeyRef = useRef<string | null>(null);
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
-  const [questionnairePickerTab, setQuestionnairePickerTab] = useState<'public' | 'private'>('public');
-  const [questionnaireSearch, setQuestionnaireSearch] = useState('');
-  const [questionnaireLoading, setQuestionnaireLoading] = useState(false);
   const [questionnairePickerError, setQuestionnairePickerError] = useState<string | null>(null);
-  const [publicQuestionnaireCards, setPublicQuestionnaireCards] = useState<any[]>([]);
-  const [privateQuestionnaireCards, setPrivateQuestionnaireCards] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -523,57 +519,10 @@ const CanshouPage: React.FC = () => {
     setSelectedQuestionnaires((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const fetchQuestionnaireCardList = useCallback(async (tab: 'public' | 'private', search: string) => {
-    const query = search.trim();
-    setQuestionnaireLoading(true);
-    setQuestionnairePickerError(null);
+  const handleSelectQuestionnaireCard = (card: any) => {
     try {
-      if (tab === 'public') {
-        const params = new URLSearchParams({ type: 'questionnaire', limit: '30' });
-        if (query) params.set('search', query);
-        const res = await fetch(`/api/public-data-cards?${params.toString()}`);
-        const json = await res.json();
-        if (!res.ok || !json?.success) throw new Error(json?.error || '加载公开问卷失败');
-        setPublicQuestionnaireCards(Array.isArray(json.cards) ? json.cards : []);
-      } else {
-        const { authStorage } = await import('@/lib/auth');
-        const authHeader = await authStorage.getAuthHeader();
-        if (!authHeader) {
-          setPrivateQuestionnaireCards([]);
-          setQuestionnairePickerError('请先登录以查看私有问卷');
-          return;
-        }
-        const url = new URL('/api/data-cards', window.location.origin);
-        const res = await fetch(url.toString(), {
-          headers: { Authorization: authHeader },
-        });
-        const json = await res.json();
-        if (!res.ok || !json?.success) throw new Error(json?.error || '加载私有问卷失败');
-        const list = Array.isArray(json.cards) ? json.cards : [];
-        const filtered = list.filter((card: any) => card?.type === 'questionnaire');
-        const searched = query
-          ? filtered.filter((card: any) => {
-              const text = `${card?.name || ''} ${card?.description || ''}`.toLowerCase();
-              return text.includes(query.toLowerCase());
-            })
-          : filtered;
-        setPrivateQuestionnaireCards(searched);
-      }
-    } catch (err) {
-      setQuestionnairePickerError(err instanceof Error ? err.message : '加载问卷失败');
-    } finally {
-      setQuestionnaireLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!showQuestionnairePicker) return;
-    void fetchQuestionnaireCardList(questionnairePickerTab, questionnaireSearch);
-  }, [showQuestionnairePicker, questionnairePickerTab, questionnaireSearch, fetchQuestionnaireCardList]);
-
-  const handleSelectQuestionnaireCard = async (card: any) => {
-    try {
-      const rawData = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
+      const rawPayload = card?.data ?? card?.dataJson ?? card?.data_json ?? null;
+      const rawData = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
       const normalized = normalizeQuestionnaireDefinition(rawData, {
         fallbackKind: 'canshou',
         fallbackId: typeof rawData?.id === 'string' ? rawData.id : `canshou-card-${card?.id ?? ''}`,
@@ -587,8 +536,9 @@ const CanshouPage: React.FC = () => {
         questionnaire: normalized,
         dataCardId: card?.id,
         dataCardName: card?.name,
-        dataCardAuthor: card?.username,
+        dataCardAuthor: card?.username || card?.author,
       });
+      setQuestionnairePickerError(null);
       setShowQuestionnairePicker(false);
     } catch (error) {
       setQuestionnairePickerError(error instanceof Error ? error.message : '解析问卷失败');
@@ -635,19 +585,6 @@ const CanshouPage: React.FC = () => {
       applySelection({ source: 'preset', questionnaire: normalized });
     } catch (error) {
       setError(error instanceof Error ? error.message : '加载预设问卷失败');
-    }
-  };
-
-  const getQuestionnaireCardSummary = (card: any) => {
-    try {
-      const rawData = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
-      const title = typeof rawData?.title === 'string' ? rawData.title : card?.name || '未命名问卷';
-      const kind = rawData?.kind === 'magical-girl' || rawData?.kind === 'canshou' ? rawData.kind : 'canshou';
-      const nativeAllowed = typeof rawData?.nativeAllowed === 'boolean' ? rawData.nativeAllowed : false;
-      const description = typeof rawData?.description === 'string' ? rawData.description : card?.description || '';
-      return { title, kind, nativeAllowed, description };
-    } catch {
-      return { title: card?.name || '未命名问卷', kind: 'canshou', nativeAllowed: false, description: card?.description || '' };
     }
   };
 
@@ -1332,7 +1269,10 @@ const CanshouPage: React.FC = () => {
                         </label>
                         <button
                           type="button"
-                          onClick={() => setShowQuestionnairePicker(true)}
+                          onClick={() => {
+                            setQuestionnairePickerError(null);
+                            setShowQuestionnairePicker(true);
+                          }}
                           className="rounded-lg border border-emerald-500/40 bg-slate-900 px-3 py-1 text-xs text-emerald-300 hover:border-emerald-400"
                         >
                           从云端问卷库选择
@@ -1705,86 +1645,19 @@ const CanshouPage: React.FC = () => {
         </div>
       </div>
 
-      {showQuestionnairePicker && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 px-4 py-6">
-          <div className="w-full max-w-2xl rounded-2xl bg-slate-900 p-4 text-slate-200 shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-700 pb-2">
-              <h3 className="text-base font-semibold text-emerald-200">选择云端问卷</h3>
-              <button
-                type="button"
-                onClick={() => setShowQuestionnairePicker(false)}
-                className="text-lg text-slate-400 hover:text-slate-200"
-              >
-                ×
-              </button>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setQuestionnairePickerTab('public')}
-                className={`rounded-full px-3 py-1 ${questionnairePickerTab === 'public' ? 'bg-emerald-700/40 text-emerald-200' : 'bg-slate-800 text-slate-400'}`}
-              >
-                公开问卷
-              </button>
-              <button
-                type="button"
-                onClick={() => setQuestionnairePickerTab('private')}
-                className={`rounded-full px-3 py-1 ${questionnairePickerTab === 'private' ? 'bg-emerald-700/40 text-emerald-200' : 'bg-slate-800 text-slate-400'}`}
-              >
-                私有问卷
-              </button>
-              <input
-                value={questionnaireSearch}
-                onChange={(e) => setQuestionnaireSearch(e.target.value)}
-                placeholder="搜索问卷名称/描述"
-                className="input-field flex-1 text-xs"
-              />
-              <button
-                type="button"
-                onClick={() => void fetchQuestionnaireCardList(questionnairePickerTab, questionnaireSearch)}
-                className="rounded-lg border border-emerald-500/40 px-3 py-1 text-emerald-200"
-              >
-                刷新
-              </button>
-            </div>
-            {questionnairePickerError && (
-              <p className="mt-3 text-xs text-rose-400">{questionnairePickerError}</p>
-            )}
-            <div className="mt-3 max-h-[50vh] space-y-2 overflow-y-auto pr-2 text-xs">
-              {questionnaireLoading ? (
-                <div className="text-center text-slate-400">加载中...</div>
-              ) : (
-                (questionnairePickerTab === 'public' ? publicQuestionnaireCards : privateQuestionnaireCards).map((card: any) => {
-                  const summary = getQuestionnaireCardSummary(card);
-                  return (
-                    <button
-                      type="button"
-                      key={card?.id}
-                      onClick={() => void handleSelectQuestionnaireCard(card)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-left hover:border-emerald-400 hover:bg-slate-800"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="font-semibold text-slate-100">{summary.title}</div>
-                        <span className="text-[11px] text-slate-400">
-                          {summary.kind === 'magical-girl' ? '魔法少女' : '残兽'}
-                          {summary.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
-                        </span>
-                      </div>
-                      {summary.description && (
-                        <div className="mt-1 text-[11px] text-slate-400">{summary.description}</div>
-                      )}
-                      <div className="mt-1 text-[11px] text-slate-500">作者：{card?.username || '未知'}</div>
-                    </button>
-                  );
-                })
-              )}
-              {!questionnaireLoading && (questionnairePickerTab === 'public' ? publicQuestionnaireCards : privateQuestionnaireCards).length === 0 && (
-                <div className="text-center text-slate-500">暂无可用问卷</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <BattleDataModal
+        isOpen={showQuestionnairePicker}
+        onClose={() => {
+          setShowQuestionnairePicker(false);
+          setQuestionnairePickerError(null);
+        }}
+        selectedType="questionnaire"
+        initialTab="public"
+        visibleTabs={['public', 'my']}
+        titleOverride="选择云端问卷"
+        onSelectCard={handleSelectQuestionnaireCard}
+        externalError={questionnairePickerError}
+      />
 
       {showImageModal && savedImageUrl && (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
