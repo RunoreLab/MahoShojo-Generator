@@ -20,40 +20,101 @@
     {
       "id": "CSF-03",
       "question": "【核心】残兽的核心概念是什么？",
-      "options": ["腐蚀", "穿透", "同化", "蛛网", "火焰", "吞噬", "畸变", "寄生"],
-      "allowCustom": true
+      "options": [
+        "腐蚀",
+        "穿透",
+        "同化",
+        "蛛网",
+        "火焰",
+        "吞噬",
+        "畸变",
+        "寄生"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（简短即可）"
     },
     {
       "id": "CSF-04",
       "question": "【核心】它的核心情感或欲望是什么？",
-      "options": ["破坏欲", "吞噬欲", "怨念", "占有欲", "混沌", "恐惧", "痛苦", "饥饿"],
-      "allowCustom": true
+      "options": [
+        "破坏欲",
+        "吞噬欲",
+        "怨念",
+        "占有欲",
+        "混沌",
+        "恐惧",
+        "痛苦",
+        "饥饿"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（简短即可）"
     },
     {
       "id": "CSF-05",
       "question": "【核心】它的进化阶段处于？",
       "options": [
-        { "value": "卵", "label": "卵" },
-        { "value": "蠖", "label": "蠖" },
-        { "value": "蛹", "label": "蛹" },
-        { "value": "半蜕", "label": "半蜕" },
-        { "value": "蜕", "label": "蜕" },
-        { "value": "王蜕", "label": "王蜕" },
-        { "value": "羽", "label": "羽 (不可选)", "disabled": true }
+        {
+          "value": "卵",
+          "label": "卵"
+        },
+        {
+          "value": "蠖",
+          "label": "蠖"
+        },
+        {
+          "value": "蛹",
+          "label": "蛹"
+        },
+        {
+          "value": "半蜕",
+          "label": "半蜕"
+        },
+        {
+          "value": "蜕",
+          "label": "蜕"
+        },
+        {
+          "value": "王蜕",
+          "label": "王蜕"
+        },
+        {
+          "value": "羽",
+          "label": "羽 (不可选)",
+          "disabled": true
+        }
       ],
-      "allowCustom": false
+      "allowCustom": false,
+      "placeholder": "请选择一个选项"
     },
     {
       "id": "CSF-06",
       "question": "【外貌】外貌形态更接近？",
-      "options": ["野兽", "昆虫", "植物", "矿物", "液体", "无定形", "几何体", "人形"],
-      "allowCustom": true
+      "options": [
+        "野兽",
+        "昆虫",
+        "植物",
+        "矿物",
+        "液体",
+        "无定形",
+        "几何体",
+        "人形"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（1~2 句即可）"
     },
     {
       "id": "CSF-07",
       "question": "【外貌】体型规模/尺寸",
-      "options": ["微型", "小型", "中型", "大型", "巨型", "城市级"],
-      "allowCustom": true
+      "options": [
+        "微型",
+        "小型",
+        "中型",
+        "大型",
+        "巨型",
+        "城市级"
+      ],
+      "allowCustom": true,
+      "placeholder": "例如：精瘦 / 匀称 / 结实"
     },
     {
       "id": "CSF-08",
@@ -93,8 +154,17 @@
     {
       "id": "CSF-15",
       "question": "【起源】它的起源或诞生源头是？",
-      "options": ["野生", "黑烬黎明（反国度组织）", "爪痕（叛逃魔法少女）", "间界", "魔法国度", "人为实验", "未知"],
-      "allowCustom": true
+      "options": [
+        "野生",
+        "黑烬黎明（反国度组织）",
+        "爪痕（叛逃魔法少女）",
+        "间界",
+        "魔法国度",
+        "人为实验",
+        "未知"
+      ],
+      "allowCustom": true,
+      "placeholder": "描述诞生/来源的关键线索（1~2 句）"
     },
     {
       "id": "CSF-16",
@@ -123,65 +193,100 @@
     },
     {
       "id": "CSF-21",
-      "question": "【能力】弱点与克制（生理/心理/环境/特定条件）"
+      "question": "【能力】弱点与克制（生理/心理/环境/特定条件）",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSF-22",
-      "question": "【能力】战斗风格概述"
+      "question": "【能力】战斗风格概述",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSF-23",
       "question": "【行为】社会性/群体关系",
-      "options": ["独行", "群居", "寄生", "受更高个体支配", "形成族群", "无法判断"],
-      "allowCustom": true
+      "options": [
+        "独行",
+        "群居",
+        "寄生",
+        "受更高个体支配",
+        "形成族群",
+        "无法判断"
+      ],
+      "allowCustom": true,
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSF-24",
       "question": "【行为】对人类/魔法少女的态度",
-      "options": ["以狩猎为主", "畏惧", "好奇", "依附", "渗透", "无差别攻击", "可沟通"],
-      "allowCustom": true
+      "options": [
+        "以狩猎为主",
+        "畏惧",
+        "好奇",
+        "依附",
+        "渗透",
+        "无差别攻击",
+        "可沟通"
+      ],
+      "allowCustom": true,
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSF-25",
-      "question": "【行为】与其他残兽/组织关系"
+      "question": "【行为】与其他残兽/组织关系",
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSF-26",
-      "question": "【动机】目标/欲望/执念"
+      "question": "【动机】目标/欲望/执念",
+      "placeholder": "描述目标/欲望/执念（1~2 句）"
     },
     {
       "id": "CSF-27",
-      "question": "【动机】成功与失败后的变化"
+      "question": "【动机】成功与失败后的变化",
+      "placeholder": "描述目标/欲望/执念（1~2 句）"
     },
     {
       "id": "CSF-28",
       "question": "【记忆】是否有人性或记忆？",
-      "suggestions": ["几乎没有残留", "有模糊记忆", "有明确人格", "多重人格或记忆", "未知"],
-      "allowCustom": true
+      "suggestions": [
+        "几乎没有残留",
+        "有模糊记忆",
+        "有明确人格",
+        "多重人格或记忆",
+        "未知"
+      ],
+      "allowCustom": true,
+      "placeholder": "例如：几乎没有 / 有模糊记忆 / 有明确人格"
     },
     {
       "id": "CSF-29",
-      "question": "【背景】关键事件/转折"
+      "question": "【背景】关键事件/转折",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSF-30",
-      "question": "【资源】资源与筹码（巢穴、收藏、同化物、可调动的人力）"
+      "question": "【资源】资源与筹码（巢穴、收藏、同化物、可调动的人力）",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSF-31",
-      "question": "【研究院记录】收容等级/威胁评估/已知称呼"
+      "question": "【研究院记录】收容等级/威胁评估/已知称呼",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSF-32",
-      "question": "【其他】伪装/拟态方式（如果有）"
+      "question": "【其他】伪装/拟态方式（如果有）",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSF-33",
-      "question": "【其他】传播/感染/繁殖方式（如果有）"
+      "question": "【其他】传播/感染/繁殖方式（如果有）",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSF-34",
-      "question": "【其他】“禁忌”或恐惧源"
+      "question": "【其他】“禁忌”或恐惧源",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSF-35",
@@ -200,7 +305,8 @@
     },
     {
       "id": "CSF-38",
-      "question": "【对抗史】与魔法少女/调查院的宿怨或对抗史"
+      "question": "【对抗史】与魔法少女/调查院的宿怨或对抗史",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSF-39",

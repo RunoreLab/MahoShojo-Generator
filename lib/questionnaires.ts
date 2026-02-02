@@ -157,12 +157,13 @@ export interface MagicalQuestionMeta {
 const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   {
     id: 'MG-1',
-    placeholder: '请填写角色的名字',
-    suggestions: ['白思与', '二阶堂祥子', '雪莉', '咕咕嘎嘎！', '真名只不过是表面之物罢了，不足挂齿'],
     maxLength: 180
+    placeholder: '例如：白思与（建议不超过 12 字）',
+    suggestions: ['白思与', '二阶堂祥子', '雪莉', '星港', '咕咕嘎嘎！'],
   },
   {
     id: 'MG-2',
+    placeholder: '例如：冲上去救她 / 呼叫支援 / 诱敌撤离，并用 1~2 句说明理由',
     suggestions: [
       '违背嘱托冲上去救她',
       '呼叫支援掩护撤退',
@@ -177,6 +178,7 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   },
   {
     id: 'MG-3',
+    placeholder: '例如：先安抚她，再复盘失误、一起承担后果（1~2 句）',
     suggestions: [
       '握住她的手告诉她已经足够好了',
       '主动请缨承担失误的后果',
@@ -192,6 +194,7 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   },
   {
     id: 'MG-4',
+    placeholder: '可直接选择选项，或自己写 1~2 句补充你的条件与底线',
     options: [
       { value: '毫不犹豫地答应', label: '毫不犹豫地答应' },
       { value: '会慎重衡量', label: '会慎重衡量风险与代价' },
@@ -232,11 +235,13 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   },
   {
     id: 'MG-7',
+    placeholder: '例如：灯火 / 盾牌 / 星辰（写 1 个名词，建议 2~6 字）',
     suggestions: ['灯火', '羽翼', '晨星', '流星', '余烬', '潮汐', '港灯', '星港', '棋盘', '潮声'],
     maxLength: 200
   },
   {
     id: 'MG-8',
+    placeholder: '可直接选择选项，或用 1~2 句解释你会如何权衡',
     options: [
       { value: '挫败敌人', label: '挫败敌人' },
       { value: '保护队友', label: '保护队友' },
@@ -249,6 +254,7 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   },
   {
     id: 'MG-9',
+    placeholder: '可直接选择选项，或用 1~2 句说清“注定/可变”的理由',
     options: [
       { value: '命运可以被改变', label: '命运可以被改变' },
       { value: '命运注定但可迂回', label: '命运注定但可迂回' },
@@ -261,6 +267,7 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   },
   {
     id: 'MG-10',
+    placeholder: '可直接选择选项，或写下你会采取的“第三条路”（1~2 句）',
     options: [
       { value: '选择拯救多数人', label: '选择拯救多数人' },
       { value: '绝不牺牲无辜', label: '绝不牺牲无辜' },
@@ -273,6 +280,7 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   },
   {
     id: 'MG-11',
+    placeholder: '一句话给出你的立场，再补充你的“边界/底线”（可选）',
     options: [
       { value: '必要之恶可以被接受', label: '必要之恶可以被接受' },
       { value: '必要之恶会腐蚀初心', label: '必要之恶会腐蚀初心' },
@@ -285,6 +293,7 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   },
   {
     id: 'MG-12',
+    placeholder: '例如：先搜集证据→沟通→上报/纠错（1~2 句）',
     options: [
       { value: '直接指出并提出改进', label: '直接指出并提出改进' },
       { value: '先搜集证据再报告', label: '先搜集证据再报告' },
@@ -297,6 +306,7 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   },
   {
     id: 'MG-13',
+    placeholder: '可直接选择选项，或补充：什么情况下你会改变选择',
     options: [
       { value: '更喜欢独自行动', label: '更喜欢独自行动' },
       { value: '依赖团队合作', label: '依赖团队合作' },
@@ -309,6 +319,7 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   },
   {
     id: 'MG-14',
+    placeholder: '可直接选择选项，或补充：你通常怎么做计划/怎么相信直觉',
     options: [
       { value: '计划为先', label: '计划为先' },
       { value: '凭直觉行动', label: '凭直觉行动' },
@@ -320,11 +331,13 @@ const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
   },
   {
     id: 'MG-15',
+    placeholder: '写下一个瞬间（1~3 句，避免长篇回忆录）',
     suggestions: ['夏夜烟花下的约定', '第一次见到魔法少女的瞬间', '与家人重逢的拥抱', '被前辈救起的瞬间', '雨中的葬礼与粉色樱花的凋零', '我……没有经历过……', '星港上的誓约', '第一次在雨夜点亮灯海', '在指挥席上听见全队呼吸整齐的瞬间', '陌生人留给我的潮汐提灯', '咕咕嘎嘎！'],
     maxLength: 280
   },
   {
     id: 'MG-16',
+    placeholder: '写下一个后悔决定与现在的选择（1~3 句）',
     suggestions: ['曾经撤退导致同伴受伤', '因为犹豫而错失机会', '没有勇敢说出的告白', '没能阻止亲人遭遇不幸', '如果当时我更强就好了', '我曾经因为顾虑一份复杂的人情，而没有及时出手，导致同伴受到了本可以避免的伤害。现在我不会再犹豫。', '没能守住承诺的港口', '为了遵守命令而错过救援朋友', '当年没有握住前辈递来的指挥棒', '咕咕嘎嘎！'],
     helperText: '描述你想弥补的遗憾',
     maxLength: 280

@@ -8,34 +8,87 @@
     {
       "id": "coreConcept",
       "question": "残兽的核心概念是什么？",
-      "options": ["腐蚀", "穿透", "同化", "蛛网", "火焰", "吞噬", "畸变", "寄生"],
-      "allowCustom": true
+      "options": [
+        "腐蚀",
+        "穿透",
+        "同化",
+        "蛛网",
+        "火焰",
+        "吞噬",
+        "畸变",
+        "寄生"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（1~2 句即可）"
     },
     {
       "id": "coreEmotion",
       "question": "它的核心情感或欲望是什么？",
-      "options": ["破坏欲", "吞噬欲", "怨念", "占有欲", "混沌", "恐惧", "痛苦", "饥饿"],
-      "allowCustom": true
+      "options": [
+        "破坏欲",
+        "吞噬欲",
+        "怨念",
+        "占有欲",
+        "混沌",
+        "恐惧",
+        "痛苦",
+        "饥饿"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（1~2 句即可）"
     },
     {
       "id": "evolutionStage",
       "question": "它的进化阶段处于？",
       "options": [
-        { "value": "卵", "label": "卵" },
-        { "value": "蠖", "label": "蠖" },
-        { "value": "蛹", "label": "蛹" },
-        { "value": "半蜕", "label": "半蜕" },
-        { "value": "蜕", "label": "蜕" },
-        { "value": "王蜕", "label": "王蜕" },
-        { "value": "羽", "label": "羽 (不可选)", "disabled": true }
+        {
+          "value": "卵",
+          "label": "卵"
+        },
+        {
+          "value": "蠖",
+          "label": "蠖"
+        },
+        {
+          "value": "蛹",
+          "label": "蛹"
+        },
+        {
+          "value": "半蜕",
+          "label": "半蜕"
+        },
+        {
+          "value": "蜕",
+          "label": "蜕"
+        },
+        {
+          "value": "王蜕",
+          "label": "王蜕"
+        },
+        {
+          "value": "羽",
+          "label": "羽 (不可选)",
+          "disabled": true
+        }
       ],
-      "allowCustom": false
+      "allowCustom": false,
+      "placeholder": "请选择一个选项"
     },
     {
       "id": "appearanceForm",
       "question": "它的外貌形态更接近？",
-      "options": ["野兽", "昆虫", "植物", "矿物", "液体", "无定形", "几何体", "人形"],
-      "allowCustom": true
+      "options": [
+        "野兽",
+        "昆虫",
+        "植物",
+        "矿物",
+        "液体",
+        "无定形",
+        "几何体",
+        "人形"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（1~2 句即可）"
     },
     {
       "id": "materialAndSkin",
@@ -64,8 +117,16 @@
     {
       "id": "origin",
       "question": "它的起源是？",
-      "options": ["野生", "黑烬黎明（反国度组织）", "爪痕（叛逃魔法少女）", "间界", "魔法国度", "未知"],
-      "allowCustom": true
+      "options": [
+        "野生",
+        "黑烬黎明（反国度组织）",
+        "爪痕（叛逃魔法少女）",
+        "间界",
+        "魔法国度",
+        "未知"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（1~2 句即可）"
     },
     {
       "id": "birthEnvironment",

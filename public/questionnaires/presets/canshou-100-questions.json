@@ -8,427 +8,605 @@
     {
       "id": "CSQ-001",
       "question": "【档案】研究院档案编号/名称",
-      "placeholder": "例如：C-17、赤潮"
+      "placeholder": "例如：C-17、赤潮",
+      "maxLength": 40
     },
     {
       "id": "CSQ-002",
-      "question": "【档案】外界流传的称呼/代号"
+      "question": "【档案】外界流传的称呼/代号",
+      "placeholder": "例如：百香果",
+      "maxLength": 60
     },
     {
       "id": "CSQ-003",
-      "question": "【核心】残兽的核心概念/象征"
+      "question": "【核心】残兽的核心概念/象征",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "CSQ-004",
-      "question": "【核心】核心欲望或情绪"
+      "question": "【核心】核心欲望或情绪",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "CSQ-005",
       "question": "【核心】进化阶段",
-      "options": ["卵", "蠖", "蛹", "半蜕", "蜕", "王蜕"],
-      "allowCustom": true
+      "options": [
+        "卵",
+        "蠖",
+        "蛹",
+        "半蜕",
+        "蜕",
+        "王蜕"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（简短即可）"
     },
     {
       "id": "CSQ-006",
       "question": "【起源】起源类型",
-      "options": ["野生", "人为实验", "间界坠落", "魔法国度残留", "叛逃魔法少女", "未知"],
-      "allowCustom": true
+      "options": [
+        "野生",
+        "人为实验",
+        "间界坠落",
+        "魔法国度残留",
+        "叛逃魔法少女",
+        "未知"
+      ],
+      "allowCustom": true,
+      "placeholder": "描述诞生/来源的关键线索（1~2 句）"
     },
     {
       "id": "CSQ-007",
-      "question": "【起源】诞生/激活地点"
+      "question": "【起源】诞生/激活地点",
+      "placeholder": "描述诞生/来源的关键线索（1~2 句）"
     },
     {
       "id": "CSQ-008",
-      "question": "【档案】主要出没区域"
+      "question": "【档案】主要出没区域",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "CSQ-009",
       "question": "【档案】威胁等级/收容等级",
-      "options": ["低", "中", "高", "极高", "不可收容"],
-      "allowCustom": true
+      "options": [
+        "低",
+        "中",
+        "高",
+        "极高",
+        "不可收容"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（简短即可）"
     },
     {
       "id": "CSQ-010",
-      "question": "【环境】领地/巢穴位置"
+      "question": "【环境】领地/巢穴位置",
+      "placeholder": "例如：废弃医院、下水道、工业区"
     },
     {
       "id": "CSQ-011",
       "question": "【记忆】是否有人性或记忆残留",
-      "options": ["几乎没有", "有模糊记忆", "有明确人格", "多重人格或记忆"],
-      "allowCustom": true
+      "options": [
+        "几乎没有",
+        "有模糊记忆",
+        "有明确人格",
+        "多重人格或记忆"
+      ],
+      "allowCustom": true,
+      "placeholder": "例如：几乎没有 / 有模糊记忆 / 有明确人格"
     },
     {
       "id": "CSQ-012",
-      "question": "【拟态】是否存在拟态/伪装身份"
+      "question": "【拟态】是否存在拟态/伪装身份",
+      "placeholder": "例如：伪装成×××，通过×××混入人群"
     },
     {
       "id": "CSQ-013",
       "question": "【外貌】外貌形态类型",
-      "options": ["野兽", "昆虫", "植物", "矿物", "液体", "无定形", "几何体", "人形"],
-      "allowCustom": true
+      "options": [
+        "野兽",
+        "昆虫",
+        "植物",
+        "矿物",
+        "液体",
+        "无定形",
+        "几何体",
+        "人形"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（1~2 句即可）"
     },
     {
       "id": "CSQ-014",
       "question": "【外貌】体型尺寸",
-      "options": ["微型", "小型", "中型", "大型", "巨型", "城市级"],
-      "allowCustom": true
+      "options": [
+        "微型",
+        "小型",
+        "中型",
+        "大型",
+        "巨型",
+        "城市级"
+      ],
+      "allowCustom": true,
+      "placeholder": "例如：精瘦 / 匀称 / 结实"
     },
     {
       "id": "CSQ-015",
-      "question": "【外貌】材质与表皮"
+      "question": "【外貌】材质与表皮",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-016",
-      "question": "【外貌】颜色/纹理/光泽"
+      "question": "【外貌】颜色/纹理/光泽",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-017",
-      "question": "【外貌】体表温度与触感"
+      "question": "【外貌】体表温度与触感",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-018",
-      "question": "【外貌】主要感官与探知方式"
+      "question": "【外貌】主要感官与探知方式",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-019",
-      "question": "【外貌】运动方式与习性动作"
+      "question": "【外貌】运动方式与习性动作",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-020",
-      "question": "【外貌】体味/气味印象"
+      "question": "【外貌】体味/气味印象",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-021",
-      "question": "【外貌】声音特征"
+      "question": "【外貌】声音特征",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-022",
-      "question": "【外貌】头部/眼/口/肢体的显著特征"
+      "question": "【外貌】头部/眼/口/肢体的显著特征",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-023",
-      "question": "【外貌】伤疤/畸变/缺失部位"
+      "question": "【外貌】伤疤/畸变/缺失部位",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-024",
-      "question": "【外貌】纹身/契约印记/标记"
+      "question": "【外貌】纹身/契约印记/标记",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-025",
-      "question": "【外貌】体表弱点或薄弱部位"
+      "question": "【外貌】体表弱点或薄弱部位",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-026",
-      "question": "【外貌】是否会脱落/分裂/再生"
+      "question": "【外貌】是否会脱落/分裂/再生",
+      "placeholder": "请用 1~3 句作答（可留空）"
     },
     {
       "id": "CSQ-027",
-      "question": "【行为】捕食/狩猎方式"
+      "question": "【行为】捕食/狩猎方式",
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-028",
-      "question": "【行为】主要食物或能量来源"
+      "question": "【行为】主要食物或能量来源",
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-029",
       "question": "【行为】攻击习惯（近战/远程/精神）",
-      "options": ["近战", "远程", "精神/心灵", "陷阱/污染"],
-      "allowCustom": true
+      "options": [
+        "近战",
+        "远程",
+        "精神/心灵",
+        "陷阱/污染"
+      ],
+      "allowCustom": true,
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-030",
       "question": "【行为】对人类的态度",
-      "options": ["狩猎", "畏惧", "好奇", "依附", "无差别攻击", "可沟通"],
-      "allowCustom": true
+      "options": [
+        "狩猎",
+        "畏惧",
+        "好奇",
+        "依附",
+        "无差别攻击",
+        "可沟通"
+      ],
+      "allowCustom": true,
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-031",
       "question": "【行为】对魔法少女的态度",
-      "options": ["狩猎", "畏惧", "仇恨", "好奇", "渗透", "可沟通"],
-      "allowCustom": true
+      "options": [
+        "狩猎",
+        "畏惧",
+        "仇恨",
+        "好奇",
+        "渗透",
+        "可沟通"
+      ],
+      "allowCustom": true,
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-032",
       "question": "【行为】对其他残兽的态度",
-      "options": ["独行", "群居", "寄生", "受支配", "结盟", "互相吞噬"],
-      "allowCustom": true
+      "options": [
+        "独行",
+        "群居",
+        "寄生",
+        "受支配",
+        "结盟",
+        "互相吞噬"
+      ],
+      "allowCustom": true,
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-033",
-      "question": "【行为】社会性/群体关系"
+      "question": "【行为】社会性/群体关系",
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-034",
-      "question": "【行为】领地行为（守护/迁移/扩张）"
+      "question": "【行为】领地行为（守护/迁移/扩张）",
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-035",
-      "question": "【行为】受刺激或饥饿时的行为模式"
+      "question": "【行为】受刺激或饥饿时的行为模式",
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-036",
-      "question": "【行为】是否可沟通？交流方式是什么？"
+      "question": "【行为】是否可沟通？交流方式是什么？",
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-037",
-      "question": "【行为】是否有固定的仪式/癖好"
+      "question": "【行为】是否有固定的仪式/癖好",
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-038",
-      "question": "【行为】是否故意营造传闻或恐怖故事"
+      "question": "【行为】是否故意营造传闻或恐怖故事",
+      "placeholder": "描述行为模式与习性（1~2 句）"
     },
     {
       "id": "CSQ-039",
-      "question": "【能力】核心能力体系"
+      "question": "【能力】核心能力体系",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-040",
-      "question": "【能力】特殊能力/异能"
+      "question": "【能力】特殊能力/异能",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-041",
-      "question": "【能力】必杀技/招牌动作"
+      "question": "【能力】必杀技/招牌动作",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-042",
-      "question": "【能力】能力来源（天生/实验/契约）"
+      "question": "【能力】能力来源（天生/实验/契约）",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-043",
-      "question": "【能力】能力代价/冷却"
+      "question": "【能力】能力代价/冷却",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-044",
-      "question": "【能力】失控/暴走条件"
+      "question": "【能力】失控/暴走条件",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-045",
-      "question": "【能力】最大弱点/克制条件"
+      "question": "【能力】最大弱点/克制条件",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-046",
-      "question": "【能力】旧伤是否影响战斗发挥"
+      "question": "【能力】旧伤是否影响战斗发挥",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-047",
-      "question": "【能力】是否拥有侦查/反侦查技巧"
+      "question": "【能力】是否拥有侦查/反侦查技巧",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-048",
-      "question": "【能力】体能耐力与持续作战时长"
+      "question": "【能力】体能耐力与持续作战时长",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-049",
-      "question": "【能力】痛觉敏感度"
+      "question": "【能力】痛觉敏感度",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-050",
       "question": "【能力】面对必输战斗的选择",
-      "options": ["投降", "逃跑", "自爆", "同归于尽"],
-      "allowCustom": true
+      "options": [
+        "投降",
+        "逃跑",
+        "自爆",
+        "同归于尽"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义补充（可分点）"
     },
     {
       "id": "CSQ-051",
-      "question": "【能力】是否藏有连同伴都不知道的底牌"
+      "question": "【能力】是否藏有连同伴都不知道的底牌",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-052",
-      "question": "【能力】失去能力后会如何生存"
+      "question": "【能力】失去能力后会如何生存",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-053",
-      "question": "【能力】杀戮后的心理状态"
+      "question": "【能力】杀戮后的心理状态",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-054",
-      "question": "【能力】能力过强/过弱引发的组织态度"
+      "question": "【能力】能力过强/过弱引发的组织态度",
+      "placeholder": "描述能力表现、代价与限制（可分点）"
     },
     {
       "id": "CSQ-055",
-      "question": "【背景】诞生或被发现的关键事件"
+      "question": "【背景】诞生或被发现的关键事件",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-056",
-      "question": "【背景】决定性创伤或异变事件"
+      "question": "【背景】决定性创伤或异变事件",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-057",
-      "question": "【背景】在事件中失去/获得的东西"
+      "question": "【背景】在事件中失去/获得的东西",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-058",
-      "question": "【背景】是否与某个人或组织绑定"
+      "question": "【背景】是否与某个人或组织绑定",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-059",
-      "question": "【背景】被研究/改造的记录"
+      "question": "【背景】被研究/改造的记录",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-060",
-      "question": "【背景】不可告人的黑历史"
+      "question": "【背景】不可告人的黑历史",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-061",
-      "question": "【背景】是否存在同源体/亲属"
+      "question": "【背景】是否存在同源体/亲属",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-062",
-      "question": "【背景】是否背负交易或债务"
+      "question": "【背景】是否背负交易或债务",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-063",
-      "question": "【背景】对过去的自己想说的话（若曾为人）"
+      "question": "【背景】对过去的自己想说的话（若曾为人）",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-064",
-      "question": "【背景】特殊纪念日/固定狩猎日"
+      "question": "【背景】特殊纪念日/固定狩猎日",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-065",
-      "question": "【背景】真实经历与外界传闻的偏差"
+      "question": "【背景】真实经历与外界传闻的偏差",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-066",
-      "question": "【背景】是否存在反噬/崩溃/消散倒计时"
+      "question": "【背景】是否存在反噬/崩溃/消散倒计时",
+      "placeholder": "描述关键经历与影响（可分点）"
     },
     {
       "id": "CSQ-067",
-      "question": "【关系】现阶段最信任/依赖的对象"
+      "question": "【关系】现阶段最信任/依赖的对象",
+      "placeholder": "描述关系对象与冲突点（可分点）"
     },
     {
       "id": "CSQ-068",
-      "question": "【关系】最大敌人/宿怨与原因"
+      "question": "【关系】最大敌人/宿怨与原因",
+      "placeholder": "描述关系对象与冲突点（可分点）"
     },
     {
       "id": "CSQ-069",
-      "question": "【关系】非血缘却胜似亲人的对象或寄生目标"
+      "question": "【关系】非血缘却胜似亲人的对象或寄生目标",
+      "placeholder": "描述关系对象与冲突点（可分点）"
     },
     {
       "id": "CSQ-070",
-      "question": "【关系】亏欠对象或交易对象"
+      "question": "【关系】亏欠对象或交易对象",
+      "placeholder": "描述关系对象与冲突点（可分点）"
     },
     {
       "id": "CSQ-071",
-      "question": "【关系】对“背叛”的定义"
+      "question": "【关系】对“背叛”的定义",
+      "placeholder": "描述关系对象与冲突点（可分点）"
     },
     {
       "id": "CSQ-072",
       "question": "【关系】在组织/阵营中的立场",
-      "options": ["死忠派", "骑墙派", "想脱离/谋反"],
-      "allowCustom": true
+      "options": [
+        "死忠派",
+        "骑墙派",
+        "想脱离/谋反"
+      ],
+      "allowCustom": true,
+      "placeholder": "描述关系对象与冲突点（可分点）"
     },
     {
       "id": "CSQ-073",
-      "question": "【关系】如果它死亡，谁最伤心/谁最开心"
+      "question": "【关系】如果它死亡，谁最伤心/谁最开心",
+      "placeholder": "描述关系对象与冲突点（可分点）"
     },
     {
       "id": "CSQ-074",
-      "question": "【关系】是否有伴生体/寄生体/宠物"
+      "question": "【关系】是否有伴生体/寄生体/宠物",
+      "placeholder": "描述关系对象与冲突点（可分点）"
     },
     {
       "id": "CSQ-075",
-      "question": "【关系】与魔法少女/调查院的对抗史"
+      "question": "【关系】与魔法少女/调查院的对抗史",
+      "placeholder": "描述关系对象与冲突点（可分点）"
     },
     {
       "id": "CSQ-076",
-      "question": "【关系】是否擅长处理群体内部纠纷"
+      "question": "【关系】是否擅长处理群体内部纠纷",
+      "placeholder": "描述关系对象与冲突点（可分点）"
     },
     {
       "id": "CSQ-077",
-      "question": "【巢穴】巢穴内部结构与陈设"
+      "question": "【巢穴】巢穴内部结构与陈设",
+      "placeholder": "描述巢穴结构、危险点与入口（可分点）"
     },
     {
       "id": "CSQ-078",
-      "question": "【巢穴】巢穴卫生/气味/温度"
+      "question": "【巢穴】巢穴卫生/气味/温度",
+      "placeholder": "描述巢穴结构、危险点与入口（可分点）"
     },
     {
       "id": "CSQ-079",
-      "question": "【巢穴】巢穴中最重要的收藏或核心物件"
+      "question": "【巢穴】巢穴中最重要的收藏或核心物件",
+      "placeholder": "描述巢穴结构、危险点与入口（可分点）"
     },
     {
       "id": "CSQ-080",
-      "question": "【巢穴】迁徙频率与原因"
+      "question": "【巢穴】迁徙频率与原因",
+      "placeholder": "描述巢穴结构、危险点与入口（可分点）"
     },
     {
       "id": "CSQ-081",
-      "question": "【拟态】如需拟态生活，会选择什么身份/职业"
+      "question": "【拟态】如需拟态生活，会选择什么身份/职业",
+      "placeholder": "例如：伪装成×××，通过×××混入人群"
     },
     {
       "id": "CSQ-082",
-      "question": "【拟态】与人类社会接触的方式"
+      "question": "【拟态】与人类社会接触的方式",
+      "placeholder": "例如：伪装成×××，通过×××混入人群"
     },
     {
       "id": "CSQ-083",
-      "question": "【日常】活跃时段/作息"
+      "question": "【日常】活跃时段/作息",
+      "placeholder": "描述日常习惯与偏好（1~2 句）"
     },
     {
       "id": "CSQ-084",
-      "question": "【日常】偏好环境（光照/温度/天气）"
+      "question": "【日常】偏好环境（光照/温度/天气）",
+      "placeholder": "描述日常习惯与偏好（1~2 句）"
     },
     {
       "id": "CSQ-085",
-      "question": "【日常】喜好与厌恶（声音/味道/颜色）"
+      "question": "【日常】喜好与厌恶（声音/味道/颜色）",
+      "placeholder": "描述日常习惯与偏好（1~2 句）"
     },
     {
       "id": "CSQ-086",
-      "question": "【日常】如果获得短暂平静，会做什么"
+      "question": "【日常】如果获得短暂平静，会做什么",
+      "placeholder": "描述日常习惯与偏好（1~2 句）"
     },
     {
       "id": "CSQ-087",
-      "question": "【叙事】角色在故事中的主要功能"
+      "question": "【叙事】角色在故事中的主要功能",
+      "placeholder": "描述角色在故事中的定位与主题（1~2 句）"
     },
     {
       "id": "CSQ-088",
-      "question": "【叙事】想通过它探讨的主题"
+      "question": "【叙事】想通过它探讨的主题",
+      "placeholder": "描述角色在故事中的定位与主题（1~2 句）"
     },
     {
       "id": "CSQ-089",
-      "question": "【叙事】用一句意象或名言概括"
+      "question": "【叙事】用一句意象或名言概括",
+      "placeholder": "例如：用一句话概括即可",
+      "maxLength": 80
     },
     {
       "id": "CSQ-090",
-      "question": "【叙事】预计结局/归宿"
+      "question": "【叙事】预计结局/归宿",
+      "placeholder": "描述角色在故事中的定位与主题（1~2 句）"
     },
     {
       "id": "CSQ-091",
-      "question": "【叙事】如果它是一种动物，会是什么"
+      "question": "【叙事】如果它是一种动物，会是什么",
+      "placeholder": "描述角色在故事中的定位与主题（1~2 句）"
     },
     {
       "id": "CSQ-092",
-      "question": "【叙事】对应的塔罗牌"
+      "question": "【叙事】对应的塔罗牌",
+      "placeholder": "描述角色在故事中的定位与主题（1~2 句）"
     },
     {
       "id": "CSQ-093",
-      "question": "【档案】研究院记录中的“别称/警告语”"
+      "question": "【档案】研究院记录中的“别称/警告语”",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "CSQ-094",
-      "question": "【档案】收容或研究的关键证据/档案摘录"
+      "question": "【档案】收容或研究的关键证据/档案摘录",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "CSQ-095",
-      "question": "【档案】目前最常见的目击传闻"
+      "question": "【档案】目前最常见的目击传闻",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "CSQ-096",
-      "question": "【档案】是否会主动扩散或隐匿行踪"
+      "question": "【档案】是否会主动扩散或隐匿行踪",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "CSQ-097",
-      "question": "【档案】可被利用的弱点/筹码"
+      "question": "【档案】可被利用的弱点/筹码",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "CSQ-098",
-      "question": "【档案】是否存在救赎/净化可能"
+      "question": "【档案】是否存在救赎/净化可能",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "CSQ-099",
-      "question": "【档案】如果成功/完成进化会怎样"
+      "question": "【档案】如果成功/完成进化会怎样",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "CSQ-100",
-      "question": "【档案】如果失败/被收容会怎样"
+      "question": "【档案】如果失败/被收容会怎样",
+      "placeholder": "请简短填写（可留空）"
     },
     {
       "id": "MGQ-142",
