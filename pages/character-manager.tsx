@@ -2003,8 +2003,8 @@ const CharacterManagerPage: React.FC = () => {
                                     </fieldset>
                                 )}
 
-                                {/* [新增] 内嵌随机事件管理模块 - 始终显示 */}
-                                {!isScenarioData(characterData) && (
+                                {/* [新增] 内嵌随机事件管理模块 - 角色/通用情景 */}
+                                {(currentTemplate === 'general-scenario' || !isScenarioData(characterData)) && (
                                     <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
                                         <legend className="text-sm font-semibold px-2 text-gray-600">🎲 内嵌随机事件管理</legend>
                                         <AdjudicatorEditor
