@@ -13,9 +13,22 @@ import {
   type QuestionnaireCondition,
   type QuestionnaireDefinition,
   type QuestionnaireJumpRule,
+  type QuestionnaireOption,
   type QuestionnaireQuestion,
   type QuestionnaireQuestionRef,
 } from '@/lib/questionnaires';
+
+type EditableSuggestionItem = {
+  uid: string;
+  text: string;
+};
+
+type EditableOptionItem = {
+  uid: string;
+  label: string;
+  value: string;
+  disabled: boolean;
+};
 
 type EditableQuestion = {
   uid: string;
@@ -23,8 +36,8 @@ type EditableQuestion = {
   question: string;
   type?: 'text' | 'select';
   placeholder?: string;
-  suggestionsText: string;
-  optionsText: string;
+  suggestions: EditableSuggestionItem[];
+  options: EditableOptionItem[];
   optionsFromId: string;
   suggestionsFromId: string;
   allowCustom?: boolean;
@@ -45,6 +58,8 @@ type EditableQuestion = {
 };
 
 let questionUidCounter = 0;
+let suggestionUidCounter = 0;
+let optionUidCounter = 0;
 
 const createQuestionUid = (seed?: string) => {
   if (seed) return `question-${seed}`;
@@ -53,6 +68,24 @@ const createQuestionUid = (seed?: string) => {
   }
   questionUidCounter += 1;
   return `question-${Date.now()}-${questionUidCounter}`;
+};
+
+const createSuggestionUid = (seed?: string) => {
+  if (seed) return `suggestion-${seed}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `suggestion-${crypto.randomUUID()}`;
+  }
+  suggestionUidCounter += 1;
+  return `suggestion-${Date.now()}-${suggestionUidCounter}`;
+};
+
+const createOptionUid = (seed?: string) => {
+  if (seed) return `option-${seed}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `option-${crypto.randomUUID()}`;
+  }
+  optionUidCounter += 1;
+  return `option-${Date.now()}-${optionUidCounter}`;
 };
 
 const createEmptyQuestion = (
@@ -65,8 +98,8 @@ const createEmptyQuestion = (
   question: '',
   type: 'text',
   placeholder: '',
-  suggestionsText: '',
-  optionsText: '',
+  suggestions: [],
+  options: [],
   optionsFromId: '',
   suggestionsFromId: '',
   allowCustom: true,
@@ -86,49 +119,30 @@ const createEmptyQuestion = (
   extraJson: '',
 });
 
-const parseOptionsText = (input: string): QuestionnaireQuestion['options'] => {
-  const lines = input
-    .split('\n')
-    .map((line) => line.trim())
+const buildSuggestionsPayload = (items: EditableSuggestionItem[]): string[] | undefined => {
+  const normalized = items
+    .map((item) => item.text.trim())
     .filter(Boolean);
-  if (lines.length === 0) return undefined;
-  return lines.map((line) => {
-    const parts = line.split('|').map((part) => part.trim()).filter(Boolean);
-    if (parts.length >= 2) {
-      const [label, value, flag] = parts;
-      const disabled = flag ? ['disabled', 'true', '1', 'yes'].includes(flag.toLowerCase()) : false;
+  return normalized.length > 0 ? normalized : undefined;
+};
+
+const buildOptionsPayload = (items: EditableOptionItem[]): QuestionnaireOption[] | undefined => {
+  const normalized = items
+    .map((item) => {
+      const label = item.label.trim();
+      const value = item.value.trim();
+      const resolvedLabel = label || value;
+      const resolvedValue = value || label;
+      if (!resolvedLabel || !resolvedValue) return null;
+      if (!item.disabled && resolvedLabel === resolvedValue) return resolvedValue;
       return {
-        label: label || value,
-        value: value || label,
-        ...(disabled ? { disabled: true } : {}),
+        label: resolvedLabel,
+        value: resolvedValue,
+        ...(item.disabled ? { disabled: true } : {}),
       };
-    }
-    return line;
-  });
-};
-
-const parseSuggestionsText = (input: string): string[] | undefined => {
-  const lines = input
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return lines.length > 0 ? lines : undefined;
-};
-
-const stringifyOptions = (options: QuestionnaireQuestion['options']): string => {
-  if (!options || options.length === 0) return '';
-  return options
-    .map((option) => {
-      if (typeof option === 'string') return option;
-      const flag = option.disabled ? '|disabled' : '';
-      return `${option.label}|${option.value}${flag}`;
     })
-    .join('\n');
-};
-
-const stringifySuggestions = (suggestions: string[] | undefined): string => {
-  if (!suggestions || suggestions.length === 0) return '';
-  return suggestions.join('\n');
+    .filter((item): item is QuestionnaireOption => item !== null);
+  return normalized.length > 0 ? normalized : undefined;
 };
 
 const CONDITION_OPERATORS = [
@@ -262,6 +276,92 @@ const QuestionnaireEditorPage: React.FC = () => {
 
   const updateQuestion = (index: number, patch: Partial<EditableQuestion>) => {
     setQuestions((prev) => prev.map((q, i) => (i === index ? { ...q, ...patch } : q)));
+  };
+
+  const addSuggestionItem = (questionIndex: number) => {
+    setQuestions((prev) => prev.map((q, i) => {
+      if (i !== questionIndex) return q;
+      return { ...q, suggestions: [...q.suggestions, { uid: createSuggestionUid(), text: '' }] };
+    }));
+  };
+
+  const updateSuggestionItem = (questionIndex: number, itemUid: string, text: string) => {
+    setQuestions((prev) => prev.map((q, i) => {
+      if (i !== questionIndex) return q;
+      return {
+        ...q,
+        suggestions: q.suggestions.map((item) => (item.uid === itemUid ? { ...item, text } : item)),
+      };
+    }));
+  };
+
+  const removeSuggestionItem = (questionIndex: number, itemUid: string) => {
+    setQuestions((prev) => prev.map((q, i) => {
+      if (i !== questionIndex) return q;
+      return { ...q, suggestions: q.suggestions.filter((item) => item.uid !== itemUid) };
+    }));
+  };
+
+  const moveSuggestionItem = (questionIndex: number, fromIndex: number, direction: -1 | 1) => {
+    setQuestions((prev) => prev.map((q, i) => {
+      if (i !== questionIndex) return q;
+      const nextIndex = clampNumber(fromIndex + direction, 0, Math.max(q.suggestions.length - 1, 0));
+      if (nextIndex === fromIndex) return q;
+      const next = [...q.suggestions];
+      const [target] = next.splice(fromIndex, 1);
+      next.splice(nextIndex, 0, target);
+      return { ...q, suggestions: next };
+    }));
+  };
+
+  const addOptionItem = (questionIndex: number) => {
+    setQuestions((prev) => prev.map((q, i) => {
+      if (i !== questionIndex) return q;
+      return {
+        ...q,
+        options: [...q.options, { uid: createOptionUid(), label: '', value: '', disabled: false }],
+      };
+    }));
+  };
+
+  const updateOptionItem = (questionIndex: number, itemUid: string, patch: Partial<EditableOptionItem>) => {
+    setQuestions((prev) => prev.map((q, i) => {
+      if (i !== questionIndex) return q;
+      return {
+        ...q,
+        options: q.options.map((item) => {
+          if (item.uid !== itemUid) return item;
+          if (typeof patch.label === 'string') {
+            const shouldSyncValue = item.value === item.label;
+            const nextLabel = patch.label;
+            const nextValue = typeof patch.value === 'string'
+              ? patch.value
+              : (shouldSyncValue ? nextLabel : item.value);
+            return { ...item, ...patch, value: nextValue };
+          }
+          return { ...item, ...patch };
+        }),
+      };
+    }));
+  };
+
+  const removeOptionItem = (questionIndex: number, itemUid: string) => {
+    setQuestions((prev) => prev.map((q, i) => {
+      if (i !== questionIndex) return q;
+      return { ...q, options: q.options.filter((item) => item.uid !== itemUid) };
+    }));
+  };
+
+  const moveOptionItem = (questionIndex: number, fromIndex: number, direction: -1 | 1) => {
+    setQuestions((prev) => prev.map((q, i) => {
+      if (i !== questionIndex) return q;
+      const nextIndex = clampNumber(fromIndex + direction, 0, Math.max(q.options.length - 1, 0));
+      if (nextIndex === fromIndex) return q;
+      const next = [...q.options];
+      const [target] = next.splice(fromIndex, 1);
+      next.splice(nextIndex, 0, target);
+      return { ...q, options: next };
+    }));
   };
 
   const addQuestion = () => {
@@ -444,8 +544,8 @@ const QuestionnaireEditorPage: React.FC = () => {
         question: q.question.trim() || `问题 ${index + 1}`,
         type: q.type,
         placeholder: q.placeholder?.trim() || undefined,
-        suggestions: parseSuggestionsText(q.suggestionsText),
-        options: parseOptionsText(q.optionsText),
+        suggestions: buildSuggestionsPayload(q.suggestions),
+        options: buildOptionsPayload(q.options),
         ...(q.optionsFromId.trim() ? { optionsFrom: { questionId: q.optionsFromId.trim() } } : {}),
         ...(q.suggestionsFromId.trim() ? { suggestionsFrom: { questionId: q.suggestionsFromId.trim() } } : {}),
         allowCustom: typeof q.allowCustom === 'boolean' ? q.allowCustom : undefined,
@@ -516,8 +616,18 @@ const QuestionnaireEditorPage: React.FC = () => {
           question: q.question,
           type: q.type || 'text',
           placeholder: q.placeholder || '',
-          suggestionsText: stringifySuggestions(q.suggestions),
-          optionsText: stringifyOptions(q.options),
+          suggestions: (q.suggestions || []).map((text) => ({ uid: createSuggestionUid(), text })),
+          options: (q.options || []).map((option) => {
+            if (typeof option === 'string') {
+              return { uid: createOptionUid(), label: option, value: option, disabled: false };
+            }
+            return {
+              uid: createOptionUid(),
+              label: option.label,
+              value: option.value,
+              disabled: Boolean(option.disabled),
+            };
+          }),
           optionsFromId: toQuestionRefId(q.optionsFrom),
           suggestionsFromId: toQuestionRefId(q.suggestionsFrom),
           allowCustom: q.allowCustom ?? true,
@@ -644,7 +754,7 @@ const QuestionnaireEditorPage: React.FC = () => {
               <ul className="list-disc pl-5 space-y-1">
                 <li>问卷由「题目列表」组成，每道题可设置提示、选项与字数限制。</li>
                 <li><code className="bg-slate-200 px-1 rounded">placeholder</code> 用于输入框提示，<code className="bg-slate-200 px-1 rounded">helperText</code> 用于补充说明。</li>
-                <li><code className="bg-slate-200 px-1 rounded">suggestions</code> 会显示为灵感按钮；<code className="bg-slate-200 px-1 rounded">options</code> 用于推荐选项。</li>
+                <li><code className="bg-slate-200 px-1 rounded">suggestions</code> 会显示为灵感按钮（可逐条新增/删除）；<code className="bg-slate-200 px-1 rounded">options</code> 是推荐选项列表，支持设置「标签 / 内容 / 禁用」。</li>
                 <li><code className="bg-slate-200 px-1 rounded">displayIf</code> 支持条件显示；<code className="bg-slate-200 px-1 rounded">jump</code> 可设置跳题规则。</li>
                 <li><code className="bg-slate-200 px-1 rounded">optionsFrom</code> / <code className="bg-slate-200 px-1 rounded">suggestionsFrom</code> 可引用其他题目的选项或灵感。</li>
                 <li>最大字数为建议上限，超出仍可提交但会影响原生性；留空表示不设题目上限（仍受统一原生上限影响）。</li>
@@ -1004,22 +1114,136 @@ const QuestionnaireEditorPage: React.FC = () => {
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-slate-500">灵感提示（每行一个）</label>
-                        <textarea
-                          value={question.suggestionsText}
-                          onChange={(e) => updateQuestion(index, { suggestionsText: e.target.value })}
-                          className="input-field mt-1 h-20"
-                          placeholder="例如：温柔的誓言"
-                        />
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-xs text-slate-500">灵感提示</label>
+                          <button
+                            type="button"
+                            onClick={() => addSuggestionItem(index)}
+                            className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:text-slate-700"
+                          >
+                            + 新增
+                          </button>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400">会显示为“灵感按钮”，点击即可快速填入答案。</p>
+                        {question.suggestions.length === 0 ? (
+                          <div className="mt-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                            暂无灵感提示，点击“新增”添加。
+                          </div>
+                        ) : (
+                          <div className="mt-2 space-y-2">
+                            {question.suggestions.map((item, suggestionIndex) => (
+                              <div key={item.uid} className="flex items-center gap-2">
+                                <input
+                                  value={item.text}
+                                  onChange={(e) => updateSuggestionItem(index, item.uid, e.target.value)}
+                                  className="input-field h-9 flex-1 text-xs"
+                                  placeholder="例如：温柔的誓言"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => moveSuggestionItem(index, suggestionIndex, -1)}
+                                  disabled={suggestionIndex === 0}
+                                  className="h-9 w-9 rounded-md border border-slate-200 text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
+                                  aria-label="上移灵感提示"
+                                  title="上移"
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => moveSuggestionItem(index, suggestionIndex, 1)}
+                                  disabled={suggestionIndex === question.suggestions.length - 1}
+                                  className="h-9 w-9 rounded-md border border-slate-200 text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
+                                  aria-label="下移灵感提示"
+                                  title="下移"
+                                >
+                                  ↓
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => removeSuggestionItem(index, item.uid)}
+                                  className="h-9 rounded-md border border-rose-200 px-3 text-xs text-rose-500 hover:text-rose-600"
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div>
-                        <label className="text-xs text-slate-500">推荐选项（每行一个，支持 label|value|disabled）</label>
-                        <textarea
-                          value={question.optionsText}
-                          onChange={(e) => updateQuestion(index, { optionsText: e.target.value })}
-                          className="input-field mt-1 h-20"
-                          placeholder="例如：守护|守护|disabled"
-                        />
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-xs text-slate-500">推荐选项</label>
+                          <button
+                            type="button"
+                            onClick={() => addOptionItem(index)}
+                            className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:text-slate-700"
+                          >
+                            + 新增
+                          </button>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400">
+                          标签：展示给用户；内容：写入答案（留空将自动等于标签）；禁用：显示但不可选。
+                        </p>
+                        {question.options.length === 0 ? (
+                          <div className="mt-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                            暂无推荐选项，点击“新增”添加。
+                          </div>
+                        ) : (
+                          <div className="mt-2 space-y-2">
+                            {question.options.map((item, optionIndex) => (
+                              <div key={item.uid} className="flex flex-wrap items-center gap-2">
+                                <input
+                                  value={item.label}
+                                  onChange={(e) => updateOptionItem(index, item.uid, { label: e.target.value })}
+                                  className="input-field h-9 flex-1 text-xs min-w-[140px]"
+                                  placeholder="标签（展示给用户）"
+                                />
+                                <input
+                                  value={item.value}
+                                  onChange={(e) => updateOptionItem(index, item.uid, { value: e.target.value })}
+                                  className="input-field h-9 flex-1 text-xs min-w-[140px]"
+                                  placeholder="内容（写入答案）"
+                                />
+                                <label className="flex items-center gap-2 text-xs text-slate-600">
+                                  <input
+                                    type="checkbox"
+                                    checked={item.disabled}
+                                    onChange={(e) => updateOptionItem(index, item.uid, { disabled: e.target.checked })}
+                                  />
+                                  禁用
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => moveOptionItem(index, optionIndex, -1)}
+                                  disabled={optionIndex === 0}
+                                  className="h-9 w-9 rounded-md border border-slate-200 text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
+                                  aria-label="上移推荐选项"
+                                  title="上移"
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => moveOptionItem(index, optionIndex, 1)}
+                                  disabled={optionIndex === question.options.length - 1}
+                                  className="h-9 w-9 rounded-md border border-slate-200 text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
+                                  aria-label="下移推荐选项"
+                                  title="下移"
+                                >
+                                  ↓
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => removeOptionItem(index, item.uid)}
+                                  className="h-9 rounded-md border border-rose-200 px-3 text-xs text-rose-500 hover:text-rose-600"
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div>
                         <label className="text-xs text-slate-500">引用其他题目的选项（可选）</label>
@@ -1030,6 +1254,19 @@ const QuestionnaireEditorPage: React.FC = () => {
                           className="input-field mt-1"
                           placeholder="选择题目 ID（留空表示使用本题选项）"
                         />
+                        <p className="mt-1 text-xs text-slate-400">仅当本题“推荐选项”为空时才会使用引用。</p>
+                        {question.optionsFromId.trim() && question.options.some((item) => item.label.trim() || item.value.trim()) && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                            <span className="text-amber-600">本题已有推荐选项，将覆盖引用。</span>
+                            <button
+                              type="button"
+                              onClick={() => updateQuestion(index, { options: [] })}
+                              className="rounded-md border border-amber-200 px-2 py-1 text-amber-700 hover:border-amber-300"
+                            >
+                              清空本题选项
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div>
                         <label className="text-xs text-slate-500">引用其他题目的灵感（可选）</label>
@@ -1040,6 +1277,19 @@ const QuestionnaireEditorPage: React.FC = () => {
                           className="input-field mt-1"
                           placeholder="选择题目 ID（留空表示使用本题灵感）"
                         />
+                        <p className="mt-1 text-xs text-slate-400">仅当本题“灵感提示”为空时才会使用引用。</p>
+                        {question.suggestionsFromId.trim() && question.suggestions.some((item) => item.text.trim()) && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                            <span className="text-amber-600">本题已有灵感提示，将覆盖引用。</span>
+                            <button
+                              type="button"
+                              onClick={() => updateQuestion(index, { suggestions: [] })}
+                              className="rounded-md border border-amber-200 px-2 py-1 text-amber-700 hover:border-amber-300"
+                            >
+                              清空本题灵感
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center gap-4 text-xs">
                         <label className="flex items-center gap-2">
