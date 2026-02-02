@@ -17,6 +17,7 @@ import BattleDataModal from '@/components/BattleDataModal';
 import {
   buildQuestionKey,
   buildQuestionnaireFlow,
+  compactQuestionnaireAnswerItems,
   formatQuestionnaireAnswers,
   normalizeQuestionnaireDefinition,
   normalizeUserAnswers,
@@ -1229,7 +1230,7 @@ const DetailsPage: React.FC = () => {
         });
         const cardWithAnswers = {
           ...card,
-          userAnswers: finalAnswerItems,
+          userAnswers: compactQuestionnaireAnswerItems(finalAnswerItems),
         };
         if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);

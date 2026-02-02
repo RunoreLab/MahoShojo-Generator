@@ -5,7 +5,7 @@ import { getRandomFlowers } from '../../lib/random-choose-hana-name';
 // import { saveToD1 } from '../../lib/d1';
 import { getLogger } from '../../lib/logger';
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
-import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '../../lib/questionnaires';
+import { compactQuestionnaireAnswerItems, formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '../../lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { type AIProvider } from '@/lib/config';
@@ -356,10 +356,11 @@ async function handler(req: Request): Promise<Response> {
     // }
 
     // 将用户答案和生成结果合并，并添加模板ID，为签名做准备
+    const compactAnswers = compactQuestionnaireAnswerItems(normalizedAnswers);
     const dataToSign = {
         ...magicalGirlDetails,
         templateId: "魔法少女/心之花/魔法少女（问卷生成）", // 添加模板ID
-        userAnswers: normalizedAnswers
+        userAnswers: compactAnswers
     };
 
     if (!allowNativeSignature) {

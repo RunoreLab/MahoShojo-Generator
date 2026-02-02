@@ -143,6 +143,15 @@ export interface QuestionnaireAnswerItem {
   questionnaireTitle?: string;
 }
 
+export const compactQuestionnaireAnswerItems = (answers: QuestionnaireAnswerItem[]): QuestionnaireAnswerItem[] => {
+  return answers.map((item) => {
+    const compacted = { ...item };
+    delete compacted.questionnaireId;
+    delete compacted.questionnaireTitle;
+    return compacted;
+  });
+};
+
 export const buildQuestionKey = (questionnaireId: string | undefined, questionId: string | undefined, index: number) => {
   const base = (questionId ?? '').trim() || `Q${index + 1}`;
   const prefix = (questionnaireId ?? '').trim();

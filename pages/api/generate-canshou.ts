@@ -8,7 +8,7 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
-import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
+import { compactQuestionnaireAnswerItems, formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 
 const log = getLogger('api-gen-canshou');
@@ -318,10 +318,11 @@ async function handler(req: NextRequest): Promise<Response> {
     }, providerOptions);
 
     // 将用户答案和生成结果合并，并添加模板ID，为签名做准备
+    const compactAnswers = compactQuestionnaireAnswerItems(normalizedAnswers);
     const dataToSign = {
         ...canshouDetails,
         templateId: "魔法少女/心之花/残兽（问卷生成）", // 添加模板ID
-        userAnswers: normalizedAnswers
+        userAnswers: compactAnswers
     };
 
     if (allowNativeSignature !== true) {
