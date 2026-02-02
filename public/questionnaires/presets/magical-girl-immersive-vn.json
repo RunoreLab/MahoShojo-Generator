@@ -86,26 +86,26 @@
       "id": "MGVN-06-TREASURE",
       "question": "你最害怕失去的是什么？",
       "type": "select",
-      "options": [
+      "suggestions": [
         "一个具体的人",
         "一个“还能回去的地方”",
         "自己的尊严与选择权",
         "那点还没熄灭的热爱",
         "其他（你自己写）"
       ],
-      "allowCustom": true,
       "placeholder": "写明对象/理由更好（1 句即可）",
       "maxLength": 100,
       "required": false
     },
     {
       "id": "MGVN-08-IS-MG",
-      "question": "【分歧点】此刻的你，已经是魔法少女了吗？（选择将决定是否跳过“如何成为魔法少女”的剧情）",
+      "question": "【分歧点】此刻的你，已经是魔法少女了吗？",
       "type": "select",
       "options": [
         "我已经是魔法少女（直接从成长开始）",
         "我现在还是普通人（将经历觉醒事件）"
       ],
+      "placeholder": "选择将决定是否跳过“如何成为魔法少女”的剧情",
       "allowCustom": false,
       "required": true,
       "jump": [
