@@ -217,11 +217,12 @@
     },
     {
       "id": "MGQ-048",
-      "question": "【穿着】随身包里永远会带着的三样东西"
+      "question": "【穿着】随身包里永远会带着的东西",
+      "placeholder": "建议3样左右"
     },
     {
       "id": "MGQ-049",
-      "question": "【装备】是否随身携带武器/魔装？藏在何处？"
+      "question": "【装备】是否随身携带武器/魔装/装备？藏在何处？"
     },
     {
       "id": "MGQ-050",
@@ -427,7 +428,8 @@
     },
     {
       "id": "MGQ-096",
-      "question": "【背景】出生环境（医院/贫民窟/荒野/豪宅等）"
+      "question": "【背景】出生环境",
+      "suggestions": ["医院", "贫民窟", "豪宅", "荒野"]
     },
     {
       "id": "MGQ-097",
@@ -435,11 +437,15 @@
     },
     {
       "id": "MGQ-098",
-      "question": "【背景】童年时期主要由谁抚养长大"
+      "question": "【背景】童年时期主要由谁抚养长大",
+      "options": ["父母", "亲戚", "孤儿院", "无血缘关系的人"],
+      "allowCustom": true
     },
     {
       "id": "MGQ-099",
-      "question": "【背景】童年最深刻的记忆是温暖还是寒冷"
+      "question": "【背景】童年最深刻的记忆是温暖还是寒冷",
+      "options": ["温暖", "寒冷", "冷暖交织", "冷暖无常"],
+      "allowCustom": true
     },
     {
       "id": "MGQ-100",
@@ -451,7 +457,10 @@
     },
     {
       "id": "MGQ-102",
-      "question": "【背景】学习或训练成绩（天才/普通/吊车尾）"
+      "question": "【背景】学习或训练成绩",
+      "placeholder": "可以是学校学习的成绩，也可以是技能训练等其他成绩",
+      "options": ["天才", "优秀", "普通", "吊车尾"],
+      "allowCustom": true
     },
     {
       "id": "MGQ-103",
@@ -617,7 +626,33 @@
     },
     {
       "id": "MGQ-142",
-      "question": "【叙事】对应的塔罗牌"
+      "question": "【叙事】对应的塔罗牌",
+      "placeholder": "请选择一张代表角色核心叙事或命运基调的大阿卡纳牌",
+      "options": [
+        "0.愚者 (The Fool)",
+        "I.魔术师 (The Magician)",
+        "II.女教皇 (The High Priestess)",
+        "III.女皇 (The Empress)",
+        "IV.皇帝 (The Emperor)",
+        "V.教皇 (The Hierophant)",
+        "VI.恋人 (The Lovers)",
+        "VII.战车 (The Chariot)",
+        "VIII.力量 (The Strength)",
+        "IX.隐者 (The Hermit)",
+        "X.命运之轮 (The Wheel of Fortune)",
+        "XI.正义 (The Justice)",
+        "XII.倒吊人 (The Hanged Man)",
+        "XIII.死神 (The Death)",
+        "XIV.节制 (The Temperance)",
+        "XV.恶魔 (The Devil)",
+        "XVI.高塔 (The Tower)",
+        "XVII.星星 (The Star)",
+        "XVIII.月亮 (The Moon)",
+        "XIX.太阳 (The Sun)",
+        "XX.审判 (The Judgement)",
+        "XXI.世界 (The World)"
+      ],
+      "allowCustom": true
     }
   ]
 }

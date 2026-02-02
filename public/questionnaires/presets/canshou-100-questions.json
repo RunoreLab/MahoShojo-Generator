@@ -429,6 +429,36 @@
     {
       "id": "CSQ-100",
       "question": "【档案】如果失败/被收容会怎样"
+    },
+    {
+      "id": "MGQ-142",
+      "question": "【叙事】对应的塔罗牌",
+      "placeholder": "请选择一张代表角色核心叙事或命运基调的大阿卡纳牌",
+      "options": [
+        "0.愚者 (The Fool)",
+        "I.魔术师 (The Magician)",
+        "II.女教皇 (The High Priestess)",
+        "III.女皇 (The Empress)",
+        "IV.皇帝 (The Emperor)",
+        "V.教皇 (The Hierophant)",
+        "VI.恋人 (The Lovers)",
+        "VII.战车 (The Chariot)",
+        "VIII.力量 (The Strength)",
+        "IX.隐者 (The Hermit)",
+        "X.命运之轮 (The Wheel of Fortune)",
+        "XI.正义 (The Justice)",
+        "XII.倒吊人 (The Hanged Man)",
+        "XIII.死神 (The Death)",
+        "XIV.节制 (The Temperance)",
+        "XV.恶魔 (The Devil)",
+        "XVI.高塔 (The Tower)",
+        "XVII.星星 (The Star)",
+        "XVIII.月亮 (The Moon)",
+        "XIX.太阳 (The Sun)",
+        "XX.审判 (The Judgement)",
+        "XXI.世界 (The World)"
+      ],
+      "allowCustom": true
     }
   ]
 }
