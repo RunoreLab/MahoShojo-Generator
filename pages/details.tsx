@@ -1316,7 +1316,7 @@ const DetailsPage: React.FC = () => {
   const showTextInput = allowCustomInput || !hasOptions;
   const navigatorItems = mergedQuestions.map((item) => ({
     id: item.key,
-    label: item.questionnaireTitle ? `${item.questionnaireTitle} · ${item.question.question}` : item.question.question
+    label: item.questionnaireTitle ? `${item.question.question} · ${item.questionnaireTitle}` : item.question.question
   }));
   const progressPercent = Math.round(((currentQuestionIndex + 1) / mergedQuestions.length) * 100);
   const fallbackQuickOptions = allowCustomInput ? ['还没想好', '不想回答'] : [];

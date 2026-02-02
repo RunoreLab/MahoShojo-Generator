@@ -1095,7 +1095,7 @@ const CanshouPage: React.FC = () => {
   const progressPercent = Math.round(((currentQuestionIndex + 1) / mergedQuestions.length) * 100);
   const navigatorItems = mergedQuestions.map((item) => ({
     id: item.key,
-    label: item.questionnaireTitle ? `${item.questionnaireTitle} · ${item.question.question}` : item.question.question
+    label: item.questionnaireTitle ? `${item.question.question} · ${item.questionnaireTitle}` : item.question.question
   }));
   const allowCustomInput = currentQuestion?.allowCustom !== false;
   const currentLimitInfo = getAnswerLimitInfo(currentQuestion?.maxLength ?? null);
