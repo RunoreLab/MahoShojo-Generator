@@ -701,26 +701,21 @@ const CanshouPage: React.FC = () => {
   useEffect(() => {
     if (mergedQuestions.length === 0) {
       currentQuestionKeyRef.current = null;
+      if (currentQuestionIndex !== 0) {
+        setCurrentQuestionIndex(0);
+      }
       return;
     }
-    const previousKey = currentQuestionKeyRef.current;
-    if (!previousKey) {
-      if (currentQuestionIndex !== 0) setCurrentQuestionIndex(0);
-      return;
-    }
-    const nextIndex = mergedQuestionIndexByKey.get(previousKey);
-    if (typeof nextIndex === 'number' && nextIndex !== currentQuestionIndex) {
-      setCurrentQuestionIndex(nextIndex);
-      return;
-    }
-    if (nextIndex === undefined && currentQuestionIndex !== 0) {
-      setCurrentQuestionIndex(0);
-    }
-  }, [mergedQuestions, mergedQuestionIndexByKey, currentQuestionIndex]);
 
-  useEffect(() => {
-    currentQuestionKeyRef.current = mergedQuestions[currentQuestionIndex]?.key ?? null;
-  }, [mergedQuestions, currentQuestionIndex]);
+    const previousKey = currentQuestionKeyRef.current;
+    const mappedIndex = previousKey ? mergedQuestionIndexByKey.get(previousKey) : undefined;
+    const nextIndex = typeof mappedIndex === 'number' ? mappedIndex : 0;
+
+    if (nextIndex !== currentQuestionIndex) {
+      setCurrentQuestionIndex(nextIndex);
+    }
+    currentQuestionKeyRef.current = mergedQuestions[nextIndex]?.key ?? null;
+  }, [mergedQuestions, mergedQuestionIndexByKey, currentQuestionIndex]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
