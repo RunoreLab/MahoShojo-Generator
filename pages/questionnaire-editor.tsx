@@ -18,6 +18,7 @@ import {
 } from '@/lib/questionnaires';
 
 type EditableQuestion = {
+  uid: string;
   id: string;
   question: string;
   type?: 'text' | 'select';
@@ -43,7 +44,23 @@ type EditableQuestion = {
   extraJson: string;
 };
 
-const createEmptyQuestion = (index: number, kind: 'magical-girl' | 'canshou'): EditableQuestion => ({
+let questionUidCounter = 0;
+
+const createQuestionUid = (seed?: string) => {
+  if (seed) return `question-${seed}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `question-${crypto.randomUUID()}`;
+  }
+  questionUidCounter += 1;
+  return `question-${Date.now()}-${questionUidCounter}`;
+};
+
+const createEmptyQuestion = (
+  index: number,
+  kind: 'magical-girl' | 'canshou',
+  uidSeed?: string
+): EditableQuestion => ({
+  uid: createQuestionUid(uidSeed),
   id: kind === 'magical-girl' ? `MG-${index + 1}` : `CS-${index + 1}`,
   question: '',
   type: 'text',
@@ -193,6 +210,12 @@ const parseFormNumber = (value: FormDataEntryValue | null): number | null => {
   return parsed;
 };
 
+const getQuestionLabel = (question: EditableQuestion, index: number) => {
+  const idLabel = question.id.trim() || `Q${index + 1}`;
+  const textLabel = question.question.trim() || `问题 ${index + 1}`;
+  return `${idLabel} · ${textLabel}`;
+};
+
 const QuestionnaireEditorPage: React.FC = () => {
   const [kind, setKind] = useState<'magical-girl' | 'canshou'>('magical-girl');
   const [questionnaireId, setQuestionnaireId] = useState('magical-girl-custom');
@@ -200,11 +223,12 @@ const QuestionnaireEditorPage: React.FC = () => {
   const [description, setDescription] = useState('');
   const [logoUrl, setLogoUrl] = useState(DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND['magical-girl']);
   const [version, setVersion] = useState('');
-  const [questions, setQuestions] = useState<EditableQuestion[]>([createEmptyQuestion(0, 'magical-girl')]);
+  const [questions, setQuestions] = useState<EditableQuestion[]>([createEmptyQuestion(0, 'magical-girl', 'initial-1')]);
   const [importText, setImportText] = useState('');
   const [editorError, setEditorError] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setLogoUrl((prev) => {
@@ -293,6 +317,29 @@ const QuestionnaireEditorPage: React.FC = () => {
     const targetPosition = clampNumber(rawPosition, 1, max);
     moveQuestionTo(index, targetPosition - 1);
     event.currentTarget.reset();
+  };
+
+  const handleToggleCollapse = (uid: string) => {
+    setCollapsedMap((prev) => ({ ...prev, [uid]: !prev[uid] }));
+  };
+
+  const handleCollapseAll = (nextCollapsed: boolean) => {
+    setCollapsedMap((prev) => {
+      const next = { ...prev };
+      questions.forEach((question) => {
+        next[question.uid] = nextCollapsed;
+      });
+      return next;
+    });
+  };
+
+  const handleJumpToQuestion = (uid: string) => () => {
+    setCollapsedMap((prev) => ({ ...prev, [uid]: false }));
+    if (typeof document === 'undefined') return;
+    const target = document.getElementById(`question-${uid}`);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   const handleDragStart = (index: number) => (event: React.DragEvent<HTMLButtonElement>) => {
@@ -451,6 +498,7 @@ const QuestionnaireEditorPage: React.FC = () => {
         if (!jumpParsed && q.jump) extraPayload.jump = q.jump;
 
         return {
+          uid: createQuestionUid(),
           id: q.id,
           question: q.question,
           type: q.type || 'text',
@@ -637,22 +685,58 @@ const QuestionnaireEditorPage: React.FC = () => {
                   <h2 className="text-lg font-semibold text-slate-800">题目列表</h2>
                   <p className="mt-1 text-xs text-slate-500">拖拽左侧把手可快速排序，也可在右侧输入题号移动。</p>
                 </div>
-                <span className="text-xs text-slate-500">共 {questions.length} 题</span>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-500">共 {questions.length} 题</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCollapseAll(true)}
+                    className="rounded-full border border-slate-200 px-3 py-1 text-slate-500 hover:text-slate-700"
+                  >
+                    全部收起
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCollapseAll(false)}
+                    className="rounded-full border border-slate-200 px-3 py-1 text-slate-500 hover:text-slate-700"
+                  >
+                    全部展开
+                  </button>
+                </div>
               </div>
             </div>
 
             <div className="mt-4 space-y-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold text-slate-600">目录跳转</h3>
+                  <span className="text-xs text-slate-400">点击题号快速定位</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {questions.map((question, index) => (
+                    <button
+                      key={`toc-${question.uid}`}
+                      type="button"
+                      onClick={handleJumpToQuestion(question.uid)}
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600 hover:border-slate-300 hover:text-slate-700"
+                      title={getQuestionLabel(question, index)}
+                    >
+                      {index + 1}.{question.id.trim() || `Q${index + 1}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <datalist id="question-id-options">
-                {questions.map((item, idx) => {
+                {questions.map((item) => {
                   const label = item.question ? `${item.id} · ${item.question}` : item.id;
                   return (
-                    <option key={`question-id-${idx}`} value={item.id} label={label} />
+                    <option key={`question-id-${item.uid}`} value={item.id} label={label} />
                   );
                 })}
               </datalist>
               {questions.map((question, index) => (
                 <div
-                  key={`question-${index}`}
+                  key={question.uid}
+                  id={`question-${question.uid}`}
                   className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition ${
                     dragOverIndex === index ? 'ring-2 ring-indigo-200' : ''
                   } ${dragIndex === index ? 'opacity-80' : ''}`}
@@ -675,6 +759,14 @@ const QuestionnaireEditorPage: React.FC = () => {
                       <div className="font-semibold text-slate-800">题目 {index + 1}</div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleCollapse(question.uid)}
+                        className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:text-slate-700"
+                        aria-expanded={!(collapsedMap[question.uid] ?? false)}
+                      >
+                        {collapsedMap[question.uid] ? '展开' : '收起'}
+                      </button>
                       <form onSubmit={handleMoveToSubmit(index)} className="flex items-center gap-1">
                         <span className="text-slate-500">移动到</span>
                         <input
@@ -693,239 +785,250 @@ const QuestionnaireEditorPage: React.FC = () => {
                       <button onClick={() => removeQuestion(index)} className="text-rose-500 hover:text-rose-600">删除</button>
                     </div>
                   </div>
-                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <div>
-                      <label className="text-xs text-slate-500">题目 ID</label>
-                      <input
-                        value={question.id}
-                        onChange={(e) => updateQuestion(index, { id: e.target.value })}
-                        className="input-field mt-1"
-                      />
+                  {collapsedMap[question.uid] ? (
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                      <div className="font-semibold text-slate-700">{getQuestionLabel(question, index)}</div>
+                      <div className="mt-1 flex flex-wrap gap-2 text-slate-500">
+                        <span>类型：{question.type === 'select' ? '选项优先' : '文本输入'}</span>
+                        <span>必答：{question.required === false ? '否' : '是'}</span>
+                        <span>最大字数：{question.maxLengthText.trim() || '未设置'}</span>
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-xs text-slate-500">题目内容</label>
-                      <input
-                        value={question.question}
-                        onChange={(e) => updateQuestion(index, { question: e.target.value })}
-                        className="input-field mt-1"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-500">题目类型</label>
-                      <select
-                        value={question.type || 'text'}
-                        onChange={(e) => updateQuestion(index, { type: e.target.value as 'text' | 'select' })}
-                        className="input-field mt-1"
-                      >
-                        <option value="text">文本输入</option>
-                        <option value="select">选项优先</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-500">最大字数（建议上限，留空=不设题目上限）</label>
-                      <input
-                        value={question.maxLengthText}
-                        onChange={(e) => updateQuestion(index, { maxLengthText: e.target.value })}
-                        className="input-field mt-1"
-                        placeholder="例如 200"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="text-xs text-slate-500">输入框提示（placeholder）</label>
-                      <input
-                        value={question.placeholder || ''}
-                        onChange={(e) => updateQuestion(index, { placeholder: e.target.value })}
-                        className="input-field mt-1"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="text-xs text-slate-500">补充说明（helperText）</label>
-                      <input
-                        value={question.helperText || ''}
-                        onChange={(e) => updateQuestion(index, { helperText: e.target.value })}
-                        className="input-field mt-1"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-500">灵感提示（每行一个）</label>
-                      <textarea
-                        value={question.suggestionsText}
-                        onChange={(e) => updateQuestion(index, { suggestionsText: e.target.value })}
-                        className="input-field mt-1 h-20"
-                        placeholder="例如：温柔的誓言"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-500">推荐选项（每行一个，支持 label|value|disabled）</label>
-                      <textarea
-                        value={question.optionsText}
-                        onChange={(e) => updateQuestion(index, { optionsText: e.target.value })}
-                        className="input-field mt-1 h-20"
-                        placeholder="例如：守护|守护|disabled"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-500">引用其他题目的选项（可选）</label>
-                      <input
-                        list="question-id-options"
-                        value={question.optionsFromId}
-                        onChange={(e) => updateQuestion(index, { optionsFromId: e.target.value })}
-                        className="input-field mt-1"
-                        placeholder="选择题目 ID（留空表示使用本题选项）"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-500">引用其他题目的灵感（可选）</label>
-                      <input
-                        list="question-id-options"
-                        value={question.suggestionsFromId}
-                        onChange={(e) => updateQuestion(index, { suggestionsFromId: e.target.value })}
-                        className="input-field mt-1"
-                        placeholder="选择题目 ID（留空表示使用本题灵感）"
-                      />
-                    </div>
-                    <div className="flex items-center gap-4 text-xs">
-                      <label className="flex items-center gap-2">
+                  ) : (
+                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="text-xs text-slate-500">题目 ID</label>
                         <input
-                          type="checkbox"
-                          checked={question.allowCustom ?? true}
-                          onChange={(e) => updateQuestion(index, { allowCustom: e.target.checked })}
+                          value={question.id}
+                          onChange={(e) => updateQuestion(index, { id: e.target.value })}
+                          className="input-field mt-1"
                         />
-                        允许自定义回答
-                      </label>
-                      <label className="flex items-center gap-2">
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500">题目内容</label>
                         <input
-                          type="checkbox"
-                          checked={question.required ?? true}
-                          onChange={(e) => updateQuestion(index, { required: e.target.checked })}
+                          value={question.question}
+                          onChange={(e) => updateQuestion(index, { question: e.target.value })}
+                          className="input-field mt-1"
                         />
-                        必答题
-                      </label>
-                    </div>
-                    <div className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-700">
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500">题目类型</label>
+                        <select
+                          value={question.type || 'text'}
+                          onChange={(e) => updateQuestion(index, { type: e.target.value as 'text' | 'select' })}
+                          className="input-field mt-1"
+                        >
+                          <option value="text">文本输入</option>
+                          <option value="select">选项优先</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500">最大字数（建议上限，留空=不设题目上限）</label>
+                        <input
+                          value={question.maxLengthText}
+                          onChange={(e) => updateQuestion(index, { maxLengthText: e.target.value })}
+                          className="input-field mt-1"
+                          placeholder="例如 200"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="text-xs text-slate-500">输入框提示（placeholder）</label>
+                        <input
+                          value={question.placeholder || ''}
+                          onChange={(e) => updateQuestion(index, { placeholder: e.target.value })}
+                          className="input-field mt-1"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="text-xs text-slate-500">补充说明（helperText）</label>
+                        <input
+                          value={question.helperText || ''}
+                          onChange={(e) => updateQuestion(index, { helperText: e.target.value })}
+                          className="input-field mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500">灵感提示（每行一个）</label>
+                        <textarea
+                          value={question.suggestionsText}
+                          onChange={(e) => updateQuestion(index, { suggestionsText: e.target.value })}
+                          className="input-field mt-1 h-20"
+                          placeholder="例如：温柔的誓言"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500">推荐选项（每行一个，支持 label|value|disabled）</label>
+                        <textarea
+                          value={question.optionsText}
+                          onChange={(e) => updateQuestion(index, { optionsText: e.target.value })}
+                          className="input-field mt-1 h-20"
+                          placeholder="例如：守护|守护|disabled"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500">引用其他题目的选项（可选）</label>
+                        <input
+                          list="question-id-options"
+                          value={question.optionsFromId}
+                          onChange={(e) => updateQuestion(index, { optionsFromId: e.target.value })}
+                          className="input-field mt-1"
+                          placeholder="选择题目 ID（留空表示使用本题选项）"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500">引用其他题目的灵感（可选）</label>
+                        <input
+                          list="question-id-options"
+                          value={question.suggestionsFromId}
+                          onChange={(e) => updateQuestion(index, { suggestionsFromId: e.target.value })}
+                          className="input-field mt-1"
+                          placeholder="选择题目 ID（留空表示使用本题灵感）"
+                        />
+                      </div>
+                      <div className="flex items-center gap-4 text-xs">
                         <label className="flex items-center gap-2">
                           <input
                             type="checkbox"
-                            checked={question.displayIfEnabled}
-                            onChange={(e) => updateQuestion(index, { displayIfEnabled: e.target.checked })}
+                            checked={question.allowCustom ?? true}
+                            onChange={(e) => updateQuestion(index, { allowCustom: e.target.checked })}
                           />
-                          启用条件显示
+                          允许自定义回答
                         </label>
                         <label className="flex items-center gap-2">
                           <input
                             type="checkbox"
-                            checked={question.jumpEnabled}
-                            onChange={(e) => updateQuestion(index, { jumpEnabled: e.target.checked })}
+                            checked={question.required ?? true}
+                            onChange={(e) => updateQuestion(index, { required: e.target.checked })}
                           />
-                          启用跳题
+                          必答题
                         </label>
                       </div>
-                      {question.displayIfEnabled && (
-                        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
-                          <div>
-                            <label className="text-xs text-slate-500">引用题目 ID</label>
+                      <div className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-700">
+                          <label className="flex items-center gap-2">
                             <input
-                              list="question-id-options"
-                              value={question.displayIfQuestionId}
-                              onChange={(e) => updateQuestion(index, { displayIfQuestionId: e.target.value })}
-                              className="input-field mt-1"
-                              placeholder="选择用于判断的题目"
+                              type="checkbox"
+                              checked={question.displayIfEnabled}
+                              onChange={(e) => updateQuestion(index, { displayIfEnabled: e.target.checked })}
                             />
-                          </div>
-                          <div>
-                            <label className="text-xs text-slate-500">条件</label>
-                            <select
-                              value={question.displayIfOperator}
-                              onChange={(e) => updateQuestion(index, { displayIfOperator: e.target.value })}
-                              className="input-field mt-1"
-                            >
-                              {CONDITION_OPERATORS.map((item) => (
-                                <option key={item.value} value={item.value}>{item.label}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="text-xs text-slate-500">条件值（多个用 | 分隔）</label>
+                            启用条件显示
+                          </label>
+                          <label className="flex items-center gap-2">
                             <input
-                              value={question.displayIfValue}
-                              onChange={(e) => updateQuestion(index, { displayIfValue: e.target.value })}
-                              className="input-field mt-1"
-                              disabled={!operatorNeedsValue(question.displayIfOperator)}
-                              placeholder="例如：是|确定"
+                              type="checkbox"
+                              checked={question.jumpEnabled}
+                              onChange={(e) => updateQuestion(index, { jumpEnabled: e.target.checked })}
                             />
-                          </div>
+                            启用跳题
+                          </label>
                         </div>
-                      )}
-                      {question.jumpEnabled && (
-                        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
-                          <div>
-                            <label className="text-xs text-slate-500">条件题目 ID</label>
-                            <input
-                              list="question-id-options"
-                              value={question.jumpQuestionId}
-                              onChange={(e) => updateQuestion(index, { jumpQuestionId: e.target.value })}
-                              className="input-field mt-1"
-                              placeholder={`默认本题：${question.id}`}
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs text-slate-500">条件</label>
-                            <select
-                              value={question.jumpOperator}
-                              onChange={(e) => updateQuestion(index, { jumpOperator: e.target.value })}
-                              className="input-field mt-1"
-                            >
-                              {CONDITION_OPERATORS.map((item) => (
-                                <option key={item.value} value={item.value}>{item.label}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="text-xs text-slate-500">条件值（多个用 | 分隔）</label>
-                            <input
-                              value={question.jumpValue}
-                              onChange={(e) => updateQuestion(index, { jumpValue: e.target.value })}
-                              className="input-field mt-1"
-                              disabled={!operatorNeedsValue(question.jumpOperator)}
-                              placeholder="例如：否"
-                            />
-                          </div>
-                          <div className="md:col-span-3 flex flex-wrap items-center gap-3">
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={question.jumpToEnd}
-                                onChange={(e) => updateQuestion(index, { jumpToEnd: e.target.checked })}
-                              />
-                              满足条件后直接结束问卷
-                            </label>
-                            <div className="flex-1 min-w-[200px]">
-                              <label className="text-xs text-slate-500">跳转到题目 ID</label>
+                        {question.displayIfEnabled && (
+                          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
+                            <div>
+                              <label className="text-xs text-slate-500">引用题目 ID</label>
                               <input
                                 list="question-id-options"
-                                value={question.jumpTargetId}
-                                onChange={(e) => updateQuestion(index, { jumpTargetId: e.target.value })}
+                                value={question.displayIfQuestionId}
+                                onChange={(e) => updateQuestion(index, { displayIfQuestionId: e.target.value })}
                                 className="input-field mt-1"
-                                disabled={question.jumpToEnd}
-                                placeholder="选择后续题目（仅支持向后跳）"
+                                placeholder="选择用于判断的题目"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-slate-500">条件</label>
+                              <select
+                                value={question.displayIfOperator}
+                                onChange={(e) => updateQuestion(index, { displayIfOperator: e.target.value })}
+                                className="input-field mt-1"
+                              >
+                                {CONDITION_OPERATORS.map((item) => (
+                                  <option key={item.value} value={item.value}>{item.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-xs text-slate-500">条件值（多个用 | 分隔）</label>
+                              <input
+                                value={question.displayIfValue}
+                                onChange={(e) => updateQuestion(index, { displayIfValue: e.target.value })}
+                                className="input-field mt-1"
+                                disabled={!operatorNeedsValue(question.displayIfOperator)}
+                                placeholder="例如：是|确定"
                               />
                             </div>
                           </div>
-                        </div>
-                      )}
-                      <p className="mt-3 text-xs text-slate-400">提示：条件/跳题仅支持简单规则；复杂条件可继续使用“额外字段 JSON”。</p>
+                        )}
+                        {question.jumpEnabled && (
+                          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
+                            <div>
+                              <label className="text-xs text-slate-500">条件题目 ID</label>
+                              <input
+                                list="question-id-options"
+                                value={question.jumpQuestionId}
+                                onChange={(e) => updateQuestion(index, { jumpQuestionId: e.target.value })}
+                                className="input-field mt-1"
+                                placeholder={`默认本题：${question.id}`}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-slate-500">条件</label>
+                              <select
+                                value={question.jumpOperator}
+                                onChange={(e) => updateQuestion(index, { jumpOperator: e.target.value })}
+                                className="input-field mt-1"
+                              >
+                                {CONDITION_OPERATORS.map((item) => (
+                                  <option key={item.value} value={item.value}>{item.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-xs text-slate-500">条件值（多个用 | 分隔）</label>
+                              <input
+                                value={question.jumpValue}
+                                onChange={(e) => updateQuestion(index, { jumpValue: e.target.value })}
+                                className="input-field mt-1"
+                                disabled={!operatorNeedsValue(question.jumpOperator)}
+                                placeholder="例如：否"
+                              />
+                            </div>
+                            <div className="md:col-span-3 flex flex-wrap items-center gap-3">
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={question.jumpToEnd}
+                                  onChange={(e) => updateQuestion(index, { jumpToEnd: e.target.checked })}
+                                />
+                                满足条件后直接结束问卷
+                              </label>
+                              <div className="flex-1 min-w-[200px]">
+                                <label className="text-xs text-slate-500">跳转到题目 ID</label>
+                                <input
+                                  list="question-id-options"
+                                  value={question.jumpTargetId}
+                                  onChange={(e) => updateQuestion(index, { jumpTargetId: e.target.value })}
+                                  className="input-field mt-1"
+                                  disabled={question.jumpToEnd}
+                                  placeholder="选择后续题目（仅支持向后跳）"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        <p className="mt-3 text-xs text-slate-400">提示：条件/跳题仅支持简单规则；复杂条件可继续使用“额外字段 JSON”。</p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="text-xs text-slate-500">额外字段 JSON（可选）</label>
+                        <textarea
+                          value={question.extraJson}
+                          onChange={(e) => updateQuestion(index, { extraJson: e.target.value })}
+                          className="input-field mt-1 h-20"
+                          placeholder='例如：{ "displayIf": { "questionId": "MG-1", "operator": "equals", "value": "是" } }'
+                        />
+                      </div>
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="text-xs text-slate-500">额外字段 JSON（可选）</label>
-                      <textarea
-                        value={question.extraJson}
-                        onChange={(e) => updateQuestion(index, { extraJson: e.target.value })}
-                        className="input-field mt-1 h-20"
-                        placeholder='例如：{ "displayIf": { "questionId": "MG-1", "operator": "equals", "value": "是" } }'
-                      />
-                    </div>
-                  </div>
+                  )}
                 </div>
               ))}
             </div>
