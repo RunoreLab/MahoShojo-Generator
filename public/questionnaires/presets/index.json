@@ -9,6 +9,13 @@
       "isDefault": true
     },
     {
+      "id": "magical-girl-immersive-vn",
+      "kind": "magical-girl",
+      "title": "沉浸式剧情车卡问卷：分歧之路",
+      "description": "像视觉小说一样做选择：普通人→心之种→成长/普通人结局；包含条件显示与跳题。",
+      "path": "/questionnaires/presets/magical-girl-immersive-vn.json"
+    },
+    {
       "id": "canshou-default",
       "kind": "canshou",
       "title": "研究院残兽调查",
