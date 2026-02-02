@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'bun:test';
-import { buildMagicalQuestionMeta } from '@/lib/questionnaires';
+import magicalGirlDefault from '@/public/questionnaires/presets/magical-girl-default.json';
 
 describe('问卷字段配置', () => {
-  it('角色名字问题允许输入至多 40 字', () => {
-    const [firstQuestion] = buildMagicalQuestionMeta(1);
-    expect(firstQuestion.maxLength).toBe(40);
+  it('默认魔法少女问卷的短答题有合理上限', () => {
+    const questions = Array.isArray((magicalGirlDefault as any)?.questions) ? (magicalGirlDefault as any).questions : [];
+    const nameQuestion = questions.find((q: any) => q?.id === 'MG-1');
+    const nounQuestion = questions.find((q: any) => q?.id === 'MG-7');
+
+    expect(nameQuestion?.maxLength).toBe(40);
+    expect(typeof nameQuestion?.placeholder).toBe('string');
+    expect(nounQuestion?.maxLength).toBe(20);
   });
 });

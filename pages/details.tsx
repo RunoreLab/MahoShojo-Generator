@@ -358,7 +358,6 @@ const DetailsPage: React.FC = () => {
   const tokenEstimateText = useMemo(() => formatQuestionnaireAnswers(answerItems), [answerItems]);
 
   const shouldDisableRemove = selectedQuestionnaires.length <= 1;
-  const shouldApplyMagicalMeta = (questionnaireId?: string) => questionnaireId === 'magical-girl-default';
 
   const resolvedResultPayload = useMemo(() => {
     if (!magicalGirlDetails) return null;
@@ -460,7 +459,6 @@ const DetailsPage: React.FC = () => {
               fallbackKind: 'magical-girl',
               fallbackId: typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : 'magical-girl-custom',
               fallbackTitle: typeof rawQuestionnaire?.title === 'string' ? rawQuestionnaire.title : '未命名问卷',
-              applyMagicalMeta: source === 'preset' && shouldApplyMagicalMeta(presetQuestionnaireId),
               nativeAllowed: source === 'preset' ? true : false,
             });
             if (!normalized) return null;
@@ -608,7 +606,6 @@ const DetailsPage: React.FC = () => {
           fallbackId: defaultPreset.id,
           fallbackKind: defaultPreset.kind,
           fallbackTitle: defaultPreset.title,
-          applyMagicalMeta: shouldApplyMagicalMeta(defaultPreset.id),
           nativeAllowed: true,
         });
         if (!normalized) throw new Error('预设问卷解析失败');
@@ -679,7 +676,6 @@ const DetailsPage: React.FC = () => {
         fallbackKind: 'magical-girl',
         fallbackId: typeof rawData?.id === 'string' ? rawData.id : `magical-girl-card-${card?.id ?? ''}`,
         fallbackTitle: typeof rawData?.title === 'string' ? rawData.title : card?.name || '未命名问卷',
-        applyMagicalMeta: false,
         nativeAllowed: typeof rawData?.nativeAllowed === 'boolean' ? rawData.nativeAllowed : false,
       });
       if (!normalized) throw new Error('问卷数据卡解析失败');
@@ -706,7 +702,6 @@ const DetailsPage: React.FC = () => {
         fallbackKind: 'magical-girl',
         fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'magical-girl-upload',
         fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : file.name.replace(/\.[^.]+$/, ''),
-        applyMagicalMeta: false,
         nativeAllowed: false,
       });
       if (!normalized) throw new Error('问卷文件解析失败');
@@ -732,7 +727,6 @@ const DetailsPage: React.FC = () => {
         fallbackKind: 'magical-girl',
         fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'magical-girl-paste',
         fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : '未命名问卷',
-        applyMagicalMeta: false,
         nativeAllowed: false,
       });
       if (!normalized) throw new Error('问卷 JSON 无法识别，请检查格式');
@@ -758,7 +752,6 @@ const DetailsPage: React.FC = () => {
         fallbackId: preset.id,
         fallbackKind: preset.kind,
         fallbackTitle: preset.title,
-        applyMagicalMeta: shouldApplyMagicalMeta(preset.id),
         nativeAllowed: true,
       });
       if (!normalized) throw new Error('预设问卷解析失败');

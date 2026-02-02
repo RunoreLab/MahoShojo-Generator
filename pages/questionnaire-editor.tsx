@@ -660,7 +660,6 @@ const QuestionnaireEditorPage: React.FC = () => {
         fallbackKind: kind,
         fallbackId: typeof parsed?.id === 'string' ? parsed.id : `${kind}-custom`,
         fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : '未命名问卷',
-        applyMagicalMeta: false,
         nativeAllowed: typeof parsed?.nativeAllowed === 'boolean' ? parsed.nativeAllowed : false,
       });
       if (!normalized) {

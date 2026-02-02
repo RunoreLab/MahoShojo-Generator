@@ -411,7 +411,6 @@ const CanshouPage: React.FC = () => {
               fallbackKind: 'canshou',
               fallbackId: typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : 'canshou-custom',
               fallbackTitle: typeof rawQuestionnaire?.title === 'string' ? rawQuestionnaire.title : '未命名问卷',
-              applyMagicalMeta: false,
               nativeAllowed: source === 'preset' ? true : false,
             });
             if (!normalized) return null;
@@ -531,7 +530,6 @@ const CanshouPage: React.FC = () => {
           fallbackId: defaultPreset.id,
           fallbackKind: defaultPreset.kind,
           fallbackTitle: defaultPreset.title,
-          applyMagicalMeta: false,
           nativeAllowed: true,
         });
         if (!normalized) throw new Error('预设问卷解析失败');
@@ -602,7 +600,6 @@ const CanshouPage: React.FC = () => {
         fallbackKind: 'canshou',
         fallbackId: typeof rawData?.id === 'string' ? rawData.id : `canshou-card-${card?.id ?? ''}`,
         fallbackTitle: typeof rawData?.title === 'string' ? rawData.title : card?.name || '未命名问卷',
-        applyMagicalMeta: false,
         nativeAllowed: typeof rawData?.nativeAllowed === 'boolean' ? rawData.nativeAllowed : false,
       });
       if (!normalized) throw new Error('问卷数据卡解析失败');
@@ -629,7 +626,6 @@ const CanshouPage: React.FC = () => {
         fallbackKind: 'canshou',
         fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'canshou-upload',
         fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : file.name.replace(/\.[^.]+$/, ''),
-        applyMagicalMeta: false,
         nativeAllowed: false,
       });
       if (!normalized) throw new Error('问卷文件解析失败');
@@ -655,7 +651,6 @@ const CanshouPage: React.FC = () => {
         fallbackKind: 'canshou',
         fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'canshou-paste',
         fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : '未命名问卷',
-        applyMagicalMeta: false,
         nativeAllowed: false,
       });
       if (!normalized) throw new Error('问卷 JSON 无法识别，请检查格式');
@@ -681,7 +676,6 @@ const CanshouPage: React.FC = () => {
         fallbackId: preset.id,
         fallbackKind: preset.kind,
         fallbackTitle: preset.title,
-        applyMagicalMeta: false,
         nativeAllowed: true,
       });
       if (!normalized) throw new Error('预设问卷解析失败');
