@@ -1,6 +1,6 @@
 # D1 Rows Read 继续降读排查与方案（2026-02）
 
-更新时间：2026-02-01  
+更新时间：2026-02-02  
 目标：把 Rows Read 从当前约 **2B/日** 继续压到 **25B/月以下**（约 **0.83B/日**）
 
 > 本文基于仓库静态分析（全量检索 `queryFromD1()` 读路径 + SQL 形态判断）。需要你结合 Cloudflare D1 Query Insights / Analytics 验证“Top Queries”是否与本文命中一致。
@@ -13,11 +13,101 @@
 
 接下来要继续从 2B/日压到 0.83B/日，需要优先处理 **“每次请求都会把大表整张扫一遍/多遍”** 这类读放大，而不是微调小查询。
 
+### 0.1 线上 Query Insights 的新信号（你贴的截图）
+
+从你贴的两条 Top Queries 来看，Rows Read 没明显下降，原因很可能是：**主读量已从「榜单 rank 全表扫」转移到了「arena_rating_events / data_cards 的扫描」**。
+
+#### A) `arena_rating_events` 最近变动（lastDelta）窗口函数
+
+截图特征 SQL（简化）：
+
+```sql
+SELECT queue, delta, applied_at
+FROM (
+  SELECT ..., ROW_NUMBER() OVER (PARTITION BY queue ORDER BY applied_at DESC, created_at DESC) AS rn
+  FROM arena_rating_events
+  WHERE status='applied' AND queue IN ('strict','free') AND (...a_entity_id=? OR b_entity_id=?)
+)
+WHERE rn = 1;
+```
+
+截图指标（来自 D1 Query Insights）：
+
+- Rows Read：约 **92.32k / 次**
+- 调用次数：约 **12,780**
+- 平均耗时：约 **137ms**
+
+这条查询如果缺少“按实体 id 过滤”的索引，非常容易退化为大范围扫描 + 排序；在高频调用下会成为稳定的大读来源。
+
+命中位置（已落地移除，见 §2.3）：`pages/api/data-card-meta.ts`（`lastDelta/lastAppliedAt`）。
+
+#### B) `/api/public-data-cards` 列表扫描（带 OFFSET + ORDER BY）
+
+截图特征 SQL（简化）：
+
+```sql
+SELECT dc.*, u.username,
+  (SELECT group_concat(DISTINCT tag_id) FROM data_card_tags WHERE data_card_id = dc.id) AS tag_ids
+FROM data_cards dc
+JOIN users u ON dc.user_id = u.id
+WHERE dc.is_public=1 AND dc.review_status='approved' AND dc.deleted_at IS NULL AND dc.type=?
+ORDER BY dc.created_at DESC
+LIMIT ? OFFSET ?;
+```
+
+截图指标（来自 D1 Query Insights）：
+
+- Rows Read：约 **15.84k / 次**
+- 调用次数：约 **7,630**
+- 平均耗时：约 **228ms**
+
+典型原因是：缺少“匹配过滤 + 排序”的复合索引，或使用 OFFSET 导致读量随翻页线性上升。
+
+命中位置：`lib/database/data-cards.ts#getPublicDataCards()` + `pages/api/public-data-cards.ts`。
+
 ---
 
 ## 1. 当前仓库内最可疑的高读放大点（按 ROI 排序）
 
-### 1.1 数据卡标签 `data_card_tags` 的“全表聚合再 JOIN”（极高 ROI）
+### 1.1 `arena_rating_events` 最近变动（lastDelta）查询（极高 ROI）
+
+现状：`pages/api/data-card-meta.ts` 曾为展示 `lastDelta/lastAppliedAt`，对 `arena_rating_events` 做窗口函数 `ROW_NUMBER() OVER (PARTITION BY queue ...)`。
+
+即使最终只取 strict/free 各 1 行，一旦缺少合适索引或命中失败，仍可能出现**大范围扫描 + 排序**，从而形成稳定 Rows Read。
+
+推荐修复（更推荐“写入时物化”，而不是给读路径加索引硬顶）：
+
+1) 在 `arena_ratings` 增加两列：`last_delta`、`last_applied_at`
+2) 在排位结算写入 `arena_ratings` 时同步更新这两列（每次只更新两行）
+3) 读取 `data-card-meta` 时直接从 `arena_ratings` 取值（不再扫 `arena_rating_events`）
+
+这会把 lastDelta 从“读放大”变成“写放大（两行 UPDATE）”，对 Rows Read 的收益非常直接。
+
+已落地实现：见 §2.3（注意需要线上迁移）。
+
+---
+
+### 1.2 公共数据卡列表 `/api/public-data-cards`（高 ROI）
+
+现状：`getPublicDataCards()` 默认用 `ORDER BY created_at DESC LIMIT/OFFSET`，且会关联作者与 tags。
+
+当缺少合适的复合索引时，SQLite/D1 容易退化为：
+
+- 先筛选出大批候选
+- 再排序
+- 再丢弃 OFFSET 前的行
+
+Rows Read 会随 offset 增长，并在“列表页浏览/无限滚动”场景下快速累积。
+
+推荐修复：
+
+1) 为 `data_cards` 增加“过滤 + 排序”复合索引（见 §2.4 / §3.4）
+2) 为 `/api/public-data-cards` 增加 Edge Cache（10s~30s）作为止血（见 §2.4）
+3) 中期可考虑把分页改成 cursor/keyset（可选，见 §3.5）
+
+---
+
+### 1.3 数据卡标签 `data_card_tags` 的“全表聚合再 JOIN”（极高 ROI）
 
 在以下函数中，存在模式：
 
@@ -45,7 +135,7 @@ LEFT JOIN (
 
 ---
 
-### 1.2 公共排名（`publicRank/publicTotal`）的 COUNT 计算（高 ROI，且价值可谈）
+### 1.4 公共排名（`publicRank/publicTotal`）的 COUNT 计算（高 ROI，且价值可谈）
 
 命中位置（尚未改动，建议按方案处理）：
 
@@ -65,7 +155,7 @@ LEFT JOIN (
 
 ---
 
-### 1.3 排行榜（`/api/arena/leaderboard*`）的标签聚合 JOIN（中高 ROI）
+### 1.5 排行榜（`/api/arena/leaderboard*`）的标签聚合 JOIN（中高 ROI）
 
 命中位置（已修复，见 §2）：
 
@@ -76,7 +166,7 @@ LEFT JOIN (
 
 ---
 
-### 1.4 榜单搜索的全量 `ROW_NUMBER()` 排名（中 ROI，但需防滥用）
+### 1.6 榜单搜索的全量 `ROW_NUMBER()` 排名（中 ROI，但需防滥用）
 
 `pages/api/arena/leaderboard/search.ts` 仍然存在：
 
@@ -125,6 +215,42 @@ LEFT JOIN (
 
 - 降低 tags 表读取
 - 让 `arena_ratings(queue, rating)` 更容易被优化器利用（尤其是分页/排序场景）
+
+---
+
+### 2.3 Data Card Meta：移除 `arena_rating_events` 的 lastDelta 窗口函数扫描（需要迁移）
+
+改动点：
+
+- `pages/api/data-card-meta.ts`
+- `lib/database/arena-ratings.ts`（排位结算写入）
+- `lib/database/schema.sql`（新增列）
+
+做法：
+
+1) 在 `arena_ratings` 增加两列：
+   - `last_delta INTEGER`
+   - `last_applied_at TEXT`
+2) 在结算写入 `arena_ratings` 时同步更新这两列（每次只更新两行）
+3) `data-card-meta` 读取时直接取 `arena_ratings.last_delta/last_applied_at`，不再扫 `arena_rating_events`
+
+兼容策略：
+
+- 代码对旧 schema 做了回退：若线上尚未加列，接口会降级为 `lastDelta/lastAppliedAt = null`（不再触发大读）。
+
+---
+
+### 2.4 Public Data Cards：增加 Edge Cache（止血型）
+
+改动点：
+
+- `pages/api/public-data-cards.ts`：`withEdgeCache` 15s
+- `lib/edge-cache.ts`：补齐内存缓存上限 + 大响应跳过内存缓存（避免 key 高基数导致内存增长）
+
+收益预期：
+
+- 在“多人浏览首页/前几页”场景下，明显降低 `/api/public-data-cards` 的 D1 读次数；
+- 与索引配套后，可进一步降低单次查询 Rows Read。
 
 ---
 
@@ -222,6 +348,42 @@ LEFT JOIN (
 
 这样 Rows Read 规模与“候选集大小”相关，而不是与“全榜规模”相关。
 
+### 3.4 线上迁移清单（建议优先执行）
+
+> 注意：`lib/database/schema.sql` 只是“目标结构”。线上 D1 需要实际执行 `ALTER TABLE/CREATE INDEX`。
+
+#### 3.4.1 `arena_ratings` 增列（用于 lastDelta 物化）
+
+```sql
+ALTER TABLE arena_ratings ADD COLUMN last_delta INTEGER;
+ALTER TABLE arena_ratings ADD COLUMN last_applied_at TEXT;
+```
+
+可选：如果希望马上让存量数据也有 lastDelta，可以做一次性 backfill（可能较重，建议离峰执行，且先在测试库验证）。
+
+#### 3.4.2 `data_cards` 增加公共列表复合索引（对应截图查询）
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_data_cards_public_approved_type_created_at
+  ON data_cards(type, is_public, review_status, deleted_at, created_at DESC);
+```
+
+验证建议：
+
+- 在 D1 控制台对截图 SQL 执行 `EXPLAIN QUERY PLAN`，确认走到该索引；
+- 对比迁移前后 Query Insights：同样参数下 Rows Read 是否显著下降。
+
+### 3.5 可选：public-data-cards 改为 cursor/keyset 分页（中期优化）
+
+当你们的列表页存在大量 `offset` 翻页/无限滚动时，复合索引仍可能无法避免“offset 越大读越多”的线性放大。
+
+可选改造方向：
+
+- 用 `created_at + id` 做游标：`WHERE (created_at, id) < (?, ?) ORDER BY created_at DESC, id DESC LIMIT ?`
+- 前端从 `offset` 改为 `cursor`，并保留兼容期（例如同时支持两种入参）
+
+收益：把 Rows Read 从“随 offset 增长”变成“近似随 limit 固定”。
+
 ---
 
 ## 4. 建议的验证方式（你们需要在 Cloudflare 控制台做）
@@ -230,9 +392,10 @@ LEFT JOIN (
 
 1) Rows Read 总量：是否显著下降；目标是逐步逼近 **0.83B/日**  
 2) Top Queries 是否从以下关键字中“消失/显著下降”：
-   - `GROUP BY data_card_id` + `group_concat(DISTINCT tag_id)`（全表 tag_map）
-   - `COUNT(*) as higherCount`（名次计算）
-   - `ROW_NUMBER() OVER`（搜索榜单）
+  - `GROUP BY data_card_id` + `group_concat(DISTINCT tag_id)`（全表 tag_map）
+  - `COUNT(*) as higherCount`（名次计算）
+  - `ROW_NUMBER() OVER`（搜索榜单 / lastDelta）
+  - `FROM data_cards` + `ORDER BY dc.created_at DESC LIMIT ? OFFSET ?`（公共列表）
 3) 关键页面 P95 延迟：榜单/公共卡列表/个人页是否同步变快（通常会）
 
 ---

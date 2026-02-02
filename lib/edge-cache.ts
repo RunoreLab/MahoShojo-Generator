@@ -6,6 +6,8 @@ type MemoryCacheEntry = {
 };
 
 const memoryCache = new Map<string, MemoryCacheEntry>();
+const MAX_MEMORY_CACHE_ENTRIES = 300;
+const MAX_MEMORY_CACHE_BODY_CHARS = 200_000;
 
 const readDefaultCache = (): Cache | null => {
   const anyCaches = (globalThis as any)?.caches;
@@ -18,9 +20,32 @@ const readDefaultCache = (): Cache | null => {
 const readMemoryCache = (key: string, now: number): MemoryCacheEntry | null => {
   const cached = memoryCache.get(key);
   if (!cached) return null;
-  if (cached.expiresAt > now) return cached;
+  if (cached.expiresAt > now) {
+    // LRU：命中后刷新顺序，避免热 key 被挤出。
+    memoryCache.delete(key);
+    memoryCache.set(key, cached);
+    return cached;
+  }
   memoryCache.delete(key);
   return null;
+};
+
+const pruneMemoryCache = (now: number): void => {
+  if (memoryCache.size <= MAX_MEMORY_CACHE_ENTRIES) return;
+
+  // 优先淘汰已过期的旧条目（按 LRU 顺序从老到新尝试）。
+  for (const [k, v] of memoryCache) {
+    if (v.expiresAt > now) break;
+    memoryCache.delete(k);
+    if (memoryCache.size <= MAX_MEMORY_CACHE_ENTRIES) return;
+  }
+
+  // 若仍超限，则按 LRU 淘汰最旧的。
+  while (memoryCache.size > MAX_MEMORY_CACHE_ENTRIES) {
+    const firstKey = memoryCache.keys().next().value as string | undefined;
+    if (!firstKey) break;
+    memoryCache.delete(firstKey);
+  }
 };
 
 export async function withEdgeCache(
@@ -52,13 +77,22 @@ export async function withEdgeCache(
   if (res.status !== 200) return res;
 
   try {
-    const bodyText = await res.clone().text();
-    memoryCache.set(key, {
-      status: res.status,
-      headers: Array.from(res.headers.entries()),
-      bodyText,
-      expiresAt: now + ttlSeconds * 1000,
-    });
+    const contentLength = res.headers.get('Content-Length');
+    const contentLengthNum = contentLength ? Number(contentLength) : NaN;
+    const shouldAttemptMemoryCache = !Number.isFinite(contentLengthNum) || contentLengthNum <= MAX_MEMORY_CACHE_BODY_CHARS;
+
+    if (shouldAttemptMemoryCache) {
+      const bodyText = await res.clone().text();
+      if (bodyText.length <= MAX_MEMORY_CACHE_BODY_CHARS) {
+        memoryCache.set(key, {
+          status: res.status,
+          headers: Array.from(res.headers.entries()),
+          bodyText,
+          expiresAt: now + ttlSeconds * 1000,
+        });
+        pruneMemoryCache(now);
+      }
+    }
   } catch {
   }
 
