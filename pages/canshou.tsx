@@ -172,8 +172,13 @@ const CanshouPage: React.FC = () => {
   const [questionnaireLoadError, setQuestionnaireLoadError] = useState<string | null>(null);
   const [answersByKey, setAnswersByKey] = useState<Record<string, string>>({});
   const [selectionReady, setSelectionReady] = useState(false);
+  const [showPasteImport, setShowPasteImport] = useState(false);
+  const [pasteQuestionnaireText, setPasteQuestionnaireText] = useState('');
+  const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
   const draftRestoredRef = useRef(false);
   const currentQuestionKeyRef = useRef<string | null>(null);
+  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const transitionEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
   const [questionnairePickerError, setQuestionnairePickerError] = useState<string | null>(null);
@@ -206,6 +211,16 @@ const CanshouPage: React.FC = () => {
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
   const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`;
+  const clearTransitionTimers = useCallback(() => {
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
+    if (transitionEndTimerRef.current) {
+      clearTimeout(transitionEndTimerRef.current);
+      transitionEndTimerRef.current = null;
+    }
+  }, []);
 
   const questionnaireItems = useMemo<QuestionnaireContextItem[]>(() => {
     return selectedQuestionnaires.flatMap((selection) =>
@@ -433,6 +448,17 @@ const CanshouPage: React.FC = () => {
   ]);
 
   useEffect(() => {
+    return () => {
+      clearTransitionTimers();
+    };
+  }, [clearTransitionTimers]);
+
+  useEffect(() => {
+    clearTransitionTimers();
+    setIsTransitioning(false);
+  }, [selectedQuestionnaires, clearTransitionTimers]);
+
+  useEffect(() => {
     let cancelled = false;
     const loadPresetIndex = async () => {
       setQuestionnaireLoadError(null);
@@ -511,18 +537,33 @@ const CanshouPage: React.FC = () => {
       }
       return [selection];
     });
+    setPasteQuestionnaireError(null);
+    setPasteQuestionnaireText('');
+    setShowPasteImport(false);
     setShowIntroduction(false);
     setShowQuestionnaireSettings(false);
   };
 
   const handleRemoveSelection = (index: number) => {
+    clearTransitionTimers();
+    setIsTransitioning(false);
     setSelectedQuestionnaires((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSelectQuestionnaireCard = (card: any) => {
     try {
-      const rawPayload = card?.data ?? card?.dataJson ?? card?.data_json ?? null;
-      const rawData = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
+      const rawPayload = card?.data ?? card?.dataJson ?? card?.data_json ?? card?.dataJSON ?? null;
+      let rawData: any = null;
+      if (rawPayload !== null && rawPayload !== undefined) {
+        rawData = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
+      } else if (card && typeof card === 'object') {
+        if (Array.isArray(card.questions)) {
+          rawData = card;
+        } else if (card.questionnaire && Array.isArray(card.questionnaire.questions)) {
+          rawData = card.questionnaire;
+        }
+      }
+      if (!rawData) throw new Error('问卷数据卡内容为空或格式不受支持');
       const normalized = normalizeQuestionnaireDefinition(rawData, {
         fallbackKind: 'canshou',
         fallbackId: typeof rawData?.id === 'string' ? rawData.id : `canshou-card-${card?.id ?? ''}`,
@@ -534,9 +575,9 @@ const CanshouPage: React.FC = () => {
       applySelection({
         source: 'database',
         questionnaire: normalized,
-        dataCardId: card?.id,
-        dataCardName: card?.name,
-        dataCardAuthor: card?.username || card?.author,
+        dataCardId: card?._cardId ?? card?.id,
+        dataCardName: card?._cardName ?? card?.name,
+        dataCardAuthor: card?._author ?? card?.username ?? card?.author,
       });
       setQuestionnairePickerError(null);
       setShowQuestionnairePicker(false);
@@ -562,8 +603,36 @@ const CanshouPage: React.FC = () => {
         source: 'upload',
         questionnaire: normalized,
       });
+      setPasteQuestionnaireError(null);
+      setError(null);
     } catch (error) {
       setError(error instanceof Error ? error.message : '问卷文件解析失败');
+    }
+  };
+
+  const handlePasteQuestionnaireImport = () => {
+    if (!pasteQuestionnaireText.trim()) {
+      setPasteQuestionnaireError('请先粘贴问卷 JSON');
+      return;
+    }
+    try {
+      const parsed = JSON.parse(pasteQuestionnaireText);
+      const normalized = normalizeQuestionnaireDefinition(parsed, {
+        fallbackKind: 'canshou',
+        fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'canshou-paste',
+        fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : '未命名问卷',
+        applyMagicalMeta: false,
+        nativeAllowed: false,
+      });
+      if (!normalized) throw new Error('问卷 JSON 无法识别，请检查格式');
+      applySelection({
+        source: 'upload',
+        questionnaire: normalized,
+      });
+      setPasteQuestionnaireError(null);
+      setError(null);
+    } catch (error) {
+      setPasteQuestionnaireError(error instanceof Error ? error.message : '问卷 JSON 解析失败');
     }
   };
 
@@ -728,6 +797,8 @@ const CanshouPage: React.FC = () => {
   };
 
   const proceedToNextQuestion = (nextAnswers: Record<string, string>) => {
+    clearTransitionTimers();
+    setIsTransitioning(false);
     const currentKey = mergedQuestions[currentQuestionIndex]?.key;
     const { flow: nextFlow, indexByKey: nextIndexByKey } = getQuestionnaireFlow(nextAnswers);
     const currentFlowIndex = currentKey ? (nextIndexByKey.get(currentKey) ?? -1) : -1;
@@ -735,12 +806,14 @@ const CanshouPage: React.FC = () => {
 
     if (nextIndex >= 0 && nextIndex < nextFlow.length) {
       setIsTransitioning(true);
-      setTimeout(() => {
+      transitionTimerRef.current = setTimeout(() => {
         const nextKey = nextFlow[nextIndex]?.key ?? null;
         currentQuestionKeyRef.current = nextKey;
         setCurrentQuestionIndex(nextIndex);
         setCurrentAnswer(nextKey ? nextAnswers[nextKey] || '' : '');
-        setIsTransitioning(false);
+        transitionEndTimerRef.current = setTimeout(() => {
+          setIsTransitioning(false);
+        }, 50);
       }, 250);
       return;
     }
@@ -766,6 +839,8 @@ const CanshouPage: React.FC = () => {
 
   const handlePreviousQuestion = () => {
     if (currentQuestionIndex === 0) return;
+    clearTransitionTimers();
+    setIsTransitioning(false);
     const nextAnswers = commitAnswerSnapshot();
     setAnswersByKey(nextAnswers);
     const previousIndex = currentQuestionIndex - 1;
@@ -809,6 +884,8 @@ const CanshouPage: React.FC = () => {
 
   const handleNavigateToQuestion = (index: number) => {
     if (index === currentQuestionIndex || index < 0 || index >= mergedQuestions.length) return;
+    clearTransitionTimers();
+    setIsTransitioning(false);
     const nextAnswers = commitAnswerSnapshot();
     setAnswersByKey(nextAnswers);
     setCurrentQuestionIndex(index);
@@ -1259,12 +1336,13 @@ const CanshouPage: React.FC = () => {
                             <option key={preset.id} value={preset.id}>{preset.title}</option>
                           ))}
                         </select>
-                        <label className="text-xs">
-                          <span className="mr-2">上传问卷 JSON</span>
+                        <label className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20 cursor-pointer">
+                          上传问卷 JSON
                           <input
                             type="file"
                             accept="application/json"
                             onChange={(e) => void handleUploadQuestionnaire(e.target.files?.[0] ?? null)}
+                            className="hidden"
                           />
                         </label>
                         <button
@@ -1277,10 +1355,54 @@ const CanshouPage: React.FC = () => {
                         >
                           从云端问卷库选择
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPasteQuestionnaireError(null);
+                            setShowPasteImport((prev) => !prev);
+                          }}
+                          className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20"
+                        >
+                          {showPasteImport ? '收起粘贴导入' : '粘贴导入 JSON'}
+                        </button>
                         <Link href="/questionnaire-editor" className="text-xs text-emerald-300 hover:underline">
                           打开问卷编辑器
                         </Link>
                       </div>
+                      {showPasteImport && (
+                        <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-3 text-xs text-slate-300">
+                          <label className="text-xs text-slate-500">粘贴问卷 JSON</label>
+                          <textarea
+                            value={pasteQuestionnaireText}
+                            onChange={(e) => setPasteQuestionnaireText(e.target.value)}
+                            placeholder="在此粘贴问卷 JSON"
+                            className="input-field mt-2 h-28"
+                            rows={6}
+                          />
+                          <div className="mt-2 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={handlePasteQuestionnaireImport}
+                              className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200 hover:border-emerald-300 hover:bg-emerald-500/20"
+                            >
+                              解析并载入
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPasteQuestionnaireText('');
+                                setPasteQuestionnaireError(null);
+                              }}
+                              className="text-xs text-slate-500 hover:text-slate-200"
+                            >
+                              清空
+                            </button>
+                          </div>
+                          {pasteQuestionnaireError && (
+                            <p className="mt-2 text-rose-400">{pasteQuestionnaireError}</p>
+                          )}
+                        </div>
+                      )}
                       {questionnaireLoadError && (
                         <p className="text-rose-400">{questionnaireLoadError}</p>
                       )}
@@ -1299,7 +1421,7 @@ const CanshouPage: React.FC = () => {
                   isRequired={isCurrentRequired}
                   skipText="本题可跳过，不作答将不会记录"
                   quickOptions={fallbackQuickOptions}
-                  quickOptionDisabled={submitting || isCooldown}
+                  quickOptionDisabled={submitting || isTransitioning || isCooldown}
                   onQuickOption={handleOptionClick}
                   options={currentQuestion?.options}
                   optionsHintText={optionsHintText}
@@ -1321,8 +1443,8 @@ const CanshouPage: React.FC = () => {
                   nextButtonContent={nextButtonLabel}
                   onPrev={handlePreviousQuestion}
                   onNext={handleNext}
-                  disablePrev={currentQuestionIndex === 0 || submitting || isCooldown}
-                  disableNext={submitting || isCooldown || (isCurrentRequired && !currentAnswer.trim())}
+                  disablePrev={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}
+                  disableNext={submitting || isTransitioning || isCooldown || (isCurrentRequired && !currentAnswer.trim())}
                   prevButtonClass="generate-button sm:w-1/4"
                   nextButtonClass="generate-button flex-1"
                 />
