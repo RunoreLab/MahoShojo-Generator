@@ -182,6 +182,17 @@ const parseSimpleJump = (
   };
 };
 
+const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const parseFormNumber = (value: FormDataEntryValue | null): number | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
+};
+
 const QuestionnaireEditorPage: React.FC = () => {
   const [kind, setKind] = useState<'magical-girl' | 'canshou'>('magical-girl');
   const [questionnaireId, setQuestionnaireId] = useState('magical-girl-custom');
@@ -192,6 +203,8 @@ const QuestionnaireEditorPage: React.FC = () => {
   const [questions, setQuestions] = useState<EditableQuestion[]>([createEmptyQuestion(0, 'magical-girl')]);
   const [importText, setImportText] = useState('');
   const [editorError, setEditorError] = useState<string | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   useEffect(() => {
     setLogoUrl((prev) => {
@@ -224,20 +237,33 @@ const QuestionnaireEditorPage: React.FC = () => {
     setQuestions((prev) => [...prev, createEmptyQuestion(prev.length, kind)]);
   };
 
+  const insertQuestionAt = (position: number) => {
+    setQuestions((prev) => {
+      const next = [...prev];
+      const targetIndex = clampNumber(position - 1, 0, next.length);
+      next.splice(targetIndex, 0, createEmptyQuestion(next.length, kind));
+      return next;
+    });
+  };
+
   const removeQuestion = (index: number) => {
     setQuestions((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const moveQuestion = (index: number, direction: -1 | 1) => {
+  const moveQuestionTo = (fromIndex: number, toIndex: number) => {
     setQuestions((prev) => {
+      if (fromIndex < 0 || fromIndex >= prev.length) return prev;
+      const targetIndex = clampNumber(toIndex, 0, prev.length - 1);
+      if (targetIndex === fromIndex) return prev;
       const next = [...prev];
-      const targetIndex = index + direction;
-      if (targetIndex < 0 || targetIndex >= next.length) return prev;
-      const temp = next[index];
-      next[index] = next[targetIndex];
-      next[targetIndex] = temp;
+      const [target] = next.splice(fromIndex, 1);
+      next.splice(targetIndex, 0, target);
       return next;
     });
+  };
+
+  const moveQuestion = (index: number, direction: -1 | 1) => {
+    moveQuestionTo(index, index + direction);
   };
 
   const applyAutoIds = () => {
@@ -245,6 +271,55 @@ const QuestionnaireEditorPage: React.FC = () => {
       ...q,
       id: kind === 'magical-girl' ? `MG-${index + 1}` : `CS-${index + 1}`,
     })));
+  };
+
+  const handleInsertSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const rawPosition = parseFormNumber(data.get('insertPosition'));
+    if (rawPosition === null) return;
+    const max = questions.length + 1;
+    const position = clampNumber(rawPosition, 1, max);
+    insertQuestionAt(position);
+    event.currentTarget.reset();
+  };
+
+  const handleMoveToSubmit = (index: number) => (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const rawPosition = parseFormNumber(data.get('moveTo'));
+    if (rawPosition === null) return;
+    const max = Math.max(questions.length, 1);
+    const targetPosition = clampNumber(rawPosition, 1, max);
+    moveQuestionTo(index, targetPosition - 1);
+    event.currentTarget.reset();
+  };
+
+  const handleDragStart = (index: number) => (event: React.DragEvent<HTMLButtonElement>) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+    setDragIndex(index);
+  };
+
+  const handleDragOver = (index: number) => (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (dragOverIndex !== index) setDragOverIndex(index);
+  };
+
+  const handleDrop = (index: number) => (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const rawIndex = event.dataTransfer.getData('text/plain');
+    const parsedIndex = Number.parseInt(rawIndex, 10);
+    const sourceIndex = Number.isFinite(parsedIndex) ? parsedIndex : dragIndex;
+    if (sourceIndex === null || Number.isNaN(sourceIndex)) return;
+    moveQuestionTo(sourceIndex, index);
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDragIndex(null);
+    setDragOverIndex(null);
   };
 
   const { questionnaireData, jsonError } = useMemo(() => {
@@ -552,13 +627,21 @@ const QuestionnaireEditorPage: React.FC = () => {
             </div>
 
             <div className="mt-6 flex flex-wrap items-center gap-3">
-              <button onClick={addQuestion} className="generate-button">新增题目</button>
-              <button onClick={applyAutoIds} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:border-slate-400">自动编号</button>
               <Link href="/details" className="text-sm text-indigo-600 hover:underline">前往魔法少女问卷</Link>
               <Link href="/canshou" className="text-sm text-indigo-600 hover:underline">前往残兽问卷</Link>
             </div>
 
-            <div className="mt-6 space-y-4">
+            <div className="mt-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-800">题目列表</h2>
+                  <p className="mt-1 text-xs text-slate-500">拖拽左侧把手可快速排序，也可在右侧输入题号移动。</p>
+                </div>
+                <span className="text-xs text-slate-500">共 {questions.length} 题</span>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-4">
               <datalist id="question-id-options">
                 {questions.map((item, idx) => {
                   const label = item.question ? `${item.id} · ${item.question}` : item.id;
@@ -568,10 +651,43 @@ const QuestionnaireEditorPage: React.FC = () => {
                 })}
               </datalist>
               {questions.map((question, index) => (
-                <div key={`question-${index}`} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold text-slate-800">题目 {index + 1}</div>
-                    <div className="flex gap-2 text-xs">
+                <div
+                  key={`question-${index}`}
+                  className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition ${
+                    dragOverIndex === index ? 'ring-2 ring-indigo-200' : ''
+                  } ${dragIndex === index ? 'opacity-80' : ''}`}
+                  onDragOver={handleDragOver(index)}
+                  onDrop={handleDrop(index)}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={handleDragStart(index)}
+                        onDragEnd={handleDragEnd}
+                        className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:text-slate-700 cursor-grab active:cursor-grabbing"
+                        aria-label="拖拽调整顺序"
+                        title="拖拽调整顺序"
+                      >
+                        ≡
+                      </button>
+                      <div className="font-semibold text-slate-800">题目 {index + 1}</div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <form onSubmit={handleMoveToSubmit(index)} className="flex items-center gap-1">
+                        <span className="text-slate-500">移动到</span>
+                        <input
+                          name="moveTo"
+                          type="number"
+                          min={1}
+                          max={questions.length}
+                          className="input-field h-8 w-16 px-2 text-xs"
+                          placeholder={`${index + 1}`}
+                        />
+                        <span className="text-slate-500">题</span>
+                        <button type="submit" className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:text-slate-700">移动</button>
+                      </form>
                       <button onClick={() => moveQuestion(index, -1)} className="text-slate-500 hover:text-slate-700">上移</button>
                       <button onClick={() => moveQuestion(index, 1)} className="text-slate-500 hover:text-slate-700">下移</button>
                       <button onClick={() => removeQuestion(index)} className="text-rose-500 hover:text-rose-600">删除</button>
@@ -812,6 +928,33 @@ const QuestionnaireEditorPage: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+
+            <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-700">题目操作</h3>
+                  <p className="mt-1 text-xs text-slate-500">新增默认追加在末尾，也可按题号插入。</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={addQuestion} className="generate-button">新增题目</button>
+                  <button onClick={applyAutoIds} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:border-slate-400">自动编号</button>
+                </div>
+              </div>
+              <form onSubmit={handleInsertSubmit} className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-slate-500">插入到第</span>
+                <input
+                  name="insertPosition"
+                  type="number"
+                  min={1}
+                  max={questions.length + 1}
+                  className="input-field h-8 w-20 px-2 text-xs"
+                  placeholder={`${questions.length + 1}`}
+                />
+                <span className="text-slate-500">题</span>
+                <button type="submit" className="rounded-md border border-indigo-200 px-3 py-1 text-indigo-600 hover:text-indigo-700">插入空题</button>
+              </form>
+              <p className="mt-2 text-xs text-slate-400">提示：拖拽卡片左侧把手即可快速调整顺序。</p>
             </div>
 
             <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
