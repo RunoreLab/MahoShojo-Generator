@@ -143,223 +143,6 @@ export interface QuestionnaireAnswerItem {
   questionnaireTitle?: string;
 }
 
-export interface MagicalQuestionMeta {
-  id: string;
-  placeholder?: string;
-  suggestions?: string[];
-  options?: Array<{ value: string; label: string; disabled?: boolean }>;
-  allowCustom?: boolean;
-  helperText?: string;
-  maxLength?: number;
-}
-
-// 预设选项与提示，参考预设角色回答
-const MAGICAL_META_CATALOG: MagicalQuestionMeta[] = [
-  {
-    id: 'MG-1',
-    maxLength: 180
-    placeholder: '例如：白思与（建议不超过 12 字）',
-    suggestions: ['白思与', '二阶堂祥子', '雪莉', '星港', '咕咕嘎嘎！'],
-  },
-  {
-    id: 'MG-2',
-    placeholder: '例如：冲上去救她 / 呼叫支援 / 诱敌撤离，并用 1~2 句说明理由',
-    suggestions: [
-      '违背嘱托冲上去救她',
-      '呼叫支援掩护撤退',
-      '想办法调虎离山',
-      '冲过去救她，命令可以事后解释',
-      '用尽一切手段去救她，即使因此受罚',
-      '我会尊重她的意志，直到最后一刻',
-      '把我的护身符塞给她后并肩突进'
-    ],
-    helperText: '描述你在危急时刻的本能反应',
-    maxLength: 260
-  },
-  {
-    id: 'MG-3',
-    placeholder: '例如：先安抚她，再复盘失误、一起承担后果（1~2 句）',
-    suggestions: [
-      '握住她的手告诉她已经足够好了',
-      '主动请缨承担失误的后果',
-      '提议暂停任务总结经验',
-      '告诉她这是团队的战斗，错误由我们一起承担',
-      '先治愈她，再约定下一次一起赢回来',
-      '比起沉湎于复杂的懊悔，用简单的行动来弥补，才是正道',
-      '把失败的乐章拆开，与她一起重新编曲',
-      '让她先把恐惧唱出来，再陪她修补破口'
-    ],
-    helperText: '聚焦你与搭档的关系',
-    maxLength: 260
-  },
-  {
-    id: 'MG-4',
-    placeholder: '可直接选择选项，或自己写 1~2 句补充你的条件与底线',
-    options: [
-      { value: '毫不犹豫地答应', label: '毫不犹豫地答应' },
-      { value: '会慎重衡量', label: '会慎重衡量风险与代价' },
-      { value: '坚持寻找替代方案', label: '坚持寻找替代方案' },
-      { value: '先护住她们撤离', label: '先护住她们撤离，再想办法逆转局势' },
-      { value: '先打开退路再决战', label: '先架设撤离通道，再由我断后' }
-    ],
-    allowCustom: true,
-    helperText: '你愿意牺牲到什么程度？',
-    maxLength: 220
-  },
-  {
-    id: 'MG-5',
-    options: [
-      { value: '守护重要之人', label: '守护重要之人' },
-      { value: '修复破碎的城市', label: '修复破碎的城市' },
-      { value: '治愈自己或他人的伤痛', label: '治愈自己或他人的伤痛' },
-      { value: '带回失落的光芒', label: '把光带回被黑暗笼罩的城市' },
-      { value: '点亮迷航灯塔', label: '为迷失的人点亮回家的灯塔' },
-      { value: '缝合破碎故事', label: '缝合被战争撕裂的故事' }
-    ],
-    allowCustom: true,
-    placeholder: '第一次想完成的事情…',
-    maxLength: 220
-  },
-  {
-    id: 'MG-6',
-    options: [
-      { value: '防御与支援型魔法', label: '防御与支援型魔法' },
-      { value: '瞬间爆发的攻击魔法', label: '瞬间爆发的攻击魔法' },
-      { value: '改变局势的策略魔法', label: '改变局势的策略魔法' },
-      { value: '协调多系魔法共鸣', label: '让不同系别的魔法同频共鸣' }
-    ],
-    allowCustom: true,
-    placeholder: '描述你期望的能力',
-    suggestions: ['治愈一切伤痕的力量', '让时间倒流，挽回失去的人', '把诗句写进现实的力量', '召回迷失灵魂的灯火'],
-    maxLength: 220
-  },
-  {
-    id: 'MG-7',
-    placeholder: '例如：灯火 / 盾牌 / 星辰（写 1 个名词，建议 2~6 字）',
-    suggestions: ['灯火', '羽翼', '晨星', '流星', '余烬', '潮汐', '港灯', '星港', '棋盘', '潮声'],
-    maxLength: 200
-  },
-  {
-    id: 'MG-8',
-    placeholder: '可直接选择选项，或用 1~2 句解释你会如何权衡',
-    options: [
-      { value: '挫败敌人', label: '挫败敌人' },
-      { value: '保护队友', label: '保护队友' },
-      { value: '依据情况权衡', label: '依据情况权衡' },
-      { value: '先护队友再反击', label: '先保护队友，再寻找反击机会' },
-      { value: '布局诱敌', label: '先布置陷阱诱敌入局，再一举反扑' }
-    ],
-    allowCustom: true,
-    maxLength: 200
-  },
-  {
-    id: 'MG-9',
-    placeholder: '可直接选择选项，或用 1~2 句说清“注定/可变”的理由',
-    options: [
-      { value: '命运可以被改变', label: '命运可以被改变' },
-      { value: '命运注定但可迂回', label: '命运注定但可迂回' },
-      { value: '顺应命运寻求意义', label: '顺应命运寻求意义' },
-      { value: '命运注定但意义可改写', label: '命运或许注定，但结果的意义由自己决定' },
-      { value: '命运如棋可再布局', label: '命运如棋，可在关键时刻重新布局' }
-    ],
-    allowCustom: true,
-    maxLength: 200
-  },
-  {
-    id: 'MG-10',
-    placeholder: '可直接选择选项，或写下你会采取的“第三条路”（1~2 句）',
-    options: [
-      { value: '选择拯救多数人', label: '选择拯救多数人' },
-      { value: '绝不牺牲无辜', label: '绝不牺牲无辜' },
-      { value: '尝试寻找第三条路', label: '尝试寻找第三条路' },
-      { value: '成为那个“少数”', label: '如果必须牺牲，就由我成为那个“少数”' },
-      { value: '承担抉择代价', label: '由我承担抉择的代价，让她们都活下来' }
-    ],
-    allowCustom: true,
-    maxLength: 200
-  },
-  {
-    id: 'MG-11',
-    placeholder: '一句话给出你的立场，再补充你的“边界/底线”（可选）',
-    options: [
-      { value: '必要之恶可以被接受', label: '必要之恶可以被接受' },
-      { value: '必要之恶会腐蚀初心', label: '必要之恶会腐蚀初心' },
-      { value: '只有在明确边界时才允许', label: '只有在明确边界时才允许' },
-      { value: '以契约划界', label: '只有在全员签署明确约定时才允许必要之恶' }
-    ],
-    allowCustom: true,
-    helperText: '谈谈你对“代价”与“底线”的理解',
-    maxLength: 220
-  },
-  {
-    id: 'MG-12',
-    placeholder: '例如：先搜集证据→沟通→上报/纠错（1~2 句）',
-    options: [
-      { value: '直接指出并提出改进', label: '直接指出并提出改进' },
-      { value: '先搜集证据再报告', label: '先搜集证据再报告' },
-      { value: '尊重但寻求其他队友协助', label: '尊重但寻求其他队友协助' },
-      { value: '独自承担风险', label: '选择独自承担，避免牵连他人' },
-      { value: '公开透明沟通', label: '在行动简报会上公开讨论并记录' }
-    ],
-    allowCustom: true,
-    maxLength: 200
-  },
-  {
-    id: 'MG-13',
-    placeholder: '可直接选择选项，或补充：什么情况下你会改变选择',
-    options: [
-      { value: '更喜欢独自行动', label: '更喜欢独自行动' },
-      { value: '依赖团队合作', label: '依赖团队合作' },
-      { value: '根据任务灵活切换', label: '根据任务灵活切换' },
-      { value: '取决于队友是谁', label: '取决于队友是谁' },
-      { value: '先侦查再召集', label: '习惯先单独侦查，再召集伙伴合力完成' }
-    ],
-    allowCustom: true,
-    maxLength: 200
-  },
-  {
-    id: 'MG-14',
-    placeholder: '可直接选择选项，或补充：你通常怎么做计划/怎么相信直觉',
-    options: [
-      { value: '计划为先', label: '计划为先' },
-      { value: '凭直觉行动', label: '凭直觉行动' },
-      { value: '先计划再顺势调整', label: '先计划再顺势调整' },
-      { value: '计划与直觉并重', label: '先制定蓝图，再视战况灵活调整' }
-    ],
-    allowCustom: true,
-    maxLength: 200
-  },
-  {
-    id: 'MG-15',
-    placeholder: '写下一个瞬间（1~3 句，避免长篇回忆录）',
-    suggestions: ['夏夜烟花下的约定', '第一次见到魔法少女的瞬间', '与家人重逢的拥抱', '被前辈救起的瞬间', '雨中的葬礼与粉色樱花的凋零', '我……没有经历过……', '星港上的誓约', '第一次在雨夜点亮灯海', '在指挥席上听见全队呼吸整齐的瞬间', '陌生人留给我的潮汐提灯', '咕咕嘎嘎！'],
-    maxLength: 280
-  },
-  {
-    id: 'MG-16',
-    placeholder: '写下一个后悔决定与现在的选择（1~3 句）',
-    suggestions: ['曾经撤退导致同伴受伤', '因为犹豫而错失机会', '没有勇敢说出的告白', '没能阻止亲人遭遇不幸', '如果当时我更强就好了', '我曾经因为顾虑一份复杂的人情，而没有及时出手，导致同伴受到了本可以避免的伤害。现在我不会再犹豫。', '没能守住承诺的港口', '为了遵守命令而错过救援朋友', '当年没有握住前辈递来的指挥棒', '咕咕嘎嘎！'],
-    helperText: '描述你想弥补的遗憾',
-    maxLength: 280
-  }
-];
-
-export const buildMagicalQuestionMeta = (length: number): MagicalQuestionMeta[] => {
-  if (length <= 0) return [];
-  return Array.from({ length }).map((_, index) => {
-    const catalogMeta = MAGICAL_META_CATALOG[index];
-    return {
-      id: catalogMeta?.id ?? `MG-${index + 1}`,
-      placeholder: catalogMeta?.placeholder,
-      suggestions: catalogMeta?.suggestions ?? [],
-      options: catalogMeta?.options,
-      allowCustom: catalogMeta?.allowCustom !== undefined ? catalogMeta.allowCustom : true,
-      helperText: catalogMeta?.helperText,
-      maxLength: catalogMeta?.maxLength ?? 200
-    };
-  });
-};
-
 export const buildQuestionKey = (questionnaireId: string | undefined, questionId: string | undefined, index: number) => {
   const base = (questionId ?? '').trim() || `Q${index + 1}`;
   const prefix = (questionnaireId ?? '').trim();
@@ -637,7 +420,6 @@ export const normalizeQuestionnaireDefinition = (
     fallbackId?: string;
     fallbackKind?: QuestionnaireKind;
     fallbackTitle?: string;
-    applyMagicalMeta?: boolean;
     nativeAllowed?: boolean | null;
   } = {}
 ): QuestionnaireDefinition | null => {
@@ -720,12 +502,10 @@ export const normalizeQuestionnaireDefinition = (
     };
   });
 
-  const questions = options.applyMagicalMeta
-    ? applyMagicalMeta(baseQuestions)
-    : baseQuestions.map((question) => ({
-      ...question,
-      maxLength: question.maxLength === undefined ? null : question.maxLength,
-    }));
+  const questions = baseQuestions.map((question) => ({
+    ...question,
+    maxLength: question.maxLength === undefined ? null : question.maxLength,
+  }));
 
   return {
     id: resolvedId,
@@ -737,24 +517,6 @@ export const normalizeQuestionnaireDefinition = (
     nativeAllowed: typeof record.nativeAllowed === 'boolean' ? record.nativeAllowed : options.nativeAllowed ?? null,
     questions,
   };
-};
-
-const applyMagicalMeta = (questions: QuestionnaireQuestion[]): QuestionnaireQuestion[] => {
-  const metaList = buildMagicalQuestionMeta(questions.length);
-  return questions.map((question, index) => {
-    const meta = metaList[index];
-    return {
-      ...question,
-      id: question.id || meta?.id || `MG-${index + 1}`,
-      placeholder: question.placeholder ?? meta?.placeholder,
-      suggestions: question.suggestions ?? meta?.suggestions,
-      options: question.options ?? meta?.options,
-      allowCustom: question.allowCustom ?? meta?.allowCustom,
-      helperText: question.helperText ?? meta?.helperText,
-      maxLength: question.maxLength ?? meta?.maxLength ?? 200,
-      required: question.required ?? true,
-    };
-  });
 };
 
 export const normalizeUserAnswers = (userAnswers: unknown, fallbackQuestions: string[] = []): QuestionnaireAnswerItem[] => {
