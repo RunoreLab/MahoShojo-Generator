@@ -1,9 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import Footer from '@/components/Footer';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import DataCardsModal from '@/components/CharManager/DataCardsModal';
+import RecycleBinModal from '@/components/CharManager/RecycleBinModal';
 import {
   DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND,
   QUESTIONNAIRE_LOGO_PRESETS,
@@ -17,6 +20,10 @@ import {
   type QuestionnaireQuestion,
   type QuestionnaireQuestionRef,
 } from '@/lib/questionnaires';
+import { dataCardApi } from '@/lib/auth';
+import { useAuth } from '@/lib/useAuth';
+import { quickCheck } from '@/lib/sensitive-word-filter';
+import { config } from '@/lib/config';
 
 type EditableSuggestionItem = {
   uid: string;
@@ -231,6 +238,8 @@ const getQuestionLabel = (question: EditableQuestion, index: number) => {
 };
 
 const QuestionnaireEditorPage: React.FC = () => {
+  const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const [kind, setKind] = useState<'magical-girl' | 'canshou'>('magical-girl');
   const [questionnaireId, setQuestionnaireId] = useState('magical-girl-custom');
   const [title, setTitle] = useState('未命名问卷');
@@ -245,6 +254,14 @@ const QuestionnaireEditorPage: React.FC = () => {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
+  const [showDataCardsModal, setShowDataCardsModal] = useState(false);
+  const [showRecycleBinModal, setShowRecycleBinModal] = useState(false);
+  const [userDataCards, setUserDataCards] = useState<any[]>([]);
+  const [recycleBinCards, setRecycleBinCards] = useState<any[]>([]);
+  const [userCapacity, setUserCapacity] = useState<number | null>(null);
+  const [editingCard, setEditingCard] = useState<any | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const cardsPerPage = 12;
 
   useEffect(() => {
     setLogoUrl((prev) => {
@@ -268,6 +285,61 @@ const QuestionnaireEditorPage: React.FC = () => {
     return normalizedLogoUrl ? null : '⚠️ 当前 Logo URL 不可信，已在导出时忽略。';
   }, [logoUrl, normalizedLogoUrl]);
   const trimmedLogoUrl = logoUrl.trim();
+
+  const questionnaireCards = useMemo(
+    () => userDataCards.filter((card) => card?.type === 'questionnaire'),
+    [userDataCards]
+  );
+  const questionnaireRecycleCards = useMemo(
+    () => recycleBinCards.filter((card) => card?.type === 'questionnaire'),
+    [recycleBinCards]
+  );
+  const privateQuestionnaireCount = useMemo(
+    () => questionnaireCards.filter((card) => card.is_public !== 1 && card.is_public !== -1).length,
+    [questionnaireCards]
+  );
+  const publicQuestionnaireCount = useMemo(
+    () => questionnaireCards.filter((card) => card.is_public === 1).length,
+    [questionnaireCards]
+  );
+  const pendingQuestionnaireCount = useMemo(
+    () => questionnaireCards.filter((card) => card.review_status === 'pending').length,
+    [questionnaireCards]
+  );
+  const defaultModalFilters = useMemo(
+    () => ({ type: 'questionnaire' as const, visibility: 'private' as const }),
+    []
+  );
+
+  const loadUserQuestionnaireCards = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const [cards, capacity, recycleCards] = await Promise.all([
+        dataCardApi.getCards(),
+        dataCardApi.getUserCapacity(),
+        dataCardApi.getRecycleBin(),
+      ]);
+      setUserDataCards(cards);
+      setRecycleBinCards(recycleCards);
+      if (capacity !== null) {
+        setUserCapacity(capacity);
+      }
+    } catch (error) {
+      console.error('加载问卷数据卡失败:', error);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadUserQuestionnaireCards();
+    } else {
+      setUserDataCards([]);
+      setRecycleBinCards([]);
+      setUserCapacity(null);
+      setShowDataCardsModal(false);
+      setShowRecycleBinModal(false);
+    }
+  }, [isAuthenticated, loadUserQuestionnaireCards]);
 
   const flashMessage = (message: string) => {
     setActionMessage(message);
@@ -708,6 +780,102 @@ const QuestionnaireEditorPage: React.FC = () => {
     flashMessage('✅ 已生成下载文件');
   };
 
+  const handleOpenQuestionnaireLibrary = () => {
+    if (!isAuthenticated) {
+      setEditorError('请先登录后再访问云端问卷库');
+      return;
+    }
+    loadUserQuestionnaireCards();
+    setShowDataCardsModal(true);
+  };
+
+  const handleLoadQuestionnaireCard = async (card: any) => {
+    try {
+      const raw = typeof card?.data === 'string' ? card.data : JSON.stringify(card?.data ?? {}, null, 2);
+      handleImport(raw);
+      setShowDataCardsModal(false);
+      flashMessage(`✅ 已载入云端问卷：${card?.name || '未命名问卷'}`);
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : '加载问卷数据卡失败');
+    }
+  };
+
+  const handleDeleteQuestionnaireCard = async (id: string) => {
+    if (!window.confirm('确定要删除这个问卷数据卡吗？')) return;
+    const result = await dataCardApi.deleteCard(id);
+    if (result.success) {
+      flashMessage('✅ 问卷数据卡已移入回收站');
+      loadUserQuestionnaireCards();
+    } else {
+      setEditorError(result.error || '删除失败');
+    }
+  };
+
+  const handleRestoreQuestionnaireCard = async (id: string) => {
+    const result = await dataCardApi.restoreCard(id);
+    if (result.success) {
+      flashMessage('✅ 问卷数据卡已恢复');
+      loadUserQuestionnaireCards();
+    } else {
+      setEditorError(result.error || '恢复失败');
+    }
+  };
+
+  const handleDeleteRecycleQuestionnaireCard = async (id: string) => {
+    if (!window.confirm('确定要彻底删除这个问卷数据卡吗？此操作无法撤销。')) return;
+    const result = await dataCardApi.deleteRecycleCard(id);
+    if (result.success) {
+      flashMessage('✅ 问卷数据卡已彻底删除');
+      loadUserQuestionnaireCards();
+    } else {
+      setEditorError(result.error || '删除失败');
+    }
+  };
+
+  const handleUpdateQuestionnaireCard = async (id: string, name: string, description: string, isPublic?: number) => {
+    const textToCheck = `${name} ${description}`;
+    const sensitiveWordResult = await quickCheck(textToCheck);
+    if (sensitiveWordResult.hasSensitiveWords) {
+      router.push('/arrested');
+      return;
+    }
+
+    const result = await dataCardApi.updateCard(id, name, description, isPublic);
+    if (result.success) {
+      setEditingCard(null);
+      loadUserQuestionnaireCards();
+      flashMessage('✅ 问卷信息已更新');
+    } else {
+      if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
+        router.push('/arrested');
+        return;
+      }
+      setEditorError(result.error || '更新失败');
+    }
+  };
+
+  const handleReplaceQuestionnaireCard = async (card: any) => {
+    if (!window.confirm(`确认用当前编辑内容替换「${card.name}」吗？`)) return;
+    const textToCheck = `${card.name} ${card.description} ${JSON.stringify(questionnaireData)}`;
+    const sensitiveWordResult = await quickCheck(textToCheck);
+    if (sensitiveWordResult.hasSensitiveWords) {
+      router.push('/arrested');
+      return;
+    }
+    const result = await dataCardApi.replaceCard(card.id, {
+      name: card.name,
+      description: card.description,
+      isPublic: card.is_public,
+      data: questionnaireData,
+    });
+    if (result.success) {
+      flashMessage(result.pendingReview ? '✅ 更新已提交审核，审核通过后生效' : '✅ 问卷已替换');
+      loadUserQuestionnaireCards();
+    } else {
+      setEditorError(result.error || '替换失败');
+    }
+  };
+
   return (
     <>
       <Head>
@@ -843,6 +1011,47 @@ const QuestionnaireEditorPage: React.FC = () => {
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-700">云端问卷库</h3>
+                  <p className="mt-1 text-xs text-slate-500">浏览、编辑你的私有问卷卡，并载入当前编辑器。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenQuestionnaireLibrary}
+                  disabled={!isAuthenticated}
+                  className={`rounded-lg border px-4 py-2 text-sm transition ${
+                    isAuthenticated
+                      ? 'border-pink-200 bg-pink-50 text-pink-700 hover:border-pink-300 hover:bg-pink-100'
+                      : 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  打开问卷库
+                </button>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-3 text-xs text-slate-600 md:grid-cols-3">
+                <div className="rounded-lg border border-white/70 bg-white p-3">
+                  <div className="text-slate-400">已保存问卷</div>
+                  <div className="mt-1 text-base font-semibold text-slate-700">{questionnaireCards.length}</div>
+                </div>
+                <div className="rounded-lg border border-white/70 bg-white p-3">
+                  <div className="text-slate-400">私有 / 公开</div>
+                  <div className="mt-1 text-base font-semibold text-slate-700">
+                    {privateQuestionnaireCount} / {publicQuestionnaireCount}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-white/70 bg-white p-3">
+                  <div className="text-slate-400">待审核</div>
+                  <div className="mt-1 text-base font-semibold text-slate-700">{pendingQuestionnaireCount}</div>
+                </div>
+              </div>
+              {!isAuthenticated && (
+                <p className="mt-3 text-xs text-rose-500">尚未登录，无法访问云端问卷库。</p>
+              )}
+              <p className="mt-2 text-xs text-slate-400">提示：默认展示私有问卷，可在筛选中切换公开状态。</p>
             </div>
 
             <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -1481,6 +1690,44 @@ const QuestionnaireEditorPage: React.FC = () => {
           <Footer />
         </div>
       </div>
+      <DataCardsModal
+        isOpen={showDataCardsModal}
+        onClose={() => {
+          setShowDataCardsModal(false);
+          setEditingCard(null);
+        }}
+        dataCards={questionnaireCards}
+        editingCard={editingCard}
+        currentPage={currentPage}
+        cardsPerPage={cardsPerPage}
+        onPageChange={setCurrentPage}
+        onEditCard={setEditingCard}
+        onUpdateCard={handleUpdateQuestionnaireCard}
+        onDeleteCard={handleDeleteQuestionnaireCard}
+        onLoadCard={handleLoadQuestionnaireCard}
+        onCancelEdit={() => setEditingCard(null)}
+        onReplaceCard={handleReplaceQuestionnaireCard}
+        userCapacity={userCapacity ?? undefined}
+        onOpenRecycleBin={() => {
+          setShowDataCardsModal(false);
+          setShowRecycleBinModal(true);
+        }}
+        recycleCount={questionnaireRecycleCards.length}
+        title="我的问卷库"
+        emptyText="暂无问卷数据卡"
+        defaultFilters={defaultModalFilters}
+        allowedTypes={['questionnaire']}
+        hideRoleTypeFilter={true}
+        showHotHint={false}
+      />
+      <RecycleBinModal
+        isOpen={showRecycleBinModal}
+        onClose={() => setShowRecycleBinModal(false)}
+        recycleCards={questionnaireRecycleCards}
+        onRestore={handleRestoreQuestionnaireCard}
+        onDelete={handleDeleteRecycleQuestionnaireCard}
+        limit={config.RECYCLE_BIN_LIMIT}
+      />
     </>
   );
 };

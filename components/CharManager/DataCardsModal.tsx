@@ -27,6 +27,12 @@ interface DataCardsModalProps {
   onOpenRecycleBin?: () => void;
   recycleCount?: number;
   recycleLimit?: number;
+  title?: string;
+  emptyText?: string;
+  defaultFilters?: Partial<Filters>;
+  allowedTypes?: CardTypeFilter[];
+  hideRoleTypeFilter?: boolean;
+  showHotHint?: boolean;
 }
 
 type CardTypeFilter = '' | 'character' | 'scenario' | 'history' | 'questionnaire';
@@ -57,6 +63,29 @@ const initialFilters: Filters = {
   minFavorites: '',
   maxFavorites: '',
   roleType: '',
+};
+
+const ALL_CARD_TYPES: CardTypeFilter[] = ['character', 'scenario', 'history', 'questionnaire'];
+
+const typeLabelMap: Record<Exclude<CardTypeFilter, ''>, string> = {
+  character: '角色',
+  scenario: '情景',
+  history: '叙事历史',
+  questionnaire: '问卷',
+};
+
+const isFilterActive = (filters: Filters) => {
+  return Boolean(
+    filters.type ||
+    filters.visibility ||
+    filters.minLikes ||
+    filters.maxLikes ||
+    filters.minUsage ||
+    filters.maxUsage ||
+    filters.minFavorites ||
+    filters.maxFavorites ||
+    filters.roleType
+  );
 };
 
 const inferRoleType = (card: any): CardRoleType | undefined => {
@@ -148,7 +177,13 @@ export default function DataCardsModal({
   userCapacity = config.DEFAULT_DATA_CARD_CAPACITY,
   onOpenRecycleBin,
   recycleCount = 0,
-  recycleLimit = config.RECYCLE_BIN_LIMIT
+  recycleLimit = config.RECYCLE_BIN_LIMIT,
+  title = '我的数据卡',
+  emptyText = '暂无数据卡',
+  defaultFilters,
+  allowedTypes,
+  hideRoleTypeFilter = false,
+  showHotHint = true,
 }: DataCardsModalProps) {
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -158,9 +193,23 @@ export default function DataCardsModal({
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const isComposingSearchRef = useRef(false);
   const [sortBy, setSortBy] = useState<SortOption>('updated_at');
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [filters, setFilters] = useState<Filters>(initialFilters);
-  const [activeFilters, setActiveFilters] = useState<Filters>(initialFilters);
+  const resolvedAllowedTypes = useMemo(() => {
+    const list = Array.isArray(allowedTypes) && allowedTypes.length > 0 ? allowedTypes : ALL_CARD_TYPES;
+    return list.filter((type) => type) as Exclude<CardTypeFilter, ''>[];
+  }, [allowedTypes]);
+  const sanitizedDefaultFilters = useMemo(() => {
+    const next: Filters = { ...initialFilters, ...(defaultFilters ?? {}) };
+    if (next.type && !resolvedAllowedTypes.includes(next.type as Exclude<CardTypeFilter, ''>)) {
+      next.type = '';
+    }
+    if (next.type !== 'character') {
+      next.roleType = '';
+    }
+    return next;
+  }, [defaultFilters, resolvedAllowedTypes]);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(() => isFilterActive(sanitizedDefaultFilters));
+  const [filters, setFilters] = useState<Filters>(sanitizedDefaultFilters);
+  const [activeFilters, setActiveFilters] = useState<Filters>(sanitizedDefaultFilters);
 
   useEffect(() => {
     if (isComposingSearchRef.current) return;
@@ -200,23 +249,13 @@ export default function DataCardsModal({
   };
 
   const resetFilters = () => {
-    setFilters(initialFilters);
-    setActiveFilters(initialFilters);
+    setFilters(sanitizedDefaultFilters);
+    setActiveFilters(sanitizedDefaultFilters);
     setShowAdvancedFilters(true);
   };
 
-  const isFilterActive = useMemo(() => {
-    return Boolean(
-      activeFilters.type ||
-      activeFilters.visibility ||
-      activeFilters.minLikes ||
-      activeFilters.maxLikes ||
-      activeFilters.minUsage ||
-      activeFilters.maxUsage ||
-      activeFilters.minFavorites ||
-      activeFilters.maxFavorites ||
-      activeFilters.roleType
-    );
+  const isFilterActiveNow = useMemo(() => {
+    return isFilterActive(activeFilters);
   }, [activeFilters]);
 
   const processedCards = useMemo(() => {
@@ -282,7 +321,15 @@ export default function DataCardsModal({
         const description = typeof card.description === 'string' ? card.description : '';
         const id = typeof card.id === 'string' ? card.id : '';
         const roleType = typeof (card as any).uiRoleType === 'string' ? (card as any).uiRoleType : '';
-        const typeLabel = card.type === 'character' ? '角色' : card.type === 'scenario' ? '情景' : card.type === 'history' ? '叙事历史' : '';
+        const typeLabel = card.type === 'character'
+          ? '角色'
+          : card.type === 'scenario'
+            ? '情景'
+            : card.type === 'history'
+              ? '叙事历史'
+              : card.type === 'questionnaire'
+                ? '问卷'
+                : '';
         const roleTypeLabel = roleType === 'magical-girl' ? '魔法少女' : roleType === 'canshou' ? '残兽' : roleType === 'general' ? '通用' : '';
         const haystack = `${name}\n${description}\n${id}\n${card.type ?? ''}\n${typeLabel}\n${roleType}\n${roleTypeLabel}`.toLowerCase();
         if (!haystack.includes(query)) return false;
@@ -333,6 +380,13 @@ export default function DataCardsModal({
     if (!isOpen) return;
     onPageChange(1);
   }, [isOpen, debouncedSearchQuery, activeFilters, sortBy, onPageChange]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setFilters(sanitizedDefaultFilters);
+    setActiveFilters(sanitizedDefaultFilters);
+    setShowAdvancedFilters(isFilterActive(sanitizedDefaultFilters));
+  }, [isOpen, sanitizedDefaultFilters]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -429,16 +483,18 @@ export default function DataCardsModal({
         </button>
         <div className="flex justify-between items-center mb-4 pr-8 gap-4 flex-wrap">
           <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold">我的数据卡</h2>
+            <h2 className="text-xl font-bold">{title}</h2>
             <div className="text-sm text-gray-600">
               {dataCards.length}/{userCapacity}
               {filteredAndSortedCards.length !== dataCards.length && (
                 <span className="ml-2 text-gray-500">筛选后 {filteredAndSortedCards.length}</span>
               )}
             </div>
-            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded">
-              🔥 热门卡片（收藏&gt;10 且使用&gt;30）不占槽位
-            </div>
+            {showHotHint && (
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded">
+                🔥 热门卡片（收藏&gt;10 且使用&gt;30）不占槽位
+              </div>
+            )}
           </div>
           {onOpenRecycleBin && (
             <button
@@ -451,7 +507,7 @@ export default function DataCardsModal({
         </div>
 
         {dataCards.length === 0 ? (
-          <p className="text-gray-500 text-center py-8">暂无数据卡</p>
+          <p className="text-gray-500 text-center py-8">{emptyText}</p>
         ) : (
           <>
             {/* 搜索 / 排序 / 筛选 */}
@@ -495,7 +551,7 @@ export default function DataCardsModal({
 
                 <button
                   onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                  className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActiveNow ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                 >
                   <Filter className="w-4 h-4" /> 高级筛选{' '}
                   <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
@@ -509,10 +565,9 @@ export default function DataCardsModal({
                       <label className="text-xs font-medium text-gray-600">卡片类型</label>
                       <select name="type" value={filters.type} onChange={handleFilterChange} className="input-field">
                         <option value="">全部</option>
-                        <option value="character">角色</option>
-                        <option value="scenario">情景</option>
-                        <option value="history">叙事历史</option>
-                        <option value="questionnaire">问卷</option>
+                        {resolvedAllowedTypes.map((type) => (
+                          <option key={type} value={type}>{typeLabelMap[type]}</option>
+                        ))}
                       </select>
                     </div>
                     <div className="space-y-1">
@@ -524,21 +579,23 @@ export default function DataCardsModal({
                         <option value="banned">封禁</option>
                       </select>
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-600">角色类型</label>
-                      <select
-                        name="roleType"
-                        value={filters.roleType}
-                        onChange={handleFilterChange}
-                        className="input-field disabled:bg-gray-100 disabled:text-gray-400"
-                        disabled={filters.type !== '' && filters.type !== 'character'}
-                      >
-                        <option value="">全部</option>
-                        <option value="magical-girl">魔法少女</option>
-                        <option value="canshou">残兽</option>
-                        <option value="general">通用</option>
-                      </select>
-                    </div>
+                    {!hideRoleTypeFilter && resolvedAllowedTypes.includes('character') && (
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-gray-600">角色类型</label>
+                        <select
+                          name="roleType"
+                          value={filters.roleType}
+                          onChange={handleFilterChange}
+                          className="input-field disabled:bg-gray-100 disabled:text-gray-400"
+                          disabled={filters.type !== '' && filters.type !== 'character'}
+                        >
+                          <option value="">全部</option>
+                          <option value="magical-girl">魔法少女</option>
+                          <option value="canshou">残兽</option>
+                          <option value="general">通用</option>
+                        </select>
+                      </div>
+                    )}
 
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-gray-600">点赞数</label>

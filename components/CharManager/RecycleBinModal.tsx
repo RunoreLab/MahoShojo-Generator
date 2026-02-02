@@ -31,6 +31,12 @@ export default function RecycleBinModal({
   limit
 }: RecycleBinModalProps) {
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
+  const typeLabelMap: Record<string, string> = {
+    character: '角色',
+    scenario: '情景',
+    history: '叙事历史',
+    questionnaire: '问卷',
+  };
 
   const parsedCards = useMemo(() => {
     return recycleCards.map((card) => {
@@ -82,7 +88,7 @@ export default function RecycleBinModal({
                         <h3 className="text-base font-semibold text-gray-800 break-words" title={full}>
                           {display}
                         </h3>
-                        <p className="text-xs text-gray-500 mt-1">类型：{card.type === 'scenario' ? '情景' : '角色'}</p>
+                        <p className="text-xs text-gray-500 mt-1">类型：{typeLabelMap[card.type] || '未知'}</p>
                       </div>
                       <span className="text-xs text-gray-500 whitespace-nowrap">删除于 {formatDateTime(card.deleted_at)}</span>
                     </div>
