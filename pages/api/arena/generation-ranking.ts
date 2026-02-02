@@ -5,6 +5,7 @@ import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } fro
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGenerationCombatantRow } from '@/lib/database/battle-report-generation-combatants';
 import {
+  buildArenaRatingEventId,
   buildEntityKey,
   getArenaEligibilitySnapshotByGenerationId,
   isFreeEligible,
@@ -359,9 +360,8 @@ export default async function handler(req: NextRequest) {
             b_before_games,
             b_after_games
           FROM arena_rating_events
-          WHERE generation_id = ?
-            AND queue IN ('strict', 'free')`,
-          [generationId],
+          WHERE id IN (?, ?)`,
+          [buildArenaRatingEventId(generationId, 'strict'), buildArenaRatingEventId(generationId, 'free')],
         ),
       );
 

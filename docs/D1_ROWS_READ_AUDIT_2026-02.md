@@ -65,6 +65,22 @@ LIMIT ? OFFSET ?;
 
 命中位置：`lib/database/data-cards.ts#getPublicDataCards()` + `pages/api/public-data-cards.ts`。
 
+### 0.2 进度盘点（对照 2026-01/2026-02 文档）
+
+| 事项 | 状态 | 备注 |
+| --- | --- | --- |
+| 排位结算 `ROW_NUMBER() OVER` 全表扫 | 已完成（代码） | `lib/database/arena-ratings.ts` 已无窗口函数扫表 |
+| 严格排位匹配（高频大读） | 已完成（代码） | `/api/arena/ranked-matchmaking` 已下线（410） |
+| 榜单缓存（止血） | 已完成（代码） | `/api/arena/leaderboard` `withEdgeCache` 15s |
+| 公共卡列表缓存（止血） | 已完成（代码） | `/api/public-data-cards` `withEdgeCache` 15s |
+| `data_card_tags` 全表聚合 JOIN | 已完成（代码） | 改为“按行关联子查询”，避免扫全表 tags |
+| lastDelta/lastAppliedAt 扫 `arena_rating_events` | 已完成（代码）/ 需迁移（D1） | 已物化到 `arena_ratings`；未迁移时接口降级为 `null` |
+| `data-card-meta` 精确 `publicRank/publicTotal` | 已完成（代码） | 已不再计算（字段保留但固定返回 `null`） |
+| `profile-card` 精确 `publicRank/publicTotal` | 未完成 | 仍在个人页热路径执行 COUNT 计算（见 §1.4/§3.1） |
+| `strict` 每日计分次数统计索引 | 已加入 schema / 待迁移（D1） | 新增复合索引以避免扫当日事件（见 §1.7/§3.4.3） |
+| `generation-ranking` 读事件按 `generation_id` | 已完成（代码） | 已改为按主键 `id IN (...)` 读取（见 §2.5） |
+| 榜单搜索 `ROW_NUMBER() OVER` 全量排名 | 已完成（代码） | 当前 `leaderboard/search` 未再出现窗口函数（见 §1.6/§3.3） |
+
 ---
 
 ## 1. 当前仓库内最可疑的高读放大点（按 ROI 排序）
@@ -137,14 +153,13 @@ LEFT JOIN (
 
 ### 1.4 公共排名（`publicRank/publicTotal`）的 COUNT 计算（高 ROI，且价值可谈）
 
-命中位置（尚未改动，建议按方案处理）：
+命中位置（部分已改动，仍需继续处理）：
 
 - `pages/api/data-card-meta.ts`
-  - `publicTotal`：strict/free 各 1 次 `COUNT(*)`（带 `arena_ratings` + `data_cards` JOIN 与复杂 eligibility 条件）
-  - `publicRank`：对单卡做 `COUNT(*) as higherCount`（带多重 OR tie-break 条件）
+  - ✅ 已不再计算 `publicRank/publicTotal`（字段保留但固定返回 `null`）
 - `pages/api/me/profile-card.ts`
-  - `publicTotal`：1 次 `COUNT(*)`
-  - `publicRank`：对多张卡重复执行 `higherCount` 计数（最多 7 次）
+  - ❗仍在计算 `publicTotal` 1 次 `COUNT(*)`
+  - ❗仍对多张卡重复执行 `publicRank` 的 `higherCount` 计数（最多 7 次）
 
 这类 query 的特点是：
 
@@ -166,16 +181,30 @@ LEFT JOIN (
 
 ---
 
-### 1.6 榜单搜索的全量 `ROW_NUMBER()` 排名（中 ROI，但需防滥用）
+### 1.6 榜单搜索的 LIKE 扫描风险（中 ROI，需要防滥用）
 
-`pages/api/arena/leaderboard/search.ts` 仍然存在：
+现状：`pages/api/arena/leaderboard/search.ts` 已移除“全量 `ROW_NUMBER() OVER (...)` 排名”逻辑，但仍是 `LOWER(...) LIKE` + 多 OR 条件，并且在 `arena_ratings` + JOIN 上直接过滤。  
+这类查询即使做了 rate limit，也属于“被爬虫/脚本打到就会很痛”的类型（LIKE 很难走索引，且 OR 条件会放大扫描）。
 
-- 先构建 base（潜在接近全量）
-- 再 `ROW_NUMBER() OVER (...)` 做全量排名
-- 最后再按关键词过滤
+已做防护（值得保留）：
 
-这类模式即使做了 rate limit，也属于“被爬虫/脚本打到就会很痛”的查询。  
-建议：把搜索改成“先找候选实体，再查其 rating/段位”，不要在搜索接口里算全量 rank（见 §3.3）。
+- IP 令牌桶限流
+- Edge Cache（10s）
+
+进一步建议：如仍出现稳定高 Rows Read，可改为“两段式搜索（先候选 id，再查 rating/段位）”或引入 FTS（见 §3.3）。
+
+---
+
+### 1.7 strict 每日计分次数 COUNT（高 ROI，需补索引）
+
+命中位置：
+
+- `lib/database/arena-ratings.ts#getStrictDailyUsage()`
+- `pages/api/arena/strict-preflight.ts`（调用 `getStrictDailyUsage`）
+
+风险：当前实现为 `COUNT(*)` + `queue/status/user_id/created_at>=` 的组合条件；若缺少复合索引，可能退化为扫描“当日 strict 全量事件”再过滤，从而把 daily limit 校验变成稳定的大读来源。
+
+建议：新增复合索引（已写入仓库 schema，线上需迁移；见 §3.4.3）。
 
 ---
 
@@ -254,6 +283,16 @@ LEFT JOIN (
 
 ---
 
+### 2.5 Generation Ranking：按主键读取 `arena_rating_events`（无损降读）
+
+改动点：
+
+- `pages/api/arena/generation-ranking.ts`
+
+做法：把读取事件的查询从 `WHERE generation_id = ?` 改为 `WHERE id IN (?, ?)`（`{generationId}:strict/free`），避免 `arena_rating_events` 随表增长导致的“按 generation_id 扫表”。
+
+---
+
 ## 3. 下一步“高性价比继续降读”方案（建议按优先级推进）
 
 ### 3.1 第一优先：砍掉/降级 `publicRank/publicTotal` 的精确计算
@@ -310,7 +349,7 @@ LEFT JOIN (
 如果后续允许引入一个“低频、强缓存”的总人数/分位点数据（例如 `/api/arena/leaderboard-stats`），则可以把 `topPercentBound` 升级为更接近全局的 `rank / total` 或 `percentileHint(rating,games)`，但这属于增强项，不是本地估算的必要条件。
 
 收益预期（对 Rows Read）：  
-只要 `pages/api/data-card-meta.ts` 与 `pages/api/me/profile-card.ts` 不再做 `higherCount/publicTotal` 的 COUNT 统计，通常会出现明显下降；localStorage 方案能让“砍查询”更容易被用户接受。
+目前 `pages/api/data-card-meta.ts` 已不再做 `higherCount/publicTotal` 的 COUNT 统计；剩余主要在 `pages/api/me/profile-card.ts`。只要把个人页的精确名次计算从热路径移除（或改成近似），通常会出现明显下降；localStorage 方案能让“砍查询”更容易被用户接受。
 
 风险与注意事项：
 
@@ -336,7 +375,9 @@ LEFT JOIN (
 
 ---
 
-### 3.3 第三优先：重写排行榜搜索，避免“先全量排名再过滤”
+### 3.3 第三优先：继续加固排行榜搜索（避免 LIKE 扫描放大）
+
+现状：榜单搜索已不再使用 `ROW_NUMBER() OVER` 做全量排名，但仍可能因为 `LIKE + OR` 在大表上扫描而被滥用。下面是进一步的降读/防滥用思路。
 
 建议 SQL/流程（思路，不是唯一解）：
 
@@ -373,6 +414,15 @@ CREATE INDEX IF NOT EXISTS idx_data_cards_public_approved_type_created_at
 - 在 D1 控制台对截图 SQL 执行 `EXPLAIN QUERY PLAN`，确认走到该索引；
 - 对比迁移前后 Query Insights：同样参数下 Rows Read 是否显著下降。
 
+#### 3.4.3 `arena_rating_events` 增加 strict 每日计分复合索引（对应 strict-preflight / 结算路径）
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_user_queue_status_created_at
+  ON arena_rating_events(user_id, queue, status, created_at);
+```
+
+对应查询：`lib/database/arena-ratings.ts#getStrictDailyUsage()`。
+
 ### 3.5 可选：public-data-cards 改为 cursor/keyset 分页（中期优化）
 
 当你们的列表页存在大量 `offset` 翻页/无限滚动时，复合索引仍可能无法避免“offset 越大读越多”的线性放大。
@@ -394,7 +444,7 @@ CREATE INDEX IF NOT EXISTS idx_data_cards_public_approved_type_created_at
 2) Top Queries 是否从以下关键字中“消失/显著下降”：
   - `GROUP BY data_card_id` + `group_concat(DISTINCT tag_id)`（全表 tag_map）
   - `COUNT(*) as higherCount`（名次计算）
-  - `ROW_NUMBER() OVER`（搜索榜单 / lastDelta）
+  - `COUNT(*) as count FROM arena_rating_events`（strict 每日计分次数统计）
   - `FROM data_cards` + `ORDER BY dc.created_at DESC LIMIT ? OFFSET ?`（公共列表）
 3) 关键页面 P95 延迟：榜单/公共卡列表/个人页是否同步变快（通常会）
 

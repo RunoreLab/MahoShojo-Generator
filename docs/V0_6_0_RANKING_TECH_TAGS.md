@@ -306,6 +306,7 @@ CREATE TABLE IF NOT EXISTS arena_rating_events (
 CREATE INDEX IF NOT EXISTS idx_arena_rating_events_queue_created_at ON arena_rating_events(queue, created_at);
 CREATE INDEX IF NOT EXISTS idx_arena_rating_events_user_pair_created_at ON arena_rating_events(user_id, pair_key, created_at);
 CREATE INDEX IF NOT EXISTS idx_arena_rating_events_ip_pair_created_at ON arena_rating_events(ip_anonymized, pair_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_user_queue_status_created_at ON arena_rating_events(user_id, queue, status, created_at);
 ```
 
 #### 1.8.2 幂等与并发处理（实现口径）
