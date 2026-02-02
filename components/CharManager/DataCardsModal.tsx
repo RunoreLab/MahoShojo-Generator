@@ -506,221 +506,223 @@ export default function DataCardsModal({
           )}
         </div>
 
-        {dataCards.length === 0 ? (
-          <p className="text-gray-500 text-center py-8">{emptyText}</p>
-        ) : (
-          <>
-            {/* 搜索 / 排序 / 筛选 */}
-            <div className="mb-3">
-              <div className="flex flex-wrap gap-2 items-center">
-                <div className="flex-1 relative min-w-[250px]">
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onCompositionStart={() => {
-                      isComposingSearchRef.current = true;
-                    }}
-                    onCompositionEnd={() => {
-                      isComposingSearchRef.current = false;
-                    }}
-                    placeholder="搜索：名称 / 简介 / ID…"
-                    className="w-full input-field pr-10"
-                  />
-                  {searchQuery && searchQuery !== debouncedSearchQuery && (
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                      <div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600 whitespace-nowrap">排序</span>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as SortOption)}
-                    className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
-                  >
-                    <option value="updated_at">更新时间</option>
-                    <option value="created_at">创建时间</option>
-                    <option value="likes">点赞数</option>
-                    <option value="usage">使用数</option>
-                    <option value="favorites">收藏数</option>
-                  </select>
-                </div>
-
-                <button
-                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                  className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActiveNow ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                >
-                  <Filter className="w-4 h-4" /> 高级筛选{' '}
-                  <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
-                </button>
-              </div>
-
-              {showAdvancedFilters && (
-                <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-600">卡片类型</label>
-                      <select name="type" value={filters.type} onChange={handleFilterChange} className="input-field">
-                        <option value="">全部</option>
-                        {resolvedAllowedTypes.map((type) => (
-                          <option key={type} value={type}>{typeLabelMap[type]}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-600">公开状态</label>
-                      <select name="visibility" value={filters.visibility} onChange={handleFilterChange} className="input-field">
-                        <option value="">全部</option>
-                        <option value="private">私有</option>
-                        <option value="public">公开</option>
-                        <option value="banned">封禁</option>
-                      </select>
-                    </div>
-                    {!hideRoleTypeFilter && resolvedAllowedTypes.includes('character') && (
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-gray-600">角色类型</label>
-                        <select
-                          name="roleType"
-                          value={filters.roleType}
-                          onChange={handleFilterChange}
-                          className="input-field disabled:bg-gray-100 disabled:text-gray-400"
-                          disabled={filters.type !== '' && filters.type !== 'character'}
-                        >
-                          <option value="">全部</option>
-                          <option value="magical-girl">魔法少女</option>
-                          <option value="canshou">残兽</option>
-                          <option value="general">通用</option>
-                        </select>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {dataCards.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">{emptyText}</p>
+          ) : (
+            <>
+              {/* 搜索 / 排序 / 筛选 */}
+              <div className="mb-3">
+                <div className="flex flex-wrap gap-2 items-center">
+                  <div className="flex-1 relative min-w-[250px]">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onCompositionStart={() => {
+                        isComposingSearchRef.current = true;
+                      }}
+                      onCompositionEnd={() => {
+                        isComposingSearchRef.current = false;
+                      }}
+                      placeholder="搜索：名称 / 简介 / ID…"
+                      className="w-full input-field pr-10"
+                    />
+                    {searchQuery && searchQuery !== debouncedSearchQuery && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <div className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
                       </div>
                     )}
+                  </div>
 
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-600">点赞数</label>
-                      <div className="flex gap-2">
-                        <input type="number" name="minLikes" value={filters.minLikes} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
-                        <input type="number" name="maxLikes" value={filters.maxLikes} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600 whitespace-nowrap">排序</span>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as SortOption)}
+                      className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                    >
+                      <option value="updated_at">更新时间</option>
+                      <option value="created_at">创建时间</option>
+                      <option value="likes">点赞数</option>
+                      <option value="usage">使用数</option>
+                      <option value="favorites">收藏数</option>
+                    </select>
+                  </div>
+
+                  <button
+                    onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                    className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActiveNow ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >
+                    <Filter className="w-4 h-4" /> 高级筛选{' '}
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+
+                {showAdvancedFilters && (
+                  <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-gray-600">卡片类型</label>
+                        <select name="type" value={filters.type} onChange={handleFilterChange} className="input-field">
+                          <option value="">全部</option>
+                          {resolvedAllowedTypes.map((type) => (
+                            <option key={type} value={type}>{typeLabelMap[type]}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-gray-600">公开状态</label>
+                        <select name="visibility" value={filters.visibility} onChange={handleFilterChange} className="input-field">
+                          <option value="">全部</option>
+                          <option value="private">私有</option>
+                          <option value="public">公开</option>
+                          <option value="banned">封禁</option>
+                        </select>
+                      </div>
+                      {!hideRoleTypeFilter && resolvedAllowedTypes.includes('character') && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-gray-600">角色类型</label>
+                          <select
+                            name="roleType"
+                            value={filters.roleType}
+                            onChange={handleFilterChange}
+                            className="input-field disabled:bg-gray-100 disabled:text-gray-400"
+                            disabled={filters.type !== '' && filters.type !== 'character'}
+                          >
+                            <option value="">全部</option>
+                            <option value="magical-girl">魔法少女</option>
+                            <option value="canshou">残兽</option>
+                            <option value="general">通用</option>
+                          </select>
+                        </div>
+                      )}
+
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-gray-600">点赞数</label>
+                        <div className="flex gap-2">
+                          <input type="number" name="minLikes" value={filters.minLikes} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                          <input type="number" name="maxLikes" value={filters.maxLikes} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-gray-600">使用数</label>
+                        <div className="flex gap-2">
+                          <input type="number" name="minUsage" value={filters.minUsage} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                          <input type="number" name="maxUsage" value={filters.maxUsage} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-gray-600">收藏数</label>
+                        <div className="flex gap-2">
+                          <input type="number" name="minFavorites" value={filters.minFavorites} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
+                          <input type="number" name="maxFavorites" value={filters.maxFavorites} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
+                        </div>
                       </div>
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-600">使用数</label>
-                      <div className="flex gap-2">
-                        <input type="number" name="minUsage" value={filters.minUsage} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
-                        <input type="number" name="maxUsage" value={filters.maxUsage} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-600">收藏数</label>
-                      <div className="flex gap-2">
-                        <input type="number" name="minFavorites" value={filters.minFavorites} onChange={handleFilterChange} placeholder="最少" className="input-field w-1/2" />
-                        <input type="number" name="maxFavorites" value={filters.maxFavorites} onChange={handleFilterChange} placeholder="最多" className="input-field w-1/2" />
-                      </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button onClick={resetFilters} className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">重置</button>
+                      <button onClick={applyFilters} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700">应用筛选</button>
                     </div>
                   </div>
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={resetFilters} className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">重置</button>
-                    <button onClick={applyFilters} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700">应用筛选</button>
+                )}
+              </div>
+
+              {/* 数据卡网格 */}
+              {filteredAndSortedCards.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">暂无匹配的数据卡</p>
+              ) : (
+                <div className="mb-4">
+                  <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {paginatedCards.map((card) => {
+                      const roleType = (card as any).uiRoleType as CardRoleType | undefined;
+                      const author = (card as any).uiAuthor as string | undefined;
+
+                      const hot = isHotCard({ favorite_count: card.favorite_count, usage_count: card.usage_count });
+                      const hasPendingUpdate = Boolean(card.pending_data);
+
+                      return editingCard?.id === card.id ? (
+                        <EditCardForm
+                          key={card.id}
+                          card={editingCard}
+                          onSave={(name, description, isPublic) =>
+                            onUpdateCard(card.id, name, description, isPublic)
+                          }
+                          onCancel={onCancelEdit}
+                        />
+                      ) : (
+                        <DataCard
+                          key={card.id}
+                          id={card.id}
+                          name={card.name}
+                          description={card.description}
+                          type={card.type}
+                          roleType={roleType}
+                          isPublic={card.is_public}
+                          reviewStatus={card.review_status}
+                          usageCount={card.usage_count}
+                          likeCount={card.like_count}
+                          favoriteCount={card.favorite_count}
+                          isRecommended={card.is_recommended === 1}
+                          techScore={cardMetaById[card.id]?.techScore ?? null}
+                          techLevel={cardMetaById[card.id]?.techLevel ?? null}
+                          strictTier={cardMetaById[card.id]?.strictTier ?? null}
+                          isNative={cardMetaById[card.id]?.isNative ?? null}
+                          hot={hot}
+                          pending={hasPendingUpdate}
+                          author={author}
+                          isOwner={true}
+                          onViewDetails={() => handleViewDetails(card)}
+                          onDownload={() => {
+                            // 下载功能
+                            const dataToDownload = JSON.parse(card.data);
+                            const blob = new Blob([JSON.stringify(dataToDownload, null, 2)], {
+                              type: 'application/json'
+                            });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${card.name}.json`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          onEditInfo={() => onEditCard(card)}
+                          onEditData={() => onLoadCard(card)}
+                          onDelete={() => onDeleteCard(card.id)}
+                          onShare={() => onShareCard?.(card)}
+                          onReplace={card.type === 'history' ? undefined : () => onReplaceCard?.(card)}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
               )}
-            </div>
 
-            {/* 数据卡网格 */}
-            {filteredAndSortedCards.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">暂无匹配的数据卡</p>
-            ) : (
-              <div className="flex-1 overflow-y-auto mb-4">
-                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {paginatedCards.map((card) => {
-                    const roleType = (card as any).uiRoleType as CardRoleType | undefined;
-                    const author = (card as any).uiAuthor as string | undefined;
-
-                    const hot = isHotCard({ favorite_count: card.favorite_count, usage_count: card.usage_count });
-                    const hasPendingUpdate = Boolean(card.pending_data);
-
-                    return editingCard?.id === card.id ? (
-                      <EditCardForm
-                        key={card.id}
-                        card={editingCard}
-                        onSave={(name, description, isPublic) =>
-                          onUpdateCard(card.id, name, description, isPublic)
-                        }
-                        onCancel={onCancelEdit}
-                      />
-                    ) : (
-                      <DataCard
-                        key={card.id}
-                        id={card.id}
-                        name={card.name}
-                        description={card.description}
-                        type={card.type}
-                        roleType={roleType}
-                        isPublic={card.is_public}
-                        reviewStatus={card.review_status}
-                        usageCount={card.usage_count}
-                        likeCount={card.like_count}
-                        favoriteCount={card.favorite_count}
-                        isRecommended={card.is_recommended === 1}
-                        techScore={cardMetaById[card.id]?.techScore ?? null}
-                        techLevel={cardMetaById[card.id]?.techLevel ?? null}
-                        strictTier={cardMetaById[card.id]?.strictTier ?? null}
-                        isNative={cardMetaById[card.id]?.isNative ?? null}
-                        hot={hot}
-                        pending={hasPendingUpdate}
-                        author={author}
-                        isOwner={true}
-                        onViewDetails={() => handleViewDetails(card)}
-                        onDownload={() => {
-                          // 下载功能
-                          const dataToDownload = JSON.parse(card.data);
-                          const blob = new Blob([JSON.stringify(dataToDownload, null, 2)], {
-                            type: 'application/json'
-                          });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = `${card.name}.json`;
-                          a.click();
-                          URL.revokeObjectURL(url);
-                        }}
-                        onEditInfo={() => onEditCard(card)}
-                        onEditData={() => onLoadCard(card)}
-                        onDelete={() => onDeleteCard(card.id)}
-                        onShare={() => onShareCard?.(card)}
-                        onReplace={card.type === 'history' ? undefined : () => onReplaceCard?.(card)}
-                      />
-                    );
-                  })}
+              {/* 分页控件 */}
+              {filteredAndSortedCards.length > cardsPerPage && (
+                <div className="flex justify-center items-center gap-2 pt-4 border-t">
+                  <button
+                    onClick={() => onPageChange(Math.max(1, safeCurrentPage - 1))}
+                    disabled={safeCurrentPage === 1}
+                    className="px-3 py-1 rounded text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400"
+                  >
+                    上一页
+                  </button>
+                  <span className="text-sm text-gray-600">
+                    第 {safeCurrentPage} / {totalPages} 页
+                  </span>
+                  <button
+                    onClick={() => onPageChange(Math.min(totalPages, safeCurrentPage + 1))}
+                    disabled={safeCurrentPage === totalPages}
+                    className="px-3 py-1 rounded text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400"
+                  >
+                    下一页
+                  </button>
                 </div>
-              </div>
-            )}
-
-            {/* 分页控件 */}
-            {filteredAndSortedCards.length > cardsPerPage && (
-              <div className="flex justify-center items-center gap-2 pt-4 border-t">
-                <button
-                  onClick={() => onPageChange(Math.max(1, safeCurrentPage - 1))}
-                  disabled={safeCurrentPage === 1}
-                  className="px-3 py-1 rounded text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400"
-                >
-                  上一页
-                </button>
-                <span className="text-sm text-gray-600">
-                  第 {safeCurrentPage} / {totalPages} 页
-                </span>
-                <button
-                  onClick={() => onPageChange(Math.min(totalPages, safeCurrentPage + 1))}
-                  disabled={safeCurrentPage === totalPages}
-                  className="px-3 py-1 rounded text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400"
-                >
-                  下一页
-                </button>
-              </div>
-            )}
-          </>
-        )}
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* 详情模态框 */}
