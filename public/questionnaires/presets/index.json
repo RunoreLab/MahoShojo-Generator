@@ -29,6 +29,20 @@
       "title": "残兽全面设定问卷",
       "description": "更完整的残兽外观、能力与动机设定",
       "path": "/questionnaires/presets/canshou-full-profile.json"
+    },
+    {
+      "id": "magical-girl-100-questions",
+      "kind": "magical-girl",
+      "title": "魔法少女百题大问卷（深度版）",
+      "description": "基于百题大问卷，适合深度塑造魔法少女角色",
+      "path": "/questionnaires/presets/magical-girl-100-questions.json"
+    },
+    {
+      "id": "canshou-100-questions",
+      "kind": "canshou",
+      "title": "残兽百题大问卷（深度版）",
+      "description": "基于百题改编，强化残兽核心概念与对抗设定",
+      "path": "/questionnaires/presets/canshou-100-questions.json"
     }
   ]
 }
