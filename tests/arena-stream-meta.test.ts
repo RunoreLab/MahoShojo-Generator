@@ -40,6 +40,38 @@ describe('arena stream meta', () => {
     expect(extracted!.meta.impacts?.[0]?.currentStateSummary).toBe('平静');
   });
 
+  test('repairs ellipsis placeholders (……/...) inside impacts array', async () => {
+    const md = [
+      '# 标题',
+      '',
+      '正文',
+      '',
+      '<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"H","winner":"A"},"impacts":[{"characterName":"A","impact":"OK","currentStateSummary":"S"},……,{"characterName":"B","currentStateSummary":"T"},...]} -->',
+    ].join('\n');
+
+    const extracted = await extractStreamUpdateMeta(md);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.meta.report?.headline).toBe('H');
+    expect(extracted!.meta.report?.winner).toBe('A');
+    expect(extracted!.meta.impacts?.map((i) => i.characterName)).toEqual(['A', 'B']);
+    expect(extracted!.strippedMarkdown.includes('MAHOSHOJO_ARENA_META')).toBe(false);
+  });
+
+  test('merges duplicate impacts and keeps the latest non-empty fields', async () => {
+    const md = [
+      '# 标题',
+      '',
+      '<!-- MAHOSHOJO_ARENA_META {"version":1,"impacts":[{"characterName":"A","impact":"OLD"},{"characterName":"A","currentStateSummary":"NEW"}]} -->',
+    ].join('\n');
+
+    const extracted = await extractStreamUpdateMeta(md);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.meta.impacts).toHaveLength(1);
+    expect(extracted!.meta.impacts?.[0]?.characterName).toBe('A');
+    expect(extracted!.meta.impacts?.[0]?.impact).toBe('OLD');
+    expect(extracted!.meta.impacts?.[0]?.currentStateSummary).toBe('NEW');
+  });
+
   test('accepts array root and wraps as impacts', async () => {
     const md = [
       '# 标题',
