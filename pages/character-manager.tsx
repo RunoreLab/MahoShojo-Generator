@@ -29,6 +29,7 @@ import SaveCardModal from '../components/CharManager/SaveCardModal';
 import DataCardsModal from '../components/CharManager/DataCardsModal';
 import RecycleBinModal from '../components/CharManager/RecycleBinModal';
 import NarrativeHistoryCardEditorModal from '../components/CharManager/NarrativeHistoryCardEditorModal';
+import QuestionnaireCompatModal, { type QuestionnaireCompatTargetCard } from '../components/CharManager/QuestionnaireCompatModal';
 import ScenarioEditor from '../components/ScenarioEditor';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { UserBadge } from '@/types/badge';
@@ -295,6 +296,9 @@ const CharacterManagerPage: React.FC = () => {
     description: string;
     isPublic: number;
   } | null>(null);
+  const [showQuestionnaireCompatModal, setShowQuestionnaireCompatModal] = useState(false);
+  const [questionnaireCompatRawJson, setQuestionnaireCompatRawJson] = useState('');
+  const [questionnaireCompatTargetCard, setQuestionnaireCompatTargetCard] = useState<QuestionnaireCompatTargetCard | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
     const cardsPerPage = 12;
 
@@ -538,6 +542,12 @@ const CharacterManagerPage: React.FC = () => {
         }
     };
 
+    const openQuestionnaireCompat = useCallback((rawJson: string, targetCard: QuestionnaireCompatTargetCard | null) => {
+        setQuestionnaireCompatRawJson(rawJson);
+        setQuestionnaireCompatTargetCard(targetCard);
+        setShowQuestionnaireCompatModal(true);
+    }, []);
+
     // 加载数据卡
     const handleLoadDataCard = async (card: any) => {
         try {
@@ -551,6 +561,18 @@ const CharacterManagerPage: React.FC = () => {
                     isPublic: card.is_public,
                 });
                 setShowHistoryCardEditor(true);
+                setShowDataCardsModal(false);
+                return;
+            }
+            if (card?.type === 'questionnaire') {
+                const raw = typeof card.data === 'string' ? card.data : JSON.stringify(card.data ?? {}, null, 2);
+                openQuestionnaireCompat(raw, {
+                    id: card.id,
+                    name: card.name,
+                    description: card.description,
+                    isPublic: card.is_public,
+                });
+                setMessage({ type: 'info', text: '已进入问卷数据卡兼容模式：建议前往 /questionnaire-editor 进行完整编辑。' });
                 setShowDataCardsModal(false);
                 return;
             }
@@ -633,6 +655,18 @@ const CharacterManagerPage: React.FC = () => {
 
     // 用当前编辑的 characterData 替换已有卡片
     const handleReplaceExistingCard = async (card: any) => {
+        if (card?.type === 'questionnaire') {
+            const raw = typeof card.data === 'string' ? card.data : JSON.stringify(card.data ?? {}, null, 2);
+            openQuestionnaireCompat(raw, {
+                id: card.id,
+                name: card.name,
+                description: card.description,
+                isPublic: card.is_public,
+            });
+            setMessage({ type: 'info', text: '问卷数据卡请优先在 /questionnaire-editor 编辑；此处仅提供兼容替换能力。' });
+            setShowDataCardsModal(false);
+            return;
+        }
         if (!characterData) {
             setMessage({ type: 'error', text: '请先在编辑区加载/生成要替换的内容' });
             return;
@@ -930,6 +964,12 @@ const CharacterManagerPage: React.FC = () => {
             // if (!validationResult.success) {
             //     throw new Error(validationResult.error || '无效的文件格式。请确保是有效的角色或情景文件。');
             // }
+
+            if (validationResult.type === 'questionnaire') {
+                openQuestionnaireCompat(jsonText, null);
+                setMessage({ type: 'info', text: '检测到问卷数据卡：角色管理器仅提供兼容模式。建议前往 /questionnaire-editor 进行完整编辑。' });
+                return;
+            }
 
             if ((data as any)?.templateId === 'narrative-history') {
                 setHistoryCardDraft(data as NarrativeHistoryDataCardV1);
@@ -2265,6 +2305,22 @@ const CharacterManagerPage: React.FC = () => {
             }}
                 recycleCount={recycleBinCards.length}
                 recycleLimit={config.RECYCLE_BIN_LIMIT}
+            />
+
+            < QuestionnaireCompatModal
+                isOpen={showQuestionnaireCompatModal}
+                onClose={() => {
+                    setShowQuestionnaireCompatModal(false);
+                    setQuestionnaireCompatRawJson('');
+                    setQuestionnaireCompatTargetCard(null);
+                }}
+                rawJson={questionnaireCompatRawJson}
+                targetCard={questionnaireCompatTargetCard}
+                onReplaceSuccess={(pendingReview) => {
+                    setMessage({ type: 'success', text: pendingReview ? '更新已提交审核，审核通过后生效' : '问卷数据卡已替换' });
+                    loadUserDataCards();
+                    loadUserBadges();
+                }}
             />
 
             < NarrativeHistoryCardEditorModal
