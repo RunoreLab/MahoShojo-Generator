@@ -15,6 +15,20 @@
       "description": "前进吧，残兽！",
       "path": "/questionnaires/presets/canshou-default.json",
       "isDefault": true
+    },
+    {
+      "id": "magical-girl-full-profile",
+      "kind": "magical-girl",
+      "title": "魔法少女全面角色设定问卷",
+      "description": "更细致地描绘魔法少女的外观、能力与人生轨迹",
+      "path": "/questionnaires/presets/magical-girl-full-profile.json"
+    },
+    {
+      "id": "canshou-full-profile",
+      "kind": "canshou",
+      "title": "残兽全面设定问卷",
+      "description": "更完整的残兽外观、能力与动机设定",
+      "path": "/questionnaires/presets/canshou-full-profile.json"
     }
   ]
 }

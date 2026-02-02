@@ -322,6 +322,7 @@ const DetailsPage: React.FC = () => {
   const tokenEstimateText = useMemo(() => formatQuestionnaireAnswers(answerItems), [answerItems]);
 
   const shouldDisableRemove = selectedQuestionnaires.length <= 1;
+  const shouldApplyMagicalMeta = (questionnaireId?: string) => questionnaireId === 'magical-girl-default';
 
   const resolvedResultPayload = useMemo(() => {
     if (!magicalGirlDetails) return null;
@@ -415,11 +416,12 @@ const DetailsPage: React.FC = () => {
               raw.source === 'upload' || raw.source === 'database' || raw.source === 'preset'
                 ? raw.source
                 : 'preset';
+            const presetQuestionnaireId = typeof raw.questionnaire?.id === 'string' ? raw.questionnaire.id : undefined;
             const normalized = normalizeQuestionnaireDefinition(raw.questionnaire, {
               fallbackKind: 'magical-girl',
               fallbackId: typeof raw.questionnaire?.id === 'string' ? raw.questionnaire.id : 'magical-girl-custom',
               fallbackTitle: typeof raw.questionnaire?.title === 'string' ? raw.questionnaire.title : '未命名问卷',
-              applyMagicalMeta: source === 'preset',
+              applyMagicalMeta: source === 'preset' && shouldApplyMagicalMeta(presetQuestionnaireId),
               nativeAllowed: source === 'preset' ? true : false,
             });
             if (!normalized) return null;
@@ -559,7 +561,7 @@ const DetailsPage: React.FC = () => {
           fallbackId: defaultPreset.id,
           fallbackKind: defaultPreset.kind,
           fallbackTitle: defaultPreset.title,
-          applyMagicalMeta: true,
+          applyMagicalMeta: shouldApplyMagicalMeta(defaultPreset.id),
           nativeAllowed: true,
         });
         if (!normalized) throw new Error('预设问卷解析失败');
@@ -658,7 +660,7 @@ const DetailsPage: React.FC = () => {
         fallbackId: preset.id,
         fallbackKind: preset.kind,
         fallbackTitle: preset.title,
-        applyMagicalMeta: true,
+        applyMagicalMeta: shouldApplyMagicalMeta(preset.id),
         nativeAllowed: true,
       });
       if (!normalized) throw new Error('预设问卷解析失败');

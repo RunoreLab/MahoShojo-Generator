@@ -1,0 +1,207 @@
+{
+  "id": "canshou-full-profile",
+  "kind": "canshou",
+  "title": "残兽全面设定问卷",
+  "description": "用于生成更完整的残兽档案",
+  "logoUrl": "/beast-title.svg",
+  "questions": [
+    {
+      "id": "CSF-01",
+      "question": "【基础档案】残兽名称/编号",
+      "placeholder": "例如：C-17、赤潮",
+      "maxLength": 40
+    },
+    {
+      "id": "CSF-02",
+      "question": "【基础档案】代号/外号",
+      "placeholder": "例如：裂潮者、玻璃蚕",
+      "maxLength": 40
+    },
+    {
+      "id": "CSF-03",
+      "question": "【核心】残兽的核心概念是什么？",
+      "options": ["腐蚀", "穿透", "同化", "蛛网", "火焰", "吞噬", "畸变", "寄生"],
+      "allowCustom": true
+    },
+    {
+      "id": "CSF-04",
+      "question": "【核心】它的核心情感或欲望是什么？",
+      "options": ["破坏欲", "吞噬欲", "怨念", "占有欲", "混沌", "恐惧", "痛苦", "饥饿"],
+      "allowCustom": true
+    },
+    {
+      "id": "CSF-05",
+      "question": "【核心】它的进化阶段处于？",
+      "options": [
+        { "value": "卵", "label": "卵" },
+        { "value": "蠖", "label": "蠖" },
+        { "value": "蛹", "label": "蛹" },
+        { "value": "半蜕", "label": "半蜕" },
+        { "value": "蜕", "label": "蜕" },
+        { "value": "王蜕", "label": "王蜕" },
+        { "value": "羽", "label": "羽 (不可选)", "disabled": true }
+      ],
+      "allowCustom": false
+    },
+    {
+      "id": "CSF-06",
+      "question": "【外貌】外貌形态更接近？",
+      "options": ["野兽", "昆虫", "植物", "矿物", "液体", "无定形", "几何体", "人形"],
+      "allowCustom": true
+    },
+    {
+      "id": "CSF-07",
+      "question": "【外貌】体型规模/尺寸",
+      "options": ["微型", "小型", "中型", "大型", "巨型", "城市级"],
+      "allowCustom": true
+    },
+    {
+      "id": "CSF-08",
+      "question": "【外貌】材质与表皮",
+      "placeholder": "例如：湿滑黏液、乌紫色皮毛、金属外壳"
+    },
+    {
+      "id": "CSF-09",
+      "question": "【外貌】颜色/纹理/光泽",
+      "placeholder": "例如：暗红、玻璃质、带油光"
+    },
+    {
+      "id": "CSF-10",
+      "question": "【外貌】显著特征与附属物",
+      "placeholder": "例如：多个头颅、管状结构、巨口"
+    },
+    {
+      "id": "CSF-11",
+      "question": "【外貌】感官与探知方式",
+      "placeholder": "例如：嗅觉极强、能感知热源"
+    },
+    {
+      "id": "CSF-12",
+      "question": "【外貌】移动方式与习性动作",
+      "placeholder": "例如：爬行、漂浮、蜷缩待机"
+    },
+    {
+      "id": "CSF-13",
+      "question": "【外貌】声音与气味印象",
+      "placeholder": "例如：低频共鸣、铁锈味"
+    },
+    {
+      "id": "CSF-14",
+      "question": "【环境】领地/栖息环境",
+      "placeholder": "例如：废弃医院、下水道、工业区"
+    },
+    {
+      "id": "CSF-15",
+      "question": "【起源】它的起源或诞生源头是？",
+      "options": ["野生", "黑烬黎明（反国度组织）", "爪痕（叛逃魔法少女）", "间界", "魔法国度", "人为实验", "未知"],
+      "allowCustom": true
+    },
+    {
+      "id": "CSF-16",
+      "question": "【起源】诞生环境",
+      "placeholder": "例如：封闭实验室、坍塌地铁站"
+    },
+    {
+      "id": "CSF-17",
+      "question": "【能力】捕食/狩猎/攻击方式",
+      "placeholder": "例如：利爪挥砍、毒液喷射、精神冲击"
+    },
+    {
+      "id": "CSF-18",
+      "question": "【能力】特殊能力与异能",
+      "placeholder": "例如：伪装、再生、空间扭曲"
+    },
+    {
+      "id": "CSF-19",
+      "question": "【能力】能力代价/限制/冷却",
+      "placeholder": "例如：每次释放会短暂虚弱"
+    },
+    {
+      "id": "CSF-20",
+      "question": "【能力】失控/暴走条件",
+      "placeholder": "例如：受到强光刺激或饥饿过久"
+    },
+    {
+      "id": "CSF-21",
+      "question": "【能力】弱点与克制（生理/心理/环境/特定条件）"
+    },
+    {
+      "id": "CSF-22",
+      "question": "【能力】战斗风格概述"
+    },
+    {
+      "id": "CSF-23",
+      "question": "【行为】社会性/群体关系",
+      "options": ["独行", "群居", "寄生", "受更高个体支配", "形成族群", "无法判断"],
+      "allowCustom": true
+    },
+    {
+      "id": "CSF-24",
+      "question": "【行为】对人类/魔法少女的态度",
+      "options": ["以狩猎为主", "畏惧", "好奇", "依附", "渗透", "无差别攻击", "可沟通"],
+      "allowCustom": true
+    },
+    {
+      "id": "CSF-25",
+      "question": "【行为】与其他残兽/组织关系"
+    },
+    {
+      "id": "CSF-26",
+      "question": "【动机】目标/欲望/执念"
+    },
+    {
+      "id": "CSF-27",
+      "question": "【动机】成功与失败后的变化"
+    },
+    {
+      "id": "CSF-28",
+      "question": "【记忆】是否保留人性或记忆？",
+      "options": ["几乎没有残留", "有模糊记忆", "保留明确人格", "与原人格冲突", "未知"],
+      "allowCustom": true
+    },
+    {
+      "id": "CSF-29",
+      "question": "【背景】关键事件/转折"
+    },
+    {
+      "id": "CSF-30",
+      "question": "【资源】资源与筹码（巢穴、收藏、同化物、可调动的人力）"
+    },
+    {
+      "id": "CSF-31",
+      "question": "【研究院记录】收容等级/威胁评估/已知称呼"
+    },
+    {
+      "id": "CSF-32",
+      "question": "【其他】伪装/拟态方式（如果有）"
+    },
+    {
+      "id": "CSF-33",
+      "question": "【其他】传播/感染/繁殖方式（如果有）"
+    },
+    {
+      "id": "CSF-34",
+      "question": "【其他】“禁忌”或恐惧源"
+    },
+    {
+      "id": "CSF-35",
+      "question": "【其他】与现实世界留下的痕迹（目击记录/传闻）"
+    },
+    {
+      "id": "CSF-36",
+      "question": "【其他】核心场景/象征意象（常出现的画面、声音或场景）"
+    },
+    {
+      "id": "CSF-37",
+      "question": "【空间】个人空间/巢穴细节（内部结构、陈设）"
+    },
+    {
+      "id": "CSF-38",
+      "question": "【对抗史】与魔法少女/调查院的宿怨或对抗史"
+    },
+    {
+      "id": "CSF-39",
+      "question": "【行为】行为模式（平时/受刺激/被逼到极限）"
+    }
+  ]
+}
