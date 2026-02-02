@@ -398,17 +398,19 @@ const CanshouPage: React.FC = () => {
       }
       if (Array.isArray(parsed?.questionnaireSelections)) {
         const usedSelectionIds = new Set<string>();
-        const restored = parsed.questionnaireSelections
-          .map((raw: any) => {
+        const restored = (parsed.questionnaireSelections as unknown[])
+          .map((raw): QuestionnaireSelection | null => {
             if (!raw || typeof raw !== 'object') return null;
+            const rawRecord = raw as Record<string, unknown>;
             const source: QuestionnaireSelectionSource =
-              raw.source === 'upload' || raw.source === 'database' || raw.source === 'preset'
-                ? raw.source
+              rawRecord.source === 'upload' || rawRecord.source === 'database' || rawRecord.source === 'preset'
+                ? rawRecord.source
                 : 'preset';
-            const normalized = normalizeQuestionnaireDefinition(raw.questionnaire, {
+            const rawQuestionnaire = rawRecord.questionnaire as { id?: unknown; title?: unknown } | null;
+            const normalized = normalizeQuestionnaireDefinition(rawRecord.questionnaire, {
               fallbackKind: 'canshou',
-              fallbackId: typeof raw.questionnaire?.id === 'string' ? raw.questionnaire.id : 'canshou-custom',
-              fallbackTitle: typeof raw.questionnaire?.title === 'string' ? raw.questionnaire.title : '未命名问卷',
+              fallbackId: typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : 'canshou-custom',
+              fallbackTitle: typeof rawQuestionnaire?.title === 'string' ? rawQuestionnaire.title : '未命名问卷',
               applyMagicalMeta: false,
               nativeAllowed: source === 'preset' ? true : false,
             });
@@ -419,10 +421,10 @@ const CanshouPage: React.FC = () => {
             return {
               source,
               questionnaire: normalized,
-              dataCardId: typeof raw.dataCardId === 'string' ? raw.dataCardId : undefined,
-              dataCardName: typeof raw.dataCardName === 'string' ? raw.dataCardName : undefined,
-              dataCardAuthor: typeof raw.dataCardAuthor === 'string' ? raw.dataCardAuthor : undefined,
-              selectionId: typeof raw.selectionId === 'string' ? raw.selectionId : undefined,
+              dataCardId: typeof rawRecord.dataCardId === 'string' ? rawRecord.dataCardId : undefined,
+              dataCardName: typeof rawRecord.dataCardName === 'string' ? rawRecord.dataCardName : undefined,
+              dataCardAuthor: typeof rawRecord.dataCardAuthor === 'string' ? rawRecord.dataCardAuthor : undefined,
+              selectionId: typeof rawRecord.selectionId === 'string' ? rawRecord.selectionId : undefined,
             } satisfies QuestionnaireSelection;
           })
           .filter((item): item is QuestionnaireSelection => Boolean(item))
