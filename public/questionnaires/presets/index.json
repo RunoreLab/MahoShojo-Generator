@@ -31,6 +31,20 @@
       "path": "/questionnaires/presets/canshou-full-profile.json"
     },
     {
+      "id": "magical-girl-mbti-profile",
+      "kind": "magical-girl",
+      "title": "魔法少女个人信息 + 性格倾向（MBTI）问卷",
+      "description": "可全空、可跳过；支持简版/完整版；用于角色塑造的 MBTI 风格倾向题",
+      "path": "/questionnaires/presets/magical-girl-mbti-profile.json"
+    },
+    {
+      "id": "canshou-mbti-profile",
+      "kind": "canshou",
+      "title": "残兽个人信息 + 行为倾向（MBTI）问卷",
+      "description": "可全空、可跳过；支持简版/完整版；用于残兽塑造的 MBTI 风格倾向题",
+      "path": "/questionnaires/presets/canshou-mbti-profile.json"
+    },
+    {
       "id": "magical-girl-100-questions",
       "kind": "magical-girl",
       "title": "魔法少女百题大问卷（深度版）",

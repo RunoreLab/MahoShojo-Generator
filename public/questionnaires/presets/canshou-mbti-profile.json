@@ -1,0 +1,1156 @@
+{
+  "id": "canshou-mbti-profile",
+  "kind": "canshou",
+  "title": "残兽个人信息 + 行为倾向（MBTI）问卷",
+  "description": "用于残兽角色塑造的“MBTI 风格”行为/思维倾向问卷（非官方量表）。所有题目都可跳过；可选简版/完整版；也可直接填最后的 16 型结果。",
+  "logoUrl": "/beast-title.svg",
+  "version": "1.0",
+  "nativeAllowed": false,
+  "questions": [
+    {
+      "id": "CSMBTI-01",
+      "question": "【基础档案】名称/编号",
+      "placeholder": "例如：C-17、赤潮（请勿填写任何真实隐私信息）",
+      "maxLength": 40,
+      "required": false
+    },
+    {
+      "id": "CSMBTI-02",
+      "question": "【基础档案】代号/外号",
+      "placeholder": "例如：裂潮者、玻璃蚕",
+      "maxLength": 40,
+      "required": false
+    },
+    {
+      "id": "CSMBTI-03",
+      "question": "【外貌】形态关键词（3~6个）",
+      "placeholder": "例如：节肢、雾化、裂纹、低温、回声",
+      "maxLength": 80,
+      "required": false
+    },
+    {
+      "id": "CSMBTI-04",
+      "question": "【外貌】材质/颜色/纹理",
+      "placeholder": "例如：像陶瓷裂纹的外壳，边缘渗出黑油；或半透明菌丝质表皮",
+      "maxLength": 240,
+      "required": false
+    },
+    {
+      "id": "CSMBTI-05",
+      "question": "【核心】核心概念（1~6字）",
+      "type": "select",
+      "options": [
+        "腐蚀",
+        "同化",
+        "吞噬",
+        "寄生",
+        "折叠",
+        "回声",
+        "蛛网",
+        "噪声"
+      ],
+      "allowCustom": true,
+      "placeholder": "例如：吞噬（越吃越空）/ 折叠（让空间失真）",
+      "helperText": "建议先用短词概括，再可选补一句“它想把世界变成什么样”。",
+      "maxLength": 80,
+      "required": false
+    },
+    {
+      "id": "CSMBTI-06",
+      "question": "【核心】核心欲望/情感",
+      "type": "select",
+      "options": [
+        "饥饿",
+        "占有欲",
+        "怨念",
+        "恐惧",
+        "好奇",
+        "痛苦",
+        "混沌",
+        "求生欲"
+      ],
+      "allowCustom": true,
+      "placeholder": "例如：占有欲（必须属于我）/ 好奇（拆开一切）",
+      "maxLength": 80,
+      "required": false
+    },
+    {
+      "id": "CSMBTI-07",
+      "question": "【能力】主要能力表现",
+      "placeholder": "例如：气味侵蚀、影子折叠、菌丝束缚、共鸣扩散",
+      "maxLength": 200,
+      "required": false
+    },
+    {
+      "id": "CSMBTI-08",
+      "question": "【行为】行动方式/狩猎习性",
+      "placeholder": "例如：偏伏击；先标记再追踪；喜欢把猎物逼到死角",
+      "maxLength": 200,
+      "required": false
+    },
+    {
+      "id": "CSMBTI-09",
+      "question": "【收容】研究院备注/危险等级（可自拟）",
+      "type": "select",
+      "options": [
+        "低风险",
+        "中风险",
+        "高风险",
+        "灾厄级",
+        "未知"
+      ],
+      "allowCustom": true,
+      "placeholder": "例如：高风险（疑似具同化性）",
+      "maxLength": 80,
+      "required": false
+    },
+    {
+      "id": "CSMBTI-10",
+      "question": "【牵引】执念/目标/诱因",
+      "placeholder": "例如：追逐“光”；对某个气味/声音产生执念；只在雨夜现身",
+      "maxLength": 200,
+      "required": false
+    },
+    {
+      "id": "CSMBTI-MODE",
+      "question": "【行为倾向】要不要做 MBTI 风格倾向题？",
+      "type": "select",
+      "options": [
+        {
+          "value": "skip",
+          "label": "跳过（直接进入结果区）"
+        },
+        {
+          "value": "lite",
+          "label": "简版（24题，约3~5分钟）"
+        },
+        {
+          "value": "full",
+          "label": "完整版（52题，约8~12分钟）"
+        },
+        {
+          "value": "known",
+          "label": "我已知道类型（直接填写结果）"
+        }
+      ],
+      "allowCustom": false,
+      "helperText": "提示：本问卷是用于角色塑造的“MBTI 风格”倾向题，不是官方量表；每题选项顺序固定为 E/I、S/N、T/F、J/P（前者/后者）。",
+      "required": false,
+      "jump": [
+        {
+          "when": {
+            "questionnaireId": "canshou-mbti-profile",
+            "questionId": "CSMBTI-MODE",
+            "operator": "equals",
+            "value": "skip"
+          },
+          "to": {
+            "questionnaireId": "canshou-mbti-profile",
+            "questionId": "CSMBTI-RESULT"
+          }
+        },
+        {
+          "when": {
+            "questionnaireId": "canshou-mbti-profile",
+            "questionId": "CSMBTI-MODE",
+            "operator": "equals",
+            "value": "known"
+          },
+          "to": {
+            "questionnaireId": "canshou-mbti-profile",
+            "questionId": "CSMBTI-RESULT"
+          }
+        }
+      ]
+    },
+    {
+      "id": "CSMBTI-EI-01",
+      "question": "【E/I】进入陌生环境，你更可能：",
+      "type": "select",
+      "options": [
+        "先主动试探与接触（E）",
+        "先观察与评估，再决定靠近（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-EI-02",
+      "question": "【E/I】你更容易在什么情况下恢复能量：",
+      "type": "select",
+      "options": [
+        "在互动/冲突中越动越精神（E）",
+        "独处安静地沉淀与重组（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-EI-03",
+      "question": "【E/I】当状态不稳时，你更倾向：",
+      "type": "select",
+      "options": [
+        "通过接触/行动把感觉“冲”出去（E）",
+        "把感觉压回体内，慢慢消化（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-EI-04",
+      "question": "【E/I】你更像：",
+      "type": "select",
+      "options": [
+        "在交流/碰撞中整理思路（E）",
+        "在沉默/独处中整理思路（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-EI-05",
+      "question": "【E/I】你更像：",
+      "type": "select",
+      "options": [
+        "扩张型：更愿意触碰外部世界（E）",
+        "收束型：更愿意把世界收进体内（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-EI-06",
+      "question": "【E/I】面对群体时你更可能：",
+      "type": "select",
+      "options": [
+        "主动制造影响与存在感（E）",
+        "降低存在感，等待最合适时机（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-SN-01",
+      "question": "【S/N】理解一条新规则/新猎物时，你更喜欢：",
+      "type": "select",
+      "options": [
+        "先抓住可验证的线索与细节（S）",
+        "先抓住整体趋势与可能走向（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-SN-02",
+      "question": "【S/N】你更容易注意到：",
+      "type": "select",
+      "options": [
+        "细节的变化与痕迹（S）",
+        "氛围的变化与暗示（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-SN-03",
+      "question": "【S/N】你更信任：",
+      "type": "select",
+      "options": [
+        "可重复验证的事实（S）",
+        "直觉里的预兆与联想（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-SN-04",
+      "question": "【S/N】你更喜欢的信息形态：",
+      "type": "select",
+      "options": [
+        "具体、清晰、可操作（S）",
+        "抽象、含义、可延伸（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-SN-05",
+      "question": "【S/N】你更擅长：",
+      "type": "select",
+      "options": [
+        "把行动做得更稳定、更精确（S）",
+        "把行动做得更出其不意、更大胆（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-SN-06",
+      "question": "【S/N】遇到模糊目标你更可能：",
+      "type": "select",
+      "options": [
+        "先从线索与步骤开始（S）",
+        "先从假设与框架开始（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-TF-01",
+      "question": "【T/F】做判断时你更优先：",
+      "type": "select",
+      "options": [
+        "规则、利弊与效率（T）",
+        "感受、关系与价值（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-TF-02",
+      "question": "【T/F】让你改变想法更有效的是：",
+      "type": "select",
+      "options": [
+        "逻辑严密的证据链（T）",
+        "情绪与共鸣的冲击（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-TF-03",
+      "question": "【T/F】发生冲突时你更可能：",
+      "type": "select",
+      "options": [
+        "把问题拆开，算清楚得失（T）",
+        "先管住情绪与氛围，再谈得失（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-TF-04",
+      "question": "【T/F】你更怕被评价为：",
+      "type": "select",
+      "options": [
+        "不够理性/不够有效（T）",
+        "不够在意他者/不够温柔（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-TF-05",
+      "question": "【T/F】面对同伴/猎物的错误，你更可能：",
+      "type": "select",
+      "options": [
+        "指出问题并给出更优解（T）",
+        "先确认感受与动机，再决定如何处理（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-TF-06",
+      "question": "【T/F】你更倾向用哪种方式表达“在意”：",
+      "type": "select",
+      "options": [
+        "用行动解决问题（T）",
+        "用陪伴承接情绪（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-JP-01",
+      "question": "【J/P】准备行动时你更倾向：",
+      "type": "select",
+      "options": [
+        "先列计划与步骤（J）",
+        "先动起来，边走边改（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-JP-02",
+      "question": "【J/P】你更喜欢：",
+      "type": "select",
+      "options": [
+        "提前确定边界与规则（J）",
+        "保持弹性，随时变化（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-JP-03",
+      "question": "【J/P】你的推进方式更像：",
+      "type": "select",
+      "options": [
+        "阶段性收尾、一个个“完成”（J）",
+        "多线程推进、随时切换（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-JP-04",
+      "question": "【J/P】面对截止/追捕窗口你更常：",
+      "type": "select",
+      "options": [
+        "提前准备以求安心（J）",
+        "靠临门一脚的爆发（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-JP-05",
+      "question": "【J/P】你更偏好：",
+      "type": "select",
+      "options": [
+        "明确的秩序与结构（J）",
+        "开放的自由与变化（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-JP-06",
+      "question": "【J/P】你更常：",
+      "type": "select",
+      "options": [
+        "做完再停下（J）",
+        "先停下再发力（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "CSMBTI-EI-07",
+      "question": "【E/I】如果要做决定，你更常：",
+      "type": "select",
+      "options": [
+        "先与外界交互几轮再定（E）",
+        "先在体内推演到笃定再定（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-EI-08",
+      "question": "【E/I】你更喜欢的休息方式：",
+      "type": "select",
+      "options": [
+        "继续活动/继续接触以维持热度（E）",
+        "彻底隔离/沉眠以回收能量（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-EI-09",
+      "question": "【E/I】你更容易被形容为：",
+      "type": "select",
+      "options": [
+        "外放、影响强、存在感高（E）",
+        "内敛、潜伏深、存在感低（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-EI-10",
+      "question": "【E/I】面对未知目标你更可能：",
+      "type": "select",
+      "options": [
+        "先接触试探，制造反馈（E）",
+        "先绕行观察，寻找最稳的入口（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-EI-11",
+      "question": "【E/I】你更常把想法：",
+      "type": "select",
+      "options": [
+        "通过动作与反应迭代（E）",
+        "通过反复推演迭代（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-EI-12",
+      "question": "【E/I】连续多天接触外界后，你更可能：",
+      "type": "select",
+      "options": [
+        "越接触越兴奋，像被点燃（E）",
+        "越接触越耗损，需要断开外界（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-EI-13",
+      "question": "【E/I】你更像：",
+      "type": "select",
+      "options": [
+        "扩散者：更愿意把自己扩到外部（E）",
+        "容器者：更愿意把外部吞进来（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-SN-07",
+      "question": "【S/N】你更喜欢的信息表达：",
+      "type": "select",
+      "options": [
+        "直白、可操作、可验证（S）",
+        "隐喻、象征、可联想（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-SN-08",
+      "question": "【S/N】你更容易被什么吸引：",
+      "type": "select",
+      "options": [
+        "已经验证、稳妥可用（S）",
+        "未知、危险但可能更强（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-SN-09",
+      "question": "【S/N】你更在意：",
+      "type": "select",
+      "options": [
+        "当下能得到的确定收益（S）",
+        "未来可能获得的更大机会（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-SN-10",
+      "question": "【S/N】你更在意故事的：",
+      "type": "select",
+      "options": [
+        "发生了什么、怎么发生的（S）",
+        "意味着什么、会走向哪里（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-SN-11",
+      "question": "【S/N】你更习惯：",
+      "type": "select",
+      "options": [
+        "复用经验与模式（S）",
+        "打破模式并重组（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-SN-12",
+      "question": "【S/N】当现实与预感冲突，你更可能：",
+      "type": "select",
+      "options": [
+        "先相信证据与触发条件（S）",
+        "先相信预感并继续追查（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-SN-13",
+      "question": "【S/N】你更容易被称赞为：",
+      "type": "select",
+      "options": [
+        "稳、准、细（S）",
+        "奇、快、能预判（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-TF-07",
+      "question": "【T/F】你更容易被什么触动：",
+      "type": "select",
+      "options": [
+        "结构是否严密、有没有漏洞（T）",
+        "是否被理解、是否被看见（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-TF-08",
+      "question": "【T/F】评价一次行动，你更看重：",
+      "type": "select",
+      "options": [
+        "结果是否达成（T）",
+        "过程是否维持了某种“意义”（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-TF-09",
+      "question": "【T/F】你更常说出口的是：",
+      "type": "select",
+      "options": [
+        "“这样更合理/更有效”（T）",
+        "“这样更合适/更舒服”（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-TF-10",
+      "question": "【T/F】面对批评你更可能：",
+      "type": "select",
+      "options": [
+        "先判断是否正确（T）",
+        "先感受是否刺痛（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-TF-11",
+      "question": "【T/F】你更在意：",
+      "type": "select",
+      "options": [
+        "规则一致、标准公平（T）",
+        "个体差异、因人而异（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-TF-12",
+      "question": "【T/F】你更喜欢的反馈方式：",
+      "type": "select",
+      "options": [
+        "直接指出问题并给方案（T）",
+        "先肯定再提建议（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-TF-13",
+      "question": "【T/F】你更容易被认为：",
+      "type": "select",
+      "options": [
+        "冷静、客观、讲道理（T）",
+        "共情、柔软、很会承接（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-JP-07",
+      "question": "【J/P】你的空间更接近：",
+      "type": "select",
+      "options": [
+        "结构清晰、分区明确（J）",
+        "形态不定、随时变化（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-JP-08",
+      "question": "【J/P】你更倾向：",
+      "type": "select",
+      "options": [
+        "提前规划路线与退路（J）",
+        "根据当下反馈随时改道（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-JP-09",
+      "question": "【J/P】你更能接受：",
+      "type": "select",
+      "options": [
+        "固定流程与重复执行（J）",
+        "临时插入变化与新需求（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-JP-10",
+      "question": "【J/P】当计划被打乱，你更可能：",
+      "type": "select",
+      "options": [
+        "立刻重排，让秩序恢复（J）",
+        "顺势变形，利用变化（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-JP-11",
+      "question": "【J/P】你更喜欢的状态：",
+      "type": "select",
+      "options": [
+        "尽快清零未定事项（J）",
+        "保持开放与不确定（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-JP-12",
+      "question": "【J/P】你更常被自己困扰的点：",
+      "type": "select",
+      "options": [
+        "秩序感太强导致僵硬（J）",
+        "变化太多导致失控（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-JP-13",
+      "question": "【J/P】你更容易被称赞为：",
+      "type": "select",
+      "options": [
+        "可靠、稳定、可预测（J）",
+        "灵活、敏捷、会变通（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "canshou-mbti-profile",
+        "questionId": "CSMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "CSMBTI-RESULT",
+      "question": "【结果】（可选）你更接近哪个 MBTI 类型？",
+      "type": "select",
+      "options": [
+        {
+          "value": "unknown",
+          "label": "未知/不想填"
+        },
+        "ISTJ",
+        "ISFJ",
+        "INFJ",
+        "INTJ",
+        "ISTP",
+        "ISFP",
+        "INFP",
+        "INTP",
+        "ESTP",
+        "ESFP",
+        "ENFP",
+        "ENTP",
+        "ESTJ",
+        "ESFJ",
+        "ENFJ",
+        "ENTJ"
+      ],
+      "allowCustom": true,
+      "placeholder": "可直接填 4 字母；也可写“ENTP-T/ENTP-A”、或补一句原因与反差点",
+      "helperText": "如果你做了上面的倾向题：可粗略统计每组（E/I、S/N、T/F、J/P）选项次数，次数更多的一侧就是倾向。",
+      "maxLength": 120,
+      "required": false
+    }
+  ]
+}
+
