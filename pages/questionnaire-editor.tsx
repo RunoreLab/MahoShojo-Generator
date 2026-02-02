@@ -226,6 +226,8 @@ const QuestionnaireEditorPage: React.FC = () => {
   const [questions, setQuestions] = useState<EditableQuestion[]>([createEmptyQuestion(0, 'magical-girl', 'initial-1')]);
   const [importText, setImportText] = useState('');
   const [editorError, setEditorError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(true);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
@@ -252,6 +254,11 @@ const QuestionnaireEditorPage: React.FC = () => {
     return normalizedLogoUrl ? null : '⚠️ 当前 Logo URL 不可信，已在导出时忽略。';
   }, [logoUrl, normalizedLogoUrl]);
   const trimmedLogoUrl = logoUrl.trim();
+
+  const flashMessage = (message: string) => {
+    setActionMessage(message);
+    setTimeout(() => setActionMessage(null), 2400);
+  };
 
   const updateQuestion = (index: number, patch: Partial<EditableQuestion>) => {
     setQuestions((prev) => prev.map((q, i) => (i === index ? { ...q, ...patch } : q)));
@@ -469,9 +476,14 @@ const QuestionnaireEditorPage: React.FC = () => {
 
   const jsonPreview = useMemo(() => JSON.stringify(questionnaireData, null, 2), [questionnaireData]);
 
-  const handleImport = () => {
+  const handleImport = (rawText?: string) => {
+    const sourceText = typeof rawText === 'string' ? rawText : importText;
+    if (!sourceText.trim()) {
+      setEditorError('请先粘贴或上传问卷 JSON');
+      return;
+    }
     try {
-      const parsed = JSON.parse(importText);
+      const parsed = JSON.parse(sourceText);
       const normalized = normalizeQuestionnaireDefinition(parsed, {
         fallbackKind: kind,
         fallbackId: typeof parsed?.id === 'string' ? parsed.id : `${kind}-custom`,
@@ -484,6 +496,7 @@ const QuestionnaireEditorPage: React.FC = () => {
         return;
       }
       setEditorError(null);
+      setImportText(sourceText);
       setKind(normalized.kind);
       setQuestionnaireId(normalized.id);
       setTitle(normalized.title);
@@ -524,6 +537,8 @@ const QuestionnaireEditorPage: React.FC = () => {
           extraJson: Object.keys(extraPayload).length > 0 ? JSON.stringify(extraPayload, null, 2) : '',
         };
       }));
+      setCollapsedMap({});
+      flashMessage('✅ 已导入问卷并应用');
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : '问卷 JSON 解析失败');
     }
@@ -534,15 +549,36 @@ const QuestionnaireEditorPage: React.FC = () => {
     try {
       const text = await file.text();
       setImportText(text);
+      handleImport(text);
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : '读取文件失败');
+    }
+  };
+
+  const handleImportInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    void handleImportFile(file);
+    event.target.value = '';
+  };
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) {
+        setEditorError('剪贴板内容为空');
+        return;
+      }
+      setImportText(text);
+      handleImport(text);
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : '读取剪贴板失败');
     }
   };
 
   const handleCopyJson = async () => {
     try {
       await navigator.clipboard.writeText(jsonPreview);
-      alert('✅ 问卷 JSON 已复制到剪贴板');
+      flashMessage('✅ 已复制到剪贴板');
     } catch {
       setEditorError('复制失败，请手动选择文本');
     }
@@ -559,6 +595,7 @@ const QuestionnaireEditorPage: React.FC = () => {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    flashMessage('✅ 已生成下载文件');
   };
 
   return (
@@ -566,11 +603,43 @@ const QuestionnaireEditorPage: React.FC = () => {
       <Head>
         <title>问卷编辑器</title>
       </Head>
-      <div className="magic-background">
-        <div className="container">
-          <div className="card">
-            <h1 className="text-2xl font-bold text-slate-800 mb-4">问卷编辑器</h1>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+      <div className="magic-background-white">
+        <div className="container !max-w-[1100px]">
+          <div className="card !max-w-none">
+            <h1 className="sr-only">问卷编辑器</h1>
+            <div className="text-center mb-6">
+              <div className="flex justify-center">
+                <div className="rounded-2xl bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500 px-6 py-3 shadow-lg">
+                  <img src="/questionnaire-title.svg" alt="问卷编辑器" className="h-8 w-auto" />
+                </div>
+              </div>
+              <p className="subtitle mt-3">把问卷当作可维护的创作工具箱</p>
+              <div className="mt-3 flex flex-wrap justify-center gap-2 text-xs">
+                <span className="rounded-full bg-pink-100 px-3 py-1 text-pink-700">条件显示 / 跳题</span>
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-700">云端问卷库</span>
+                <span className="rounded-full bg-indigo-100 px-3 py-1 text-indigo-700">JSON 导入 / 导出</span>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
+              <Link
+                href="/details"
+                className="rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-pink-700 hover:border-pink-300 hover:bg-pink-100"
+              >
+                前往魔法少女问卷
+              </Link>
+              <Link
+                href="/canshou"
+                className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:border-rose-300 hover:bg-rose-100"
+              >
+                前往残兽问卷
+              </Link>
+            </div>
+            {actionMessage && (
+              <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                {actionMessage}
+              </div>
+            )}
+            <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
               <p className="font-semibold text-slate-800 mb-2">创建指引</p>
               <ul className="list-disc pl-5 space-y-1">
                 <li>问卷由「题目列表」组成，每道题可设置提示、选项与字数限制。</li>
@@ -584,7 +653,97 @@ const QuestionnaireEditorPage: React.FC = () => {
               </ul>
             </div>
 
-            <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-700">导入现有问卷</h3>
+                    <p className="mt-1 text-xs text-slate-500">支持粘贴或上传 JSON，导入后会覆盖当前编辑内容。</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePasteFromClipboard}
+                    className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100"
+                  >
+                    从剪贴板导入
+                  </button>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="text-xs text-slate-500">上传问卷 JSON 文件</label>
+                    <input
+                      type="file"
+                      accept="application/json"
+                      onChange={handleImportInputChange}
+                      className="input-field mt-1 file:mr-4 file:rounded-full file:border-0 file:bg-white file:px-4 file:py-2 file:text-xs file:text-slate-600"
+                    />
+                    <p className="mt-1 text-xs text-slate-400">上传后会自动导入并应用。</p>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500">粘贴问卷 JSON</label>
+                    <textarea
+                      value={importText}
+                      onChange={(e) => setImportText(e.target.value)}
+                      placeholder="在此粘贴问卷 JSON"
+                      className="input-field mt-1 h-28"
+                    />
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => handleImport()}
+                        className="rounded-lg border border-indigo-200 px-3 py-1 text-indigo-600 hover:text-indigo-700"
+                      >
+                        应用粘贴内容
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImportText('')}
+                        className="rounded-lg border border-slate-200 px-3 py-1 text-slate-500 hover:text-slate-700"
+                      >
+                        清空
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-700">导出问卷</h3>
+                    <p className="mt-1 text-xs text-slate-500">复制或下载当前问卷 JSON，方便保存与分享。</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <button onClick={handleCopyJson} className="rounded-full border border-indigo-200 px-3 py-1 text-indigo-600 hover:text-indigo-700">复制 JSON</button>
+                    <button onClick={handleDownloadJson} className="rounded-full border border-indigo-200 px-3 py-1 text-indigo-600 hover:text-indigo-700">下载 JSON</button>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                  <span>预览（{jsonPreview.length} 字符）</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowPreview((prev) => !prev)}
+                    className="text-indigo-600 hover:underline"
+                  >
+                    {showPreview ? '收起预览' : '展开预览'}
+                  </button>
+                </div>
+                {showPreview && (
+                  <div className="mt-2 max-h-64 overflow-auto rounded-lg bg-white p-3 text-xs text-slate-600 whitespace-pre-wrap">
+                    {jsonPreview}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-800">问卷信息</h2>
+                  <p className="mt-1 text-xs text-slate-500">编辑问卷基础字段与 Logo 展示。</p>
+                </div>
+                <div className="text-xs text-slate-500">当前题目：{questions.length} 题</div>
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <label className="text-xs text-slate-500">问卷类型</label>
                 <select
@@ -672,11 +831,7 @@ const QuestionnaireEditorPage: React.FC = () => {
                   {logoWarning && <p className="mt-1 text-xs text-rose-500">{logoWarning}</p>}
                 </div>
               </div>
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center gap-3">
-              <Link href="/details" className="text-sm text-indigo-600 hover:underline">前往魔法少女问卷</Link>
-              <Link href="/canshou" className="text-sm text-indigo-600 hover:underline">前往残兽问卷</Link>
+              </div>
             </div>
 
             <div className="mt-6">
@@ -1040,7 +1195,7 @@ const QuestionnaireEditorPage: React.FC = () => {
                   <p className="mt-1 text-xs text-slate-500">新增默认追加在末尾，也可按题号插入。</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={addQuestion} className="generate-button">新增题目</button>
+                  <button onClick={addQuestion} className="generate-button mb-0 w-full text-sm md:w-auto md:px-6 md:py-2">新增题目</button>
                   <button onClick={applyAutoIds} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:border-slate-400">自动编号</button>
                 </div>
               </div>
@@ -1060,46 +1215,20 @@ const QuestionnaireEditorPage: React.FC = () => {
               <p className="mt-2 text-xs text-slate-400">提示：拖拽卡片左侧把手即可快速调整顺序。</p>
             </div>
 
-            <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-700">导入 / 导出</h3>
-                <div className="flex gap-2 text-xs">
-                  <button onClick={handleCopyJson} className="text-indigo-600 hover:underline">复制 JSON</button>
-                  <button onClick={handleDownloadJson} className="text-indigo-600 hover:underline">下载 JSON</button>
-                </div>
-              </div>
-              <textarea
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                placeholder="在此粘贴问卷 JSON，点击“导入”应用"
-                className="input-field mt-2 h-28"
-              />
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                <button onClick={handleImport} className="rounded-lg border border-indigo-200 px-3 py-1 text-indigo-600">导入 JSON</button>
-                <label className="text-xs text-slate-500">
-                  <span className="mr-2">上传 JSON 文件</span>
-                  <input type="file" accept="application/json" onChange={(e) => void handleImportFile(e.target.files?.[0] ?? null)} />
-                </label>
-              </div>
-              <div className="mt-3 rounded-lg bg-white p-3 text-xs text-slate-600 whitespace-pre-wrap">
-                {jsonPreview}
-              </div>
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center gap-3">
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
               <SaveToCloudButton
                 data={questionnaireData}
                 cardType="questionnaire"
                 buttonText="保存为云端问卷"
-                className="generate-button"
+                className="generate-button mb-0 w-full text-sm md:w-auto md:px-6 md:py-2"
               />
-              <Link href="/" className="text-sm text-slate-500 hover:underline">返回首页</Link>
+              <Link href="/" className="footer-link text-sm">返回首页</Link>
             </div>
 
             {(editorError || jsonError) && <ErrorMessage message={editorError || jsonError || '问卷格式错误'} />}
             <p className="mt-4 text-xs text-slate-400">提示：原生许可由管理员评估标记；自建问卷默认非原生。</p>
           </div>
-          <Footer textWhite={true} />
+          <Footer />
         </div>
       </div>
     </>
