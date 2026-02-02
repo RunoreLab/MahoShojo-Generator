@@ -49,6 +49,7 @@ type QuestionnaireSelection = {
   dataCardId?: string;
   dataCardName?: string;
   dataCardAuthor?: string;
+  selectionId?: string;
 };
 
 type QuestionnaireContextItem = {
@@ -221,11 +222,31 @@ const CanshouPage: React.FC = () => {
       transitionEndTimerRef.current = null;
     }
   }, []);
+  const createSelectionSuffix = useCallback(() => {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID();
+    }
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+  const ensureSelectionId = useCallback(
+    (selection: QuestionnaireSelection, used: Set<string>) => {
+      const base = selection.questionnaire.id || 'questionnaire';
+      let nextId = typeof selection.selectionId === 'string' ? selection.selectionId.trim() : '';
+      if (!nextId) {
+        nextId = used.has(base) ? `${base}::${createSelectionSuffix()}` : base;
+      } else if (used.has(nextId)) {
+        nextId = `${base}::${createSelectionSuffix()}`;
+      }
+      used.add(nextId);
+      return { ...selection, selectionId: nextId };
+    },
+    [createSelectionSuffix]
+  );
 
   const questionnaireItems = useMemo<QuestionnaireContextItem[]>(() => {
     return selectedQuestionnaires.flatMap((selection) =>
       selection.questionnaire.questions.map((question, index) => ({
-        key: buildQuestionKey(selection.questionnaire.id, question.id, index),
+        key: buildQuestionKey(selection.selectionId ?? selection.questionnaire.id, question.id, index),
         questionnaireId: selection.questionnaire.id,
         questionnaireTitle: selection.questionnaire.title,
         indexInQuestionnaire: index,
@@ -325,7 +346,7 @@ const CanshouPage: React.FC = () => {
       .then(res => res.json())
       .then(data => setLanguages(data))
       .catch(err => console.error("Failed to load languages:", err));
-  }, []);
+  }, [ensureSelectionId]);
 
   useEffect(() => {
     if (typeof navigator === 'undefined') return;
@@ -376,6 +397,7 @@ const CanshouPage: React.FC = () => {
         setShowQuestionnaireSettings(parsed.showQuestionnaireSettings);
       }
       if (Array.isArray(parsed?.questionnaireSelections)) {
+        const usedSelectionIds = new Set<string>();
         const restored = parsed.questionnaireSelections
           .map((raw: any) => {
             if (!raw || typeof raw !== 'object') return null;
@@ -400,9 +422,11 @@ const CanshouPage: React.FC = () => {
               dataCardId: typeof raw.dataCardId === 'string' ? raw.dataCardId : undefined,
               dataCardName: typeof raw.dataCardName === 'string' ? raw.dataCardName : undefined,
               dataCardAuthor: typeof raw.dataCardAuthor === 'string' ? raw.dataCardAuthor : undefined,
+              selectionId: typeof raw.selectionId === 'string' ? raw.selectionId : undefined,
             } satisfies QuestionnaireSelection;
           })
-          .filter(Boolean) as QuestionnaireSelection[];
+          .filter((item): item is QuestionnaireSelection => Boolean(item))
+          .map((item) => ensureSelectionId(item, usedSelectionIds));
         if (restored.length > 0) {
           setSelectedQuestionnaires(restored);
           setSelectionReady(true);
@@ -413,7 +437,7 @@ const CanshouPage: React.FC = () => {
       setImageSaveMode(defaultImageMode);
       setJsonSaveMode(defaultJsonMode);
     }
-  }, []);
+  }, [ensureSelectionId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -510,7 +534,9 @@ const CanshouPage: React.FC = () => {
         });
         if (!normalized) throw new Error('预设问卷解析失败');
         if (cancelled) return;
-        setSelectedQuestionnaires([{ source: 'preset', questionnaire: normalized }]);
+        setSelectedQuestionnaires([
+          ensureSelectionId({ source: 'preset', questionnaire: normalized }, new Set()),
+        ]);
         setSelectionReady(true);
       } catch (error) {
         console.error('加载默认问卷失败:', error);
@@ -524,7 +550,7 @@ const CanshouPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [presetEntries, selectedQuestionnaires.length, selectionReady]);
+  }, [ensureSelectionId, presetEntries, selectedQuestionnaires.length, selectionReady]);
 
   useEffect(() => {
     if (selectionReady) setLoading(false);
@@ -532,10 +558,16 @@ const CanshouPage: React.FC = () => {
 
   const applySelection = (selection: QuestionnaireSelection) => {
     setSelectedQuestionnaires((prev) => {
+      const usedSelectionIds = new Set<string>();
+      prev.forEach((item) => {
+        const existingId = item.selectionId || item.questionnaire.id;
+        if (existingId) usedSelectionIds.add(existingId);
+      });
+      const normalizedSelection = ensureSelectionId(selection, usedSelectionIds);
       if (allowMultipleQuestionnaires) {
-        return [...prev, selection];
+        return [...prev, normalizedSelection];
       }
-      return [selection];
+      return [normalizedSelection];
     });
     setPasteQuestionnaireError(null);
     setPasteQuestionnaireText('');
