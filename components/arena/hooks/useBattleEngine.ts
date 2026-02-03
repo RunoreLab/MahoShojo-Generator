@@ -886,20 +886,6 @@ export const useBattleEngine = () => {
               const decodedChunkRaw = decoder.decode(value, { stream: true });
               const decoded = decodedChunkRaw.replace(/\r\n/g, '\n');
 
-              if (debugSseEnabled) {
-                const shouldLogThisChunk = sseChunksRead <= 10 || sseChunksRead % 20 === 0;
-                if (shouldLogThisChunk) {
-                  const previewMax = 200;
-                  const preview = decoded.length > previewMax ? decoded.slice(0, previewMax) : decoded;
-                  console.info('SSE 调试：收到 chunk', {
-                    index: sseChunksRead,
-                    bytes: value.byteLength,
-                    preview,
-                    previewTruncated: decoded.length > previewMax,
-                  });
-                }
-              }
-
               sseBuffer += decoded;
 
               let idx = sseBuffer.indexOf('\n\n');
