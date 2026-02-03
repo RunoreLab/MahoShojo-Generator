@@ -371,36 +371,6 @@ export async function getDashboardStatsStorage(): Promise<DashboardStatsStorage>
     console.warn('[Admin] large_objects 未就绪，跳过大对象统计:', error);
   }
 
-  try {
-    const [pageCountResult, pageSizeResult, freelistCountResult] = await Promise.all([
-      queryFromD1('PRAGMA page_count;'),
-      queryFromD1('PRAGMA page_size;'),
-      queryFromD1('PRAGMA freelist_count;'),
-    ]);
-
-    const pageCountRow = readFirstRow(pageCountResult as any);
-    const pageSizeRow = readFirstRow(pageSizeResult as any);
-    const freelistCountRow = readFirstRow(freelistCountResult as any);
-
-    const pageCount = readInt(pageCountRow.page_count);
-    const pageSize = readInt(pageSizeRow.page_size);
-    const freelistCount = readInt(freelistCountRow.freelist_count);
-
-    stats.d1PageCount = pageCount;
-    stats.d1PageSize = pageSize;
-    stats.d1FreelistCount = freelistCount;
-
-    if (pageCount > 0 && pageSize > 0) {
-      const fileBytes = pageCount * pageSize;
-      const freeBytes = freelistCount * pageSize;
-      const usedBytes = Math.max(0, fileBytes - freeBytes);
-      stats.d1EstimatedFileBytes = fileBytes;
-      stats.d1EstimatedUsedBytes = usedBytes;
-    }
-  } catch (error) {
-    console.warn('[Admin] PRAGMA 不可用，跳过 D1 存储估算:', error);
-  }
-
   return stats;
 }
 

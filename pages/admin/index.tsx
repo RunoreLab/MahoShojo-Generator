@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award, Tags, BarChart3, Activity, HardDrive, Database, Trophy, Cpu, BookOpen } from 'lucide-react';
+import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award, Tags, BarChart3, Activity, HardDrive, Trophy, Cpu, BookOpen } from 'lucide-react';
 
 import { encyclopediaEntries } from '@/lib/encyclopedia';
 
@@ -240,15 +240,6 @@ const AdminHomePage: React.FC = () => {
       ? '—'
       : '加载中…';
 
-  const d1EstimatedFileBytes = storageReady ? (stats.d1EstimatedFileBytes ?? null) : null;
-  const d1EstimatedUsedBytes = storageReady ? (stats.d1EstimatedUsedBytes ?? null) : null;
-  const d1FreelistCount = storageReady ? (stats.d1FreelistCount ?? null) : null;
-  const d1PageSize = storageReady ? (stats.d1PageSize ?? null) : null;
-  const d1EstimatedFreeBytes =
-    typeof d1FreelistCount === 'number' && typeof d1PageSize === 'number'
-      ? Math.max(0, d1FreelistCount) * Math.max(0, d1PageSize)
-      : null;
-
   return (
     <>
       <Head>
@@ -380,29 +371,6 @@ const AdminHomePage: React.FC = () => {
                 <div>
                   <h3 className="mb-4 text-lg font-semibold text-gray-700">存储与大对象</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
-                    <StatCard
-                      title="D1 估算占用"
-                      value={
-                        storageReady
-                          ? formatBytes(d1EstimatedUsedBytes)
-                          : sectionStatus.storage === 'error'
-                            ? '—'
-                            : sectionStatus.storage === 'idle'
-                              ? '稍后加载'
-                              : '加载中…'
-                      }
-                      icon={Database}
-                      color="bg-gray-800"
-                      note={
-                        storageReady
-                          ? `总大小：${formatBytes(d1EstimatedFileBytes)} · 空闲：${formatBytes(d1EstimatedFreeBytes)}`
-                          : sectionStatus.storage === 'error'
-                            ? sectionError.storage || '加载失败'
-                            : sectionStatus.storage === 'idle'
-                              ? '存储统计会在首屏后延迟加载'
-                              : '加载中…'
-                      }
-                    />
                     <StatCard
                       title="R2 索引占用（估算）"
                       value={
