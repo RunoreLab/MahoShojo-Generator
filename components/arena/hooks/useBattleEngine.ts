@@ -518,14 +518,25 @@ export const useBattleEngine = () => {
         const abortController = new AbortController();
         let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
-        try {
-          setStreamCharacterGuidances(null);
-          const response = await fetch('/api/arena/generate-stream?format=sse', {
-            method: 'POST',
-            headers: requestHeaders,
-            body: JSON.stringify(requestBody),
-            signal: abortController.signal,
-          });
+	        try {
+	          setStreamCharacterGuidances(null);
+	          const debugSseQuery = (() => {
+	            try {
+	              if (typeof window === 'undefined') return '';
+	              const raw = new URLSearchParams(window.location.search).get('debugSse') || '';
+	              const normalized = raw.trim().toLowerCase();
+	              if (normalized === '1' || normalized === 'true') return '&debugSse=1';
+	              return '';
+	            } catch {
+	              return '';
+	            }
+	          })();
+	          const response = await fetch(`/api/arena/generate-stream?format=sse${debugSseQuery}`, {
+	            method: 'POST',
+	            headers: requestHeaders,
+	            body: JSON.stringify(requestBody),
+	            signal: abortController.signal,
+	          });
 
           if (!response.ok) {
             const text = await response.text();
@@ -813,6 +824,15 @@ export const useBattleEngine = () => {
                   raw: typeof payload?.raw === 'string' ? payload.raw : null,
                   rawTruncated: Boolean(payload?.rawTruncated),
                 });
+                return;
+              }
+
+              if (event === 'debug') {
+                if (payload && typeof payload === 'object') {
+                  console.info('SSE 调试事件', payload);
+                } else if (typeof payload !== 'undefined') {
+                  console.info('SSE 调试事件', payload);
+                }
                 return;
               }
 

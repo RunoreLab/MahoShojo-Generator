@@ -804,24 +804,33 @@ async function handler(req: NextRequest): Promise<Response> {
             url.searchParams.get('format') === 'sse' || (req.headers.get('accept') || '').includes('text/event-stream');
         const shouldAllowStreamMeta = shouldForceStreamMeta || resolvedWriteArenaHistory || resolvedWriteCurrentState;
 
-        if (wantsSse) {
-            const sseHeaders = new Headers(headers);
-            sseHeaders.set('Content-Type', 'text/event-stream; charset=utf-8');
-            sseHeaders.set('Cache-Control', 'no-cache, no-transform');
+	        if (wantsSse) {
+	            const sseHeaders = new Headers(headers);
+	            sseHeaders.set('Content-Type', 'text/event-stream; charset=utf-8');
+	            sseHeaders.set('Cache-Control', 'no-cache, no-transform');
+	            const debugSse =
+	                url.searchParams.get('debug') === '1' ||
+	                url.searchParams.get('debug') === 'true' ||
+	                url.searchParams.get('debugSse') === '1' ||
+	                url.searchParams.get('debugSse') === 'true';
 
-            const encoder = new TextEncoder();
-            const encodeEvent = (event: string, payload: unknown) => {
-                let data: string;
-                try {
-                    data = JSON.stringify(payload ?? null);
+	            const encoder = new TextEncoder();
+	            const encodeEvent = (event: string, payload: unknown) => {
+	                let data: string;
+	                try {
+	                    data = JSON.stringify(payload ?? null);
                 } catch (error) {
                     data = JSON.stringify({
                         ok: false,
                         error: error instanceof Error ? error.message : String(error ?? 'json stringify failed'),
                     });
                 }
-                return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
-            };
+	                return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
+	            };
+	            const enqueueDebug = (controller: ReadableStreamDefaultController<Uint8Array>, payload: unknown) => {
+	                if (!debugSse) return;
+	                controller.enqueue(encodeEvent('debug', payload));
+	            };
 
 	            const META_START_RE = new RegExp(`<!---*\\s*(?:${STREAM_UPDATE_META_MARKERS.join('|')})\\b`, 'i');
 	            const META_GUARD_CHARS = 256;
@@ -852,11 +861,13 @@ async function handler(req: NextRequest): Promise<Response> {
 	            let metaBuffer = '';
 	            let metaFallbackTail = '';
 	            let inMeta = false;
+	            let markdownCharsSent = 0;
 
-            const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
-                if (!chunk) return;
-                controller.enqueue(encodeEvent('markdown', { chunk }));
-            };
+	            const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
+	                if (!chunk) return;
+	                markdownCharsSent += chunk.length;
+	                controller.enqueue(encodeEvent('markdown', { chunk }));
+	            };
 
 	            const processText = (controller: ReadableStreamDefaultController<Uint8Array>, text: string) => {
 	                if (!text) return;
@@ -881,17 +892,23 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    return;
 	                }
 
-                pendingMarkdownTail += text;
-                const match = META_START_RE.exec(pendingMarkdownTail);
-                if (match && typeof match.index === 'number') {
-                    const start = match.index;
-                    const before = pendingMarkdownTail.slice(0, start);
-                    if (before) flushMarkdown(controller, before);
-                    metaBuffer = pendingMarkdownTail.slice(start);
-                    pendingMarkdownTail = '';
-                    inMeta = true;
-                    return;
-                }
+	                pendingMarkdownTail += text;
+	                const match = META_START_RE.exec(pendingMarkdownTail);
+	                if (match && typeof match.index === 'number') {
+	                    const start = match.index;
+	                    const before = pendingMarkdownTail.slice(0, start);
+	                    if (before) flushMarkdown(controller, before);
+	                    metaBuffer = pendingMarkdownTail.slice(start);
+	                    pendingMarkdownTail = '';
+	                    inMeta = true;
+	                    enqueueDebug(controller, {
+	                        phase: 'meta_start',
+	                        startIndex: start,
+	                        pendingTailLength: pendingMarkdownTail.length,
+	                        metaBufferLength: metaBuffer.length,
+	                    });
+	                    return;
+	                }
 
                 if (pendingMarkdownTail.length > META_GUARD_CHARS) {
                     const safePart = pendingMarkdownTail.slice(0, pendingMarkdownTail.length - META_GUARD_CHARS);
@@ -903,8 +920,8 @@ async function handler(req: NextRequest): Promise<Response> {
             const sseBody = new ReadableStream<Uint8Array>({
                 async pull(controller) {
                     try {
-                        const { done, value } = await readWithTimeout(reader);
-                        if (done) {
+	                        const { done, value } = await readWithTimeout(reader);
+	                        if (done) {
                             // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
                             const flushed = decoder.decode();
                             if (flushed) {
@@ -917,17 +934,16 @@ async function handler(req: NextRequest): Promise<Response> {
 	                                pendingMarkdownTail = '';
 	                            }
 
-	                            // 模型可能在正文前/中途错误输出 meta 注释：此时我们会进入 inMeta 并吞掉后续内容。
-	                            // 为避免“吞掉了正文导致前端收到空内容”，在流式结束时尝试把 meta 注释后的内容补发为 markdown。
-	                            if (inMeta && metaBuffer) {
-	                                const metaEnd = metaBuffer.indexOf('-->');
-	                                if (metaEnd !== -1) {
-	                                    const afterMeta = metaBuffer.slice(metaEnd + 3);
-	                                    if (afterMeta) {
-	                                        flushMarkdown(controller, afterMeta);
-	                                    }
-	                                }
-	                            }
+	                            enqueueDebug(controller, {
+	                                phase: 'done_before_meta',
+	                                outputBytes,
+	                                outputChars,
+	                                markdownCharsSent,
+	                                inMeta,
+	                                pendingMarkdownTailLength: pendingMarkdownTail.length,
+	                                metaBufferLength: metaBuffer.length,
+	                                metaFallbackTailLength: metaFallbackTail.length,
+	                            });
 
 	                            // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
 	                            const usageForTelemetry = await Promise.race([
@@ -1014,11 +1030,36 @@ async function handler(req: NextRequest): Promise<Response> {
 	                                }
 	                            }
 
-                            controller.enqueue(encodeEvent('done', { ok: true }));
-                            await finalizeOnce('completed');
-                            controller.close();
-                            return;
-                        }
+	                            // 若未下发任何 markdown，则视为异常：AI 返回空输出 / 或正文被吞掉。
+	                            if (markdownCharsSent <= 0) {
+	                                const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
+	                                const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
+	                                controller.enqueue(
+	                                    encodeEvent('error', {
+	                                        ok: false,
+	                                        error: 'AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。',
+	                                        debug: debugSse
+	                                            ? {
+	                                                outputBytes,
+	                                                outputChars,
+	                                                inMeta,
+	                                                metaBufferLength: metaBuffer.length,
+	                                                metaFallbackTailLength: metaFallbackTail.length,
+	                                                rawPreview,
+	                                              }
+	                                            : null,
+	                                    })
+	                                );
+	                                await finalizeOnce('failed', 'empty stream output');
+	                                controller.close();
+	                                return;
+	                            }
+
+	                            controller.enqueue(encodeEvent('done', { ok: true }));
+	                            await finalizeOnce('completed');
+	                            controller.close();
+	                            return;
+	                        }
 
                         if (value) {
                             outputBytes += value.byteLength;

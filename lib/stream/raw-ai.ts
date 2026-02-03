@@ -267,7 +267,7 @@ export async function generateWithStreamAI(
                     },
                 });
 
-                // 预检流：在返回流之前，先尝试读取第一个 chunk 来验证连接成功
+                // 预检流：在返回流之前，先尝试读取前几个 chunk 来验证连接成功且内容非空
                 const reader = result.textStream.getReader();
                 const readWithTimeout = createStreamReadWithTimeout({
                     label: `上游流式(${provider.name}/${selectedModel})`,
@@ -281,20 +281,37 @@ export async function generateWithStreamAI(
                         }
                     },
                 });
-                const firstChunk = await readWithTimeout(reader);
+                const prefetchedChunks: string[] = [];
+                let prefetchedText = '';
+                const MAX_PREFETCH_READS = 8;
+                const MAX_PREFETCH_CHARS = 8_192;
 
-                if (firstChunk.done) {
-                    // 使用工具函数提取上游错误信息
-                    const errorMessage = extractUpstreamErrorMessage(capturedError, result);
-                    throw new Error(errorMessage);
+                for (let i = 0; i < MAX_PREFETCH_READS && prefetchedText.length < MAX_PREFETCH_CHARS; i++) {
+                    const chunk = await readWithTimeout(reader);
+                    if (chunk.done) {
+                        const errorMessage = extractUpstreamErrorMessage(capturedError, result);
+                        throw new Error(errorMessage);
+                    }
+                    prefetchedChunks.push(chunk.value ?? '');
+                    prefetchedText += chunk.value ?? '';
+                    if (prefetchedText.trim()) break;
+                }
+
+                if (!prefetchedText.trim()) {
+                    try {
+                        void reader.cancel('empty-output');
+                    } catch {
+                        // ignore
+                    }
+                    throw new Error('AI 返回空对象/空内容（{} / [] / 空白），请重试或切换模型。');
                 }
 
                 // 创建一个新的 ReadableStream，将已读取的 chunk 和剩余流合并
                 const combinedStream = new ReadableStream<string>({
                     start(controller) {
-                        // 先推送已读取的第一个 chunk
-                        if (firstChunk.value) {
-                            controller.enqueue(firstChunk.value);
+                        // 先推送已预检的内容（避免上游首包为空字符串时导致整体输出为空）
+                        for (const chunk of prefetchedChunks) {
+                            controller.enqueue(chunk);
                         }
                     },
                     async pull(controller) {
