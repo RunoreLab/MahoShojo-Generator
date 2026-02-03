@@ -23,6 +23,20 @@
       "path": "/questionnaires/presets/magical-girl-afterwork-world.json"
     },
     {
+      "id": "magical-girl-afterwork-world-lore-core",
+      "kind": "magical-girl",
+      "title": "设定卡（原作）：世界结构与势力速查",
+      "description": "纯设定卡：三界结构、王庭五院、核心势力/组织等速查（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/magical-girl-afterwork-world-lore-core.json"
+    },
+    {
+      "id": "magical-girl-afterwork-world-lore-power-system",
+      "kind": "magical-girl",
+      "title": "设定卡（原作）：心之花体系与能力边界（留空规则）",
+      "description": "纯设定卡：种/芽/叶/蕾/花/强花能力模块，指导 AI 对未解锁字段留空（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/magical-girl-afterwork-world-lore-power-system.json"
+    },
+    {
       "id": "canshou-default",
       "kind": "canshou",
       "title": "研究院残兽调查",
@@ -36,6 +50,20 @@
       "title": "原作世界观向：残兽设定与进化路线问卷",
       "description": "面向原作世界观：核心概念/进化阶段/巢穴与规则/出现方式/社会影响等设定补全（可跳过）。",
       "path": "/questionnaires/presets/canshou-afterwork-world.json"
+    },
+    {
+      "id": "canshou-afterwork-world-lore-core",
+      "kind": "canshou",
+      "title": "设定卡（原作）：世界结构与势力速查",
+      "description": "纯设定卡：三界结构、王庭五院、核心势力/组织等速查（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/canshou-afterwork-world-lore-core.json"
+    },
+    {
+      "id": "canshou-afterwork-world-lore-evolution",
+      "kind": "canshou",
+      "title": "设定卡（原作）：残兽生态与进化速查",
+      "description": "纯设定卡：进化阶段、巢穴与规则、对抗常识等速查（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/canshou-afterwork-world-lore-evolution.json"
     },
     {
       "id": "magical-girl-full-profile",

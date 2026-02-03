@@ -437,6 +437,15 @@ const magicalGirlDetailsConfig: GenerationConfig<MagicalGirlDetails, { answers: 
 4.角色背景：请在 "analysis" -> "background" 字段中，深入挖掘并创作能够体现角色立体形象与人物弧光的背景故事。
 - **信念 (belief)**：根据问卷回答，提炼出角色的核心价值观和战斗理由。角色是为何而战？她的行动准则是什么？
 - **羁绊 (bonds)**：根据问卷中涉及他人的回答（如前辈、搭档、家人等），描绘出角色的羁绊关系。关系可以是正面的，也可以是负面的，但应是塑造她性格和能力的关键。
+5.字段解锁限制：
+- 若问卷回答中明确给出“当前等阶/阶段”（例如：普通人/未觉醒、种、芽、叶、蕾、花、强花），请把输出视为该阶段的档案，不得越级写未解锁模块。
+- 对于未解锁模块，请用空字符串或空数组留空；不要编造不存在的设定来“填满 schema”。
+  - 未到对应等级不用写高阶能力；非魔法少女不要强行补齐魔装/奇境/繁开。
+  - 种：magicConstruct 可写为“初始法杖”及基础魔力表现；wonderlandRule、blooming 留空。
+  - 芽/叶：允许完整写魔装；wonderlandRule、blooming 留空。
+  - 蕾/花：允许写奇境规则；blooming 留空（盛开也可写 blooming 或在分析中体现，但需注明不等同于繁开）。
+  - 强花：允许写繁开（blooming）。
+- 若问卷未提供等阶信息，则可完整生成。
 `,
   temperature: 0.8,
   promptBuilder: ({ answers, language, loreText }) => {
