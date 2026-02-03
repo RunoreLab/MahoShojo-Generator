@@ -1,0 +1,307 @@
+{
+  "id": "girl-band-taiban-war-1.1",
+  "kind": "magical-girl",
+  "title": "乐队少女问卷",
+  "description": "用于生成“少女乐队/对邦”世界线的角色档案：乐队经历、位置/担当、乐器与设备、曲风、技术、现实压力、关系性引信等。支持：流式通用角色卡（直接输出少女乐队设定）/ 非流式魔法少女 Schema（将少女乐队设定映射进字段）。",
+  "logoUrl": "/questionnaire-title.svg",
+  "version": "1.1",
+  "nativeAllowed": false,
+  "loreMarkdown": "【世界线】少女乐队 / 对邦战争（现实主义）\\n- 时间：现代。\\n- 地点：大城市 Live House 聚集区（Live House、排练室、乐器店、学校/打工点、后台休息室、深夜便利店）。\\n- 角色：乐队少女。\\n\\n【重要设定：禁止超自然】\\n- 本世界线不存在魔法、变身、咒语、异界、超能力。\\n- 任何“能力/规则/繁开/战斗”等词，都必须以【音乐、舞台、设备、情绪与人际关系】解释。\\n- 叙述者的“妖精/魔法国度”只是一种叙事外壳：请理解为 Live House 负责人/PA/经纪人，用问卷提前评估一位乐手的舞台表现与关系风险。\\n\\n【角色档案必须包含的要素】（生成结果里必须能找到对应信息）\\n1) 乐队经历：在哪些乐队待过、位置/担当、解散/退团原因、最重要的一场 Live。\\n2) 乐器与设备：主力乐器（型号/改装/效果器链）或主唱设备与唱法；常见故障与备用方案。\\n3) 曲风与技术：2-3 个曲风标签 + 具体演奏/编曲/舞台技法（至少 3 个）+ 明确弱点/限制。\\n4) 现实压力：售票指标/打工/预算/家里或学校阻力；她最怕的失败是什么。\\n5) 关系性引信：至少 2 条不可回避的矛盾/秘密（代餐、利用、隐瞒联系对手、前乐队阴影、对承诺的恐惧等）。\\n\\n【位置/担当推导（用于未指定时的自动补全）】\\n- Vocal：表达欲强、需要被听见、或最“说不出口”的人；歌词往往是关系性的引爆点。\\n- Guitar（Lead）：执拗/尖锐/技术欲强；更容易把情绪写进音色与失真里。\\n- Guitar（Rhythm）：社交型或愿意托底的人；她的节奏像“把人拉回同一条线上”。\\n- Bass：观察者、支撑者、或“表面圆滑内里执念”的人；低频是隐忍与占有欲的容器。\\n- Drums：边界与秩序的制定者；越压抑越可能打得凶，失控时也最容易“把一切砸碎”。\\n- Keys：想把世界编排成正确形状的人；擅长结构、和声与氛围，但也可能操控关系。\\n- Support：作词/作曲/编曲/视觉/SNS 运营；可以不上台，但必须参与“关系性”。\\n\\n【原创曲要求（写作提示）】\\n- 所有曲目与歌词必须原创。\\n- 每话至少 1 首原创曲信息：曲名、曲风标签、速度/拍号倾向、音色关键词、编曲要点。\\n- 歌词节选 8–16 行，至少 2 行要映射到具体关系变化（对内或对外）。\\n- 必须写明：这首歌为什么现在写出来，它回应了谁、刺痛了谁、拯救了谁。\\n\\n【生成模式适配】\\nA) Markdown：请直接按“少女乐队角色档案”书写，把“战斗/魔装/奇境/繁开”理解为“演出/乐器与设备/舞台规则/终盘爆发”。\\nB) JSON Schema：请把少女乐队设定映射填入下列字段（字段名不变，但内容必须是少女乐队语境）：\\n- codename：舞台代号/艺名（可以是本名）。\\n- appearance.*：舞台形象（outfit=演出服；accessories=配件/效果器/发饰；colorScheme=乐队视觉配色；overallLook=外观+舞台神态）。\\n- magicConstruct.*：=主力乐器与设备系统（name=乐器昵称；form=型号/改装；basicAbilities=演奏/音色/编曲核心能力2-3条；description=具体音色、效果器链、现场习惯与限制）。\\n- wonderlandRule.*：=舞台规则/个人演出“规矩”（用现实逻辑解释：例如编曲习惯、上台前的仪式、对某人的触发条件、对返送与节拍的依赖等）。\\n- blooming.*：=终盘/安可/觉醒式爆发（evolvedForm=装备或编制升级；evolvedOutfit=终盘造型；evolvedAbilities=更激进的演出/编曲强化；powerLevel=舞台统治力）。\\n- analysis.*：在乐队语境下分析性格、动机、关系与能力来源；background.belief=音乐信条；background.bonds=队内与对手的关系网。\\n",
+  "questions": [
+    {
+      "id": "GB-01",
+      "question": "角色的基本信息（请使用虚构信息）：名字/年龄/身份（高中生/大学生/社会人）/当前城市与生活状态",
+      "type": "text",
+      "placeholder": "例：高二；白天上学，晚上在 Live House 打工；住在离排练室两站地的老公寓",
+      "suggestions": [
+        "高二转学生，刚搬来；社团挂名但几乎不去",
+        "大学一年级，休学边打工边练团",
+        "社会人，新人社畜；把乐队当成唯一的出口"
+      ],
+      "allowCustom": true,
+      "maxLength": 280,
+      "required": false
+    },
+    {
+      "id": "GB-02",
+      "question": "你希望她在舞台上被怎么称呼？（花名/艺名/外号；不填则由 AI 自行取）",
+      "type": "text",
+      "placeholder": "例：铃兰 / 蓝玫瑰 / 雾中花（更像花名也行）",
+      "suggestions": [
+        "铃兰",
+        "黑百合",
+        "勿忘草",
+        "鸢尾",
+        "山茶"
+      ],
+      "allowCustom": true,
+      "maxLength": 60,
+      "required": false
+    },
+    {
+      "id": "GB-03",
+      "question": "日常外观与第一印象：发型/发色/瞳色/身材气质/说话习惯",
+      "type": "text",
+      "placeholder": "例：黑长直+挑染；说话总是半句停住；看起来很乖但眼神有点刺",
+      "suggestions": [
+        "看起来温柔干净，但一被追问就沉默",
+        "一身运动风，像随时准备逃跑",
+        "妆很淡，眼下却常年有睡眠不足的阴影"
+      ],
+      "allowCustom": true,
+      "maxLength": 280,
+      "required": false
+    },
+    {
+      "id": "GB-04",
+      "question": "舞台形象：演出服/配色/妆容/配件/标志动作（可以夸张，但必须现实可行）",
+      "type": "text",
+      "placeholder": "例：黑白对比强烈的制服改造；红色发夹；开唱前会把拨片抵在嘴唇停一秒",
+      "suggestions": [
+        "面具/面纱作为舞台道具（不是超自然）",
+        "只在安可换上另一套衣服，像是“把话说完”的开关",
+        "演出开始前永远先调一次返送，像在确认自己还在这里"
+      ],
+      "allowCustom": true,
+      "maxLength": 300,
+      "required": false
+    },
+    {
+      "id": "GB-05",
+      "question": "性格与“说不出口的那句话”：她最想通过歌让谁听见？她最怕被谁听见？",
+      "type": "text",
+      "placeholder": "例：想让前队友听见；但最怕被现队友听见——因为那句歌词其实是在说她",
+      "suggestions": [
+        "“我不是任何人的代餐。”",
+        "“别再用‘为了你好’把我推开。”",
+        "“我想被需要，但我更怕自己变得可有可无。”"
+      ],
+      "allowCustom": true,
+      "maxLength": 320,
+      "required": false
+    },
+    {
+      "id": "GB-06",
+      "question": "当前/目标乐队：乐队名、标语（1句）、主风格标签（2-3个）、排练地点（可虚构）",
+      "type": "text",
+      "placeholder": "例：乐队名「HOLLOW DAYS」；标语「把沉默唱出来」；标签：Alternative/J-Rock/Shoegaze；排练点：地下二层的 3 号排练室",
+      "suggestions": [
+        "乐队名「HOLLOW DAYS」；标语「把沉默唱出来」；标签：Alternative/J-Rock/Shoegaze；排练点：地下二层的 3 号排练室"
+      ],
+      "allowCustom": true,
+      "maxLength": 360,
+      "required": false
+    },
+    {
+      "id": "GB-07",
+      "question": "你在乐队里的位置/担当（可多写）：Vocal/Guitar/Bass/Drums/Keys/Support + 是否兼任作词/作曲/编曲/Leader/SNS",
+      "type": "text",
+      "placeholder": "例：Vocal；兼作词；不是队长但情绪是引爆点",
+      "options": [
+        "Vocal（主唱）",
+        "Guitar（Lead）",
+        "Guitar（Rhythm）",
+        "Bass",
+        "Drums",
+        "Keys",
+        "Support（作词/作曲/编曲/视觉/SNS）"
+      ],
+      "allowCustom": true,
+      "maxLength": 180,
+      "required": false
+    },
+    {
+      "id": "GB-08",
+      "question": "乐器与设备：主力乐器/型号/改装/效果器链/音箱/拾音器/弦或鼓皮；若是主唱请写麦克风与唱法/音域",
+      "type": "text",
+      "placeholder": "例：Fender Jazzmaster；RAT2→Delay→Reverb；常用闷音切分；备用线永远多带两根",
+      "suggestions": [
+        "Gibson Les Paul / Les Paul Junior",
+        "Fender Jazzmaster / Jaguar / Precision Bass",
+        "Yamaha Pacifica（实用主义）",
+        "Schecter 7-string（现代金属/侵略性）",
+        "Boss BD-2 / ProCo RAT2 / Big Muff / Tube Screamer",
+        "Nord Electro（键盘）/ 入门鼓组（Tama/Pearl）"
+      ],
+      "allowCustom": true,
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "GB-09",
+      "question": "技术与弱点：至少 3 个你擅长的演奏/编曲/舞台技法 + 1-2 个明确弱点/限制（会影响对邦）",
+      "type": "text",
+      "placeholder": "例：闷音切分、变拍过门、失真颗粒控制；弱点：手指易起水泡/紧张会走音",
+      "suggestions": [
+        "主唱：换气、咬字、破音控制、台词节奏",
+        "吉他：分解和弦/扫弦、riff 写作、音色分层",
+        "贝斯：低频压迫、律动推进、音符选择",
+        "鼓：切分、动态控制、稳住全队呼吸",
+        "键盘：和声铺底、音色设计、结构编排"
+      ],
+      "allowCustom": true,
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "GB-10",
+      "question": "音乐风格与影响：用 2-3 个标签描述你的“声音”，再写 1-2 个强影响来源（人/乐队/城市/过去事件均可）",
+      "type": "text",
+      "placeholder": "例：Alternative / Emo / J-Rock；影响：那次后台吵架后的沉默；以及某支强队的舞台统治力",
+      "suggestions": [
+        "J-Rock / Alternative",
+        "Emo / Post-Hardcore",
+        "Shoegaze（盯鞋）",
+        "Punk / Garage",
+        "Math Rock（变拍/精密）",
+        "Pop Rock（更商业但要“真”）"
+      ],
+      "allowCustom": true,
+      "maxLength": 260,
+      "required": false
+    },
+    {
+      "id": "GB-11",
+      "question": "乐队经历（历战记录）：待过的乐队名与位置/担当、最重要的一场 Live、解散/退团原因（如有）",
+      "type": "text",
+      "placeholder": "例：前乐队「闪光星辰」贝斯；某次对邦翻车后冷战；离开时没告别，只留了一条未发送的消息",
+      "allowCustom": true,
+      "maxLength": 500,
+      "required": false
+    },
+    {
+      "id": "GB-12",
+      "question": "创作与排练：谁写歌/谁编曲/谁定结构？你们怎么排练？（比如：先写 riff 还是先写词）",
+      "type": "text",
+      "placeholder": "例：我先写词；吉他手根据关键词写 riff；鼓手最后决定“这首歌到底怎么呼吸”",
+      "suggestions": [
+        "先写一句歌词当引信，再补全整首",
+        "先写主 riff，当成情绪的骨架",
+        "排练室里不说话，只靠一次次重来对齐"
+      ],
+      "allowCustom": true,
+      "maxLength": 360,
+      "required": false
+    },
+    {
+      "id": "GB-13",
+      "question": "现实压力：售票指标/打工/预算/家里或学校阻力。你最怕哪一种“失败”？",
+      "type": "text",
+      "placeholder": "例：票卖不完要自己补；打工撞彩排；家里不许再吵；最怕舞台上冷场后大家装作没事",
+      "suggestions": [
+        "设备维修费不够，必须二手交易",
+        "主唱嗓子开始不对劲但不敢说",
+        "时间不够：考试/社畜加班/合宿撞档"
+      ],
+      "allowCustom": true,
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "GB-14",
+      "question": "身体与状态：嗓子/手指/体力/情绪",
+      "type": "text",
+      "placeholder": "例：嗓子发干但还撑得住；手指贴着创可贴；情绪像在等一个人先道歉",
+      "suggestions": [
+        "耳鸣与睡眠不足",
+        "手指出血/起水泡",
+        "偏头痛导致排练中断",
+        "情绪快要爆炸但仍在装正常"
+      ],
+      "allowCustom": true,
+      "maxLength": 220,
+      "required": false
+    },
+    {
+      "id": "GB-15",
+      "question": "关系网络（建议至少 3 个关键对象）：队内/前队友/对手/家人/老师/店长/网友……写清你们的关系与最近变化",
+      "type": "text",
+      "placeholder": "例：A（队长）我依赖→我在躲她；B（前队友）恨→放不下；店长：现实压力源但会在关键时刻托举",
+      "allowCustom": true,
+      "maxLength": 500,
+      "required": false
+    },
+    {
+      "id": "GB-16",
+      "question": "关系性引信（至少两条不可回避的矛盾/秘密）：它们会在舞台上爆出来",
+      "type": "text",
+      "placeholder": "例：1) 我把现队友当成前任代餐；2) 我背着大家联系了强敌，想用对邦逼她们成长",
+      "suggestions": [
+        "我在利用你，但我也离不开你",
+        "我害怕承诺，所以我每次都先推开",
+        "那首歌其实不是写给观众的，是写给队内某个人的"
+      ],
+      "allowCustom": true,
+      "maxLength": 500,
+      "required": false
+    },
+    {
+      "id": "GB-17",
+      "question": "对邦目标：要达成什么？长线想要什么？（可以不写武道馆，也可以更私人）",
+      "type": "text",
+      "placeholder": "例：9天内完成 3 场对邦并凑齐票；长线目标：成为某人唯一的乐手/不再逃跑/在这座城市留下一首歌",
+      "suggestions": [
+        "9天内完成 3 场对邦并凑齐票；长线目标：成为某人唯一的乐手/不再逃跑/在这座城市留下一首歌"
+      ],
+      "allowCustom": true,
+      "maxLength": 320,
+      "required": false
+    },
+    {
+      "id": "GB-18",
+      "question": "SNS 与舆论：网络人设/最怕被剪成什么样/有没有炎上风险（可虚构）",
+      "type": "text",
+      "placeholder": "例：账号只发黑白排练室照；最怕被剪成“翻车合集”；聊天截图外泄风险来自某个前队友",
+      "suggestions": [
+        "被误会抄袭/蹭热度",
+        "对手粉丝挑衅",
+        "队内聊天截图疑似外泄"
+      ],
+      "allowCustom": true,
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "GB-19",
+      "question": "你与其他乐队/角色的关系（可多写）",
+      "type": "text",
+      "placeholder": "例：我把 LiftMagic 当镜子；对 至简乐队 有畏惧；店长是现实主义压力源但也会给我机会",
+      "suggestions": [
+        "LiftMagic（镜子/朋友/对手）",
+        "至简乐队（强敌/BOSS/舞台统治力）",
+        "有限元乐队（前辈/现实导师）",
+        "Diamond Dash（商业化对照）",
+        "Live House 负责人（PA大哥/店长姐姐）"
+      ],
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "GB-20",
+      "question": "数值与开局倾向（可选）：演奏/舞台/创作/重力值 0-100",
+      "type": "text",
+      "placeholder": "例：演奏78 舞台62 创作85 重力值91；进度=筹备；Day0",
+      "suggestions": [
+        "演奏78 舞台62 创作85 重力值91；进度=筹备；Day0",
+        "演奏11 舞台45 创作14 重力值0；进度=筹备；Day0",
+        "演奏19 舞台19 创作810 重力值0；进度=筹备；Day0"
+      ],
+      "allowCustom": true,
+      "maxLength": 180,
+      "required": false
+    },
+    {
+      "id": "GB-21",
+      "question": "她“最像会写出的第一首原创曲”是什么样：曲名/风格/速度倾向/音色关键词/这首歌要刺痛谁？",
+      "type": "text",
+      "placeholder": "例：曲名《回授》；Emo/Alternative；中速偏快；失真颗粒+干净音分解；刺痛：那个说过“一辈子的乐队吗”的人",
+      "suggestions": [
+        "曲名《闪光的我》；Emo/Alternative；中速偏快；失真颗粒+干净音分解；刺痛：不相信自己能在舞台上发光的人",
+        "曲名《镜中花》；Shoegaze/Pop Rock；慢速；梦幻氛围+温暖和声；刺痛：那个总在背后说‘你不行’的人"
+      ],
+      "allowCustom": true,
+      "maxLength": 500,
+      "required": false
+    }
+  ]
+}

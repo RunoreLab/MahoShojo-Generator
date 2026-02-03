@@ -16,6 +16,13 @@
       "path": "/questionnaires/presets/magical-girl-immersive-vn.json"
     },
     {
+      "id": "girl-band-taiban-war-1.1",
+      "kind": "magical-girl",
+      "title": "乐队少女问卷",
+      "description": "用于生成“少女乐队/对邦”世界线的角色档案：乐队经历、位置/担当、乐器与设备、曲风、技术、现实压力、关系性引信等。支持：流式通用角色卡（直接输出少女乐队设定）/ 非流式魔法少女 Schema（将少女乐队设定映射进字段）。",
+      "path": "/questionnaires/presets/girl-band-taiban-war-1.1.json"
+    },
+    {
       "id": "magical-girl-afterwork-world",
       "kind": "magical-girl",
       "title": "原作世界观向：魔法少女成长路线问卷",
