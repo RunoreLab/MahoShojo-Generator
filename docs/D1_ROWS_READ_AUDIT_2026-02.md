@@ -307,36 +307,46 @@ LEFT JOIN (
 
 优点：对 Rows Read 的下降最直接；缺点：产品上“名次”不再处处可见。
 
-**方案 A1（更激进但更“定价可控”）：只给 Top200 + Bottom100 计算/展示名次（窗口排名）**  
+**方案 A1（更激进但更“定价可控”）：精确名次仅 Top300（窗口排名）**  
 将“名次”从“全量定义”改为“窗口内定义”：
 
-- **默认只统计排位分最高的 200 位 + 最低的 100 位**（可先只做 Top200；Bottom100 属于产品敏感项）
-- 对于窗口之外的实体：**不再显示排名**（`publicRank/publicTotal = null`），仅显示排位分/段位/Δ 等
-- 只有进入窗口范围的实体才展示排名（Top 200 展示 `#1~#200`；Bottom 100 建议展示为 `倒数 #1~#100`，避免引入全榜 `total` 的额外 COUNT）
+- **仅统计排位分最高的 Top300**（严格/自由各一份；按 canonical 口径：`rating DESC, games DESC, updated_at DESC, entity_type ASC, entity_id ASC`）
+- 对于 Top300 之外的实体：**不再显示排名**（`publicRank/publicTotal = null`），仅显示排位分/段位/Δ 等
+- 榜单页面/榜单模态框只允许浏览 **Top300**（最多翻到 #300，不支持深分页 offset）
 
 对 D1 Rows Read 的收益点（为什么它可能“极大降读”）：
 
 - 个人页（`/me`）等非榜单页面的“精确名次”目前仍依赖 `COUNT(*) higherCount` / `COUNT(*) total`，属于**按请求扫描**的模式（读量与榜单规模强相关）。
-- 窗口排名把“需要全量统计的名次”变成“固定窗口的列表查询”：在索引可用的前提下，查询读量趋近于 **O(200 + 100)**，而不是 **O(|eligible|)**。
-- 同时还能天然限制排行榜的深分页（OFFSET）读放大：榜单可直接变成“固定上限列表”，避免 offset 越大 Rows Read 越大。
+- Top300 窗口排名把“需要全量统计的名次”变成“固定窗口的列表查询”：在索引可用的前提下，查询读量趋近于 **O(300)**，而不是 **O(|eligible|)**。
+- 同时还能直接消灭“排行榜深分页（OFFSET）导致 Rows Read 随 offset 线性上升”的问题：offset 的上限被强行钉死在 300。
 
 实现建议（尽量不引入新的 D1 热点）：
 
 1) **服务端不再在热路径计算 `publicRank/publicTotal`**  
-   - 直接对齐 `data-card-meta` 的做法：`pages/api/me/profile-card.ts` 移除 `computePublicRank/computePublicTotal`（或仅在“命中窗口”时返回名次）。
-2) **窗口榜单走强缓存的单点出口**  
-   - 新增 `/api/arena/leaderboard-window?queue=strict|free`：返回 `{ top: LeaderboardItem[], bottom: LeaderboardItem[] }`，并 `withEdgeCache`（例如 30s~120s）。
-   - 客户端（/ranking、/me）若需要展示“窗口内名次”，从该接口取数据并按 `entityType/entityId` 做 membership 绑定。
-3) **不做全榜 total**（尤其是 Bottom100）  
-   - Bottom100 若强行展示“全榜名次”（例如 `#5234`），就绕不开 `COUNT(*) total` 或其他 total 维护手段；这会把“窗口榜”又拉回全量统计。
-   - 若产品一定要“全榜名次”，更成熟的做法是“引入预计算快照表”（见方案 C），而不是在读路径上再加 COUNT。
+   - 直接对齐 `data-card-meta` 的做法：`pages/api/me/profile-card.ts` 移除 `computePublicRank/computePublicTotal`。
+   - 若仍希望在个人页展示“我的卡的名次”：改为 **一次性读取 Top300 并做 membership 绑定**（对该请求内的 1~3 张卡填充 rank；其它一律 null）。
+2) **排行榜接口“硬限制”Top300 范围**  
+   - `pages/api/arena/leaderboard.ts`：当 canonical 排行榜请求（`sort=rating&order=desc&...`）时，强制 `offset + limit <= 300`（超出返回空列表或 400）。
+   - 非 canonical（标签/技术值/筛选）视图建议不再宣称“全榜名次”，而是展示“列表序号”（避免误解为精确 rank）。
+3) **不做全榜 total**  
+   - Top300 方案天然不需要 `total`；若仍要展示“全榜总人数/百分比”，应走单点缓存或快照表（见 3.2/方案 C），不要回到读路径 COUNT。
 
-产品/体验风险（需要提前想清楚）：
+对“严格排位自选对手”的影响（关键风险点）：
 
-- 大部分角色将看不到名次：可能降低“反馈感/爬榜动机”，但也能避免“伪精确名次”导致的争议。
-- Bottom100 容易引发负面体验（公开羞辱风险）；如果只是为了让“低分也能有名次”，更建议改为：
-  - 仅 Top200；
-  - 或展示“段位/分数区间/分位段（近似）”。
+- 当前竞技场的“快速查看排行榜”模态框（`components/arena/components/ArenaRankingModal.tsx`）既用于看榜，也用于“加入参战”挑对手；并提供“仅显示严格可计分对手”的过滤。
+- **若榜单只剩 Top300**：对于绝大多数不在 Top300 的玩家而言，Top300 的排位分通常远高于自己，开启“严格可计分对手”后会大量出现 **空列表**；即便强行选择对手，也会频繁触发 `strict-out-of-range`，导致严格计分被跳过。
+
+建议的解决方案（保持 D1 可控 + 不牺牲严格对局可用性）：
+
+1) **把“挑严格对手”从“榜单”里拆出去**（推荐）  
+   - 在排行榜模态框增加一个 Tab：`严格可计分对手（附近分段）`，该列表**不显示名次**，只展示分数/段位/局数/胜率，并提供“加入参战”。
+   - 新增轻量接口：`/api/arena/opponents?queue=strict&pivotEntityType=...&pivotEntityId=...`  
+     - 服务端先读 pivot 的 `rating/games`（可复用现有 `/api/arena/entity-rating` 逻辑）
+     - 用 `rating BETWEEN [pivot-maxDiff, pivot+maxDiff]` 取候选（`LIMIT 30~60`），按“更接近 pivot”排序或随机打散
+     - 该接口不返回 rank，因此不违反“精确名次仅 Top300”的约束
+2) **UI 上做显式提示与降级**  
+   - 在 Top300 榜单视图里提示：“本榜单仅展示 Top300 名次；如要找严格可计分对手，请切换到『附近分段』。”
+   - 当用户勾选“仅显示严格可计分对手”且结果为空时，不再提示“翻页试试”，而是引导切换到“附近分段/搜索”。
 
 可观测性（上线后怎么验证它是否真的在降读）：
 
@@ -363,7 +373,7 @@ LEFT JOIN (
 
 推荐的实现方式（兼顾降读与体验）：
 
-1) **只保留两处“精确排名”**：排行榜页（`/ranking`）与个人页（`/me`）。  
+1) **只保留“Top300 精确名次”**：排行榜页（`/ranking`，含竞技场内“快速查看排行榜”）与个人页（`/me`，仅命中 Top300 时显示）。  
 2) 其它位置（竞技场页面、数据卡详情模态框、列表卡片等）不再请求/计算 `publicRank/publicTotal`，改为：
    - 优先展示 `约 N 名`（来自本地缓存估算），并提供 tooltip：“基于本地缓存估算，仅供参考；以排行榜/个人页为准”；
    - 本地缓存缺失时降级为不展示名次（只展示分数/段位/Δ）。
