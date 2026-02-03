@@ -1,7 +1,7 @@
 # 问卷系统与自定义问卷（问卷编辑器 / 云端问卷库）
 
 > 作者：[末伏之夜](https://github.com/notuhao)  
-> 更新时间：2026-02-02
+> 更新时间：2026-02-03
 
 本条目覆盖 v0.7.2 之后的问卷新能力：**自定义问卷、条件显示/跳题、云端问卷库、字数上限与可信 Logo**。如果你想把问卷当成“可维护的创作工具箱”，先从这里开始。
 
@@ -43,6 +43,7 @@
 - `kind`：问卷类型（`magical-girl` / `canshou`）
 - `title`：问卷标题
 - `description`：问卷描述（可选）
+- `loreMarkdown`：设定文本（可选，多行 Markdown/纯文本；作为参考资料提供给 AI，不需要作答）
 - `logoUrl`：Logo 图片（仅允许站内路径或可信 HTTPS 外链）
 - `version`：版本号（可选，用于标记迭代）
 - `nativeAllowed`：是否具备原生许可（自建问卷默认非原生）
@@ -169,8 +170,9 @@
 - 仍失败请看：`/encyclopedia/network-errors`
 
 ### Q2：提示“问卷 JSON 无法识别 / 解析失败”？
-- 检查是否包含 `id / kind / title / questions` 等必填字段
-- `questions` 必须是数组，每一题要有 `id` 与 `question`
+- 检查是否包含 `id / kind / title` 等必填字段
+- `questions` 必须是数组（可为空数组），每一题要有 `id` 与 `question`
+- 若 `questions` 为空，则需要提供 `loreMarkdown`（设定文本），否则无法识别为有效问卷
 
 ### Q3：提示“当前没有可作答题目”？
 - 常见原因：**条件显示把全部题隐藏**

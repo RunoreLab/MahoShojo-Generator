@@ -126,7 +126,7 @@ export default function QuestionnaireCompatModal({
       });
 
       if (!normalized) {
-        throw new Error('问卷 JSON 无法识别：请确认包含 kind、title、questions 等字段');
+        throw new Error('问卷 JSON 无法识别：请确认包含 kind、title，以及 questions 或 loreMarkdown 等字段');
       }
 
       const payload = {

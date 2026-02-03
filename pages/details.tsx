@@ -357,7 +357,22 @@ const DetailsPage: React.FC = () => {
     return selectedQuestionnaires.every((selection) => selection.questionnaire.nativeAllowed === true);
   }, [selectedQuestionnaires]);
 
-  const tokenEstimateText = useMemo(() => formatQuestionnaireAnswers(answerItems), [answerItems]);
+  const questionnaireLoreText = useMemo(() => {
+    const blocks = selectedQuestionnaires
+      .map((selection) => ({
+        title: selection.questionnaire.title,
+        lore: selection.questionnaire.loreMarkdown?.trim() ?? '',
+      }))
+      .filter((item) => Boolean(item.lore))
+      .map((item) => `【设定来源：${item.title}】\n${item.lore}`);
+    return blocks.length > 0 ? blocks.join('\n\n') : '';
+  }, [selectedQuestionnaires]);
+
+  const tokenEstimateText = useMemo(() => {
+    const answerText = formatQuestionnaireAnswers(answerItems);
+    if (questionnaireLoreText && answerText) return `${questionnaireLoreText}\n\n${answerText}`;
+    return questionnaireLoreText || answerText;
+  }, [answerItems, questionnaireLoreText]);
 
   const shouldDisableRemove = selectedQuestionnaires.length <= 1;
 
@@ -634,6 +649,11 @@ const DetailsPage: React.FC = () => {
   }, [selectionReady]);
 
   const applySelection = (selection: QuestionnaireSelection) => {
+    const isLoreOnly = selection.questionnaire.questions.length === 0
+      && Boolean(selection.questionnaire.loreMarkdown?.trim());
+    if (isLoreOnly && !allowMultipleQuestionnaires) {
+      setAllowMultipleQuestionnaires(true);
+    }
     setSelectedQuestionnaires((prev) => {
       const usedSelectionIds = new Set<string>();
       prev.forEach((item) => {
@@ -641,7 +661,7 @@ const DetailsPage: React.FC = () => {
         if (existingId) usedSelectionIds.add(existingId);
       });
       const normalizedSelection = ensureSelectionId(selection, usedSelectionIds);
-      if (allowMultipleQuestionnaires) {
+      if (allowMultipleQuestionnaires || (isLoreOnly && prev.length > 0)) {
         return [...prev, normalizedSelection];
       }
       return [normalizedSelection];
@@ -1208,6 +1228,7 @@ const DetailsPage: React.FC = () => {
             id: selection.questionnaire.id,
             title: selection.questionnaire.title,
             kind: selection.questionnaire.kind,
+            loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
             questions: selection.questionnaire.questions.map((question) => ({
               id: question.id,
               question: question.question,
@@ -1396,11 +1417,37 @@ const DetailsPage: React.FC = () => {
   }
 
   if (resolvedQuestionItems.length === 0) {
+    const hasLore = selectedQuestionnaires.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));
     return (
       <div className="magic-background">
         <div className="container">
           <div className="card">
-            <div className="error-message">加载问卷失败</div>
+            <div className="error-message">
+              {hasLore
+                ? '当前所选问卷仅包含设定（无题目），请在“问卷设置”中再添加一份有题目的问卷。'
+                : '加载问卷失败'}
+            </div>
+            <div className="mt-2 text-center text-xs text-gray-500">
+              你可以开启“允许同时回答多份问卷”，并将设定问卷与任意可作答问卷搭配使用。
+            </div>
+            {hasLore && (
+              <div className="mt-4 flex flex-col items-center justify-center gap-2">
+                <button
+                  type="button"
+                  className="generate-button"
+                  onClick={() => {
+                    setSelectedQuestionnaires([]);
+                    setSelectionReady(false);
+                    setLoading(true);
+                  }}
+                >
+                  恢复默认问卷
+                </button>
+                <Link href="/questionnaire-editor" className="text-xs text-indigo-600 hover:underline">
+                  打开问卷编辑器
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1593,6 +1640,9 @@ const DetailsPage: React.FC = () => {
                                 来源：{selection.source === 'preset' ? '预设' : selection.source === 'upload' ? '本地上传' : '云端问卷'}
                                 {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
                                 {selection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
+                                {selection.questionnaire.loreMarkdown?.trim()
+                                  ? (selection.questionnaire.questions.length > 0 ? ' · 含设定' : ' · 仅设定')
+                                  : ''}
                               </div>
                             </div>
                             <button

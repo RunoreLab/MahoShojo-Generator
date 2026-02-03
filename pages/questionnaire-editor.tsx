@@ -7,6 +7,7 @@ import Footer from '@/components/Footer';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import DataCardsModal from '@/components/CharManager/DataCardsModal';
 import RecycleBinModal from '@/components/CharManager/RecycleBinModal';
+import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import {
   DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND,
   QUESTIONNAIRE_LOGO_PRESETS,
@@ -244,6 +245,7 @@ const QuestionnaireEditorPage: React.FC = () => {
   const [questionnaireId, setQuestionnaireId] = useState('magical-girl-custom');
   const [title, setTitle] = useState('未命名问卷');
   const [description, setDescription] = useState('');
+  const [loreMarkdown, setLoreMarkdown] = useState('');
   const [logoUrl, setLogoUrl] = useState(DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND['magical-girl']);
   const [version, setVersion] = useState('');
   const [questions, setQuestions] = useState<EditableQuestion[]>([createEmptyQuestion(0, 'magical-girl', 'initial-1')]);
@@ -629,11 +631,17 @@ const QuestionnaireEditorPage: React.FC = () => {
       } satisfies QuestionnaireQuestion;
     });
 
+    const trimmedLore = loreMarkdown.trim();
+    if (cleanedQuestions.length === 0 && !trimmedLore) {
+      errors.push('问卷至少需要 1 个题目，或填写设定内容（loreMarkdown）');
+    }
+
     const payload: QuestionnaireDefinition = {
       id: questionnaireId.trim() || `${kind}-custom`,
       kind,
       title: title.trim() || '未命名问卷',
       description: description.trim() || undefined,
+      loreMarkdown: trimmedLore ? loreMarkdown : undefined,
       logoUrl: normalizedLogoUrl || undefined,
       version: version.trim() || undefined,
       nativeAllowed: false,
@@ -644,7 +652,7 @@ const QuestionnaireEditorPage: React.FC = () => {
       questionnaireData: payload,
       jsonError: errors.length > 0 ? errors[0] : null,
     };
-  }, [questions, questionnaireId, kind, title, description, normalizedLogoUrl, version]);
+  }, [questions, questionnaireId, kind, title, description, loreMarkdown, normalizedLogoUrl, version]);
 
   const jsonPreview = useMemo(() => JSON.stringify(questionnaireData, null, 2), [questionnaireData]);
 
@@ -672,6 +680,7 @@ const QuestionnaireEditorPage: React.FC = () => {
       setQuestionnaireId(normalized.id);
       setTitle(normalized.title);
       setDescription(normalized.description || '');
+      setLoreMarkdown(normalized.loreMarkdown || '');
       setLogoUrl(normalized.logoUrl || '');
       setVersion(normalized.version || '');
       setQuestions(normalized.questions.map((q) => {
@@ -757,6 +766,10 @@ const QuestionnaireEditorPage: React.FC = () => {
   };
 
   const handleCopyJson = async () => {
+    if (jsonError) {
+      setEditorError(jsonError);
+      return;
+    }
     try {
       await navigator.clipboard.writeText(jsonPreview);
       flashMessage('✅ 已复制到剪贴板');
@@ -766,6 +779,10 @@ const QuestionnaireEditorPage: React.FC = () => {
   };
 
   const handleDownloadJson = () => {
+    if (jsonError) {
+      setEditorError(jsonError);
+      return;
+    }
     const blob = new Blob([jsonPreview], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -925,6 +942,7 @@ const QuestionnaireEditorPage: React.FC = () => {
                 <li><code className="bg-slate-200 px-1 rounded">displayIf</code> 支持条件显示；<code className="bg-slate-200 px-1 rounded">jump</code> 可设置跳题规则。</li>
                 <li><code className="bg-slate-200 px-1 rounded">optionsFrom</code> / <code className="bg-slate-200 px-1 rounded">suggestionsFrom</code> 可引用其他题目的选项或灵感。</li>
                 <li>最大字数为建议上限，超出仍可提交但会影响原生性；留空表示不设题目上限（仍受统一原生上限影响）。</li>
+                <li><code className="bg-slate-200 px-1 rounded">loreMarkdown</code> 是可选“设定文本”，会作为参考资料提供给 AI（不是题目，不需要作答）。</li>
                 <li>Logo 仅支持站内路径或可信 HTTPS 外链，推荐使用下方快捷 Logo。</li>
                 <li>更多高级字段可写入「额外字段 JSON」，会并入该题的最终结构。</li>
               </ul>
@@ -1104,6 +1122,21 @@ const QuestionnaireEditorPage: React.FC = () => {
                   onChange={(e) => setDescription(e.target.value)}
                   className="input-field mt-1 h-20"
                 />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs text-slate-500">问卷设定（Lore，可选，多行 Markdown/文本）</label>
+                <textarea
+                  value={loreMarkdown}
+                  onChange={(e) => setLoreMarkdown(e.target.value)}
+                  className="input-field mt-1 h-40 whitespace-pre-wrap"
+                  placeholder="在此填写给 AI 的参考设定（例如：世界观术语、能力阶段边界、创作提示等）。"
+                />
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-slate-400">
+                    提示：设定会作为“参考资料”注入提示词，不会覆盖系统输出规则；内容越长越耗 Token。
+                  </p>
+                  <TokenIndicator text={loreMarkdown} />
+                </div>
               </div>
               <div className="md:col-span-2">
                 <label className="text-xs text-slate-500">Logo URL（可选）</label>
@@ -1676,6 +1709,10 @@ const QuestionnaireEditorPage: React.FC = () => {
             <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
               <SaveToCloudButton
                 data={questionnaireData}
+                getData={async () => {
+                  if (jsonError) throw new Error(jsonError);
+                  return questionnaireData;
+                }}
                 cardType="questionnaire"
                 buttonText="保存为云端问卷"
                 className="generate-button mb-0 w-full text-sm md:w-auto md:px-6 md:py-2"
