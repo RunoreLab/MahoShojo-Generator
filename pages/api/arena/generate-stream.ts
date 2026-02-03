@@ -868,6 +868,16 @@ async function handler(req: NextRequest): Promise<Response> {
 	                }
 	                if (inMeta) {
 	                    metaBuffer += text;
+	                    const metaEnd = metaBuffer.indexOf('-->');
+	                    if (metaEnd !== -1) {
+	                        const metaComment = metaBuffer.slice(0, metaEnd + 3);
+	                        const afterMeta = metaBuffer.slice(metaEnd + 3);
+	                        metaBuffer = metaComment;
+	                        inMeta = false;
+	                        if (afterMeta) {
+	                            processText(controller, afterMeta);
+	                        }
+	                    }
 	                    return;
 	                }
 
@@ -902,14 +912,26 @@ async function handler(req: NextRequest): Promise<Response> {
                                 processText(controller, flushed);
                             }
 
-                            if (!inMeta && pendingMarkdownTail) {
-                                flushMarkdown(controller, pendingMarkdownTail);
-                                pendingMarkdownTail = '';
-                            }
+	                            if (!inMeta && pendingMarkdownTail) {
+	                                flushMarkdown(controller, pendingMarkdownTail);
+	                                pendingMarkdownTail = '';
+	                            }
 
-                            // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
-                            const usageForTelemetry = await Promise.race([
-                                resolvedUsagePromise,
+	                            // 模型可能在正文前/中途错误输出 meta 注释：此时我们会进入 inMeta 并吞掉后续内容。
+	                            // 为避免“吞掉了正文导致前端收到空内容”，在流式结束时尝试把 meta 注释后的内容补发为 markdown。
+	                            if (inMeta && metaBuffer) {
+	                                const metaEnd = metaBuffer.indexOf('-->');
+	                                if (metaEnd !== -1) {
+	                                    const afterMeta = metaBuffer.slice(metaEnd + 3);
+	                                    if (afterMeta) {
+	                                        flushMarkdown(controller, afterMeta);
+	                                    }
+	                                }
+	                            }
+
+	                            // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
+	                            const usageForTelemetry = await Promise.race([
+	                                resolvedUsagePromise,
                                 new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
                             ]);
                             const shouldIncludeTelemetry =
