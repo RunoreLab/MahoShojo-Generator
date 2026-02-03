@@ -307,6 +307,42 @@ LEFT JOIN (
 
 优点：对 Rows Read 的下降最直接；缺点：产品上“名次”不再处处可见。
 
+**方案 A1（更激进但更“定价可控”）：只给 Top200 + Bottom100 计算/展示名次（窗口排名）**  
+将“名次”从“全量定义”改为“窗口内定义”：
+
+- **默认只统计排位分最高的 200 位 + 最低的 100 位**（可先只做 Top200；Bottom100 属于产品敏感项）
+- 对于窗口之外的实体：**不再显示排名**（`publicRank/publicTotal = null`），仅显示排位分/段位/Δ 等
+- 只有进入窗口范围的实体才展示排名（Top 200 展示 `#1~#200`；Bottom 100 建议展示为 `倒数 #1~#100`，避免引入全榜 `total` 的额外 COUNT）
+
+对 D1 Rows Read 的收益点（为什么它可能“极大降读”）：
+
+- 个人页（`/me`）等非榜单页面的“精确名次”目前仍依赖 `COUNT(*) higherCount` / `COUNT(*) total`，属于**按请求扫描**的模式（读量与榜单规模强相关）。
+- 窗口排名把“需要全量统计的名次”变成“固定窗口的列表查询”：在索引可用的前提下，查询读量趋近于 **O(200 + 100)**，而不是 **O(|eligible|)**。
+- 同时还能天然限制排行榜的深分页（OFFSET）读放大：榜单可直接变成“固定上限列表”，避免 offset 越大 Rows Read 越大。
+
+实现建议（尽量不引入新的 D1 热点）：
+
+1) **服务端不再在热路径计算 `publicRank/publicTotal`**  
+   - 直接对齐 `data-card-meta` 的做法：`pages/api/me/profile-card.ts` 移除 `computePublicRank/computePublicTotal`（或仅在“命中窗口”时返回名次）。
+2) **窗口榜单走强缓存的单点出口**  
+   - 新增 `/api/arena/leaderboard-window?queue=strict|free`：返回 `{ top: LeaderboardItem[], bottom: LeaderboardItem[] }`，并 `withEdgeCache`（例如 30s~120s）。
+   - 客户端（/ranking、/me）若需要展示“窗口内名次”，从该接口取数据并按 `entityType/entityId` 做 membership 绑定。
+3) **不做全榜 total**（尤其是 Bottom100）  
+   - Bottom100 若强行展示“全榜名次”（例如 `#5234`），就绕不开 `COUNT(*) total` 或其他 total 维护手段；这会把“窗口榜”又拉回全量统计。
+   - 若产品一定要“全榜名次”，更成熟的做法是“引入预计算快照表”（见方案 C），而不是在读路径上再加 COUNT。
+
+产品/体验风险（需要提前想清楚）：
+
+- 大部分角色将看不到名次：可能降低“反馈感/爬榜动机”，但也能避免“伪精确名次”导致的争议。
+- Bottom100 容易引发负面体验（公开羞辱风险）；如果只是为了让“低分也能有名次”，更建议改为：
+  - 仅 Top200；
+  - 或展示“段位/分数区间/分位段（近似）”。
+
+可观测性（上线后怎么验证它是否真的在降读）：
+
+- Cloudflare Query Insights 的 Top Queries 里：`COUNT(*) as higherCount` / `COUNT(*) as total` 应明显下降或消失。
+- 若仍高：说明 D1 Rows Read 的主要来源已转移到其它查询（常见是公共列表分页 / tag 关联 / 搜索 LIKE）。
+
 **方案 B（折中）**  
 仍提供名次，但做“近似名次”：
 
