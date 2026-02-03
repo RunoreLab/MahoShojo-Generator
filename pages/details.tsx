@@ -43,6 +43,7 @@ import {
   DETAILS_QUESTIONNAIRE_THEME,
   QuestionnaireQuestionPanel,
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
+import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
 
 type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -1095,6 +1096,42 @@ const DetailsPage: React.FC = () => {
     setBulkAnswers('');
   };
 
+  const buildAnswerExportText = useCallback(() => {
+    const now = new Date();
+    const answered = mergedQuestions.flatMap((item, index) => {
+      const raw = answersByKey[item.key];
+      const trimmed = typeof raw === 'string' ? raw.trim() : '';
+      if (!trimmed) return [];
+      return [{
+        index,
+        questionnaireTitle: item.questionnaireTitle,
+        question: item.question.question,
+        answer: raw,
+      }];
+    });
+
+    const selectedTitles = selectedQuestionnaires
+      .map((selection) => selection.questionnaire.title?.trim())
+      .filter((title): title is string => Boolean(title));
+    const questionnaireLabel = selectedTitles.length > 0 ? selectedTitles.join(' + ') : '';
+
+    const lines: string[] = [];
+    lines.push('【魔法少女问卷答案备份】');
+    lines.push(`导出时间：${now.toLocaleString()}`);
+    lines.push(`已填写：${answered.length} / ${mergedQuestions.length}`);
+    if (questionnaireLabel) lines.push(`问卷：${questionnaireLabel}`);
+    lines.push('');
+
+    answered.forEach((item) => {
+      const title = item.questionnaireTitle ? `（${item.questionnaireTitle}）` : '';
+      lines.push(`Q${item.index + 1}${title}: ${item.question}`);
+      lines.push(`A: ${item.answer}`);
+      lines.push('');
+    });
+
+    return lines.join('\n').trimEnd();
+  }, [answersByKey, mergedQuestions, selectedQuestionnaires]);
+
   const handleSubmit = async (answersSnapshot?: Record<string, string>) => {
     if (isCooldown) {
       setError(`请等待 ${remainingTime} 秒后再生成`);
@@ -1296,24 +1333,6 @@ const DetailsPage: React.FC = () => {
       // 依据当前通道实时覆盖冷却时间，确保自定义 AI 时降为 3 秒
       startCooldown(generatorCooldownMs);
     }
-  };
-
-  // “一键复制”功能的函数
-  const handleCopyContent = () => {
-    const contentToCopy = mergedQuestions
-      .map((item, index) => {
-        const title = item.questionnaireTitle ? `（${item.questionnaireTitle}）` : '';
-        return `Q${index + 1}${title}: ${item.question.question}\nA: ${answersByKey[item.key] || ''}`;
-      })
-      .join('\n\n');
-
-    // 使用剪贴板API进行复制
-    navigator.clipboard.writeText(contentToCopy).then(() => {
-      alert('已填写内容已复制到剪贴板！');
-    }).catch(err => {
-      console.error('复制失败: ', err);
-      alert('复制失败，请稍后再试。');
-    });
   };
 
   const handleSaveImage = (imageUrl: string) => {
@@ -1844,15 +1863,14 @@ const DetailsPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* 复制已填写内容 */}
-                <div className="text-center">
-                  <button className="border-2 border-grey-900 rounded-md px-4 py-2 cursor-pointer" onClick={handleCopyContent} style={{ marginRight: '10px' }}>
-                    复制已填写内容
-                  </button>
-                  <p className="mt-2 text-xs text-gray-500">
-                    为避免生成失败丢失信息的可能，建议在提交生成前复制保存已填写信息。
-                  </p>
-                </div>
+                <QuestionnaireAnswerExportPanel
+                  variant="light"
+                  title="生成前备份问卷答案"
+                  filenameBase="魔法少女问卷_答案备份"
+                  hasContent={answerItems.length > 0}
+                  buildContent={buildAnswerExportText}
+                  disabled={submitting || isTransitioning || isCooldown}
+                />
 
                 {/* 返回首页链接 */}
                 <div className="text-center" style={{ marginTop: '1rem' }}>

@@ -23,6 +23,7 @@ import {
   CANSHOU_QUESTIONNAIRE_THEME,
   QuestionnaireQuestionPanel,
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
+import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
@@ -210,6 +211,7 @@ const CanshouPage: React.FC = () => {
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
+  const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
   const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`;
@@ -763,6 +765,7 @@ const CanshouPage: React.FC = () => {
         setAnswersByKey((prev) => ({ ...prev, ...nextAnswers }));
         const firstKey = mergedQuestions[0]?.key;
         if (firstKey) setCurrentAnswer(nextAnswers[firstKey] || '');
+        setAutoSaveTimestamp(Date.now());
       }
     } catch (e) {
       console.error("Failed to load answers from localStorage", e);
@@ -775,6 +778,7 @@ const CanshouPage: React.FC = () => {
       if (hasAnswers) {
         const dataToSave = JSON.stringify({ version: 2, answersByKey });
         localStorage.setItem(LOCAL_STORAGE_KEY, dataToSave);
+        setAutoSaveTimestamp(Date.now());
       }
     } catch (e) {
       console.error("Failed to save answers to localStorage", e);
@@ -1109,6 +1113,7 @@ const CanshouPage: React.FC = () => {
       localStorage.removeItem(LOCAL_STORAGE_KEY);
       setAnswersByKey({});
       setCurrentAnswer('');
+      setAutoSaveTimestamp(null);
       alert('存档已清空！');
     }
   };
@@ -1164,6 +1169,42 @@ const CanshouPage: React.FC = () => {
     alert(`成功填充了 ${appliedCount} 个答案（识别格式：${formatLabel}${ignoredCount > 0 ? `，忽略了 ${ignoredCount} 条超出范围的内容` : ''}）！`);
     setBulkAnswers('');
   };
+
+  const buildAnswerExportText = useCallback(() => {
+    const now = new Date();
+    const answered = mergedQuestions.flatMap((item, index) => {
+      const raw = answersByKey[item.key];
+      const trimmed = typeof raw === 'string' ? raw.trim() : '';
+      if (!trimmed) return [];
+      return [{
+        index,
+        questionnaireTitle: item.questionnaireTitle,
+        question: item.question.question,
+        answer: raw,
+      }];
+    });
+
+    const selectedTitles = selectedQuestionnaires
+      .map((selection) => selection.questionnaire.title?.trim())
+      .filter((title): title is string => Boolean(title));
+    const questionnaireLabel = selectedTitles.length > 0 ? selectedTitles.join(' + ') : '';
+
+    const lines: string[] = [];
+    lines.push('【残兽问卷答案备份】');
+    lines.push(`导出时间：${now.toLocaleString()}`);
+    lines.push(`已填写：${answered.length} / ${mergedQuestions.length}`);
+    if (questionnaireLabel) lines.push(`问卷：${questionnaireLabel}`);
+    lines.push('');
+
+    answered.forEach((entry) => {
+      const title = entry.questionnaireTitle ? `（${entry.questionnaireTitle}）` : '';
+      lines.push(`Q${entry.index + 1}${title}: ${entry.question}`);
+      lines.push(`A: ${entry.answer}`);
+      lines.push('');
+    });
+
+    return lines.join('\n').trimEnd();
+  }, [answersByKey, mergedQuestions, selectedQuestionnaires]);
 
   if (loading) {
     return (
@@ -1438,6 +1479,9 @@ const CanshouPage: React.FC = () => {
                   theme={CANSHOU_QUESTIONNAIRE_THEME}
                   progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
                   progressPercent={progressPercent}
+                  progressExtra={autoSaveTimestamp ? (
+                    <span className="text-xs text-slate-500">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
+                  ) : null}
                   questionText={currentQuestion?.question || '未加载题目'}
                   questionnaireTitle={currentQuestionnaireTitle}
                   noticeText="请基于您构想的虚拟档案回答，并确保内容符合公序良俗，请勿使用任何真实信息。"
@@ -1603,6 +1647,15 @@ const CanshouPage: React.FC = () => {
                     ⚠️ 已有 {overLimitItems.length} 条答案超过字数上限，继续提交将导致生成内容丧失原生性。
                   </div>
                 )}
+
+                <QuestionnaireAnswerExportPanel
+                  variant="dark"
+                  title="生成前备份问卷答案"
+                  filenameBase="残兽问卷_答案备份"
+                  hasContent={answerItems.length > 0}
+                  buildContent={buildAnswerExportText}
+                  disabled={submitting || isTransitioning || isCooldown}
+                />
 
                 <div className="mt-8 text-center">
                   <Link href="/" className="footer-link">返回首页</Link>
