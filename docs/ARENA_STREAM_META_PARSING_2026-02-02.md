@@ -9,6 +9,7 @@
 
 更新记录：
 - 2026-02-03：根据补充前提（“注释与 JSON 代码块都会短暂显示，用户已习惯；只要最终能隐藏即可”），补充了对路线 2 与 SSE/事件流的可行性分析，并加入“元数据可视化入口”建议。
+- 2026-02-03：补充 SSE 端点设计、服务端拆分 meta 的状态机思路、前端 SSE 帧解析策略，并明确“诊断入口应放在战报卡片外侧，避免污染截图”。
 
 ---
 
@@ -209,6 +210,127 @@ N 的经验值通常在 `2k~8k` 之间，需要在“隐藏效果”和“尾部
 4. **Cloudflare Pages / Edge Runtime 支持性**  
    现有 `/api/arena/generate-stream` 已经使用 `ReadableStream` 进行流式透传与尾部追加注释，说明部署侧具备“边读边写响应”的能力。将响应的 `Content-Type` 换成 `text/event-stream`（并按 SSE 帧格式输出）在技术上是同一类能力。
 
+### SSE 端点设计（推荐方案）
+
+建议将 SSE 视为“同一生成接口的另一种响应格式”，优先采用**同一路径协商**，以便灰度与回滚：
+
+- 路径：仍用 `/api/arena/generate-stream`
+- 请求：仍为 `POST` JSON body（保持兼容，不引入 EventSource）
+- 协商方式（二选一，推荐 A）：
+  - A：`?format=sse`（最直观，排查方便）
+  - B：`Accept: text/event-stream`（更标准，但调试成本略高）
+
+响应头建议：
+
+- `Content-Type: text/event-stream; charset=utf-8`
+- `Cache-Control: no-cache, no-transform`
+- （可选）`X-Accel-Buffering: no`（部分代理有意义）
+
+事件定义（建议统一用“单行 JSON”作为 data，避免换行复杂度）：
+
+- `event: markdown` → `data: {"chunk":"..."}`
+- `event: meta` → `data: {"meta":{...},"raw":"...","parseOk":true}`（`raw` 可选/可截断）
+- `event: meta_error` → `data: {"raw":"...","parseOk":false,"error":"..."}`
+- `event: telemetry` → `data: {"aiModel":"...","usage":{...},"narrativeHistoryReadCount":N}`
+- `event: done` → `data: {"ok":true}`
+- `event: error` → `data: {"ok":false,"error":"..."}`
+
+> 设计要点：即使采用 SSE，也不建议把“元数据输出”完全丢给客户端再解析；更推荐服务端发 `meta`（解析后）并可选发 `raw`（用于诊断）。原因：服务端可顺便把“修复率/失败原因/覆盖率”打到日志里，更利于长期优化。
+
+### 服务端实现要点（如何从上游纯文本流拆出 meta）
+
+目标：客户端**只收到 markdown chunk**，meta 不进入正文渲染，但仍可在诊断入口查看。
+
+推荐做法：服务端对上游文本做一个轻量状态机 + marker 保护：
+
+1. 维护 `pendingMarkdownTail`（未发送的小尾巴）与 `metaBuffer`（命中 marker 后开始收集）
+2. 在未进入 meta 模式时：
+   - 每次追加新文本后，先在 `pendingMarkdownTail` 中查找 `<!-- MAHOSHOJO_ARENA_META`（或你们选择的 meta 标记）
+   - 未命中：仅发送“除最后 guard 长度外”的部分为 `markdown` 事件，保留 guard 以避免把 marker 切碎后发出去
+   - 命中：把 marker 之前的内容发为 `markdown`，marker 起的内容转入 `metaBuffer`，从此不再发送后续文本为 markdown
+3. 流结束后：
+   - 若命中过 meta：对 `metaBuffer` 运行现有 `repairNormalizeValidate + schema` 管线，发 `meta/meta_error` 事件
+   - 若未命中过 meta：直接结束（仍可发 `meta_error` 提示“未输出 meta”）
+4. telemetry 不再通过“尾部注释”注入正文，而是直接发 `telemetry` 事件
+
+这个方案的关键性质：
+
+- 不增加 LLM token：模型输出仍是同一份文本（包含 meta），只是服务端不把 meta 下发到正文事件
+- 不依赖 meta 长度：一旦命中 marker，就不再发送后续内容为正文，因此 meta 再长也不会污染正文
+- guard 只需要覆盖“marker 最长前缀”（例如 64~256 字符），用于避免“flush 切碎 marker 导致漏检”
+
+### 前端 SSE 解析设计（fetch + ReadableStream，自解析帧）
+
+由于生成请求是 `POST`，前端应继续使用 `fetch` 获取 `response.body`，并在浏览器侧解析 SSE 帧（而不是 EventSource）。
+
+推荐的解析策略：
+
+1. **按字节流读取并解码**  
+   - 使用 `reader = response.body.getReader()`  
+   - `TextDecoder.decode(value, { stream: true })` 拼接进一个 `sseBuffer` 字符串  
+   - 结束时 `decoder.decode()` flush，避免多字节字符丢失
+
+2. **按事件块切分**  
+   - SSE 事件以空行分隔：`\n\n`（也要兼容 `\r\n\r\n`）  
+   - 每次从 `sseBuffer` 中取出一个完整块，逐行解析：  
+     - `event:` 行 → 当前事件名  
+     - `data:` 行 → 数据（可能多行，需按 SSE 规则用 `\n` 拼接）  
+     - `:` 开头注释行忽略
+
+3. **约定 data 为“单行 JSON”可显著简化前端**  
+   如果服务端按上文建议让每个事件都用 `data: { ... }`（一行 JSON），则前端可直接 `JSON.parse(data)`，并且不会被“多行 data”复杂度困扰（chunk 中的换行会以 `\\n` 转义存在）。
+
+4. **事件处理与状态管理（建议）**
+
+   - `markdown`：
+     - `accumulatedMarkdown += payload.chunk`
+     - `setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedMarkdown))`
+     - 为避免每个小 chunk 都 setState，可做节流（例如每 50~100ms 更新一次 UI）
+   - `meta` / `meta_error`：
+     - 保存到独立状态（例如 `streamMetaDebug`），用于“诊断入口”展示
+     - 将可用的 `meta.meta` 作为 `metaOverride` 传给 `updateFromMarkdown`（无需把 raw 插回正文）
+   - `telemetry`：
+     - 更新 token / aiModel / narrativeHistoryReadCount 的展示状态（同样不要放进战报卡片）
+   - `done`：
+     - 标记结束，触发“叙事历史写入 / 冷却 / 角色更新”等后续流程（逻辑基本复用现有非 SSE 结束后处理）
+   - `error`：
+     - 优先展示错误（并保留已收到的 markdown 作为“半截战报”给用户复制）
+
+5. **降级策略（不触发二次 AI 调用）**
+
+   由于“重新请求一次”会导致二次模型调用（成本与结果不一致），SSE 解析的降级应尽量在同一响应内完成：
+
+   - 若遇到单个事件 JSON 解析失败：将该事件记为 `meta_error`（或忽略），继续处理后续事件
+   - 若 SSE 帧切分失败（极少见，通常是服务端输出格式错误）：可将 `sseBuffer` 全量作为“纯文本”展示给用户，并明确提示“流式协议错误”（用于反馈/排查）
+
+> 工程建议：为了让前端解析更稳，服务端应尽量保证 `data:` 只输出一行 JSON（不要输出裸换行），并且每个事件块以 `\n\n` 结束。
+
+### 与现有链路的集成点（保证“不破坏现有功能”）
+
+SSE 方案落地时，建议显式关注以下“影响面”，避免把“传输层改造”扩散成大回归：
+
+1. **保持默认仍为 `text/plain`，SSE 必须显式协商开启**  
+   这样能确保：
+   - 旧版前端与第三方脚本不受影响
+   - 服务端内部子请求（例如 PVP 的 `resolve-stream` 转发调用）不被意外切到 SSE
+
+2. **R2 存储与 D1 预览：优先存“原始模型输出”，不要存 SSE 帧**  
+   当前实现会把响应流 `tee()` 后上传 R2。SSE 上线后建议：
+   - `upstream.body.tee()`：一份原始输出用于 R2/preview，另一份用于 SSE 拆分后发客户端  
+   - 否则若把 SSE 帧存进 R2，会导致后续排查“模型实际输出了什么”变得困难
+
+3. **telemetry 的处理方式切换**  
+   - SSE 模式：不要在正文末尾追加 `MAHOSHOJO_TELEMETRY_META` 注释，改为 `telemetry` 事件  
+   - 非 SSE 模式：保持现状（尾部注释），兼容旧前端
+
+4. **角色更新触发点保持一致（仍在 done 后）**  
+   SSE 的 `meta` 事件可能在 `done` 之前就到达，但建议仍按现有语义：
+   - 正文展示：边到边流式  
+   - 角色更新：在 `done`（或最终确认完成）后统一触发，避免“中途更新/中途失败”导致难以理解的状态
+
+5. **安全边界不变：服务端签名仍是最终防线**  
+   即便 SSE 把 meta 拆得更干净，也不能把它当作“可信输入”。现有 `/api/arena/update-combatants-after-stream` 的签名验证与写入逻辑应保持不变；SSE 只是让“拿到可靠 meta”更容易、可观测性更强。
+
 ### 工程落地时最容易踩的坑（提前规避）
 
 1. **EventSource 只支持 GET**  
@@ -262,10 +384,11 @@ N 的经验值通常在 `2k~8k` 之间，需要在“隐藏效果”和“尾部
 
 无论采用路线 1/2（in-band）还是 SSE（out-of-band），都建议提供一个统一的“诊断入口”，避免用户只能看 console：
 
-建议 UI 形态（不限定实现）：
+建议 UI 形态（不限定实现，重点是“不要污染战报截图区域”）：
 
-- 战报卡片右上角：`元数据` / `诊断` 按钮（默认折叠）
-- 弹窗内容建议包含：
+- **不要把入口放进战报卡片内部**：因为用户可能截图保存战报，额外按钮/标签会被截进去。更推荐放在“角色更新/写入结果”区域附近（类似现有角色更新组件的布局），或放在页面侧栏/抽屉里。
+- 入口文案建议偏“诊断/详情”，避免让普通用户误以为这是正文的一部分。
+- 弹窗/抽屉内容建议包含：
   1. **解析状态**：命中 marker？是否使用 jsonrepair？schema 校验是否通过？失败原因（简短）
   2. **结构化结果（parsed meta）**：用于更新的最终对象（可复制）
   3. **原始输出（raw meta）**：用于定位“模型到底输出了什么”（可复制，必要时截断）
