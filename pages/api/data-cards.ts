@@ -136,6 +136,7 @@ export default async function handler(req: Request): Promise<Response> {
       // 创建新数据卡
       try {
         const { type, name, description, data, isPublic } = await req.json();
+        const isAdmin = user.is_admin === 1;
 
         if (!type || !name || !data) {
           return new Response(JSON.stringify({ error: '缺少必要参数' }), {
@@ -155,7 +156,14 @@ export default async function handler(req: Request): Promise<Response> {
         let dataString: string;
         let dataWithAuthorString: string;
         try {
-          dataString = JSON.stringify(data);
+          const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+            typeof value === 'object' && value !== null && !Array.isArray(value);
+          const sanitizedPayload =
+            type === 'questionnaire' && !isAdmin && isPlainObject(data)
+              ? { ...data, nativeAllowed: false }
+              : data;
+
+          dataString = JSON.stringify(sanitizedPayload);
           dataWithAuthorString = JSON.stringify({ ...(JSON.parse(dataString) as any), _author: user.username, _authorId: userId });
         } catch {
           return new Response(JSON.stringify({ error: 'data 无法序列化为 JSON' }), {
@@ -262,19 +270,52 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
+        // 读取当前卡片
+        const currentCard = await getDataCardById(id, false);
+        if (!currentCard || currentCard.user_id !== userId) {
+          return new Response(JSON.stringify({ error: '数据卡不存在或无权访问' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        const isExempt = user.is_review_exempt === 1;
+        const isAdmin = user.is_admin === 1;
+        const isPendingOrRejected = currentCard.review_status !== 'approved';
+
         let dataString: string | null = null;
-        let dataSizeBytes: number | null = null;
         const dataChanged = data !== undefined;
         if (dataChanged) {
+          const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+            typeof value === 'object' && value !== null && !Array.isArray(value);
+
+          const preservedNativeAllowed = (() => {
+            if (currentCard.type !== 'questionnaire') return null;
+            if (isAdmin) return null;
+            if (typeof currentCard.data !== 'string') return null;
+            try {
+              const parsed = JSON.parse(currentCard.data) as any;
+              return typeof parsed?.nativeAllowed === 'boolean' ? parsed.nativeAllowed : null;
+            } catch {
+              return null;
+            }
+          })();
+
+          const nextPayload =
+            currentCard.type === 'questionnaire' && !isAdmin && isPlainObject(data)
+              ? { ...data, nativeAllowed: preservedNativeAllowed === true }
+              : data;
+
           try {
-            dataString = JSON.stringify(data);
+            dataString = JSON.stringify(nextPayload);
           } catch {
             return new Response(JSON.stringify({ error: 'data 无法序列化为 JSON' }), {
               status: 400,
               headers: { 'Content-Type': 'application/json' }
             });
           }
-          dataSizeBytes = getUtf8ByteLength(dataString);
+
+          const dataSizeBytes = getUtf8ByteLength(dataString);
           if (dataSizeBytes > MAX_DATA_CARD_BYTES) return makePayloadTooLargeResponse(dataSizeBytes);
         }
 
@@ -291,18 +332,6 @@ export default async function handler(req: Request): Promise<Response> {
           });
         }
 
-        // 读取当前卡片
-        const currentCard = await getDataCardById(id, false);
-        if (!currentCard || currentCard.user_id !== userId) {
-          return new Response(JSON.stringify({ error: '数据卡不存在或无权访问' }), {
-            status: 404,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-
-        const isExempt = user.is_review_exempt === 1;
-        const isAdmin = user.is_admin === 1;
-        const isPendingOrRejected = currentCard.review_status !== 'approved';
         const normalizedPublicAfter =
           isPublic === undefined
             ? Number(currentCard.is_public) === 1

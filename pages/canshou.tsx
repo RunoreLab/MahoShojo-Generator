@@ -978,6 +978,12 @@ const CanshouPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           answers: finalAnswerItems,
+          questionnaireSelections: selectedQuestionnaires.map((selection) => ({
+            source: selection.source,
+            kind: selection.questionnaire.kind,
+            presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
+            dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
+          })),
           questionnaires: selectedQuestionnaires.map((selection) => ({
             id: selection.questionnaire.id,
             title: selection.questionnaire.title,
