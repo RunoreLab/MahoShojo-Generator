@@ -22,6 +22,7 @@
 - ✅ 问卷 JSON 已支持 `loreMarkdown`，并允许 `questions: []`（纯设定卡）
 - ✅ `/details`、`/canshou` 已支持选择问卷/设定卡，并将 Lore 注入提示词（含 `useLore` 开关）
 - ✅ `/sublimation` 已接入同款“选择问卷/设定卡并注入 Lore”，并将“非原生许可 Lore”纳入签名判定
+- ✅ `/battle`（竞技场战报，含流式/非流式）已支持选择问卷/设定卡，并将 Lore 注入战报提示词（PVP 复用 `/api/generate-battle-story` 同步生效）
 - ✅ 预设问卷若 `nativeAllowed=false`，不会参与原生签名链路（与百科/原生性规则一致）
 - ✅ 已新增预设“纯设定卡”（默认不选，可选叠加）：世界结构与势力速查、心之花体系与能力边界（留空规则）、残兽生态与进化速查
 - ✅ 已为“深度向/档案补全/原作向”部分预设问卷补充 `loreMarkdown`（创作提示、原作口径与阶段边界）

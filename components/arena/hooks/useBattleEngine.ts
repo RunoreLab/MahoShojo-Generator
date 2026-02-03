@@ -235,6 +235,7 @@ export const useBattleEngine = () => {
   const arenaFreeRankingEnabled = useBattleSelector((state) => state.arenaFreeRankingEnabled);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
+  const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
   const selectedLevel = useBattleSelector((state) => state.selectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const storyLength = useBattleSelector((state) => state.storyLength);
@@ -345,6 +346,10 @@ export const useBattleEngine = () => {
         JSON.stringify(freshCombatants.map((c) => c.data)),
         settings.userGuidance,
         JSON.stringify(freshCombatants.map((c) => (typeof (c as any).characterGuidance === 'string' ? (c as any).characterGuidance : ''))),
+        selectedQuestionnaires
+          .filter((selection) => selection.useLore !== false)
+          .map((selection) => selection.questionnaire.loreMarkdown ?? '')
+          .join('\n\n'),
         shouldUseScenario ? JSON.stringify(scenario.content) : '',
         shouldUseScenario && auxScenarios.length > 0 ? JSON.stringify(auxScenarios.map((s) => s.content)) : '',
       ];
@@ -426,6 +431,23 @@ export const useBattleEngine = () => {
         adjudicationEvents,
         storyLength,
       };
+
+      if (selectedQuestionnaires.length > 0) {
+        requestBody.questionnaireSelections = selectedQuestionnaires.map((selection) => ({
+          source: selection.source,
+          kind: selection.questionnaire.kind,
+          presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
+          dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
+          useLore: selection.useLore === false ? false : undefined,
+        }));
+        requestBody.questionnaires = selectedQuestionnaires.map((selection) => ({
+          id: selection.questionnaire.id,
+          title: selection.questionnaire.title,
+          kind: selection.questionnaire.kind,
+          useLore: selection.useLore === false ? false : undefined,
+          loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
+        }));
+      }
 
       if (
         userProviderConfig &&
@@ -1238,6 +1260,7 @@ export const useBattleEngine = () => {
     combatants,
     scenario,
     auxScenarios,
+    selectedQuestionnaires,
     userProviderConfig,
     settings,
     selectedLevel,

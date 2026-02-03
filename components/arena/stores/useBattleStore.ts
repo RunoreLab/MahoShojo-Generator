@@ -51,6 +51,7 @@ export const useBattleStore = create<BattleStoreState>()(
       teams: [],
       scenario: defaultScenario,
       auxScenarios: [],
+      selectedQuestionnaires: [],
       battleMode: 'classic',
       generationMode: 'non-stream',
       arenaFreeRankingEnabled: false,
@@ -261,6 +262,65 @@ export const useBattleStore = create<BattleStoreState>()(
       setLoadingPreset: (filename) => set({ loadingPreset: filename }),
       setUserProviderConfig: (config) => set({ userProviderConfig: config }),
       setStats: (stats) => set({ stats }),
+
+      addQuestionnaireSelection: (incoming) =>
+        set((state) => {
+          const questionnaireId = incoming.questionnaire?.id ?? '';
+          const isDuplicate = state.selectedQuestionnaires.some((item) => {
+            if (item.source !== incoming.source) return false;
+            if (item.questionnaire?.id !== questionnaireId) return false;
+            if (incoming.source === 'database') {
+              return Boolean(incoming.dataCardId) && item.dataCardId === incoming.dataCardId;
+            }
+            return true;
+          });
+          if (isDuplicate) return state;
+
+          const usedSelectionIds = new Set<string>();
+          state.selectedQuestionnaires.forEach((item) => {
+            const existingId = item.selectionId || item.questionnaire.id;
+            if (existingId) usedSelectionIds.add(existingId);
+          });
+
+          const createSelectionSuffix = () => {
+            try {
+              if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+                return crypto.randomUUID();
+              }
+            } catch {
+              // ignore
+            }
+            return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+          };
+
+          const base = questionnaireId || 'questionnaire';
+          let selectionId = typeof incoming.selectionId === 'string' ? incoming.selectionId.trim() : '';
+          if (!selectionId) {
+            selectionId = usedSelectionIds.has(base) ? `${base}::${createSelectionSuffix()}` : base;
+          } else if (usedSelectionIds.has(selectionId)) {
+            selectionId = `${base}::${createSelectionSuffix()}`;
+          }
+
+          return { selectedQuestionnaires: [...state.selectedQuestionnaires, { ...incoming, selectionId }] };
+        }),
+
+      removeQuestionnaireSelection: (selectionId) =>
+        set((state) => ({
+          selectedQuestionnaires: state.selectedQuestionnaires.filter(
+            (item) => (item.selectionId ?? item.questionnaire.id) !== selectionId
+          ),
+        })),
+
+      setQuestionnaireSelections: (selections) => set({ selectedQuestionnaires: selections }),
+
+      toggleQuestionnaireSelectionLore: (selectionId, enabled) =>
+        set((state) => ({
+          selectedQuestionnaires: state.selectedQuestionnaires.map((item) => {
+            const id = item.selectionId ?? item.questionnaire.id;
+            if (id !== selectionId) return item;
+            return { ...item, useLore: enabled };
+          }),
+        })),
     }),
     {
       name: 'arena-storage',

@@ -4,6 +4,7 @@ import type { Preset } from '@/lib/presets';
 import type { StatsData } from '@/pages/api/get-stats';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
+import type { QuestionnaireDefinition } from '@/lib/questionnaires';
 
 export const MAX_COMBATANTS = 10;
 export const MAX_AUX_SCENARIOS = 10;
@@ -13,6 +14,18 @@ export type CombatantType = 'magical-girl' | 'canshou' | 'general-character';
 export type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type StoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 export type GenerationMode = 'non-stream' | 'stream';
+
+export type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
+
+export type QuestionnaireSelection = {
+  source: QuestionnaireSelectionSource;
+  questionnaire: QuestionnaireDefinition;
+  dataCardId?: string;
+  dataCardName?: string;
+  dataCardAuthor?: string;
+  selectionId?: string;
+  useLore?: boolean;
+};
 
 export type StreamUpdateMetaDebug = {
   source: 'sse' | 'inline';
@@ -128,6 +141,7 @@ export interface BattleStoreState {
   teams: BattleTeam[];
   scenario: ScenarioState;
   auxScenarios: AuxiliaryScenarioState[];
+  selectedQuestionnaires: QuestionnaireSelection[];
   battleMode: BattleMode;
   generationMode: GenerationMode;
   /** 是否启用“自由排位”计分（默认关闭；仅影响 free 队列）。 */
@@ -214,4 +228,9 @@ export interface BattleStoreState {
   setLoadingPreset: (filename: string | null) => void;
   setUserProviderConfig: (config: UserAIProviderConfig | null) => void;
   setStats: (stats: StatsData | null) => void;
+
+  addQuestionnaireSelection: (selection: QuestionnaireSelection) => void;
+  removeQuestionnaireSelection: (selectionId: string) => void;
+  setQuestionnaireSelections: (selections: QuestionnaireSelection[]) => void;
+  toggleQuestionnaireSelectionLore: (selectionId: string, enabled: boolean) => void;
 }
