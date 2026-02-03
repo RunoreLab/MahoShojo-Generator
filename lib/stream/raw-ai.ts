@@ -284,7 +284,7 @@ export async function generateWithStreamAI(
                     totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
                     onTimeout: () => {
                         try {
-                            void reader.cancel('timeout');
+                            void reader.cancel('timeout').catch(() => {});
                         } catch {
                             // ignore
                         }
@@ -300,7 +300,7 @@ export async function generateWithStreamAI(
 	                    if (chunk.done) {
 	                        if (looksLikeTrivialEmptyOutput(prefetchedText)) {
 	                            try {
-	                                void reader.cancel('empty-output');
+	                                void reader.cancel('empty-output').catch(() => {});
 	                            } catch {
 	                                // ignore
 	                            }
@@ -316,7 +316,7 @@ export async function generateWithStreamAI(
 
 	                if (looksLikeTrivialEmptyOutput(prefetchedText)) {
 	                    try {
-	                        void reader.cancel('empty-output');
+	                        void reader.cancel('empty-output').catch(() => {});
 	                    } catch {
 	                        // ignore
 	                    }

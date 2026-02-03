@@ -849,7 +849,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
                 onTimeout: () => {
                     try {
-                        void reader.cancel('timeout');
+                        void reader.cancel('timeout').catch(() => {});
                     } catch {
                         // ignore
                     }
@@ -928,6 +928,8 @@ async function handler(req: NextRequest): Promise<Response> {
 	                        phase: 'open',
 	                        generationId,
 	                        shouldAllowStreamMeta,
+	                        idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+	                        totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
 	                    });
 	                },
 	                async pull(controller) {
@@ -1100,7 +1102,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 },
                 async cancel(reason) {
                     try {
-                        void reader.cancel(reason);
+                        void reader.cancel(reason).catch(() => {});
                     } catch {
                         // 忽略取消时的二次错误
                     }
@@ -1121,7 +1123,7 @@ async function handler(req: NextRequest): Promise<Response> {
             totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
             onTimeout: () => {
                 try {
-                    void reader.cancel('timeout');
+                    void reader.cancel('timeout').catch(() => {});
                 } catch {
                     // ignore
                 }
@@ -1191,7 +1193,7 @@ async function handler(req: NextRequest): Promise<Response> {
             },
             async cancel(reason) {
                 try {
-                    void reader.cancel(reason);
+                    void reader.cancel(reason).catch(() => {});
                 } catch {
                     // 忽略取消时的二次错误
                 }

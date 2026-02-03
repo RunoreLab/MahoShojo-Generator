@@ -19,18 +19,18 @@ export async function readTextStreamFromResponse(
   const decoder = new TextDecoder();
   let accumulatedText = '';
 
-  const readWithTimeout = createStreamReadWithTimeout({
-    label: options.label,
-    idleTimeoutMs: options.idleTimeoutMs ?? STREAM_READ_IDLE_TIMEOUT_MS,
-    totalTimeoutMs: options.totalTimeoutMs ?? STREAM_READ_TOTAL_TIMEOUT_MS,
-    onTimeout: () => {
-      try {
-        void reader.cancel('timeout');
-      } catch {
-        // ignore
-      }
-    },
-  });
+    const readWithTimeout = createStreamReadWithTimeout({
+      label: options.label,
+      idleTimeoutMs: options.idleTimeoutMs ?? STREAM_READ_IDLE_TIMEOUT_MS,
+      totalTimeoutMs: options.totalTimeoutMs ?? STREAM_READ_TOTAL_TIMEOUT_MS,
+      onTimeout: () => {
+        try {
+          void reader.cancel('timeout').catch(() => {});
+        } catch {
+          // ignore
+        }
+      },
+    });
 
   while (true) {
     const { value, done } = await readWithTimeout(reader);
@@ -44,4 +44,3 @@ export async function readTextStreamFromResponse(
   options.onText?.(accumulatedText);
   return accumulatedText;
 }
-

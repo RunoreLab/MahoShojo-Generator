@@ -572,6 +572,8 @@ export const useBattleEngine = () => {
 	              status: response.status,
 	              contentType,
 	              isSseResponse,
+	              clientReadIdleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+	              clientReadTotalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
 	            });
 	          }
 
@@ -661,25 +663,32 @@ export const useBattleEngine = () => {
             if (!trimmed.endsWith('-->')) return false;
             return trimmed.length - idx < 4096;
           };
-          const readWithTimeout = createStreamReadWithTimeout({
-            label: '战报流式生成',
-            idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
-            totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
-            onTimeout: () => {
-              try {
-                abortController.abort();
-              } catch {
-                // ignore
-              }
-              if (reader) {
-                try {
-                  void reader.cancel('timeout');
-                } catch {
-                  // ignore
-                }
-              }
-            },
-          });
+	          const readWithTimeout = createStreamReadWithTimeout({
+	            label: '战报流式生成',
+	            idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+	            totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
+	            onTimeout: (timeoutError) => {
+	              if (debugSseEnabled) {
+	                console.warn('SSE 调试：读流超时', {
+	                  kind: (timeoutError as any)?.kind ?? null,
+	                  timeoutMs: (timeoutError as any)?.timeoutMs ?? null,
+	                  message: timeoutError instanceof Error ? timeoutError.message : String(timeoutError ?? 'timeout'),
+	                });
+	              }
+	              try {
+	                abortController.abort();
+	              } catch {
+	                // ignore
+	              }
+	              if (reader) {
+	                try {
+	                  void reader.cancel('timeout').catch(() => {});
+	                } catch {
+	                  // ignore
+	                }
+	              }
+	            },
+	          });
           const streamBackupItems = buildBattleBackupItems(
             freshCombatants,
             shouldUseScenario ? scenario.content : null,
@@ -769,7 +778,7 @@ export const useBattleEngine = () => {
 
               shouldAbort = true;
               try {
-                void reader!.cancel('sensitive');
+                void reader!.cancel('sensitive').catch(() => {});
               } catch {
                 // ignore
               }
@@ -853,7 +862,7 @@ export const useBattleEngine = () => {
                 shouldAbort = true;
                 sawDoneEvent = true;
                 try {
-                  void reader!.cancel('server-error-event');
+                  void reader!.cancel('server-error-event').catch(() => {});
                 } catch {
                   // ignore
                 }
@@ -994,7 +1003,7 @@ export const useBattleEngine = () => {
 
                 shouldAbort = true;
                 try {
-                  void reader.cancel('sensitive');
+                  void reader.cancel('sensitive').catch(() => {});
                 } catch {
                   // ignore
                 }
@@ -1003,14 +1012,14 @@ export const useBattleEngine = () => {
 
               setStreamingMarkdown(sanitizeTextByShieldWords(accumulatedText));
 
-              if (shouldTerminateByTelemetry(accumulatedText)) {
-                try {
-                  void reader.cancel('telemetry-meta-received');
-                } catch {
-                  // ignore
+                if (shouldTerminateByTelemetry(accumulatedText)) {
+                  try {
+                    void reader.cancel('telemetry-meta-received').catch(() => {});
+                  } catch {
+                    // ignore
+                  }
+                  break;
                 }
-                break;
-              }
 
               if (shouldAbort) {
                 break;
@@ -1185,7 +1194,7 @@ export const useBattleEngine = () => {
         } finally {
           if (reader) {
             try {
-              void reader.cancel();
+              void reader.cancel().catch(() => {});
             } catch {
               // ignore
             }
