@@ -1799,7 +1799,6 @@ const CanshouPage: React.FC = () => {
         }}
         selectedType="questionnaire"
         initialTab="public"
-        visibleTabs={['public', 'my']}
         titleOverride="选择云端问卷"
         onSelectCard={handleSelectQuestionnaireCard}
         externalError={questionnairePickerError}
