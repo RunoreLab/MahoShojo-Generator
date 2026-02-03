@@ -531,6 +531,7 @@ export const useBattleEngine = () => {
 	              return '';
 	            }
 	          })();
+	          const debugSseEnabled = Boolean(debugSseQuery);
 	          const response = await fetch(`/api/arena/generate-stream?format=sse${debugSseQuery}`, {
 	            method: 'POST',
 	            headers: requestHeaders,
@@ -559,15 +560,22 @@ export const useBattleEngine = () => {
             throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
           }
 
-          reader = response.body?.getReader() ?? null;
-          if (!reader) {
-            throw new Error('无法读取响应流，请使用最新版本的浏览器。');
-          }
+	          reader = response.body?.getReader() ?? null;
+	          if (!reader) {
+	            throw new Error('无法读取响应流，请使用最新版本的浏览器。');
+	          }
 
-          const contentType = response.headers.get('content-type') || '';
-          const isSseResponse = contentType.includes('text/event-stream');
+	          const contentType = response.headers.get('content-type') || '';
+	          const isSseResponse = contentType.includes('text/event-stream');
+	          if (debugSseEnabled) {
+	            console.info('SSE 调试：响应信息', {
+	              status: response.status,
+	              contentType,
+	              isSseResponse,
+	            });
+	          }
 
-          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
+	          const metaHeader = response.headers.get('x-mahoshojo-stream-meta');
           if (metaHeader) {
             try {
               const parsed = JSON.parse(decodeURIComponent(metaHeader));
