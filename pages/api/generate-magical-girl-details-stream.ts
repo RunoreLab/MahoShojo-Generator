@@ -49,7 +49,8 @@ const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
       const id = typeof record.id === 'string' && record.id.trim() ? record.id.trim() : '';
       const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim() : '';
       if (!id || !title) return null;
-      const loreMarkdown = typeof record.loreMarkdown === 'string' && record.loreMarkdown.trim()
+      const useLore = typeof record.useLore === 'boolean' ? record.useLore : true;
+      const loreMarkdown = useLore && typeof record.loreMarkdown === 'string' && record.loreMarkdown.trim()
         ? record.loreMarkdown
         : undefined;
       const rawQuestions = Array.isArray(record.questions) ? record.questions : [];

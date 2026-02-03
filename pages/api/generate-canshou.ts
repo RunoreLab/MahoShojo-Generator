@@ -66,6 +66,7 @@ type RequestQuestionnaireSelection = {
   kind: 'magical-girl' | 'canshou';
   presetId?: string;
   dataCardId?: string;
+  useLore?: boolean;
 };
 
 type QuestionnairePresetIndexEntry = {
@@ -102,10 +103,12 @@ const normalizeQuestionnaireSelections = (raw: unknown): RequestQuestionnaireSel
 
       const presetId = typeof record.presetId === 'string' ? record.presetId.trim() : '';
       const dataCardId = typeof record.dataCardId === 'string' ? record.dataCardId.trim() : '';
+      const useLore = typeof record.useLore === 'boolean' ? record.useLore : undefined;
 
       const selection: RequestQuestionnaireSelection = { source, kind };
       if (presetId) selection.presetId = presetId;
       if (dataCardId) selection.dataCardId = dataCardId;
+      if (typeof useLore === 'boolean') selection.useLore = useLore;
       return selection;
     })
     .filter((item): item is RequestQuestionnaireSelection => Boolean(item));
@@ -130,12 +133,16 @@ const fetchJsonFromSameOrigin = async (reqUrl: string, path: string): Promise<un
 
 const resolveNativeQuestionnaires = async (
   reqUrl: string,
-  selections: RequestQuestionnaireSelection[]
+  selections: RequestQuestionnaireSelection[],
+  requiredQuestionnaireIds: Set<string>
 ): Promise<{ allowed: boolean; questionnaires: RequestQuestionnaire[] }> => {
   if (selections.length === 0) return { allowed: false, questionnaires: [] };
 
+  const canIgnoreUntrusted = requiredQuestionnaireIds.size > 0;
   const payloads: unknown[] = [];
+  const metas: Array<{ useLore?: boolean }> = [];
   for (const selection of selections) {
+    const useLore = selection.useLore;
     if (selection.source === 'preset') {
       const presetId = selection.presetId?.trim() ?? '';
       const presetEntry = PRESET_ENTRIES.find((item) => item.kind === selection.kind && item.id === presetId) ?? null;
@@ -144,6 +151,7 @@ const resolveNativeQuestionnaires = async (
       }
       const presetPayload = await fetchJsonFromSameOrigin(reqUrl, presetEntry.path);
       payloads.push(presetPayload);
+      metas.push({ useLore });
       continue;
     }
 
@@ -160,22 +168,51 @@ const resolveNativeQuestionnaires = async (
       } catch {
         return { allowed: false, questionnaires: [] };
       }
-      if (!parsed || typeof parsed !== 'object' || (parsed as any).nativeAllowed !== true) {
+      const questionnaireId = typeof parsed?.id === 'string' ? parsed.id.trim() : '';
+      if (!questionnaireId) return { allowed: false, questionnaires: [] };
+      const nativeAllowed = parsed && typeof parsed === 'object' && (parsed as any).nativeAllowed === true;
+      if (!nativeAllowed) {
+        if (canIgnoreUntrusted && useLore === false && !requiredQuestionnaireIds.has(questionnaireId)) {
+          continue;
+        }
         return { allowed: false, questionnaires: [] };
       }
       payloads.push(parsed);
+      metas.push({ useLore });
       continue;
     }
 
     // upload / 其他来源：不允许原生签名
+    if (canIgnoreUntrusted && useLore === false) {
+      continue;
+    }
     return { allowed: false, questionnaires: [] };
   }
+
+  if (payloads.length === 0) return { allowed: false, questionnaires: [] };
 
   const normalized = normalizeQuestionnaires(payloads);
   if (normalized.length !== payloads.length) {
     return { allowed: false, questionnaires: [] };
   }
-  return { allowed: true, questionnaires: normalized };
+
+  if (canIgnoreUntrusted) {
+    const loadedIds = new Set(normalized.map((questionnaire) => questionnaire.id));
+    for (const id of requiredQuestionnaireIds) {
+      if (!loadedIds.has(id)) {
+        return { allowed: false, questionnaires: [] };
+      }
+    }
+  }
+
+  const questionnaires = normalized.map((questionnaire, index) => {
+    if (metas[index]?.useLore === false) {
+      return { ...questionnaire, loreMarkdown: undefined };
+    }
+    return questionnaire;
+  });
+
+  return { allowed: true, questionnaires };
 };
 
 const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
@@ -189,7 +226,8 @@ const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
       const id = typeof record.id === 'string' && record.id.trim() ? record.id.trim() : '';
       const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim() : '';
       if (!id || !title) return null;
-      const loreMarkdown = typeof record.loreMarkdown === 'string' && record.loreMarkdown.trim()
+      const useLore = typeof record.useLore === 'boolean' ? record.useLore : true;
+      const loreMarkdown = useLore && typeof record.loreMarkdown === 'string' && record.loreMarkdown.trim()
         ? record.loreMarkdown
         : undefined;
       const rawQuestions = Array.isArray(record.questions) ? record.questions : [];
@@ -235,6 +273,16 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
     .filter((item) => Boolean(item.lore))
     .map((item) => `【设定来源：${item.title}】\n${item.lore}`);
   return blocks.length > 0 ? blocks.join('\n\n') : '';
+};
+
+const extractAnswerQuestionnaireIds = (rawAnswers: unknown): Set<string> => {
+  const ids = new Set<string>();
+  const normalized = normalizeUserAnswers(rawAnswers, []);
+  normalized.forEach((item) => {
+    const id = item.questionnaireId?.trim() ?? '';
+    if (id) ids.add(id);
+  });
+  return ids;
 };
 
 type QuestionLookup = {
@@ -381,13 +429,14 @@ async function handler(req: NextRequest): Promise<Response> {
     const { answers: rawAnswers, questionnaires: rawQuestionnaires, allowNativeSignature: requestedNativeSignature, language = 'zh-CN', customProvider: customProviderPayload } = parsedBody;
 
     const questionnaireSelections = normalizeQuestionnaireSelections((parsedBody as any)?.questionnaireSelections);
+    const requiredQuestionnaireIds = extractAnswerQuestionnaireIds(rawAnswers);
     const requestQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
     let effectiveQuestionnaires = requestQuestionnaires;
     let nativeAllowedByServer = false;
 
     if (requestedNativeSignature === true) {
       try {
-        const resolved = await resolveNativeQuestionnaires(req.url, questionnaireSelections);
+        const resolved = await resolveNativeQuestionnaires(req.url, questionnaireSelections, requiredQuestionnaireIds);
         if (resolved.allowed && resolved.questionnaires.length > 0) {
           nativeAllowedByServer = true;
           effectiveQuestionnaires = resolved.questionnaires;
