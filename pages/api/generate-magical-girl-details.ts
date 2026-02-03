@@ -168,6 +168,17 @@ const resolveNativeQuestionnaires = async (
         return { allowed: false, questionnaires: [] };
       }
       const presetPayload = await fetchJsonFromSameOrigin(reqUrl, presetEntry.path);
+      const presetRecord = presetPayload && typeof presetPayload === 'object'
+        ? (presetPayload as Record<string, unknown>)
+        : null;
+      const questionnaireId = typeof presetRecord?.id === 'string' ? presetRecord.id.trim() : '';
+      const nativeAllowed = presetRecord?.nativeAllowed !== false;
+      if (!nativeAllowed) {
+        if (canIgnoreUntrusted && useLore === false && questionnaireId && !requiredQuestionnaireIds.has(questionnaireId)) {
+          continue;
+        }
+        return { allowed: false, questionnaires: [] };
+      }
       payloads.push(presetPayload);
       metas.push({ useLore });
       continue;

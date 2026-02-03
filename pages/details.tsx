@@ -488,16 +488,19 @@ const DetailsPage: React.FC = () => {
               rawRecord.source === 'upload' || rawRecord.source === 'database' || rawRecord.source === 'preset'
                 ? rawRecord.source
                 : 'preset';
-            const rawQuestionnaire = rawRecord.questionnaire as { id?: unknown; title?: unknown } | null;
+            const rawQuestionnaire = rawRecord.questionnaire as { id?: unknown; title?: unknown; nativeAllowed?: unknown } | null;
+            const fallbackNativeAllowed = source === 'preset'
+              ? (typeof rawQuestionnaire?.nativeAllowed === 'boolean' ? rawQuestionnaire.nativeAllowed : true)
+              : source === 'upload'
+                ? false
+                : (typeof rawQuestionnaire?.nativeAllowed === 'boolean' ? rawQuestionnaire.nativeAllowed : false);
             const normalized = normalizeQuestionnaireDefinition(rawRecord.questionnaire, {
               fallbackKind: 'magical-girl',
               fallbackId: typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : 'magical-girl-custom',
               fallbackTitle: typeof rawQuestionnaire?.title === 'string' ? rawQuestionnaire.title : '未命名问卷',
-              nativeAllowed: source === 'preset' ? true : false,
+              nativeAllowed: fallbackNativeAllowed,
             });
             if (!normalized) return null;
-            if (source === 'preset') normalized.nativeAllowed = true;
-            if (source === 'upload') normalized.nativeAllowed = false;
             if (source === 'database' && normalized.nativeAllowed == null) normalized.nativeAllowed = false;
             return {
               source,
@@ -650,11 +653,12 @@ const DetailsPage: React.FC = () => {
         const response = await fetch(defaultPreset.path);
         if (!response.ok) throw new Error('加载预设问卷失败');
         const data = await response.json();
+        const nativeAllowed = typeof (data as any)?.nativeAllowed === 'boolean' ? Boolean((data as any).nativeAllowed) : true;
         const normalized = normalizeQuestionnaireDefinition(data, {
           fallbackId: defaultPreset.id,
           fallbackKind: defaultPreset.kind,
           fallbackTitle: defaultPreset.title,
-          nativeAllowed: true,
+          nativeAllowed,
         });
         if (!normalized) throw new Error('预设问卷解析失败');
         if (cancelled) return;
@@ -820,11 +824,12 @@ const DetailsPage: React.FC = () => {
       const response = await fetch(preset.path);
       if (!response.ok) throw new Error('加载预设问卷失败');
       const data = await response.json();
+      const nativeAllowed = typeof (data as any)?.nativeAllowed === 'boolean' ? Boolean((data as any).nativeAllowed) : true;
       const normalized = normalizeQuestionnaireDefinition(data, {
         fallbackId: preset.id,
         fallbackKind: preset.kind,
         fallbackTitle: preset.title,
-        nativeAllowed: true,
+        nativeAllowed,
       });
       if (!normalized) throw new Error('预设问卷解析失败');
       applySelection({ source: 'preset', questionnaire: normalized });

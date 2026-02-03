@@ -21,12 +21,14 @@ import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProvide
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { ThemeImage } from '@/components/shared/ThemeImage';
+import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { formatDateTime } from '@/lib/constants';
 import { formatNarrativeHistoryEntriesForReference, mergeNarrativeHistoryText } from '@/lib/narrative-history';
+import { normalizeQuestionnaireDefinition, type QuestionnaireDefinition, type QuestionnairePresetEntry } from '@/lib/questionnaires';
 import {
 	    inferTemplate,
 	    TEMPLATE_LABELS,
@@ -66,6 +68,18 @@ const TARGET_TEMPLATE_LABELS: Record<SupportedTargetTemplate, string> = {
     'magical-girl': TEMPLATE_LABELS['magical-girl'],
     'canshou': TEMPLATE_LABELS['canshou'],
     'general': TEMPLATE_LABELS['general'],
+};
+
+type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
+
+type QuestionnaireSelection = {
+    source: QuestionnaireSelectionSource;
+    questionnaire: QuestionnaireDefinition;
+    dataCardId?: string;
+    dataCardName?: string;
+    dataCardAuthor?: string;
+    selectionId?: string;
+    useLore?: boolean;
 };
 
 // 递归提取对象中所有字符串值的函数
@@ -224,6 +238,47 @@ const SublimationPage: React.FC = () => {
     const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
     const hasStoredSublimationPrefsRef = useRef(false);
 
+    const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<QuestionnaireSelection[]>([]);
+    const [presetEntries, setPresetEntries] = useState<QuestionnairePresetEntry[]>([]);
+    const [showQuestionnaireSettings, setShowQuestionnaireSettings] = useState(false);
+    const [questionnaireLoadError, setQuestionnaireLoadError] = useState<string | null>(null);
+    const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
+    const [questionnairePickerError, setQuestionnairePickerError] = useState<string | null>(null);
+    const [showPasteQuestionnaireImport, setShowPasteQuestionnaireImport] = useState(false);
+    const [pasteQuestionnaireText, setPasteQuestionnaireText] = useState('');
+    const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
+
+    const createSelectionSuffix = useCallback(() => {
+        if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+            return crypto.randomUUID();
+        }
+        return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    }, []);
+
+    const ensureSelectionId = useCallback((selection: QuestionnaireSelection, used: Set<string>) => {
+        const base = selection.questionnaire.id || 'questionnaire';
+        let nextId = typeof selection.selectionId === 'string' ? selection.selectionId.trim() : '';
+        if (!nextId) {
+            nextId = used.has(base) ? `${base}::${createSelectionSuffix()}` : base;
+        } else if (used.has(nextId)) {
+            nextId = `${base}::${createSelectionSuffix()}`;
+        }
+        used.add(nextId);
+        return { ...selection, selectionId: nextId };
+    }, [createSelectionSuffix]);
+
+    const questionnaireLoreText = useMemo(() => {
+        const blocks = selectedQuestionnaires
+            .filter((selection) => selection.useLore !== false)
+            .map((selection) => ({
+                title: selection.questionnaire.title,
+                lore: selection.questionnaire.loreMarkdown?.trim() ?? '',
+            }))
+            .filter((item) => Boolean(item.lore))
+            .map((item) => `【设定来源：${item.title}】\n${item.lore}`);
+        return blocks.join('\n\n');
+    }, [selectedQuestionnaires]);
+
     const streamedGeneralCardForDisplay = useMemo(() => {
         if (generationMode !== 'stream') return null;
         const markdown = streamingMarkdown ?? streamedGeneralCard?.content ?? null;
@@ -258,6 +313,28 @@ const SublimationPage: React.FC = () => {
     }, []);
 
     useEffect(() => {
+        let cancelled = false;
+        const loadPresetIndex = async () => {
+            setQuestionnaireLoadError(null);
+            try {
+                const response = await fetch('/questionnaires/presets/index.json');
+                if (!response.ok) throw new Error('加载预设问卷索引失败');
+                const data = await response.json();
+                const list = Array.isArray(data?.presets) ? (data.presets as QuestionnairePresetEntry[]) : [];
+                if (!cancelled) setPresetEntries(list);
+            } catch (error) {
+                console.error('加载预设问卷失败:', error);
+                if (!cancelled) {
+                    setPresetEntries([]);
+                    setQuestionnaireLoadError('📋 预设问卷加载失败，请刷新页面重试');
+                }
+            }
+        };
+        void loadPresetIndex();
+        return () => { cancelled = true; };
+    }, []);
+
+    useEffect(() => {
         if (typeof window === 'undefined') return;
         try {
             const saved = window.localStorage.getItem(SUBLIMATION_PREFERENCE_KEY);
@@ -286,10 +363,55 @@ const SublimationPage: React.FC = () => {
                 const filtered = parsed.fieldsToPreserve.filter((value: unknown) => typeof value === 'string');
                 setFieldsToPreserve(filtered);
             }
+            if (typeof parsed?.showQuestionnaireSettings === 'boolean') {
+                setShowQuestionnaireSettings(parsed.showQuestionnaireSettings);
+            }
+            if (Array.isArray(parsed?.questionnaireSelections)) {
+                const usedSelectionIds = new Set<string>();
+                const restored = (parsed.questionnaireSelections as unknown[])
+                    .map((raw): QuestionnaireSelection | null => {
+                        if (!raw || typeof raw !== 'object') return null;
+                        const rawRecord = raw as Record<string, unknown>;
+                        const source: QuestionnaireSelectionSource =
+                            rawRecord.source === 'upload' || rawRecord.source === 'database' || rawRecord.source === 'preset'
+                                ? rawRecord.source
+                                : 'preset';
+                        const rawQuestionnaire = rawRecord.questionnaire as { id?: unknown; title?: unknown; kind?: unknown; nativeAllowed?: unknown } | null;
+                        const fallbackKind =
+                            rawQuestionnaire?.kind === 'canshou'
+                                ? 'canshou'
+                                : 'magical-girl';
+                        const fallbackNativeAllowed = source === 'preset'
+                            ? (typeof rawQuestionnaire?.nativeAllowed === 'boolean' ? rawQuestionnaire.nativeAllowed : true)
+                            : source === 'upload'
+                                ? false
+                                : (typeof rawQuestionnaire?.nativeAllowed === 'boolean' ? rawQuestionnaire.nativeAllowed : false);
+                        const normalized = normalizeQuestionnaireDefinition(rawRecord.questionnaire, {
+                            fallbackKind,
+                            fallbackId: typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : `${fallbackKind}-custom`,
+                            fallbackTitle: typeof rawQuestionnaire?.title === 'string' ? rawQuestionnaire.title : '未命名问卷',
+                            nativeAllowed: fallbackNativeAllowed,
+                        });
+                        if (!normalized) return null;
+                        if (source === 'database' && normalized.nativeAllowed == null) normalized.nativeAllowed = false;
+                        return {
+                            source,
+                            questionnaire: normalized,
+                            dataCardId: typeof rawRecord.dataCardId === 'string' ? rawRecord.dataCardId : undefined,
+                            dataCardName: typeof rawRecord.dataCardName === 'string' ? rawRecord.dataCardName : undefined,
+                            dataCardAuthor: typeof rawRecord.dataCardAuthor === 'string' ? rawRecord.dataCardAuthor : undefined,
+                            selectionId: typeof rawRecord.selectionId === 'string' ? rawRecord.selectionId : undefined,
+                            useLore: typeof rawRecord.useLore === 'boolean' ? rawRecord.useLore : undefined,
+                        } satisfies QuestionnaireSelection;
+                    })
+                    .filter((item): item is QuestionnaireSelection => Boolean(item))
+                    .map((item) => ensureSelectionId(item, usedSelectionIds));
+                setSelectedQuestionnaires(restored);
+            }
         } catch (error) {
             console.warn('读取升华偏好失败', error);
         }
-    }, []);
+    }, [ensureSelectionId]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -328,6 +450,8 @@ const SublimationPage: React.FC = () => {
                 allowReshapeNames,
                 targetTemplate,
                 fieldsToPreserve,
+                showQuestionnaireSettings,
+                questionnaireSelections: selectedQuestionnaires,
             };
             window.localStorage.setItem(SUBLIMATION_PREFERENCE_KEY, JSON.stringify(payload));
             hasStoredSublimationPrefsRef.current = true;
@@ -342,6 +466,8 @@ const SublimationPage: React.FC = () => {
         allowReshapeNames,
         targetTemplate,
         fieldsToPreserve,
+        showQuestionnaireSettings,
+        selectedQuestionnaires,
     ]);
 
     useEffect(() => {
@@ -418,6 +544,12 @@ const SublimationPage: React.FC = () => {
         if (!characterData) return false;
         const isNative = await verifyOrigin(characterData);
         if (!isNative) return false;
+        const hasNonNativeLore = selectedQuestionnaires.some((selection) =>
+            selection.useLore !== false
+            && Boolean(selection.questionnaire.loreMarkdown?.trim())
+            && selection.questionnaire.nativeAllowed !== true
+        );
+        if (hasNonNativeLore) return false;
         const trimmedGuidance = typeof userGuidance === 'string' ? userGuidance.trim() : '';
         const trimmedNarrativeHistory = typeof narrativeHistory === 'string' ? narrativeHistory.trim() : '';
         const hasArenaNarrativeSelection = Array.isArray(arenaNarrativeSelectedIds) && arenaNarrativeSelectedIds.length > 0;
@@ -428,7 +560,7 @@ const SublimationPage: React.FC = () => {
             return appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
         }
         return true;
-    }, [characterData, userGuidance, narrativeHistory, arenaNarrativeSelectedIds, verifyOrigin]);
+    }, [characterData, userGuidance, narrativeHistory, arenaNarrativeSelectedIds, verifyOrigin, selectedQuestionnaires]);
 
     const processJsonData = (jsonText: string) => {
         try {
@@ -506,6 +638,154 @@ const SublimationPage: React.FC = () => {
         setNarrativeHistory('');
         setNarrativeHistoryFileName(null);
         setArenaNarrativeSelectedIds([]);
+    };
+
+    const buildQuestionnaireSelectionKey = useCallback((selection: QuestionnaireSelection): string => {
+        if (selection.source === 'database') {
+            const id = selection.dataCardId?.trim() ?? selection.questionnaire.id;
+            return `database:${id}`;
+        }
+        if (selection.source === 'preset') {
+            return `preset:${selection.questionnaire.id}`;
+        }
+        return `${selection.source}:${selection.questionnaire.id}`;
+    }, []);
+
+    const applyQuestionnaireSelection = useCallback((selection: QuestionnaireSelection) => {
+        const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
+        const normalizedSelection: QuestionnaireSelection = hasLore ? selection : { ...selection, useLore: false };
+
+        setSelectedQuestionnaires((prev) => {
+            const existingKeys = new Set(prev.map(buildQuestionnaireSelectionKey));
+            const nextKey = buildQuestionnaireSelectionKey(normalizedSelection);
+            if (existingKeys.has(nextKey)) return prev;
+
+            const usedSelectionIds = new Set<string>();
+            prev.forEach((item) => {
+                const existingId = item.selectionId ?? item.questionnaire.id;
+                if (existingId) usedSelectionIds.add(existingId);
+            });
+            return [...prev, ensureSelectionId(normalizedSelection, usedSelectionIds)];
+        });
+
+        setQuestionnaireLoadError(null);
+        setPasteQuestionnaireError(null);
+        setPasteQuestionnaireText('');
+        setShowPasteQuestionnaireImport(false);
+    }, [buildQuestionnaireSelectionKey, ensureSelectionId]);
+
+    const handleRemoveQuestionnaireSelection = (selectionId: string) => {
+        setSelectedQuestionnaires((prev) => prev.filter((item) => (item.selectionId ?? item.questionnaire.id) !== selectionId));
+    };
+
+    const handleToggleQuestionnaireLore = (selectionId: string, enabled: boolean) => {
+        setSelectedQuestionnaires((prev) => prev.map((item) => {
+            const id = item.selectionId ?? item.questionnaire.id;
+            if (id !== selectionId) return item;
+            return { ...item, useLore: enabled };
+        }));
+    };
+
+    const handleSelectQuestionnaireCard = (card: any) => {
+        try {
+            const rawPayload = card?.data ?? card?.dataJson ?? card?.data_json ?? card?.dataJSON ?? null;
+            let rawData: any = null;
+            if (rawPayload !== null && rawPayload !== undefined) {
+                rawData = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
+            } else if (card && typeof card === 'object') {
+                if (Array.isArray(card.questions)) {
+                    rawData = card;
+                } else if (card.questionnaire && Array.isArray(card.questionnaire.questions)) {
+                    rawData = card.questionnaire;
+                }
+            }
+            if (!rawData) throw new Error('问卷数据卡内容为空或格式不受支持');
+
+            const fallbackKind = rawData?.kind === 'canshou' ? 'canshou' : 'magical-girl';
+            const normalized = normalizeQuestionnaireDefinition(rawData, {
+                fallbackKind,
+                fallbackId: typeof rawData?.id === 'string' ? rawData.id : `${fallbackKind}-card-${card?.id ?? ''}`,
+                fallbackTitle: typeof rawData?.title === 'string' ? rawData.title : card?.name || '未命名问卷',
+                nativeAllowed: typeof rawData?.nativeAllowed === 'boolean' ? rawData.nativeAllowed : false,
+            });
+            if (!normalized) throw new Error('问卷数据卡解析失败');
+
+            applyQuestionnaireSelection({
+                source: 'database',
+                questionnaire: normalized,
+                dataCardId: card?._cardId ?? card?.id,
+                dataCardName: card?._cardName ?? card?.name,
+                dataCardAuthor: card?._author ?? card?.username ?? card?.author,
+            });
+            setQuestionnairePickerError(null);
+            setShowQuestionnairePicker(false);
+        } catch (err) {
+            setQuestionnairePickerError(err instanceof Error ? err.message : '解析问卷失败');
+        }
+    };
+
+    const handleUploadQuestionnaire = async (file: File | null) => {
+        if (!file) return;
+        try {
+            const text = await file.text();
+            const parsed = JSON.parse(text);
+            const fallbackKind = parsed?.kind === 'canshou' ? 'canshou' : 'magical-girl';
+            const normalized = normalizeQuestionnaireDefinition(parsed, {
+                fallbackKind,
+                fallbackId: typeof parsed?.id === 'string' ? parsed.id : `${fallbackKind}-upload`,
+                fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : file.name.replace(/\.[^.]+$/, ''),
+                nativeAllowed: false,
+            });
+            if (!normalized) throw new Error('问卷文件解析失败');
+            applyQuestionnaireSelection({ source: 'upload', questionnaire: normalized });
+            setError(null);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '问卷文件解析失败');
+        }
+    };
+
+    const handlePasteQuestionnaireImport = () => {
+        if (!pasteQuestionnaireText.trim()) {
+            setPasteQuestionnaireError('请先粘贴问卷 JSON');
+            return;
+        }
+        try {
+            const parsed = JSON.parse(pasteQuestionnaireText);
+            const fallbackKind = parsed?.kind === 'canshou' ? 'canshou' : 'magical-girl';
+            const normalized = normalizeQuestionnaireDefinition(parsed, {
+                fallbackKind,
+                fallbackId: typeof parsed?.id === 'string' ? parsed.id : `${fallbackKind}-paste`,
+                fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : '未命名问卷',
+                nativeAllowed: false,
+            });
+            if (!normalized) throw new Error('问卷 JSON 无法识别，请检查格式');
+            applyQuestionnaireSelection({ source: 'upload', questionnaire: normalized });
+            setPasteQuestionnaireError(null);
+            setError(null);
+        } catch (err) {
+            setPasteQuestionnaireError(err instanceof Error ? err.message : '问卷 JSON 解析失败');
+        }
+    };
+
+    const handleAddPresetQuestionnaire = async (presetId: string) => {
+        const preset = presetEntries.find((item) => item.id === presetId);
+        if (!preset) return;
+        try {
+            const response = await fetch(preset.path);
+            if (!response.ok) throw new Error('加载预设问卷失败');
+            const data = await response.json();
+            const nativeAllowed = typeof (data as any)?.nativeAllowed === 'boolean' ? Boolean((data as any).nativeAllowed) : true;
+            const normalized = normalizeQuestionnaireDefinition(data, {
+                fallbackKind: preset.kind,
+                fallbackId: preset.id,
+                fallbackTitle: preset.title,
+                nativeAllowed,
+            });
+            if (!normalized) throw new Error('预设问卷解析失败');
+            applyQuestionnaireSelection({ source: 'preset', questionnaire: normalized });
+        } catch (err) {
+            setQuestionnaireLoadError(err instanceof Error ? err.message : '预设问卷加载失败');
+        }
     };
 
     // 打开角色数据卡选择器
@@ -615,7 +895,7 @@ const SublimationPage: React.FC = () => {
                 });
                 const finalNarrativeHistoryText = mergeNarrativeHistoryText(arenaNarrativeText, narrativeHistory);
 
-	            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance + " " + finalNarrativeHistoryText;
+	            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance + " " + finalNarrativeHistoryText + " " + questionnaireLoreText;
 	            const redirectTarget = await getSensitiveWordRedirectTarget(textToCheck, {
 	                reason: '上传的角色档案或引导内容包含危险符文',
 	            });
@@ -649,6 +929,26 @@ const SublimationPage: React.FC = () => {
                     modelId: userProviderConfig.modelId,
                     apiKey: userProviderConfig.apiKey,
                 } : undefined,
+                questionnaireSelections: selectedQuestionnaires.map((selection) => ({
+                    source: selection.source,
+                    kind: selection.questionnaire.kind,
+                    presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
+                    dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
+                    useLore: selection.useLore === false ? false : undefined,
+                })),
+                questionnaires: selectedQuestionnaires.map((selection) => ({
+                    id: selection.questionnaire.id,
+                    title: selection.questionnaire.title,
+                    kind: selection.questionnaire.kind,
+                    useLore: selection.useLore === false ? false : undefined,
+                    loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
+                    questions: selection.questionnaire.questions.map((question) => ({
+                        id: question.id,
+                        question: question.question,
+                        required: question.required !== false,
+                        maxLength: question.maxLength ?? null,
+                    })),
+                })),
             };
 
             if (sourceTemplate !== 'unknown') {
@@ -821,18 +1121,31 @@ const SublimationPage: React.FC = () => {
     const trimmedNarrativeHistory = narrativeHistory.trim();
     const hasArenaNarrativeSelection = Array.isArray(arenaNarrativeSelectedIds) && arenaNarrativeSelectedIds.length > 0;
     const hasNarrativeHistory = trimmedNarrativeHistory.length > 0 || hasArenaNarrativeSelection;
+    const hasQuestionnaireLore = questionnaireLoreText.trim().length > 0;
+    const hasNonNativeQuestionnaireLore =
+        hasQuestionnaireLore
+        && selectedQuestionnaires.some((selection) =>
+            selection.useLore !== false
+            && Boolean(selection.questionnaire.loreMarkdown?.trim())
+            && selection.questionnaire.nativeAllowed !== true
+        );
     const shouldWarnGuidanceNativeness =
         hasGuidance
         && !hasNarrativeHistory
         && isSourceNative === true
+        && !hasNonNativeQuestionnaireLore
         && !appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
     const shouldConfirmGuidanceNativeness =
         hasGuidance
         && !hasNarrativeHistory
         && isSourceNative === true
+        && !hasNonNativeQuestionnaireLore
         && appConfig.ALLOW_GUIDED_SUBLIMATION_NATIVE_SIGNING;
     const shouldWarnNarrativeNativeness =
         hasNarrativeHistory
+        && isSourceNative === true;
+    const shouldWarnLoreNativeness =
+        hasNonNativeQuestionnaireLore
         && isSourceNative === true;
     const sourceNativenessStatus: NativenessStatus | null = characterData
         ? (isSourceNativeChecking
@@ -876,6 +1189,7 @@ const SublimationPage: React.FC = () => {
                                 <li>选择目标模板（默认沿用原模板，无匹配时自动切换为通用角色），并可指定需要保留的字段。如果希望借此切换角色模板，建议选择【完全重塑】。</li>
                                 <li>可额外提供叙事历史（手动输入或上传），AI 将结合设定、历战记录与成长引导生成“升华后”的新形态设定。</li>
                                 <li>若提供叙事历史，本次升华结果将标记为<strong>非原生</strong>。</li>
+                                <li>若注入了<strong>非原生许可</strong>的问卷/设定卡设定（Lore），本次升华结果同样会标记为<strong>非原生</strong>。</li>
                             </ol>
                             <div className="mt-3 flex flex-wrap gap-3 text-xs">
                                 <Link href="/encyclopedia/sublimation" className="text-blue-700 hover:underline">百科：成长升华</Link>
@@ -974,6 +1288,188 @@ const SublimationPage: React.FC = () => {
                                 <p className="text-xs text-blue-600 mt-1">
                                     通用角色的 <code>content</code> 字段将承载全部设定，AI 会输出结构化 Markdown 方便继续创作。
                                 </p>
+                            )}
+                        </div>
+
+                        {/* 问卷/设定卡 Lore 注入 */}
+                        <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-900">
+                            <button
+                                type="button"
+                                onClick={() => setShowQuestionnaireSettings((prev) => !prev)}
+                                className="flex items-center justify-between w-full text-left font-medium text-purple-800 hover:text-purple-900"
+                                disabled={isGenerating}
+                            >
+                                <span>设定（Lore）注入：选择问卷/设定卡</span>
+                                <span className="ml-2">{showQuestionnaireSettings ? '▼' : '▶'}</span>
+                            </button>
+                            {showQuestionnaireSettings && (
+                                <div className="mt-3 space-y-3">
+                                    <p className="text-xs text-purple-700">
+                                        选择问卷/设定卡，将其中的 <code>loreMarkdown</code> 作为【参考设定】注入到升华提示词中（不是题目，不需要作答）。
+                                    </p>
+                                    <div className="space-y-2">
+                                        <div className="text-[11px] font-semibold text-purple-700">已选择的设定来源</div>
+                                        {selectedQuestionnaires.length === 0 ? (
+                                            <div className="rounded-lg border border-purple-200 bg-white px-3 py-2 text-[11px] text-gray-500">
+                                                暂无设定来源
+                                            </div>
+                                        ) : (
+                                            selectedQuestionnaires.map((selection) => {
+                                                const selectionId = selection.selectionId ?? selection.questionnaire.id;
+                                                const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
+                                                const sourceLabel = selection.source === 'preset'
+                                                    ? '预设'
+                                                    : selection.source === 'upload'
+                                                        ? '本地上传'
+                                                        : '云端问卷';
+                                                const nativeLabel = selection.questionnaire.nativeAllowed === true ? '原生许可' : '非原生';
+                                                return (
+                                                    <div key={selectionId} className="flex items-center justify-between rounded-lg border border-purple-200 bg-white px-3 py-2">
+                                                        <div className="min-w-0">
+                                                            <div className="font-semibold text-purple-800 truncate">{selection.questionnaire.title}</div>
+                                                            <div className="text-[11px] text-gray-500">
+                                                                来源：{sourceLabel}
+                                                                {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
+                                                                {` · ${nativeLabel}`}
+                                                                {!hasLore ? ' · 无设定' : ''}
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-3">
+                                                            <label className={`flex items-center gap-2 text-[11px] ${hasLore ? 'text-purple-800' : 'text-gray-400'}`}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={selection.useLore !== false && hasLore}
+                                                                    disabled={!hasLore || isGenerating}
+                                                                    onChange={(e) => handleToggleQuestionnaireLore(selectionId, e.target.checked)}
+                                                                />
+                                                                使用设定
+                                                            </label>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleRemoveQuestionnaireSelection(selectionId)}
+                                                                disabled={isGenerating}
+                                                                className="text-xs text-rose-500 hover:underline disabled:text-gray-300"
+                                                            >
+                                                                移除
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <select
+                                            className="input-field text-xs"
+                                            onChange={(e) => {
+                                                if (e.target.value) {
+                                                    void handleAddPresetQuestionnaire(e.target.value);
+                                                    e.currentTarget.value = '';
+                                                }
+                                            }}
+                                            defaultValue=""
+                                            disabled={isGenerating}
+                                        >
+                                            <option value="" disabled>选择预设问卷/设定卡</option>
+                                            {presetEntries.map((preset) => (
+                                                <option key={`${preset.kind}:${preset.id}`} value={preset.id}>
+                                                    {preset.kind === 'canshou' ? '残兽' : '魔法少女'} · {preset.title}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <label className={`inline-flex items-center gap-2 rounded-lg border border-purple-200 bg-white px-3 py-1 text-xs font-medium text-purple-700 hover:border-purple-300 cursor-pointer ${isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                            上传问卷 JSON
+                                            <input
+                                                type="file"
+                                                accept="application/json"
+                                                onChange={(e) => void handleUploadQuestionnaire(e.target.files?.[0] ?? null)}
+                                                className="hidden"
+                                                disabled={isGenerating}
+                                            />
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setQuestionnairePickerError(null);
+                                                setShowQuestionnairePicker(true);
+                                            }}
+                                            className="rounded-lg border border-purple-200 bg-white px-3 py-1 text-xs text-purple-700 hover:border-purple-300 disabled:opacity-50"
+                                            disabled={isGenerating}
+                                        >
+                                            从云端问卷库选择
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setPasteQuestionnaireError(null);
+                                                setShowPasteQuestionnaireImport((prev) => !prev);
+                                            }}
+                                            className="rounded-lg border border-purple-200 bg-purple-100 px-3 py-1 text-xs text-purple-800 hover:border-purple-300 hover:bg-purple-200 disabled:opacity-50"
+                                            disabled={isGenerating}
+                                        >
+                                            {showPasteQuestionnaireImport ? '收起粘贴导入' : '粘贴导入 JSON'}
+                                        </button>
+                                        <Link href="/questionnaire-editor" className="text-xs text-purple-700 hover:underline">
+                                            打开问卷编辑器
+                                        </Link>
+                                    </div>
+
+                                    {showPasteQuestionnaireImport && (
+                                        <div className="rounded-lg border border-purple-200 bg-white p-3 text-xs text-gray-700">
+                                            <label className="text-xs text-gray-600">粘贴问卷 JSON</label>
+                                            <textarea
+                                                value={pasteQuestionnaireText}
+                                                onChange={(e) => setPasteQuestionnaireText(e.target.value)}
+                                                placeholder="在此粘贴问卷 JSON（可包含 loreMarkdown）"
+                                                className="input-field mt-2 h-28"
+                                                rows={6}
+                                                disabled={isGenerating}
+                                            />
+                                            <div className="mt-2 flex items-center justify-between">
+                                                <button
+                                                    type="button"
+                                                    onClick={handlePasteQuestionnaireImport}
+                                                    className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-1 text-xs text-purple-800 hover:border-purple-300 hover:bg-purple-100 disabled:opacity-50"
+                                                    disabled={isGenerating}
+                                                >
+                                                    解析并载入
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setPasteQuestionnaireText('');
+                                                        setPasteQuestionnaireError(null);
+                                                    }}
+                                                    className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                                                    disabled={isGenerating}
+                                                >
+                                                    清空
+                                                </button>
+                                            </div>
+                                            {pasteQuestionnaireError && (
+                                                <p className="mt-2 text-rose-500">{pasteQuestionnaireError}</p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {questionnaireLoadError && (
+                                        <p className="text-xs text-rose-500">{questionnaireLoadError}</p>
+                                    )}
+
+                                    {questionnaireLoreText.trim() && (
+                                        <TokenIndicator
+                                            text={questionnaireLoreText}
+                                            warningText="⚠️ 注入设定较长时，升华更易超时/失败。可尝试精简 lore 或减少勾选内容。"
+                                        />
+                                    )}
+
+                                    {shouldWarnLoreNativeness && (
+                                        <p className="text-xs text-yellow-700">
+                                            ⚠️ 已注入非原生许可的问卷设定，本次升华结果将标记为“衍生数据”（非原生），并移除/不生成原生签名。
+                                        </p>
+                                    )}
+                                </div>
                             )}
                         </div>
 
@@ -1369,6 +1865,19 @@ const SublimationPage: React.FC = () => {
 	                    onSelectCard={handleSelectDataCard}
 	                    selectedType={modalType}
 	                />
+
+                    <BattleDataModal
+                        isOpen={showQuestionnairePicker}
+                        onClose={() => {
+                            setShowQuestionnairePicker(false);
+                            setQuestionnairePickerError(null);
+                        }}
+                        selectedType="questionnaire"
+                        initialTab="public"
+                        titleOverride="选择云端问卷"
+                        onSelectCard={handleSelectQuestionnaireCard}
+                        externalError={questionnairePickerError}
+                    />
 
                     <NarrativeHistoryPickerModal
                         isOpen={showArenaNarrativePicker}
