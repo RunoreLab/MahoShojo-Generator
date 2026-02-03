@@ -35,6 +35,34 @@ export function NarrativeHistorySettings({ value, onChange, disabled }: Props) {
             />
             战报后写入（自动累积）
           </label>
+          {value.readNarrativeHistory && (
+            <div className="mt-3 space-y-2">
+              <label className="block text-xs font-semibold text-gray-600">读取条数（最新）</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  className="input-field w-24"
+                  value={Number.isFinite(value.readNarrativeHistoryLimit) ? value.readNarrativeHistoryLimit : 1}
+                  onChange={(e) =>
+                    onChange({ readNarrativeHistoryLimit: Math.max(1, Math.floor(Number(e.target.value) || 1)) })
+                  }
+                  disabled={disabled || value.isNarrativeHistoryUnlimited}
+                />
+                <label className="flex items-center text-xs text-gray-600">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 mr-2 text-pink-600 border-gray-300 rounded"
+                    checked={value.isNarrativeHistoryUnlimited}
+                    onChange={(e) => onChange({ isNarrativeHistoryUnlimited: e.target.checked })}
+                    disabled={disabled}
+                  />
+                  无上限
+                </label>
+              </div>
+            </div>
+          )}
           <p className="text-[11px] text-gray-500 mt-1">叙事历史会自动缓存到浏览器（localStorage），用于防止崩溃丢失。</p>
         </fieldset>
 
@@ -53,4 +81,3 @@ export function NarrativeHistorySettings({ value, onChange, disabled }: Props) {
     </div>
   );
 }
-

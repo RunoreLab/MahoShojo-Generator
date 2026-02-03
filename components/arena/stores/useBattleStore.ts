@@ -25,6 +25,8 @@ const defaultSettings: BattleSettings = {
   readCurrentState: true,
   writeCurrentState: true,
   readNarrativeHistory: false,
+  readNarrativeHistoryLimit: 10,
+  isNarrativeHistoryUnlimited: false,
   writeNarrativeHistory: false,
   userGuidance: '',
 };
@@ -325,6 +327,13 @@ export const useBattleStore = create<BattleStoreState>()(
     {
       name: 'arena-storage',
       storage: createJSONStorage(createStorage),
+      merge: (persistedState, currentState) => {
+        const merged = { ...currentState, ...(persistedState as any) };
+        if ((persistedState as any)?.settings && typeof (persistedState as any).settings === 'object') {
+          merged.settings = { ...currentState.settings, ...(persistedState as any).settings };
+        }
+        return merged;
+      },
       partialize: (state) => ({
         battleMode: state.battleMode,
         generationMode: state.generationMode,

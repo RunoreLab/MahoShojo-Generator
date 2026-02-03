@@ -114,6 +114,8 @@ export interface BattleSettings {
   readCurrentState: boolean;
   writeCurrentState: boolean;
   readNarrativeHistory: boolean;
+  readNarrativeHistoryLimit: number;
+  isNarrativeHistoryUnlimited: boolean;
   writeNarrativeHistory: boolean;
   userGuidance: string;
 }

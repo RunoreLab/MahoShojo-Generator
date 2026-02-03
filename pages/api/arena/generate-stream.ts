@@ -154,6 +154,7 @@ async function handler(req: NextRequest): Promise<Response> {
             writeCurrentState,
             readNarrativeHistory,
             narrativeHistory,
+            narrativeHistoryReadLimit,
             adjudicationEvents,
             storyLength,
             customProvider: customProviderPayload,
@@ -212,6 +213,15 @@ async function handler(req: NextRequest): Promise<Response> {
         const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
         const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
         const resolvedReadNarrativeHistory = typeof readNarrativeHistory === 'boolean' ? readNarrativeHistory : false;
+        const resolvedNarrativeHistoryReadLimit = resolvedReadNarrativeHistory
+            ? (() => {
+                if (narrativeHistoryReadLimit === null) return Infinity;
+                if (typeof narrativeHistoryReadLimit === 'number' && Number.isFinite(narrativeHistoryReadLimit)) {
+                    return Math.max(1, Math.floor(narrativeHistoryReadLimit));
+                }
+                return 10;
+            })()
+            : 0;
         const resolvedHistoryReadLimit = resolvedReadArenaHistory
             ? (() => {
                 if (arenaHistoryReadLimit === null) return Infinity;
@@ -248,7 +258,18 @@ async function handler(req: NextRequest): Promise<Response> {
         };
 
         const narrativeHistoryForPrompt: NarrativeHistoryEntry[] | null = resolvedReadNarrativeHistory
-            ? normalizeNarrativeHistoryForPrompt(narrativeHistory)
+            ? (() => {
+                const normalized = normalizeNarrativeHistoryForPrompt(narrativeHistory);
+                if (normalized.length === 0) return [];
+                const parseTime = (entry: NarrativeHistoryEntry): number => {
+                    const t = Date.parse(entry.createdAt || entry.updatedAt);
+                    return Number.isFinite(t) ? t : 0;
+                };
+                normalized.sort((a, b) => parseTime(a) - parseTime(b));
+                if (resolvedNarrativeHistoryReadLimit === Infinity) return normalized;
+                const sliceLimit = Math.max(1, Math.floor(resolvedNarrativeHistoryReadLimit));
+                return normalized.slice(Math.max(0, normalized.length - sliceLimit));
+            })()
             : null;
         const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 
@@ -458,6 +479,11 @@ async function handler(req: NextRequest): Promise<Response> {
 		                                rejectedBy: 'sensitive-input',
 		                                arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
 		                                readNarrativeHistory: resolvedReadNarrativeHistory,
+                                        narrativeHistoryReadLimit: resolvedReadNarrativeHistory
+                                            ? (Number.isFinite(resolvedNarrativeHistoryReadLimit)
+                                                ? (resolvedNarrativeHistoryReadLimit === Infinity ? null : resolvedNarrativeHistoryReadLimit)
+                                                : null)
+                                            : null,
 		                                narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
 		                            }),
 		                        });
@@ -762,6 +788,11 @@ async function handler(req: NextRequest): Promise<Response> {
                             auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                        resolvedModelOverride: usedModelOverride ?? null,
 	                        readNarrativeHistory: resolvedReadNarrativeHistory,
+                            narrativeHistoryReadLimit: resolvedReadNarrativeHistory
+                                ? (Number.isFinite(resolvedNarrativeHistoryReadLimit)
+                                    ? (resolvedNarrativeHistoryReadLimit === Infinity ? null : resolvedNarrativeHistoryReadLimit)
+                                    : null)
+                                : null,
 	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
 	                    }),
 	                });

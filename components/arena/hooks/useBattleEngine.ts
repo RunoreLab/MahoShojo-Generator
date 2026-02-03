@@ -382,16 +382,29 @@ export const useBattleEngine = () => {
 
       const numericLimit = settings.isArenaHistoryUnlimited ? null : Math.max(1, settings.readArenaHistoryLimit);
       const arenaHistoryReadLimit = settings.readArenaHistory ? numericLimit ?? null : undefined;
+      const narrativeHistoryReadLimit = settings.readNarrativeHistory
+        ? (settings.isNarrativeHistoryUnlimited ? null : Math.max(1, settings.readNarrativeHistoryLimit))
+        : undefined;
       const narrativeHistoryForRequest = settings.readNarrativeHistory
-        ? [...useNarrativeHistoryStore.getState().entries]
-          .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
-          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-          .map((entry) => ({
+        ? (() => {
+          const sorted = [...useNarrativeHistoryStore.getState().entries]
+            .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
+            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+
+          const limited =
+            narrativeHistoryReadLimit === null
+              ? sorted
+              : typeof narrativeHistoryReadLimit === 'number' && Number.isFinite(narrativeHistoryReadLimit)
+                ? sorted.slice(Math.max(0, sorted.length - Math.max(1, Math.floor(narrativeHistoryReadLimit))))
+                : sorted.slice(Math.max(0, sorted.length - 10));
+
+          return limited.map((entry) => ({
             title: entry.title,
             content: entry.content,
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,
-          }))
+          }));
+        })()
         : undefined;
 
       const requestBody: Record<string, unknown> = {
@@ -426,6 +439,7 @@ export const useBattleEngine = () => {
         writeCurrentState: settings.writeCurrentState,
         readNarrativeHistory: settings.readNarrativeHistory,
         writeNarrativeHistory: settings.writeNarrativeHistory,
+        narrativeHistoryReadLimit,
         narrativeHistory: narrativeHistoryForRequest,
         isDowngrade: false,
         adjudicationEvents,

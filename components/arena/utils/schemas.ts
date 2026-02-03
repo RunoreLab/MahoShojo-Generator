@@ -39,6 +39,8 @@ export const BattleSettingsSchema = z.object({
   readCurrentState: z.boolean(),
   writeCurrentState: z.boolean(),
   readNarrativeHistory: z.boolean(),
+  readNarrativeHistoryLimit: z.number().min(1).max(999),
+  isNarrativeHistoryUnlimited: z.boolean(),
   writeNarrativeHistory: z.boolean(),
 });
 
