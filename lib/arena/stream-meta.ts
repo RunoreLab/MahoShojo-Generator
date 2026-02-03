@@ -2,11 +2,17 @@ import { z } from 'zod/v3';
 
 import { repairNormalizeValidate } from '@/lib/repair-pipeline';
 
-const META_MARKERS = [
+export const STREAM_UPDATE_META_MARKERS = [
   'MAHOSHOJO_ARENA_META',
   'MAHOSHOJO_META',
   'MAHOSHOJO_STREAM_META',
-  'MAHOSHOJO_TELEMETRY_META',
+] as const;
+
+export const STREAM_TELEMETRY_META_MARKER = 'MAHOSHOJO_TELEMETRY_META' as const;
+
+const META_MARKERS = [
+  ...STREAM_UPDATE_META_MARKERS,
+  STREAM_TELEMETRY_META_MARKER,
 ] as const;
 
 export const StreamUpdateMetaSchema = z
@@ -392,11 +398,7 @@ const sanitizeMeta = (meta: StreamUpdateMeta): NormalizedStreamUpdateMeta => {
 export async function extractStreamUpdateMeta(markdown: string): Promise<ExtractedStreamMeta | null> {
   if (typeof markdown !== 'string' || !markdown.trim()) return null;
 
-  const hit = findLastStreamMetaBlock(markdown, [
-    'MAHOSHOJO_ARENA_META',
-    'MAHOSHOJO_META',
-    'MAHOSHOJO_STREAM_META',
-  ]);
+  const hit = findLastStreamMetaBlock(markdown, STREAM_UPDATE_META_MARKERS);
   if (!hit) return null;
 
   const candidate = extractBestJsonCandidate(hit.inner);

@@ -212,6 +212,20 @@ describe('arena stream meta', () => {
     expect(extracted!.meta.impacts?.[0]?.currentStateSummary).toBe('好');
   });
 
+  test('accepts MAHOSHOJO_META / MAHOSHOJO_STREAM_META markers', async () => {
+    const md1 = ['# 标题', '', '<!-- MAHOSHOJO_META {"version":1,"impacts":[{"name":"A","currentStateSummary":"OK"}]} -->'].join('\n');
+    const extracted1 = await extractStreamUpdateMeta(md1);
+    expect(extracted1).not.toBeNull();
+    expect(extracted1!.meta.impacts?.[0]?.characterName).toBe('A');
+    expect(extracted1!.meta.impacts?.[0]?.currentStateSummary).toBe('OK');
+
+    const md2 = ['# 标题', '', '<!-- MAHOSHOJO_STREAM_META {"version":1,"impacts":[{"character":"B","currentStateSummary":"YES"}]} -->'].join('\n');
+    const extracted2 = await extractStreamUpdateMeta(md2);
+    expect(extracted2).not.toBeNull();
+    expect(extracted2!.meta.impacts?.[0]?.characterName).toBe('B');
+    expect(extracted2!.meta.impacts?.[0]?.currentStateSummary).toBe('YES');
+  });
+
   test('ignores marker-like line without json', async () => {
     const md = ['# 标题', '', 'MAHOSHOJO_ARENA_META 只是提到', '', '正文'].join('\n');
     expect(await extractStreamUpdateMeta(md)).toBeNull();

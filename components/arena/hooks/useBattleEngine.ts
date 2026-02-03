@@ -1008,7 +1008,7 @@ export const useBattleEngine = () => {
                   setStreamUpdateMetaDebug({
                     source: 'inline',
                     parseOk: false,
-                    error: '未检测到 MAHOSHOJO_ARENA_META（模型可能漏写或格式不匹配）',
+                    error: '未检测到 MAHOSHOJO_*_META（模型可能漏写或格式不匹配）',
                     meta: null,
                     raw: null,
                     rawTruncated: false,

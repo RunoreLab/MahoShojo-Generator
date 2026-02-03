@@ -45,7 +45,7 @@ import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
-import { extractStreamUpdateMeta } from '@/lib/arena/stream-meta';
+	import { extractStreamUpdateMeta, STREAM_UPDATE_META_MARKERS } from '@/lib/arena/stream-meta';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
@@ -823,8 +823,9 @@ async function handler(req: NextRequest): Promise<Response> {
                 return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
             };
 
-            const META_START_RE = /<!---*\s*MAHOSHOJO_ARENA_META\b/i;
-            const META_GUARD_CHARS = 256;
+	            const META_START_RE = new RegExp(`<!---*\\s*(?:${STREAM_UPDATE_META_MARKERS.join('|')})\\b`, 'i');
+	            const META_GUARD_CHARS = 256;
+	            const META_FALLBACK_TAIL_CHARS = 120_000;
 
             const [clientUpstream, r2Body] = originalBody.tee();
             r2UploadPromise = storeBattleReportGenerationOutputStreamToR2({
@@ -847,21 +848,28 @@ async function handler(req: NextRequest): Promise<Response> {
                 },
             });
 
-            let pendingMarkdownTail = '';
-            let metaBuffer = '';
-            let inMeta = false;
+	            let pendingMarkdownTail = '';
+	            let metaBuffer = '';
+	            let metaFallbackTail = '';
+	            let inMeta = false;
 
             const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
                 if (!chunk) return;
                 controller.enqueue(encodeEvent('markdown', { chunk }));
             };
 
-            const processText = (controller: ReadableStreamDefaultController<Uint8Array>, text: string) => {
-                if (!text) return;
-                if (inMeta) {
-                    metaBuffer += text;
-                    return;
-                }
+	            const processText = (controller: ReadableStreamDefaultController<Uint8Array>, text: string) => {
+	                if (!text) return;
+	                if (shouldAllowStreamMeta) {
+	                    metaFallbackTail += text;
+	                    if (metaFallbackTail.length > META_FALLBACK_TAIL_CHARS) {
+	                        metaFallbackTail = metaFallbackTail.slice(-META_FALLBACK_TAIL_CHARS);
+	                    }
+	                }
+	                if (inMeta) {
+	                    metaBuffer += text;
+	                    return;
+	                }
 
                 pendingMarkdownTail += text;
                 const match = META_START_RE.exec(pendingMarkdownTail);
@@ -936,52 +944,53 @@ async function handler(req: NextRequest): Promise<Response> {
                                 controller.enqueue(encodeEvent('telemetry', telemetryPayload));
                             }
 
-                            if (shouldAllowStreamMeta) {
-                                if (metaBuffer && metaBuffer.trim()) {
-                                    try {
-                                        const extracted = await extractStreamUpdateMeta(metaBuffer);
-                                        if (extracted?.meta) {
-                                            const raw = extracted.rawComment ?? metaBuffer;
-                                            const rawMax = 8_000;
-                                            const rawTrimmed = raw.length > rawMax ? raw.slice(0, rawMax) : raw;
-                                            controller.enqueue(
-                                                encodeEvent('meta', {
-                                                    parseOk: true,
-                                                    meta: extracted.meta,
-                                                    raw: rawTrimmed,
-                                                    rawTruncated: raw.length > rawMax,
-                                                })
-                                            );
-                                        } else {
-                                            controller.enqueue(
-                                                encodeEvent('meta_error', {
-                                                    parseOk: false,
-                                                    error: '未能识别 MAHOSHOJO_ARENA_META 块（marker 缺失或格式不匹配）',
-                                                    raw: metaBuffer.slice(0, 2_000),
-                                                    rawTruncated: metaBuffer.length > 2_000,
-                                                })
-                                            );
-                                        }
-                                    } catch (error) {
-                                        controller.enqueue(
-                                            encodeEvent('meta_error', {
-                                                parseOk: false,
-                                                error: error instanceof Error ? error.message : String(error ?? 'meta parse failed'),
-                                                raw: metaBuffer.slice(0, 2_000),
-                                                rawTruncated: metaBuffer.length > 2_000,
-                                            })
-                                        );
-                                    }
-                                } else {
-                                    controller.enqueue(
-                                        encodeEvent('meta_error', {
-                                            parseOk: false,
-                                            error: '未检测到 MAHOSHOJO_ARENA_META（模型可能漏写，或未按末行追加）',
-                                            raw: null,
-                                        })
-                                    );
-                                }
-                            }
+	                            if (shouldAllowStreamMeta) {
+	                                const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
+	                                if (metaCandidate && metaCandidate.trim()) {
+	                                    try {
+	                                        const extracted = await extractStreamUpdateMeta(metaCandidate);
+	                                        if (extracted?.meta) {
+	                                            const raw = extracted.rawComment ?? metaCandidate;
+	                                            const rawMax = 8_000;
+	                                            const rawTrimmed = raw.length > rawMax ? raw.slice(0, rawMax) : raw;
+	                                            controller.enqueue(
+	                                                encodeEvent('meta', {
+	                                                    parseOk: true,
+	                                                    meta: extracted.meta,
+	                                                    raw: rawTrimmed,
+	                                                    rawTruncated: raw.length > rawMax,
+	                                                })
+	                                            );
+	                                        } else {
+	                                            controller.enqueue(
+	                                                encodeEvent('meta_error', {
+	                                                    parseOk: false,
+	                                                    error: '未能识别 MAHOSHOJO_*_META 块（marker 缺失或格式不匹配）',
+	                                                    raw: metaCandidate.slice(0, 2_000),
+	                                                    rawTruncated: metaCandidate.length > 2_000,
+	                                                })
+	                                            );
+	                                        }
+	                                    } catch (error) {
+	                                        controller.enqueue(
+	                                            encodeEvent('meta_error', {
+	                                                parseOk: false,
+	                                                error: error instanceof Error ? error.message : String(error ?? 'meta parse failed'),
+	                                                raw: metaCandidate.slice(0, 2_000),
+	                                                rawTruncated: metaCandidate.length > 2_000,
+	                                            })
+	                                        );
+	                                    }
+	                                } else {
+	                                    controller.enqueue(
+	                                        encodeEvent('meta_error', {
+	                                            parseOk: false,
+	                                            error: '未检测到 MAHOSHOJO_*_META（模型可能漏写，或未按末行追加）',
+	                                            raw: null,
+	                                        })
+	                                    );
+	                                }
+	                            }
 
                             controller.enqueue(encodeEvent('done', { ok: true }));
                             await finalizeOnce('completed');
