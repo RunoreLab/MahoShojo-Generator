@@ -45,7 +45,7 @@ import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
-	import { extractStreamUpdateMeta, STREAM_UPDATE_META_MARKERS } from '@/lib/arena/stream-meta';
+	import { extractStreamUpdateMeta, findStreamUpdateMetaStart } from '@/lib/arena/stream-meta';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
@@ -832,9 +832,8 @@ async function handler(req: NextRequest): Promise<Response> {
 	                controller.enqueue(encodeEvent('debug', payload));
 	            };
 
-	            const META_START_RE = new RegExp(`<!---*\\s*(?:${STREAM_UPDATE_META_MARKERS.join('|')})\\b`, 'i');
-	            const META_GUARD_CHARS = 256;
-	            const META_FALLBACK_TAIL_CHARS = 120_000;
+		            const META_GUARD_CHARS = 2048;
+		            const META_FALLBACK_TAIL_CHARS = 120_000;
 
             const [clientUpstream, r2Body] = originalBody.tee();
             r2UploadPromise = storeBattleReportGenerationOutputStreamToR2({
@@ -859,15 +858,19 @@ async function handler(req: NextRequest): Promise<Response> {
 
 	            let pendingMarkdownTail = '';
 	            let metaBuffer = '';
-	            let metaFallbackTail = '';
-	            let inMeta = false;
-	            let markdownCharsSent = 0;
+		            let metaFallbackTail = '';
+		            let inMeta = false;
+		            let markdownCharsSent = 0;
+		            let hasMeaningfulMarkdown = false;
 
-	            const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
-	                if (!chunk) return;
-	                markdownCharsSent += chunk.length;
-	                controller.enqueue(encodeEvent('markdown', { chunk }));
-	            };
+		            const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
+		                if (!chunk) return;
+		                markdownCharsSent += chunk.length;
+		                if (!hasMeaningfulMarkdown && /\S/.test(chunk)) {
+		                    hasMeaningfulMarkdown = true;
+		                }
+		                controller.enqueue(encodeEvent('markdown', { chunk }));
+		            };
 
 	            const processText = (controller: ReadableStreamDefaultController<Uint8Array>, text: string) => {
 	                if (!text) return;
@@ -890,25 +893,27 @@ async function handler(req: NextRequest): Promise<Response> {
 	                        }
 	                    }
 	                    return;
-	                }
+		                }
 
-	                pendingMarkdownTail += text;
-	                const match = META_START_RE.exec(pendingMarkdownTail);
-	                if (match && typeof match.index === 'number') {
-	                    const start = match.index;
-	                    const before = pendingMarkdownTail.slice(0, start);
-	                    if (before) flushMarkdown(controller, before);
-	                    metaBuffer = pendingMarkdownTail.slice(start);
-	                    pendingMarkdownTail = '';
-	                    inMeta = true;
-	                    enqueueDebug(controller, {
-	                        phase: 'meta_start',
-	                        startIndex: start,
-	                        pendingTailLength: pendingMarkdownTail.length,
-	                        metaBufferLength: metaBuffer.length,
-	                    });
-	                    return;
-	                }
+		                pendingMarkdownTail += text;
+		                const metaStart = findStreamUpdateMetaStart(pendingMarkdownTail);
+		                if (metaStart) {
+		                    const start = metaStart.index;
+		                    const before = pendingMarkdownTail.slice(0, start);
+		                    if (before) flushMarkdown(controller, before);
+		                    metaBuffer = pendingMarkdownTail.slice(start);
+		                    pendingMarkdownTail = '';
+		                    inMeta = true;
+		                    enqueueDebug(controller, {
+		                        phase: 'meta_start',
+		                        kind: metaStart.kind,
+		                        marker: metaStart.marker,
+		                        startIndex: start,
+		                        pendingTailLength: pendingMarkdownTail.length,
+		                        metaBufferLength: metaBuffer.length,
+		                    });
+		                    return;
+		                }
 
                 if (pendingMarkdownTail.length > META_GUARD_CHARS) {
                     const safePart = pendingMarkdownTail.slice(0, pendingMarkdownTail.length - META_GUARD_CHARS);
@@ -917,8 +922,15 @@ async function handler(req: NextRequest): Promise<Response> {
                 }
             };
 
-            const sseBody = new ReadableStream<Uint8Array>({
-                async pull(controller) {
+	            const sseBody = new ReadableStream<Uint8Array>({
+	                start(controller) {
+	                    enqueueDebug(controller, {
+	                        phase: 'open',
+	                        generationId,
+	                        shouldAllowStreamMeta,
+	                    });
+	                },
+	                async pull(controller) {
                     try {
 	                        const { done, value } = await readWithTimeout(reader);
 	                        if (done) {
@@ -934,16 +946,17 @@ async function handler(req: NextRequest): Promise<Response> {
 	                                pendingMarkdownTail = '';
 	                            }
 
-	                            enqueueDebug(controller, {
-	                                phase: 'done_before_meta',
-	                                outputBytes,
-	                                outputChars,
-	                                markdownCharsSent,
-	                                inMeta,
-	                                pendingMarkdownTailLength: pendingMarkdownTail.length,
-	                                metaBufferLength: metaBuffer.length,
-	                                metaFallbackTailLength: metaFallbackTail.length,
-	                            });
+		                            enqueueDebug(controller, {
+		                                phase: 'done_before_meta',
+		                                outputBytes,
+		                                outputChars,
+		                                markdownCharsSent,
+		                                hasMeaningfulMarkdown,
+		                                inMeta,
+		                                pendingMarkdownTailLength: pendingMarkdownTail.length,
+		                                metaBufferLength: metaBuffer.length,
+		                                metaFallbackTailLength: metaFallbackTail.length,
+		                            });
 
 	                            // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
 	                            const usageForTelemetry = await Promise.race([
@@ -982,17 +995,20 @@ async function handler(req: NextRequest): Promise<Response> {
                                 controller.enqueue(encodeEvent('telemetry', telemetryPayload));
                             }
 
-	                            if (shouldAllowStreamMeta) {
-	                                const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
-	                                if (metaCandidate && metaCandidate.trim()) {
-	                                    try {
-	                                        const extracted = await extractStreamUpdateMeta(metaCandidate);
-	                                        if (extracted?.meta) {
-	                                            const raw = extracted.rawComment ?? metaCandidate;
-	                                            const rawMax = 8_000;
-	                                            const rawTrimmed = raw.length > rawMax ? raw.slice(0, rawMax) : raw;
-	                                            controller.enqueue(
-	                                                encodeEvent('meta', {
+		                            let metaHasImpacts = false;
+		                            if (shouldAllowStreamMeta) {
+		                                const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
+		                                if (metaCandidate && metaCandidate.trim()) {
+		                                    try {
+		                                        const extracted = await extractStreamUpdateMeta(metaCandidate);
+		                                        if (extracted?.meta) {
+		                                            metaHasImpacts =
+		                                                Array.isArray(extracted.meta.impacts) && extracted.meta.impacts.length > 0;
+		                                            const raw = extracted.rawComment ?? metaCandidate;
+		                                            const rawMax = 8_000;
+		                                            const rawTrimmed = raw.length > rawMax ? raw.slice(0, rawMax) : raw;
+		                                            controller.enqueue(
+		                                                encodeEvent('meta', {
 	                                                    parseOk: true,
 	                                                    meta: extracted.meta,
 	                                                    raw: rawTrimmed,
@@ -1030,25 +1046,29 @@ async function handler(req: NextRequest): Promise<Response> {
 	                                }
 	                            }
 
-	                            // 若未下发任何 markdown，则视为异常：AI 返回空输出 / 或正文被吞掉。
-	                            if (markdownCharsSent <= 0) {
-	                                const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
-	                                const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
-	                                controller.enqueue(
-	                                    encodeEvent('error', {
-	                                        ok: false,
-	                                        error: 'AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。',
-	                                        debug: debugSse
-	                                            ? {
-	                                                outputBytes,
-	                                                outputChars,
-	                                                inMeta,
-	                                                metaBufferLength: metaBuffer.length,
-	                                                metaFallbackTailLength: metaFallbackTail.length,
-	                                                rawPreview,
-	                                              }
-	                                            : null,
-	                                    })
+		                            // 若未下发任何有效正文（非空白），且也没有可用的 impacts，则视为异常：AI 返回空输出 / 或正文被吞掉。
+		                            if (!hasMeaningfulMarkdown && !metaHasImpacts) {
+		                                const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
+		                                const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
+		                                controller.enqueue(
+		                                    encodeEvent('error', {
+		                                        ok: false,
+		                                        error: 'AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。',
+		                                        debug: debugSse
+		                                            ? {
+		                                                outputBytes,
+		                                                outputChars,
+		                                                markdownCharsSent,
+		                                                hasMeaningfulMarkdown,
+		                                                metaHasImpacts,
+		                                                inMeta,
+		                                                pendingMarkdownTailLength: pendingMarkdownTail.length,
+		                                                metaBufferLength: metaBuffer.length,
+		                                                metaFallbackTailLength: metaFallbackTail.length,
+		                                                rawPreview,
+		                                              }
+		                                            : null,
+		                                    })
 	                                );
 	                                await finalizeOnce('failed', 'empty stream output');
 	                                controller.close();

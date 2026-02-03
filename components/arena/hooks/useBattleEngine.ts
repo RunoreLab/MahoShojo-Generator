@@ -709,6 +709,9 @@ export const useBattleEngine = () => {
           if (isSseResponse) {
             let sseBuffer = '';
             let sawDoneEvent = false;
+            let sseBytesRead = 0;
+            let sseChunksRead = 0;
+            let sseEventsParsed = 0;
 
             const parseSseBlock = (block: string): { event: string; data: string } | null => {
               const lines = block.split('\n');
@@ -868,7 +871,26 @@ export const useBattleEngine = () => {
               if (done) break;
               if (!value) continue;
 
-              const decoded = decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+              sseChunksRead += 1;
+              sseBytesRead += value.byteLength;
+
+              const decodedChunkRaw = decoder.decode(value, { stream: true });
+              const decoded = decodedChunkRaw.replace(/\r\n/g, '\n');
+
+              if (debugSseEnabled) {
+                const shouldLogThisChunk = sseChunksRead <= 10 || sseChunksRead % 20 === 0;
+                if (shouldLogThisChunk) {
+                  const previewMax = 200;
+                  const preview = decoded.length > previewMax ? decoded.slice(0, previewMax) : decoded;
+                  console.info('SSE 调试：收到 chunk', {
+                    index: sseChunksRead,
+                    bytes: value.byteLength,
+                    preview,
+                    previewTruncated: decoded.length > previewMax,
+                  });
+                }
+              }
+
               sseBuffer += decoded;
 
               let idx = sseBuffer.indexOf('\n\n');
@@ -877,6 +899,7 @@ export const useBattleEngine = () => {
                 sseBuffer = sseBuffer.slice(idx + 2);
                 const parsed = parseSseBlock(block);
                 if (parsed) {
+                  sseEventsParsed += 1;
                   await handleSseEvent(parsed.event, parsed.data);
                 }
                 if (shouldAbort || sawDoneEvent) break;
@@ -898,10 +921,30 @@ export const useBattleEngine = () => {
               sseBuffer = sseBuffer.slice(idx + 2);
               const parsed = parseSseBlock(block);
               if (parsed) {
+                sseEventsParsed += 1;
                 await handleSseEvent(parsed.event, parsed.data);
               }
               if (shouldAbort || sawDoneEvent) break;
               idx = sseBuffer.indexOf('\n\n');
+            }
+
+            if (debugSseEnabled) {
+              const previewMax = 400;
+              const remainingPreview = sseBuffer.length > previewMax ? sseBuffer.slice(0, previewMax) : sseBuffer;
+              console.info('SSE 调试：读取结束', {
+                chunks: sseChunksRead,
+                bytes: sseBytesRead,
+                parsedEvents: sseEventsParsed,
+                sawDoneEvent,
+                remainingBufferChars: sseBuffer.length,
+                remainingPreview,
+                remainingTruncated: sseBuffer.length > previewMax,
+              });
+              if (sseBytesRead === 0) {
+                console.warn('SSE 调试：响应流为 0 字节（服务端可能提前结束，或中间层吞掉了流式内容）');
+              } else if (sseEventsParsed === 0) {
+                console.warn('SSE 调试：收到 SSE 字节但未解析出任何事件（可能是分隔符/格式不符合 SSE）');
+              }
             }
           } else {
             while (true) {

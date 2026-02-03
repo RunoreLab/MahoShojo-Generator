@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
+import {
+  extractStreamTelemetryMeta,
+  extractStreamUpdateMeta,
+  findStreamUpdateMetaStart,
+  stripStreamUpdateMetaComment,
+} from '@/lib/arena/stream-meta';
 
 describe('arena stream meta', () => {
   test('extracts valid meta comment and strips it from markdown', async () => {
@@ -245,5 +250,21 @@ describe('arena stream meta', () => {
     expect(extracted).not.toBeNull();
     expect(extracted!.strippedMarkdown.includes('MAHOSHOJO_TELEMETRY_META')).toBe(false);
     expect(extracted!.strippedMarkdown.includes('正文')).toBe(true);
+  });
+
+  test('findStreamUpdateMetaStart finds both comment and loose markers', () => {
+    const commentText = ['正文', '<!-- MAHOSHOJO_META {"version":1} -->'].join('\n');
+    expect(findStreamUpdateMetaStart(commentText)).toEqual({
+      index: 3,
+      kind: 'comment',
+      marker: 'MAHOSHOJO_META',
+    });
+
+    const looseText = ['正文', '', '---MAHOSHOJO_STREAM_META {version:1, impacts:[]}'].join('\n');
+    const hit = findStreamUpdateMetaStart(looseText);
+    expect(hit).not.toBeNull();
+    expect(hit!.kind).toBe('loose');
+    expect(hit!.marker).toBe('MAHOSHOJO_STREAM_META');
+    expect(looseText.slice(hit!.index).startsWith('---MAHOSHOJO_STREAM_META')).toBe(true);
   });
 });

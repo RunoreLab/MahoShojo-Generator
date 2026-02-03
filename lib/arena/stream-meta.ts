@@ -15,6 +15,54 @@ const META_MARKERS = [
   STREAM_TELEMETRY_META_MARKER,
 ] as const;
 
+export type StreamUpdateMetaStartKind = 'comment' | 'loose';
+
+export type StreamUpdateMetaStartHit = {
+  index: number;
+  kind: StreamUpdateMetaStartKind;
+  marker: (typeof STREAM_UPDATE_META_MARKERS)[number];
+};
+
+const STREAM_UPDATE_META_COMMENT_START_RE = new RegExp(
+  `<!---*\\s*(${STREAM_UPDATE_META_MARKERS.join('|')})\\b`,
+  'i'
+);
+
+const STREAM_UPDATE_META_LOOSE_START_RE = new RegExp(
+  `(^|\\n)\\s*(?:---+\\s*)?(${STREAM_UPDATE_META_MARKERS.join('|')})(?=\\s*[:=\\[{]|\\s*$)`,
+  'im'
+);
+
+export function findStreamUpdateMetaStart(input: string): StreamUpdateMetaStartHit | null {
+  if (typeof input !== 'string' || !input) return null;
+
+  const commentMatch = STREAM_UPDATE_META_COMMENT_START_RE.exec(input);
+  const looseMatch = STREAM_UPDATE_META_LOOSE_START_RE.exec(input);
+
+  const commentIndex = commentMatch && typeof commentMatch.index === 'number' ? commentMatch.index : null;
+  const looseIndex =
+    looseMatch && typeof looseMatch.index === 'number'
+      ? (() => {
+          const matched = looseMatch[0] || '';
+          let offset = 0;
+          while (offset < matched.length && /\s/.test(matched[offset]!)) {
+            offset += 1;
+          }
+          return looseMatch.index + offset;
+        })()
+      : null;
+
+  if (commentIndex == null && looseIndex == null) return null;
+
+  if (commentIndex != null && (looseIndex == null || commentIndex <= looseIndex)) {
+    const marker = (commentMatch?.[1] || 'MAHOSHOJO_ARENA_META') as StreamUpdateMetaStartHit['marker'];
+    return { index: commentIndex, kind: 'comment', marker };
+  }
+
+  const marker = (looseMatch?.[2] || 'MAHOSHOJO_ARENA_META') as StreamUpdateMetaStartHit['marker'];
+  return { index: looseIndex ?? 0, kind: 'loose', marker };
+}
+
 export const StreamUpdateMetaSchema = z
   .object({
     version: z.number().int().min(1).optional(),

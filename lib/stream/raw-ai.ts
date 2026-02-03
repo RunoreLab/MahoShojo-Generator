@@ -1,4 +1,4 @@
-import { streamText, generateText, NoObjectGeneratedError } from "ai";
+import { streamText, NoObjectGeneratedError } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createDeepSeek } from "@ai-sdk/deepseek";
@@ -256,43 +256,6 @@ export async function generateWithStreamAI(
 	                    return false;
 	                };
 
-	                const buildNonStreamFallbackResponse = async () => {
-	                    const textResult = await generateText({
-	                        model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel),
-	                        prompt: [
-	                            {
-	                                role: 'user',
-	                                content: generationConfig.prompt,
-	                            },
-	                        ],
-	                        temperature: generationConfig.temperature,
-	                        maxRetries: 0,
-	                        ...maxOutputTokensOption,
-	                    });
-
-	                    const generatedText = typeof (textResult as any)?.text === 'string' ? (textResult as any).text : '';
-	                    if (looksLikeTrivialEmptyOutput(generatedText)) {
-	                        throw new Error('AI 返回空对象/空内容（{} / [] / 空白），请重试或切换模型。');
-	                    }
-
-	                    const fallbackStream = new ReadableStream<string>({
-	                        start(controller) {
-	                            controller.enqueue(generatedText);
-	                            controller.close();
-	                        },
-	                    });
-
-	                    return {
-	                        response: new Response(fallbackStream.pipeThrough(new TextEncoderStream()), {
-	                            headers: {
-	                                'Content-Type': 'text/plain; charset=utf-8',
-	                            },
-	                        }),
-	                        usagePromise: Promise.resolve((textResult as any).usage),
-	                        telemetry: options?.telemetry,
-	                    };
-	                };
-
 	                // 捕获 onError 回调中的错误，用于后续提取错误信息
 	                let capturedError: any = null;
 
@@ -341,7 +304,7 @@ export async function generateWithStreamAI(
 	                            } catch {
 	                                // ignore
 	                            }
-	                            return await buildNonStreamFallbackResponse();
+	                            throw new Error('AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。');
 	                        }
 	                        const errorMessage = extractUpstreamErrorMessage(capturedError, result);
 	                        throw new Error(errorMessage);
@@ -357,7 +320,7 @@ export async function generateWithStreamAI(
 	                    } catch {
 	                        // ignore
 	                    }
-	                    return await buildNonStreamFallbackResponse();
+	                    throw new Error('AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。');
 	                }
 
 	                // 创建一个新的 ReadableStream，将已读取的 chunk 和剩余流合并
