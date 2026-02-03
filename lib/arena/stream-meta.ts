@@ -311,6 +311,31 @@ const findLastHtmlCommentWithMarker = (
   return null;
 };
 
+type UnclosedCommentHit = { start: number; marker: string };
+
+const findLastUnclosedHtmlCommentStartWithMarker = (
+  markdown: string,
+  markers: readonly string[] = META_MARKERS
+): UnclosedCommentHit | null => {
+  const MAX_TAIL_CHARS = 120_000;
+  const tailStart = Math.max(0, markdown.length - MAX_TAIL_CHARS);
+  const haystack = tailStart > 0 ? markdown.slice(tailStart) : markdown;
+
+  const markerAlt = markers.map(escapeRegExp).join('|');
+  const re = new RegExp(`<!---*\\s*(${markerAlt})\\b`, 'gi');
+
+  let last: { index: number; marker: string } | null = null;
+  for (const match of haystack.matchAll(re)) {
+    if (typeof match.index !== 'number') continue;
+    const marker = match[1];
+    if (!marker) continue;
+    last = { index: match.index, marker };
+  }
+  if (!last) return null;
+
+  return { start: tailStart + last.index, marker: last.marker };
+};
+
 const findLastLooseMarkerBlock = (
   markdown: string,
   markers: readonly string[] = META_MARKERS
@@ -357,7 +382,16 @@ const findLastStreamMetaBlock = (
 export function stripStreamUpdateMetaComment(markdown: string): StrippedStreamMetaComment | null {
   if (typeof markdown !== 'string' || !markdown.trim()) return null;
   const hit = findLastStreamMetaBlock(markdown);
-  if (!hit) return null;
+  if (!hit) {
+    const openHit = findLastUnclosedHtmlCommentStartWithMarker(markdown, META_MARKERS);
+    if (!openHit) return null;
+    const strippedMarkdown = markdown.slice(0, openHit.start).trimEnd();
+    return {
+      rawComment: markdown.slice(openHit.start),
+      strippedMarkdown,
+      marker: openHit.marker,
+    };
+  }
   const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
   return {
     rawComment: markdown.slice(hit.start, hit.end),
@@ -447,9 +481,11 @@ export async function extractStreamUpdateMeta(markdown: string): Promise<Extract
   if (typeof markdown !== 'string' || !markdown.trim()) return null;
 
   const hit = findLastStreamMetaBlock(markdown, STREAM_UPDATE_META_MARKERS);
-  if (!hit) return null;
+  const openHit = hit ? null : findLastUnclosedHtmlCommentStartWithMarker(markdown, STREAM_UPDATE_META_MARKERS);
+  if (!hit && !openHit) return null;
 
-  const candidate = extractBestJsonCandidate(hit.inner);
+  const rawComment = hit ? markdown.slice(hit.start, hit.end) : markdown.slice(openHit!.start);
+  const candidate = extractBestJsonCandidate(hit ? hit.inner : rawComment);
   if (!candidate) return null;
 
   const meta = await repairNormalizeValidate({
@@ -508,11 +544,13 @@ export async function extractStreamUpdateMeta(markdown: string): Promise<Extract
   });
 
   const sanitized = sanitizeMeta(meta as StreamUpdateMeta);
-  const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
+  const strippedMarkdown = hit
+    ? (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd()
+    : markdown.slice(0, openHit!.start).trimEnd();
 
   return {
     meta: sanitized,
-    rawComment: markdown.slice(hit.start, hit.end),
+    rawComment,
     strippedMarkdown,
   };
 }

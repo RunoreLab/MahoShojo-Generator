@@ -267,4 +267,21 @@ describe('arena stream meta', () => {
     expect(hit!.marker).toBe('MAHOSHOJO_STREAM_META');
     expect(looseText.slice(hit!.index).startsWith('---MAHOSHOJO_STREAM_META')).toBe(true);
   });
+
+  test('extracts update meta even when html comment is not closed', async () => {
+    const md = [
+      '# 标题',
+      '',
+      '正文',
+      '',
+      '<!-- MAHOSHOJO_ARENA_META {"version":1,"impacts":[{"name":"A","currentStateSummary":"OK"}]}',
+    ].join('\n');
+
+    const extracted = await extractStreamUpdateMeta(md);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.meta.impacts?.[0]?.characterName).toBe('A');
+    expect(extracted!.meta.impacts?.[0]?.currentStateSummary).toBe('OK');
+    expect(extracted!.strippedMarkdown.includes('MAHOSHOJO_ARENA_META')).toBe(false);
+    expect(extracted!.strippedMarkdown.includes('正文')).toBe(true);
+  });
 });
