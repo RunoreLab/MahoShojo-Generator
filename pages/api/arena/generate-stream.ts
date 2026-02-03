@@ -45,6 +45,7 @@ import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
+import { extractStreamUpdateMeta } from '@/lib/arena/stream-meta';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
@@ -798,25 +799,248 @@ async function handler(req: NextRequest): Promise<Response> {
             }
         };
 
-	        const reader = originalBody.getReader();
-	        const readWithTimeout = createStreamReadWithTimeout({
-	            label: 'api/arena/generate-stream 上游读取',
-	            idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
-	            totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
-	            onTimeout: () => {
-	                try {
-	                    void reader.cancel('timeout');
-	                } catch {
-	                    // ignore
-	                }
-	            },
-	        });
-	        const wrappedBody = new ReadableStream<Uint8Array>({
-	            async pull(controller) {
-	                try {
-	                    const { done, value } = await readWithTimeout(reader);
-	                    if (done) {
-	                        appendText(decoder.decode());
+        const url = new URL(req.url);
+        const wantsSse =
+            url.searchParams.get('format') === 'sse' || (req.headers.get('accept') || '').includes('text/event-stream');
+        const shouldAllowStreamMeta = shouldForceStreamMeta || resolvedWriteArenaHistory || resolvedWriteCurrentState;
+
+        if (wantsSse) {
+            const sseHeaders = new Headers(headers);
+            sseHeaders.set('Content-Type', 'text/event-stream; charset=utf-8');
+            sseHeaders.set('Cache-Control', 'no-cache, no-transform');
+
+            const encoder = new TextEncoder();
+            const encodeEvent = (event: string, payload: unknown) => {
+                let data: string;
+                try {
+                    data = JSON.stringify(payload ?? null);
+                } catch (error) {
+                    data = JSON.stringify({
+                        ok: false,
+                        error: error instanceof Error ? error.message : String(error ?? 'json stringify failed'),
+                    });
+                }
+                return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
+            };
+
+            const META_START_RE = /<!---*\s*MAHOSHOJO_ARENA_META\b/i;
+            const META_GUARD_CHARS = 256;
+
+            const [clientUpstream, r2Body] = originalBody.tee();
+            r2UploadPromise = storeBattleReportGenerationOutputStreamToR2({
+                generationId,
+                startedAtIso,
+                stream: r2Body,
+            });
+
+            const reader = clientUpstream.getReader();
+            const readWithTimeout = createStreamReadWithTimeout({
+                label: 'api/arena/generate-stream SSE 上游读取',
+                idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+                totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
+                onTimeout: () => {
+                    try {
+                        void reader.cancel('timeout');
+                    } catch {
+                        // ignore
+                    }
+                },
+            });
+
+            let pendingMarkdownTail = '';
+            let metaBuffer = '';
+            let inMeta = false;
+
+            const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
+                if (!chunk) return;
+                controller.enqueue(encodeEvent('markdown', { chunk }));
+            };
+
+            const processText = (controller: ReadableStreamDefaultController<Uint8Array>, text: string) => {
+                if (!text) return;
+                if (inMeta) {
+                    metaBuffer += text;
+                    return;
+                }
+
+                pendingMarkdownTail += text;
+                const match = META_START_RE.exec(pendingMarkdownTail);
+                if (match && typeof match.index === 'number') {
+                    const start = match.index;
+                    const before = pendingMarkdownTail.slice(0, start);
+                    if (before) flushMarkdown(controller, before);
+                    metaBuffer = pendingMarkdownTail.slice(start);
+                    pendingMarkdownTail = '';
+                    inMeta = true;
+                    return;
+                }
+
+                if (pendingMarkdownTail.length > META_GUARD_CHARS) {
+                    const safePart = pendingMarkdownTail.slice(0, pendingMarkdownTail.length - META_GUARD_CHARS);
+                    pendingMarkdownTail = pendingMarkdownTail.slice(-META_GUARD_CHARS);
+                    if (safePart) flushMarkdown(controller, safePart);
+                }
+            };
+
+            const sseBody = new ReadableStream<Uint8Array>({
+                async pull(controller) {
+                    try {
+                        const { done, value } = await readWithTimeout(reader);
+                        if (done) {
+                            // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
+                            const flushed = decoder.decode();
+                            if (flushed) {
+                                appendText(flushed);
+                                processText(controller, flushed);
+                            }
+
+                            if (!inMeta && pendingMarkdownTail) {
+                                flushMarkdown(controller, pendingMarkdownTail);
+                                pendingMarkdownTail = '';
+                            }
+
+                            // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
+                            const usageForTelemetry = await Promise.race([
+                                resolvedUsagePromise,
+                                new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+                            ]);
+                            const shouldIncludeTelemetry =
+                                (usageForTelemetry != null &&
+                                    (typeof usageForTelemetry.promptTokens === 'number' ||
+                                        typeof usageForTelemetry.completionTokens === 'number' ||
+                                        typeof usageForTelemetry.reasoningTokens === 'number')) ||
+                                typeof narrativeHistoryReadCount === 'number' ||
+                                (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
+
+                            if (shouldIncludeTelemetry) {
+                                const aiModelForTelemetry =
+                                    typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim()
+                                        ? aiTelemetry.model.trim()
+                                        : null;
+                                const telemetryPayload = {
+                                    version: 1,
+                                    ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
+                                    ...(usageForTelemetry
+                                        ? {
+                                            usage: {
+                                                promptTokens: usageForTelemetry.promptTokens ?? null,
+                                                reasoningTokens: usageForTelemetry.reasoningTokens ?? null,
+                                                completionTokens: usageForTelemetry.completionTokens ?? null,
+                                                totalTokens: usageForTelemetry.totalTokens ?? null,
+                                                cachedTokens: usageForTelemetry.cachedTokens ?? null,
+                                            },
+                                        }
+                                        : {}),
+                                    ...(typeof narrativeHistoryReadCount === 'number' ? { narrativeHistoryReadCount } : {}),
+                                };
+                                controller.enqueue(encodeEvent('telemetry', telemetryPayload));
+                            }
+
+                            if (shouldAllowStreamMeta) {
+                                if (metaBuffer && metaBuffer.trim()) {
+                                    try {
+                                        const extracted = await extractStreamUpdateMeta(metaBuffer);
+                                        if (extracted?.meta) {
+                                            const raw = extracted.rawComment ?? metaBuffer;
+                                            const rawMax = 8_000;
+                                            const rawTrimmed = raw.length > rawMax ? raw.slice(0, rawMax) : raw;
+                                            controller.enqueue(
+                                                encodeEvent('meta', {
+                                                    parseOk: true,
+                                                    meta: extracted.meta,
+                                                    raw: rawTrimmed,
+                                                    rawTruncated: raw.length > rawMax,
+                                                })
+                                            );
+                                        } else {
+                                            controller.enqueue(
+                                                encodeEvent('meta_error', {
+                                                    parseOk: false,
+                                                    error: '未能识别 MAHOSHOJO_ARENA_META 块（marker 缺失或格式不匹配）',
+                                                    raw: metaBuffer.slice(0, 2_000),
+                                                    rawTruncated: metaBuffer.length > 2_000,
+                                                })
+                                            );
+                                        }
+                                    } catch (error) {
+                                        controller.enqueue(
+                                            encodeEvent('meta_error', {
+                                                parseOk: false,
+                                                error: error instanceof Error ? error.message : String(error ?? 'meta parse failed'),
+                                                raw: metaBuffer.slice(0, 2_000),
+                                                rawTruncated: metaBuffer.length > 2_000,
+                                            })
+                                        );
+                                    }
+                                } else {
+                                    controller.enqueue(
+                                        encodeEvent('meta_error', {
+                                            parseOk: false,
+                                            error: '未检测到 MAHOSHOJO_ARENA_META（模型可能漏写，或未按末行追加）',
+                                            raw: null,
+                                        })
+                                    );
+                                }
+                            }
+
+                            controller.enqueue(encodeEvent('done', { ok: true }));
+                            await finalizeOnce('completed');
+                            controller.close();
+                            return;
+                        }
+
+                        if (value) {
+                            outputBytes += value.byteLength;
+                            const decoded = decoder.decode(value, { stream: true });
+                            appendText(decoded);
+                            processText(controller, decoded);
+                        }
+                    } catch (streamError) {
+                        const message = streamError instanceof Error ? streamError.message : String(streamError ?? 'stream error');
+                        try {
+                            controller.enqueue(encodeEvent('error', { ok: false, error: message }));
+                        } catch {
+                            // ignore
+                        }
+                        await finalizeOnce('failed', message);
+                        controller.close();
+                    }
+                },
+                async cancel(reason) {
+                    try {
+                        void reader.cancel(reason);
+                    } catch {
+                        // 忽略取消时的二次错误
+                    }
+                    await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
+                },
+            });
+
+            return new Response(sseBody, {
+                status: streamResponse.status,
+                headers: sseHeaders,
+            });
+        }
+
+        const reader = originalBody.getReader();
+        const readWithTimeout = createStreamReadWithTimeout({
+            label: 'api/arena/generate-stream 上游读取',
+            idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+            totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
+            onTimeout: () => {
+                try {
+                    void reader.cancel('timeout');
+                } catch {
+                    // ignore
+                }
+            },
+        });
+        const wrappedBody = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+                try {
+                    const { done, value } = await readWithTimeout(reader);
+                    if (done) {
+                        appendText(decoder.decode());
 
                         // 在流式末尾追加一段系统 telemetry 注释，用于前端展示 token 与叙事历史读取条数。
                         const usageForTelemetry = await Promise.race([
@@ -848,9 +1072,7 @@ async function handler(req: NextRequest): Promise<Response> {
                                         },
                                     }
                                     : {}),
-                                ...(typeof narrativeHistoryReadCount === 'number'
-                                    ? { narrativeHistoryReadCount }
-                                    : {}),
+                                ...(typeof narrativeHistoryReadCount === 'number' ? { narrativeHistoryReadCount } : {}),
                             };
 
                             const telemetryComment = `\n\n<!-- MAHOSHOJO_TELEMETRY_META ${JSON.stringify(telemetryPayload)} -->\n`;
@@ -874,16 +1096,16 @@ async function handler(req: NextRequest): Promise<Response> {
                     controller.error(streamError);
                     await finalizeOnce('failed', streamError instanceof Error ? streamError.message : 'stream error');
                 }
-	            },
-	            async cancel(reason) {
-	                try {
-	                    void reader.cancel(reason);
-	                } catch {
-	                    // 忽略取消时的二次错误
-	                }
-	                await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
-	            }
-	        });
+            },
+            async cancel(reason) {
+                try {
+                    void reader.cancel(reason);
+                } catch {
+                    // 忽略取消时的二次错误
+                }
+                await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
+            },
+        });
 
         const [clientBody, r2Body] = wrappedBody.tee();
         r2UploadPromise = storeBattleReportGenerationOutputStreamToR2({

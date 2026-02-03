@@ -3,6 +3,7 @@ import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import type { Preset } from '@/lib/presets';
 import type { StatsData } from '@/pages/api/get-stats';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
+import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 
 export const MAX_COMBATANTS = 10;
 export const MAX_AUX_SCENARIOS = 10;
@@ -12,6 +13,15 @@ export type CombatantType = 'magical-girl' | 'canshou' | 'general-character';
 export type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type StoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 export type GenerationMode = 'non-stream' | 'stream';
+
+export type StreamUpdateMetaDebug = {
+  source: 'sse' | 'inline';
+  parseOk: boolean;
+  error?: string | null;
+  raw?: string | null;
+  rawTruncated?: boolean;
+  meta?: NormalizedStreamUpdateMeta | null;
+};
 
 export interface BattleTeam {
   id: number;
@@ -130,6 +140,7 @@ export interface BattleStoreState {
   streamAiUsage: NewsReport['aiUsage'] | null;
   streamAiModel: string | null;
   streamNarrativeHistoryReadCount: number | null;
+  streamUpdateMetaDebug: StreamUpdateMetaDebug | null;
   storyLength: StoryLengthOption;
   selectedLevel: string;
   selectedLanguage: string;
@@ -159,6 +170,7 @@ export interface BattleStoreState {
   setStreamAiUsage: (usage: NewsReport['aiUsage'] | null) => void;
   setStreamAiModel: (model: string | null) => void;
   setStreamNarrativeHistoryReadCount: (count: number | null) => void;
+  setStreamUpdateMetaDebug: (debug: StreamUpdateMetaDebug | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setSelectedLevel: (level: string) => void;
   setSelectedLanguage: (language: string) => void;

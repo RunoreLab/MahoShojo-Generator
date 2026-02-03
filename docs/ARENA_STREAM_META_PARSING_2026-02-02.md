@@ -378,6 +378,15 @@ SSE 方案落地时，建议显式关注以下“影响面”，避免把“传�
 
 在迁移期建议保留“旧解析逻辑”作为 fallback（例如 SSE 解析失败就退回到纯文本 + 尾部剥离）。
 
+### 当前落地状态（2026-02-03）
+
+已在代码中落地一版“可灰度”的 SSE 方案（默认仍兼容旧版纯文本流）：
+
+- 服务端：`/api/arena/generate-stream?format=sse` 会返回 `text/event-stream`；否则保持旧版 `text/plain`（`pages/api/arena/generate-stream.ts`）。
+- 事件：`markdown/telemetry/meta/meta_error/done/error`（`meta` 在服务端解析后下发；SSE 模式不再追加 `MAHOSHOJO_TELEMETRY_META` 尾注释）。
+- 前端：流式模式会优先请求 SSE，并按 `content-type` 自动回退到旧版文本流解析（`components/arena/hooks/useBattleEngine.ts`）。
+- 诊断入口：放在“角色更新”卡片内的折叠面板 **元数据诊断**（避免污染战报卡片截图区域），可查看 parsed/raw 与错误信息（`components/arena/components/BattleResult.tsx`）。
+
 ---
 
 ## 5.4 “查看元数据输出”的用户入口：SSE 与非 SSE 都应提供

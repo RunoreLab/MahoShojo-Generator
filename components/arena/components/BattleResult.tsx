@@ -34,6 +34,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const streamAiUsage = useBattleSelector((state) => state.streamAiUsage);
   const streamAiModel = useBattleSelector((state) => state.streamAiModel);
   const streamNarrativeHistoryReadCount = useBattleSelector((state) => state.streamNarrativeHistoryReadCount);
+  const streamUpdateMetaDebug = useBattleSelector((state) => state.streamUpdateMetaDebug);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
   const settings = useBattleSelector((state) => state.settings);
@@ -56,6 +57,21 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
       ? (streamingMarkdown ?? '').trim()
       : (newsReport ? toBattleReportMarkdown(newsReport as NewsReport) : '').trim();
   const redoPrecheck = precheckBattleReportForRedo(reportMarkdownForRedo, battleMode);
+  const streamMetaDebugSummary = useMemo(() => {
+    if (!streamUpdateMetaDebug) return null;
+    const sourceLabel = streamUpdateMetaDebug.source === 'sse' ? 'SSE' : '注释解析';
+    const okLabel = streamUpdateMetaDebug.parseOk ? '解析成功' : '解析失败';
+    const rawLabel = streamUpdateMetaDebug.raw ? (streamUpdateMetaDebug.rawTruncated ? 'raw 已截断' : 'raw 可用') : 'raw 缺失';
+    return `${sourceLabel}｜${okLabel}｜${rawLabel}`;
+  }, [streamUpdateMetaDebug]);
+  const streamMetaParsedJson = useMemo(() => {
+    if (!streamUpdateMetaDebug?.meta) return '';
+    try {
+      return JSON.stringify(streamUpdateMetaDebug.meta, null, 2);
+    } catch {
+      return '';
+    }
+  }, [streamUpdateMetaDebug?.meta]);
 
   const downloadUpdatedJson = (characterData: any) => {
     const name = characterData.codename || characterData.name;
@@ -174,6 +190,42 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
             }
           >
             <div className="space-y-4">
+              {generationMode === 'stream' && streamUpdateMetaDebug && (
+                <CollapsibleSection
+                  title="元数据诊断"
+                  description={streamMetaDebugSummary ?? undefined}
+                  defaultOpen={false}
+                  storageKey="arena.section.streamUpdateMetaDebug.open"
+                  variant="panel"
+                >
+                  <div className="text-sm text-gray-600 space-y-3">
+                    {streamUpdateMetaDebug.error && (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <div className="font-medium text-amber-800">错误信息</div>
+                        <div className="mt-1 whitespace-pre-wrap break-words">{streamUpdateMetaDebug.error}</div>
+                      </div>
+                    )}
+                    {streamMetaParsedJson && (
+                      <div>
+                        <div className="font-medium text-gray-700">解析结果（parsed meta）</div>
+                        <div className="mt-1">
+                          <MarkdownBlock content={`\`\`\`json\n${streamMetaParsedJson}\n\`\`\``} variant="light" />
+                        </div>
+                      </div>
+                    )}
+                    {streamUpdateMetaDebug.raw && (
+                      <div>
+                        <div className="font-medium text-gray-700">
+                          原始输出（raw meta）{streamUpdateMetaDebug.rawTruncated ? '（已截断）' : ''}
+                        </div>
+                        <div className="mt-1">
+                          <MarkdownBlock content={`\`\`\`\n${streamUpdateMetaDebug.raw}\n\`\`\``} variant="light" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleSection>
+              )}
               {updatedCombatants.length === 0 && (
                 <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
                   本次尚未产生可展示的角色更新。你仍可点击“重做角色更新”，让 AI 基于战报生成（或修正）历战记录/当前状态摘要。
