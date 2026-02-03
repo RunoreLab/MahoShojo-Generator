@@ -1,6 +1,6 @@
 # D1 Rows Read 继续降读排查与方案（2026-02）
 
-更新时间：2026-02-01  
+更新时间：2026-02-02  
 目标：把 Rows Read 从当前约 **2B/日** 继续压到 **25B/月以下**（约 **0.83B/日**）
 
 > 本文基于仓库静态分析（全量检索 `queryFromD1()` 读路径 + SQL 形态判断）。需要你结合 Cloudflare D1 Query Insights / Analytics 验证“Top Queries”是否与本文命中一致。
@@ -13,11 +13,117 @@
 
 接下来要继续从 2B/日压到 0.83B/日，需要优先处理 **“每次请求都会把大表整张扫一遍/多遍”** 这类读放大，而不是微调小查询。
 
+### 0.1 线上 Query Insights 的新信号（你贴的截图）
+
+从你贴的两条 Top Queries 来看，Rows Read 没明显下降，原因很可能是：**主读量已从「榜单 rank 全表扫」转移到了「arena_rating_events / data_cards 的扫描」**。
+
+#### A) `arena_rating_events` 最近变动（lastDelta）窗口函数
+
+截图特征 SQL（简化）：
+
+```sql
+SELECT queue, delta, applied_at
+FROM (
+  SELECT ..., ROW_NUMBER() OVER (PARTITION BY queue ORDER BY applied_at DESC, created_at DESC) AS rn
+  FROM arena_rating_events
+  WHERE status='applied' AND queue IN ('strict','free') AND (...a_entity_id=? OR b_entity_id=?)
+)
+WHERE rn = 1;
+```
+
+截图指标（来自 D1 Query Insights）：
+
+- Rows Read：约 **92.32k / 次**
+- 调用次数：约 **12,780**
+- 平均耗时：约 **137ms**
+
+这条查询如果缺少“按实体 id 过滤”的索引，非常容易退化为大范围扫描 + 排序；在高频调用下会成为稳定的大读来源。
+
+命中位置（已落地移除，见 §2.3）：`pages/api/data-card-meta.ts`（`lastDelta/lastAppliedAt`）。
+
+#### B) `/api/public-data-cards` 列表扫描（带 OFFSET + ORDER BY）
+
+截图特征 SQL（简化）：
+
+```sql
+SELECT dc.*, u.username,
+  (SELECT group_concat(DISTINCT tag_id) FROM data_card_tags WHERE data_card_id = dc.id) AS tag_ids
+FROM data_cards dc
+JOIN users u ON dc.user_id = u.id
+WHERE dc.is_public=1 AND dc.review_status='approved' AND dc.deleted_at IS NULL AND dc.type=?
+ORDER BY dc.created_at DESC
+LIMIT ? OFFSET ?;
+```
+
+截图指标（来自 D1 Query Insights）：
+
+- Rows Read：约 **15.84k / 次**
+- 调用次数：约 **7,630**
+- 平均耗时：约 **228ms**
+
+典型原因是：缺少“匹配过滤 + 排序”的复合索引，或使用 OFFSET 导致读量随翻页线性上升。
+
+命中位置：`lib/database/data-cards.ts#getPublicDataCards()` + `pages/api/public-data-cards.ts`。
+
+### 0.2 进度盘点（对照 2026-01/2026-02 文档）
+
+| 事项 | 状态 | 备注 |
+| --- | --- | --- |
+| 排位结算 `ROW_NUMBER() OVER` 全表扫 | 已完成（代码） | `lib/database/arena-ratings.ts` 已无窗口函数扫表 |
+| 严格排位匹配（高频大读） | 已完成（代码） | `/api/arena/ranked-matchmaking` 已下线（410） |
+| 榜单缓存（止血） | 已完成（代码） | `/api/arena/leaderboard` `withEdgeCache` 15s |
+| 公共卡列表缓存（止血） | 已完成（代码） | `/api/public-data-cards` `withEdgeCache` 15s |
+| `data_card_tags` 全表聚合 JOIN | 已完成（代码） | 改为“按行关联子查询”，避免扫全表 tags |
+| lastDelta/lastAppliedAt 扫 `arena_rating_events` | 已完成（代码）/ 需迁移（D1） | 已物化到 `arena_ratings`；未迁移时接口降级为 `null` |
+| `data-card-meta` 精确 `publicRank/publicTotal` | 已完成（代码） | 已不再计算（字段保留但固定返回 `null`） |
+| `profile-card` 精确 `publicRank/publicTotal` | 未完成 | 仍在个人页热路径执行 COUNT 计算（见 §1.4/§3.1） |
+| `strict` 每日计分次数统计索引 | 已加入 schema / 待迁移（D1） | 新增复合索引以避免扫当日事件（见 §1.7/§3.4.3） |
+| `generation-ranking` 读事件按 `generation_id` | 已完成（代码） | 已改为按主键 `id IN (...)` 读取（见 §2.5） |
+| 榜单搜索 `ROW_NUMBER() OVER` 全量排名 | 已完成（代码） | 当前 `leaderboard/search` 未再出现窗口函数（见 §1.6/§3.3） |
+
 ---
 
 ## 1. 当前仓库内最可疑的高读放大点（按 ROI 排序）
 
-### 1.1 数据卡标签 `data_card_tags` 的“全表聚合再 JOIN”（极高 ROI）
+### 1.1 `arena_rating_events` 最近变动（lastDelta）查询（极高 ROI）
+
+现状：`pages/api/data-card-meta.ts` 曾为展示 `lastDelta/lastAppliedAt`，对 `arena_rating_events` 做窗口函数 `ROW_NUMBER() OVER (PARTITION BY queue ...)`。
+
+即使最终只取 strict/free 各 1 行，一旦缺少合适索引或命中失败，仍可能出现**大范围扫描 + 排序**，从而形成稳定 Rows Read。
+
+推荐修复（更推荐“写入时物化”，而不是给读路径加索引硬顶）：
+
+1) 在 `arena_ratings` 增加两列：`last_delta`、`last_applied_at`
+2) 在排位结算写入 `arena_ratings` 时同步更新这两列（每次只更新两行）
+3) 读取 `data-card-meta` 时直接从 `arena_ratings` 取值（不再扫 `arena_rating_events`）
+
+这会把 lastDelta 从“读放大”变成“写放大（两行 UPDATE）”，对 Rows Read 的收益非常直接。
+
+已落地实现：见 §2.3（注意需要线上迁移）。
+
+---
+
+### 1.2 公共数据卡列表 `/api/public-data-cards`（高 ROI）
+
+现状：`getPublicDataCards()` 默认用 `ORDER BY created_at DESC LIMIT/OFFSET`，且会关联作者与 tags。
+
+当缺少合适的复合索引时，SQLite/D1 容易退化为：
+
+- 先筛选出大批候选
+- 再排序
+- 再丢弃 OFFSET 前的行
+
+Rows Read 会随 offset 增长，并在“列表页浏览/无限滚动”场景下快速累积。
+
+推荐修复：
+
+1) 为 `data_cards` 增加“过滤 + 排序”复合索引（见 §2.4 / §3.4）
+2) 为 `/api/public-data-cards` 增加 Edge Cache（10s~30s）作为止血（见 §2.4）
+3) 中期可考虑把分页改成 cursor/keyset（可选，见 §3.5）
+
+---
+
+### 1.3 数据卡标签 `data_card_tags` 的“全表聚合再 JOIN”（极高 ROI）
 
 在以下函数中，存在模式：
 
@@ -45,16 +151,15 @@ LEFT JOIN (
 
 ---
 
-### 1.2 公共排名（`publicRank/publicTotal`）的 COUNT 计算（高 ROI，且价值可谈）
+### 1.4 公共排名（`publicRank/publicTotal`）的 COUNT 计算（高 ROI，且价值可谈）
 
-命中位置（尚未改动，建议按方案处理）：
+命中位置（部分已改动，仍需继续处理）：
 
 - `pages/api/data-card-meta.ts`
-  - `publicTotal`：strict/free 各 1 次 `COUNT(*)`（带 `arena_ratings` + `data_cards` JOIN 与复杂 eligibility 条件）
-  - `publicRank`：对单卡做 `COUNT(*) as higherCount`（带多重 OR tie-break 条件）
+  - ✅ 已不再计算 `publicRank/publicTotal`（字段保留但固定返回 `null`）
 - `pages/api/me/profile-card.ts`
-  - `publicTotal`：1 次 `COUNT(*)`
-  - `publicRank`：对多张卡重复执行 `higherCount` 计数（最多 7 次）
+  - ❗仍在计算 `publicTotal` 1 次 `COUNT(*)`
+  - ❗仍对多张卡重复执行 `publicRank` 的 `higherCount` 计数（最多 7 次）
 
 这类 query 的特点是：
 
@@ -65,7 +170,7 @@ LEFT JOIN (
 
 ---
 
-### 1.3 排行榜（`/api/arena/leaderboard*`）的标签聚合 JOIN（中高 ROI）
+### 1.5 排行榜（`/api/arena/leaderboard*`）的标签聚合 JOIN（中高 ROI）
 
 命中位置（已修复，见 §2）：
 
@@ -76,16 +181,30 @@ LEFT JOIN (
 
 ---
 
-### 1.4 榜单搜索的全量 `ROW_NUMBER()` 排名（中 ROI，但需防滥用）
+### 1.6 榜单搜索的 LIKE 扫描风险（中 ROI，需要防滥用）
 
-`pages/api/arena/leaderboard/search.ts` 仍然存在：
+现状：`pages/api/arena/leaderboard/search.ts` 已移除“全量 `ROW_NUMBER() OVER (...)` 排名”逻辑，但仍是 `LOWER(...) LIKE` + 多 OR 条件，并且在 `arena_ratings` + JOIN 上直接过滤。  
+这类查询即使做了 rate limit，也属于“被爬虫/脚本打到就会很痛”的类型（LIKE 很难走索引，且 OR 条件会放大扫描）。
 
-- 先构建 base（潜在接近全量）
-- 再 `ROW_NUMBER() OVER (...)` 做全量排名
-- 最后再按关键词过滤
+已做防护（值得保留）：
 
-这类模式即使做了 rate limit，也属于“被爬虫/脚本打到就会很痛”的查询。  
-建议：把搜索改成“先找候选实体，再查其 rating/段位”，不要在搜索接口里算全量 rank（见 §3.3）。
+- IP 令牌桶限流
+- Edge Cache（10s）
+
+进一步建议：如仍出现稳定高 Rows Read，可改为“两段式搜索（先候选 id，再查 rating/段位）”或引入 FTS（见 §3.3）。
+
+---
+
+### 1.7 strict 每日计分次数 COUNT（高 ROI，需补索引）
+
+命中位置：
+
+- `lib/database/arena-ratings.ts#getStrictDailyUsage()`
+- `pages/api/arena/strict-preflight.ts`（调用 `getStrictDailyUsage`）
+
+风险：当前实现为 `COUNT(*)` + `queue/status/user_id/created_at>=` 的组合条件；若缺少复合索引，可能退化为扫描“当日 strict 全量事件”再过滤，从而把 daily limit 校验变成稳定的大读来源。
+
+建议：新增复合索引（已写入仓库 schema，线上需迁移；见 §3.4.3）。
 
 ---
 
@@ -128,6 +247,52 @@ LEFT JOIN (
 
 ---
 
+### 2.3 Data Card Meta：移除 `arena_rating_events` 的 lastDelta 窗口函数扫描（需要迁移）
+
+改动点：
+
+- `pages/api/data-card-meta.ts`
+- `lib/database/arena-ratings.ts`（排位结算写入）
+- `lib/database/schema.sql`（新增列）
+
+做法：
+
+1) 在 `arena_ratings` 增加两列：
+   - `last_delta INTEGER`
+   - `last_applied_at TEXT`
+2) 在结算写入 `arena_ratings` 时同步更新这两列（每次只更新两行）
+3) `data-card-meta` 读取时直接取 `arena_ratings.last_delta/last_applied_at`，不再扫 `arena_rating_events`
+
+兼容策略：
+
+- 代码对旧 schema 做了回退：若线上尚未加列，接口会降级为 `lastDelta/lastAppliedAt = null`（不再触发大读）。
+
+---
+
+### 2.4 Public Data Cards：增加 Edge Cache（止血型）
+
+改动点：
+
+- `pages/api/public-data-cards.ts`：`withEdgeCache` 15s
+- `lib/edge-cache.ts`：补齐内存缓存上限 + 大响应跳过内存缓存（避免 key 高基数导致内存增长）
+
+收益预期：
+
+- 在“多人浏览首页/前几页”场景下，明显降低 `/api/public-data-cards` 的 D1 读次数；
+- 与索引配套后，可进一步降低单次查询 Rows Read。
+
+---
+
+### 2.5 Generation Ranking：按主键读取 `arena_rating_events`（无损降读）
+
+改动点：
+
+- `pages/api/arena/generation-ranking.ts`
+
+做法：把读取事件的查询从 `WHERE generation_id = ?` 改为 `WHERE id IN (?, ?)`（`{generationId}:strict/free`），避免 `arena_rating_events` 随表增长导致的“按 generation_id 扫表”。
+
+---
+
 ## 3. 下一步“高性价比继续降读”方案（建议按优先级推进）
 
 ### 3.1 第一优先：砍掉/降级 `publicRank/publicTotal` 的精确计算
@@ -142,6 +307,74 @@ LEFT JOIN (
 
 优点：对 Rows Read 的下降最直接；缺点：产品上“名次”不再处处可见。
 
+**方案 A1（更激进但更“定价可控”）：精确名次仅 Top300（窗口排名）**  
+将“名次”从“全量定义”改为“窗口内定义”：
+
+- **仅统计排位分最高的 Top300**（严格/自由各一份；按 canonical 口径：`rating DESC, games DESC, updated_at DESC, entity_type ASC, entity_id ASC`）
+- 对于 Top300 之外的实体：**不再显示排名**（`publicRank/publicTotal = null`），仅显示排位分/段位/Δ 等
+- 榜单页面/榜单模态框只允许浏览 **Top300**（最多翻到 #300，不支持深分页 offset）
+
+对 D1 Rows Read 的收益点（为什么它可能“极大降读”）：
+
+- 个人页（`/me`）等非榜单页面的“精确名次”目前仍依赖 `COUNT(*) higherCount` / `COUNT(*) total`，属于**按请求扫描**的模式（读量与榜单规模强相关）。
+- Top300 窗口排名把“需要全量统计的名次”变成“固定窗口的列表查询”：在索引可用的前提下，查询读量趋近于 **O(300)**，而不是 **O(|eligible|)**。
+- 同时还能直接消灭“排行榜深分页（OFFSET）导致 Rows Read 随 offset 线性上升”的问题：offset 的上限被强行钉死在 300。
+
+实现建议（尽量不引入新的 D1 热点）：
+
+1) **服务端不再在热路径计算 `publicRank/publicTotal`**  
+   - 直接对齐 `data-card-meta` 的做法：`pages/api/me/profile-card.ts` 移除 `computePublicRank/computePublicTotal`。
+   - 若仍希望在个人页展示“我的卡的名次”：改为 **一次性读取 Top300 并做 membership 绑定**（对该请求内的 1~3 张卡填充 rank；其它一律 null）。
+2) **排行榜接口“硬限制”Top300 范围**  
+   - `pages/api/arena/leaderboard.ts`：当 canonical 排行榜请求（`sort=rating&order=desc&...`）时，强制 `offset + limit <= 300`（超出返回空列表或 400）。
+   - 非 canonical（标签/技术值/筛选）视图建议不再宣称“全榜名次”，而是展示“列表序号”（避免误解为精确 rank）。
+3) **不做全榜 total**  
+   - Top300 方案天然不需要 `total`；若仍要展示“全榜总人数/百分比”，应走单点缓存或快照表（见 3.2/方案 C），不要回到读路径 COUNT。
+4) **UI 口径同步：只显示 Top300 的“精确名次”，其余一律不展示名次/百分比**  
+   - 竞技场页面、数据卡详情模态框、搜索结果等位置，移除/关闭“约排名/约前百分比”等展示（例如基于 localStorage 的估算）。
+   - 说明：这一步对 Rows Read 的直接影响通常不大（因为 localStorage 估算不读 D1），但它能避免“Top300 精确名次”与“其它地方还在展示约名次”造成口径混乱；同时也能减少用户把“估算”当成“精确”的误解。  
+   - 另外：当系统侧仅提供 Top300 的名次数据时，本地缓存“约排名”的覆盖面会急剧下降（多数角色永远拿不到 rank），`maxRankSeen` 也会被钉死在 ≤300，导致“约前百分比”几乎失效；因此从体验与一致性上更倾向于直接移除。
+
+对“严格排位自选对手”的影响（关键风险点）：
+
+- 当前竞技场的“快速查看排行榜”模态框（`components/arena/components/ArenaRankingModal.tsx`）既用于看榜，也用于“加入参战”挑对手；并提供“仅显示严格可计分对手”的过滤。
+- **若榜单只剩 Top300**：对于绝大多数不在 Top300 的玩家而言，Top300 的排位分通常远高于自己，开启“严格可计分对手”后会大量出现 **空列表**；即便强行选择对手，也会频繁触发 `strict-out-of-range`，导致严格计分被跳过。
+
+建议的解决方案（保持 D1 可控 + 不牺牲严格对局可用性）：
+
+1) **把“挑严格对手”从“榜单”里拆出去**（推荐）  
+   - 在排行榜模态框增加一个 Tab：`严格可计分对手（附近分段）`，该列表**不显示名次**，只展示分数/段位/局数/胜率，并提供“加入参战”。
+   - 新增轻量接口：`/api/arena/opponents?queue=strict&pivotEntityType=...&pivotEntityId=...`  
+     - 服务端先读 pivot 的 `rating/games`（可复用现有 `/api/arena/entity-rating` 逻辑）
+     - 用 `rating BETWEEN [pivot-maxDiff, pivot+maxDiff]` 取候选（`LIMIT 30~60`），按“更接近 pivot”排序或随机打散
+     - 该接口不返回 rank，因此不违反“精确名次仅 Top300”的约束
+2) **UI 上做显式提示与降级**  
+   - 在 Top300 榜单视图里提示：“本榜单仅展示 Top300 名次；如要找严格可计分对手，请切换到『附近分段』。”
+   - 当用户勾选“仅显示严格可计分对手”且结果为空时，不再提示“翻页试试”，而是引导切换到“附近分段/搜索”。
+
+可选政策变体（避免 Top300 membership 引入新的 D1 热点）：**花牌段位开始才启用 strict 分差限制**  
+
+- 规则草案（保持尽量“可解释 + 不额外查库”）：
+  - 当严格排位对战涉及预设时：维持现状（预设不做分差限制）。
+  - 当双方都是数据卡角色时：
+    - 若双方的基础段位（由 `rating+games` 推导）都低于 **花牌**（即无牌/白牌/字牌）：**不做 `strict-out-of-range` 检查**，对战默认可计分（仍保留公开审核/去重/每日次数/模型白名单等其它规则）。
+    - 只要任意一方达到 **花牌**或更高（花牌/权杖）：继续按现有口径做 `strict-out-of-range` 检查。
+- 好处：
+  - 不需要判定“是否 Top300”，因此不会因为每局/每次预检额外查询榜单而引入新的 D1 读热点（结算/预检本来就要读双方的 `arena_ratings`）。
+  - 低段位玩家更容易找到“可计分对手”，降低 Top300 榜单导致的可用性问题。
+- 主要风险（需要明确是否接受）：
+  - **低段位刷分空间增加**：无/白/字牌范围内不限制分差，会放大“喂分/互刷”动机；虽然上升到花牌后限制会恢复，但依然可能出现“冲花牌前的刷分窗口”。
+  - **规则仍有门槛**：从字牌 → 花牌时，用户会感到“突然开始卡分差”，需要在 UI/百科里明确提示。
+- 推荐配套（若采纳该变体）：
+  - 预检与结算必须使用同一口径：同步调整 `pages/api/arena/strict-preflight.ts` 与 `lib/database/arena-ratings.ts`，避免 UI 显示“可计分”但结算被跳过（或相反）。
+  - 保持现有的严格去重窗口（`dedup-user-pair`）与每日次数限制，减少互刷的收益。
+  - 在“快速挑对手”UI 里：若我方尚未到花牌，可隐藏/弱化“仅显示严格可计分对手（分差）”开关，并提示“花牌及以上才启用分差限制”。
+
+可观测性（上线后怎么验证它是否真的在降读）：
+
+- Cloudflare Query Insights 的 Top Queries 里：`COUNT(*) as higherCount` / `COUNT(*) as total` 应明显下降或消失。
+- 若仍高：说明 D1 Rows Read 的主要来源已转移到其它查询（常见是公共列表分页 / tag 关联 / 搜索 LIKE）。
+
 **方案 B（折中）**  
 仍提供名次，但做“近似名次”：
 
@@ -153,7 +386,14 @@ LEFT JOIN (
 **方案 B2（折中 + 更偏客户端）：localStorage 估算名次（你提的方案）**  
 核心点先说清楚：**localStorage 本身不会降低 Rows Read**，真正的降读来自“把精确 `publicRank/publicTotal` 从热路径移除”。localStorage 的价值是：在你砍掉精确排名查询后，仍然能在多数页面给用户一个“可用的名次参考”，维持体验。
 
+> 备注：如果最终采纳 **“精确名次仅 Top300，其他位置一律不展示名次/百分比”**（方案 A1 的 UI 口径），那么本方案（B2）可直接跳过。
+
 可行性结论：**可行，但需要调整“估算口径/精度预期”**。
+
+但需要特别强调：若服务端从源头就不再提供 Top300 之外的 rank 数据，那么本地缓存方案的覆盖面会被钉死在 `≤300`，这会导致：
+
+- 大多数角色永远拿不到 rank（只剩“空占位/不显示”）
+- `maxRankSeen` 失去意义，无法再推导“约前百分比”
 
 - 如果仅把“用户最近看过的排行榜条目/对战涉及的角色”存本地：你只能对“本地已缓存覆盖到的那段排名”给出较靠谱的名次；对未覆盖区域很难推算，**无法稳定做到**“约 1234 名（个位数精度）”。
 - 若希望“任何角色都能给出一个看起来像名次的数字”，需要额外引入一个“小体积的 rank 模型”，例如：按分数（+场次）做分位点/直方图的 **rankHint**（可强缓存、低频刷新），客户端用它把 `rating/games` 映射为 `rankApprox`。这个模型可以：
@@ -162,7 +402,7 @@ LEFT JOIN (
 
 推荐的实现方式（兼顾降读与体验）：
 
-1) **只保留两处“精确排名”**：排行榜页（`/ranking`）与个人页（`/me`）。  
+1) **只保留“Top300 精确名次”**：排行榜页（`/ranking`，含竞技场内“快速查看排行榜”）与个人页（`/me`，仅命中 Top300 时显示）。  
 2) 其它位置（竞技场页面、数据卡详情模态框、列表卡片等）不再请求/计算 `publicRank/publicTotal`，改为：
    - 优先展示 `约 N 名`（来自本地缓存估算），并提供 tooltip：“基于本地缓存估算，仅供参考；以排行榜/个人页为准”；
    - 本地缓存缺失时降级为不展示名次（只展示分数/段位/Δ）。
@@ -184,7 +424,7 @@ LEFT JOIN (
 如果后续允许引入一个“低频、强缓存”的总人数/分位点数据（例如 `/api/arena/leaderboard-stats`），则可以把 `topPercentBound` 升级为更接近全局的 `rank / total` 或 `percentileHint(rating,games)`，但这属于增强项，不是本地估算的必要条件。
 
 收益预期（对 Rows Read）：  
-只要 `pages/api/data-card-meta.ts` 与 `pages/api/me/profile-card.ts` 不再做 `higherCount/publicTotal` 的 COUNT 统计，通常会出现明显下降；localStorage 方案能让“砍查询”更容易被用户接受。
+目前 `pages/api/data-card-meta.ts` 已不再做 `higherCount/publicTotal` 的 COUNT 统计；剩余主要在 `pages/api/me/profile-card.ts`。只要把个人页的精确名次计算从热路径移除（或改成近似），通常会出现明显下降；localStorage 方案能让“砍查询”更容易被用户接受。
 
 风险与注意事项：
 
@@ -210,7 +450,9 @@ LEFT JOIN (
 
 ---
 
-### 3.3 第三优先：重写排行榜搜索，避免“先全量排名再过滤”
+### 3.3 第三优先：继续加固排行榜搜索（避免 LIKE 扫描放大）
+
+现状：榜单搜索已不再使用 `ROW_NUMBER() OVER` 做全量排名，但仍可能因为 `LIKE + OR` 在大表上扫描而被滥用。下面是进一步的降读/防滥用思路。
 
 建议 SQL/流程（思路，不是唯一解）：
 
@@ -222,6 +464,51 @@ LEFT JOIN (
 
 这样 Rows Read 规模与“候选集大小”相关，而不是与“全榜规模”相关。
 
+### 3.4 线上迁移清单（建议优先执行）
+
+> 注意：`lib/database/schema.sql` 只是“目标结构”。线上 D1 需要实际执行 `ALTER TABLE/CREATE INDEX`。
+
+#### 3.4.1 `arena_ratings` 增列（用于 lastDelta 物化）
+
+```sql
+ALTER TABLE arena_ratings ADD COLUMN last_delta INTEGER;
+ALTER TABLE arena_ratings ADD COLUMN last_applied_at TEXT;
+```
+
+可选：如果希望马上让存量数据也有 lastDelta，可以做一次性 backfill（可能较重，建议离峰执行，且先在测试库验证）。
+
+#### 3.4.2 `data_cards` 增加公共列表复合索引（对应截图查询）
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_data_cards_public_approved_type_created_at
+  ON data_cards(type, is_public, review_status, deleted_at, created_at DESC);
+```
+
+验证建议：
+
+- 在 D1 控制台对截图 SQL 执行 `EXPLAIN QUERY PLAN`，确认走到该索引；
+- 对比迁移前后 Query Insights：同样参数下 Rows Read 是否显著下降。
+
+#### 3.4.3 `arena_rating_events` 增加 strict 每日计分复合索引（对应 strict-preflight / 结算路径）
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_user_queue_status_created_at
+  ON arena_rating_events(user_id, queue, status, created_at);
+```
+
+对应查询：`lib/database/arena-ratings.ts#getStrictDailyUsage()`。
+
+### 3.5 可选：public-data-cards 改为 cursor/keyset 分页（中期优化）
+
+当你们的列表页存在大量 `offset` 翻页/无限滚动时，复合索引仍可能无法避免“offset 越大读越多”的线性放大。
+
+可选改造方向：
+
+- 用 `created_at + id` 做游标：`WHERE (created_at, id) < (?, ?) ORDER BY created_at DESC, id DESC LIMIT ?`
+- 前端从 `offset` 改为 `cursor`，并保留兼容期（例如同时支持两种入参）
+
+收益：把 Rows Read 从“随 offset 增长”变成“近似随 limit 固定”。
+
 ---
 
 ## 4. 建议的验证方式（你们需要在 Cloudflare 控制台做）
@@ -230,9 +517,10 @@ LEFT JOIN (
 
 1) Rows Read 总量：是否显著下降；目标是逐步逼近 **0.83B/日**  
 2) Top Queries 是否从以下关键字中“消失/显著下降”：
-   - `GROUP BY data_card_id` + `group_concat(DISTINCT tag_id)`（全表 tag_map）
-   - `COUNT(*) as higherCount`（名次计算）
-   - `ROW_NUMBER() OVER`（搜索榜单）
+  - `GROUP BY data_card_id` + `group_concat(DISTINCT tag_id)`（全表 tag_map）
+  - `COUNT(*) as higherCount`（名次计算）
+  - `COUNT(*) as count FROM arena_rating_events`（strict 每日计分次数统计）
+  - `FROM data_cards` + `ORDER BY dc.created_at DESC LIMIT ? OFFSET ?`（公共列表）
 3) 关键页面 P95 延迟：榜单/公共卡列表/个人页是否同步变快（通常会）
 
 ---

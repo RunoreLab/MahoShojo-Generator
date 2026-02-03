@@ -2,6 +2,7 @@
 
 import { getLogger } from '@/lib/logger';
 import magicalGirlQuestionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
+import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-default.json';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -44,6 +45,7 @@ import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
+	import { extractStreamUpdateMeta, findStreamUpdateMetaStart } from '@/lib/arena/stream-meta';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
@@ -433,11 +435,22 @@ async function handler(req: NextRequest): Promise<Response> {
             adjudicationResults: adjudicationResults || undefined,
         };
 
-        const fallbackQuestions = Array.isArray((magicalGirlQuestionnaire as any)?.questions)
-            ? ((magicalGirlQuestionnaire as any).questions as unknown[])
-                .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
-                .filter((item) => typeof item === 'string' && item.trim())
-            : [];
+	        const magicalGirlFallbackQuestions = Array.isArray((magicalGirlQuestionnaire as any)?.questions)
+	            ? ((magicalGirlQuestionnaire as any).questions as unknown[])
+	                .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
+	                .filter((item) => typeof item === 'string' && item.trim())
+	            : [];
+	        const canshouFallbackQuestions = Array.isArray((canshouQuestionnaire as any)?.questions)
+	            ? ((canshouQuestionnaire as any).questions as unknown[])
+	                .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
+	                .filter((item) => typeof item === 'string' && item.trim())
+	            : [];
+
+	        const fallbackQuestions = {
+	            magicalGirl: magicalGirlFallbackQuestions,
+	            canshou: canshouFallbackQuestions,
+	            default: magicalGirlFallbackQuestions,
+	        };
 
         const prompt = createStreamPromptBuilder(
             fallbackQuestions,
@@ -786,25 +799,373 @@ async function handler(req: NextRequest): Promise<Response> {
             }
         };
 
-	        const reader = originalBody.getReader();
-	        const readWithTimeout = createStreamReadWithTimeout({
-	            label: 'api/arena/generate-stream 上游读取',
-	            idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
-	            totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
-	            onTimeout: () => {
+        const url = new URL(req.url);
+        const wantsSse =
+            url.searchParams.get('format') === 'sse' || (req.headers.get('accept') || '').includes('text/event-stream');
+        const shouldAllowStreamMeta = shouldForceStreamMeta || resolvedWriteArenaHistory || resolvedWriteCurrentState;
+
+	        if (wantsSse) {
+	            const sseHeaders = new Headers(headers);
+	            sseHeaders.set('Content-Type', 'text/event-stream; charset=utf-8');
+	            sseHeaders.set('Cache-Control', 'no-cache, no-transform');
+	            const debugSse =
+	                url.searchParams.get('debug') === '1' ||
+	                url.searchParams.get('debug') === 'true' ||
+	                url.searchParams.get('debugSse') === '1' ||
+	                url.searchParams.get('debugSse') === 'true';
+
+	            const encoder = new TextEncoder();
+	            const encodeEvent = (event: string, payload: unknown) => {
+	                let data: string;
 	                try {
-	                    void reader.cancel('timeout');
-	                } catch {
-	                    // ignore
+	                    data = JSON.stringify(payload ?? null);
+                } catch (error) {
+                    data = JSON.stringify({
+                        ok: false,
+                        error: error instanceof Error ? error.message : String(error ?? 'json stringify failed'),
+                    });
+                }
+	                return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
+	            };
+	            const enqueueDebug = (controller: ReadableStreamDefaultController<Uint8Array>, payload: unknown) => {
+	                if (!debugSse) return;
+	                controller.enqueue(encodeEvent('debug', payload));
+	            };
+
+		            const META_GUARD_CHARS = 2048;
+		            const META_FALLBACK_TAIL_CHARS = 120_000;
+
+            const [clientUpstream, r2Body] = originalBody.tee();
+            r2UploadPromise = storeBattleReportGenerationOutputStreamToR2({
+                generationId,
+                startedAtIso,
+                stream: r2Body,
+            });
+
+            const reader = clientUpstream.getReader();
+            const readWithTimeout = createStreamReadWithTimeout({
+                label: 'api/arena/generate-stream SSE 上游读取',
+                idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+                totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
+                onTimeout: () => {
+                    try {
+                        void reader.cancel('timeout').catch(() => {});
+                    } catch {
+                        // ignore
+                    }
+                },
+            });
+
+	            let pendingMarkdownTail = '';
+	            let metaBuffer = '';
+		            let metaFallbackTail = '';
+		            let inMeta = false;
+		            let markdownCharsSent = 0;
+		            let hasMeaningfulMarkdown = false;
+
+		            const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
+		                if (!chunk) return;
+		                markdownCharsSent += chunk.length;
+		                if (!hasMeaningfulMarkdown && /\S/.test(chunk)) {
+		                    hasMeaningfulMarkdown = true;
+		                }
+		                controller.enqueue(encodeEvent('markdown', { chunk }));
+		            };
+
+	            const processText = (controller: ReadableStreamDefaultController<Uint8Array>, text: string) => {
+	                if (!text) return;
+	                if (shouldAllowStreamMeta) {
+	                    metaFallbackTail += text;
+	                    if (metaFallbackTail.length > META_FALLBACK_TAIL_CHARS) {
+	                        metaFallbackTail = metaFallbackTail.slice(-META_FALLBACK_TAIL_CHARS);
+	                    }
 	                }
-	            },
-	        });
-	        const wrappedBody = new ReadableStream<Uint8Array>({
-	            async pull(controller) {
-	                try {
-	                    const { done, value } = await readWithTimeout(reader);
-	                    if (done) {
-	                        appendText(decoder.decode());
+	                if (inMeta) {
+	                    metaBuffer += text;
+	                    const metaEnd = metaBuffer.indexOf('-->');
+	                    if (metaEnd !== -1) {
+	                        const metaComment = metaBuffer.slice(0, metaEnd + 3);
+	                        const afterMeta = metaBuffer.slice(metaEnd + 3);
+	                        metaBuffer = metaComment;
+	                        inMeta = false;
+	                        if (afterMeta) {
+	                            processText(controller, afterMeta);
+	                        }
+	                    }
+	                    return;
+		                }
+
+		                pendingMarkdownTail += text;
+		                const metaStart = findStreamUpdateMetaStart(pendingMarkdownTail);
+		                if (metaStart) {
+		                    const start = metaStart.index;
+		                    const before = pendingMarkdownTail.slice(0, start);
+		                    if (before) flushMarkdown(controller, before);
+		                    metaBuffer = pendingMarkdownTail.slice(start);
+		                    pendingMarkdownTail = '';
+		                    inMeta = true;
+		                    enqueueDebug(controller, {
+		                        phase: 'meta_start',
+		                        kind: metaStart.kind,
+		                        marker: metaStart.marker,
+		                        startIndex: start,
+		                        pendingTailLength: pendingMarkdownTail.length,
+		                        metaBufferLength: metaBuffer.length,
+		                    });
+		                    return;
+		                }
+
+                if (pendingMarkdownTail.length > META_GUARD_CHARS) {
+                    const safePart = pendingMarkdownTail.slice(0, pendingMarkdownTail.length - META_GUARD_CHARS);
+                    pendingMarkdownTail = pendingMarkdownTail.slice(-META_GUARD_CHARS);
+                    if (safePart) flushMarkdown(controller, safePart);
+                }
+            };
+
+		            let sseCancelled = false;
+		            let pumpStarted = false;
+
+		            const finalizeSseAndClose = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
+		                // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
+		                const flushed = decoder.decode();
+		                if (flushed) {
+		                    appendText(flushed);
+		                    processText(controller, flushed);
+		                }
+
+		                if (!inMeta && pendingMarkdownTail) {
+		                    flushMarkdown(controller, pendingMarkdownTail);
+		                    pendingMarkdownTail = '';
+		                }
+
+		                enqueueDebug(controller, {
+		                    phase: 'done_before_meta',
+		                    outputBytes,
+		                    outputChars,
+		                    markdownCharsSent,
+		                    hasMeaningfulMarkdown,
+		                    inMeta,
+		                    pendingMarkdownTailLength: pendingMarkdownTail.length,
+		                    metaBufferLength: metaBuffer.length,
+		                    metaFallbackTailLength: metaFallbackTail.length,
+		                });
+
+		                // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
+		                const usageForTelemetry = await Promise.race([
+		                    resolvedUsagePromise,
+		                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+		                ]);
+		                const shouldIncludeTelemetry =
+		                    (usageForTelemetry != null &&
+		                        (typeof usageForTelemetry.promptTokens === 'number' ||
+		                            typeof usageForTelemetry.completionTokens === 'number' ||
+		                            typeof usageForTelemetry.reasoningTokens === 'number')) ||
+		                    typeof narrativeHistoryReadCount === 'number' ||
+		                    (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
+
+		                if (shouldIncludeTelemetry) {
+		                    const aiModelForTelemetry =
+		                        typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim() ? aiTelemetry.model.trim() : null;
+		                    const telemetryPayload = {
+		                        version: 1,
+		                        ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
+		                        ...(usageForTelemetry
+		                            ? {
+		                                usage: {
+		                                    promptTokens: usageForTelemetry.promptTokens ?? null,
+		                                    reasoningTokens: usageForTelemetry.reasoningTokens ?? null,
+		                                    completionTokens: usageForTelemetry.completionTokens ?? null,
+		                                    totalTokens: usageForTelemetry.totalTokens ?? null,
+		                                    cachedTokens: usageForTelemetry.cachedTokens ?? null,
+		                                },
+		                            }
+		                            : {}),
+		                        ...(typeof narrativeHistoryReadCount === 'number' ? { narrativeHistoryReadCount } : {}),
+		                    };
+		                    controller.enqueue(encodeEvent('telemetry', telemetryPayload));
+		                }
+
+		                let metaHasImpacts = false;
+		                if (shouldAllowStreamMeta) {
+		                    const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
+		                    if (metaCandidate && metaCandidate.trim()) {
+		                        try {
+		                            const extracted = await extractStreamUpdateMeta(metaCandidate);
+		                            if (extracted?.meta) {
+		                                metaHasImpacts = Array.isArray(extracted.meta.impacts) && extracted.meta.impacts.length > 0;
+		                                const raw = extracted.rawComment ?? metaCandidate;
+		                                const rawMax = 8_000;
+		                                const rawTrimmed = raw.length > rawMax ? raw.slice(0, rawMax) : raw;
+		                                controller.enqueue(
+		                                    encodeEvent('meta', {
+		                                        parseOk: true,
+		                                        meta: extracted.meta,
+		                                        raw: rawTrimmed,
+		                                        rawTruncated: raw.length > rawMax,
+		                                    })
+		                                );
+		                            } else {
+		                                controller.enqueue(
+		                                    encodeEvent('meta_error', {
+		                                        parseOk: false,
+		                                        error: '未能识别 MAHOSHOJO_*_META 块（marker 缺失或格式不匹配）',
+		                                        raw: metaCandidate.slice(0, 2_000),
+		                                        rawTruncated: metaCandidate.length > 2_000,
+		                                    })
+		                                );
+		                            }
+		                        } catch (error) {
+		                            controller.enqueue(
+		                                encodeEvent('meta_error', {
+		                                    parseOk: false,
+		                                    error: error instanceof Error ? error.message : String(error ?? 'meta parse failed'),
+		                                    raw: metaCandidate.slice(0, 2_000),
+		                                    rawTruncated: metaCandidate.length > 2_000,
+		                                })
+		                            );
+		                        }
+		                    } else {
+		                        controller.enqueue(
+		                            encodeEvent('meta_error', {
+		                                parseOk: false,
+		                                error: '未检测到 MAHOSHOJO_*_META（模型可能漏写，或未按末行追加）',
+		                                raw: null,
+		                            })
+		                        );
+		                    }
+		                }
+
+		                // 若未下发任何有效正文（非空白），且也没有可用的 impacts，则视为异常：AI 返回空输出 / 或正文被吞掉。
+		                if (!hasMeaningfulMarkdown && !metaHasImpacts) {
+		                    const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
+		                    const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
+		                    controller.enqueue(
+		                        encodeEvent('error', {
+		                            ok: false,
+		                            error: 'AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。',
+		                            debug: debugSse
+		                                ? {
+		                                    outputBytes,
+		                                    outputChars,
+		                                    markdownCharsSent,
+		                                    hasMeaningfulMarkdown,
+		                                    metaHasImpacts,
+		                                    inMeta,
+		                                    pendingMarkdownTailLength: pendingMarkdownTail.length,
+		                                    metaBufferLength: metaBuffer.length,
+		                                    metaFallbackTailLength: metaFallbackTail.length,
+		                                    rawPreview,
+		                                  }
+		                                : null,
+		                        })
+		                    );
+		                    await finalizeOnce('failed', 'empty stream output');
+		                    controller.close();
+		                    return;
+		                }
+
+		                controller.enqueue(encodeEvent('done', { ok: true }));
+		                await finalizeOnce('completed');
+		                controller.close();
+		            };
+
+		            const pumpSse = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
+		                if (pumpStarted) return;
+		                pumpStarted = true;
+
+		                enqueueDebug(controller, { phase: 'pump_start' });
+
+		                while (!sseCancelled) {
+		                    try {
+		                        // 简单背压：队列满时暂停读取上游，避免无界缓存
+		                        while (!sseCancelled && typeof controller.desiredSize === 'number' && controller.desiredSize <= 0) {
+		                            await new Promise((resolve) => setTimeout(resolve, 5));
+		                        }
+
+		                        const { done, value } = await readWithTimeout(reader);
+		                        if (sseCancelled) return;
+
+		                        if (done) {
+		                            await finalizeSseAndClose(controller);
+		                            return;
+		                        }
+
+		                        if (value) {
+		                            outputBytes += value.byteLength;
+		                            const decoded = decoder.decode(value, { stream: true });
+		                            appendText(decoded);
+		                            processText(controller, decoded);
+		                        }
+		                    } catch (streamError) {
+		                        if (sseCancelled) return;
+		                        const message =
+		                            streamError instanceof Error ? streamError.message : String(streamError ?? 'stream error');
+		                        try {
+		                            controller.enqueue(encodeEvent('error', { ok: false, error: message }));
+		                        } catch {
+		                            // ignore
+		                        }
+		                        await finalizeOnce('failed', message);
+		                        try {
+		                            controller.close();
+		                        } catch {
+		                            // ignore
+		                        }
+		                        return;
+		                    }
+		                }
+		            };
+
+		            const sseBody = new ReadableStream<Uint8Array>({
+		                start(controller) {
+		                    enqueueDebug(controller, {
+		                        phase: 'open',
+		                        generationId,
+		                        shouldAllowStreamMeta,
+		                        idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+		                        totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
+		                    });
+		                    void pumpSse(controller);
+		                },
+		                async cancel(reason) {
+		                    sseCancelled = true;
+		                    try {
+		                        void reader.cancel(reason).catch(() => {});
+		                    } catch {
+		                        // 忽略取消时的二次错误
+		                    }
+		                    await finalizeOnce(
+		                        'aborted',
+		                        reason instanceof Error ? reason.message : String(reason ?? 'aborted')
+		                    );
+		                },
+		            });
+
+            return new Response(sseBody, {
+                status: streamResponse.status,
+                headers: sseHeaders,
+            });
+        }
+
+        const reader = originalBody.getReader();
+        const readWithTimeout = createStreamReadWithTimeout({
+            label: 'api/arena/generate-stream 上游读取',
+            idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+            totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
+            onTimeout: () => {
+                try {
+                    void reader.cancel('timeout').catch(() => {});
+                } catch {
+                    // ignore
+                }
+            },
+        });
+        const wrappedBody = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+                try {
+                    const { done, value } = await readWithTimeout(reader);
+                    if (done) {
+                        appendText(decoder.decode());
 
                         // 在流式末尾追加一段系统 telemetry 注释，用于前端展示 token 与叙事历史读取条数。
                         const usageForTelemetry = await Promise.race([
@@ -836,9 +1197,7 @@ async function handler(req: NextRequest): Promise<Response> {
                                         },
                                     }
                                     : {}),
-                                ...(typeof narrativeHistoryReadCount === 'number'
-                                    ? { narrativeHistoryReadCount }
-                                    : {}),
+                                ...(typeof narrativeHistoryReadCount === 'number' ? { narrativeHistoryReadCount } : {}),
                             };
 
                             const telemetryComment = `\n\n<!-- MAHOSHOJO_TELEMETRY_META ${JSON.stringify(telemetryPayload)} -->\n`;
@@ -862,16 +1221,16 @@ async function handler(req: NextRequest): Promise<Response> {
                     controller.error(streamError);
                     await finalizeOnce('failed', streamError instanceof Error ? streamError.message : 'stream error');
                 }
-	            },
-	            async cancel(reason) {
-	                try {
-	                    void reader.cancel(reason);
-	                } catch {
-	                    // 忽略取消时的二次错误
-	                }
-	                await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
-	            }
-	        });
+            },
+            async cancel(reason) {
+                try {
+                    void reader.cancel(reason).catch(() => {});
+                } catch {
+                    // 忽略取消时的二次错误
+                }
+                await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
+            },
+        });
 
         const [clientBody, r2Body] = wrappedBody.tee();
         r2UploadPromise = storeBattleReportGenerationOutputStreamToR2({

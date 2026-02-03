@@ -79,6 +79,8 @@ CREATE INDEX idx_data_cards_like_count ON data_cards(like_count);
 CREATE INDEX idx_data_cards_favorite_count ON data_cards(favorite_count);
 CREATE INDEX idx_data_cards_deleted_at ON data_cards(deleted_at);
 CREATE INDEX idx_data_cards_is_recommended ON data_cards(is_recommended);
+CREATE INDEX IF NOT EXISTS idx_data_cards_public_approved_type_created_at
+  ON data_cards(type, is_public, review_status, deleted_at, created_at DESC);
 
 -- 数据卡更新暂存表：用于存放需要审核的新版本内容
 CREATE TABLE IF NOT EXISTS data_card_updates (
@@ -536,6 +538,8 @@ CREATE TABLE IF NOT EXISTS arena_ratings (
   wins INTEGER NOT NULL DEFAULT 0,
   losses INTEGER NOT NULL DEFAULT 0,
   draws INTEGER NOT NULL DEFAULT 0,
+  last_delta INTEGER,
+  last_applied_at TEXT,
 
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -593,6 +597,8 @@ CREATE TABLE IF NOT EXISTS arena_rating_events (
 CREATE INDEX IF NOT EXISTS idx_arena_rating_events_queue_created_at ON arena_rating_events(queue, created_at);
 CREATE INDEX IF NOT EXISTS idx_arena_rating_events_user_pair_created_at ON arena_rating_events(user_id, pair_key, created_at);
 CREATE INDEX IF NOT EXISTS idx_arena_rating_events_ip_pair_created_at ON arena_rating_events(ip_anonymized, pair_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_arena_rating_events_user_queue_status_created_at
+  ON arena_rating_events(user_id, queue, status, created_at);
 
 -- =================================================================
 -- Data Card Metrics（v0.6.0）

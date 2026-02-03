@@ -1,0 +1,389 @@
+{
+  "id": "magical-girl-afterwork-world",
+  "kind": "magical-girl",
+  "title": "原作世界观向：魔法少女成长路线问卷",
+  "description": "用于在《下班，然后变成魔法少女》世界观中补全角色的城市/阵营/等阶/本相/魔装/术式/奇境/盛开/繁开等设定（大部分题目可跳过，建议只填写你希望 AI 严格遵守的部分）。",
+  "logoUrl": "/questionnaire-title.svg",
+  "version": "1.0",
+  "questions": [
+    {
+      "id": "MGW-01",
+      "question": "一句话概括：你想要怎样的魔法少女？",
+      "type": "text",
+      "placeholder": "例如：沉默寡言的新人巡查使，擅长结界与侦测，害怕“再次失去同伴”",
+      "helperText": "建议包含：性格关键词 + 能力关键词 + 主要矛盾（各 1 个即可）",
+      "suggestions": [
+        "温柔但固执的支援型魔法少女，永远把撤离通道留到最后",
+        "精于侦查与追踪的调查院协作者，习惯把所有线索写进笔记",
+        "外表轻浮、实则极度认真，为了兑现旧日誓约而战",
+        "看似冷静的术式使用者，越接近危险越容易失控"
+      ],
+      "allowCustom": true,
+      "required": false
+    },
+    {
+      "id": "MGW-02",
+      "question": "活动区域/常驻城市是？",
+      "type": "select",
+      "suggestions": [
+        "东华州·方亭",
+        "东华州·柏安",
+        "东华州·临扬",
+        "东华州·太余",
+        "东华州·岳望",
+        "东华州·浅川",
+        "西罗州·新约",
+        "东瀛州",
+        "南非州",
+        "物质界·中央都市",
+        "物质界·小城市",
+        "魔法国度·卢恩诺雷（研究院）",
+        "魔法国度·多姆利亚（调查院）",
+        "魔法国度·奥拉缇欧（财政院）",
+        "魔法国度·赫姆维恩（魔事院）",
+        "魔法国度·凡纳海姆（民治院）",
+        "魔法国度",
+        "间界（临时任务/极少见）"
+      ],
+      "placeholder": "可直接选择，或补充：城区/地标/常用据点",
+      "helperText": "物质界城市之间多依靠陆行舰往来；往返魔法国度通常依赖特质列车。",
+      "maxLength": 120,
+      "required": false
+    },
+    {
+      "id": "MGW-03",
+      "question": "身份/编制更接近哪一种？",
+      "type": "select",
+      "options": [
+        "物质界现役（播种者辖区）",
+        "王庭五院编制（研究院/调查院/财政院/魔事院/民治院）",
+        "银廊学员（国度学府体系）",
+        "城市驻守（守护城市，对接协调异策局）",
+        "终身魔法少女（特殊功绩永久保留力量）",
+        "退役（已回归普通人）",
+        "爪痕（叛逃魔法少女）",
+        "游离/独行（未受约束）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补充：具体岗位",
+      "required": false
+    },
+    {
+      "id": "MGW-04",
+      "question": "持有什么等级的考核牌？",
+      "type": "select",
+      "suggestions": [
+        "无牌（新晋/未认证）",
+        "白牌（通过基础考核）",
+        "字牌（资深现役）",
+        "花牌（顶尖强者）"
+      ],
+      "placeholder": "可选：牌位（无牌/白牌/字牌/花牌）",
+      "maxLength": 120,
+      "required": false
+    },
+    {
+      "id": "MGW-05",
+      "question": "当前等阶（花朵体系）是？",
+      "type": "select",
+      "options": [
+        {
+          "value": "未觉醒",
+          "label": "未觉醒（普通人/尚未签约）"
+        },
+        {
+          "value": "种",
+          "label": "种（Seed：基础魔力操作/初始法杖）"
+        },
+        {
+          "value": "芽",
+          "label": "芽（Bud：凝结本相/魔装析出）"
+        },
+        {
+          "value": "叶",
+          "label": "叶（Leaf：学习并使用术式）"
+        },
+        {
+          "value": "蕾",
+          "label": "蕾（Bud/Flower Bud：觉醒奇境规则）"
+        },
+        {
+          "value": "花",
+          "label": "花（Flower：盛开常态强化）"
+        },
+        {
+          "value": "强花",
+          "label": "强花（Flower+：拥有繁开爆发形态）"
+        }
+      ],
+      "allowCustom": false,
+      "placeholder": "请选择一个选项",
+      "helperText": "等阶决定可用能力边界：芽→魔装析出；叶→术式；蕾→奇境；花→盛开；强花→繁开。",
+      "required": false
+    },
+    {
+      "id": "MGW-06",
+      "question": "不变身时的日常形象/穿衣风格是？",
+      "type": "text",
+      "placeholder": "例如：短发 + 深色工装外套 + 运动鞋；常背帆布包",
+      "suggestions": [
+        "干净利落的通勤风",
+        "偏运动/机能风，方便随时奔跑",
+        "学生制服外套 + 简单配饰",
+        "偏复古的长裙/风衣风格",
+        "朴素的工作服（经常加班）"
+      ],
+      "allowCustom": true,
+      "maxLength": 220,
+      "required": false
+    },
+    {
+      "id": "MGW-07",
+      "question": "变身后的魔法少女外观/服装要点是？",
+      "type": "text",
+      "placeholder": "例如：主色调、材质、标志性配饰、披风/裙摆/护具等；不需要写太长",
+      "helperText": "魔法少女代号遵循“花名”规则；服装风格可与本相意象呼应。",
+      "suggestions": [
+        "以“花瓣/枝叶”元素为主题的轻甲",
+        "偏舞台感的礼服风（但便于战斗）",
+        "简洁的风衣式战斗装 + 发光纹路",
+        "围巾/披肩随魔力流动，如潮汐起伏",
+        "带有“符文书写”痕迹的手套/袖口"
+      ],
+      "allowCustom": true,
+      "maxLength": 280,
+      "required": false
+    },
+    {
+      "id": "MGW-08",
+      "question": "如何觉醒/拿到心之种的？当时的动机是什么？",
+      "type": "text",
+      "placeholder": "例如：残兽袭击中被播种者递上心之种；她握住它，是为了守护某人/弥补某事/摆脱恐惧",
+      "suggestions": [
+        "下班途中遭遇残兽袭击，在封锁线外被播种者拦下",
+        "为了救下同伴/家人，主动握住心之种签约",
+        "在陆行舰停靠站的混乱中觉醒，从此再难回到日常",
+        "在长久的失眠与恐惧里，被“发光的心之种”唤醒",
+        "明知代价仍然签约：因为不想再旁观"
+      ],
+      "allowCustom": true,
+      "maxLength": 260,
+      "required": false
+    },
+    {
+      "id": "MGW-09",
+      "question": "代号（花名）是什么？意味着什么？",
+      "type": "text",
+      "placeholder": "例如：鸢尾——“为归来的人守一盏灯”",
+      "suggestions": [
+        "鸢尾",
+        "铃兰",
+        "风信子",
+        "桔梗",
+        "山茶",
+        "朝颜",
+        "蔷薇",
+        "薄雪"
+      ],
+      "allowCustom": true,
+      "maxLength": 120,
+      "required": false
+    },
+    {
+      "id": "MGW-10",
+      "question": "魔力/能力关键词更偏向？",
+      "type": "select",
+      "options": [
+        "无属性（乳白魔力）",
+        "自然/植物",
+        "光",
+        "影",
+        "火",
+        "冰",
+        "风",
+        "雷",
+        "水/潮汐",
+        "腐蚀",
+        "结界/屏障",
+        "音律/回声",
+        "金属/锈蚀",
+        "空间/折叠"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选择一个主属性，也可补充“副属性/表现方式”",
+      "suggestions": [
+        "光（净化与照明）",
+        "影（潜行与遮蔽）",
+        "结界（守护与分隔）",
+        "潮汐（牵引与回收）",
+        "锈蚀（让一切变质）"
+      ],
+      "maxLength": 120,
+      "required": false
+    },
+    {
+      "id": "MGW-11",
+      "question": "芽级与魔装：凝结本相、魔装“析出”时发生了什么？魔装是什么形态？",
+      "type": "text",
+      "placeholder": "例如：在一次几乎失控的战斗后，跨入了新的阶段；魔装析出为一面折叠镜，既可防御也可折返攻击",
+      "displayIf": {
+        "questionnaireId": "magical-girl-afterwork-world",
+        "questionId": "MGW-04",
+        "operator": "equals",
+        "value": [
+          "芽",
+          "叶",
+          "蕾",
+          "花",
+          "强花"
+        ]
+      },
+      "suggestions": [
+        "镜子（反射/折返/照见）",
+        "八音盒（旋律/封存/回放）",
+        "锤子（断裂/重塑/锚定）",
+        "裁缝套装（缝合/牵引/修补）",
+        "书本（记录/命名/封印）",
+        "酒杯（契约/分享/代价）"
+      ],
+      "allowCustom": true,
+      "maxLength": 320,
+      "required": false
+    },
+    {
+      "id": "MGW-12",
+      "question": "叶级与术式：主要学习/擅长的术式方向是什么？",
+      "type": "text",
+      "placeholder": "例如：护盾与反震、标记追踪、束缚牵引、短距位移、广域侦测等",
+      "displayIf": {
+        "questionnaireId": "magical-girl-afterwork-world",
+        "questionId": "MGW-04",
+        "operator": "equals",
+        "value": [
+          "叶",
+          "蕾",
+          "花",
+          "强花"
+        ]
+      },
+      "suggestions": [
+        "护盾与反震",
+        "束缚与牵引",
+        "治愈与止痛",
+        "标记与追踪",
+        "隐匿与消音",
+        "广域侦测与预警",
+        "净化与驱散"
+      ],
+      "allowCustom": true,
+      "maxLength": 280,
+      "required": false
+    },
+    {
+      "id": "MGW-13",
+      "question": "蕾级与奇境：奇境规则是什么？（范围 + 普适规则 + 代价/规避方式）",
+      "type": "text",
+      "placeholder": "例如：范围为一座站台；规则是“所有脚步声都会被放大并回放一次”；代价是施放者也会被回放干扰",
+      "displayIf": {
+        "questionnaireId": "magical-girl-afterwork-world",
+        "questionId": "MGW-04",
+        "operator": "equals",
+        "value": [
+          "蕾",
+          "花",
+          "强花"
+        ]
+      },
+      "helperText": "奇境规则对范围内所有目标（包括施放者）平等生效。你可以拥有信息优势，但不能完全免疫自身规则；规则必须与本相/魔装/意志直接相关。",
+      "suggestions": [
+        "范围内，所有“说出口的承诺”都会被强制兑现一次",
+        "范围内，影子最大的人更容易控制魔力流动（施放者也受影响）",
+        "范围内，任何被标记的目标都无法离开“标记的视线”",
+        "范围内，一切魔力都会被转化为同一种可被度量的“气”",
+        "范围内，所有伤口都会“延迟结算”，结束时一并归还"
+      ],
+      "allowCustom": true,
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "MGW-14",
+      "question": "花级与盛开/繁开：盛开强化点是什么？繁开形态是什么？代价是什么？",
+      "type": "text",
+      "placeholder": "例如：盛开后魔装成套化、护盾更稳；繁开让魔力短时暴涨，但结束后长时间衰弱且本相裂痕加深",
+      "displayIf": {
+        "questionnaireId": "magical-girl-afterwork-world",
+        "questionId": "MGW-04",
+        "operator": "equals",
+        "value": [
+          "花",
+          "强花"
+        ]
+      },
+      "helperText": "盛开是花级常态强化；繁开（大繁盛开）是短时爆发形态，结束后通常会进入衰弱期。",
+      "suggestions": [
+        "盛开：魔装结构更复杂/数量增多；机动与感知显著提升",
+        "繁开：魔装进化为第三形态，规则强度上升，但结束后衰弱",
+        "繁开：换取“十倍魔力”的代价是灵魂意志透支与长期隐疾"
+      ],
+      "allowCustom": true,
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "MGW-15",
+      "question": "成长节点：从觉醒到现在，最重要的 1~3 个转折是什么？",
+      "type": "text",
+      "placeholder": "可按“种→芽→叶→蕾→花”顺序写，每段 1 句即可",
+      "suggestions": [
+        "第一次面对残兽时学会了“撤离比胜利更重要”",
+        "凝结本相的那天，失去了某个重要之人",
+        "第一次用术式救下同伴后，开始相信自己能承担责任",
+        "奇境觉醒时，不得不让规则同样束缚自己",
+        "盛开之后，终于能够守住那条回家的路"
+      ],
+      "allowCustom": true,
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "MGW-16",
+      "question": "队伍与人际关系如何？（播种者/同伴/家人/对立者）",
+      "type": "text",
+      "placeholder": "例如：与播种者像师徒；与同伴关系紧密但常争执；家人不知真相；与爪痕有旧怨",
+      "suggestions": [
+        "把小队当成新的“家”",
+        "与播种者常争吵，但关键时刻绝对信任",
+        "必须对凡人隐藏身份，因此长期处于双重生活",
+        "曾被追杀，留下心理阴影"
+      ],
+      "allowCustom": true,
+      "maxLength": 320,
+      "required": false
+    },
+    {
+      "id": "MGW-17",
+      "question": "现在最想做的事/正在追查的线索是什么？",
+      "type": "text",
+      "placeholder": "例如：守护辖区、追查黑烬黎明、夺回回响/兽之源、帮助异策局完善防线等",
+      "suggestions": [
+        "守住辖区，让城市不要陷入危险之中",
+        "追查黑烬黎明",
+        "寻找退役/加入国度的选择，给未来留后路"
+      ],
+      "allowCustom": true,
+      "maxLength": 260,
+      "required": false
+    },
+    {
+      "id": "MGW-18",
+      "question": "写一段战斗片段：用 3~6 句描述“魔装战”或“奇境战”",
+      "type": "text",
+      "placeholder": "建议：开场（发现/接敌）→招式（魔装/术式/机动）→转折（代价/受伤/规则）→收束（撤离/击败/留下伏笔）",
+      "helperText": "如果你想让 AI 更贴近你的战斗风格，可以写得更具体；不写也完全没问题。",
+      "allowCustom": true,
+      "maxLength": 500,
+      "required": false
+    }
+  ]
+}

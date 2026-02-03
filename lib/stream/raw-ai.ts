@@ -228,8 +228,8 @@ export async function generateWithStreamAI(
         log.info(`开始使用提供商: ${provider.name} 模型: ${selectedModel} 重试次数: ${retryCount}`);
 
         // 对当前提供商进行重试
-        for (let attempt = 0; attempt < retryCount; attempt++) {
-            try {
+	        for (let attempt = 0; attempt < retryCount; attempt++) {
+	            try {
                 log.debug(`开始尝试: 提供商: ${provider.name} 模型: ${selectedModel} 尝试次数: ${attempt + 1} / ${retryCount}`);
 
                 if (options?.telemetry) {
@@ -241,17 +241,26 @@ export async function generateWithStreamAI(
                     options.telemetry.attempt = attempt + 1;
                 }
 
-                const llm = createAIClient(provider);
-                const maxOutputTokensOption =
-                    typeof generationConfig.maxOutputTokens === 'number'
-                        ? { maxOutputTokens: generationConfig.maxOutputTokens }
-                        : {};
+	                const llm = createAIClient(provider);
+	                const maxOutputTokensOption =
+	                    typeof generationConfig.maxOutputTokens === 'number'
+	                        ? { maxOutputTokens: generationConfig.maxOutputTokens }
+	                        : {};
 
-                // 捕获 onError 回调中的错误，用于后续提取错误信息
-                let capturedError: any = null;
+	                const looksLikeTrivialEmptyOutput = (text: string) => {
+	                    const trimmed = text.trim().replace(/^\uFEFF/, '');
+	                    if (!trimmed) return true;
+	                    if (trimmed === 'null' || trimmed === 'undefined') return true;
+	                    if (/^\{\s*\}$/.test(trimmed)) return true;
+	                    if (/^\[\s*\]$/.test(trimmed)) return true;
+	                    return false;
+	                };
 
-                const result = streamText({
-                    model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel),
+	                // 捕获 onError 回调中的错误，用于后续提取错误信息
+	                let capturedError: any = null;
+
+	                const result = streamText({
+	                    model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel),
                     prompt: [
                         {
                             role: 'user',
@@ -265,36 +274,61 @@ export async function generateWithStreamAI(
                         capturedError = error;
                         log.error(`流式传输过程中出错: 提供商: ${provider.name} 模型: ${selectedModel}`, { error });
                     },
-                });
+	                });
 
-                // 预检流：在返回流之前，先尝试读取第一个 chunk 来验证连接成功
-                const reader = result.textStream.getReader();
+	                // 预检流：在返回流之前，先尝试读取前几个 chunk 来验证连接成功且内容非空
+	                const reader = result.textStream.getReader();
                 const readWithTimeout = createStreamReadWithTimeout({
                     label: `上游流式(${provider.name}/${selectedModel})`,
                     idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
                     totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
                     onTimeout: () => {
                         try {
-                            void reader.cancel('timeout');
+                            void reader.cancel('timeout').catch(() => {});
                         } catch {
                             // ignore
                         }
                     },
                 });
-                const firstChunk = await readWithTimeout(reader);
+	                const prefetchedChunks: string[] = [];
+	                let prefetchedText = '';
+	                const MAX_PREFETCH_READS = 8;
+	                const MAX_PREFETCH_CHARS = 8_192;
 
-                if (firstChunk.done) {
-                    // 使用工具函数提取上游错误信息
-                    const errorMessage = extractUpstreamErrorMessage(capturedError, result);
-                    throw new Error(errorMessage);
-                }
+	                for (let i = 0; i < MAX_PREFETCH_READS && prefetchedText.length < MAX_PREFETCH_CHARS; i++) {
+	                    const chunk = await readWithTimeout(reader);
+	                    if (chunk.done) {
+	                        if (looksLikeTrivialEmptyOutput(prefetchedText)) {
+	                            try {
+	                                void reader.cancel('empty-output').catch(() => {});
+	                            } catch {
+	                                // ignore
+	                            }
+	                            throw new Error('AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。');
+	                        }
+	                        const errorMessage = extractUpstreamErrorMessage(capturedError, result);
+	                        throw new Error(errorMessage);
+	                    }
+	                    prefetchedChunks.push(chunk.value ?? '');
+	                    prefetchedText += chunk.value ?? '';
+	                    if (prefetchedText.trim() && !looksLikeTrivialEmptyOutput(prefetchedText)) break;
+	                }
 
-                // 创建一个新的 ReadableStream，将已读取的 chunk 和剩余流合并
-                const combinedStream = new ReadableStream<string>({
+	                if (looksLikeTrivialEmptyOutput(prefetchedText)) {
+	                    try {
+	                        void reader.cancel('empty-output').catch(() => {});
+	                    } catch {
+	                        // ignore
+	                    }
+	                    throw new Error('AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。');
+	                }
+
+	                // 创建一个新的 ReadableStream，将已读取的 chunk 和剩余流合并
+	                const combinedStream = new ReadableStream<string>({
                     start(controller) {
-                        // 先推送已读取的第一个 chunk
-                        if (firstChunk.value) {
-                            controller.enqueue(firstChunk.value);
+                        // 先推送已预检的内容（避免上游首包为空字符串时导致整体输出为空）
+                        for (const chunk of prefetchedChunks) {
+                            controller.enqueue(chunk);
                         }
                     },
                     async pull(controller) {

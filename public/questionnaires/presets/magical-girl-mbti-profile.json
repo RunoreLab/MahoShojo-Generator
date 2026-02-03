@@ -1,0 +1,1173 @@
+{
+  "id": "magical-girl-mbti-profile",
+  "kind": "magical-girl",
+  "title": "魔法少女个人信息 + 性格倾向（MBTI）问卷",
+  "description": "用于角色塑造的“MBTI 风格”倾向问卷（非官方量表）。所有题目都可跳过；若想快速完成，可选择“简版”；也可直接填最后的 16 型结果。",
+  "logoUrl": "/questionnaire-title.svg",
+  "version": "1.0",
+  "nativeAllowed": false,
+  "questions": [
+    {
+      "id": "MGMBTI-01",
+      "question": "【基础档案】本名/真实姓名（虚构）",
+      "placeholder": "例如：白思与（请勿填写任何真实隐私信息）",
+      "suggestions": [
+        "白思与",
+        "二阶堂祥子",
+        "雪莉",
+        "星港",
+        "咕咕嘎嘎！"
+      ],
+      "maxLength": 40,
+      "required": false
+    },
+    {
+      "id": "MGMBTI-02",
+      "question": "【基础档案】外文名/别名/昵称",
+      "placeholder": "可留空；也可以写常用称呼或代号",
+      "maxLength": 60,
+      "required": false
+    },
+    {
+      "id": "MGMBTI-03",
+      "question": "【基础档案】年龄/外表年龄",
+      "placeholder": "例如：16 / 外表18",
+      "maxLength": 30,
+      "required": false
+    },
+    {
+      "id": "MGMBTI-04",
+      "question": "【基础档案】性别 / 性别认同",
+      "type": "select",
+      "options": [
+        "女",
+        "男",
+        "非二元",
+        "无性别",
+        "未公开"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选推荐项或自定义填写（简短即可）",
+      "maxLength": 20,
+      "required": false
+    },
+    {
+      "id": "MGMBTI-05",
+      "question": "【基础档案】身高 / 体型",
+      "placeholder": "例如：165cm / 52kg / 瘦削但挺拔",
+      "maxLength": 50,
+      "required": false
+    },
+    {
+      "id": "MGMBTI-06",
+      "question": "【外观/印象】穿着打扮与第一印象",
+      "placeholder": "例如：日常简洁干净；战斗时像礼服一样的装束；给人“冷淡但可靠”的感觉",
+      "maxLength": 240,
+      "required": false
+    },
+    {
+      "id": "MGMBTI-07",
+      "question": "【兴趣】兴趣爱好/擅长（可用逗号分隔）",
+      "placeholder": "例如：甜品、射击训练、写日记、收集旧照片",
+      "maxLength": 200,
+      "required": false
+    },
+    {
+      "id": "MGMBTI-08",
+      "question": "【关系】重要的人/组织/羁绊（可用代号）",
+      "placeholder": "例如：搭档“灯塔”、导师“白鸽”、必须守护的城市港区",
+      "helperText": "建议不要出现现实中的真实姓名/联系方式。",
+      "maxLength": 240,
+      "required": false
+    },
+    {
+      "id": "MGMBTI-09",
+      "question": "【魔法】你更偏好的能力方向",
+      "type": "select",
+      "options": [
+        "攻击",
+        "防护",
+        "治疗",
+        "控制",
+        "召唤",
+        "侦察",
+        "变化/拟态",
+        "辅助/增益"
+      ],
+      "allowCustom": true,
+      "placeholder": "例如：控制（冻结行动）/ 侦察（追踪气味）",
+      "helperText": "只写关键词即可；想细写可补一句“用来做什么”。",
+      "suggestions": [
+        "攻击（高爆发）",
+        "治疗（代价型）",
+        "控制（封锁行动）",
+        "防护（结界）",
+        "召唤（契约）",
+        "侦察（感知/追踪）",
+        "变化（特摄式变身）"
+      ],
+      "maxLength": 80,
+      "required": false
+    },
+    {
+      "id": "MGMBTI-10",
+      "question": "【魔法】战斗定位/风格",
+      "type": "select",
+      "options": [
+        "前排强攻",
+        "后排输出",
+        "机动游击",
+        "控场压制",
+        "团队辅助",
+        "单挑特化",
+        "陷阱/领域",
+        "不确定"
+      ],
+      "allowCustom": true,
+      "placeholder": "例如：机动游击（高速切入）/ 团队辅助（增益与救场）",
+      "maxLength": 80,
+      "required": false
+    },
+    {
+      "id": "MGMBTI-MODE",
+      "question": "【性格倾向】要不要做 MBTI 风格倾向题？",
+      "type": "select",
+      "options": [
+        {
+          "value": "skip",
+          "label": "跳过（直接进入结果区）"
+        },
+        {
+          "value": "lite",
+          "label": "简版（24题，约3~5分钟）"
+        },
+        {
+          "value": "full",
+          "label": "完整版（52题，约8~12分钟）"
+        },
+        {
+          "value": "known",
+          "label": "我已知道类型（直接填写结果）"
+        }
+      ],
+      "allowCustom": false,
+      "helperText": "提示：本问卷是用于角色塑造的“MBTI 风格”倾向题，不是官方量表；每题选项顺序固定为 E/I、S/N、T/F、J/P（前者/后者）。",
+      "required": false,
+      "jump": [
+        {
+          "when": {
+            "questionnaireId": "magical-girl-mbti-profile",
+            "questionId": "MGMBTI-MODE",
+            "operator": "equals",
+            "value": "skip"
+          },
+          "to": {
+            "questionnaireId": "magical-girl-mbti-profile",
+            "questionId": "MGMBTI-RESULT"
+          }
+        },
+        {
+          "when": {
+            "questionnaireId": "magical-girl-mbti-profile",
+            "questionId": "MGMBTI-MODE",
+            "operator": "equals",
+            "value": "known"
+          },
+          "to": {
+            "questionnaireId": "magical-girl-mbti-profile",
+            "questionId": "MGMBTI-RESULT"
+          }
+        }
+      ]
+    },
+    {
+      "id": "MGMBTI-EI-01",
+      "question": "【E/I】遇到新队伍/新班级，你更可能：",
+      "type": "select",
+      "options": [
+        "主动自我介绍并迅速建立联系（E）",
+        "先观察氛围，等确定安全再靠近（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-EI-02",
+      "question": "【E/I】你更容易在什么情况下恢复能量：",
+      "type": "select",
+      "options": [
+        "和人一起聊天/并肩行动会充电（E）",
+        "独处安静地整理思绪会充电（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-EI-03",
+      "question": "【E/I】发生烦心事时，你更倾向：",
+      "type": "select",
+      "options": [
+        "立刻找人倾诉或求助（E）",
+        "自己消化，等想清楚再说（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-EI-04",
+      "question": "【E/I】讨论计划时你更常：",
+      "type": "select",
+      "options": [
+        "边说边想，在交流中完善（E）",
+        "先想好要点，再清晰表达（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-EI-05",
+      "question": "【E/I】你更喜欢的社交节奏：",
+      "type": "select",
+      "options": [
+        "认识很多人，但不一定深交（E）",
+        "深交少数人，不太频繁扩圈（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-EI-06",
+      "question": "【E/I】在人多的场合你更可能：",
+      "type": "select",
+      "options": [
+        "成为气氛的一部分（带动/回应）（E）",
+        "找个边缘位置（听/看）（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-SN-01",
+      "question": "【S/N】学习新规则/能力时，你更喜欢：",
+      "type": "select",
+      "options": [
+        "先看具体步骤和案例（S）",
+        "先理解原理与可能的延伸（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-SN-02",
+      "question": "【S/N】你更容易注意到：",
+      "type": "select",
+      "options": [
+        "细节的差异（数据、变化、手感）（S）",
+        "大方向的趋势（氛围、走向、意义）（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-SN-03",
+      "question": "【S/N】你更信任的信息来源：",
+      "type": "select",
+      "options": [
+        "亲眼所见/可验证的事实（S）",
+        "直觉判断/隐含线索/“我觉得不对劲”（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-SN-04",
+      "question": "【S/N】你更喜欢的对话：",
+      "type": "select",
+      "options": [
+        "聊具体经历与现状（S）",
+        "聊想法、假设与未来（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-SN-05",
+      "question": "【S/N】你更擅长：",
+      "type": "select",
+      "options": [
+        "把一件事做得更稳更细（S）",
+        "把一件事变得更新更大（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-SN-06",
+      "question": "【S/N】遇到模糊问题你更可能：",
+      "type": "select",
+      "options": [
+        "先拆成可操作的小步骤（S）",
+        "先给出整体框架再填细节（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-TF-01",
+      "question": "【T/F】做决定时你更优先：",
+      "type": "select",
+      "options": [
+        "客观利弊、规则与效率（T）",
+        "人的感受、关系与价值（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-TF-02",
+      "question": "【T/F】说服你更有效的是：",
+      "type": "select",
+      "options": [
+        "逻辑清晰的论证（T）",
+        "真诚动人的表达（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-TF-03",
+      "question": "【T/F】团队里出现争执时你更可能：",
+      "type": "select",
+      "options": [
+        "把问题拆开，讨论谁对谁错（T）",
+        "先缓和情绪，讨论怎么让大家都能接受（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-TF-04",
+      "question": "【T/F】你更怕别人评价你：",
+      "type": "select",
+      "options": [
+        "不够理性/不够正确（T）",
+        "不够温柔/不够体贴（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-TF-05",
+      "question": "【T/F】当朋友做了不靠谱的决定，你更可能：",
+      "type": "select",
+      "options": [
+        "指出风险并给出改法（T）",
+        "尊重感受并陪着一起承担（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-TF-06",
+      "question": "【T/F】你更倾向用哪种方式表达关心：",
+      "type": "select",
+      "options": [
+        "帮你把事情解决（T）",
+        "陪你把情绪走完（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-JP-01",
+      "question": "【J/P】接到任务/作业时你更倾向：",
+      "type": "select",
+      "options": [
+        "先列计划和时间表（J）",
+        "先动手，边做边调整（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-JP-02",
+      "question": "【J/P】你更喜欢：",
+      "type": "select",
+      "options": [
+        "提前确定安排并按计划执行（J）",
+        "保持弹性，临时决定也没关系（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-JP-03",
+      "question": "【J/P】你的工作方式更像：",
+      "type": "select",
+      "options": [
+        "阶段性收尾、一个个“完成”（J）",
+        "多线程推进、随时切换（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-JP-04",
+      "question": "【J/P】面对截止日期你更常：",
+      "type": "select",
+      "options": [
+        "提前完成以求安心（J）",
+        "靠最后的爆发把事推过去（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-JP-05",
+      "question": "【J/P】你更偏好：",
+      "type": "select",
+      "options": [
+        "清晰的规则和边界（J）",
+        "留有余地的自由度（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-JP-06",
+      "question": "【J/P】你更常：",
+      "type": "select",
+      "options": [
+        "做完再放松（J）",
+        "先放松再上强度（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": [
+          "lite",
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "MGMBTI-EI-07",
+      "question": "【E/I】如果要做决定，你更常：",
+      "type": "select",
+      "options": [
+        "跟人讨论几轮再定（E）",
+        "独自思考到笃定再定（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-EI-08",
+      "question": "【E/I】你更喜欢的休息方式：",
+      "type": "select",
+      "options": [
+        "出门走走/找人玩/参加活动（E）",
+        "关门宅着/看书/听歌/发呆（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-EI-09",
+      "question": "【E/I】你更容易被别人评价为：",
+      "type": "select",
+      "options": [
+        "外向、好相处、反应快（E）",
+        "内敛、有距离、慢热（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-EI-10",
+      "question": "【E/I】遇到陌生人求助，你更可能：",
+      "type": "select",
+      "options": [
+        "先开口确认情况并主动出手（E）",
+        "先判断风险与边界，再决定是否介入（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-EI-11",
+      "question": "【E/I】你更常把想法：",
+      "type": "select",
+      "options": [
+        "说出来让大家一起推（E）",
+        "写下来或在心里反复推演（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-EI-12",
+      "question": "【E/I】在连续多天高强度社交后，你的状态更可能：",
+      "type": "select",
+      "options": [
+        "越社交越顺，像被点燃（E）",
+        "越社交越耗，需要完全断联回血（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-EI-13",
+      "question": "【E/I】你更习惯在团队里扮演：",
+      "type": "select",
+      "options": [
+        "连接者/协调者/“来来来我来问”（E）",
+        "专家/观察者/“我先研究一下”（I）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-SN-07",
+      "question": "【S/N】你更喜欢的创作/命名风格：",
+      "type": "select",
+      "options": [
+        "直白好懂、贴近现实（S）",
+        "象征隐喻、带一点谜语感（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-SN-08",
+      "question": "【S/N】你更容易被什么吸引：",
+      "type": "select",
+      "options": [
+        "成熟可用、已经验证的方案（S）",
+        "未知领域、全新的可能性（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-SN-09",
+      "question": "【S/N】你更在意：",
+      "type": "select",
+      "options": [
+        "当下能落地的收益（S）",
+        "长期意义与潜在机会（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-SN-10",
+      "question": "【S/N】别人讲故事时你更想听：",
+      "type": "select",
+      "options": [
+        "发生了什么、怎么发生的（S）",
+        "这意味着什么、会走向哪里（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-SN-11",
+      "question": "【S/N】你更习惯：",
+      "type": "select",
+      "options": [
+        "按经验复用有效做法（S）",
+        "重新组合，找一个更“妙”的解法（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-SN-12",
+      "question": "【S/N】当现实与预感冲突，你更可能：",
+      "type": "select",
+      "options": [
+        "先相信现实证据（S）",
+        "先相信预感，继续追查（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-SN-13",
+      "question": "【S/N】你更容易被称赞为：",
+      "type": "select",
+      "options": [
+        "踏实、靠谱、细致（S）",
+        "有创意、能预判、会联想（N）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-TF-07",
+      "question": "【T/F】你更容易被什么触动：",
+      "type": "select",
+      "options": [
+        "观点是否严密、有没有漏洞（T）",
+        "人是否真诚、是否被理解（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-TF-08",
+      "question": "【T/F】评价一个行动成功与否，你更看重：",
+      "type": "select",
+      "options": [
+        "结果是否达成（T）",
+        "过程是否不伤害重要的人（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-TF-09",
+      "question": "【T/F】你更常说出口的是：",
+      "type": "select",
+      "options": [
+        "“这样更合理/更有效”（T）",
+        "“这样更合适/更温和”（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-TF-10",
+      "question": "【T/F】面对批评你更可能：",
+      "type": "select",
+      "options": [
+        "先分析内容是否正确（T）",
+        "先感受语气与态度（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-TF-11",
+      "question": "【T/F】你更在意：",
+      "type": "select",
+      "options": [
+        "原则一致、标准公平（T）",
+        "个体差异、因人而异（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-TF-12",
+      "question": "【T/F】你更喜欢别人给你的反馈：",
+      "type": "select",
+      "options": [
+        "直接指出问题并给方案（T）",
+        "先肯定再提建议（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-TF-13",
+      "question": "【T/F】你更容易被认为：",
+      "type": "select",
+      "options": [
+        "冷静、客观、讲道理（T）",
+        "共情、柔软、很会照顾人（F）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-JP-07",
+      "question": "【J/P】你的物品与空间更接近：",
+      "type": "select",
+      "options": [
+        "分门别类、井井有条（J）",
+        "看似凌乱，但你心里有谱（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-JP-08",
+      "question": "【J/P】旅行/出门你更倾向：",
+      "type": "select",
+      "options": [
+        "做攻略、订好路线（J）",
+        "到了再看，当场决定（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-JP-09",
+      "question": "【J/P】你更能接受：",
+      "type": "select",
+      "options": [
+        "按固定流程重复执行（J）",
+        "临时插入变化与新需求（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-JP-10",
+      "question": "【J/P】当计划被打乱，你更可能：",
+      "type": "select",
+      "options": [
+        "感到不爽，想立刻重新排程（J）",
+        "顺势改道，觉得也挺有趣（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-JP-11",
+      "question": "【J/P】你更喜欢的目标状态：",
+      "type": "select",
+      "options": [
+        "尽快把悬而未决的事清零（J）",
+        "让选择保持开放，慢慢看（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-JP-12",
+      "question": "【J/P】你更常被自己困扰的点：",
+      "type": "select",
+      "options": [
+        "计划太多导致压迫感（J）",
+        "过于随性导致拖延（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-JP-13",
+      "question": "【J/P】你更容易被称赞为：",
+      "type": "select",
+      "options": [
+        "靠谱、准时、说到做到（J）",
+        "灵活、反应快、随机应变（P）"
+      ],
+      "allowCustom": false,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-mbti-profile",
+        "questionId": "MGMBTI-MODE",
+        "operator": "equals",
+        "value": "full"
+      }
+    },
+    {
+      "id": "MGMBTI-RESULT",
+      "question": "【结果】（可选）你更接近哪个 MBTI 类型？",
+      "type": "select",
+      "options": [
+        {
+          "value": "unknown",
+          "label": "未知/不想填"
+        },
+        "ISTJ",
+        "ISFJ",
+        "INFJ",
+        "INTJ",
+        "ISTP",
+        "ISFP",
+        "INFP",
+        "INTP",
+        "ESTP",
+        "ESFP",
+        "ENFP",
+        "ENTP",
+        "ESTJ",
+        "ESFJ",
+        "ENFJ",
+        "ENTJ"
+      ],
+      "allowCustom": true,
+      "placeholder": "可直接填 4 字母；也可写“INFP-T/INFP-A”、或补一句原因与反差点",
+      "helperText": "如果你做了上面的倾向题：可粗略统计每组（E/I、S/N、T/F、J/P）选项次数，次数更多的一侧就是倾向。",
+      "maxLength": 120,
+      "required": false
+    }
+  ]
+}
+

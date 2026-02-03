@@ -1,0 +1,1623 @@
+{
+  "id": "magical-girl-immersive-vn",
+  "kind": "magical-girl",
+  "title": "沉浸式剧情车卡问卷：分歧之路",
+  "description": "像视觉小说一样做选择：普通人→心之种→种/芽/叶/蕾/花/繁开。包含条件显示与跳题，适合用来“演绎经历”并生成最终角色档案。",
+  "logoUrl": "/questionnaire-title.svg",
+  "version": "1.0.0",
+  "questions": [
+    {
+      "id": "MGVN-01-NAME",
+      "question": "【开场】你的名字是？（虚构即可）",
+      "type": "text",
+      "placeholder": "例如：顾晚灯 / 林见春（建议不超过 12 字）",
+      "suggestions": [
+        "顾晚灯",
+        "林见春",
+        "许雾桥",
+        "沈栖潮",
+        "岑远澜"
+      ],
+      "maxLength": 40,
+      "required": true
+    },
+    {
+      "id": "MGVN-01B-GENDER",
+      "question": "【开场】你的角色性别设定/自我认同是？",
+      "type": "select",
+      "options": [
+        {
+          "value": "female",
+          "label": "女性（世界常识：通常只有女孩子能成为魔法少女）"
+        },
+        {
+          "value": "male",
+          "label": "男性（罕见例外：可能引来额外关注与风险）"
+        },
+        {
+          "value": "nonbinary",
+          "label": "非二元/其他（罕见：可能引来额外关注与风险）"
+        },
+        {
+          "value": "unspecified",
+          "label": "不设定/不说明"
+        }
+      ],
+      "allowCustom": true,
+      "helperText": "世界观常识：一般只承认“女孩子”能成为魔法少女；若你选择非女性设定，建议写成未公开记录的异常个案，或“外界登记”与“真实自我认同”并不一致。",
+      "placeholder": "可直接选项，也可自定义（按虚构角色设定填写即可）",
+      "maxLength": 60,
+      "required": false
+    },
+    {
+      "id": "MGVN-02-IDENTITY",
+      "question": "你在物质界的日常身份更像是：",
+      "type": "select",
+      "options": [
+        "学生（被课业与关系网裹挟）",
+        "上班族（在工位与通勤里消耗）",
+        "自由职业（靠灵感与焦虑吃饭）",
+        "照护者（家人/弟妹/病人是你的重心）",
+        "其他（你自己定义）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可直接选项，也可补一句：你的“日常”到底是什么",
+      "maxLength": 80,
+      "required": false
+    },
+    {
+      "id": "MGVN-03-CITY-TYPE",
+      "question": "你生活的城市更接近哪一种？",
+      "type": "select",
+      "options": [
+        "中央都市（资源密集、秩序更强）",
+        "海港/工业城（夜色、雾与警报常在）",
+        "内陆小城（熟人社会，秘密更难藏）",
+        "陆行舰/迁徙途中（车轮与路标是家）",
+        "荒原聚居地（隐藏在荒无人烟之处的小聚居地）"
+      ],
+      "allowCustom": true,
+      "required": true
+    },
+    {
+      "id": "MGVN-04-CITY-NAME",
+      "question": "给你的舞台城市起个名字（可留空用“你所在城市”代称）：",
+      "type": "text",
+      "placeholder": "例如：澄湾市 / 雾岬市 / 岚河市",
+      "suggestions": [
+        "澄湾市",
+        "雾岬市",
+        "岚河市",
+        "白栈市",
+        "青栀市"
+      ],
+      "maxLength": 20,
+      "required": false
+    },
+    {
+      "id": "MGVN-05-KEYWORD",
+      "question": "用一个“名词/短句”，概括你此刻的人生关键词：",
+      "type": "text",
+      "placeholder": "例如：欠债 / 责任 / 逃跑 / 玻璃心 / 想被看见",
+      "suggestions": [
+        "责任",
+        "逃跑",
+        "想被看见",
+        "欠债",
+        "无力感",
+        "想要证明"
+      ],
+      "maxLength": 40,
+      "required": false
+    },
+    {
+      "id": "MGVN-06-TREASURE",
+      "question": "你最害怕失去的是什么？",
+      "type": "select",
+      "options": [
+        "一个具体的人",
+        "一个“还能回去的地方”",
+        "自己的尊严与选择权",
+        "那点还没熄灭的热爱",
+        "其他（你自己写）"
+      ],
+      "allowCustom": true,
+      "placeholder": "写明对象/理由更好（1 句即可）",
+      "maxLength": 100,
+      "required": false
+    },
+    {
+      "id": "MGVN-08-IS-MG",
+      "question": "【分歧点】此刻的你，已经是魔法少女了吗？（如果你自定义答案，系统会先用档案题补齐关键信息再推进）",
+      "type": "select",
+      "options": [
+        "我已经是魔法少女（直接从成长开始）",
+        "我现在还是普通人（将经历觉醒事件）",
+        "我不确定/情况复杂（走档案分流）"
+      ],
+      "placeholder": "提示：本题会影响是否跳过“如何成为魔法少女”的剧情",
+      "allowCustom": true,
+      "required": true,
+      "jump": [
+        {
+          "when": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08-IS-MG",
+            "operator": "equals",
+            "value": "我已经是魔法少女（直接从成长开始）"
+          },
+          "to": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-30-GROWTH-MODE"
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "MGVN-08A-IS-MG-ARCHIVE",
+      "question": "【档案补全】你现在与“魔法少女”这条道路的关系是怎样的？（现役/见习/退役/失去力量/旁观者/其他）",
+      "type": "text",
+      "placeholder": "例如：曾经觉醒过但失去心之种的回应 / 还没觉醒但已被盯上 / 只是见过她们在战斗…（1~3 句）",
+      "maxLength": 220,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-08-IS-MG",
+        "operator": "notEquals",
+        "value": [
+          "我已经是魔法少女（直接从成长开始）",
+          "我现在还是普通人（将经历觉醒事件）"
+        ]
+      }
+    },
+    {
+      "id": "MGVN-08B-IS-MG-MAP",
+      "question": "【档案分流】为了继续推进本问卷，请把你的状态“折算”为以下之一：",
+      "type": "select",
+      "options": [
+        {
+          "value": "MG",
+          "label": "推进为：我已经是魔法少女（跳过觉醒，从成长开始）"
+        },
+        {
+          "value": "HUMAN",
+          "label": "推进为：我现在还是普通人（保留觉醒事件）"
+        },
+        {
+          "value": "LOST",
+          "label": "推进为：我曾经觉醒过，但现在不完整（从成长开始，并记录断裂）"
+        }
+      ],
+      "allowCustom": false,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-08-IS-MG",
+        "operator": "notEquals",
+        "value": [
+          "我已经是魔法少女（直接从成长开始）",
+          "我现在还是普通人（将经历觉醒事件）"
+        ]
+      },
+      "jump": [
+        {
+          "when": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08B-IS-MG-MAP",
+            "operator": "equals",
+            "value": "MG"
+          },
+          "to": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-30-GROWTH-MODE"
+          }
+        },
+        {
+          "when": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08B-IS-MG-MAP",
+            "operator": "equals",
+            "value": "LOST"
+          },
+          "to": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-30-GROWTH-MODE"
+          }
+        }
+      ]
+    },
+    {
+      "id": "MGVN-08C-IS-MG-LOST",
+      "question": "【隐藏题】如果你选择了“曾经觉醒但不完整”，你失去/破损的是什么？",
+      "type": "text",
+      "placeholder": "例如：心之宝石碎裂、魔装封存、记忆被抽走、被剥夺资格…（1~2 句）",
+      "maxLength": 200,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-08B-IS-MG-MAP",
+        "operator": "equals",
+        "value": "LOST"
+      }
+    },
+
+    {
+      "id": "MGVN-10-INCITING",
+      "question": "【普通人的第一夜】你是通过什么契机，第一次触碰到“魔法少女的世界”？",
+      "type": "select",
+      "options": [
+        "夜班归途：霓虹下的求救声",
+        "陆行舰夜行：车窗外的蓝月",
+        "旧馆谜案：书页里渗出的冷光",
+        "我想自定义开场（走档案线）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可选模板，也可自定义；若自定义，会先出现档案补全题以保证后续剧情正常推进",
+      "required": true,
+      "displayIf": {
+        "any": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08-IS-MG",
+            "operator": "equals",
+            "value": "我现在还是普通人（将经历觉醒事件）"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08B-IS-MG-MAP",
+            "operator": "equals",
+            "value": "HUMAN"
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "MGVN-10A-INCITING-ARCHIVE",
+      "question": "【档案补全】如果你没有选择上面的模板开场，请用档案方式描述“第一次接触魔法侧”的事件：",
+      "type": "text",
+      "placeholder": "地点/时间段 + 发生了什么 + 你当时最想做什么（2~4 句）",
+      "required": false,
+      "displayIf": {
+        "all": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-10-INCITING",
+            "operator": "notEmpty"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-10-INCITING",
+            "operator": "notEquals",
+            "value": [
+              "夜班归途：霓虹下的求救声",
+              "陆行舰夜行：车窗外的蓝月",
+              "旧馆谜案：书页里渗出的冷光"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-10B-INCITING-MAP",
+      "question": "【档案分流】为了继续推进剧情，请把你的开场“折算”为以下之一：",
+      "type": "select",
+      "options": [
+        {
+          "value": "ALLEY",
+          "label": "归入：夜班归途（霓虹下的求救声）"
+        },
+        {
+          "value": "LANDSHIP",
+          "label": "归入：陆行舰夜行（车窗外的蓝月）"
+        },
+        {
+          "value": "LIBRARY",
+          "label": "归入：旧馆谜案（书页里渗出的冷光）"
+        },
+        {
+          "value": "CUSTOM",
+          "label": "自定义事件线（不演绎三条模板剧情，直接用档案题推进）"
+        }
+      ],
+      "allowCustom": false,
+      "required": true,
+      "displayIf": {
+        "all": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-10-INCITING",
+            "operator": "notEmpty"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-10-INCITING",
+            "operator": "notEquals",
+            "value": [
+              "夜班归途：霓虹下的求救声",
+              "陆行舰夜行：车窗外的蓝月",
+              "旧馆谜案：书页里渗出的冷光"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-11X-CUSTOM-SCENE",
+      "question": "【自定义开场·档案】请写下这一夜的“场景摘要”（尽量具体）：",
+      "type": "text",
+      "placeholder": "谁在场？发生了什么异常？你做了什么？（2~4 句）",
+      "maxLength": 260,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-10B-INCITING-MAP",
+        "operator": "equals",
+        "value": "CUSTOM"
+      }
+    },
+    {
+      "id": "MGVN-12X-CUSTOM-ACTION",
+      "question": "【自定义开场·档案】当危险逼近时，你的第一选择更像：",
+      "type": "select",
+      "options": [
+        "先救人/组织撤离",
+        "先求援（报警/联系异策局/找成年人）",
+        "先观察（确认危险来源与规模）",
+        "硬拼/反击（哪怕没胜算）",
+        "躲藏/逃离（先活下去）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：你当时在保护什么/在害怕什么",
+      "maxLength": 160,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-10B-INCITING-MAP",
+        "operator": "equals",
+        "value": "CUSTOM"
+      }
+    },
+    {
+      "id": "MGVN-13X-CUSTOM-DETAIL",
+      "question": "【隐藏题】如果你愿意，补充 1 个你记住的细节（气味/声响/形状/符文感）。",
+      "type": "text",
+      "placeholder": "例如：像烧焦的花瓣味 / 玻璃裂釉般的纹路 / 蓝光在缝隙里游走",
+      "maxLength": 140,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-10B-INCITING-MAP",
+        "operator": "equals",
+        "value": "CUSTOM"
+      }
+    },
+
+    {
+      "id": "MGVN-11A-ALLEY",
+      "question": "【夜班归途】巷口的求救声被雨声切碎，街灯忽明忽暗。你：",
+      "type": "select",
+      "options": [
+        "冲进去（先救人）",
+        "边报警边靠近（留退路）",
+        "先观察（确认危险来源）",
+        "转身离开（我没有能力）"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "all": [
+          {
+            "any": [
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-08-IS-MG",
+                "operator": "equals",
+                "value": "我现在还是普通人（将经历觉醒事件）"
+              },
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-08B-IS-MG-MAP",
+                "operator": "equals",
+                "value": "HUMAN"
+              }
+            ]
+          },
+          {
+            "any": [
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-10-INCITING",
+                "operator": "equals",
+                "value": "夜班归途：霓虹下的求救声"
+              },
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-10B-INCITING-MAP",
+                "operator": "equals",
+                "value": "ALLEY"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-12A-FIRST-LOOK",
+      "question": "【夜班归途】你第一次直视“残兽的影子”时，你的第一反应是：",
+      "type": "select",
+      "options": [
+        "挡在他人前面",
+        "拉着人就跑",
+        "抓起手边物品反击",
+        "强迫自己记住细节（为之后求援）"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-11A-ALLEY",
+        "operator": "notEmpty"
+      }
+    },
+    {
+      "id": "MGVN-13A-DETAIL",
+      "question": "【隐藏题】你记住了什么细节？（颜色/气味/声响/形状/符文感）",
+      "type": "text",
+      "placeholder": "例如：像烧焦的花瓣味 / 皮肤表面像裂釉 / 蓝光在缝隙里游走",
+      "maxLength": 140,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-12A-FIRST-LOOK",
+        "operator": "equals",
+        "value": "强迫自己记住细节（为之后求援）"
+      }
+    },
+
+    {
+      "id": "MGVN-11B-LANDSHIP",
+      "question": "【陆行舰夜行】夜里急停，广播失真，车窗外的月亮泛着不自然的蓝。你：",
+      "type": "select",
+      "options": [
+        "安抚乘客、组织撤离",
+        "挤到前车厢找原因",
+        "独自下车查看（哪怕违反规定）",
+        "把自己藏起来（先活下去）"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "all": [
+          {
+            "any": [
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-08-IS-MG",
+                "operator": "equals",
+                "value": "我现在还是普通人（将经历觉醒事件）"
+              },
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-08B-IS-MG-MAP",
+                "operator": "equals",
+                "value": "HUMAN"
+              }
+            ]
+          },
+          {
+            "any": [
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-10-INCITING",
+                "operator": "equals",
+                "value": "陆行舰夜行：车窗外的蓝月"
+              },
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-10B-INCITING-MAP",
+                "operator": "equals",
+                "value": "LANDSHIP"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-12B-DOOR",
+      "question": "【陆行舰夜行】黑暗里传来某节车厢的撞击声。你：",
+      "type": "select",
+      "options": [
+        "打开门冲进去",
+        "把门反锁，隔门喊话引导",
+        "去找随车警卫/异策局联络员",
+        "当没听见，继续撤离"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-11B-LANDSHIP",
+        "operator": "notEmpty"
+      }
+    },
+    {
+      "id": "MGVN-13B-LINE",
+      "question": "【隐藏题】你向“联络员/警卫”说出的第一句话是什么？",
+      "type": "text",
+      "placeholder": "例如：‘别开枪，里面不是人。’/ ‘把乘客带走，我来引开它。’",
+      "maxLength": 120,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-12B-DOOR",
+        "operator": "equals",
+        "value": "去找随车警卫/异策局联络员"
+      }
+    },
+
+    {
+      "id": "MGVN-11C-LIBRARY",
+      "question": "【旧馆谜案】禁阅室里，你找到一本没有书名的书，封面像干涸的花纹。你：",
+      "type": "select",
+      "options": [
+        "立刻翻开（好奇心胜过谨慎）",
+        "先拍照记录，再翻开",
+        "把书交给管理员/老师",
+        "把书放回去（不碰未知）"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "all": [
+          {
+            "any": [
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-08-IS-MG",
+                "operator": "equals",
+                "value": "我现在还是普通人（将经历觉醒事件）"
+              },
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-08B-IS-MG-MAP",
+                "operator": "equals",
+                "value": "HUMAN"
+              }
+            ]
+          },
+          {
+            "any": [
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-10-INCITING",
+                "operator": "equals",
+                "value": "旧馆谜案：书页里渗出的冷光"
+              },
+              {
+                "questionnaireId": "magical-girl-immersive-vn",
+                "questionId": "MGVN-10B-INCITING-MAP",
+                "operator": "equals",
+                "value": "LIBRARY"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-12C-PAGE",
+      "question": "【旧馆谜案】翻到某一页时，纸里渗出冷光，像蓝月照进水面。你：",
+      "type": "select",
+      "options": [
+        "用指尖触碰那道光",
+        "合上书，立刻离开",
+        "继续读下去（想看完真相）",
+        "把书包起来带走（留作证据）"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-11C-LIBRARY",
+        "operator": "notEmpty"
+      }
+    },
+    {
+      "id": "MGVN-13C-THING",
+      "question": "【隐藏题】你带走时，书页里掉出一样东西：那是什么？",
+      "type": "text",
+      "placeholder": "例如：一枚碎裂的徽章 / 一截银色线团 / 一片像花瓣的玻璃",
+      "maxLength": 120,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-12C-PAGE",
+        "operator": "equals",
+        "value": "把书包起来带走（留作证据）"
+      }
+    },
+
+    {
+      "id": "MGVN-20-AFTERMATH",
+      "question": "【普通人的第一夜】回想起来，你更像是被什么推着走？",
+      "type": "select",
+      "options": [
+        "恐惧（但我不想再害怕）",
+        "责任（我不能当作没看见）",
+        "好奇（我想知道真相）",
+        "愤怒（有什么被踩碎了）",
+        "空白（我只是被卷进去）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：你心里最清晰的那句话",
+      "maxLength": 120,
+      "required": false,
+      "displayIf": {
+        "any": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08-IS-MG",
+            "operator": "equals",
+            "value": "我现在还是普通人（将经历觉醒事件）"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08B-IS-MG-MAP",
+            "operator": "equals",
+            "value": "HUMAN"
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-21-RELIC",
+      "question": "【普通人的第一夜】残兽退去后，你在地上看见一枚异常的碎片/小物。你：",
+      "type": "select",
+      "options": [
+        "拾起带走",
+        "不碰它，立刻远离",
+        "交给异策局/可信的成年人",
+        "把它踩碎（切断麻烦）",
+        "用布包起来，等天亮再处理"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "any": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08-IS-MG",
+            "operator": "equals",
+            "value": "我现在还是普通人（将经历觉醒事件）"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08B-IS-MG-MAP",
+            "operator": "equals",
+            "value": "HUMAN"
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-22-RELIC-DESC",
+      "question": "【隐藏题】你带走的东西，触感/温度/光泽像什么？",
+      "type": "text",
+      "placeholder": "例如：冰冷像月光里的金属 / 温热像刚熄的余烬 / 有花香但刺鼻",
+      "maxLength": 140,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-21-RELIC",
+        "operator": "equals",
+        "value": [
+          "拾起带走",
+          "用布包起来，等天亮再处理"
+        ]
+      }
+    },
+
+    {
+      "id": "MGVN-24-SEED-OFFER",
+      "question": "【觉醒分歧】一位自称“播种者”的妖精出现，取出宝石状物“心之种”，说：‘握住它，贴在胸口。你会知道自己有没有资格。’ 你：",
+      "type": "select",
+      "options": [
+        "接过心之种（我愿意赌一次）",
+        "拒绝（我不想被任何人定义）",
+        "要求解释代价与规则（再决定）",
+        "只问一句：‘救得了她/他吗？’",
+        "先救现场的人，再谈觉醒",
+        "我说不清/想自定义（走档案分流）"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "any": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08-IS-MG",
+            "operator": "equals",
+            "value": "我现在还是普通人（将经历觉醒事件）"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08B-IS-MG-MAP",
+            "operator": "equals",
+            "value": "HUMAN"
+          }
+        ]
+      },
+      "jump": [
+        {
+          "when": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "equals",
+            "value": "拒绝（我不想被任何人定义）"
+          },
+          "to": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-81-STATE-NOT"
+          }
+        }
+      ]
+    },
+    {
+      "id": "MGVN-24A-SEED-ARCHIVE",
+      "question": "【档案补全】如果你没有选择上面的固定选项，请描述：播种者妖精说了什么？你最在意的“代价/规则”是什么？",
+      "type": "text",
+      "placeholder": "例如：她要求我保密/要求我服从国度/需要我先救人…（1~3 句）",
+      "maxLength": 260,
+      "required": false,
+      "displayIf": {
+        "all": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "notEmpty"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "notEquals",
+            "value": [
+              "接过心之种（我愿意赌一次）",
+              "拒绝（我不想被任何人定义）",
+              "要求解释代价与规则（再决定）",
+              "只问一句：‘救得了她/他吗？’",
+              "先救现场的人，再谈觉醒"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-24B-SEED-MAP",
+      "question": "【档案分流】为了继续推进剧情，请把你刚才的选择“折算”为以下之一：",
+      "type": "select",
+      "options": [
+        {
+          "value": "TAKE",
+          "label": "等同：接过心之种（愿意尝试觉醒）"
+        },
+        {
+          "value": "REFUSE",
+          "label": "等同：拒绝心之种（放弃成为魔法少女）"
+        },
+        {
+          "value": "ASK",
+          "label": "等同：要求解释代价与规则（再决定）"
+        },
+        {
+          "value": "ASK_SAVE",
+          "label": "等同：只关心能否救人（先确认再觉醒）"
+        },
+        {
+          "value": "SAVE_FIRST",
+          "label": "等同：先救人，再进行觉醒"
+        }
+      ],
+      "allowCustom": false,
+      "required": true,
+      "displayIf": {
+        "all": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "notEmpty"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "notEquals",
+            "value": [
+              "接过心之种（我愿意赌一次）",
+              "拒绝（我不想被任何人定义）",
+              "要求解释代价与规则（再决定）",
+              "只问一句：‘救得了她/他吗？’",
+              "先救现场的人，再谈觉醒"
+            ]
+          }
+        ]
+      },
+      "jump": [
+        {
+          "when": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24B-SEED-MAP",
+            "operator": "equals",
+            "value": "REFUSE"
+          },
+          "to": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-81-STATE-NOT"
+          }
+        }
+      ]
+    },
+    {
+      "id": "MGVN-25-VOW",
+      "question": "【觉醒】在握住心之种前，你在心里说出了哪句誓言/祈愿？",
+      "type": "text",
+      "placeholder": "例如：‘我想把她带回家。’ / ‘我不想再逃了。’（1 句即可）",
+      "suggestions": [
+        "我想把她带回家。",
+        "我不想再逃了。",
+        "我想守住那个还能回去的地方。",
+        "如果必须付出代价——我愿意先付。",
+        "请让我有一次选择的机会。"
+      ],
+      "maxLength": 140,
+      "required": true,
+      "displayIf": {
+        "all": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "notEmpty"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "notEquals",
+            "value": "拒绝（我不想被任何人定义）"
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-26-CONNECT",
+      "question": "【觉醒】你双手握住心之种贴在胸口。你选择用什么方式与它“建立连接”？",
+      "type": "select",
+      "options": [
+        "闭眼，任由记忆涌上来",
+        "盯着心之种不眨眼（强迫自己冷静）",
+        "在心里喊出某个人的名字",
+        "什么都不想，只听自己的呼吸"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "all": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "notEmpty"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "notEquals",
+            "value": "拒绝（我不想被任何人定义）"
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-27-SEED-RESPONSE",
+      "question": "【觉醒结果】心之种的反应是——（这决定你是否成为魔法少女）",
+      "type": "select",
+      "options": [
+        "开始发光，与我的光交织（觉醒成功）",
+        "光很弱，但没有熄灭（勉强成功）",
+        "毫无反应，冰冷得像石头（未能觉醒）",
+        "出现裂纹，像在拒绝我（危险/失败）",
+        "我难以描述/想自定义（走档案分流）"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "all": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "notEmpty"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "notEquals",
+            "value": "拒绝（我不想被任何人定义）"
+          }
+        ]
+      },
+      "jump": [
+        {
+          "when": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-27-SEED-RESPONSE",
+            "operator": "equals",
+            "value": [
+              "毫无反应，冰冷得像石头（未能觉醒）",
+              "出现裂纹，像在拒绝我（危险/失败）"
+            ]
+          },
+          "to": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-81-STATE-NOT"
+          }
+        }
+      ]
+    },
+    {
+      "id": "MGVN-27A-SEED-RESPONSE-ARCHIVE",
+      "question": "【档案补全】如果你没有选择上面的固定选项，请描述：心之种具体发生了什么？（光/温度/裂纹/回声/异象）",
+      "type": "text",
+      "placeholder": "例如：先发热再冷却 / 光像被风吹灭 / 裂纹里有蓝色回声…（1~3 句）",
+      "maxLength": 260,
+      "required": false,
+      "displayIf": {
+        "all": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-27-SEED-RESPONSE",
+            "operator": "notEmpty"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-27-SEED-RESPONSE",
+            "operator": "notEquals",
+            "value": [
+              "开始发光，与我的光交织（觉醒成功）",
+              "光很弱，但没有熄灭（勉强成功）",
+              "毫无反应，冰冷得像石头（未能觉醒）",
+              "出现裂纹，像在拒绝我（危险/失败）"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-27B-SEED-RESPONSE-MAP",
+      "question": "【档案分流】为了继续推进剧情，请把你刚才的觉醒结果“折算”为以下之一：",
+      "type": "select",
+      "options": [
+        {
+          "value": "SUCCESS",
+          "label": "觉醒成功（成为魔法少女）"
+        },
+        {
+          "value": "WEAK",
+          "label": "勉强成功（成为魔法少女，但状态不稳/代价更大）"
+        },
+        {
+          "value": "FAIL",
+          "label": "未能觉醒（无法成为魔法少女）"
+        },
+        {
+          "value": "DANGER",
+          "label": "危险失败（觉醒失败且留下隐患）"
+        }
+      ],
+      "allowCustom": false,
+      "required": true,
+      "displayIf": {
+        "all": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-27-SEED-RESPONSE",
+            "operator": "notEmpty"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-27-SEED-RESPONSE",
+            "operator": "notEquals",
+            "value": [
+              "开始发光，与我的光交织（觉醒成功）",
+              "光很弱，但没有熄灭（勉强成功）",
+              "毫无反应，冰冷得像石头（未能觉醒）",
+              "出现裂纹，像在拒绝我（危险/失败）"
+            ]
+          }
+        ]
+      },
+      "jump": [
+        {
+          "when": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-27B-SEED-RESPONSE-MAP",
+            "operator": "equals",
+            "value": [
+              "FAIL",
+              "DANGER"
+            ]
+          },
+          "to": {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-81-STATE-NOT"
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "MGVN-30-GROWTH-MODE",
+      "question": "【成长演绎】从“种级”开始，你希望用哪种方式回顾/体验你的成长？",
+      "type": "select",
+      "options": [
+        "完整演绎（剧情更细，像视觉小说）",
+        "简洁演绎（每个阶段 1~2 题）",
+        "速通（只保留关键里程碑）"
+      ],
+      "allowCustom": false,
+      "required": true
+    },
+    {
+      "id": "MGVN-31-SEED-FIRST-SIGHT",
+      "question": "【种级】第一次变身后，你最先看见自己的哪里变了？",
+      "type": "text",
+      "placeholder": "例如：指尖有光 / 影子像花瓣 / 呼吸里带着某种香气（1~2 句）",
+      "suggestions": [
+        "指尖有光，像被月光磨过。",
+        "衣摆像花瓣，但落下时没有声音。",
+        "心跳比平时慢，却更有力。",
+        "视野里多出一层淡淡的“纹路”，像符文的骨架。"
+      ],
+      "maxLength": 160,
+      "required": true
+    },
+    {
+      "id": "MGVN-32-SEED-FIRST-CHOICE",
+      "question": "【种级】你第一次面对残兽时，选择的行动准则是：",
+      "type": "select",
+      "options": [
+        "先护人撤离，再谈胜负",
+        "先打断它的“进食”，再找机会",
+        "引到空旷处，避免波及无辜",
+        "不硬拼，用拖延与诱导争取时间",
+        "我只想活下去（先逃）"
+      ],
+      "allowCustom": true,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": [
+          "完整演绎（剧情更细，像视觉小说）",
+          "简洁演绎（每个阶段 1~2 题）"
+        ]
+      }
+    },
+    {
+      "id": "MGVN-33-SEED-DOUBLE-LIFE",
+      "question": "【种级】你准备如何把“日常”与“战斗”缝在一起？",
+      "type": "select",
+      "options": [
+        "照常生活，把秘密藏进缝隙里",
+        "向异策局报备，换取后勤与情报",
+        "找一位现役魔法少女当引路人",
+        "独自行动（不信任何机构）",
+        "逃离城市（我不想牵连任何人）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：你最担心的暴露点是什么",
+      "maxLength": 140,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": "完整演绎（剧情更细，像视觉小说）"
+      }
+    },
+
+    {
+      "id": "MGVN-40-MAZHUANG-FORM",
+      "question": "【芽级·魔装】你的魔装（魔力构装）最终固定成什么形态？",
+      "type": "select",
+      "options": [
+        "手电/灯具（照亮与引路）",
+        "伞/遮蔽物（守护与隔绝）",
+        "剪刀/刀片（裁断与决心）",
+        "线团/针线（缝合与连接）",
+        "钥匙/锁（开启与封存）",
+        "书本/笔（记录与改写）",
+        "镜子/玻璃（映照与折射）",
+        "其他（你自己写）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可写：它为什么会是这个？（1 句）",
+      "maxLength": 140,
+      "required": true
+    },
+    {
+      "id": "MGVN-41-MAZHUANG-FAST",
+      "question": "【速通·芽级】用 1~2 句写清你的魔装：形态 + 核心能力 + 一个限制。",
+      "type": "text",
+      "placeholder": "例如：‘它是一盏手电，照到的影子会被钉住；但光越强，我越容易失去方向感。’",
+      "maxLength": 220,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": "速通（只保留关键里程碑）"
+      }
+    },
+    {
+      "id": "MGVN-42-MAZHUANG-NAME",
+      "question": "【芽级·魔装】给你的魔装取一个“2 字名”（可留空让妖精代取）：",
+      "type": "text",
+      "placeholder": "例如：灯铃 / 断线 / 归钥 / 雾镜（建议 2 字）",
+      "suggestions": [
+        "灯铃",
+        "断线",
+        "归钥",
+        "雾镜",
+        "雨伞",
+        "缝语"
+      ],
+      "maxLength": 8,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": [
+          "完整演绎（剧情更细，像视觉小说）",
+          "简洁演绎（每个阶段 1~2 题）"
+        ]
+      }
+    },
+    {
+      "id": "MGVN-43-MAZHUANG-ABILITY",
+      "question": "【芽级·魔装】魔装的“基本能力”更偏向哪一种？",
+      "type": "select",
+      "options": [
+        "守护/护盾（让伤害止步）",
+        "束缚/控制（让敌人停下）",
+        "斩断/破坏（让结局更快）",
+        "治愈/修复（让破碎回到原样）",
+        "侦察/追踪（让真相浮现）",
+        "欺骗/幻象（让敌人走错路）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：你最想用它完成的那件事",
+      "maxLength": 140,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": "完整演绎（剧情更细，像视觉小说）"
+      }
+    },
+
+    {
+      "id": "MGVN-50-LEAF-RUNE",
+      "question": "【叶级·术式】你最先系统学习的“法沃符文/术式”类型是：",
+      "type": "select",
+      "options": [
+        "防御术式（护盾、抵消、隔绝）",
+        "探知术式（感知、定位、辨识）",
+        "束缚术式（锁链、结界、封印）",
+        "机动术式（加速、跃迁、短距位移）",
+        "净化术式（驱散、清洁、稳定）",
+        "我不太学术式（更依赖魔装直觉）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：你学习它的理由",
+      "maxLength": 140,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": [
+          "完整演绎（剧情更细，像视觉小说）",
+          "简洁演绎（每个阶段 1~2 题）"
+        ]
+      }
+    },
+
+    {
+      "id": "MGVN-60-WONDERLAND-SCENE",
+      "question": "【蕾级·奇境】你的奇境第一次张开时，像什么地方？（范围要“有限且明确”）",
+      "type": "text",
+      "placeholder": "例如：一间候车室 / 一段走廊 / 一座天台 / 一辆空车厢（写具体一点）",
+      "suggestions": [
+        "一间候车室，灯一盏盏亮起。",
+        "一段狭窄走廊，墙上都是花纹裂缝。",
+        "一座天台，风像刀一样干净。",
+        "一辆空车厢，座椅上落着蓝色月光。"
+      ],
+      "maxLength": 160,
+      "required": true
+    },
+    {
+      "id": "MGVN-61-WONDERLAND-RULE",
+      "question": "【蕾级·奇境】请用一句话写下你的“奇境规则”。（提示：规则对范围内所有目标普适生效，包括你自己）",
+      "type": "text",
+      "placeholder": "例如：‘在奇境内，说出口的谎言会变重，直到压垮说谎的人。’",
+      "maxLength": 220,
+      "required": true
+    },
+    {
+      "id": "MGVN-62-WONDERLAND-FLAW",
+      "question": "【蕾级·奇境】你的规则有一个“漏洞/代价”是什么？（越具体越好）",
+      "type": "text",
+      "placeholder": "例如：我也会被自己的规则束缚；必须有人“见证”才生效…",
+      "maxLength": 220,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": "完整演绎（剧情更细，像视觉小说）"
+      }
+    },
+
+    {
+      "id": "MGVN-70-FLOWER-CHANGE",
+      "question": "【花级·盛开】第一次盛开时，你身上发生的变化更像：",
+      "type": "select",
+      "options": [
+        "魔力暴涨，呼吸都带着花香",
+        "伤口愈合得更快，但疼痛更清晰",
+        "情绪被放大（爱/恨/恐惧都更尖锐）",
+        "时间感变得模糊（像被拉长或压缩）",
+        "我几乎失去“人类感”（像一束光在行走）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：你更害怕哪一种变化",
+      "maxLength": 160,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": [
+          "完整演绎（剧情更细，像视觉小说）",
+          "简洁演绎（每个阶段 1~2 题）"
+        ]
+      }
+    },
+    {
+      "id": "MGVN-71-FLOWER-FAST",
+      "question": "【速通·花级】用 1~2 句写清你的“盛开”：你获得了什么，又失去了什么？",
+      "type": "text",
+      "placeholder": "例如：‘盛开让我能把伤口缝合到天亮，但我开始害怕睡梦，因为梦里总有人在求救。’",
+      "maxLength": 220,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": "速通（只保留关键里程碑）"
+      }
+    },
+
+    {
+      "id": "MGVN-75-FANKAI-FAST",
+      "question": "【速通·繁开】用 1~2 句写清你的“繁开”：触发瞬间 + 进化能力 + 一句代价。",
+      "type": "text",
+      "placeholder": "例如：‘我在同伴断气前繁开，灯铃化作灯铃·归航；光能把人拉回一步，但我会失去一段记忆。’",
+      "maxLength": 260,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": "速通（只保留关键里程碑）"
+      }
+    },
+    {
+      "id": "MGVN-76-FANKAI-TRIGGER",
+      "question": "【强花·繁开】是什么瞬间逼你繁开？",
+      "type": "select",
+      "options": [
+        "同伴即将死去，我必须把她/他拉回来",
+        "城市将被吞噬，我必须挡在前面",
+        "我终于承认了自己的愿望（不再骗自己）",
+        "我选择了牺牲（用我换很多人）",
+        "我选择了毁灭（宁可烧成灰）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：那一刻你喊出的名字/誓言",
+      "maxLength": 180,
+      "required": true,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": [
+          "完整演绎（剧情更细，像视觉小说）",
+          "简洁演绎（每个阶段 1~2 题）"
+        ]
+      }
+    },
+    {
+      "id": "MGVN-77-FANKAI-NAME",
+      "question": "【强花·繁开】繁开后的“魔装名”（需包含原魔装名每个字；可留空让妖精代取）：",
+      "type": "text",
+      "placeholder": "例如：原名“灯铃”→“灯铃·归航”（必须包含“灯”“铃”）",
+      "maxLength": 24,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": "完整演绎（剧情更细，像视觉小说）"
+      }
+    },
+    {
+      "id": "MGVN-78-FANKAI-UPGRADE",
+      "question": "【强花·繁开】繁开后，你的能力“进化方向”更像哪一种？",
+      "type": "select",
+      "options": [
+        "范围更大（把更多人圈进规则里）",
+        "规则更硬（更难被绕开）",
+        "输出更强（短时间内压倒一切）",
+        "更聪明（代价更小、控制更精细）",
+        "更残酷（为了赢可以付出更多）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：你更想进化掉“哪一个弱点”",
+      "maxLength": 180,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-30-GROWTH-MODE",
+        "operator": "equals",
+        "value": "完整演绎（剧情更细，像视觉小说）"
+      }
+    },
+
+    {
+      "id": "MGVN-81-STATE-NOT",
+      "question": "【结局标记】你未能成为魔法少女。请把它当作结局：妖精应生成“普通人结局 + 余波”，而不是强行补齐魔装/奇境/繁开。",
+      "type": "select",
+      "options": [
+        "我未能成为魔法少女"
+      ],
+      "allowCustom": false,
+      "required": true,
+      "displayIf": {
+        "any": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24-SEED-OFFER",
+            "operator": "equals",
+            "value": "拒绝（我不想被任何人定义）"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-24B-SEED-MAP",
+            "operator": "equals",
+            "value": "REFUSE"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-27-SEED-RESPONSE",
+            "operator": "equals",
+            "value": [
+              "毫无反应，冰冷得像石头（未能觉醒）",
+              "出现裂纹，像在拒绝我（危险/失败）"
+            ]
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-27B-SEED-RESPONSE-MAP",
+            "operator": "equals",
+            "value": [
+              "FAIL",
+              "DANGER"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-82-STATE-MG",
+      "question": "【结局标记】你最终成为了魔法少女。请把它当作结局：妖精应生成完整的魔装、奇境规则与繁开形态，并写出成长方向。",
+      "type": "select",
+      "options": [
+        "我最终成为了魔法少女"
+      ],
+      "allowCustom": false,
+      "required": true,
+      "displayIf": {
+        "any": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08-IS-MG",
+            "operator": "equals",
+            "value": "我已经是魔法少女（直接从成长开始）"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-08B-IS-MG-MAP",
+            "operator": "equals",
+            "value": [
+              "MG",
+              "LOST"
+            ]
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-27-SEED-RESPONSE",
+            "operator": "equals",
+            "value": [
+              "开始发光，与我的光交织（觉醒成功）",
+              "光很弱，但没有熄灭（勉强成功）"
+            ]
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-27B-SEED-RESPONSE-MAP",
+            "operator": "equals",
+            "value": [
+              "SUCCESS",
+              "WEAK"
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      "id": "MGVN-90-EPILOGUE-NOT",
+      "question": "【尾声·普通人】未能成为魔法少女后，你选择的道路是：",
+      "type": "select",
+      "options": [
+        "回到原来的生活（假装一切没发生）",
+        "加入异策局/相关机构做后勤（用另一种方式参与）",
+        "成为魔术使（学习法沃符文，做凡人的魔法侧支援）",
+        "继续追查真相（我不甘心）",
+        "远离城市与人群（我怕连累别人）",
+        "其他（你自己写）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：你最想补救的是什么",
+      "maxLength": 160,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-81-STATE-NOT",
+        "operator": "equals",
+        "value": "我未能成为魔法少女"
+      }
+    },
+    {
+      "id": "MGVN-90B-EPILOGUE-NOT-MAGE",
+      "question": "【尾声·普通人】如果你选择成为魔术使/符文修习者，你最先学习的术式方向是：",
+      "type": "select",
+      "options": [
+        "防御术式（护盾、抵消、隔绝）",
+        "探知术式（感知、定位、辨识）",
+        "束缚术式（锁链、结界、封印）",
+        "机动术式（加速、短距位移）",
+        "净化术式（驱散、稳定、清洁）",
+        "我不确定/我会自定义"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：你为什么选它（1 句）",
+      "maxLength": 180,
+      "required": false,
+      "displayIf": {
+        "all": [
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-90-EPILOGUE-NOT",
+            "operator": "notEmpty"
+          },
+          {
+            "questionnaireId": "magical-girl-immersive-vn",
+            "questionId": "MGVN-90-EPILOGUE-NOT",
+            "operator": "includes",
+            "value": "魔术使"
+          }
+        ]
+      }
+    },
+    {
+      "id": "MGVN-91-EPILOGUE-NOT-SCAR",
+      "question": "【尾声·普通人】那一夜留给你的“后遗症/礼物”是什么？",
+      "type": "text",
+      "placeholder": "例如：偶尔听见蓝月的回声 / 手心留下发光裂纹 / 记住了某个妖精的名字…",
+      "maxLength": 200,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-81-STATE-NOT",
+        "operator": "equals",
+        "value": "我未能成为魔法少女"
+      }
+    },
+    {
+      "id": "MGVN-92-EPILOGUE-MG-ROAD",
+      "question": "【尾声·魔法少女】你更愿意把自己放在哪条道路上？",
+      "type": "select",
+      "options": [
+        "守护者（把人带回家）",
+        "猎手（把残兽赶回间界）",
+        "修补匠（修复裂缝与关系）",
+        "引路人（把迷失的人带出黑暗）",
+        "审判者（用规则与代价换秩序）",
+        "其他（你自己写）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补一句：你最不想变成哪一种魔法少女",
+      "maxLength": 200,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-82-STATE-MG",
+        "operator": "equals",
+        "value": "我最终成为了魔法少女"
+      }
+    },
+    {
+      "id": "MGVN-93-EPILOGUE-MG-BELIEF",
+      "question": "【尾声·魔法少女】用一句话写下你的信念（belief）：你为何而战？",
+      "type": "text",
+      "placeholder": "例如：‘我不允许求救声被雨声吞掉。’（1 句）",
+      "maxLength": 120,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-82-STATE-MG",
+        "operator": "equals",
+        "value": "我最终成为了魔法少女"
+      }
+    },
+    {
+      "id": "MGVN-94-EPILOGUE-MG-AFFILIATION",
+      "question": "【尾声·魔法少女】你更可能与哪一方建立长期合作/编制关系？",
+      "type": "select",
+      "options": [
+        "异策局（物质界协作/后勤）",
+        "调查院（巡查/执法线）",
+        "研究院（技术/教育线）",
+        "魔事院（编制/人事线）",
+        "财政院（资源/抚恤线）",
+        "民治院（民生/地方治理线）",
+        "城市驻守（守护自己所在的城市）",
+        "无所属（独行或小队自管）",
+        "其他（你自己写）"
+      ],
+      "allowCustom": true,
+      "helperText": "提示：五院是魔法国度的五大机构；物质界侧常通过异策局进行协作与支援。",
+      "placeholder": "可补一句：你和该机构的“交换条件”是什么",
+      "maxLength": 200,
+      "required": false,
+      "displayIf": {
+        "questionnaireId": "magical-girl-immersive-vn",
+        "questionId": "MGVN-82-STATE-MG",
+        "operator": "equals",
+        "value": "我最终成为了魔法少女"
+      }
+    },
+    {
+      "id": "MGVN-99-AI-SUMMARY",
+      "question": "【给妖精评估官】请用 3~5 句总结你最关键的选择（不超过 200 字；可留空）。",
+      "type": "text",
+      "placeholder": "例如：我选择先救人→因此失去某段记忆；魔装偏向守护；奇境规则带来自伤；繁开触发于…",
+      "required": false
+    }
+  ]
+}

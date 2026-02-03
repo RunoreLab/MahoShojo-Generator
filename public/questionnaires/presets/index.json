@@ -9,12 +9,75 @@
       "isDefault": true
     },
     {
+      "id": "magical-girl-immersive-vn",
+      "kind": "magical-girl",
+      "title": "沉浸式剧情车卡问卷：分歧之路",
+      "description": "像视觉小说一样做选择：普通人→心之种→成长/普通人结局；包含条件显示与跳题。",
+      "path": "/questionnaires/presets/magical-girl-immersive-vn.json"
+    },
+    {
+      "id": "magical-girl-afterwork-world",
+      "kind": "magical-girl",
+      "title": "原作世界观向：魔法少女成长路线问卷",
+      "description": "面向原作世界观：城市/阵营/等阶/本相/魔装/术式/奇境/盛开/繁开等设定补全（可跳过）。",
+      "path": "/questionnaires/presets/magical-girl-afterwork-world.json"
+    },
+    {
       "id": "canshou-default",
       "kind": "canshou",
       "title": "研究院残兽调查",
       "description": "前进吧，残兽！",
       "path": "/questionnaires/presets/canshou-default.json",
       "isDefault": true
+    },
+    {
+      "id": "canshou-afterwork-world",
+      "kind": "canshou",
+      "title": "原作世界观向：残兽设定与进化路线问卷",
+      "description": "面向原作世界观：核心概念/进化阶段/巢穴与规则/出现方式/社会影响等设定补全（可跳过）。",
+      "path": "/questionnaires/presets/canshou-afterwork-world.json"
+    },
+    {
+      "id": "magical-girl-full-profile",
+      "kind": "magical-girl",
+      "title": "魔法少女全面角色设定问卷",
+      "description": "更细致地描绘魔法少女的外观、能力与人生轨迹",
+      "path": "/questionnaires/presets/magical-girl-full-profile.json"
+    },
+    {
+      "id": "canshou-full-profile",
+      "kind": "canshou",
+      "title": "残兽全面设定问卷",
+      "description": "更完整的残兽外观、能力与动机设定",
+      "path": "/questionnaires/presets/canshou-full-profile.json"
+    },
+    {
+      "id": "magical-girl-mbti-profile",
+      "kind": "magical-girl",
+      "title": "魔法少女个人信息 + 性格倾向（MBTI）问卷",
+      "description": "可全空、可跳过；支持简版/完整版；用于角色塑造的 MBTI 风格倾向题",
+      "path": "/questionnaires/presets/magical-girl-mbti-profile.json"
+    },
+    {
+      "id": "canshou-mbti-profile",
+      "kind": "canshou",
+      "title": "残兽个人信息 + 行为倾向（MBTI）问卷",
+      "description": "可全空、可跳过；支持简版/完整版；用于残兽塑造的 MBTI 风格倾向题",
+      "path": "/questionnaires/presets/canshou-mbti-profile.json"
+    },
+    {
+      "id": "magical-girl-100-questions",
+      "kind": "magical-girl",
+      "title": "魔法少女百题大问卷（深度版）",
+      "description": "基于百题大问卷，适合深度塑造魔法少女角色",
+      "path": "/questionnaires/presets/magical-girl-100-questions.json"
+    },
+    {
+      "id": "canshou-100-questions",
+      "kind": "canshou",
+      "title": "残兽百题大问卷（深度版）",
+      "description": "基于百题改编，强化残兽核心概念与对抗设定",
+      "path": "/questionnaires/presets/canshou-100-questions.json"
     }
   ]
 }

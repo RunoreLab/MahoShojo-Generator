@@ -18,7 +18,7 @@ interface BattleDataModalProps {
   onClose: () => void;
   onSelectCard?: (card: any) => void;
   onToggleCard?: (card: any, nextSelected: boolean) => void;
-  selectedType: 'character' | 'scenario' | 'history';
+  selectedType: 'character' | 'scenario' | 'history' | 'questionnaire';
   initialTab?: BattleDataTab;
   visibleTabs?: BattleDataTab[];
   titleOverride?: string;
@@ -27,6 +27,7 @@ interface BattleDataModalProps {
   selectedCardIds?: string[];
   selectedCountOverride?: number;
   maxSelected?: number;
+  externalError?: string | null;
 }
 
 type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'pvpHand';
@@ -155,6 +156,7 @@ export default function BattleDataModal({
   selectedCardIds,
   selectedCountOverride,
   maxSelected,
+  externalError,
 }: BattleDataModalProps) {
   const { isAuthenticated } = useAuth();
   const isComposingSearchRef = useRef(false);
@@ -450,7 +452,7 @@ export default function BattleDataModal({
   }, []);
 
   const loadFavorites = useCallback(async (
-    typeParam?: 'character' | 'scenario' | 'history',
+    typeParam?: 'character' | 'scenario' | 'history' | 'questionnaire',
     showLoading: boolean = false,
     sortCriteria?: 'likes' | 'usage' | 'favorites' | 'created_at'
   ) => {
@@ -1129,7 +1131,13 @@ export default function BattleDataModal({
     : isPublicTab
         ? publicTotalPages
         : null;
-  const typeLabel = selectedType === 'character' ? '角色' : selectedType === 'scenario' ? '情景' : '叙事历史';
+  const typeLabelMap: Record<'character' | 'scenario' | 'history' | 'questionnaire', string> = {
+    character: '角色',
+    scenario: '情景',
+    history: '叙事历史',
+    questionnaire: '问卷',
+  };
+  const typeLabel = typeLabelMap[selectedType] ?? '数据';
   const isFilterActive = useMemo(() => {
     return Boolean(
       publicFilters.author ||
@@ -1156,6 +1164,11 @@ export default function BattleDataModal({
           {selectError && (
             <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {selectError}
+            </div>
+          )}
+          {externalError && (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {externalError}
             </div>
           )}
           {selectionMode === 'multi' && typeof maxSelected === 'number' && maxSelected > 0 ? (

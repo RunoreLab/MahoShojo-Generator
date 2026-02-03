@@ -1,0 +1,358 @@
+{
+  "id": "canshou-afterwork-world",
+  "kind": "canshou",
+  "title": "原作世界观向：残兽设定与进化路线问卷",
+  "description": "用于在《下班，然后变成魔法少女》世界观中补全残兽的核心概念/进化阶段/巢穴与规则/出现方式/社会影响等设定（大部分题目可跳过）。",
+  "logoUrl": "/beast-title.svg",
+  "version": "1.0",
+  "questions": [
+    {
+      "id": "CSW-01",
+      "question": "一句话概括：这是怎样的残兽？",
+      "type": "text",
+      "placeholder": "例如：来自间界的蛹阶残兽，在旧工业区筑巢，以“锈蚀”侵染金属与意志",
+      "helperText": "建议包含：核心概念 + 阶段 + 出现地点/巢穴 + 主要威胁（各 1 个即可）",
+      "suggestions": [
+        "以“吞噬”为概念的蠖阶残兽，游荡于荒原，追逐魔力波动",
+        "蛹阶残兽在地下管网筑巢，以“寄生”扩散，城市被迫封锁",
+        "半蜕残兽拥有巢穴规则，以“回声”扰乱感知，诱导误判",
+        "以“折叠”为概念的蜕阶残兽，擅长扭曲距离，切断撤离路线"
+      ],
+      "allowCustom": true,
+      "maxLength": 220,
+      "required": false
+    },
+    {
+      "id": "CSW-02",
+      "question": "档案称呼/编号",
+      "type": "text",
+      "placeholder": "例如：C-17、赤潮、玻璃蚕（不想写可留空）",
+      "suggestions": [
+        "C-",
+        "代号：",
+        "俗称："
+      ],
+      "allowCustom": true,
+      "maxLength": 80,
+      "required": false
+    },
+    {
+      "id": "CSW-03",
+      "question": "核心概念是什么？",
+      "type": "select",
+      "options": [
+        "腐蚀",
+        "穿透",
+        "同化",
+        "蛛网",
+        "火焰",
+        "吞噬",
+        "畸变",
+        "寄生",
+        "噪声",
+        "折叠"
+      ],
+      "allowCustom": true,
+      "placeholder": "建议先用 1~6 字概括，再可选补一句解释",
+      "helperText": "残兽的外形、能力与巢穴风格通常都围绕核心概念生长。",
+      "suggestions": [
+        "锈蚀（让一切变质）",
+        "镜面（复制与反射）",
+        "回声（延迟与回放）",
+        "潮汐（牵引与淹没）",
+        "断线（切断联系）",
+        "空洞（掏空内里）",
+        "雪崩（滚大灾难）",
+        "渗漏（慢性扩散）"
+      ],
+      "maxLength": 120,
+      "required": false
+    },
+    {
+      "id": "CSW-04",
+      "question": "核心情感/欲望更接近？",
+      "type": "select",
+      "options": [
+        "破坏欲",
+        "吞噬欲",
+        "占有欲",
+        "怨念",
+        "恐惧",
+        "饥饿",
+        "求生欲",
+        "嫉妒",
+        "混沌",
+        "好奇"
+      ],
+      "allowCustom": true,
+      "placeholder": "例如：饥饿（越吞噬越空）/ 占有欲（必须属于我）",
+      "helperText": "可以写成“情感（表现）”的形式。",
+      "suggestions": [
+        "饥饿（永远不够）",
+        "占有欲（必须属于我）",
+        "怨念（欠我的要还）",
+        "恐惧（先下手为强）",
+        "孤独（想被看见）",
+        "求生欲（不惜代价）"
+      ],
+      "maxLength": 120,
+      "required": false
+    },
+    {
+      "id": "CSW-05",
+      "question": "进化阶段处于？",
+      "type": "select",
+      "options": [
+        "卵",
+        "蠖",
+        "蛹",
+        "半蜕",
+        "蜕",
+        "王蜕",
+        "羽"
+      ],
+      "allowCustom": false,
+      "placeholder": "请选择一个选项",
+      "helperText": "规则只在残兽的“巢穴”中生效；从半蜕开始才会在巢穴中形成专属规则。",
+      "required": false
+    },
+    {
+      "id": "CSW-06",
+      "question": "外形轮廓与材质特征是？",
+      "type": "text",
+      "placeholder": "例如：像玻璃与骨质拼接的巨蚕，体表裂纹会渗出黑雾；移动时会留下锈色痕迹",
+      "suggestions": [
+        "昆虫/蚕蛹轮廓，表面像湿润的茧",
+        "兽类轮廓，但关节结构异常",
+        "器物化（像门、钟、镜子等）并具“活物”细节",
+        "雾/潮水状，无固定形体但有“核心”",
+        "人形"
+      ],
+      "allowCustom": true,
+      "maxLength": 260,
+      "required": false
+    },
+    {
+      "id": "CSW-07",
+      "question": "它通常出现/活动在哪类区域？",
+      "type": "select",
+      "options": [
+        "间界荒原",
+        "物质界荒原",
+        "城市近郊",
+        "地下管网/隧道",
+        "海岸/港口",
+        "旧工业区/废弃工厂",
+        "陆行舰航线附近",
+        "居民区"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补充：时间规律、天气、触发条件",
+      "suggestions": [
+        "雨夜更活跃",
+        "对魔力波动敏感，喜欢追踪变身地点",
+        "会沿着交通干线移动",
+        "只在封锁线外徘徊，像在等待"
+      ],
+      "maxLength": 220,
+      "required": false
+    },
+    {
+      "id": "CSW-08",
+      "question": "它的行为模式/目标更接近？",
+      "type": "select",
+      "options": [
+        "无差别破坏",
+        "以魔力为食（追逐变身与战斗）",
+        "筑巢扩张（把区域改造成巢穴）",
+        "守护巢穴（靠近即攻击）",
+        "猎食特定人群",
+        "有“指向性任务”（疑似人为干预）"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补充：它“为什么”这么做（与核心欲望呼应）",
+      "maxLength": 220,
+      "required": false
+    },
+    {
+      "id": "CSW-09",
+      "question": "主要能力与攻击方式是什么？",
+      "type": "text",
+      "placeholder": "例如：喷吐腐蚀雾、织网束缚、同化触碰到的材质、制造回声误导感知等",
+      "suggestions": [
+        "腐蚀雾/酸雨：让防线与装备快速失效",
+        "寄生孢子：附着后缓慢夺取行动能力",
+        "蛛网领域：限制机动并切断撤离通道",
+        "回声诱导：把命令与呼救“回放”成陷阱",
+        "折叠空间：让直线变成迷路的圆"
+      ],
+      "allowCustom": true,
+      "maxLength": 320,
+      "required": false
+    },
+    {
+      "id": "CSW-10",
+      "question": "防御特性与弱点/对策是什么？",
+      "type": "text",
+      "placeholder": "例如：物理攻击几乎无效；对某属性魔力更敏感；核心器官/巢穴节点暴露后会崩解",
+      "helperText": "世界观常识：物理攻击对残兽基本无效；有效对抗通常依赖魔法少女、术式、奇境/规则与战术协作。",
+      "suggestions": [
+        "弱点在“核心”处（击破后迅速崩解）",
+        "巢穴存在“节点”，破坏节点可削弱规则",
+        "对“净化/光”系魔力更敏感",
+        "离开巢穴范围后会明显虚弱",
+        "对“信息优势”极度敏感，易被诱导误判"
+      ],
+      "allowCustom": true,
+      "maxLength": 320,
+      "required": false
+    },
+    {
+      "id": "CSW-11",
+      "question": "它是如何出现/被制造出来的？",
+      "type": "select",
+      "options": [
+        "自然生成",
+        "黑烬黎明投放/实验产物",
+        "被兽之源诱发或强化",
+        "人为事故/污染导致异常滋生",
+        "与兽之腑/兽子相关",
+        "不明原因"
+      ],
+      "allowCustom": true,
+      "placeholder": "可补充：谁获益、谁试图掩盖、线索有哪些",
+      "maxLength": 240,
+      "required": false
+    },
+    {
+      "id": "CSW-12",
+      "question": "它对城市与社会造成了什么影响？",
+      "type": "text",
+      "placeholder": "例如：封锁线长期存在；陆行舰航线改道；居民撤离",
+      "suggestions": [
+        "城市被迫分区封锁，生活秩序长期紧绷",
+        "交通线路中断，补给与人员流动受阻",
+        "居民对“魔法侧”产生不信任或依赖"
+      ],
+      "allowCustom": true,
+      "maxLength": 360,
+      "required": false
+    },
+    {
+      "id": "CSW-13",
+      "question": "（蛹阶及以上）它的巢穴是什么样的？",
+      "type": "text",
+      "placeholder": "例如：把旧工厂改造成“锈色茧房”；墙面被网状脉络覆盖；进入后方向感逐渐丢失",
+      "displayIf": {
+        "questionnaireId": "canshou-afterwork-world",
+        "questionId": "CSW-05",
+        "operator": "equals",
+        "value": [
+          "蛹",
+          "半蜕",
+          "蜕",
+          "王蜕"
+        ]
+      },
+      "helperText": "蛹阶残兽会形成巢穴，但此时尚未拥有规则；从半蜕开始才会在巢穴内生成规则。",
+      "suggestions": [
+        "地下管网被“结网”成迷宫",
+        "旧工业区被锈蚀覆盖，金属会自行重组",
+        "港口像潮水倒灌，地面变成黏滞的“海”",
+        "楼宇被折叠成回廊，走廊尽头永远回到入口"
+      ],
+      "allowCustom": true,
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "CSW-14",
+      "question": "（半蜕及以上）巢穴中的“规则”是什么？（范围 + 普适规则 + 触发/代价/规避方式）",
+      "type": "text",
+      "placeholder": "例如：范围为厂区；规则是“任何金属都会被锈蚀并向巢穴核心汇聚”；代价是残兽也会被规则反噬",
+      "displayIf": {
+        "questionnaireId": "canshou-afterwork-world",
+        "questionId": "CSW-05",
+        "operator": "equals",
+        "value": [
+          "半蜕",
+          "蜕",
+          "王蜕"
+        ]
+      },
+      "helperText": "规则只在巢穴中起效，且对范围内所有目标（包括残兽自身）平等生效；残兽通常依靠信息优势或“合法规避手段”获利。",
+      "suggestions": [
+        "范围内，任何“呼喊同伴名字”的人都会被回声引向错误方向",
+        "范围内，离开地面的目标会被蛛网强制拉回",
+        "范围内，所有光源会逐渐变暗，直到只剩巢穴核心发光",
+        "范围内，越试图逃离的人越会被“折叠”回中心"
+      ],
+      "allowCustom": true,
+      "maxLength": 500,
+      "required": false
+    },
+    {
+      "id": "CSW-15",
+      "question": "（蜕/王蜕）它的“质变点”是什么？（智慧、组织性或新能力）",
+      "type": "text",
+      "placeholder": "例如：开始使用诱饵与伏击；能识别术式结构并进行干扰；会主动保护巢穴节点",
+      "displayIf": {
+        "questionnaireId": "canshou-afterwork-world",
+        "questionId": "CSW-05",
+        "operator": "equals",
+        "value": [
+          "蜕",
+          "王蜕"
+        ]
+      },
+      "suggestions": [
+        "变得更像“猎手”：会布置陷阱与诱导撤离失败",
+        "开始理解“契约/承诺”，并把它变成规则的一部分",
+        "能针对魔法少女的出力/占用模式进行反制",
+        "会驱使低阶残兽协同作战"
+      ],
+      "allowCustom": true,
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "CSW-16",
+      "question": "它与魔法少女的第一次遭遇是什么场景？",
+      "type": "text",
+      "placeholder": "例如：封锁线外的夜色里，小队第一次进入巢穴；播种者的预警迟到了一分钟",
+      "suggestions": [
+        "撤离通道被切断，小队只能在巢穴里“赢一次”",
+        "异策局刚拉起封锁线，它就从地面“长出来”",
+        "它像在等某个人：每次都在同一站台出现",
+        "巢穴里留下了人为布置的痕迹（疑似黑烬黎明）"
+      ],
+      "allowCustom": true,
+      "maxLength": 320,
+      "required": false
+    },
+    {
+      "id": "CSW-17",
+      "question": "写一段档案摘要（研究院/异策局口吻，可选）",
+      "type": "text",
+      "placeholder": "建议：危险等级/已知能力/活动范围/对策建议（每项 1 句即可）",
+      "suggestions": [
+        "危险等级：高。建议：避免单独进入巢穴，优先侦查节点。",
+        "特点：对光系魔力敏感；离开巢穴后显著虚弱。",
+        "对策：以术式标记核心位置，配合奇境规则压制其机动。"
+      ],
+      "allowCustom": true,
+      "maxLength": 420,
+      "required": false
+    },
+    {
+      "id": "CSW-18",
+      "question": "写一段战斗片段：用 3~6 句描述一次与它的交战",
+      "type": "text",
+      "placeholder": "建议：接敌→能力展示→转折（巢穴/规则/受伤）→对策→收束（击退/撤离/遗留伏笔）",
+      "helperText": "如果你想让 AI 更贴近你的设计，可以写得更具体；不写也完全没问题。",
+      "allowCustom": true,
+      "maxLength": 500,
+      "required": false
+    }
+  ]
+}

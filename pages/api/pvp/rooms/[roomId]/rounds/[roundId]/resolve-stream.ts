@@ -743,18 +743,18 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
           label: 'api/pvp/resolve-stream 上游读取',
           idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
           totalTimeoutMs: UPSTREAM_TOTAL_TIMEOUT_MS,
-          onTimeout: () => {
-            try {
-              upstreamAbortController.abort();
-            } catch {
-              // ignore
-            }
-            try {
-              void reader.cancel('timeout');
-            } catch {
-              // ignore
-            }
-          },
+	          onTimeout: () => {
+	            try {
+	              upstreamAbortController.abort();
+	            } catch {
+	              // ignore
+	            }
+	            try {
+	              void reader.cancel('timeout').catch(() => {});
+	            } catch {
+	              // ignore
+	            }
+	          },
         });
         while (true) {
           const { value, done } = await readWithTimeout(reader);
@@ -763,14 +763,14 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
           const chunkText = decoder.decode(value, { stream: true });
           accumulatedText += chunkText;
           controller.enqueue(value);
-          if (shouldTerminateByTelemetry(accumulatedText)) {
-            try {
-              void reader.cancel('telemetry-meta-received');
-            } catch {
-              // ignore
-            }
-            break;
-          }
+	          if (shouldTerminateByTelemetry(accumulatedText)) {
+	            try {
+	              void reader.cancel('telemetry-meta-received').catch(() => {});
+	            } catch {
+	              // ignore
+	            }
+	            break;
+	          }
         }
         accumulatedText += decoder.decode();
         await finalizeAndPersist(accumulatedText);
@@ -794,11 +794,11 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       } catch {
         // ignore
       }
-      try {
-        void reader.cancel();
-      } catch {
-        // ignore
-      }
+	      try {
+	        void reader.cancel().catch(() => {});
+	      } catch {
+	        // ignore
+	      }
       try {
         await updatePvpRound(roundId, { status: 'pending' });
         await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });

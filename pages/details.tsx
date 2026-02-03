@@ -13,9 +13,11 @@ import { generateRandomMagicalGirl } from '../lib/random-character-generator';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
+import BattleDataModal from '@/components/BattleDataModal';
 import {
   buildQuestionKey,
   buildQuestionnaireFlow,
+  compactQuestionnaireAnswerItems,
   formatQuestionnaireAnswers,
   normalizeQuestionnaireDefinition,
   normalizeUserAnswers,
@@ -37,6 +39,11 @@ import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-car
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
+import {
+  DETAILS_QUESTIONNAIRE_THEME,
+  QuestionnaireQuestionPanel,
+} from '@/components/questionnaire/QuestionnaireQuestionPanel';
+import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
 
 type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -46,6 +53,7 @@ type QuestionnaireSelection = {
   dataCardId?: string;
   dataCardName?: string;
   dataCardAuthor?: string;
+  selectionId?: string;
 };
 
 type QuestionnaireContextItem = {
@@ -204,16 +212,16 @@ const DetailsPage: React.FC = () => {
   const [questionnaireLoadError, setQuestionnaireLoadError] = useState<string | null>(null);
   const [answersByKey, setAnswersByKey] = useState<Record<string, string>>({});
   const [selectionReady, setSelectionReady] = useState(false);
+  const [showPasteImport, setShowPasteImport] = useState(false);
+  const [pasteQuestionnaireText, setPasteQuestionnaireText] = useState('');
+  const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
   const draftRestoredRef = useRef(false);
   const currentQuestionKeyRef = useRef<string | null>(null);
+  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const transitionEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
-  const [questionnairePickerTab, setQuestionnairePickerTab] = useState<'public' | 'private'>('public');
-  const [questionnaireSearch, setQuestionnaireSearch] = useState('');
-  const [questionnaireLoading, setQuestionnaireLoading] = useState(false);
   const [questionnairePickerError, setQuestionnairePickerError] = useState<string | null>(null);
-  const [publicQuestionnaireCards, setPublicQuestionnaireCards] = useState<any[]>([]);
-  const [privateQuestionnaireCards, setPrivateQuestionnaireCards] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -247,11 +255,41 @@ const DetailsPage: React.FC = () => {
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
   const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600'}`;
+  const clearTransitionTimers = useCallback(() => {
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
+    if (transitionEndTimerRef.current) {
+      clearTimeout(transitionEndTimerRef.current);
+      transitionEndTimerRef.current = null;
+    }
+  }, []);
+  const createSelectionSuffix = useCallback(() => {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID();
+    }
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+  const ensureSelectionId = useCallback(
+    (selection: QuestionnaireSelection, used: Set<string>) => {
+      const base = selection.questionnaire.id || 'questionnaire';
+      let nextId = typeof selection.selectionId === 'string' ? selection.selectionId.trim() : '';
+      if (!nextId) {
+        nextId = used.has(base) ? `${base}::${createSelectionSuffix()}` : base;
+      } else if (used.has(nextId)) {
+        nextId = `${base}::${createSelectionSuffix()}`;
+      }
+      used.add(nextId);
+      return { ...selection, selectionId: nextId };
+    },
+    [createSelectionSuffix]
+  );
 
   const questionnaireItems = useMemo<QuestionnaireContextItem[]>(() => {
     return selectedQuestionnaires.flatMap((selection) =>
       selection.questionnaire.questions.map((question, index) => ({
-        key: buildQuestionKey(selection.questionnaire.id, question.id, index),
+        key: buildQuestionKey(selection.selectionId ?? selection.questionnaire.id, question.id, index),
         questionnaireId: selection.questionnaire.id,
         questionnaireTitle: selection.questionnaire.title,
         indexInQuestionnaire: index,
@@ -408,18 +446,20 @@ const DetailsPage: React.FC = () => {
         setShowQuestionnaireSettings(parsed.showQuestionnaireSettings);
       }
       if (Array.isArray(parsed?.questionnaireSelections)) {
-        const restored = parsed.questionnaireSelections
-          .map((raw: any) => {
+        const usedSelectionIds = new Set<string>();
+        const restored = (parsed.questionnaireSelections as unknown[])
+          .map((raw): QuestionnaireSelection | null => {
             if (!raw || typeof raw !== 'object') return null;
+            const rawRecord = raw as Record<string, unknown>;
             const source: QuestionnaireSelectionSource =
-              raw.source === 'upload' || raw.source === 'database' || raw.source === 'preset'
-                ? raw.source
+              rawRecord.source === 'upload' || rawRecord.source === 'database' || rawRecord.source === 'preset'
+                ? rawRecord.source
                 : 'preset';
-            const normalized = normalizeQuestionnaireDefinition(raw.questionnaire, {
+            const rawQuestionnaire = rawRecord.questionnaire as { id?: unknown; title?: unknown } | null;
+            const normalized = normalizeQuestionnaireDefinition(rawRecord.questionnaire, {
               fallbackKind: 'magical-girl',
-              fallbackId: typeof raw.questionnaire?.id === 'string' ? raw.questionnaire.id : 'magical-girl-custom',
-              fallbackTitle: typeof raw.questionnaire?.title === 'string' ? raw.questionnaire.title : '未命名问卷',
-              applyMagicalMeta: source === 'preset',
+              fallbackId: typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : 'magical-girl-custom',
+              fallbackTitle: typeof rawQuestionnaire?.title === 'string' ? rawQuestionnaire.title : '未命名问卷',
               nativeAllowed: source === 'preset' ? true : false,
             });
             if (!normalized) return null;
@@ -429,12 +469,14 @@ const DetailsPage: React.FC = () => {
             return {
               source,
               questionnaire: normalized,
-              dataCardId: typeof raw.dataCardId === 'string' ? raw.dataCardId : undefined,
-              dataCardName: typeof raw.dataCardName === 'string' ? raw.dataCardName : undefined,
-              dataCardAuthor: typeof raw.dataCardAuthor === 'string' ? raw.dataCardAuthor : undefined,
+              dataCardId: typeof rawRecord.dataCardId === 'string' ? rawRecord.dataCardId : undefined,
+              dataCardName: typeof rawRecord.dataCardName === 'string' ? rawRecord.dataCardName : undefined,
+              dataCardAuthor: typeof rawRecord.dataCardAuthor === 'string' ? rawRecord.dataCardAuthor : undefined,
+              selectionId: typeof rawRecord.selectionId === 'string' ? rawRecord.selectionId : undefined,
             } satisfies QuestionnaireSelection;
           })
-          .filter(Boolean) as QuestionnaireSelection[];
+          .filter((item): item is QuestionnaireSelection => Boolean(item))
+          .map((item) => ensureSelectionId(item, usedSelectionIds));
         if (restored.length > 0) {
           setSelectedQuestionnaires(restored);
           setSelectionReady(true);
@@ -445,7 +487,7 @@ const DetailsPage: React.FC = () => {
       setImageSaveMode(defaultImageMode);
       setJsonSaveMode(defaultJsonMode);
     }
-  }, []);
+  }, [ensureSelectionId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -482,6 +524,17 @@ const DetailsPage: React.FC = () => {
   ]);
 
   useEffect(() => {
+    return () => {
+      clearTransitionTimers();
+    };
+  }, [clearTransitionTimers]);
+
+  useEffect(() => {
+    clearTransitionTimers();
+    setIsTransitioning(false);
+  }, [selectedQuestionnaires, clearTransitionTimers]);
+
+  useEffect(() => {
     if (!allowMultipleQuestionnaires && selectedQuestionnaires.length > 1) {
       setSelectedQuestionnaires([selectedQuestionnaires[0]]);
       setCurrentQuestionIndex(0);
@@ -491,26 +544,21 @@ const DetailsPage: React.FC = () => {
   useEffect(() => {
     if (mergedQuestions.length === 0) {
       currentQuestionKeyRef.current = null;
+      if (currentQuestionIndex !== 0) {
+        setCurrentQuestionIndex(0);
+      }
       return;
     }
-    const previousKey = currentQuestionKeyRef.current;
-    if (!previousKey) {
-      if (currentQuestionIndex !== 0) setCurrentQuestionIndex(0);
-      return;
-    }
-    const nextIndex = mergedQuestionIndexByKey.get(previousKey);
-    if (typeof nextIndex === 'number' && nextIndex !== currentQuestionIndex) {
-      setCurrentQuestionIndex(nextIndex);
-      return;
-    }
-    if (nextIndex === undefined && currentQuestionIndex !== 0) {
-      setCurrentQuestionIndex(0);
-    }
-  }, [mergedQuestions, mergedQuestionIndexByKey, currentQuestionIndex]);
 
-  useEffect(() => {
-    currentQuestionKeyRef.current = mergedQuestions[currentQuestionIndex]?.key ?? null;
-  }, [mergedQuestions, currentQuestionIndex]);
+    const previousKey = currentQuestionKeyRef.current;
+    const mappedIndex = previousKey ? mergedQuestionIndexByKey.get(previousKey) : undefined;
+    const nextIndex = typeof mappedIndex === 'number' ? mappedIndex : 0;
+
+    if (nextIndex !== currentQuestionIndex) {
+      setCurrentQuestionIndex(nextIndex);
+    }
+    currentQuestionKeyRef.current = mergedQuestions[nextIndex]?.key ?? null;
+  }, [mergedQuestions, mergedQuestionIndexByKey, currentQuestionIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -559,12 +607,13 @@ const DetailsPage: React.FC = () => {
           fallbackId: defaultPreset.id,
           fallbackKind: defaultPreset.kind,
           fallbackTitle: defaultPreset.title,
-          applyMagicalMeta: true,
           nativeAllowed: true,
         });
         if (!normalized) throw new Error('预设问卷解析失败');
         if (cancelled) return;
-        setSelectedQuestionnaires([{ source: 'preset', questionnaire: normalized }]);
+        setSelectedQuestionnaires([
+          ensureSelectionId({ source: 'preset', questionnaire: normalized }, new Set()),
+        ]);
         setSelectionReady(true);
       } catch (error) {
         console.error('加载默认问卷失败:', error);
@@ -578,7 +627,7 @@ const DetailsPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [presetEntries, selectedQuestionnaires.length, selectionReady]);
+  }, [ensureSelectionId, presetEntries, selectedQuestionnaires.length, selectionReady]);
 
   useEffect(() => {
     if (selectionReady) setLoading(false);
@@ -586,101 +635,62 @@ const DetailsPage: React.FC = () => {
 
   const applySelection = (selection: QuestionnaireSelection) => {
     setSelectedQuestionnaires((prev) => {
+      const usedSelectionIds = new Set<string>();
+      prev.forEach((item) => {
+        const existingId = item.selectionId || item.questionnaire.id;
+        if (existingId) usedSelectionIds.add(existingId);
+      });
+      const normalizedSelection = ensureSelectionId(selection, usedSelectionIds);
       if (allowMultipleQuestionnaires) {
-        return [...prev, selection];
+        return [...prev, normalizedSelection];
       }
-      return [selection];
+      return [normalizedSelection];
     });
+    setPasteQuestionnaireError(null);
+    setPasteQuestionnaireText('');
+    setShowPasteImport(false);
     setShowIntroduction(false);
     setShowQuestionnaireSettings(false);
   };
 
   const handleRemoveSelection = (index: number) => {
+    clearTransitionTimers();
+    setIsTransitioning(false);
     setSelectedQuestionnaires((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const fetchQuestionnaireCardList = useCallback(async (tab: 'public' | 'private', search: string) => {
-    const query = search.trim();
-    setQuestionnaireLoading(true);
-    setQuestionnairePickerError(null);
+  const handleSelectQuestionnaireCard = (card: any) => {
     try {
-      if (tab === 'public') {
-        const params = new URLSearchParams({ type: 'questionnaire', limit: '30' });
-        if (query) params.set('search', query);
-        const res = await fetch(`/api/public-data-cards?${params.toString()}`);
-        const json = await res.json();
-        if (!res.ok || !json?.success) throw new Error(json?.error || '加载公开问卷失败');
-        setPublicQuestionnaireCards(Array.isArray(json.cards) ? json.cards : []);
-      } else {
-        const { authStorage } = await import('@/lib/auth');
-        const authHeader = await authStorage.getAuthHeader();
-        if (!authHeader) {
-          setPrivateQuestionnaireCards([]);
-          setQuestionnairePickerError('请先登录以查看私有问卷');
-          return;
+      const rawPayload = card?.data ?? card?.dataJson ?? card?.data_json ?? card?.dataJSON ?? null;
+      let rawData: any = null;
+      if (rawPayload !== null && rawPayload !== undefined) {
+        rawData = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
+      } else if (card && typeof card === 'object') {
+        if (Array.isArray(card.questions)) {
+          rawData = card;
+        } else if (card.questionnaire && Array.isArray(card.questionnaire.questions)) {
+          rawData = card.questionnaire;
         }
-        const url = new URL('/api/data-cards', window.location.origin);
-        const res = await fetch(url.toString(), {
-          headers: { Authorization: authHeader },
-        });
-        const json = await res.json();
-        if (!res.ok || !json?.success) throw new Error(json?.error || '加载私有问卷失败');
-        const list = Array.isArray(json.cards) ? json.cards : [];
-        const filtered = list.filter((card: any) => card?.type === 'questionnaire');
-        const searched = query
-          ? filtered.filter((card: any) => {
-              const text = `${card?.name || ''} ${card?.description || ''}`.toLowerCase();
-              return text.includes(query.toLowerCase());
-            })
-          : filtered;
-        setPrivateQuestionnaireCards(searched);
       }
-    } catch (err) {
-      setQuestionnairePickerError(err instanceof Error ? err.message : '加载问卷失败');
-    } finally {
-      setQuestionnaireLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!showQuestionnairePicker) return;
-    void fetchQuestionnaireCardList(questionnairePickerTab, questionnaireSearch);
-  }, [showQuestionnairePicker, questionnairePickerTab, questionnaireSearch, fetchQuestionnaireCardList]);
-
-  const handleSelectQuestionnaireCard = async (card: any) => {
-    try {
-      const rawData = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
+      if (!rawData) throw new Error('问卷数据卡内容为空或格式不受支持');
       const normalized = normalizeQuestionnaireDefinition(rawData, {
         fallbackKind: 'magical-girl',
         fallbackId: typeof rawData?.id === 'string' ? rawData.id : `magical-girl-card-${card?.id ?? ''}`,
         fallbackTitle: typeof rawData?.title === 'string' ? rawData.title : card?.name || '未命名问卷',
-        applyMagicalMeta: false,
         nativeAllowed: typeof rawData?.nativeAllowed === 'boolean' ? rawData.nativeAllowed : false,
       });
       if (!normalized) throw new Error('问卷数据卡解析失败');
       applySelection({
         source: 'database',
         questionnaire: normalized,
-        dataCardId: card?.id,
-        dataCardName: card?.name,
-        dataCardAuthor: card?.username,
+        dataCardId: card?._cardId ?? card?.id,
+        dataCardName: card?._cardName ?? card?.name,
+        dataCardAuthor: card?._author ?? card?.username ?? card?.author,
       });
+      setQuestionnairePickerError(null);
       setShowQuestionnairePicker(false);
     } catch (error) {
       setQuestionnairePickerError(error instanceof Error ? error.message : '解析问卷失败');
-    }
-  };
-
-  const getQuestionnaireCardSummary = (card: any) => {
-    try {
-      const rawData = typeof card?.data === 'string' ? JSON.parse(card.data) : card?.data;
-      const title = typeof rawData?.title === 'string' ? rawData.title : card?.name || '未命名问卷';
-      const kind = rawData?.kind === 'magical-girl' || rawData?.kind === 'canshou' ? rawData.kind : 'magical-girl';
-      const nativeAllowed = typeof rawData?.nativeAllowed === 'boolean' ? rawData.nativeAllowed : false;
-      const description = typeof rawData?.description === 'string' ? rawData.description : card?.description || '';
-      return { title, kind, nativeAllowed, description };
-    } catch {
-      return { title: card?.name || '未命名问卷', kind: 'magical-girl', nativeAllowed: false, description: card?.description || '' };
     }
   };
 
@@ -693,7 +703,6 @@ const DetailsPage: React.FC = () => {
         fallbackKind: 'magical-girl',
         fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'magical-girl-upload',
         fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : file.name.replace(/\.[^.]+$/, ''),
-        applyMagicalMeta: false,
         nativeAllowed: false,
       });
       if (!normalized) throw new Error('问卷文件解析失败');
@@ -701,8 +710,35 @@ const DetailsPage: React.FC = () => {
         source: 'upload',
         questionnaire: normalized,
       });
+      setPasteQuestionnaireError(null);
+      setError(null);
     } catch (error) {
       setError(error instanceof Error ? error.message : '问卷文件解析失败');
+    }
+  };
+
+  const handlePasteQuestionnaireImport = () => {
+    if (!pasteQuestionnaireText.trim()) {
+      setPasteQuestionnaireError('请先粘贴问卷 JSON');
+      return;
+    }
+    try {
+      const parsed = JSON.parse(pasteQuestionnaireText);
+      const normalized = normalizeQuestionnaireDefinition(parsed, {
+        fallbackKind: 'magical-girl',
+        fallbackId: typeof parsed?.id === 'string' ? parsed.id : 'magical-girl-paste',
+        fallbackTitle: typeof parsed?.title === 'string' ? parsed.title : '未命名问卷',
+        nativeAllowed: false,
+      });
+      if (!normalized) throw new Error('问卷 JSON 无法识别，请检查格式');
+      applySelection({
+        source: 'upload',
+        questionnaire: normalized,
+      });
+      setPasteQuestionnaireError(null);
+      setError(null);
+    } catch (error) {
+      setPasteQuestionnaireError(error instanceof Error ? error.message : '问卷 JSON 解析失败');
     }
   };
 
@@ -717,7 +753,6 @@ const DetailsPage: React.FC = () => {
         fallbackId: preset.id,
         fallbackKind: preset.kind,
         fallbackTitle: preset.title,
-        applyMagicalMeta: true,
         nativeAllowed: true,
       });
       if (!normalized) throw new Error('预设问卷解析失败');
@@ -857,6 +892,8 @@ const DetailsPage: React.FC = () => {
   // “返回上题”功能的函数
   const handlePreviousQuestion = () => {
     if (currentQuestionIndex === 0) return;
+    clearTransitionTimers();
+    setIsTransitioning(false);
     const nextAnswers = commitAnswerSnapshot();
     setAnswersByKey(nextAnswers);
 
@@ -878,6 +915,8 @@ const DetailsPage: React.FC = () => {
 
   const handleNavigateToQuestion = (index: number) => {
     if (index === currentQuestionIndex || index < 0 || index >= mergedQuestions.length) return;
+    clearTransitionTimers();
+    setIsTransitioning(false);
     const nextAnswers = commitAnswerSnapshot();
     setAnswersByKey(nextAnswers);
     setCurrentQuestionIndex(index);
@@ -892,6 +931,8 @@ const DetailsPage: React.FC = () => {
   };
 
   const proceedToNextQuestion = (nextAnswers: Record<string, string>) => {
+    clearTransitionTimers();
+    setIsTransitioning(false);
     const currentKey = mergedQuestions[currentQuestionIndex]?.key;
     const { flow: nextFlow, indexByKey: nextIndexByKey } = getQuestionnaireFlow(nextAnswers);
     const currentFlowIndex = currentKey ? (nextIndexByKey.get(currentKey) ?? -1) : -1;
@@ -900,13 +941,13 @@ const DetailsPage: React.FC = () => {
     if (nextIndex >= 0 && nextIndex < nextFlow.length) {
       setIsTransitioning(true);
 
-      setTimeout(() => {
+      transitionTimerRef.current = setTimeout(() => {
         const nextKey = nextFlow[nextIndex]?.key ?? null;
         currentQuestionKeyRef.current = nextKey;
         setCurrentQuestionIndex(nextIndex);
         setCurrentAnswer(nextKey ? nextAnswers[nextKey] || '' : '');
 
-        setTimeout(() => {
+        transitionEndTimerRef.current = setTimeout(() => {
           setIsTransitioning(false);
         }, 50);
       }, 250);
@@ -1055,6 +1096,42 @@ const DetailsPage: React.FC = () => {
     setBulkAnswers('');
   };
 
+  const buildAnswerExportText = useCallback(() => {
+    const now = new Date();
+    const answered = mergedQuestions.flatMap((item, index) => {
+      const raw = answersByKey[item.key];
+      const trimmed = typeof raw === 'string' ? raw.trim() : '';
+      if (!trimmed) return [];
+      return [{
+        index,
+        questionnaireTitle: item.questionnaireTitle,
+        question: item.question.question,
+        answer: raw,
+      }];
+    });
+
+    const selectedTitles = selectedQuestionnaires
+      .map((selection) => selection.questionnaire.title?.trim())
+      .filter((title): title is string => Boolean(title));
+    const questionnaireLabel = selectedTitles.length > 0 ? selectedTitles.join(' + ') : '';
+
+    const lines: string[] = [];
+    lines.push('【魔法少女问卷答案备份】');
+    lines.push(`导出时间：${now.toLocaleString()}`);
+    lines.push(`已填写：${answered.length} / ${mergedQuestions.length}`);
+    if (questionnaireLabel) lines.push(`问卷：${questionnaireLabel}`);
+    lines.push('');
+
+    answered.forEach((item) => {
+      const title = item.questionnaireTitle ? `（${item.questionnaireTitle}）` : '';
+      lines.push(`Q${item.index + 1}${title}: ${item.question}`);
+      lines.push(`A: ${item.answer}`);
+      lines.push('');
+    });
+
+    return lines.join('\n').trimEnd();
+  }, [answersByKey, mergedQuestions, selectedQuestionnaires]);
+
   const handleSubmit = async (answersSnapshot?: Record<string, string>) => {
     if (isCooldown) {
       setError(`请等待 ${remainingTime} 秒后再生成`);
@@ -1190,7 +1267,7 @@ const DetailsPage: React.FC = () => {
         });
         const cardWithAnswers = {
           ...card,
-          userAnswers: finalAnswerItems,
+          userAnswers: compactQuestionnaireAnswerItems(finalAnswerItems),
         };
         if (!allowNativeSignatureForSubmit) {
           setStreamedGeneralCard(cardWithAnswers);
@@ -1256,24 +1333,6 @@ const DetailsPage: React.FC = () => {
       // 依据当前通道实时覆盖冷却时间，确保自定义 AI 时降为 3 秒
       startCooldown(generatorCooldownMs);
     }
-  };
-
-  // “一键复制”功能的函数
-  const handleCopyContent = () => {
-    const contentToCopy = mergedQuestions
-      .map((item, index) => {
-        const title = item.questionnaireTitle ? `（${item.questionnaireTitle}）` : '';
-        return `Q${index + 1}${title}: ${item.question.question}\nA: ${answersByKey[item.key] || ''}`;
-      })
-      .join('\n\n');
-
-    // 使用剪贴板API进行复制
-    navigator.clipboard.writeText(contentToCopy).then(() => {
-      alert('已填写内容已复制到剪贴板！');
-    }).catch(err => {
-      console.error('复制失败: ', err);
-      alert('复制失败，请稍后再试。');
-    });
   };
 
   const handleSaveImage = (imageUrl: string) => {
@@ -1373,11 +1432,11 @@ const DetailsPage: React.FC = () => {
   const showTextInput = allowCustomInput || !hasOptions;
   const navigatorItems = mergedQuestions.map((item) => ({
     id: item.key,
-    label: item.questionnaireTitle ? `${item.questionnaireTitle} · ${item.question.question}` : item.question.question
+    label: item.questionnaireTitle ? `${item.question.question} · ${item.questionnaireTitle}` : item.question.question
   }));
   const progressPercent = Math.round(((currentQuestionIndex + 1) / mergedQuestions.length) * 100);
-  const fallbackQuickOptions = ['还没想好', '不想回答'];
-  const suggestionPool = quickSuggestions.filter(Boolean);
+  const fallbackQuickOptions = allowCustomInput ? ['还没想好', '不想回答'] : [];
+  const suggestionPool = showTextInput ? quickSuggestions.filter(Boolean) : [];
   const nextButtonLabel = isCooldown
     ? `请等待 ${remainingTime} 秒`
     : submitting
@@ -1385,6 +1444,19 @@ const DetailsPage: React.FC = () => {
       : isLastQuestion
         ? (isCurrentRequired || currentAnswer.trim() ? '提交' : '跳过并提交')
         : (!isCurrentRequired && !currentAnswer.trim() ? '跳过并继续' : '下一题');
+  const optionsHintText = allowCustomInput
+    ? '推荐选项（点击后自动跳转下一题，也可继续补充文本）'
+    : '推荐选项（点击后自动跳转下一题，本题仅可从选项中选择）';
+  const overLimitText = `⚠️ 已超过${currentLimitLabel}，继续提交将导致生成内容丧失原生性。`;
+  const nextButtonContent = submitting ? (
+    <span className="flex items-center justify-center">
+      <svg className="animate-spin h-4 w-4 text-white" style={{ marginLeft: '-0.25rem', marginRight: '0.5rem' }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      提交中...
+    </span>
+  ) : nextButtonLabel;
 
   return (
     <>
@@ -1544,25 +1616,73 @@ const DetailsPage: React.FC = () => {
                             <option key={preset.id} value={preset.id}>{preset.title}</option>
                           ))}
                         </select>
-                        <label className="text-xs">
-                          <span className="mr-2">上传问卷 JSON</span>
+                        <label className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100 cursor-pointer">
+                          上传问卷 JSON
                           <input
                             type="file"
                             accept="application/json"
                             onChange={(e) => void handleUploadQuestionnaire(e.target.files?.[0] ?? null)}
+                            className="hidden"
                           />
                         </label>
                         <button
                           type="button"
-                          onClick={() => setShowQuestionnairePicker(true)}
+                          onClick={() => {
+                            setQuestionnairePickerError(null);
+                            setShowQuestionnairePicker(true);
+                          }}
                           className="rounded-lg border border-indigo-200 bg-white px-3 py-1 text-xs text-indigo-600 hover:border-indigo-400"
                         >
                           从云端问卷库选择
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPasteQuestionnaireError(null);
+                            setShowPasteImport((prev) => !prev);
+                          }}
+                          className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100"
+                        >
+                          {showPasteImport ? '收起粘贴导入' : '粘贴导入 JSON'}
                         </button>
                         <Link href="/questionnaire-editor" className="text-xs text-indigo-600 hover:underline">
                           打开问卷编辑器
                         </Link>
                       </div>
+                      {showPasteImport && (
+                        <div className="rounded-lg border border-indigo-100 bg-white p-3 text-xs text-slate-600">
+                          <label className="text-xs text-slate-500">粘贴问卷 JSON</label>
+                          <textarea
+                            value={pasteQuestionnaireText}
+                            onChange={(e) => setPasteQuestionnaireText(e.target.value)}
+                            placeholder="在此粘贴问卷 JSON"
+                            className="input-field mt-2 h-28"
+                            rows={6}
+                          />
+                          <div className="mt-2 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={handlePasteQuestionnaireImport}
+                              className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100"
+                            >
+                              解析并载入
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPasteQuestionnaireText('');
+                                setPasteQuestionnaireError(null);
+                              }}
+                              className="text-xs text-slate-500 hover:text-slate-700"
+                            >
+                              清空
+                            </button>
+                          </div>
+                          {pasteQuestionnaireError && (
+                            <p className="mt-2 text-rose-500">{pasteQuestionnaireError}</p>
+                          )}
+                        </div>
+                      )}
                       {questionnaireLoadError && (
                         <p className="text-rose-500">{questionnaireLoadError}</p>
                       )}
@@ -1570,146 +1690,52 @@ const DetailsPage: React.FC = () => {
                   )}
                 </div>
 
-                <div className="mt-4 space-y-4">
-                  <div className="rounded-2xl border border-pink-100 bg-white/90 p-4 shadow-sm">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600">
-                      <span>问题 {currentQuestionIndex + 1} / {mergedQuestions.length}</span>
-                      <span>进度 {progressPercent}%</span>
-                      {autoSaveTimestamp && (
-                        <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
-                      )}
-                    </div>
-                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-pink-100">
-                      <div
-                        className="h-full rounded-full bg-pink-400 transition-all duration-300 ease-out"
-                        style={{ width: `${progressPercent}%` }}
-                      />
-                    </div>
-                    <h2
-                      className="mt-4 text-xl font-semibold leading-relaxed text-center text-pink-700 transition-all duration-300 ease-out"
-                      style={{
-                        opacity: isTransitioning ? 0 : 1,
-                        transform: isTransitioning ? 'translateX(-16px)' : 'translateX(0)'
-                      }}
-                    >
-                      {currentQuestion?.question || '未加载题目'}
-                    </h2>
-                    {currentQuestionnaireTitle && (
-                      <p className="mt-1 text-center text-xs text-gray-400">问卷来源：{currentQuestionnaireTitle}</p>
-                    )}
-                    <p className="text-xs text-center text-gray-500 mt-2">
-                      请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。
-                    </p>
-                    {currentQuestion?.helperText && (
-                      <p className="mt-2 text-sm text-gray-600 text-center">{currentQuestion.helperText}</p>
-                    )}
-                    {!isCurrentRequired && (
-                      <p className="mt-2 text-xs text-pink-500 text-center">本题可跳过，不作答将不会记录</p>
-                    )}
-                    <div className="mt-3 flex flex-wrap justify-center gap-3 text-xs">
-                      {fallbackQuickOptions.map(option => (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => handleQuickOption(option)}
-                          disabled={submitting || isTransitioning || isCooldown}
-                          className="rounded-full border border-pink-200 bg-white px-4 py-1.5 font-medium text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50"
-                        >
-                          {option}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {hasOptions && (
-                    <div className="rounded-2xl border border-pink-100 bg-white p-4 shadow-sm">
-                      <p className="text-xs text-gray-500 mb-2">推荐选项（点击后自动跳转下一题，也可继续补充文本）</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {currentQuestion?.options?.map((option, index) => {
-                          const value = typeof option === 'string' ? option : option.value;
-                          const label = typeof option === 'string' ? option : option.label;
-                          const disabled = typeof option !== 'string' && option.disabled;
-                          return (
-                            <button
-                              type="button"
-                              key={`${value}-${index}`}
-                              onClick={() => !disabled && handleQuickOption(value)}
-                              disabled={disabled}
-                              className={`rounded-lg border px-3 py-2 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 ${disabled ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed' : 'border-pink-200 bg-white text-gray-700 hover:border-pink-400 hover:bg-pink-50'}`}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {suggestionPool.length > 0 && (
-                    <div className="rounded-2xl border border-pink-100 bg-white/80 p-3 shadow-sm">
-                      <p className="text-xs text-gray-500 mb-2">灵感提示（点击将内容填入文本框，可再编辑）</p>
-                      <div className="flex flex-wrap gap-2">
-                        {suggestionPool.map(suggestion => (
-                          <button
-                            type="button"
-                            key={suggestion}
-                            onClick={() => handleSuggestionFill(suggestion)}
-                            className="rounded-full border border-pink-200 bg-white px-3 py-1.5 text-xs text-pink-600 transition-colors hover:border-pink-400 hover:bg-pink-50"
-                          >
-                            {suggestion}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 输入框 */}
-                {showTextInput && (
-                  <div className="input-group mt-4">
-                    <textarea
-                      value={currentAnswer}
-                      onChange={(e) => handleCurrentAnswerChange(e.target.value)}
-                      placeholder={currentQuestion?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
-                      className="input-field min-h-[6rem] resize-y"
-                    />
-                    <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
-                      <span>有效字数：{currentAnswerLength}/{currentMaxLength ?? '不限'}</span>
-                      {currentLimitInfo.source !== 'none' && currentMaxLength ? (
-                        <span className="text-[11px] text-gray-400">{currentLimitLabel}</span>
-                      ) : null}
-                    </div>
-                    {isCurrentOverLimit && (
-                      <div className="mt-1 text-right text-xs text-amber-600">
-                        ⚠️ 已超过{currentLimitLabel}，继续提交将导致生成内容丧失原生性。
-                      </div>
-                    )}
-                  </div>
-                )}
-                {!showTextInput && (
-                  <div className="mt-3 text-center text-xs text-gray-500">本题仅可从选项中选择，无需填写文本。</div>
-                )}
-                {/* 下一题按钮 */}
-                <div className="mt-4 flex flex-col sm:flex-row gap-2">
-                  <button className="generate-button w-1/4" onClick={handlePreviousQuestion} disabled={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}>
-                    返回上题
-                  </button>
-                  <button
-                    onClick={handleNext}
-                    disabled={submitting || isTransitioning || isCooldown || (isCurrentRequired && currentAnswer.trim().length === 0)}
-                    className="generate-button"
-                  >
-                    {submitting ? (
-                      <span className="flex items-center justify-center">
-                        <svg className="animate-spin h-4 w-4 text-white" style={{ marginLeft: '-0.25rem', marginRight: '0.5rem' }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        提交中...
-                      </span>
-                    ) : nextButtonLabel}
-                  </button>
-                </div>
+                <QuestionnaireQuestionPanel
+                  theme={DETAILS_QUESTIONNAIRE_THEME}
+                  progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
+                  progressPercent={progressPercent}
+                  progressExtra={autoSaveTimestamp ? (
+                    <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
+                  ) : null}
+                  questionText={currentQuestion?.question || '未加载题目'}
+                  questionnaireTitle={currentQuestionnaireTitle}
+                  noticeText="请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。"
+                  helperText={currentQuestion?.helperText}
+                  isRequired={isCurrentRequired}
+                  skipText="本题可跳过，不作答将不会记录"
+                  quickOptions={fallbackQuickOptions}
+                  quickOptionDisabled={submitting || isTransitioning || isCooldown}
+                  onQuickOption={handleQuickOption}
+                  options={currentQuestion?.options}
+                  optionsHintText={optionsHintText}
+                  onOptionSelect={handleQuickOption}
+                  suggestions={suggestionPool}
+                  onSuggestionSelect={handleSuggestionFill}
+                  showTextInput={showTextInput}
+                  answer={currentAnswer}
+                  onAnswerChange={handleCurrentAnswerChange}
+                  placeholder={currentQuestion?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
+                  answerLength={currentAnswerLength}
+                  maxLength={currentMaxLength}
+                  limitLabel={currentLimitLabel}
+                  showLimitLabel={currentLimitInfo.source !== 'none' && Boolean(currentMaxLength)}
+                  isOverLimit={isCurrentOverLimit}
+                  overLimitText={overLimitText}
+                  isTransitioning={isTransitioning}
+                  transitionClassName="transition-all duration-300 ease-out"
+                  transitionStyle={{
+                    opacity: isTransitioning ? 0 : 1,
+                    transform: isTransitioning ? 'translateX(-16px)' : 'translateX(0)',
+                  }}
+                  prevLabel="返回上题"
+                  nextButtonContent={nextButtonContent}
+                  onPrev={handlePreviousQuestion}
+                  onNext={handleNext}
+                  disablePrev={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}
+                  disableNext={submitting || isTransitioning || isCooldown || (isCurrentRequired && currentAnswer.trim().length === 0)}
+                  prevButtonClass="generate-button w-1/4"
+                  nextButtonClass="generate-button"
+                />
 
                 <TokenIndicator
                   text={tokenEstimateText}
@@ -1837,15 +1863,14 @@ const DetailsPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* 复制已填写内容 */}
-                <div className="text-center">
-                  <button className="border-2 border-grey-900 rounded-md px-4 py-2 cursor-pointer" onClick={handleCopyContent} style={{ marginRight: '10px' }}>
-                    复制已填写内容
-                  </button>
-                  <p className="mt-2 text-xs text-gray-500">
-                    为避免生成失败丢失信息的可能，建议在提交生成前复制保存已填写信息。
-                  </p>
-                </div>
+                <QuestionnaireAnswerExportPanel
+                  variant="light"
+                  title="生成前备份问卷答案"
+                  filenameBase="魔法少女问卷_答案备份"
+                  hasContent={answerItems.length > 0}
+                  buildContent={buildAnswerExportText}
+                  disabled={submitting || isTransitioning || isCooldown}
+                />
 
                 {/* 返回首页链接 */}
                 <div className="text-center" style={{ marginTop: '1rem' }}>
@@ -2067,86 +2092,18 @@ const DetailsPage: React.FC = () => {
           <Footer textWhite={true} />
         </div>
 
-        {showQuestionnairePicker && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 px-4 py-6">
-            <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-xl">
-              <div className="flex items-center justify-between border-b pb-2">
-                <h3 className="text-base font-semibold text-slate-800">选择云端问卷</h3>
-                <button
-                  type="button"
-                  onClick={() => setShowQuestionnairePicker(false)}
-                  className="text-lg text-slate-400 hover:text-slate-600"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setQuestionnairePickerTab('public')}
-                  className={`rounded-full px-3 py-1 ${questionnairePickerTab === 'public' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}
-                >
-                  公开问卷
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setQuestionnairePickerTab('private')}
-                  className={`rounded-full px-3 py-1 ${questionnairePickerTab === 'private' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}
-                >
-                  私有问卷
-                </button>
-                <input
-                  value={questionnaireSearch}
-                  onChange={(e) => setQuestionnaireSearch(e.target.value)}
-                  placeholder="搜索问卷名称/描述"
-                  className="input-field flex-1 text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={() => void fetchQuestionnaireCardList(questionnairePickerTab, questionnaireSearch)}
-                  className="rounded-lg border border-indigo-200 px-3 py-1 text-indigo-600"
-                >
-                  刷新
-                </button>
-              </div>
-              {questionnairePickerError && (
-                <p className="mt-3 text-xs text-rose-500">{questionnairePickerError}</p>
-              )}
-              <div className="mt-3 max-h-[50vh] space-y-2 overflow-y-auto pr-2 text-xs">
-                {questionnaireLoading ? (
-                  <div className="text-center text-slate-500">加载中...</div>
-                ) : (
-                  (questionnairePickerTab === 'public' ? publicQuestionnaireCards : privateQuestionnaireCards).map((card: any) => {
-                    const summary = getQuestionnaireCardSummary(card);
-                    return (
-                      <button
-                        type="button"
-                        key={card?.id}
-                        onClick={() => void handleSelectQuestionnaireCard(card)}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left hover:border-indigo-300 hover:bg-indigo-50"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="font-semibold text-slate-800">{summary.title}</div>
-                          <span className="text-[11px] text-slate-500">
-                            {summary.kind === 'magical-girl' ? '魔法少女' : '残兽'}
-                            {summary.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
-                          </span>
-                        </div>
-                        {summary.description && (
-                          <div className="mt-1 text-[11px] text-slate-500">{summary.description}</div>
-                        )}
-                        <div className="mt-1 text-[11px] text-slate-400">作者：{card?.username || '未知'}</div>
-                      </button>
-                    );
-                  })
-                )}
-                {!questionnaireLoading && (questionnairePickerTab === 'public' ? publicQuestionnaireCards : privateQuestionnaireCards).length === 0 && (
-                  <div className="text-center text-slate-400">暂无可用问卷</div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        <BattleDataModal
+          isOpen={showQuestionnairePicker}
+          onClose={() => {
+            setShowQuestionnairePicker(false);
+            setQuestionnairePickerError(null);
+          }}
+          selectedType="questionnaire"
+          initialTab="public"
+          titleOverride="选择云端问卷"
+          onSelectCard={handleSelectQuestionnaireCard}
+          externalError={questionnairePickerError}
+        />
 
         {/* Image Modal */}
         {showImageModal && savedImageUrl && (

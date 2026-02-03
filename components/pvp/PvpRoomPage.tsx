@@ -1144,13 +1144,13 @@ export function PvpRoomPage() {
 	          label: 'PVP 结算流式',
 	          idleTimeoutMs: RESOLVE_STREAM_IDLE_TIMEOUT_MS,
 	          totalTimeoutMs: RESOLVE_STREAM_TOTAL_TIMEOUT_MS,
-	          onTimeout: () => {
-	            try {
-	              void reader.cancel('timeout');
-	            } catch {
-	              // ignore
-	            }
-	          },
+		          onTimeout: () => {
+		            try {
+		              void reader.cancel('timeout').catch(() => {});
+		            } catch {
+		              // ignore
+		            }
+		          },
 	        });
 	        while (true) {
 	          const { value, done } = await readWithTimeout(reader);
@@ -1158,14 +1158,14 @@ export function PvpRoomPage() {
 	          if (!value) continue;
 	          accumulated += decoder.decode(value, { stream: true });
 	          setStreamingResolveMarkdown(accumulated);
-	          if (shouldTerminateByTelemetry(accumulated)) {
-	            try {
-	              void reader.cancel('telemetry-meta-received');
-	            } catch {
-	              // ignore
-	            }
-	            break;
-	          }
+		          if (shouldTerminateByTelemetry(accumulated)) {
+		            try {
+		              void reader.cancel('telemetry-meta-received').catch(() => {});
+		            } catch {
+		              // ignore
+		            }
+		            break;
+		          }
 	        }
 	        accumulated += decoder.decode();
 	        setStreamingResolveMarkdown(accumulated);

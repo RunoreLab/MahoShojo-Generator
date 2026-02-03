@@ -2,12 +2,66 @@ import { z } from 'zod/v3';
 
 import { repairNormalizeValidate } from '@/lib/repair-pipeline';
 
-const META_MARKERS = [
+export const STREAM_UPDATE_META_MARKERS = [
   'MAHOSHOJO_ARENA_META',
   'MAHOSHOJO_META',
   'MAHOSHOJO_STREAM_META',
-  'MAHOSHOJO_TELEMETRY_META',
 ] as const;
+
+export const STREAM_TELEMETRY_META_MARKER = 'MAHOSHOJO_TELEMETRY_META' as const;
+
+const META_MARKERS = [
+  ...STREAM_UPDATE_META_MARKERS,
+  STREAM_TELEMETRY_META_MARKER,
+] as const;
+
+export type StreamUpdateMetaStartKind = 'comment' | 'loose';
+
+export type StreamUpdateMetaStartHit = {
+  index: number;
+  kind: StreamUpdateMetaStartKind;
+  marker: (typeof STREAM_UPDATE_META_MARKERS)[number];
+};
+
+const STREAM_UPDATE_META_COMMENT_START_RE = new RegExp(
+  `<!---*\\s*(${STREAM_UPDATE_META_MARKERS.join('|')})\\b`,
+  'i'
+);
+
+const STREAM_UPDATE_META_LOOSE_START_RE = new RegExp(
+  `(^|\\n)\\s*(?:---+\\s*)?(${STREAM_UPDATE_META_MARKERS.join('|')})(?=\\s*[:=\\[{]|\\s*$)`,
+  'im'
+);
+
+export function findStreamUpdateMetaStart(input: string): StreamUpdateMetaStartHit | null {
+  if (typeof input !== 'string' || !input) return null;
+
+  const commentMatch = STREAM_UPDATE_META_COMMENT_START_RE.exec(input);
+  const looseMatch = STREAM_UPDATE_META_LOOSE_START_RE.exec(input);
+
+  const commentIndex = commentMatch && typeof commentMatch.index === 'number' ? commentMatch.index : null;
+  const looseIndex =
+    looseMatch && typeof looseMatch.index === 'number'
+      ? (() => {
+          const matched = looseMatch[0] || '';
+          let offset = 0;
+          while (offset < matched.length && /\s/.test(matched[offset]!)) {
+            offset += 1;
+          }
+          return looseMatch.index + offset;
+        })()
+      : null;
+
+  if (commentIndex == null && looseIndex == null) return null;
+
+  if (commentIndex != null && (looseIndex == null || commentIndex <= looseIndex)) {
+    const marker = (commentMatch?.[1] || 'MAHOSHOJO_ARENA_META') as StreamUpdateMetaStartHit['marker'];
+    return { index: commentIndex, kind: 'comment', marker };
+  }
+
+  const marker = (looseMatch?.[2] || 'MAHOSHOJO_ARENA_META') as StreamUpdateMetaStartHit['marker'];
+  return { index: looseIndex ?? 0, kind: 'loose', marker };
+}
 
 export const StreamUpdateMetaSchema = z
   .object({
@@ -117,6 +171,7 @@ const normalizeJsonishText = (input: string): string => {
     .replace(/[\u200B-\u200D\u2060]/g, '');
 
   // 常见“Python-ish”字面量：True/False/None（仅在字符串外替换）
+  // 以及：流式生成中常见的“省略号占位符”（……/…/...），避免打断 JSON 修复流程
   // 注意：这里不做 eval，只做最小必要的词法替换。
   let out = '';
   let quote: "'" | '"' | null = null;
@@ -140,6 +195,23 @@ const normalizeJsonishText = (input: string): string => {
     if (ch === "'" || ch === '"') {
       quote = ch;
       out += ch;
+      continue;
+    }
+
+    // “……/…/...”：常见于模型在数组里用省略号表示“中间还有内容”
+    // 用 null 替换，后续在 postProcess 中过滤掉非对象 impacts，避免 schema 校验失败。
+    if (ch === '…') {
+      let j = i;
+      while (j < normalized.length && normalized[j] === '…') j++;
+      out += 'null';
+      i = j - 1;
+      continue;
+    }
+    if (ch === '.' && normalized[i + 1] === '.' && normalized[i + 2] === '.') {
+      let j = i;
+      while (j < normalized.length && normalized[j] === '.') j++;
+      out += 'null';
+      i = j - 1;
       continue;
     }
 
@@ -239,6 +311,31 @@ const findLastHtmlCommentWithMarker = (
   return null;
 };
 
+type UnclosedCommentHit = { start: number; marker: string };
+
+const findLastUnclosedHtmlCommentStartWithMarker = (
+  markdown: string,
+  markers: readonly string[] = META_MARKERS
+): UnclosedCommentHit | null => {
+  const MAX_TAIL_CHARS = 120_000;
+  const tailStart = Math.max(0, markdown.length - MAX_TAIL_CHARS);
+  const haystack = tailStart > 0 ? markdown.slice(tailStart) : markdown;
+
+  const markerAlt = markers.map(escapeRegExp).join('|');
+  const re = new RegExp(`<!---*\\s*(${markerAlt})\\b`, 'gi');
+
+  let last: { index: number; marker: string } | null = null;
+  for (const match of haystack.matchAll(re)) {
+    if (typeof match.index !== 'number') continue;
+    const marker = match[1];
+    if (!marker) continue;
+    last = { index: match.index, marker };
+  }
+  if (!last) return null;
+
+  return { start: tailStart + last.index, marker: last.marker };
+};
+
 const findLastLooseMarkerBlock = (
   markdown: string,
   markers: readonly string[] = META_MARKERS
@@ -285,7 +382,16 @@ const findLastStreamMetaBlock = (
 export function stripStreamUpdateMetaComment(markdown: string): StrippedStreamMetaComment | null {
   if (typeof markdown !== 'string' || !markdown.trim()) return null;
   const hit = findLastStreamMetaBlock(markdown);
-  if (!hit) return null;
+  if (!hit) {
+    const openHit = findLastUnclosedHtmlCommentStartWithMarker(markdown, META_MARKERS);
+    if (!openHit) return null;
+    const strippedMarkdown = markdown.slice(0, openHit.start).trimEnd();
+    return {
+      rawComment: markdown.slice(openHit.start),
+      strippedMarkdown,
+      marker: openHit.marker,
+    };
+  }
   const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
   return {
     rawComment: markdown.slice(hit.start, hit.end),
@@ -341,10 +447,7 @@ const sanitizeMeta = (meta: StreamUpdateMeta): NormalizedStreamUpdateMeta => {
   }
 
   if (Array.isArray(out.impacts)) {
-    const byName = new Map<
-      string,
-      StreamUpdateImpact
-    >();
+    const byName = new Map<string, StreamUpdateImpact>();
     for (const item of out.impacts) {
       const candidateName =
         (typeof (item as any)?.characterName === 'string' ? (item as any).characterName : '') ||
@@ -353,7 +456,7 @@ const sanitizeMeta = (meta: StreamUpdateMeta): NormalizedStreamUpdateMeta => {
         (typeof (item as any)?.character === 'string' ? (item as any).character : '') ||
         (typeof (item as any)?.characterNameZh === 'string' ? (item as any).characterNameZh : '');
       const name = typeof candidateName === 'string' ? candidateName.trim() : '';
-      if (!name || byName.has(name)) continue;
+      if (!name) continue;
       const impact = typeof item.impact === 'string' ? item.impact.trim() : undefined;
       const currentStateSummary =
         typeof (item as any).currentStateSummary === 'string'
@@ -361,11 +464,11 @@ const sanitizeMeta = (meta: StreamUpdateMeta): NormalizedStreamUpdateMeta => {
           : typeof (item as any).current_state_summary === 'string'
             ? (item as any).current_state_summary.trim()
             : undefined;
-      byName.set(name, {
-        characterName: name,
-        ...(impact ? { impact } : {}),
-        ...(currentStateSummary ? { currentStateSummary } : {}),
-      });
+
+      const existing = byName.get(name) ?? { characterName: name };
+      if (impact) existing.impact = impact;
+      if (currentStateSummary) existing.currentStateSummary = currentStateSummary;
+      byName.set(name, existing);
     }
     out.impacts = Array.from(byName.values());
     if (out.impacts.length === 0) delete out.impacts;
@@ -377,14 +480,12 @@ const sanitizeMeta = (meta: StreamUpdateMeta): NormalizedStreamUpdateMeta => {
 export async function extractStreamUpdateMeta(markdown: string): Promise<ExtractedStreamMeta | null> {
   if (typeof markdown !== 'string' || !markdown.trim()) return null;
 
-  const hit = findLastStreamMetaBlock(markdown, [
-    'MAHOSHOJO_ARENA_META',
-    'MAHOSHOJO_META',
-    'MAHOSHOJO_STREAM_META',
-  ]);
-  if (!hit) return null;
+  const hit = findLastStreamMetaBlock(markdown, STREAM_UPDATE_META_MARKERS);
+  const openHit = hit ? null : findLastUnclosedHtmlCommentStartWithMarker(markdown, STREAM_UPDATE_META_MARKERS);
+  if (!hit && !openHit) return null;
 
-  const candidate = extractBestJsonCandidate(hit.inner);
+  const rawComment = hit ? markdown.slice(hit.start, hit.end) : markdown.slice(openHit!.start);
+  const candidate = extractBestJsonCandidate(hit ? hit.inner : rawComment);
   if (!candidate) return null;
 
   const meta = await repairNormalizeValidate({
@@ -395,20 +496,61 @@ export async function extractStreamUpdateMeta(markdown: string): Promise<Extract
     coerce: { wrapSingleToArray: true, emptyStringToUndefined: true },
     postProcess: (value) => {
       // 允许模型直接输出 impacts 数组：[{...}, {...}]
-      if (Array.isArray(value)) {
-        return { version: 1, impacts: value };
+      const normalized = Array.isArray(value) ? { version: 1, impacts: value } : value;
+      if (!isRecord(normalized)) return normalized;
+
+      // 将 null / 非对象字段提前剔除：避免 schema 校验失败。
+      // （例如：impacts 中夹杂了 “……/...” 被替换成 null 的占位符）
+      const record = normalized as Record<string, unknown>;
+
+      if (record.report == null || !isRecord(record.report)) {
+        delete record.report;
+      } else {
+        const report = record.report as Record<string, unknown>;
+        if (typeof report.headline !== 'string') delete report.headline;
+        if (typeof report.winner !== 'string') delete report.winner;
+        if (Object.keys(report).length === 0) delete record.report;
       }
-      return value;
+
+      if (!Array.isArray(record.impacts)) {
+        delete record.impacts;
+      } else {
+        const stringKeys = [
+          'characterName',
+          'name',
+          'character',
+          'character_name',
+          'characterNameZh',
+          'impact',
+          'currentStateSummary',
+          'current_state_summary',
+        ] as const;
+        record.impacts = record.impacts
+          .filter((item) => isRecord(item))
+          .map((item) => {
+            const cleaned: Record<string, unknown> = { ...(item as Record<string, unknown>) };
+            for (const key of stringKeys) {
+              if (key in cleaned && typeof cleaned[key] !== 'string') delete cleaned[key];
+            }
+            return cleaned;
+          });
+
+        if ((record.impacts as unknown[]).length === 0) delete record.impacts;
+      }
+
+      return record;
     },
     as: 'object',
   });
 
   const sanitized = sanitizeMeta(meta as StreamUpdateMeta);
-  const strippedMarkdown = (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd();
+  const strippedMarkdown = hit
+    ? (markdown.slice(0, hit.start) + markdown.slice(hit.end)).trimEnd()
+    : markdown.slice(0, openHit!.start).trimEnd();
 
   return {
     meta: sanitized,
-    rawComment: markdown.slice(hit.start, hit.end),
+    rawComment,
     strippedMarkdown,
   };
 }

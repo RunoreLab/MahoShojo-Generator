@@ -4,6 +4,7 @@ import { z } from 'zod/v3';
 import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/ai';
 import { getLogger } from '@/lib/logger';
 import magicalGirlQuestionnaire from '@/public/questionnaires/presets/magical-girl-default.json';
+import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-default.json';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/config';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
@@ -346,11 +347,22 @@ interface BattleApiResponse {
 
         type BattleReportResult = z.infer<typeof battleReportSchema>;
 
-        const fallbackQuestions = Array.isArray((magicalGirlQuestionnaire as any)?.questions)
+        const magicalGirlFallbackQuestions = Array.isArray((magicalGirlQuestionnaire as any)?.questions)
             ? ((magicalGirlQuestionnaire as any).questions as unknown[])
                 .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
                 .filter((item) => typeof item === 'string' && item.trim())
             : [];
+        const canshouFallbackQuestions = Array.isArray((canshouQuestionnaire as any)?.questions)
+            ? ((canshouQuestionnaire as any).questions as unknown[])
+                .map((item) => (typeof item === 'string' ? item : (item as any)?.question))
+                .filter((item) => typeof item === 'string' && item.trim())
+            : [];
+
+        const fallbackQuestions = {
+            magicalGirl: magicalGirlFallbackQuestions,
+            canshou: canshouFallbackQuestions,
+            default: magicalGirlFallbackQuestions,
+        };
 
         const generationConfig: GenerationConfig<BattleReportResult, any> = {
             systemPrompt,

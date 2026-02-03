@@ -225,60 +225,7 @@ export default async function handler(req: NextRequest) {
         return promise;
       };
 
-      const lastEventsByQueue = new Map<Queue, { delta: number; appliedAt: string | null }>();
-      if (cardRow.type === 'character') {
-        try {
-          const lastEventsResult = (await queryFromD1(
-            `SELECT queue, delta, applied_at as appliedAt
-             FROM (
-               SELECT
-                 queue,
-                 applied_at,
-                 created_at,
-                 CASE
-                   WHEN a_entity_type = 'data_card' AND a_entity_id = ? THEN a_delta
-                   WHEN b_entity_type = 'data_card' AND b_entity_id = ? THEN b_delta
-                   ELSE NULL
-                 END AS delta,
-                 ROW_NUMBER() OVER (PARTITION BY queue ORDER BY applied_at DESC, created_at DESC) AS rn
-               FROM arena_rating_events
-               WHERE status = 'applied'
-                 AND queue IN ('strict', 'free')
-                 AND (
-                   (a_entity_type = 'data_card' AND a_entity_id = ?)
-                   OR
-                   (b_entity_type = 'data_card' AND b_entity_id = ?)
-                 )
-             )
-             WHERE rn = 1`,
-            [dataCardId, dataCardId, dataCardId, dataCardId],
-          )) as any;
-
-          const rows = (lastEventsResult?.result?.[0]?.results ?? []) as Array<{
-            queue: Queue;
-            delta: number | null;
-            appliedAt: string | null;
-          }>;
-
-          for (const row of rows) {
-            if (row.queue !== 'strict' && row.queue !== 'free') continue;
-            if (typeof row.delta !== 'number') continue;
-            lastEventsByQueue.set(row.queue, { delta: row.delta, appliedAt: typeof row.appliedAt === 'string' ? row.appliedAt : null });
-          }
-        } catch (error) {
-          console.warn('读取最近排位变动失败（降级为空）:', error);
-        }
-      }
-
-      const res = (await queryFromD1(
-        `SELECT queue, rating, games, wins, losses, draws, updated_at
-         FROM arena_ratings
-         WHERE entity_type = 'data_card'
-           AND entity_id = ?
-           AND queue IN ('strict', 'free')`,
-        [dataCardId],
-      )) as any;
-      const rows = (res?.result?.[0]?.results ?? []) as Array<{
+      type RatingRow = {
         queue: Queue;
         rating: number;
         games: number;
@@ -286,16 +233,46 @@ export default async function handler(req: NextRequest) {
         losses: number;
         draws: number;
         updated_at: string;
-      }>;
+        lastDelta?: number | null;
+        lastAppliedAt?: string | null;
+      };
+
+      const readRatingRows = async (): Promise<RatingRow[]> => {
+        try {
+          const res = (await queryFromD1(
+            `SELECT queue, rating, games, wins, losses, draws, updated_at, last_delta as lastDelta, last_applied_at as lastAppliedAt
+             FROM arena_ratings
+             WHERE entity_type = 'data_card'
+               AND entity_id = ?
+               AND queue IN ('strict', 'free')`,
+            [dataCardId],
+          )) as any;
+          return (res?.result?.[0]?.results ?? []) as RatingRow[];
+        } catch {
+          const res = (await queryFromD1(
+            `SELECT queue, rating, games, wins, losses, draws, updated_at
+             FROM arena_ratings
+             WHERE entity_type = 'data_card'
+               AND entity_id = ?
+               AND queue IN ('strict', 'free')`,
+            [dataCardId],
+          )) as any;
+          return (res?.result?.[0]?.results ?? []) as RatingRow[];
+        }
+      };
+
+      const rows = await readRatingRows();
       for (const row of rows) {
         const queue: Queue = row.queue === 'free' ? 'free' : 'strict';
         const rating = typeof row.rating === 'number' ? row.rating : 0;
         const games = typeof row.games === 'number' ? row.games : 0;
-        const last = lastEventsByQueue.get(queue);
         const baseTier = computeArenaBaseTier(rating, games);
         const queen = baseTier === '权杖' ? await getQueen(queue) : null;
         const isQueen = queen?.entityType === 'data_card' && queen?.entityId === dataCardId;
         const tier = applyQueenTier(baseTier, isQueen);
+        const lastDelta = cardRow.type === 'character' && typeof row.lastDelta === 'number' ? row.lastDelta : null;
+        const lastAppliedAt =
+          cardRow.type === 'character' && typeof row.lastAppliedAt === 'string' ? row.lastAppliedAt : null;
         const item: ApiRating = {
           queue,
           rating,
@@ -304,8 +281,8 @@ export default async function handler(req: NextRequest) {
           losses: typeof row.losses === 'number' ? row.losses : 0,
           draws: typeof row.draws === 'number' ? row.draws : 0,
           tier,
-          lastDelta: typeof last?.delta === 'number' ? last.delta : null,
-          lastAppliedAt: typeof last?.appliedAt === 'string' ? last.appliedAt : null,
+          lastDelta,
+          lastAppliedAt,
           publicRank: null,
           publicTotal: null,
         };

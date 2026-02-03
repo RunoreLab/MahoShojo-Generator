@@ -73,14 +73,27 @@ export async function resetStrictArenaRatingForDataCard(dataCardId: string): Pro
 
   try {
     const nowIso = new Date().toISOString();
-    await queryFromD1(
-      `UPDATE arena_ratings
-       SET rating = ?, games = 0, wins = 0, losses = 0, draws = 0, updated_at = ?
-       WHERE entity_type = 'data_card'
-         AND entity_id = ?
-         AND queue = 'strict'`,
-      [INITIAL_RATING, nowIso, id]
-    );
+    await (async () => {
+      try {
+        await queryFromD1(
+          `UPDATE arena_ratings
+           SET rating = ?, games = 0, wins = 0, losses = 0, draws = 0, last_delta = NULL, last_applied_at = NULL, updated_at = ?
+           WHERE entity_type = 'data_card'
+             AND entity_id = ?
+             AND queue = 'strict'`,
+          [INITIAL_RATING, nowIso, id]
+        );
+      } catch {
+        await queryFromD1(
+          `UPDATE arena_ratings
+           SET rating = ?, games = 0, wins = 0, losses = 0, draws = 0, updated_at = ?
+           WHERE entity_type = 'data_card'
+             AND entity_id = ?
+             AND queue = 'strict'`,
+          [INITIAL_RATING, nowIso, id]
+        );
+      }
+    })();
   } catch (error) {
     console.warn('重置严格排位分失败（降级为忽略）:', { dataCardId, error });
   }
@@ -992,8 +1005,47 @@ const applyArenaRatingsUpdateIfBothMatch = async (
   const nowIso = new Date().toISOString();
   const [aEntity, bEntity] = entities;
 
-  const result = (await queryFromD1(
-    `WITH matched AS (
+  const matchGuardParams = [
+    queue,
+    aEntity.entityType, aEntity.entityId, computed.aBefore.rating, computed.aBefore.games,
+    bEntity.entityType, bEntity.entityId, computed.bBefore.rating, computed.bBefore.games,
+  ];
+
+  const ratingParams = [
+    aEntity.entityType, aEntity.entityId, computed.aAfter.rating,
+    bEntity.entityType, bEntity.entityId, computed.bAfter.rating,
+  ];
+  const gamesParams = [
+    aEntity.entityType, aEntity.entityId, computed.aAfter.games,
+    bEntity.entityType, bEntity.entityId, computed.bAfter.games,
+  ];
+  const winsParams = [
+    aEntity.entityType, aEntity.entityId, computed.aAfter.wins,
+    bEntity.entityType, bEntity.entityId, computed.bAfter.wins,
+  ];
+  const lossesParams = [
+    aEntity.entityType, aEntity.entityId, computed.aAfter.losses,
+    bEntity.entityType, bEntity.entityId, computed.bAfter.losses,
+  ];
+  const drawsParams = [
+    aEntity.entityType, aEntity.entityId, computed.aAfter.draws,
+    bEntity.entityType, bEntity.entityId, computed.bAfter.draws,
+  ];
+
+  const whereParams = [queue, aEntity.entityType, aEntity.entityId, bEntity.entityType, bEntity.entityId];
+
+  const paramsOld = [
+    ...matchGuardParams,
+    ...ratingParams,
+    ...gamesParams,
+    ...winsParams,
+    ...lossesParams,
+    ...drawsParams,
+    nowIso,
+    ...whereParams,
+  ];
+
+  const sqlOld = `WITH matched AS (
       SELECT entity_type, entity_id
       FROM arena_ratings
       WHERE queue = ?
@@ -1037,35 +1089,99 @@ const applyArenaRatingsUpdateIfBothMatch = async (
         OR
         (entity_type = ? AND entity_id = ?)
       )
-      AND (SELECT COUNT(*) FROM matched) = 2`,
-    [
-      queue,
-      aEntity.entityType, aEntity.entityId, computed.aBefore.rating, computed.aBefore.games,
-      bEntity.entityType, bEntity.entityId, computed.bBefore.rating, computed.bBefore.games,
+      AND (SELECT COUNT(*) FROM matched) = 2`;
 
-      aEntity.entityType, aEntity.entityId, computed.aAfter.rating,
-      bEntity.entityType, bEntity.entityId, computed.bAfter.rating,
+  const lastDeltaParams = [
+    aEntity.entityType, aEntity.entityId, computed.deltaA,
+    bEntity.entityType, bEntity.entityId, computed.deltaB,
+  ];
+  const lastAppliedAtParams = [
+    aEntity.entityType, aEntity.entityId, nowIso,
+    bEntity.entityType, bEntity.entityId, nowIso,
+  ];
 
-      aEntity.entityType, aEntity.entityId, computed.aAfter.games,
-      bEntity.entityType, bEntity.entityId, computed.bAfter.games,
+  const paramsNew = [
+    ...matchGuardParams,
+    ...ratingParams,
+    ...gamesParams,
+    ...winsParams,
+    ...lossesParams,
+    ...drawsParams,
+    ...lastDeltaParams,
+    ...lastAppliedAtParams,
+    nowIso,
+    ...whereParams,
+  ];
 
-      aEntity.entityType, aEntity.entityId, computed.aAfter.wins,
-      bEntity.entityType, bEntity.entityId, computed.bAfter.wins,
+  const sqlNew = `WITH matched AS (
+      SELECT entity_type, entity_id
+      FROM arena_ratings
+      WHERE queue = ?
+        AND (
+          (entity_type = ? AND entity_id = ? AND rating = ? AND games = ?)
+          OR
+          (entity_type = ? AND entity_id = ? AND rating = ? AND games = ?)
+        )
+    )
+    UPDATE arena_ratings
+    SET
+      rating = CASE
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        ELSE rating
+      END,
+      games = CASE
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        ELSE games
+      END,
+      wins = CASE
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        ELSE wins
+      END,
+      losses = CASE
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        ELSE losses
+      END,
+      draws = CASE
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        ELSE draws
+      END,
+      last_delta = CASE
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        ELSE last_delta
+      END,
+      last_applied_at = CASE
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        WHEN entity_type = ? AND entity_id = ? THEN ?
+        ELSE last_applied_at
+      END,
+      updated_at = ?
+    WHERE queue = ?
+      AND (
+        (entity_type = ? AND entity_id = ?)
+        OR
+        (entity_type = ? AND entity_id = ?)
+      )
+      AND (SELECT COUNT(*) FROM matched) = 2`;
 
-      aEntity.entityType, aEntity.entityId, computed.aAfter.losses,
-      bEntity.entityType, bEntity.entityId, computed.bAfter.losses,
+  const runUpdate = async (sql: string, params: unknown[]): Promise<number> => {
+    const result = (await queryFromD1(sql, params)) as any;
+    return readD1Changes(result);
+  };
 
-      aEntity.entityType, aEntity.entityId, computed.aAfter.draws,
-      bEntity.entityType, bEntity.entityId, computed.bAfter.draws,
-
-      nowIso,
-      queue,
-      aEntity.entityType, aEntity.entityId,
-      bEntity.entityType, bEntity.entityId,
-    ]
-  )) as any;
-
-  const changes = readD1Changes(result);
+  const changes = await (async () => {
+    try {
+      return await runUpdate(sqlNew, paramsNew);
+    } catch (error) {
+      console.warn('更新 arena_ratings.last_delta 失败（将回退到旧结构）:', error);
+      return await runUpdate(sqlOld, paramsOld);
+    }
+  })();
   if (changes === 2) return 'applied';
 
   const latest = await getArenaRatings(queue, entities);

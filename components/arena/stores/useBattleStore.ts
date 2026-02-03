@@ -62,6 +62,7 @@ export const useBattleStore = create<BattleStoreState>()(
       streamAiUsage: null,
       streamAiModel: null,
       streamNarrativeHistoryReadCount: null,
+      streamUpdateMetaDebug: null,
       storyLength: 'default',
       selectedLevel: '',
       selectedLanguage: 'zh-CN',
@@ -90,6 +91,7 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamAiUsage: (usage) => set({ streamAiUsage: usage }),
       setStreamAiModel: (model) => set({ streamAiModel: model }),
       setStreamNarrativeHistoryReadCount: (count) => set({ streamNarrativeHistoryReadCount: count }),
+      setStreamUpdateMetaDebug: (debug) => set({ streamUpdateMetaDebug: debug }),
       setStoryLength: (storyLength) => set({ storyLength }),
       setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
       setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
@@ -147,6 +149,7 @@ export const useBattleStore = create<BattleStoreState>()(
           streamAiUsage: null,
           streamAiModel: null,
           streamNarrativeHistoryReadCount: null,
+          streamUpdateMetaDebug: null,
           lastGenerationId: null,
         }),
 
