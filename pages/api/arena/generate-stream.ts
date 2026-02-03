@@ -922,193 +922,224 @@ async function handler(req: NextRequest): Promise<Response> {
                 }
             };
 
-	            const sseBody = new ReadableStream<Uint8Array>({
-	                start(controller) {
-	                    enqueueDebug(controller, {
-	                        phase: 'open',
-	                        generationId,
-	                        shouldAllowStreamMeta,
-	                        idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
-	                        totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
-	                    });
-	                },
-	                async pull(controller) {
-                    try {
-	                        const { done, value } = await readWithTimeout(reader);
-	                        if (done) {
-                            // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
-                            const flushed = decoder.decode();
-                            if (flushed) {
-                                appendText(flushed);
-                                processText(controller, flushed);
-                            }
+		            let sseCancelled = false;
+		            let pumpStarted = false;
 
-	                            if (!inMeta && pendingMarkdownTail) {
-	                                flushMarkdown(controller, pendingMarkdownTail);
-	                                pendingMarkdownTail = '';
-	                            }
+		            const finalizeSseAndClose = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
+		                // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
+		                const flushed = decoder.decode();
+		                if (flushed) {
+		                    appendText(flushed);
+		                    processText(controller, flushed);
+		                }
 
-		                            enqueueDebug(controller, {
-		                                phase: 'done_before_meta',
-		                                outputBytes,
-		                                outputChars,
-		                                markdownCharsSent,
-		                                hasMeaningfulMarkdown,
-		                                inMeta,
-		                                pendingMarkdownTailLength: pendingMarkdownTail.length,
-		                                metaBufferLength: metaBuffer.length,
-		                                metaFallbackTailLength: metaFallbackTail.length,
-		                            });
+		                if (!inMeta && pendingMarkdownTail) {
+		                    flushMarkdown(controller, pendingMarkdownTail);
+		                    pendingMarkdownTail = '';
+		                }
 
-	                            // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
-	                            const usageForTelemetry = await Promise.race([
-	                                resolvedUsagePromise,
-                                new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
-                            ]);
-                            const shouldIncludeTelemetry =
-                                (usageForTelemetry != null &&
-                                    (typeof usageForTelemetry.promptTokens === 'number' ||
-                                        typeof usageForTelemetry.completionTokens === 'number' ||
-                                        typeof usageForTelemetry.reasoningTokens === 'number')) ||
-                                typeof narrativeHistoryReadCount === 'number' ||
-                                (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
+		                enqueueDebug(controller, {
+		                    phase: 'done_before_meta',
+		                    outputBytes,
+		                    outputChars,
+		                    markdownCharsSent,
+		                    hasMeaningfulMarkdown,
+		                    inMeta,
+		                    pendingMarkdownTailLength: pendingMarkdownTail.length,
+		                    metaBufferLength: metaBuffer.length,
+		                    metaFallbackTailLength: metaFallbackTail.length,
+		                });
 
-                            if (shouldIncludeTelemetry) {
-                                const aiModelForTelemetry =
-                                    typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim()
-                                        ? aiTelemetry.model.trim()
-                                        : null;
-                                const telemetryPayload = {
-                                    version: 1,
-                                    ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
-                                    ...(usageForTelemetry
-                                        ? {
-                                            usage: {
-                                                promptTokens: usageForTelemetry.promptTokens ?? null,
-                                                reasoningTokens: usageForTelemetry.reasoningTokens ?? null,
-                                                completionTokens: usageForTelemetry.completionTokens ?? null,
-                                                totalTokens: usageForTelemetry.totalTokens ?? null,
-                                                cachedTokens: usageForTelemetry.cachedTokens ?? null,
-                                            },
-                                        }
-                                        : {}),
-                                    ...(typeof narrativeHistoryReadCount === 'number' ? { narrativeHistoryReadCount } : {}),
-                                };
-                                controller.enqueue(encodeEvent('telemetry', telemetryPayload));
-                            }
+		                // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
+		                const usageForTelemetry = await Promise.race([
+		                    resolvedUsagePromise,
+		                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+		                ]);
+		                const shouldIncludeTelemetry =
+		                    (usageForTelemetry != null &&
+		                        (typeof usageForTelemetry.promptTokens === 'number' ||
+		                            typeof usageForTelemetry.completionTokens === 'number' ||
+		                            typeof usageForTelemetry.reasoningTokens === 'number')) ||
+		                    typeof narrativeHistoryReadCount === 'number' ||
+		                    (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
 
-		                            let metaHasImpacts = false;
-		                            if (shouldAllowStreamMeta) {
-		                                const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
-		                                if (metaCandidate && metaCandidate.trim()) {
-		                                    try {
-		                                        const extracted = await extractStreamUpdateMeta(metaCandidate);
-		                                        if (extracted?.meta) {
-		                                            metaHasImpacts =
-		                                                Array.isArray(extracted.meta.impacts) && extracted.meta.impacts.length > 0;
-		                                            const raw = extracted.rawComment ?? metaCandidate;
-		                                            const rawMax = 8_000;
-		                                            const rawTrimmed = raw.length > rawMax ? raw.slice(0, rawMax) : raw;
-		                                            controller.enqueue(
-		                                                encodeEvent('meta', {
-	                                                    parseOk: true,
-	                                                    meta: extracted.meta,
-	                                                    raw: rawTrimmed,
-	                                                    rawTruncated: raw.length > rawMax,
-	                                                })
-	                                            );
-	                                        } else {
-	                                            controller.enqueue(
-	                                                encodeEvent('meta_error', {
-	                                                    parseOk: false,
-	                                                    error: '未能识别 MAHOSHOJO_*_META 块（marker 缺失或格式不匹配）',
-	                                                    raw: metaCandidate.slice(0, 2_000),
-	                                                    rawTruncated: metaCandidate.length > 2_000,
-	                                                })
-	                                            );
-	                                        }
-	                                    } catch (error) {
-	                                        controller.enqueue(
-	                                            encodeEvent('meta_error', {
-	                                                parseOk: false,
-	                                                error: error instanceof Error ? error.message : String(error ?? 'meta parse failed'),
-	                                                raw: metaCandidate.slice(0, 2_000),
-	                                                rawTruncated: metaCandidate.length > 2_000,
-	                                            })
-	                                        );
-	                                    }
-	                                } else {
-	                                    controller.enqueue(
-	                                        encodeEvent('meta_error', {
-	                                            parseOk: false,
-	                                            error: '未检测到 MAHOSHOJO_*_META（模型可能漏写，或未按末行追加）',
-	                                            raw: null,
-	                                        })
-	                                    );
-	                                }
-	                            }
+		                if (shouldIncludeTelemetry) {
+		                    const aiModelForTelemetry =
+		                        typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim() ? aiTelemetry.model.trim() : null;
+		                    const telemetryPayload = {
+		                        version: 1,
+		                        ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
+		                        ...(usageForTelemetry
+		                            ? {
+		                                usage: {
+		                                    promptTokens: usageForTelemetry.promptTokens ?? null,
+		                                    reasoningTokens: usageForTelemetry.reasoningTokens ?? null,
+		                                    completionTokens: usageForTelemetry.completionTokens ?? null,
+		                                    totalTokens: usageForTelemetry.totalTokens ?? null,
+		                                    cachedTokens: usageForTelemetry.cachedTokens ?? null,
+		                                },
+		                            }
+		                            : {}),
+		                        ...(typeof narrativeHistoryReadCount === 'number' ? { narrativeHistoryReadCount } : {}),
+		                    };
+		                    controller.enqueue(encodeEvent('telemetry', telemetryPayload));
+		                }
 
-		                            // 若未下发任何有效正文（非空白），且也没有可用的 impacts，则视为异常：AI 返回空输出 / 或正文被吞掉。
-		                            if (!hasMeaningfulMarkdown && !metaHasImpacts) {
-		                                const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
-		                                const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
+		                let metaHasImpacts = false;
+		                if (shouldAllowStreamMeta) {
+		                    const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
+		                    if (metaCandidate && metaCandidate.trim()) {
+		                        try {
+		                            const extracted = await extractStreamUpdateMeta(metaCandidate);
+		                            if (extracted?.meta) {
+		                                metaHasImpacts = Array.isArray(extracted.meta.impacts) && extracted.meta.impacts.length > 0;
+		                                const raw = extracted.rawComment ?? metaCandidate;
+		                                const rawMax = 8_000;
+		                                const rawTrimmed = raw.length > rawMax ? raw.slice(0, rawMax) : raw;
 		                                controller.enqueue(
-		                                    encodeEvent('error', {
-		                                        ok: false,
-		                                        error: 'AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。',
-		                                        debug: debugSse
-		                                            ? {
-		                                                outputBytes,
-		                                                outputChars,
-		                                                markdownCharsSent,
-		                                                hasMeaningfulMarkdown,
-		                                                metaHasImpacts,
-		                                                inMeta,
-		                                                pendingMarkdownTailLength: pendingMarkdownTail.length,
-		                                                metaBufferLength: metaBuffer.length,
-		                                                metaFallbackTailLength: metaFallbackTail.length,
-		                                                rawPreview,
-		                                              }
-		                                            : null,
+		                                    encodeEvent('meta', {
+		                                        parseOk: true,
+		                                        meta: extracted.meta,
+		                                        raw: rawTrimmed,
+		                                        rawTruncated: raw.length > rawMax,
 		                                    })
-	                                );
-	                                await finalizeOnce('failed', 'empty stream output');
-	                                controller.close();
-	                                return;
-	                            }
+		                                );
+		                            } else {
+		                                controller.enqueue(
+		                                    encodeEvent('meta_error', {
+		                                        parseOk: false,
+		                                        error: '未能识别 MAHOSHOJO_*_META 块（marker 缺失或格式不匹配）',
+		                                        raw: metaCandidate.slice(0, 2_000),
+		                                        rawTruncated: metaCandidate.length > 2_000,
+		                                    })
+		                                );
+		                            }
+		                        } catch (error) {
+		                            controller.enqueue(
+		                                encodeEvent('meta_error', {
+		                                    parseOk: false,
+		                                    error: error instanceof Error ? error.message : String(error ?? 'meta parse failed'),
+		                                    raw: metaCandidate.slice(0, 2_000),
+		                                    rawTruncated: metaCandidate.length > 2_000,
+		                                })
+		                            );
+		                        }
+		                    } else {
+		                        controller.enqueue(
+		                            encodeEvent('meta_error', {
+		                                parseOk: false,
+		                                error: '未检测到 MAHOSHOJO_*_META（模型可能漏写，或未按末行追加）',
+		                                raw: null,
+		                            })
+		                        );
+		                    }
+		                }
 
-	                            controller.enqueue(encodeEvent('done', { ok: true }));
-	                            await finalizeOnce('completed');
-	                            controller.close();
-	                            return;
-	                        }
+		                // 若未下发任何有效正文（非空白），且也没有可用的 impacts，则视为异常：AI 返回空输出 / 或正文被吞掉。
+		                if (!hasMeaningfulMarkdown && !metaHasImpacts) {
+		                    const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
+		                    const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
+		                    controller.enqueue(
+		                        encodeEvent('error', {
+		                            ok: false,
+		                            error: 'AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。',
+		                            debug: debugSse
+		                                ? {
+		                                    outputBytes,
+		                                    outputChars,
+		                                    markdownCharsSent,
+		                                    hasMeaningfulMarkdown,
+		                                    metaHasImpacts,
+		                                    inMeta,
+		                                    pendingMarkdownTailLength: pendingMarkdownTail.length,
+		                                    metaBufferLength: metaBuffer.length,
+		                                    metaFallbackTailLength: metaFallbackTail.length,
+		                                    rawPreview,
+		                                  }
+		                                : null,
+		                        })
+		                    );
+		                    await finalizeOnce('failed', 'empty stream output');
+		                    controller.close();
+		                    return;
+		                }
 
-                        if (value) {
-                            outputBytes += value.byteLength;
-                            const decoded = decoder.decode(value, { stream: true });
-                            appendText(decoded);
-                            processText(controller, decoded);
-                        }
-                    } catch (streamError) {
-                        const message = streamError instanceof Error ? streamError.message : String(streamError ?? 'stream error');
-                        try {
-                            controller.enqueue(encodeEvent('error', { ok: false, error: message }));
-                        } catch {
-                            // ignore
-                        }
-                        await finalizeOnce('failed', message);
-                        controller.close();
-                    }
-                },
-                async cancel(reason) {
-                    try {
-                        void reader.cancel(reason).catch(() => {});
-                    } catch {
-                        // 忽略取消时的二次错误
-                    }
-                    await finalizeOnce('aborted', reason instanceof Error ? reason.message : String(reason ?? 'aborted'));
-                },
-            });
+		                controller.enqueue(encodeEvent('done', { ok: true }));
+		                await finalizeOnce('completed');
+		                controller.close();
+		            };
+
+		            const pumpSse = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
+		                if (pumpStarted) return;
+		                pumpStarted = true;
+
+		                enqueueDebug(controller, { phase: 'pump_start' });
+
+		                while (!sseCancelled) {
+		                    try {
+		                        // 简单背压：队列满时暂停读取上游，避免无界缓存
+		                        while (!sseCancelled && typeof controller.desiredSize === 'number' && controller.desiredSize <= 0) {
+		                            await new Promise((resolve) => setTimeout(resolve, 5));
+		                        }
+
+		                        const { done, value } = await readWithTimeout(reader);
+		                        if (sseCancelled) return;
+
+		                        if (done) {
+		                            await finalizeSseAndClose(controller);
+		                            return;
+		                        }
+
+		                        if (value) {
+		                            outputBytes += value.byteLength;
+		                            const decoded = decoder.decode(value, { stream: true });
+		                            appendText(decoded);
+		                            processText(controller, decoded);
+		                        }
+		                    } catch (streamError) {
+		                        if (sseCancelled) return;
+		                        const message =
+		                            streamError instanceof Error ? streamError.message : String(streamError ?? 'stream error');
+		                        try {
+		                            controller.enqueue(encodeEvent('error', { ok: false, error: message }));
+		                        } catch {
+		                            // ignore
+		                        }
+		                        await finalizeOnce('failed', message);
+		                        try {
+		                            controller.close();
+		                        } catch {
+		                            // ignore
+		                        }
+		                        return;
+		                    }
+		                }
+		            };
+
+		            const sseBody = new ReadableStream<Uint8Array>({
+		                start(controller) {
+		                    enqueueDebug(controller, {
+		                        phase: 'open',
+		                        generationId,
+		                        shouldAllowStreamMeta,
+		                        idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+		                        totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
+		                    });
+		                    void pumpSse(controller);
+		                },
+		                async cancel(reason) {
+		                    sseCancelled = true;
+		                    try {
+		                        void reader.cancel(reason).catch(() => {});
+		                    } catch {
+		                        // 忽略取消时的二次错误
+		                    }
+		                    await finalizeOnce(
+		                        'aborted',
+		                        reason instanceof Error ? reason.message : String(reason ?? 'aborted')
+		                    );
+		                },
+		            });
 
             return new Response(sseBody, {
                 status: streamResponse.status,
