@@ -16,12 +16,26 @@
       "path": "/questionnaires/presets/magical-girl-immersive-vn.json"
     },
     {
+      "id": "magical-girl-afterwork-world",
+      "kind": "magical-girl",
+      "title": "原作世界观向：魔法少女成长路线问卷",
+      "description": "面向原作世界观：城市/阵营/等阶/本相/魔装/术式/奇境/盛开/繁开等设定补全（可跳过）。",
+      "path": "/questionnaires/presets/magical-girl-afterwork-world.json"
+    },
+    {
       "id": "canshou-default",
       "kind": "canshou",
       "title": "研究院残兽调查",
       "description": "前进吧，残兽！",
       "path": "/questionnaires/presets/canshou-default.json",
       "isDefault": true
+    },
+    {
+      "id": "canshou-afterwork-world",
+      "kind": "canshou",
+      "title": "原作世界观向：残兽设定与进化路线问卷",
+      "description": "面向原作世界观：核心概念/进化阶段/巢穴与规则/出现方式/社会影响等设定补全（可跳过）。",
+      "path": "/questionnaires/presets/canshou-afterwork-world.json"
     },
     {
       "id": "magical-girl-full-profile",
