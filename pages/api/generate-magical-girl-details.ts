@@ -9,6 +9,8 @@ import { compactQuestionnaireAnswerItems, formatQuestionnaireAnswers, normalizeU
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { type AIProvider } from '@/lib/config';
+import { getDataCardById } from '@/lib/d1';
+import presetIndex from '@/public/questionnaires/presets/index.json';
 
 const log = getLogger('api-gen-details');
 
@@ -72,6 +74,125 @@ type RequestQuestionnaire = {
   title: string;
   kind: 'magical-girl' | 'canshou';
   questions: RequestQuestion[];
+};
+
+type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
+
+type RequestQuestionnaireSelection = {
+  source: QuestionnaireSelectionSource;
+  kind: 'magical-girl' | 'canshou';
+  presetId?: string;
+  dataCardId?: string;
+};
+
+type QuestionnairePresetIndexEntry = {
+  id: string;
+  kind: 'magical-girl' | 'canshou';
+  path: string;
+};
+
+const PRESET_ENTRIES: QuestionnairePresetIndexEntry[] = (() => {
+  const raw = (presetIndex as any)?.presets;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item: any) => {
+      const id = typeof item?.id === 'string' ? item.id.trim() : '';
+      const kind = item?.kind === 'magical-girl' || item?.kind === 'canshou' ? item.kind : null;
+      const path = typeof item?.path === 'string' ? item.path.trim() : '';
+      if (!id || !kind || !path) return null;
+      return { id, kind, path } satisfies QuestionnairePresetIndexEntry;
+    })
+    .filter((item: QuestionnairePresetIndexEntry | null): item is QuestionnairePresetIndexEntry => Boolean(item));
+})();
+
+const normalizeQuestionnaireSelections = (raw: unknown): RequestQuestionnaireSelection[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      const source = record.source === 'preset' || record.source === 'upload' || record.source === 'database'
+        ? record.source
+        : null;
+      const kind = record.kind === 'magical-girl' || record.kind === 'canshou' ? record.kind : null;
+      if (!source || !kind) return null;
+
+      const presetId = typeof record.presetId === 'string' ? record.presetId.trim() : '';
+      const dataCardId = typeof record.dataCardId === 'string' ? record.dataCardId.trim() : '';
+
+      const selection: RequestQuestionnaireSelection = { source, kind };
+      if (presetId) selection.presetId = presetId;
+      if (dataCardId) selection.dataCardId = dataCardId;
+      return selection;
+    })
+    .filter((item): item is RequestQuestionnaireSelection => Boolean(item));
+};
+
+const isSafePresetPath = (path: string): boolean => {
+  const normalized = path.trim();
+  if (!normalized.startsWith('/questionnaires/presets/')) return false;
+  if (!normalized.endsWith('.json')) return false;
+  if (normalized.includes('..')) return false;
+  return true;
+};
+
+const fetchJsonFromSameOrigin = async (reqUrl: string, path: string): Promise<unknown> => {
+  const url = new URL(path, reqUrl);
+  const response = await fetch(url.toString(), { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(`加载预设问卷失败: ${response.status} ${response.statusText}`);
+  }
+  return await response.json();
+};
+
+const resolveNativeQuestionnaires = async (
+  reqUrl: string,
+  selections: RequestQuestionnaireSelection[]
+): Promise<{ allowed: boolean; questionnaires: RequestQuestionnaire[] }> => {
+  if (selections.length === 0) return { allowed: false, questionnaires: [] };
+
+  const payloads: unknown[] = [];
+  for (const selection of selections) {
+    if (selection.source === 'preset') {
+      const presetId = selection.presetId?.trim() ?? '';
+      const presetEntry = PRESET_ENTRIES.find((item) => item.kind === selection.kind && item.id === presetId) ?? null;
+      if (!presetEntry || !isSafePresetPath(presetEntry.path)) {
+        return { allowed: false, questionnaires: [] };
+      }
+      const presetPayload = await fetchJsonFromSameOrigin(reqUrl, presetEntry.path);
+      payloads.push(presetPayload);
+      continue;
+    }
+
+    if (selection.source === 'database') {
+      const dataCardId = selection.dataCardId?.trim() ?? '';
+      if (!dataCardId) return { allowed: false, questionnaires: [] };
+      const card = await getDataCardById(dataCardId, false);
+      if (!card || card.type !== 'questionnaire' || typeof card.data !== 'string') {
+        return { allowed: false, questionnaires: [] };
+      }
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(card.data);
+      } catch {
+        return { allowed: false, questionnaires: [] };
+      }
+      if (!parsed || typeof parsed !== 'object' || (parsed as any).nativeAllowed !== true) {
+        return { allowed: false, questionnaires: [] };
+      }
+      payloads.push(parsed);
+      continue;
+    }
+
+    // upload / 其他来源：不允许原生签名
+    return { allowed: false, questionnaires: [] };
+  }
+
+  const normalized = normalizeQuestionnaires(payloads);
+  if (normalized.length !== payloads.length) {
+    return { allowed: false, questionnaires: [] };
+  }
+  return { allowed: true, questionnaires: normalized };
 };
 
 const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
@@ -149,11 +270,13 @@ const buildQuestionLookup = (questionnaires: RequestQuestionnaire[]): QuestionLo
 
 const resolveAnswerItems = (
   rawAnswers: unknown,
-  questionnaires: RequestQuestionnaire[]
+  questionnaires: RequestQuestionnaire[],
+  options: { preferResolvedQuestionText?: boolean } = {}
 ): QuestionnaireAnswerItem[] => {
   const fallbackQuestions = questionnaires.flatMap((q) => q.questions.map((item) => item.question));
   const normalized = normalizeUserAnswers(rawAnswers, fallbackQuestions);
   if (normalized.length === 0) return [];
+  const preferResolved = options.preferResolvedQuestionText === true;
   const lookup = buildQuestionLookup(questionnaires);
   const resolvedItems: QuestionnaireAnswerItem[] = [];
   normalized.forEach((item, index) => {
@@ -172,13 +295,16 @@ const resolveAnswerItems = (
     if (!resolved && lookup.ordered[index]) {
       resolved = lookup.ordered[index];
     }
-    const question = item.question?.trim() || resolved?.question || `问题 ${index + 1}`;
+    if (preferResolved && !resolved) return;
+    const question = preferResolved
+      ? (resolved as RequestQuestion & { questionnaireId: string; questionnaireTitle: string }).question
+      : item.question?.trim() || resolved?.question || `问题 ${index + 1}`;
     resolvedItems.push({
       question,
       answer,
-      questionId: item.questionId ?? resolved?.id,
-      questionnaireId: item.questionnaireId ?? resolved?.questionnaireId,
-      questionnaireTitle: item.questionnaireTitle ?? resolved?.questionnaireTitle,
+      questionId: preferResolved ? resolved!.id : item.questionId ?? resolved?.id,
+      questionnaireId: preferResolved ? resolved!.questionnaireId : item.questionnaireId ?? resolved?.questionnaireId,
+      questionnaireTitle: preferResolved ? resolved!.questionnaireTitle : item.questionnaireTitle ?? resolved?.questionnaireTitle,
     });
   });
   return resolvedItems;
@@ -257,11 +383,35 @@ async function handler(req: Request): Promise<Response> {
   const rawAnswers = body?.answers;
   const rawQuestionnaires = body?.questionnaires;
   const requestedNativeSignature = body?.allowNativeSignature === true;
+  const questionnaireSelections = normalizeQuestionnaireSelections(body?.questionnaireSelections);
   const language = body?.language ?? 'zh-CN';
   const customProviderPayload = body?.customProvider;
 
-  const questionnaires = normalizeQuestionnaires(rawQuestionnaires);
-  const normalizedAnswers = resolveAnswerItems(rawAnswers, questionnaires);
+  const requestQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
+  let effectiveQuestionnaires = requestQuestionnaires;
+  let nativeAllowedByServer = false;
+
+  if (requestedNativeSignature) {
+    try {
+      const resolved = await resolveNativeQuestionnaires(req.url, questionnaireSelections);
+      if (resolved.allowed && resolved.questionnaires.length > 0) {
+        nativeAllowedByServer = true;
+        effectiveQuestionnaires = resolved.questionnaires;
+      } else {
+        log.info('请求原生签名但问卷未获原生许可，已取消原生签名', {
+          selectionCount: questionnaireSelections.length,
+        });
+      }
+    } catch (error) {
+      log.warn('尝试解析原生许可问卷失败，已取消原生签名', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const normalizedAnswers = resolveAnswerItems(rawAnswers, effectiveQuestionnaires, {
+    preferResolvedQuestionText: nativeAllowedByServer,
+  });
 
   if (normalizedAnswers.length === 0) {
     return new Response(JSON.stringify({ error: 'Answers array is required' }), {
@@ -270,8 +420,8 @@ async function handler(req: Request): Promise<Response> {
     });
   }
 
-  const overLimitAnswer = findOverLimitAnswer(normalizedAnswers, questionnaires);
-  const allowNativeSignature = requestedNativeSignature && !overLimitAnswer;
+  const overLimitAnswer = findOverLimitAnswer(normalizedAnswers, effectiveQuestionnaires);
+  const allowNativeSignature = requestedNativeSignature && nativeAllowedByServer && !overLimitAnswer;
   if (overLimitAnswer) {
     log.info('问卷答案超过字数上限，已取消原生签名', overLimitAnswer);
   }
