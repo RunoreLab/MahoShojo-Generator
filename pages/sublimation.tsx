@@ -13,6 +13,7 @@ import { config as appConfig } from '../lib/config';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import BattleDataModal from '../components/BattleDataModal';
+import DataCardDetailsModal from '../components/DataCardDetailsModal';
 import { NarrativeHistoryModal } from '@/components/arena/components/NarrativeHistoryModal';
 import { NarrativeHistoryPickerModal } from '@/components/arena/components/NarrativeHistoryPickerModal';
 import { useNarrativeHistoryStore } from '@/components/arena/stores/useNarrativeHistoryStore';
@@ -244,6 +245,16 @@ const SublimationPage: React.FC = () => {
     const [questionnaireLoadError, setQuestionnaireLoadError] = useState<string | null>(null);
     const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
     const [questionnairePickerError, setQuestionnairePickerError] = useState<string | null>(null);
+    const [questionnaireDetailsCard, setQuestionnaireDetailsCard] = useState<{
+        id: string;
+        name: string;
+        description: string;
+        type: 'questionnaire';
+        data: string;
+        isPublic: boolean;
+        author?: string;
+    } | null>(null);
+    const [showQuestionnaireDetailsModal, setShowQuestionnaireDetailsModal] = useState(false);
     const [showPasteQuestionnaireImport, setShowPasteQuestionnaireImport] = useState(false);
     const [pasteQuestionnaireText, setPasteQuestionnaireText] = useState('');
     const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
@@ -685,6 +696,28 @@ const SublimationPage: React.FC = () => {
             return { ...item, useLore: enabled };
         }));
     };
+
+    const handleOpenQuestionnaireDetails = useCallback((selection: QuestionnaireSelection) => {
+        const baseId = selection.source === 'database'
+            ? (selection.dataCardId ?? selection.questionnaire.id)
+            : (selection.questionnaire.id ?? '');
+        const cardId = selection.source === 'database'
+            ? baseId
+            : `questionnaire:${selection.source}:${baseId}`;
+        const name = (selection.dataCardName ?? selection.questionnaire.title ?? '未命名问卷').trim() || '未命名问卷';
+        const description = selection.questionnaire.description?.trim() || '暂无简介';
+
+        setQuestionnaireDetailsCard({
+            id: cardId,
+            name,
+            description,
+            type: 'questionnaire',
+            data: JSON.stringify(selection.questionnaire, null, 2),
+            isPublic: selection.source === 'database',
+            author: selection.dataCardAuthor,
+        });
+        setShowQuestionnaireDetailsModal(true);
+    }, []);
 
     const handleSelectQuestionnaireCard = (card: any) => {
         try {
@@ -1346,6 +1379,14 @@ const SublimationPage: React.FC = () => {
                                                             </label>
                                                             <button
                                                                 type="button"
+                                                                onClick={() => handleOpenQuestionnaireDetails(selection)}
+                                                                disabled={isGenerating}
+                                                                className="text-xs text-purple-700 hover:underline disabled:text-gray-300"
+                                                            >
+                                                                详情
+                                                            </button>
+                                                            <button
+                                                                type="button"
                                                                 onClick={() => handleRemoveQuestionnaireSelection(selectionId)}
                                                                 disabled={isGenerating}
                                                                 className="text-xs text-rose-500 hover:underline disabled:text-gray-300"
@@ -1878,6 +1919,25 @@ const SublimationPage: React.FC = () => {
                         onSelectCard={handleSelectQuestionnaireCard}
                         externalError={questionnairePickerError}
                     />
+
+                    {questionnaireDetailsCard && (
+                        <DataCardDetailsModal
+                            isOpen={showQuestionnaireDetailsModal}
+                            onClose={() => {
+                                setShowQuestionnaireDetailsModal(false);
+                                setQuestionnaireDetailsCard(null);
+                            }}
+                            card={{
+                                id: questionnaireDetailsCard.id,
+                                name: questionnaireDetailsCard.name,
+                                description: questionnaireDetailsCard.description,
+                                type: 'questionnaire',
+                                data: questionnaireDetailsCard.data,
+                                isPublic: questionnaireDetailsCard.isPublic,
+                                author: questionnaireDetailsCard.author,
+                            }}
+                        />
+                    )}
 
                     <NarrativeHistoryPickerModal
                         isOpen={showArenaNarrativePicker}

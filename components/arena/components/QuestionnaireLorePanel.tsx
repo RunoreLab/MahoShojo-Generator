@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import BattleDataModal from '@/components/BattleDataModal';
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import {
   normalizeQuestionnaireDefinition,
@@ -59,6 +60,16 @@ export function QuestionnaireLorePanel() {
 
   const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
   const [questionnairePickerError, setQuestionnairePickerError] = useState<string | null>(null);
+  const [questionnaireDetailsCard, setQuestionnaireDetailsCard] = useState<{
+    id: string;
+    name: string;
+    description: string;
+    type: 'questionnaire';
+    data: string;
+    isPublic: boolean;
+    author?: string;
+  } | null>(null);
+  const [showQuestionnaireDetailsModal, setShowQuestionnaireDetailsModal] = useState(false);
   const [presetEntries, setPresetEntries] = useState<QuestionnairePresetEntry[]>([]);
   const [presetError, setPresetError] = useState<string | null>(null);
 
@@ -116,6 +127,28 @@ export function QuestionnaireLorePanel() {
       setQuestionnairePickerError(error instanceof Error ? error.message : '解析问卷失败');
     }
   }, [addQuestionnaireSelection]);
+
+  const handleOpenQuestionnaireDetails = useCallback((selection: BattleStoreState['selectedQuestionnaires'][number]) => {
+    const baseId = selection.source === 'database'
+      ? (selection.dataCardId ?? selection.questionnaire.id)
+      : (selection.questionnaire.id ?? '');
+    const cardId = selection.source === 'database'
+      ? baseId
+      : `questionnaire:${selection.source}:${baseId}`;
+    const name = (selection.dataCardName ?? selection.questionnaire.title ?? '未命名问卷').trim() || '未命名问卷';
+    const description = selection.questionnaire.description?.trim() || '暂无简介';
+
+    setQuestionnaireDetailsCard({
+      id: cardId,
+      name,
+      description,
+      type: 'questionnaire',
+      data: JSON.stringify(selection.questionnaire, null, 2),
+      isPublic: selection.source === 'database',
+      author: selection.dataCardAuthor,
+    });
+    setShowQuestionnaireDetailsModal(true);
+  }, []);
 
   const handleAddPreset = useCallback(async (presetId: string) => {
     const matched = presetEntries.find((item) => item.id === presetId);
@@ -305,18 +338,28 @@ export function QuestionnaireLorePanel() {
                           <div className="text-sm font-semibold text-gray-900 truncate">
                             {selection.questionnaire.title}
                           </div>
-                          <div className="mt-1 text-xs text-gray-500">
-                            来源：{sourceLabel}{author ? ` · 作者：${author}` : ''}{hasLore ? '' : ' · 无设定'}
-                          </div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          来源：{sourceLabel}{author ? ` · 作者：${author}` : ''}{hasLore ? '' : ' · 无设定'}
                         </div>
-                        <button
-                          type="button"
-                          className="px-3 py-1.5 text-xs rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
-                          onClick={() => removeQuestionnaireSelection(selectionId)}
-                          disabled={isGenerating}
-                        >
-                          移除
-                        </button>
+                      </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className="px-3 py-1.5 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            onClick={() => handleOpenQuestionnaireDetails(selection)}
+                            disabled={isGenerating}
+                          >
+                            详情
+                          </button>
+                          <button
+                            type="button"
+                            className="px-3 py-1.5 text-xs rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                            onClick={() => removeQuestionnaireSelection(selectionId)}
+                            disabled={isGenerating}
+                          >
+                            移除
+                          </button>
+                        </div>
                       </div>
 
                       {hasLore && (
@@ -359,6 +402,25 @@ export function QuestionnaireLorePanel() {
         onSelectCard={handleSelectQuestionnaireCard}
         externalError={questionnairePickerError}
       />
+
+      {questionnaireDetailsCard && (
+        <DataCardDetailsModal
+          isOpen={showQuestionnaireDetailsModal}
+          onClose={() => {
+            setShowQuestionnaireDetailsModal(false);
+            setQuestionnaireDetailsCard(null);
+          }}
+          card={{
+            id: questionnaireDetailsCard.id,
+            name: questionnaireDetailsCard.name,
+            description: questionnaireDetailsCard.description,
+            type: 'questionnaire',
+            data: questionnaireDetailsCard.data,
+            isPublic: questionnaireDetailsCard.isPublic,
+            author: questionnaireDetailsCard.author,
+          }}
+        />
+      )}
     </>
   );
 }

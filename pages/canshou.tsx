@@ -12,6 +12,7 @@ import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
 import BattleDataModal from '@/components/BattleDataModal';
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
@@ -186,6 +187,16 @@ const CanshouPage: React.FC = () => {
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
   const [questionnairePickerError, setQuestionnairePickerError] = useState<string | null>(null);
+  const [questionnaireDetailsCard, setQuestionnaireDetailsCard] = useState<{
+    id: string;
+    name: string;
+    description: string;
+    type: 'questionnaire';
+    data: string;
+    isPublic: boolean;
+    author?: string;
+  } | null>(null);
+  const [showQuestionnaireDetailsModal, setShowQuestionnaireDetailsModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -648,6 +659,28 @@ const CanshouPage: React.FC = () => {
       return { ...item, useLore: enabled };
     }));
   };
+
+  const handleOpenQuestionnaireDetails = useCallback((selection: QuestionnaireSelection) => {
+    const baseId = selection.source === 'database'
+      ? (selection.dataCardId ?? selection.questionnaire.id)
+      : (selection.questionnaire.id ?? '');
+    const cardId = selection.source === 'database'
+      ? baseId
+      : `questionnaire:${selection.source}:${baseId}`;
+    const name = (selection.dataCardName ?? selection.questionnaire.title ?? '未命名问卷').trim() || '未命名问卷';
+    const description = selection.questionnaire.description?.trim() || '暂无简介';
+
+    setQuestionnaireDetailsCard({
+      id: cardId,
+      name,
+      description,
+      type: 'questionnaire',
+      data: JSON.stringify(selection.questionnaire, null, 2),
+      isPublic: selection.source === 'database',
+      author: selection.dataCardAuthor,
+    });
+    setShowQuestionnaireDetailsModal(true);
+  }, []);
 
   const handleSelectQuestionnaireCard = (card: any) => {
     try {
@@ -1505,14 +1538,23 @@ const CanshouPage: React.FC = () => {
 	                                    {loreStatus}
 	                                  </div>
 	                                </div>
-	                                <button
-	                                  type="button"
-	                                  disabled={shouldDisableRemove}
-	                                  onClick={() => handleRemoveSelection(selectionId)}
-	                                  className={`text-xs ${shouldDisableRemove ? 'text-slate-700' : 'text-rose-400 hover:underline'}`}
-	                                >
-	                                  移除
-	                                </button>
+	                                <div className="flex items-center gap-3">
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => handleOpenQuestionnaireDetails(selection)}
+	                                    className="text-xs text-emerald-300 hover:underline"
+	                                  >
+	                                    详情
+	                                  </button>
+	                                  <button
+	                                    type="button"
+	                                    disabled={shouldDisableRemove}
+	                                    onClick={() => handleRemoveSelection(selectionId)}
+	                                    className={`text-xs ${shouldDisableRemove ? 'text-slate-700' : 'text-rose-400 hover:underline'}`}
+	                                  >
+	                                    移除
+	                                  </button>
+	                                </div>
 	                              </div>
 	                            );
 	                          })
@@ -1548,6 +1590,13 @@ const CanshouPage: React.FC = () => {
 	                                    />
 	                                    使用设定
 	                                  </label>
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => handleOpenQuestionnaireDetails(selection)}
+	                                    className="text-xs text-emerald-300 hover:underline"
+	                                  >
+	                                    详情
+	                                  </button>
 	                                  {isLoreOnly && (
 	                                    <button
 	                                      type="button"
@@ -2035,6 +2084,25 @@ const CanshouPage: React.FC = () => {
         onSelectCard={handleSelectQuestionnaireCard}
         externalError={questionnairePickerError}
       />
+
+      {questionnaireDetailsCard && (
+        <DataCardDetailsModal
+          isOpen={showQuestionnaireDetailsModal}
+          onClose={() => {
+            setShowQuestionnaireDetailsModal(false);
+            setQuestionnaireDetailsCard(null);
+          }}
+          card={{
+            id: questionnaireDetailsCard.id,
+            name: questionnaireDetailsCard.name,
+            description: questionnaireDetailsCard.description,
+            type: 'questionnaire',
+            data: questionnaireDetailsCard.data,
+            isPublic: questionnaireDetailsCard.isPublic,
+            author: questionnaireDetailsCard.author,
+          }}
+        />
+      )}
 
       {showImageModal && savedImageUrl && (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
