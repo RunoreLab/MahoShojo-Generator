@@ -1334,6 +1334,15 @@ async function handler(req: NextRequest): Promise<Response> {
 	        log.error('生成战斗故事时发生顶层错误', { error });
 	        const errorMessage = error instanceof Error ? error.message : '未知错误';
 
+	        const url = new URL(req.url);
+	        const wantsSse =
+	            url.searchParams.get('format') === 'sse' || (req.headers.get('accept') || '').includes('text/event-stream');
+	        const debugSse =
+	            url.searchParams.get('debug') === '1' ||
+	            url.searchParams.get('debug') === 'true' ||
+	            url.searchParams.get('debugSse') === '1' ||
+	            url.searchParams.get('debugSse') === 'true';
+
 	        const endedAtMs = Date.now();
 	        const endedAtIso = new Date(endedAtMs).toISOString();
 	        const durationMs = Math.max(0, endedAtMs - startedAtMs);
@@ -1384,6 +1393,48 @@ async function handler(req: NextRequest): Promise<Response> {
 	            executionContext.waitUntil(recordPromise);
 	        } else {
 	            await recordPromise;
+	        }
+
+	        if (wantsSse) {
+	            const encoder = new TextEncoder();
+	            const encodeEvent = (event: string, payload: unknown) => {
+	                let data: string;
+	                try {
+	                    data = JSON.stringify(payload ?? null);
+	                } catch (jsonError) {
+	                    data = JSON.stringify({
+	                        ok: false,
+	                        error: jsonError instanceof Error ? jsonError.message : String(jsonError ?? 'json stringify failed'),
+	                    });
+	                }
+	                return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
+	            };
+
+	            const sseHeaders = new Headers();
+	            sseHeaders.set('Content-Type', 'text/event-stream; charset=utf-8');
+	            sseHeaders.set('Cache-Control', 'no-cache, no-transform');
+
+	            const body = new ReadableStream<Uint8Array>({
+	                start(controller) {
+	                    if (debugSse) {
+	                        controller.enqueue(
+	                            encodeEvent('debug', {
+	                                phase: 'top_level_error',
+	                                error: errorMessage,
+	                                ...(error instanceof Error && typeof error.name === 'string' ? { errorName: error.name } : {}),
+	                            })
+	                        );
+	                    }
+	                    controller.enqueue(encodeEvent('error', { ok: false, error: errorMessage }));
+	                    controller.enqueue(encodeEvent('done', { ok: false }));
+	                    controller.close();
+	                },
+	            });
+
+	            return new Response(body, {
+	                status: 200,
+	                headers: sseHeaders,
+	            });
 	        }
 
 	        return new Response(JSON.stringify({ error: '生成失败，请稍后重试', message: errorMessage }), {
