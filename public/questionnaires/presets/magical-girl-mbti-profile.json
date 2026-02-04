@@ -5,7 +5,7 @@
   "description": "用于角色塑造的“MBTI 风格”倾向问卷（非官方量表）。所有题目都可跳过；若想快速完成，可选择“简版”；也可直接填最后的 16 型结果。",
   "logoUrl": "/questionnaire-title.svg",
   "version": "1.0",
-  "nativeAllowed": false,
+  "nativeAllowed": true,
   "questions": [
     {
       "id": "MGMBTI-01",
