@@ -61,15 +61,22 @@ export function extractUpstreamErrorMessage(
     // 优先从 capturedError 中提取（onError 回调捕获的错误）
     if (capturedError) {
         try {
+            const responseBodyText = safeString((capturedError as any)?.responseBody);
+            const responseBodyJson = responseBodyText ? safeJsonParse(responseBodyText) : null;
+            const responseBodyMessage = responseBodyJson ? extractMessageFromUnknownPayload(responseBodyJson) : '';
+
             const upstreamMessage =
                 capturedError?.data?.error?.message ||
                 capturedError?.message ||
                 capturedError?.responseBody?.error?.message ||
+                responseBodyMessage ||
                 capturedError?.cause?.message;
 
             if (upstreamMessage) {
                 const errorPrefix = capturedError.name || 'AI_Error';
-                errorMessage = `${errorPrefix}: ${upstreamMessage}`;
+                const statusCode = typeof capturedError?.statusCode === 'number' ? capturedError.statusCode : null;
+                const suffix = statusCode ? `（HTTP ${statusCode}）` : '';
+                errorMessage = `${errorPrefix}: ${upstreamMessage}${suffix}`;
             }
         } catch (e) {
             log.debug('无法从 capturedError 提取错误信息', { extractError: e });

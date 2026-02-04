@@ -247,17 +247,20 @@ export async function generateWithStreamAI(
 	                        ? { maxOutputTokens: generationConfig.maxOutputTokens }
 	                        : {};
 
-	                const looksLikeTrivialEmptyOutput = (text: string) => {
-	                    const trimmed = text.trim().replace(/^\uFEFF/, '');
-	                    if (!trimmed) return true;
-	                    if (trimmed === 'null' || trimmed === 'undefined') return true;
-	                    if (/^\{\s*\}$/.test(trimmed)) return true;
-	                    if (/^\[\s*\]$/.test(trimmed)) return true;
-	                    return false;
-	                };
+		                const looksLikeTrivialEmptyOutput = (text: string) => {
+		                    const trimmed = text.trim().replace(/^\uFEFF/, '');
+		                    if (!trimmed) return true;
+		                    if (trimmed === 'null' || trimmed === 'undefined') return true;
+		                    if (/^\{\s*\}$/.test(trimmed)) return true;
+		                    if (/^\[\s*\]$/.test(trimmed)) return true;
+		                    return false;
+		                };
 
-	                // 捕获 onError 回调中的错误，用于后续提取错误信息
-	                let capturedError: any = null;
+		                const EMPTY_OUTPUT_ERROR_MESSAGE =
+		                    'AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。';
+
+		                // 捕获 onError 回调中的错误，用于后续提取错误信息
+		                let capturedError: any = null;
 
 	                const result = streamText({
 	                    model: provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel),
@@ -295,33 +298,33 @@ export async function generateWithStreamAI(
 	                const MAX_PREFETCH_READS = 8;
 	                const MAX_PREFETCH_CHARS = 8_192;
 
-	                for (let i = 0; i < MAX_PREFETCH_READS && prefetchedText.length < MAX_PREFETCH_CHARS; i++) {
-	                    const chunk = await readWithTimeout(reader);
-	                    if (chunk.done) {
-	                        if (looksLikeTrivialEmptyOutput(prefetchedText)) {
-	                            try {
-	                                void reader.cancel('empty-output').catch(() => {});
-	                            } catch {
-	                                // ignore
-	                            }
-	                            throw new Error('AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。');
-	                        }
-	                        const errorMessage = extractUpstreamErrorMessage(capturedError, result);
-	                        throw new Error(errorMessage);
-	                    }
+		                for (let i = 0; i < MAX_PREFETCH_READS && prefetchedText.length < MAX_PREFETCH_CHARS; i++) {
+		                    const chunk = await readWithTimeout(reader);
+		                    if (chunk.done) {
+		                        if (looksLikeTrivialEmptyOutput(prefetchedText)) {
+		                            try {
+		                                void reader.cancel('empty-output').catch(() => {});
+		                            } catch {
+		                                // ignore
+		                            }
+		                            throw new Error(extractUpstreamErrorMessage(capturedError, result, EMPTY_OUTPUT_ERROR_MESSAGE));
+		                        }
+		                        const errorMessage = extractUpstreamErrorMessage(capturedError, result);
+		                        throw new Error(errorMessage);
+		                    }
 	                    prefetchedChunks.push(chunk.value ?? '');
 	                    prefetchedText += chunk.value ?? '';
 	                    if (prefetchedText.trim() && !looksLikeTrivialEmptyOutput(prefetchedText)) break;
 	                }
 
-	                if (looksLikeTrivialEmptyOutput(prefetchedText)) {
-	                    try {
-	                        void reader.cancel('empty-output').catch(() => {});
-	                    } catch {
-	                        // ignore
-	                    }
-	                    throw new Error('AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。');
-	                }
+		                if (looksLikeTrivialEmptyOutput(prefetchedText)) {
+		                    try {
+		                        void reader.cancel('empty-output').catch(() => {});
+		                    } catch {
+		                        // ignore
+		                    }
+		                    throw new Error(extractUpstreamErrorMessage(capturedError, result, EMPTY_OUTPUT_ERROR_MESSAGE));
+		                }
 
 	                // 创建一个新的 ReadableStream，将已读取的 chunk 和剩余流合并
 	                const combinedStream = new ReadableStream<string>({
