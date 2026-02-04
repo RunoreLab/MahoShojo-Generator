@@ -436,6 +436,7 @@ export const normalizeQuestionnaireDefinition = (
   if (!raw || typeof raw !== 'object') return null;
   const record = raw as Record<string, unknown>;
   const rawQuestions = record.questions;
+  const defaultRequired = typeof record.defaultRequired === 'boolean' ? record.defaultRequired : true;
   const loreMarkdown = typeof record.loreMarkdown === 'string'
     ? (record.loreMarkdown.trim() ? record.loreMarkdown : undefined)
     : undefined;
@@ -460,20 +461,20 @@ export const normalizeQuestionnaireDefinition = (
       return {
         id: `${resolvedKind === 'magical-girl' ? 'MG' : 'Q'}-${index + 1}`,
         question: item,
-        required: true,
+        required: defaultRequired,
       };
     }
     if (!item || typeof item !== 'object') {
       return {
         id: `${resolvedKind === 'magical-girl' ? 'MG' : 'Q'}-${index + 1}`,
         question: `问题 ${index + 1}`,
-        required: true,
+        required: defaultRequired,
       };
     }
     const q = item as Record<string, unknown>;
     const id = typeof q.id === 'string' && q.id.trim() ? q.id.trim() : `${resolvedKind === 'magical-girl' ? 'MG' : 'Q'}-${index + 1}`;
     const question = typeof q.question === 'string' && q.question.trim() ? q.question.trim() : `问题 ${index + 1}`;
-    const required = typeof q.required === 'boolean' ? q.required : true;
+    const required = typeof q.required === 'boolean' ? q.required : defaultRequired;
     const maxLength = typeof q.maxLength === 'number' && Number.isFinite(q.maxLength)
       ? Math.max(0, Math.floor(q.maxLength))
       : q.maxLength === null

@@ -4,6 +4,7 @@
   "title": "研究院残兽调查",
   "description": "前进吧，残兽！",
   "logoUrl": "/questionnaire-logo.svg",
+  "defaultRequired": false,
   "questions": [
     {
       "id": "coreConcept",

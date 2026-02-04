@@ -4,6 +4,7 @@
   "title": "残兽全面设定问卷",
   "description": "用于生成更完整的残兽档案",
   "logoUrl": "/beast-title.svg",
+  "defaultRequired": false,
   "questions": [
     {
       "id": "CSF-01",
