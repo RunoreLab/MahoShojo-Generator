@@ -120,6 +120,7 @@ export interface QuestionnaireDefinition {
   kind: QuestionnaireKind;
   title: string;
   description?: string;
+  loreMarkdown?: string;
   logoUrl?: string;
   version?: string;
   nativeAllowed?: boolean | null;
@@ -435,7 +436,14 @@ export const normalizeQuestionnaireDefinition = (
   if (!raw || typeof raw !== 'object') return null;
   const record = raw as Record<string, unknown>;
   const rawQuestions = record.questions;
-  if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) return null;
+  const defaultRequired = typeof record.defaultRequired === 'boolean' ? record.defaultRequired : true;
+  const loreMarkdown = typeof record.loreMarkdown === 'string'
+    ? (record.loreMarkdown.trim() ? record.loreMarkdown : undefined)
+    : undefined;
+  const hasLore = Boolean(loreMarkdown && loreMarkdown.trim());
+  if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) {
+    if (!hasLore) return null;
+  }
 
   const resolvedKind = (record.kind as QuestionnaireKind) || options.fallbackKind;
   if (resolvedKind !== 'magical-girl' && resolvedKind !== 'canshou') return null;
@@ -447,25 +455,26 @@ export const normalizeQuestionnaireDefinition = (
     ? record.title.trim()
     : (options.fallbackTitle?.trim() || '未命名问卷');
 
-  const baseQuestions: QuestionnaireQuestion[] = rawQuestions.map((item, index) => {
+  const baseQuestions: QuestionnaireQuestion[] = Array.isArray(rawQuestions)
+    ? rawQuestions.map((item, index) => {
     if (typeof item === 'string') {
       return {
         id: `${resolvedKind === 'magical-girl' ? 'MG' : 'Q'}-${index + 1}`,
         question: item,
-        required: true,
+        required: defaultRequired,
       };
     }
     if (!item || typeof item !== 'object') {
       return {
         id: `${resolvedKind === 'magical-girl' ? 'MG' : 'Q'}-${index + 1}`,
         question: `问题 ${index + 1}`,
-        required: true,
+        required: defaultRequired,
       };
     }
     const q = item as Record<string, unknown>;
     const id = typeof q.id === 'string' && q.id.trim() ? q.id.trim() : `${resolvedKind === 'magical-girl' ? 'MG' : 'Q'}-${index + 1}`;
     const question = typeof q.question === 'string' && q.question.trim() ? q.question.trim() : `问题 ${index + 1}`;
-    const required = typeof q.required === 'boolean' ? q.required : true;
+    const required = typeof q.required === 'boolean' ? q.required : defaultRequired;
     const maxLength = typeof q.maxLength === 'number' && Number.isFinite(q.maxLength)
       ? Math.max(0, Math.floor(q.maxLength))
       : q.maxLength === null
@@ -509,7 +518,8 @@ export const normalizeQuestionnaireDefinition = (
       displayIf,
       jump,
     };
-  });
+  })
+    : [];
 
   const questions = baseQuestions.map((question) => ({
     ...question,
@@ -521,6 +531,7 @@ export const normalizeQuestionnaireDefinition = (
     kind: resolvedKind,
     title: resolvedTitle,
     description: typeof record.description === 'string' ? record.description.trim() : undefined,
+    loreMarkdown,
     logoUrl: sanitizeQuestionnaireLogoUrl(record.logoUrl),
     version: typeof record.version === 'string' ? record.version.trim() : undefined,
     nativeAllowed: typeof record.nativeAllowed === 'boolean' ? record.nativeAllowed : options.nativeAllowed ?? null,

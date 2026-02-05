@@ -13,6 +13,8 @@ type Queue = 'strict' | 'free';
 type Sort = 'rating' | 'tech';
 type SortOrder = 'asc' | 'desc';
 
+const LEADERBOARD_TOP_RANK_LIMIT = 300;
+
 type LeaderboardItem = {
   rank: number;
   entityType: 'data_card' | 'preset';
@@ -95,6 +97,16 @@ export default async function handler(req: NextRequest) {
       const order: SortOrder = url.searchParams.get('order') === 'asc' ? 'asc' : 'desc';
       const limit = Math.max(1, Math.min(100, parseIntParam(url.searchParams.get('limit'), 50)));
       const offset = Math.max(0, parseIntParam(url.searchParams.get('offset'), 0));
+      if (offset >= LEADERBOARD_TOP_RANK_LIMIT) {
+        return new Response(JSON.stringify({ success: true, items: [] }), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=15',
+          },
+        });
+      }
+      const effectiveLimit = Math.max(1, Math.min(limit, LEADERBOARD_TOP_RANK_LIMIT - offset));
       const includePresets = url.searchParams.get('includePresets') === '0' ? 0 : 1;
       const tagIds = parseCommaList(url.searchParams.get('tagIds'));
       const excludeTagIds = parseCommaList(url.searchParams.get('excludeTagIds'));
@@ -241,7 +253,7 @@ export default async function handler(req: NextRequest) {
       LIMIT ? OFFSET ?;
     `;
 
-      const result = (await queryFromD1(sql, [...params, limit, offset])) as any;
+      const result = (await queryFromD1(sql, [...params, effectiveLimit, offset])) as any;
       const rows = (result?.result?.[0]?.results ?? []) as Array<{
         entityType: 'data_card' | 'preset';
         entityId: string;

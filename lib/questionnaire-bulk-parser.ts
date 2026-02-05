@@ -41,8 +41,23 @@ const stripListPrefix = (line: string) => {
   return result.trim();
 };
 
-const looksLikeQuestionLine = (line: string) =>
-  /^\s*(?:Q|问|问题)\s*(?:\d+)?\s*[:：]/i.test(line.trim());
+const matchQuestionLine = (line: string) => {
+  const trimmed = line.trim();
+  const match = trimmed.match(
+    /^(?:Q|问题|问)\s*(\d+)?\s*(?:[（(【\[][^）)】\]]*[）)】\]])?\s*[:：]/i
+  );
+  if (!match) return null;
+  const rawIndex = match[1]?.trim();
+  if (rawIndex) {
+    const parsedIndex = Number(rawIndex);
+    if (Number.isFinite(parsedIndex) && parsedIndex > 0) {
+      return { index: parsedIndex - 1 };
+    }
+  }
+  return { index: null as number | null };
+};
+
+const looksLikeQuestionLine = (line: string) => Boolean(matchQuestionLine(line));
 
 const matchAnswerLine = (line: string) => {
   const trimmed = line.trim();
@@ -148,29 +163,36 @@ const parseFromQaText = (raw: string): BulkParseResult | null => {
 
   const lines = normalizeNewlines(raw).split('\n');
   const entries: BulkParseEntry[] = [];
-  let current: string[] | null = null;
+  let currentLines: string[] | null = null;
+  let currentIndex: number | null = null;
+  let pendingQuestionIndex: number | null = null;
 
   const flush = () => {
-    if (!current) return;
-    const joined = current.join('\n').replace(/\s+$/g, '').trim();
-    entries.push({ index: entries.length, value: joined });
-    current = null;
+    if (!currentLines) return;
+    const joined = currentLines.join('\n').replace(/\s+$/g, '').trim();
+    entries.push({ index: currentIndex ?? entries.length, value: joined });
+    currentLines = null;
+    currentIndex = null;
   };
 
   for (const line of lines) {
+    const questionMatch = matchQuestionLine(line);
+    if (questionMatch) {
+      flush();
+      pendingQuestionIndex = questionMatch.index;
+      continue;
+    }
+
     const answerMatch = matchAnswerLine(line);
     if (answerMatch) {
       flush();
-      current = [answerMatch.value];
+      currentLines = [answerMatch.value];
+      currentIndex = pendingQuestionIndex ?? entries.length;
+      pendingQuestionIndex = null;
       continue;
     }
 
-    if (looksLikeQuestionLine(line)) {
-      flush();
-      continue;
-    }
-
-    if (current) current.push(line);
+    if (currentLines) currentLines.push(line);
   }
 
   flush();

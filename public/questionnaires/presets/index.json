@@ -16,11 +16,32 @@
       "path": "/questionnaires/presets/magical-girl-immersive-vn.json"
     },
     {
+      "id": "girl-band-taiban-war-1.1",
+      "kind": "magical-girl",
+      "title": "乐队少女问卷",
+      "description": "用于生成“少女乐队/对邦”世界线的角色档案：乐队经历、位置/担当、乐器与设备、曲风、技术、现实压力、关系性引信等。支持：流式通用角色卡（直接输出少女乐队设定）/ 非流式魔法少女 Schema（将少女乐队设定映射进字段）。",
+      "path": "/questionnaires/presets/girl-band-taiban-war-1.1.json"
+    },
+    {
       "id": "magical-girl-afterwork-world",
       "kind": "magical-girl",
       "title": "原作世界观向：魔法少女成长路线问卷",
-      "description": "面向原作世界观：城市/阵营/等阶/本相/魔装/术式/奇境/盛开/繁开等设定补全（可跳过）。",
+      "description": "面向原作世界观：城市/阵营/等阶/魔力属性/基础魔力技艺/本相/魔装/术式/奇境/盛开/繁开等设定补全（可跳过）。",
       "path": "/questionnaires/presets/magical-girl-afterwork-world.json"
+    },
+    {
+      "id": "magical-girl-afterwork-world-lore-core",
+      "kind": "magical-girl",
+      "title": "设定卡（原作）：世界结构与势力速查",
+      "description": "纯设定卡：三界结构、王庭五院、核心势力/组织等速查（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/magical-girl-afterwork-world-lore-core.json"
+    },
+    {
+      "id": "magical-girl-afterwork-world-lore-power-system",
+      "kind": "magical-girl",
+      "title": "设定卡（原作）：心之花体系与能力边界（留空规则）",
+      "description": "纯设定卡：心之花解锁顺序 + 魔力属性/基础技艺边界 + 越级禁令与留空规则（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/magical-girl-afterwork-world-lore-power-system.json"
     },
     {
       "id": "canshou-default",
@@ -36,6 +57,20 @@
       "title": "原作世界观向：残兽设定与进化路线问卷",
       "description": "面向原作世界观：核心概念/进化阶段/巢穴与规则/出现方式/社会影响等设定补全（可跳过）。",
       "path": "/questionnaires/presets/canshou-afterwork-world.json"
+    },
+    {
+      "id": "canshou-afterwork-world-lore-core",
+      "kind": "canshou",
+      "title": "设定卡（原作）：世界结构与势力速查",
+      "description": "纯设定卡：三界结构、王庭五院、核心势力/组织等速查（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/canshou-afterwork-world-lore-core.json"
+    },
+    {
+      "id": "canshou-afterwork-world-lore-evolution",
+      "kind": "canshou",
+      "title": "设定卡（原作）：残兽生态与进化速查",
+      "description": "纯设定卡：进化阶段、巢穴与规则、对抗常识等速查（默认不选，可选叠加）。",
+      "path": "/questionnaires/presets/canshou-afterwork-world-lore-evolution.json"
     },
     {
       "id": "magical-girl-full-profile",

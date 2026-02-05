@@ -4,7 +4,7 @@ import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { getFieldDisplayName } from '@/lib/fieldTranslations';
 import { formatDateTime } from '@/lib/constants';
 import { authStorage } from '@/lib/auth';
-import { getArenaApproxRankLabel, upsertArenaRankCacheFromMeta } from '@/lib/arena/rank-cache';
+import { upsertArenaRankCacheFromMeta } from '@/lib/arena/rank-cache';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { buildTitleDisplay } from '@/lib/text';
 
@@ -642,14 +642,6 @@ export default function DataCardDetailsModal({
                               {meta.ratings.strict.lastDelta != null ? (
                                 <span>，Δ{formatSignedDelta(meta.ratings.strict.lastDelta)}</span>
                               ) : null}
-                              {isCloudDataCard && Boolean(card.isPublic) ? (() => {
-                                const approx = getArenaApproxRankLabel({
-                                  queue: 'strict',
-                                  entityType: 'data_card',
-                                  entityId: resolvedCloudCardId,
-                                });
-                                return approx ? <span title={approx.title}>，公共排名{approx.label}</span> : null;
-                              })() : null}
                               ）
                             </span>
                           ) : (
@@ -669,14 +661,6 @@ export default function DataCardDetailsModal({
                               {meta.ratings.free.lastDelta != null ? (
                                 <span>，Δ{formatSignedDelta(meta.ratings.free.lastDelta)}</span>
                               ) : null}
-                              {isCloudDataCard && Boolean(card.isPublic) ? (() => {
-                                const approx = getArenaApproxRankLabel({
-                                  queue: 'free',
-                                  entityType: 'data_card',
-                                  entityId: resolvedCloudCardId,
-                                });
-                                return approx ? <span title={approx.title}>，公共排名{approx.label}</span> : null;
-                              })() : null}
                               ）
                             </span>
                           ) : (

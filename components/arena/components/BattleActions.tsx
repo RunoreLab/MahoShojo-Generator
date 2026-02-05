@@ -20,6 +20,14 @@ const normalizeArenaHistoryReadLimitForEstimate = (value: unknown): number | nul
   return 3;
 };
 
+const normalizeNarrativeHistoryReadLimitForEstimate = (value: unknown): number | null => {
+  if (value === null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(1, Math.floor(value));
+  }
+  return 10;
+};
+
 const trimArenaHistoryEntriesForEstimate = (
   entries: unknown[],
   otherParticipantNames: string[],
@@ -108,6 +116,12 @@ export function BattleActions() {
         : settings.readArenaHistory
           ? null
           : undefined;
+    const narrativeHistoryReadLimitForEstimate =
+      settings.readNarrativeHistory && !settings.isNarrativeHistoryUnlimited
+        ? normalizeNarrativeHistoryReadLimitForEstimate(settings.readNarrativeHistoryLimit)
+        : settings.readNarrativeHistory
+          ? null
+          : undefined;
 
     const combatantPayload = readableCombatants.map((combatant) => {
       const raw = combatant.data;
@@ -153,10 +167,20 @@ export function BattleActions() {
     });
 
     const narrativeHistoryPayload = settings.readNarrativeHistory
-      ? [...narrativeEntries]
+      ? (() => {
+        const sorted = [...narrativeEntries]
           .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
-          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-          .map((entry) => ({ title: entry.title, content: entry.content }))
+          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+
+        const limited =
+          narrativeHistoryReadLimitForEstimate === null
+            ? sorted
+            : typeof narrativeHistoryReadLimitForEstimate === 'number' && Number.isFinite(narrativeHistoryReadLimitForEstimate)
+              ? sorted.slice(Math.max(0, sorted.length - Math.max(1, Math.floor(narrativeHistoryReadLimitForEstimate))))
+              : sorted.slice(Math.max(0, sorted.length - 10));
+
+        return limited.map((entry) => ({ title: entry.title, content: entry.content }));
+      })()
       : undefined;
 
     const payload: Record<string, unknown> = {
@@ -169,6 +193,7 @@ export function BattleActions() {
       arenaHistoryReadLimit: arenaHistoryReadLimitForEstimate,
       readCurrentState: settings.readCurrentState,
       readNarrativeHistory: settings.readNarrativeHistory,
+      narrativeHistoryReadLimit: narrativeHistoryReadLimitForEstimate,
       narrativeHistory: narrativeHistoryPayload,
       combatants: combatantPayload,
       ...(battleMode === 'scenario' ? { scenario: scenario.content } : {}),

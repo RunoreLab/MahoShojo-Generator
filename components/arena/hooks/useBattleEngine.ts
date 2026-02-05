@@ -235,6 +235,7 @@ export const useBattleEngine = () => {
   const arenaFreeRankingEnabled = useBattleSelector((state) => state.arenaFreeRankingEnabled);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
+  const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
   const selectedLevel = useBattleSelector((state) => state.selectedLevel);
   const selectedLanguage = useBattleSelector((state) => state.selectedLanguage);
   const storyLength = useBattleSelector((state) => state.storyLength);
@@ -345,6 +346,10 @@ export const useBattleEngine = () => {
         JSON.stringify(freshCombatants.map((c) => c.data)),
         settings.userGuidance,
         JSON.stringify(freshCombatants.map((c) => (typeof (c as any).characterGuidance === 'string' ? (c as any).characterGuidance : ''))),
+        selectedQuestionnaires
+          .filter((selection) => selection.useLore !== false)
+          .map((selection) => selection.questionnaire.loreMarkdown ?? '')
+          .join('\n\n'),
         shouldUseScenario ? JSON.stringify(scenario.content) : '',
         shouldUseScenario && auxScenarios.length > 0 ? JSON.stringify(auxScenarios.map((s) => s.content)) : '',
       ];
@@ -377,16 +382,29 @@ export const useBattleEngine = () => {
 
       const numericLimit = settings.isArenaHistoryUnlimited ? null : Math.max(1, settings.readArenaHistoryLimit);
       const arenaHistoryReadLimit = settings.readArenaHistory ? numericLimit ?? null : undefined;
+      const narrativeHistoryReadLimit = settings.readNarrativeHistory
+        ? (settings.isNarrativeHistoryUnlimited ? null : Math.max(1, settings.readNarrativeHistoryLimit))
+        : undefined;
       const narrativeHistoryForRequest = settings.readNarrativeHistory
-        ? [...useNarrativeHistoryStore.getState().entries]
-          .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
-          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-          .map((entry) => ({
+        ? (() => {
+          const sorted = [...useNarrativeHistoryStore.getState().entries]
+            .filter((entry) => typeof entry?.content === 'string' && entry.content.trim())
+            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+
+          const limited =
+            narrativeHistoryReadLimit === null
+              ? sorted
+              : typeof narrativeHistoryReadLimit === 'number' && Number.isFinite(narrativeHistoryReadLimit)
+                ? sorted.slice(Math.max(0, sorted.length - Math.max(1, Math.floor(narrativeHistoryReadLimit))))
+                : sorted.slice(Math.max(0, sorted.length - 10));
+
+          return limited.map((entry) => ({
             title: entry.title,
             content: entry.content,
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,
-          }))
+          }));
+        })()
         : undefined;
 
       const requestBody: Record<string, unknown> = {
@@ -421,11 +439,29 @@ export const useBattleEngine = () => {
         writeCurrentState: settings.writeCurrentState,
         readNarrativeHistory: settings.readNarrativeHistory,
         writeNarrativeHistory: settings.writeNarrativeHistory,
+        narrativeHistoryReadLimit,
         narrativeHistory: narrativeHistoryForRequest,
         isDowngrade: false,
         adjudicationEvents,
         storyLength,
       };
+
+      if (selectedQuestionnaires.length > 0) {
+        requestBody.questionnaireSelections = selectedQuestionnaires.map((selection) => ({
+          source: selection.source,
+          kind: selection.questionnaire.kind,
+          presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
+          dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
+          useLore: selection.useLore === false ? false : undefined,
+        }));
+        requestBody.questionnaires = selectedQuestionnaires.map((selection) => ({
+          id: selection.questionnaire.id,
+          title: selection.questionnaire.title,
+          kind: selection.questionnaire.kind,
+          useLore: selection.useLore === false ? false : undefined,
+          loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
+        }));
+      }
 
       if (
         userProviderConfig &&
@@ -1238,6 +1274,7 @@ export const useBattleEngine = () => {
     combatants,
     scenario,
     auxScenarios,
+    selectedQuestionnaires,
     userProviderConfig,
     settings,
     selectedLevel,

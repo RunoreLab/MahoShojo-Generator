@@ -5,7 +5,7 @@
   "description": "用于残兽角色塑造的“MBTI 风格”行为/思维倾向问卷（非官方量表）。所有题目都可跳过；可选简版/完整版；也可直接填最后的 16 型结果。",
   "logoUrl": "/beast-title.svg",
   "version": "1.0",
-  "nativeAllowed": false,
+  "nativeAllowed": true,
   "questions": [
     {
       "id": "CSMBTI-01",

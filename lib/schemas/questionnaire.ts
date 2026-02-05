@@ -71,10 +71,23 @@ export const QuestionnaireSchema = z.object({
   kind: z.enum(['magical-girl', 'canshou']),
   title: z.string(),
   description: z.string().optional(),
+  loreMarkdown: z.string().optional(),
   logoUrl: z.string().optional(),
   version: z.string().optional(),
   nativeAllowed: z.boolean().optional(),
-  questions: z.array(QuestionnaireQuestionSchema).min(1),
-}).catchall(z.unknown());
+  questions: z.array(QuestionnaireQuestionSchema),
+})
+  .catchall(z.unknown())
+  .superRefine((data, ctx) => {
+    const hasQuestions = Array.isArray(data.questions) && data.questions.length > 0;
+    const hasLore = typeof data.loreMarkdown === 'string' && data.loreMarkdown.trim().length > 0;
+    if (!hasQuestions && !hasLore) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['questions'],
+        message: '问卷至少需要 1 个题目，或提供 loreMarkdown 设定内容',
+      });
+    }
+  });
 
 export type QuestionnaireData = z.infer<typeof QuestionnaireSchema>;

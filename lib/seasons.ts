@@ -44,40 +44,98 @@ export type SeasonsConfig = {
   seasons: SeasonMeta[];
 };
 
-export type SeasonArchiveLeaderboard = {
-  queue: 'strict' | 'free';
-  total: number;
-  top: SeasonArchiveItem[];
-  bottom: SeasonArchiveItem[];
-};
-
-export type SeasonArchiveItem = {
-  rank: number;
+export type SeasonArchiveEntityRef = {
   entityType: 'data_card' | 'preset';
   entityId: string;
-  displayName: string;
-  authorName?: string | null;
+};
+
+export type SeasonArchiveQueueSnapshot = {
   rating: number;
   games: number;
   wins: number;
   losses: number;
   draws: number;
-  tier: string;
+  ratingUpdatedAt: string | null;
+  /**
+   * v2 历史归档曾在队列快照里写入 `rank/tier`（用于直接渲染 Top/Bottom）。
+   * v3 起不再把“榜单视图”当作归档必需数据，这两个字段会在前端按当前口径计算。
+   */
+  rank?: number;
+  tier?: string;
+};
+
+export type SeasonArchiveEntity = {
+  entityType: 'data_card' | 'preset';
+  entityId: string;
+  displayName: string;
+  authorName?: string | null;
+  authorId?: number | null;
+  likeCount?: number | null;
+  favoriteCount?: number | null;
+  usageCount?: number | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  description?: string | null;
   techScore: number | null;
   techLevel: string | null;
   isNative: boolean | null;
   tagIds: string[];
+  queues: {
+    strict?: SeasonArchiveQueueSnapshot | null;
+    free?: SeasonArchiveQueueSnapshot | null;
+  };
 };
 
-export type SeasonArchive = {
-  schemaVersion: 1;
+export type SeasonArchiveLeaderboard = {
+  queue: 'strict' | 'free';
+  total: number;
+  top: SeasonArchiveEntityRef[];
+  bottom: SeasonArchiveEntityRef[];
+};
+
+export type SeasonArchiveSnapshotPolicy =
+  | {
+      mode: 'top_bottom';
+      top: number;
+      bottom: number;
+    }
+  | {
+      mode: 'full';
+    };
+
+export type SeasonArchiveV2 = {
+  schemaVersion: 2;
   generatedAt: string;
   season: Pick<SeasonMeta, 'id' | 'name' | 'startsAt' | 'endsAt' | 'description' | 'specialRules'>;
+  entities: SeasonArchiveEntity[];
   leaderboards: {
     strict: SeasonArchiveLeaderboard;
     free: SeasonArchiveLeaderboard;
   };
 };
+
+export type SeasonArchiveV3 = {
+  schemaVersion: 3;
+  generatedAt: string;
+  season: Pick<SeasonMeta, 'id' | 'name' | 'startsAt' | 'endsAt' | 'description' | 'specialRules'>;
+  /**
+   * 赛季结算快照策略（用于解释“为什么历史榜单不是全量”）。
+   */
+  snapshotPolicy: SeasonArchiveSnapshotPolicy;
+  /**
+   * 全榜可上榜实体总数（按 strict/free 分别统计），用于 UI 文案解释与比例感知。
+   */
+  totalEligible: {
+    strict: number;
+    free: number;
+  };
+  /**
+   * 实体快照（facts）：仅保存角色事实数据；榜单视图在前端按当前口径计算。
+   */
+  entities: SeasonArchiveEntity[];
+};
+
+export type SeasonArchive = SeasonArchiveV2 | SeasonArchiveV3;
 
 const normalizeSeasonBattleMode = (value: unknown): SeasonBattleMode | null => {
   const raw = typeof value === 'string' ? value.trim() : '';

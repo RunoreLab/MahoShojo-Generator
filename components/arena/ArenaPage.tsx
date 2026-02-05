@@ -23,6 +23,7 @@ import { ScenarioPanel } from './components/ScenarioPanel';
 import { BattleSettings } from './components/BattleSettings';
 import { AdjudicatorPanel } from './components/AdjudicatorPanel';
 import { StoryOptions } from './components/StoryOptions';
+import { QuestionnaireLorePanel } from './components/QuestionnaireLorePanel';
 import { BattleActions } from './components/BattleActions';
 import { BattleResult } from './components/BattleResult';
 import { BattleModeSwitcher } from './components/BattleModeSwitcher';
@@ -284,7 +285,15 @@ export function ArenaPage() {
               storageKey="arena.section.storyOptions.open"
               className="mt-4"
             >
-              <StoryOptions languages={languages} afterUserGuidance={<AdjudicatorPanel />} />
+              <StoryOptions
+                languages={languages}
+                afterUserGuidance={(
+                  <>
+                    <QuestionnaireLorePanel />
+                    <AdjudicatorPanel />
+                  </>
+                )}
+              />
             </CollapsibleSection>
 
             <CollapsibleSection

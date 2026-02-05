@@ -8,8 +8,10 @@ import { useQuery } from '@tanstack/react-query';
 import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
-import { getArenaApproxRankLabel, getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
-import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
+import { getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
+import { ARENA_QUEEN_MIN_SCEPTER_COUNT, applyQueenTier, computeArenaBaseTier, isArenaScepterTier } from '@/lib/arena/tier';
+import { formatDateTime } from '@/lib/constants';
+import type { SeasonArchive, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
 import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
 import { buildTitleDisplay } from '@/lib/text';
@@ -35,8 +37,53 @@ type RankingFilters = {
   maxTechScore: string;
 };
 
-type LeaderboardItem = SeasonArchiveItem & {
-  authorName?: string | null;
+type LeaderboardItem = {
+  rank: number;
+  entityType: 'data_card' | 'preset';
+  entityId: string;
+  displayName: string;
+  authorName: string | null;
+  rating: number;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  tier: string;
+  techScore: number | null;
+  techLevel: string | null;
+  isNative: boolean | null;
+  tagIds: string[];
+  ratingUpdatedAt?: string | null;
+};
+
+type HistoryBaseItem = Omit<LeaderboardItem, 'rank' | 'tier'>;
+
+const buildRowKey = (entityType: LeaderboardItem['entityType'], entityId: string): string => `${entityType}:${entityId}`;
+
+const compareQueenCandidate = (a: HistoryBaseItem, b: HistoryBaseItem): number => {
+  if (a.rating !== b.rating) return a.rating > b.rating ? -1 : 1;
+  if (a.games !== b.games) return a.games > b.games ? -1 : 1;
+
+  const aUpdated = typeof a.ratingUpdatedAt === 'string' ? a.ratingUpdatedAt : '';
+  const bUpdated = typeof b.ratingUpdatedAt === 'string' ? b.ratingUpdatedAt : '';
+  if (aUpdated !== bUpdated) return aUpdated > bUpdated ? -1 : 1;
+
+  if (a.entityType !== b.entityType) return a.entityType.localeCompare(b.entityType);
+  if (a.entityId !== b.entityId) return a.entityId.localeCompare(b.entityId);
+  return 0;
+};
+
+const deriveArchiveQueenKey = (items: HistoryBaseItem[]): string | null => {
+  const candidates = items.filter((item) => isArenaScepterTier(item.rating, item.games));
+  if (candidates.length < ARENA_QUEEN_MIN_SCEPTER_COUNT) return null;
+
+  let best = candidates[0];
+  for (let i = 1; i < candidates.length; i++) {
+    const next = candidates[i];
+    if (next && compareQueenCandidate(next, best) < 0) best = next;
+  }
+
+  return buildRowKey(best.entityType, best.entityId);
 };
 
 type Tag = {
@@ -84,6 +131,16 @@ const normalizeFilters = (filters: RankingFilters): RankingFilters => ({
 });
 
 const filtersKey = (filters: RankingFilters) => JSON.stringify(filters);
+
+const parseOptionalInt = (value: string): number | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.floor(parsed);
+};
+
+const LIVE_LEADERBOARD_TOP_RANK_LIMIT = 300;
 
 const formatBattleModeLabel = (mode: string): string => {
   const normalized = mode.trim();
@@ -152,8 +209,12 @@ export function RankingPage() {
   }, [seasons, selectedSeasonId]);
 
   const isHistoryMode = selectedSeason?.status === 'history';
-  const [historyQueue, setHistoryQueue] = useState<Queue>('strict');
-  const [historySection, setHistorySection] = useState<'top' | 'bottom'>('top');
+  const [useSeasonSnapshot, setUseSeasonSnapshot] = useState(false);
+  const isArchiveMode = isHistoryMode || useSeasonSnapshot;
+
+  useEffect(() => {
+    setUseSeasonSnapshot(false);
+  }, [selectedSeasonId]);
 
   const selectedSeasonScenarioPreset = useMemo(() => {
     const filename = selectedSeason?.specialRules?.scenarioPresetFilename;
@@ -164,7 +225,7 @@ export function RankingPage() {
   const archiveQuery = useQuery({
     queryKey: ['seasonArchive', selectedSeasonId],
     queryFn: () => fetchJson<SeasonArchive>(seasonArchiveUrl(selectedSeasonId)),
-    enabled: Boolean(selectedSeasonId) && isHistoryMode,
+    enabled: Boolean(selectedSeasonId) && isArchiveMode,
     staleTime: Infinity,
   });
 
@@ -310,19 +371,203 @@ export function RankingPage() {
       return fetchJson<{ success: boolean; items: LeaderboardItem[] }>(`/api/arena/leaderboard?${params.toString()}`);
     },
     staleTime: 10_000,
-    enabled: !isHistoryMode,
+    enabled: !isArchiveMode,
   });
 
-  const items = useMemo<LeaderboardItem[]>(() => {
-    if (!isHistoryMode) return leaderboardQuery.data?.items ?? [];
+  const historySnapshot = useMemo(() => {
+    if (!isArchiveMode) return null;
     const data = archiveQuery.data;
-    if (!data) return [];
-    const board = historyQueue === 'free' ? data.leaderboards.free : data.leaderboards.strict;
-    return historySection === 'bottom' ? board.bottom : board.top;
-  }, [archiveQuery.data, historyQueue, historySection, isHistoryMode, leaderboardQuery.data?.items]);
+    if (!data) return null;
+    const queue: Queue = appliedFilters.queue === 'free' ? 'free' : 'strict';
+    const entities = Array.isArray(data.entities) ? data.entities : [];
+
+    const items: HistoryBaseItem[] = [];
+    for (const entity of entities) {
+      if (!entity) continue;
+      const entityType = entity.entityType === 'preset' ? 'preset' : 'data_card';
+      const entityId = typeof entity.entityId === 'string' ? entity.entityId : '';
+      if (!entityId) continue;
+
+      const snapshot = queue === 'free' ? entity.queues?.free : entity.queues?.strict;
+      if (!snapshot) continue;
+
+      items.push({
+        entityType,
+        entityId,
+        displayName: entity.displayName ?? entityId,
+        authorName: typeof entity.authorName === 'string' ? entity.authorName : null,
+        rating: typeof snapshot.rating === 'number' && Number.isFinite(snapshot.rating) ? snapshot.rating : 0,
+        games: typeof snapshot.games === 'number' && Number.isFinite(snapshot.games) ? snapshot.games : 0,
+        wins: typeof snapshot.wins === 'number' && Number.isFinite(snapshot.wins) ? snapshot.wins : 0,
+        losses: typeof snapshot.losses === 'number' && Number.isFinite(snapshot.losses) ? snapshot.losses : 0,
+        draws: typeof snapshot.draws === 'number' && Number.isFinite(snapshot.draws) ? snapshot.draws : 0,
+        techScore: entity.techScore,
+        techLevel: entity.techLevel,
+        isNative: entity.isNative,
+        tagIds: Array.isArray(entity.tagIds) ? entity.tagIds : [],
+        ratingUpdatedAt: typeof snapshot.ratingUpdatedAt === 'string' ? snapshot.ratingUpdatedAt : null,
+      });
+    }
+
+    const queenKey = deriveArchiveQueenKey(items);
+
+    const totalEligible = (() => {
+      if (data.schemaVersion === 3) {
+        const raw = queue === 'free' ? data.totalEligible?.free : data.totalEligible?.strict;
+        return typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
+      }
+      const board = queue === 'free' ? data.leaderboards?.free : data.leaderboards?.strict;
+      const raw = board?.total;
+      return typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
+    })();
+
+    const { topCount, bottomCount, snapshotMode } = (() => {
+      if (data.schemaVersion === 2) {
+        const board = queue === 'free' ? data.leaderboards?.free : data.leaderboards?.strict;
+        return {
+          snapshotMode: 'top_bottom' as const,
+          topCount: Array.isArray(board?.top) ? board.top.length : 0,
+          bottomCount: Array.isArray(board?.bottom) ? board.bottom.length : 0,
+        };
+      }
+
+      const policy = data.snapshotPolicy;
+      if (policy?.mode === 'top_bottom') {
+        return {
+          snapshotMode: 'top_bottom' as const,
+          topCount: Math.min(Math.max(0, Math.floor(policy.top)), totalEligible),
+          bottomCount: Math.min(Math.max(0, Math.floor(policy.bottom)), totalEligible),
+        };
+      }
+
+      return { snapshotMode: 'full' as const, topCount: 0, bottomCount: 0 };
+    })();
+
+    return { totalEligible, topCount, bottomCount, items, queenKey, snapshotMode };
+  }, [appliedFilters.queue, archiveQuery.data, isArchiveMode]);
+
+  const historyFilteredSortedItems = useMemo((): LeaderboardItem[] => {
+    if (!isArchiveMode) return [];
+    const list = historySnapshot?.items ?? [];
+    const queenKey = historySnapshot?.queenKey ?? null;
+    const minRating = parseOptionalInt(appliedFilters.minRating);
+    const maxRating = parseOptionalInt(appliedFilters.maxRating);
+    const minGames = parseOptionalInt(appliedFilters.minGames);
+    const maxGames = parseOptionalInt(appliedFilters.maxGames);
+    const minTechScore = parseOptionalInt(appliedFilters.minTechScore);
+    const maxTechScore = parseOptionalInt(appliedFilters.maxTechScore);
+    const includeTags = new Set(appliedFilters.includeTagIds);
+    const excludeTags = new Set(appliedFilters.excludeTagIds);
+
+    const filtered = list.filter((item) => {
+      if (!appliedFilters.includePresets && item.entityType === 'preset') return false;
+
+      if (appliedFilters.isNative === '1') {
+        if (item.entityType !== 'data_card') return false;
+        if (item.isNative !== true) return false;
+      } else if (appliedFilters.isNative === '0') {
+        if (item.entityType !== 'data_card') return false;
+        if (item.isNative !== false) return false;
+      }
+
+      if (includeTags.size > 0 && item.entityType === 'data_card') {
+        const hasAny = item.tagIds.some((id) => includeTags.has(id));
+        if (!hasAny) return false;
+      }
+      if (includeTags.size > 0 && item.entityType === 'preset') {
+        // 与线上规则对齐：预设不受标签筛选影响
+      }
+
+      if (excludeTags.size > 0 && item.entityType === 'data_card') {
+        const hasExcluded = item.tagIds.some((id) => excludeTags.has(id));
+        if (hasExcluded) return false;
+      }
+
+      if (minRating != null && item.rating < minRating) return false;
+      if (maxRating != null && item.rating > maxRating) return false;
+      if (minGames != null && item.games < minGames) return false;
+      if (maxGames != null && item.games > maxGames) return false;
+
+      if (minTechScore != null || maxTechScore != null) {
+        if (item.entityType !== 'data_card') return false;
+        if (typeof item.techScore !== 'number' || !Number.isFinite(item.techScore)) return false;
+        if (minTechScore != null && item.techScore < minTechScore) return false;
+        if (maxTechScore != null && item.techScore > maxTechScore) return false;
+      }
+
+      return true;
+    });
+
+    const order = appliedFilters.order === 'asc' ? 'asc' : 'desc';
+    const sort = appliedFilters.sort === 'tech' ? 'tech' : 'rating';
+
+    const compareText = (a: string, b: string) => a.localeCompare(b, 'zh-CN');
+    const compareNumber = (a: number, b: number) => (a === b ? 0 : a < b ? -1 : 1);
+
+    filtered.sort((a, b) => {
+      if (sort === 'tech') {
+        const aNull = a.techScore == null;
+        const bNull = b.techScore == null;
+        if (aNull !== bNull) return aNull ? 1 : -1;
+
+        if (a.techScore != null && b.techScore != null) {
+          const tech = compareNumber(a.techScore, b.techScore);
+          if (tech !== 0) return order === 'asc' ? tech : -tech;
+        }
+
+        const rating = compareNumber(a.rating, b.rating);
+        if (rating !== 0) return -rating;
+        const games = compareNumber(a.games, b.games);
+        if (games !== 0) return -games;
+      } else {
+        const rating = compareNumber(a.rating, b.rating);
+        if (rating !== 0) return order === 'asc' ? rating : -rating;
+        const games = compareNumber(a.games, b.games);
+        if (games !== 0) return -games;
+      }
+
+      const aUpdated = typeof a.ratingUpdatedAt === 'string' ? a.ratingUpdatedAt : '';
+      const bUpdated = typeof b.ratingUpdatedAt === 'string' ? b.ratingUpdatedAt : '';
+      if (aUpdated !== bUpdated) return bUpdated.localeCompare(aUpdated);
+
+      if (a.entityType !== b.entityType) return compareText(a.entityType, b.entityType);
+      if (a.entityId !== b.entityId) return compareText(a.entityId, b.entityId);
+      return 0;
+    });
+
+    return filtered.map((item, index) => {
+      const baseTier = computeArenaBaseTier(item.rating, item.games);
+      const isQueen = queenKey === buildRowKey(item.entityType, item.entityId);
+      const tier = applyQueenTier(baseTier, isQueen);
+      return {
+        ...item,
+        rank: index + 1,
+        tier,
+      };
+    });
+  }, [appliedFilters, historySnapshot, isArchiveMode]);
+
+  const historyIndexByKey = useMemo(() => {
+    if (!isArchiveMode) return new Map<string, number>();
+    const map = new Map<string, number>();
+    historyFilteredSortedItems.forEach((item, index) => {
+      map.set(`${item.entityType}:${item.entityId}`, index);
+    });
+    return map;
+  }, [historyFilteredSortedItems, isArchiveMode]);
+
+  const historyItemsPage = useMemo(() => {
+    if (!isArchiveMode) return [] as LeaderboardItem[];
+    return historyFilteredSortedItems.slice(offset, offset + limit);
+  }, [historyFilteredSortedItems, isArchiveMode, limit, offset]);
+
+  const items = useMemo<LeaderboardItem[]>(() => {
+    if (!isArchiveMode) return leaderboardQuery.data?.items ?? [];
+    return historyItemsPage;
+  }, [historyItemsPage, isArchiveMode, leaderboardQuery.data?.items]);
 
   const isCanonicalPublicQuery = useMemo(() => {
-    if (isHistoryMode) return false;
+    if (isArchiveMode) return false;
     return isCanonicalPublicLeaderboardQuery({
       sort: appliedFilters.sort,
       order: appliedFilters.order,
@@ -337,10 +582,10 @@ export function RankingPage() {
       minTechScore: appliedFilters.minTechScore,
       maxTechScore: appliedFilters.maxTechScore,
     });
-  }, [appliedFilters, isHistoryMode]);
+  }, [appliedFilters, isArchiveMode]);
 
   useEffect(() => {
-    if (isHistoryMode) return;
+    if (isArchiveMode) return;
     const list = leaderboardQuery.data?.items;
     if (!Array.isArray(list) || list.length === 0) return;
     if (!isCanonicalPublicQuery) return;
@@ -350,13 +595,13 @@ export function RankingPage() {
       items: list,
       maxRankSeen: offset + list.length,
     });
-  }, [appliedFilters.queue, isCanonicalPublicQuery, isHistoryMode, leaderboardQuery.data?.items, offset]);
+  }, [appliedFilters.queue, isCanonicalPublicQuery, isArchiveMode, leaderboardQuery.data?.items, offset]);
 
   useEffect(() => {
     setSearchResults(null);
     setSearchError(null);
     setFocusRowKey(null);
-  }, [historyQueue, historySection, isHistoryMode, selectedSeasonId]);
+  }, [isArchiveMode, selectedSeasonId]);
 
   useEffect(() => {
     if (focusTimerRef.current != null) {
@@ -402,7 +647,7 @@ export function RankingPage() {
     if (item.entityType === 'preset') return '官方';
     const author = typeof item.authorName === 'string' ? item.authorName.trim() : '';
     if (author) return author;
-    return isHistoryMode ? '—' : '未知';
+    return isArchiveMode ? '—' : '未知';
   };
 
   const runSearch = async () => {
@@ -414,16 +659,16 @@ export function RankingPage() {
       return;
     }
 
-    if (isHistoryMode) {
+    if (isArchiveMode) {
       const qLower = q.toLowerCase();
-      const matched = items.filter((item) => {
+      const matched = historyFilteredSortedItems.filter((item) => {
         const author = formatAuthorLabel(item);
         return (
           item.displayName.toLowerCase().includes(qLower) ||
           author.toLowerCase().includes(qLower) ||
           item.entityId.toLowerCase().includes(qLower)
         );
-      });
+      }).slice(0, 10);
       setSearchResults(matched);
       return;
     }
@@ -469,16 +714,27 @@ export function RankingPage() {
     const rowKey = `${item.entityType}:${item.entityId}`;
     setFocusRowKey(rowKey);
 
-    if (isHistoryMode) return;
+    if (isArchiveMode) {
+      const index = historyIndexByKey.get(rowKey);
+      if (typeof index === 'number' && Number.isFinite(index) && index >= 0) {
+        const targetOffset = Math.floor(index / limit) * limit;
+        setOffset(targetOffset);
+      }
+      return;
+    }
 
     const rankFromItem = typeof item.rank === 'number' && Number.isFinite(item.rank) ? Math.floor(item.rank) : 0;
-    const cachedRank = rankFromItem > 0 || !isCanonicalPublicQuery
+    const cachedRankRaw = rankFromItem > 0 || !isCanonicalPublicQuery
       ? null
       : getArenaCachedRank({
         queue: appliedFilters.queue,
         entityType: item.entityType,
         entityId: item.entityId,
       });
+    const cachedRank =
+      typeof cachedRankRaw === 'number' && Number.isFinite(cachedRankRaw) && cachedRankRaw > 0 && cachedRankRaw <= 300
+        ? Math.floor(cachedRankRaw)
+        : null;
     const rank = rankFromItem > 0 ? rankFromItem : cachedRank ?? 0;
 
     if (rank > 0) {
@@ -498,12 +754,15 @@ export function RankingPage() {
     });
   };
 
-  const listIsLoading = isHistoryMode ? archiveQuery.isLoading : leaderboardQuery.isLoading;
-  const listIsError = isHistoryMode ? archiveQuery.isError : leaderboardQuery.isError;
-  const listError = isHistoryMode ? archiveQuery.error : leaderboardQuery.error;
+  const listIsLoading = isArchiveMode ? archiveQuery.isLoading : leaderboardQuery.isLoading;
+  const listIsError = isArchiveMode ? archiveQuery.isError : leaderboardQuery.isError;
+  const listError = isArchiveMode ? archiveQuery.error : leaderboardQuery.error;
 
-  const canGoPrev = !isHistoryMode && offset > 0;
-  const canGoNext = !isHistoryMode && items.length >= limit;
+  const historyTotal = isArchiveMode ? historyFilteredSortedItems.length : 0;
+  const canGoPrev = offset > 0;
+  const canGoNext = isArchiveMode
+    ? offset + limit < historyTotal
+    : items.length >= limit && offset + limit < LIVE_LEADERBOARD_TOP_RANK_LIMIT;
   const pageIndex = Math.floor(offset / limit) + 1;
 
   const appliedSummary = useMemo(() => {
@@ -524,11 +783,34 @@ export function RankingPage() {
 
   const seasonSummary = useMemo(() => {
     if (!selectedSeason) return '';
-    if (!isHistoryMode) return appliedSummary;
-    const queueLabel = historyQueue === 'strict' ? '严格天梯' : '自由天梯';
-    const sectionLabel = historySection === 'top' ? 'Top 50' : 'Bottom 20';
-    return `${queueLabel} · ${sectionLabel} · 历史赛季快照`;
-  }, [appliedSummary, historyQueue, historySection, isHistoryMode, selectedSeason]);
+    if (!isArchiveMode) return appliedSummary;
+    const topCount = historySnapshot?.topCount ?? 0;
+    const bottomCount = historySnapshot?.bottomCount ?? 0;
+    const snapshotCount = historySnapshot?.items.length ?? 0;
+    const totalEligible = historySnapshot?.totalEligible ?? 0;
+    const snapshotLabel = historySnapshot?.snapshotMode === 'full'
+      ? '全量快照'
+      : topCount > 0 || bottomCount > 0 ? `Top ${topCount} + Bottom ${bottomCount}` : '快照';
+    const totalLabel = totalEligible > 0 ? `全榜 ${totalEligible}` : '全榜未知';
+    const prefix = isHistoryMode ? '历史赛季快照' : '当前赛季快照（测试）';
+    return `${appliedSummary} · ${prefix}：${snapshotLabel}（已去重 ${snapshotCount} 条，${totalLabel}）`;
+  }, [appliedSummary, historySnapshot, isArchiveMode, isHistoryMode, selectedSeason]);
+
+  const archiveGeneratedAtLabel = useMemo(() => {
+    if (!isArchiveMode) return null;
+    const generatedAt = typeof archiveQuery.data?.generatedAt === 'string' ? archiveQuery.data.generatedAt.trim() : '';
+    if (generatedAt) return formatDateTime(generatedAt);
+    if (archiveQuery.isLoading) return '加载中...';
+    if (archiveQuery.isError) return '加载失败';
+    return '未知';
+  }, [archiveQuery.data?.generatedAt, archiveQuery.isError, archiveQuery.isLoading, isArchiveMode]);
+
+  const seasonArchivedAtLabel = useMemo(() => {
+    if (!isHistoryMode) return null;
+    const archivedAt = typeof selectedSeason?.archivedAt === 'string' ? selectedSeason.archivedAt.trim() : '';
+    if (!archivedAt) return null;
+    return formatDateTime(archivedAt);
+  }, [isHistoryMode, selectedSeason?.archivedAt]);
 
   return (
     <>
@@ -561,6 +843,27 @@ export function RankingPage() {
                       </option>
                     ))}
                   </select>
+                  {selectedSeason?.status === 'current' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !useSeasonSnapshot;
+                        setUseSeasonSnapshot(next);
+                        setOffset(0);
+                        setSearchResults(null);
+                        setSearchError(null);
+                        setFocusRowKey(null);
+                      }}
+                      className={`rounded-lg border px-3 py-1 text-sm transition-colors ${
+                        useSeasonSnapshot
+                          ? 'border-purple-200 bg-purple-50 text-purple-800 hover:bg-purple-100'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                      title="用于测试：不改变赛季状态的前提下，查看同赛季的归档快照文件（archive_<season_id>.json）。"
+                    >
+                      {useSeasonSnapshot ? '查看实时榜单' : '查看快照（测试）'}
+                    </button>
+                  ) : null}
                   <span className="text-sm text-gray-500">每页 {limit} 条</span>
                 </div>
                 <div className="mt-1 text-sm text-gray-600 line-clamp-2">{seasonSummary || appliedSummary}</div>
@@ -583,8 +886,29 @@ export function RankingPage() {
                       >
                         {selectedSeason.status === 'current' ? '当前赛季' : '历史赛季'}
                       </span>
+                      {useSeasonSnapshot ? (
+                        <span className="rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-800 ring-1 ring-purple-200">
+                          快照测试
+                        </span>
+                      ) : null}
                     </div>
+                    {isArchiveMode ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-500">
+                        <span>快照生成：{archiveGeneratedAtLabel}</span>
+                        {seasonArchivedAtLabel ? <span>归档标记：{seasonArchivedAtLabel}</span> : null}
+                      </div>
+                    ) : null}
                     <div className="mt-1 text-xs text-gray-500">{selectedSeason.description}</div>
+                    {isArchiveMode ? (
+                      <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-900">
+                        <div>
+                          提示：当前展示的是{isHistoryMode ? '历史赛季' : '当前赛季'}快照，段位/排序按当前版本规则重算，可能与结算时略有差异。
+                        </div>
+                        <div className="mt-1">
+                          提示：点击条目后的“角色详情”读取的是当前公开卡内容，可能与快照不一致，或因下架/转私有而无法加载。
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="mt-2 border-t border-gray-200/70 pt-2 text-xs text-gray-600">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-gray-800">特殊规则</span>
@@ -652,8 +976,8 @@ export function RankingPage() {
             </header>
 
             <div className="px-6 py-6 sm:px-8 sm:py-8">
-              <div className={isHistoryMode ? 'grid gap-6' : 'grid gap-6 lg:grid-cols-[360px_1fr]'}>
-                {!isHistoryMode ? <aside className="lg:sticky lg:top-6 lg:self-start">
+              <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
+                <aside className="lg:sticky lg:top-6 lg:self-start">
                   <div className="rounded-xl border border-gray-200 bg-white p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-sm font-semibold text-gray-900">筛选</div>
@@ -981,72 +1305,39 @@ export function RankingPage() {
                       </button>
                     </div>
                   </div>
-                </aside> : null}
+                </aside>
 
                 <main className="min-w-0">
                   <div className="rounded-xl border border-gray-200 bg-white">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
                       <div className="text-sm text-gray-700">
-                        {listIsLoading ? '正在加载排行榜...' : listIsError ? '加载失败' : isHistoryMode ? (historySection === 'top' ? 'Top 50' : 'Bottom 20') : `第 ${pageIndex} 页`}
-                        {!isHistoryMode && leaderboardQuery.isFetching && !leaderboardQuery.isLoading ? (
+                        {listIsLoading
+                          ? (isArchiveMode ? '正在加载赛季快照...' : '正在加载排行榜...')
+                          : listIsError
+                            ? '加载失败'
+                            : `第 ${pageIndex} 页${isArchiveMode ? ' · 快照' : ' · Top300'}`}
+                        {!isArchiveMode && leaderboardQuery.isFetching && !leaderboardQuery.isLoading ? (
                           <span className="ml-2 text-xs text-gray-500">更新中…</span>
                         ) : null}
                       </div>
-                      {isHistoryMode ? (
-                        <div className="flex flex-wrap items-center gap-2 text-sm">
-                          <div className="flex overflow-hidden rounded-lg border border-gray-200 bg-white">
-                            <button
-                              type="button"
-                              onClick={() => setHistoryQueue('strict')}
-                              className={`px-3 py-1.5 text-sm transition-colors ${historyQueue === 'strict' ? 'bg-purple-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                            >
-                              严格
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setHistoryQueue('free')}
-                              className={`px-3 py-1.5 text-sm transition-colors ${historyQueue === 'free' ? 'bg-purple-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                            >
-                              自由
-                            </button>
-                          </div>
-                          <div className="flex overflow-hidden rounded-lg border border-gray-200 bg-white">
-                            <button
-                              type="button"
-                              onClick={() => setHistorySection('top')}
-                              className={`px-3 py-1.5 text-sm transition-colors ${historySection === 'top' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                            >
-                              Top 50
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setHistorySection('bottom')}
-                              className={`px-3 py-1.5 text-sm transition-colors ${historySection === 'bottom' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                            >
-                              Bottom 20
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 text-sm">
-                          <button
-                            type="button"
-                            onClick={() => setOffset((v) => Math.max(0, v - limit))}
-                            disabled={!canGoPrev}
-                            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
-                          >
-                            上一页
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setOffset((v) => v + limit)}
-                            disabled={!canGoNext}
-                            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
-                          >
-                            下一页
-                          </button>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2 text-sm">
+                        <button
+                          type="button"
+                          onClick={() => setOffset((v) => Math.max(0, v - limit))}
+                          disabled={!canGoPrev}
+                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
+                        >
+                          上一页
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setOffset((v) => v + limit)}
+                          disabled={!canGoNext}
+                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
+                        >
+                          下一页
+                        </button>
+                      </div>
                     </div>
 
                     <div className="border-b border-gray-100 px-4 py-3">
@@ -1067,9 +1358,9 @@ export function RankingPage() {
                               setSearchError(null);
                               setFocusRowKey(null);
                             }
-                          }}
+                        }}
                           className="input-field h-9 w-full sm:w-[320px]"
-                          placeholder={isHistoryMode ? '搜索角色名 / 作者 / ID（仅当前列表）' : '搜索角色名 / 作者 / ID'}
+                          placeholder="搜索角色名 / 作者 / ID"
                           aria-label="排行榜搜索"
                         />
                         <button
@@ -1092,9 +1383,9 @@ export function RankingPage() {
                           清空
                         </button>
                         <span className="text-xs text-gray-500">
-                          {isHistoryMode
-                            ? '提示：历史赛季榜单只会在当前 Top/Bottom 列表内搜索。'
-                            : '提示：搜索结果默认不计算全榜名次；若本地已缓存名次，可点击尝试跳转，否则将打开详情。'}
+                          {isArchiveMode
+                            ? '提示：快照模式仅在已归档范围内搜索与筛选。'
+                            : '提示：搜索结果不提供精确名次（仅 Top300 在排行榜页展示名次）；若本地缓存过 Top300 名次，可点击跳转，否则将打开详情。'}
                         </span>
                       </form>
 
@@ -1112,12 +1403,17 @@ export function RankingPage() {
                             <div className="grid gap-2">
                               {searchResults.map((item) => {
                                 const author = formatAuthorLabel(item);
-                                const approx = !isHistoryMode && isCanonicalPublicQuery
-                                  ? getArenaApproxRankLabel({ queue: appliedFilters.queue, entityType: item.entityType, entityId: item.entityId })
+                                const cachedRankRaw = !isArchiveMode && isCanonicalPublicQuery
+                                  ? getArenaCachedRank({ queue: appliedFilters.queue, entityType: item.entityType, entityId: item.entityId })
                                   : null;
-                                const rankTitle = approx?.title ?? (item.rank > 0 ? `全榜 #${item.rank}` : '名次未计算');
-                                const rankLabel = item.rank > 0 ? `#${item.rank}` : approx?.label ?? '#—';
-                                const canJump = item.rank > 0 || Boolean(approx);
+                                const cachedRank =
+                                  typeof cachedRankRaw === 'number' && Number.isFinite(cachedRankRaw) && cachedRankRaw > 0 && cachedRankRaw <= 300
+                                    ? Math.floor(cachedRankRaw)
+                                    : null;
+                                const rank = item.rank > 0 ? item.rank : cachedRank ?? 0;
+                                const rankTitle = rank > 0 ? `Top300 #${rank}` : '名次仅在 Top300 展示';
+                                const rankLabel = rank > 0 ? `#${rank}` : '#—';
+                                const canJump = rank > 0;
                                 const { display: displayName, full: fullName } = buildTitleDisplay(item.displayName || '未命名');
                                 return (
                                   <button
@@ -1155,15 +1451,16 @@ export function RankingPage() {
                         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
                           <div className="font-medium">排行榜加载失败</div>
                           <div className="mt-1 break-words text-xs text-red-700">{String(listError)}</div>
-                          {!isHistoryMode ? (
-                            <button
-                              type="button"
-                              onClick={() => void leaderboardQuery.refetch()}
-                              className="mt-3 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700"
-                            >
-                              重试
-                            </button>
-                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isArchiveMode) void archiveQuery.refetch();
+                              else void leaderboardQuery.refetch();
+                            }}
+                            className="mt-3 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700"
+                          >
+                            重试
+                          </button>
                         </div>
                       </div>
                     ) : (
@@ -1186,7 +1483,7 @@ export function RankingPage() {
                             {listIsLoading ? (
                               <tr>
                                 <td colSpan={9} className="px-4 py-10 text-center text-gray-500">
-                                  {isHistoryMode ? '正在加载赛季快照...' : '正在加载排行榜...'}
+                                  {isArchiveMode ? '正在加载赛季快照...' : '正在加载排行榜...'}
                                 </td>
                               </tr>
                             ) : items.length === 0 ? (
@@ -1227,7 +1524,7 @@ export function RankingPage() {
 	                                        <button
 	                                          type="button"
 	                                          onClick={() => {
-	                                            const detailsNotice = `当前榜单：#${item.rank} · 段位 ${item.tier} · 分 ${item.rating} · 局 ${item.games} · W/L/D ${item.wins}/${item.losses}/${item.draws}${winRate == null ? '' : ` · 胜率 ${winRate}%`}`;
+	                                            const detailsNotice = `${isArchiveMode ? (isHistoryMode ? '历史快照' : '快照测试') : '当前榜单'}：#${item.rank} · 段位 ${item.tier} · 分 ${item.rating} · 局 ${item.games} · W/L/D ${item.wins}/${item.losses}/${item.draws}${winRate == null ? '' : ` · 胜率 ${winRate}%`}`;
 	                                            setDetailsEntity({
 	                                              entityType: item.entityType,
 	                                              entityId: item.entityId,
@@ -1305,36 +1602,40 @@ export function RankingPage() {
                       </div>
                     )}
 
-                    {isHistoryMode ? (
-                      <div className="border-t border-gray-100 px-4 py-3 text-xs text-gray-500">
-                        历史赛季仅展示结算快照（Top 50 / Bottom 20），不支持筛选与分页。
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3 text-sm">
+                      <div className="text-gray-500">
+                        当前：第 {pageIndex} 页 · 偏移 {offset}（每页 {limit}{isArchiveMode ? '' : ' · Top300'}）
+                        {hasPendingChanges ? <span className="ml-2 text-amber-700">（有未应用更改）</span> : null}
+                        {isArchiveMode ? (
+                          <div className="mt-1 text-xs text-gray-500">
+                            {isHistoryMode ? '历史赛季结算快照' : '当前赛季快照（测试）'}：
+                            {historySnapshot?.snapshotMode === 'full'
+                              ? '全量快照'
+                              : `Top ${historySnapshot?.topCount ?? 0} + Bottom ${historySnapshot?.bottomCount ?? 0}`}
+                            （已去重 {historySnapshot?.items.length ?? 0} 条 / 全榜 {historySnapshot?.totalEligible ? historySnapshot.totalEligible : '—'}）。
+                            仅在快照范围内支持筛选/搜索/排序/分页。
+                          </div>
+                        ) : null}
                       </div>
-                    ) : (
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3 text-sm">
-                        <div className="text-gray-500">
-                          当前：第 {pageIndex} 页 · 偏移 {offset}（每页 {limit}）
-                          {hasPendingChanges ? <span className="ml-2 text-amber-700">（有未应用更改）</span> : null}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setOffset((v) => Math.max(0, v - limit))}
-                            disabled={!canGoPrev}
-                            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
-                          >
-                            上一页
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setOffset((v) => v + limit)}
-                            disabled={!canGoNext}
-                            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
-                          >
-                            下一页
-                          </button>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setOffset((v) => Math.max(0, v - limit))}
+                          disabled={!canGoPrev}
+                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
+                        >
+                          上一页
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setOffset((v) => v + limit)}
+                          disabled={!canGoNext}
+                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 disabled:hover:bg-white"
+                        >
+                          下一页
+                        </button>
                       </div>
-                    )}
+                    </div>
                   </div>
                 </main>
               </div>

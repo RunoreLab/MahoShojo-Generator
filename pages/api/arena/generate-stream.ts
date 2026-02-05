@@ -54,6 +54,50 @@ export const config = {
     runtime: 'edge',
 };
 
+type RequestQuestionnaire = {
+    id: string;
+    title: string;
+    kind: 'magical-girl' | 'canshou';
+    loreMarkdown?: string;
+};
+
+const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .map((item) => {
+            if (!item || typeof item !== 'object') return null;
+            const record = item as Record<string, unknown>;
+            const kind = record.kind === 'magical-girl' || record.kind === 'canshou' ? record.kind : null;
+            if (!kind) return null;
+            const id = typeof record.id === 'string' && record.id.trim() ? record.id.trim() : '';
+            const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim() : '';
+            if (!id || !title) return null;
+            const useLore = typeof record.useLore === 'boolean' ? record.useLore : true;
+            const loreMarkdown = useLore && typeof record.loreMarkdown === 'string' && record.loreMarkdown.trim()
+                ? record.loreMarkdown
+                : undefined;
+            const payload: RequestQuestionnaire = {
+                id,
+                title,
+                kind,
+                ...(loreMarkdown ? { loreMarkdown } : {}),
+            };
+            return payload;
+        })
+        .filter((item): item is RequestQuestionnaire => Boolean(item));
+};
+
+const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): string => {
+    const blocks = questionnaires
+        .map((questionnaire) => ({
+            title: questionnaire.title,
+            lore: questionnaire.loreMarkdown?.trim() ?? '',
+        }))
+        .filter((item) => Boolean(item.lore))
+        .map((item) => `【设定来源：${item.title}】\n${item.lore}`);
+    return blocks.length > 0 ? blocks.join('\n\n') : '';
+};
+
 async function handler(req: NextRequest): Promise<Response> {
     if (req.method !== 'POST') {
         return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
@@ -110,6 +154,7 @@ async function handler(req: NextRequest): Promise<Response> {
             writeCurrentState,
             readNarrativeHistory,
             narrativeHistory,
+            narrativeHistoryReadLimit,
             adjudicationEvents,
             storyLength,
             customProvider: customProviderPayload,
@@ -119,9 +164,12 @@ async function handler(req: NextRequest): Promise<Response> {
 	            scenarioSourceDataCardUpdatedAt,
               pvpContext,
               forceStreamMeta,
+              questionnaires: rawQuestionnaires,
 	        } = body;
 
             const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
+            const loreText = buildQuestionnaireLoreText(normalizeQuestionnaires(rawQuestionnaires)).trim();
+            const hasQuestionnaireLore = Boolean(loreText);
 
 	          const normalizedAuxScenarios = Array.isArray(auxScenarios)
 	              ? auxScenarios.filter((item) => item && typeof item === 'object')
@@ -165,6 +213,15 @@ async function handler(req: NextRequest): Promise<Response> {
         const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
         const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
         const resolvedReadNarrativeHistory = typeof readNarrativeHistory === 'boolean' ? readNarrativeHistory : false;
+        const resolvedNarrativeHistoryReadLimit = resolvedReadNarrativeHistory
+            ? (() => {
+                if (narrativeHistoryReadLimit === null) return Infinity;
+                if (typeof narrativeHistoryReadLimit === 'number' && Number.isFinite(narrativeHistoryReadLimit)) {
+                    return Math.max(1, Math.floor(narrativeHistoryReadLimit));
+                }
+                return 10;
+            })()
+            : 0;
         const resolvedHistoryReadLimit = resolvedReadArenaHistory
             ? (() => {
                 if (arenaHistoryReadLimit === null) return Infinity;
@@ -201,7 +258,18 @@ async function handler(req: NextRequest): Promise<Response> {
         };
 
         const narrativeHistoryForPrompt: NarrativeHistoryEntry[] | null = resolvedReadNarrativeHistory
-            ? normalizeNarrativeHistoryForPrompt(narrativeHistory)
+            ? (() => {
+                const normalized = normalizeNarrativeHistoryForPrompt(narrativeHistory);
+                if (normalized.length === 0) return [];
+                const parseTime = (entry: NarrativeHistoryEntry): number => {
+                    const t = Date.parse(entry.createdAt || entry.updatedAt);
+                    return Number.isFinite(t) ? t : 0;
+                };
+                normalized.sort((a, b) => parseTime(a) - parseTime(b));
+                if (resolvedNarrativeHistoryReadLimit === Infinity) return normalized;
+                const sliceLimit = Math.max(1, Math.floor(resolvedNarrativeHistoryReadLimit));
+                return normalized.slice(Math.max(0, normalized.length - sliceLimit));
+            })()
             : null;
         const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 
@@ -318,6 +386,13 @@ async function handler(req: NextRequest): Promise<Response> {
                 inputsToCheck.push({ type: 'userGuidance', content: narrativeText, isNative: false });
             }
         }
+        if (hasQuestionnaireLore) {
+            inputsToCheck.push({
+                type: 'userGuidance',
+                content: `【参考设定（问卷/设定卡 Lore）】\n${loreText}`,
+                isNative: false,
+            });
+        }
         if (scenario) {
             const isNative = await verifySignature(scenario);
             inputsToCheck.push({ type: 'scenario', content: JSON.stringify(scenario), isNative });
@@ -404,6 +479,11 @@ async function handler(req: NextRequest): Promise<Response> {
 		                                rejectedBy: 'sensitive-input',
 		                                arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
 		                                readNarrativeHistory: resolvedReadNarrativeHistory,
+                                        narrativeHistoryReadLimit: resolvedReadNarrativeHistory
+                                            ? (Number.isFinite(resolvedNarrativeHistoryReadLimit)
+                                                ? (resolvedNarrativeHistoryReadLimit === Infinity ? null : resolvedNarrativeHistoryReadLimit)
+                                                : null)
+                                            : null,
 		                                narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
 		                            }),
 		                        });
@@ -473,6 +553,7 @@ async function handler(req: NextRequest): Promise<Response> {
             adjudicationResults,
             storyLength,
             narrativeHistoryForPrompt,
+            loreText,
         )({ combatants });
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
@@ -482,6 +563,7 @@ async function handler(req: NextRequest): Promise<Response> {
             && String(language ?? '').trim() === 'zh-CN'
             && !String(selectedLevel ?? '').trim()
             && !String(userGuidance ?? '').trim()
+            && !hasQuestionnaireLore
             && resolvedReadArenaHistory === false
             && resolvedReadCurrentState === false
             && resolvedReadNarrativeHistory === false
@@ -706,6 +788,11 @@ async function handler(req: NextRequest): Promise<Response> {
                             auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                        resolvedModelOverride: usedModelOverride ?? null,
 	                        readNarrativeHistory: resolvedReadNarrativeHistory,
+                            narrativeHistoryReadLimit: resolvedReadNarrativeHistory
+                                ? (Number.isFinite(resolvedNarrativeHistoryReadLimit)
+                                    ? (resolvedNarrativeHistoryReadLimit === Infinity ? null : resolvedNarrativeHistoryReadLimit)
+                                    : null)
+                                : null,
 	                        narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
 	                    }),
 	                });
@@ -832,7 +919,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                controller.enqueue(encodeEvent('debug', payload));
 	            };
 
-		            const META_GUARD_CHARS = 2048;
+		            const META_GUARD_CHARS = 256;
 		            const META_FALLBACK_TAIL_CHARS = 120_000;
 
             const [clientUpstream, r2Body] = originalBody.tee();
@@ -1247,6 +1334,15 @@ async function handler(req: NextRequest): Promise<Response> {
 	        log.error('生成战斗故事时发生顶层错误', { error });
 	        const errorMessage = error instanceof Error ? error.message : '未知错误';
 
+	        const url = new URL(req.url);
+	        const wantsSse =
+	            url.searchParams.get('format') === 'sse' || (req.headers.get('accept') || '').includes('text/event-stream');
+	        const debugSse =
+	            url.searchParams.get('debug') === '1' ||
+	            url.searchParams.get('debug') === 'true' ||
+	            url.searchParams.get('debugSse') === '1' ||
+	            url.searchParams.get('debugSse') === 'true';
+
 	        const endedAtMs = Date.now();
 	        const endedAtIso = new Date(endedAtMs).toISOString();
 	        const durationMs = Math.max(0, endedAtMs - startedAtMs);
@@ -1297,6 +1393,48 @@ async function handler(req: NextRequest): Promise<Response> {
 	            executionContext.waitUntil(recordPromise);
 	        } else {
 	            await recordPromise;
+	        }
+
+	        if (wantsSse) {
+	            const encoder = new TextEncoder();
+	            const encodeEvent = (event: string, payload: unknown) => {
+	                let data: string;
+	                try {
+	                    data = JSON.stringify(payload ?? null);
+	                } catch (jsonError) {
+	                    data = JSON.stringify({
+	                        ok: false,
+	                        error: jsonError instanceof Error ? jsonError.message : String(jsonError ?? 'json stringify failed'),
+	                    });
+	                }
+	                return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
+	            };
+
+	            const sseHeaders = new Headers();
+	            sseHeaders.set('Content-Type', 'text/event-stream; charset=utf-8');
+	            sseHeaders.set('Cache-Control', 'no-cache, no-transform');
+
+	            const body = new ReadableStream<Uint8Array>({
+	                start(controller) {
+	                    if (debugSse) {
+	                        controller.enqueue(
+	                            encodeEvent('debug', {
+	                                phase: 'top_level_error',
+	                                error: errorMessage,
+	                                ...(error instanceof Error && typeof error.name === 'string' ? { errorName: error.name } : {}),
+	                            })
+	                        );
+	                    }
+	                    controller.enqueue(encodeEvent('error', { ok: false, error: errorMessage }));
+	                    controller.enqueue(encodeEvent('done', { ok: false }));
+	                    controller.close();
+	                },
+	            });
+
+	            return new Response(body, {
+	                status: 200,
+	                headers: sseHeaders,
+	            });
 	        }
 
 	        return new Response(JSON.stringify({ error: '生成失败，请稍后重试', message: errorMessage }), {

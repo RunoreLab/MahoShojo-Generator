@@ -4,6 +4,7 @@
   "title": "残兽百题大问卷（深度版）",
   "description": "基于百题大问卷改编，强化残兽的核心概念、行为与对抗设定。",
   "logoUrl": "/beast-title.svg",
+  "defaultRequired": false,
   "questions": [
     {
       "id": "CSQ-001",

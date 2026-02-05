@@ -14,6 +14,7 @@ import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import QuestionNavigator from '../components/QuestionNavigator';
 import BattleDataModal from '@/components/BattleDataModal';
+import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import {
   buildQuestionKey,
   buildQuestionnaireFlow,
@@ -54,6 +55,7 @@ type QuestionnaireSelection = {
   dataCardName?: string;
   dataCardAuthor?: string;
   selectionId?: string;
+  useLore?: boolean;
 };
 
 type QuestionnaireContextItem = {
@@ -222,6 +224,16 @@ const DetailsPage: React.FC = () => {
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [showQuestionnairePicker, setShowQuestionnairePicker] = useState(false);
   const [questionnairePickerError, setQuestionnairePickerError] = useState<string | null>(null);
+  const [questionnaireDetailsCard, setQuestionnaireDetailsCard] = useState<{
+    id: string;
+    name: string;
+    description: string;
+    type: 'questionnaire';
+    data: string;
+    isPublic: boolean;
+    author?: string;
+  } | null>(null);
+  const [showQuestionnaireDetailsModal, setShowQuestionnaireDetailsModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -354,12 +366,44 @@ const DetailsPage: React.FC = () => {
 
   const isQuestionnaireNativeAllowed = useMemo(() => {
     if (selectedQuestionnaires.length === 0) return false;
-    return selectedQuestionnaires.every((selection) => selection.questionnaire.nativeAllowed === true);
+    return selectedQuestionnaires.every((selection) => {
+      const hasQuestions = selection.questionnaire.questions.length > 0;
+      const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
+      const usesLore = hasLore && selection.useLore !== false;
+      if (!hasQuestions && !usesLore) return true;
+      return selection.questionnaire.nativeAllowed === true;
+    });
   }, [selectedQuestionnaires]);
 
-  const tokenEstimateText = useMemo(() => formatQuestionnaireAnswers(answerItems), [answerItems]);
+  const questionnaireLoreText = useMemo(() => {
+    const blocks = selectedQuestionnaires
+      .filter((selection) => selection.useLore !== false)
+      .map((selection) => ({
+        title: selection.questionnaire.title,
+        lore: selection.questionnaire.loreMarkdown?.trim() ?? '',
+      }))
+      .filter((item) => Boolean(item.lore))
+      .map((item) => `【设定来源：${item.title}】\n${item.lore}`);
+    return blocks.length > 0 ? blocks.join('\n\n') : '';
+  }, [selectedQuestionnaires]);
+
+  const tokenEstimateText = useMemo(() => {
+    const answerText = formatQuestionnaireAnswers(answerItems);
+    if (questionnaireLoreText && answerText) return `${questionnaireLoreText}\n\n${answerText}`;
+    return questionnaireLoreText || answerText;
+  }, [answerItems, questionnaireLoreText]);
 
   const shouldDisableRemove = selectedQuestionnaires.length <= 1;
+
+  const answerableSelections = useMemo(
+    () => selectedQuestionnaires.filter((selection) => selection.questionnaire.questions.length > 0),
+    [selectedQuestionnaires]
+  );
+
+  const loreSelections = useMemo(
+    () => selectedQuestionnaires.filter((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim())),
+    [selectedQuestionnaires]
+  );
 
   const resolvedResultPayload = useMemo(() => {
     if (!magicalGirlDetails) return null;
@@ -455,16 +499,19 @@ const DetailsPage: React.FC = () => {
               rawRecord.source === 'upload' || rawRecord.source === 'database' || rawRecord.source === 'preset'
                 ? rawRecord.source
                 : 'preset';
-            const rawQuestionnaire = rawRecord.questionnaire as { id?: unknown; title?: unknown } | null;
+            const rawQuestionnaire = rawRecord.questionnaire as { id?: unknown; title?: unknown; nativeAllowed?: unknown } | null;
+            const fallbackNativeAllowed = source === 'preset'
+              ? (typeof rawQuestionnaire?.nativeAllowed === 'boolean' ? rawQuestionnaire.nativeAllowed : true)
+              : source === 'upload'
+                ? false
+                : (typeof rawQuestionnaire?.nativeAllowed === 'boolean' ? rawQuestionnaire.nativeAllowed : false);
             const normalized = normalizeQuestionnaireDefinition(rawRecord.questionnaire, {
               fallbackKind: 'magical-girl',
               fallbackId: typeof rawQuestionnaire?.id === 'string' ? rawQuestionnaire.id : 'magical-girl-custom',
               fallbackTitle: typeof rawQuestionnaire?.title === 'string' ? rawQuestionnaire.title : '未命名问卷',
-              nativeAllowed: source === 'preset' ? true : false,
+              nativeAllowed: fallbackNativeAllowed,
             });
             if (!normalized) return null;
-            if (source === 'preset') normalized.nativeAllowed = true;
-            if (source === 'upload') normalized.nativeAllowed = false;
             if (source === 'database' && normalized.nativeAllowed == null) normalized.nativeAllowed = false;
             return {
               source,
@@ -473,6 +520,7 @@ const DetailsPage: React.FC = () => {
               dataCardName: typeof rawRecord.dataCardName === 'string' ? rawRecord.dataCardName : undefined,
               dataCardAuthor: typeof rawRecord.dataCardAuthor === 'string' ? rawRecord.dataCardAuthor : undefined,
               selectionId: typeof rawRecord.selectionId === 'string' ? rawRecord.selectionId : undefined,
+              useLore: typeof rawRecord.useLore === 'boolean' ? rawRecord.useLore : undefined,
             } satisfies QuestionnaireSelection;
           })
           .filter((item): item is QuestionnaireSelection => Boolean(item))
@@ -535,10 +583,23 @@ const DetailsPage: React.FC = () => {
   }, [selectedQuestionnaires, clearTransitionTimers]);
 
   useEffect(() => {
-    if (!allowMultipleQuestionnaires && selectedQuestionnaires.length > 1) {
-      setSelectedQuestionnaires([selectedQuestionnaires[0]]);
-      setCurrentQuestionIndex(0);
-    }
+    if (allowMultipleQuestionnaires) return;
+    if (selectedQuestionnaires.length <= 1) return;
+
+    const firstAnswerableIndex = selectedQuestionnaires.findIndex((selection) => selection.questionnaire.questions.length > 0);
+    if (firstAnswerableIndex < 0) return;
+
+    const hasExtraAnswerable = selectedQuestionnaires.some(
+      (selection, index) => index !== firstAnswerableIndex && selection.questionnaire.questions.length > 0
+    );
+    if (!hasExtraAnswerable) return;
+
+    const nextSelections = selectedQuestionnaires.filter(
+      (selection, index) => selection.questionnaire.questions.length === 0 || index === firstAnswerableIndex
+    );
+
+    setSelectedQuestionnaires(nextSelections);
+    setCurrentQuestionIndex(0);
   }, [allowMultipleQuestionnaires, selectedQuestionnaires]);
 
   useEffect(() => {
@@ -603,11 +664,12 @@ const DetailsPage: React.FC = () => {
         const response = await fetch(defaultPreset.path);
         if (!response.ok) throw new Error('加载预设问卷失败');
         const data = await response.json();
+        const nativeAllowed = typeof (data as any)?.nativeAllowed === 'boolean' ? Boolean((data as any).nativeAllowed) : true;
         const normalized = normalizeQuestionnaireDefinition(data, {
           fallbackId: defaultPreset.id,
           fallbackKind: defaultPreset.kind,
           fallbackTitle: defaultPreset.title,
-          nativeAllowed: true,
+          nativeAllowed,
         });
         if (!normalized) throw new Error('预设问卷解析失败');
         if (cancelled) return;
@@ -634,16 +696,32 @@ const DetailsPage: React.FC = () => {
   }, [selectionReady]);
 
   const applySelection = (selection: QuestionnaireSelection) => {
+    const hasQuestions = selection.questionnaire.questions.length > 0;
+    const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
+    const isLoreOnly = !hasQuestions && hasLore;
+
     setSelectedQuestionnaires((prev) => {
       const usedSelectionIds = new Set<string>();
       prev.forEach((item) => {
         const existingId = item.selectionId || item.questionnaire.id;
         if (existingId) usedSelectionIds.add(existingId);
       });
+
       const normalizedSelection = ensureSelectionId(selection, usedSelectionIds);
+
       if (allowMultipleQuestionnaires) {
         return [...prev, normalizedSelection];
       }
+
+      if (hasQuestions) {
+        const preservedLoreOnly = prev.filter((item) => item.questionnaire.questions.length === 0);
+        return [normalizedSelection, ...preservedLoreOnly];
+      }
+
+      if (isLoreOnly && prev.length > 0) {
+        return [...prev, normalizedSelection];
+      }
+
       return [normalizedSelection];
     });
     setPasteQuestionnaireError(null);
@@ -653,11 +731,41 @@ const DetailsPage: React.FC = () => {
     setShowQuestionnaireSettings(false);
   };
 
-  const handleRemoveSelection = (index: number) => {
+  const handleRemoveSelection = (selectionId: string) => {
     clearTransitionTimers();
     setIsTransitioning(false);
-    setSelectedQuestionnaires((prev) => prev.filter((_, i) => i !== index));
+    setSelectedQuestionnaires((prev) => prev.filter((item) => (item.selectionId ?? item.questionnaire.id) !== selectionId));
   };
+
+  const handleToggleSelectionLore = (selectionId: string, enabled: boolean) => {
+    setSelectedQuestionnaires((prev) => prev.map((item) => {
+      const id = item.selectionId ?? item.questionnaire.id;
+      if (id !== selectionId) return item;
+      return { ...item, useLore: enabled };
+    }));
+  };
+
+  const handleOpenQuestionnaireDetails = useCallback((selection: QuestionnaireSelection) => {
+    const baseId = selection.source === 'database'
+      ? (selection.dataCardId ?? selection.questionnaire.id)
+      : (selection.questionnaire.id ?? '');
+    const cardId = selection.source === 'database'
+      ? baseId
+      : `questionnaire:${selection.source}:${baseId}`;
+    const name = (selection.dataCardName ?? selection.questionnaire.title ?? '未命名问卷').trim() || '未命名问卷';
+    const description = selection.questionnaire.description?.trim() || '暂无简介';
+
+    setQuestionnaireDetailsCard({
+      id: cardId,
+      name,
+      description,
+      type: 'questionnaire',
+      data: JSON.stringify(selection.questionnaire, null, 2),
+      isPublic: selection.source === 'database',
+      author: selection.dataCardAuthor,
+    });
+    setShowQuestionnaireDetailsModal(true);
+  }, []);
 
   const handleSelectQuestionnaireCard = (card: any) => {
     try {
@@ -749,11 +857,12 @@ const DetailsPage: React.FC = () => {
       const response = await fetch(preset.path);
       if (!response.ok) throw new Error('加载预设问卷失败');
       const data = await response.json();
+      const nativeAllowed = typeof (data as any)?.nativeAllowed === 'boolean' ? Boolean((data as any).nativeAllowed) : true;
       const normalized = normalizeQuestionnaireDefinition(data, {
         fallbackId: preset.id,
         fallbackKind: preset.kind,
         fallbackTitle: preset.title,
-        nativeAllowed: true,
+        nativeAllowed,
       });
       if (!normalized) throw new Error('预设问卷解析失败');
       applySelection({ source: 'preset', questionnaire: normalized });
@@ -1203,11 +1312,14 @@ const DetailsPage: React.FC = () => {
             kind: selection.questionnaire.kind,
             presetId: selection.source === 'preset' ? selection.questionnaire.id : undefined,
             dataCardId: selection.source === 'database' ? selection.dataCardId : undefined,
+            useLore: selection.useLore === false ? false : undefined,
           })),
           questionnaires: selectedQuestionnaires.map((selection) => ({
             id: selection.questionnaire.id,
             title: selection.questionnaire.title,
             kind: selection.questionnaire.kind,
+            useLore: selection.useLore === false ? false : undefined,
+            loreMarkdown: selection.questionnaire.loreMarkdown ?? undefined,
             questions: selection.questionnaire.questions.map((question) => ({
               id: question.id,
               question: question.question,
@@ -1396,11 +1508,37 @@ const DetailsPage: React.FC = () => {
   }
 
   if (resolvedQuestionItems.length === 0) {
+    const hasLore = selectedQuestionnaires.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));
     return (
       <div className="magic-background">
         <div className="container">
           <div className="card">
-            <div className="error-message">加载问卷失败</div>
+            <div className="error-message">
+              {hasLore
+                ? '当前所选问卷仅包含设定（无题目），请在“问卷设置”中再添加一份有题目的问卷。'
+                : '加载问卷失败'}
+            </div>
+            <div className="mt-2 text-center text-xs text-gray-500">
+              关闭“允许同时回答多份问卷”时，也可以叠加纯设定卡；但你仍需要至少一份有题目的问卷用于作答。
+            </div>
+            {hasLore && (
+              <div className="mt-4 flex flex-col items-center justify-center gap-2">
+                <button
+                  type="button"
+                  className="generate-button"
+                  onClick={() => {
+                    setSelectedQuestionnaires([]);
+                    setSelectionReady(false);
+                    setLoading(true);
+                  }}
+                >
+                  恢复默认问卷
+                </button>
+                <Link href="/questionnaire-editor" className="text-xs text-indigo-600 hover:underline">
+                  打开问卷编辑器
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1565,51 +1703,129 @@ const DetailsPage: React.FC = () => {
                     <span>问卷设置</span>
                     <span>{showQuestionnaireSettings ? '▲' : '▼'}</span>
                   </button>
-                  {showQuestionnaireSettings && (
-                    <div className="mt-3 space-y-3 text-xs text-slate-600">
-                      <p>你可以选择预设、上传或从云端问卷库挑选。若启用多问卷，将按顺序依次出题。</p>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={allowMultipleQuestionnaires}
-                            onChange={(e) => setAllowMultipleQuestionnaires(e.target.checked)}
-                          />
-                          允许同时回答多份问卷
-                        </label>
-                        {!isQuestionnaireNativeAllowed && (
-                          <span className="text-rose-500">提示：当前问卷未获得原生许可，生成结果将不具备原生性。</span>
-                        )}
-                        {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
-                          <span className="text-amber-600">提示：已有答案超过字数上限（原生统一上限 {QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS} 字），生成结果将不具备原生性。</span>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        {selectedQuestionnaires.map((selection, index) => (
-                          <div key={`${selection.questionnaire.id}-${index}`} className="flex items-center justify-between rounded-lg border border-indigo-100 bg-white px-3 py-2">
-                            <div>
-                              <div className="font-semibold text-indigo-700">{selection.questionnaire.title}</div>
-                              <div className="text-[11px] text-gray-500">
-                                来源：{selection.source === 'preset' ? '预设' : selection.source === 'upload' ? '本地上传' : '云端问卷'}
-                                {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
-                                {selection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              disabled={shouldDisableRemove}
-                              onClick={() => handleRemoveSelection(index)}
-                              className={`text-xs ${shouldDisableRemove ? 'text-gray-300' : 'text-rose-500 hover:underline'}`}
-                            >
-                              移除
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <select
-                          className="input-field text-xs"
-                          onChange={(e) => {
+	                  {showQuestionnaireSettings && (
+	                    <div className="mt-3 space-y-3 text-xs text-slate-600">
+	                      <p>你可以选择预设、上传或从云端问卷库挑选。多问卷只影响题目顺序；设定（Lore）可单独启用/禁用。</p>
+	                      <div className="flex flex-wrap items-center gap-3">
+	                        <label className="flex items-center gap-2">
+	                          <input
+	                            type="checkbox"
+	                            checked={allowMultipleQuestionnaires}
+	                            onChange={(e) => setAllowMultipleQuestionnaires(e.target.checked)}
+	                          />
+	                          允许同时回答多份问卷
+	                        </label>
+	                        {!allowMultipleQuestionnaires && (
+	                          <span className="text-[11px] text-slate-500">关闭时：仅允许 1 份可作答问卷，但仍可叠加纯设定卡。</span>
+	                        )}
+	                        {!isQuestionnaireNativeAllowed && (
+	                          <span className="text-rose-500">提示：当前问卷未获得原生许可，生成结果将不具备原生性。</span>
+	                        )}
+	                        {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
+	                          <span className="text-amber-600">提示：已有答案超过字数上限（原生统一上限 {QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS} 字），生成结果将不具备原生性。</span>
+	                        )}
+	                      </div>
+	                      <div className="space-y-2">
+	                        <div className="text-[11px] font-semibold text-slate-500">可作答问卷（题目）</div>
+	                        {answerableSelections.length === 0 ? (
+	                          <div className="rounded-lg border border-indigo-100 bg-white px-3 py-2 text-[11px] text-slate-500">
+	                            暂无可作答问卷
+	                          </div>
+	                        ) : (
+	                          answerableSelections.map((selection) => {
+	                            const selectionId = selection.selectionId ?? selection.questionnaire.id;
+	                            const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
+	                            const loreStatus = hasLore ? (selection.useLore !== false ? ' · 设定：启用' : ' · 设定：关闭') : '';
+	                            return (
+	                              <div key={selectionId} className="flex items-center justify-between rounded-lg border border-indigo-100 bg-white px-3 py-2">
+	                                <div>
+	                                  <div className="font-semibold text-indigo-700">{selection.questionnaire.title}</div>
+	                                  <div className="text-[11px] text-gray-500">
+	                                    来源：{selection.source === 'preset' ? '预设' : selection.source === 'upload' ? '本地上传' : '云端问卷'}
+	                                    {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
+	                                    {selection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
+	                                    {loreStatus}
+	                                  </div>
+	                                </div>
+	                                <div className="flex items-center gap-3">
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => handleOpenQuestionnaireDetails(selection)}
+	                                    className="text-xs text-indigo-600 hover:underline"
+	                                  >
+	                                    详情
+	                                  </button>
+	                                  <button
+	                                    type="button"
+	                                    disabled={shouldDisableRemove}
+	                                    onClick={() => handleRemoveSelection(selectionId)}
+	                                    className={`text-xs ${shouldDisableRemove ? 'text-gray-300' : 'text-rose-500 hover:underline'}`}
+	                                  >
+	                                    移除
+	                                  </button>
+	                                </div>
+	                              </div>
+	                            );
+	                          })
+	                        )}
+	                      </div>
+	                      <div className="space-y-2">
+	                        <div className="text-[11px] font-semibold text-slate-500">设定（Lore）注入</div>
+	                        {loreSelections.length === 0 ? (
+	                          <div className="rounded-lg border border-indigo-100 bg-white px-3 py-2 text-[11px] text-slate-500">
+	                            暂无设定来源
+	                          </div>
+	                        ) : (
+	                          loreSelections.map((selection) => {
+	                            const selectionId = selection.selectionId ?? selection.questionnaire.id;
+	                            const isLoreOnly = selection.questionnaire.questions.length === 0;
+	                            return (
+	                              <div key={selectionId} className="flex items-center justify-between rounded-lg border border-indigo-100 bg-white px-3 py-2">
+	                                <div>
+	                                  <div className="font-semibold text-indigo-700">{selection.questionnaire.title}</div>
+	                                  <div className="text-[11px] text-gray-500">
+	                                    来源：{selection.source === 'preset' ? '预设' : selection.source === 'upload' ? '本地上传' : '云端问卷'}
+	                                    {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
+	                                    {selection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
+	                                    {isLoreOnly ? ' · 仅设定' : ' · 来自问卷'}
+	                                  </div>
+	                                </div>
+	                                <div className="flex items-center gap-3">
+	                                  <label className="flex items-center gap-2 text-[11px] text-indigo-700">
+	                                    <input
+	                                      type="checkbox"
+	                                      checked={selection.useLore !== false}
+	                                      onChange={(e) => handleToggleSelectionLore(selectionId, e.target.checked)}
+	                                    />
+	                                    使用设定
+	                                  </label>
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => handleOpenQuestionnaireDetails(selection)}
+	                                    className="text-xs text-indigo-600 hover:underline"
+	                                  >
+	                                    详情
+	                                  </button>
+	                                  {isLoreOnly && (
+	                                    <button
+	                                      type="button"
+	                                      disabled={shouldDisableRemove}
+	                                      onClick={() => handleRemoveSelection(selectionId)}
+	                                      className={`text-xs ${shouldDisableRemove ? 'text-gray-300' : 'text-rose-500 hover:underline'}`}
+	                                    >
+	                                      移除
+	                                    </button>
+	                                  )}
+	                                </div>
+	                              </div>
+	                            );
+	                          })
+	                        )}
+	                      </div>
+	                      <div className="flex flex-wrap items-center gap-2">
+	                        <select
+	                          className="input-field text-xs"
+	                          onChange={(e) => {
                             if (e.target.value) {
                               void handleAddPreset(e.target.value);
                               e.currentTarget.value = '';
@@ -2110,6 +2326,25 @@ const DetailsPage: React.FC = () => {
           onSelectCard={handleSelectQuestionnaireCard}
           externalError={questionnairePickerError}
         />
+
+        {questionnaireDetailsCard && (
+          <DataCardDetailsModal
+            isOpen={showQuestionnaireDetailsModal}
+            onClose={() => {
+              setShowQuestionnaireDetailsModal(false);
+              setQuestionnaireDetailsCard(null);
+            }}
+            card={{
+              id: questionnaireDetailsCard.id,
+              name: questionnaireDetailsCard.name,
+              description: questionnaireDetailsCard.description,
+              type: 'questionnaire',
+              data: questionnaireDetailsCard.data,
+              isPublic: questionnaireDetailsCard.isPublic,
+              author: questionnaireDetailsCard.author,
+            }}
+          />
+        )}
 
         {/* Image Modal */}
         {showImageModal && savedImageUrl && (

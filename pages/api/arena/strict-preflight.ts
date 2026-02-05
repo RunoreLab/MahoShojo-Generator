@@ -4,6 +4,7 @@ import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { buildPairKey, getStrictDailyUsage, INITIAL_RATING, STRICT_DEDUP_WINDOW_MS, STRICT_DAILY_LIMIT } from '@/lib/database/arena-ratings';
 import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
+import { shouldEnforceStrictRangeLimit } from '@/lib/arena/strict-range';
 import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
 import { deriveSeasonStrictRules } from '@/lib/seasons';
 
@@ -245,17 +246,22 @@ export default async function handler(req: NextRequest) {
 
             const involvesPreset = a.entityType === 'preset' || b.entityType === 'preset';
             if (!involvesPreset) {
-              const absDiff = Math.abs(aRating - bRating);
-              const maxAbsDiff = getStrictMaxAbsDiffForRatings({ rating: aRating, games: aGames }, { rating: bRating, games: bGames });
-              range = {
-                absDiff,
-                maxAbsDiff,
-                exceededBy: Math.max(0, absDiff - maxAbsDiff),
-                aRating,
-                bRating,
-              };
-              if (absDiff > maxAbsDiff) {
-                reasons.push('strict-out-of-range');
+              const aSnapshot = { rating: aRating, games: aGames };
+              const bSnapshot = { rating: bRating, games: bGames };
+              const shouldCheckRange = shouldEnforceStrictRangeLimit(aSnapshot, bSnapshot);
+              if (shouldCheckRange) {
+                const absDiff = Math.abs(aRating - bRating);
+                const maxAbsDiff = getStrictMaxAbsDiffForRatings(aSnapshot, bSnapshot);
+                range = {
+                  absDiff,
+                  maxAbsDiff,
+                  exceededBy: Math.max(0, absDiff - maxAbsDiff),
+                  aRating,
+                  bRating,
+                };
+                if (absDiff > maxAbsDiff) {
+                  reasons.push('strict-out-of-range');
+                }
               }
             }
 

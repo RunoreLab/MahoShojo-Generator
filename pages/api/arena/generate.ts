@@ -56,6 +56,50 @@ interface BattleApiResponse {
     adjudicationResults?: AdjudicationResult[];
 }
 
+type RequestQuestionnaire = {
+    id: string;
+    title: string;
+    kind: 'magical-girl' | 'canshou';
+    loreMarkdown?: string;
+};
+
+const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .map((item) => {
+            if (!item || typeof item !== 'object') return null;
+            const record = item as Record<string, unknown>;
+            const kind = record.kind === 'magical-girl' || record.kind === 'canshou' ? record.kind : null;
+            if (!kind) return null;
+            const id = typeof record.id === 'string' && record.id.trim() ? record.id.trim() : '';
+            const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim() : '';
+            if (!id || !title) return null;
+            const useLore = typeof record.useLore === 'boolean' ? record.useLore : true;
+            const loreMarkdown = useLore && typeof record.loreMarkdown === 'string' && record.loreMarkdown.trim()
+                ? record.loreMarkdown
+                : undefined;
+            const payload: RequestQuestionnaire = {
+                id,
+                title,
+                kind,
+                ...(loreMarkdown ? { loreMarkdown } : {}),
+            };
+            return payload;
+        })
+        .filter((item): item is RequestQuestionnaire => Boolean(item));
+};
+
+const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): string => {
+    const blocks = questionnaires
+        .map((questionnaire) => ({
+            title: questionnaire.title,
+            lore: questionnaire.loreMarkdown?.trim() ?? '',
+        }))
+        .filter((item) => Boolean(item.lore))
+        .map((item) => `【设定来源：${item.title}】\n${item.lore}`);
+    return blocks.length > 0 ? blocks.join('\n\n') : '';
+};
+
 	async function handler(req: NextRequest): Promise<Response> {
 	    if (req.method !== 'POST') {
 	        return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
@@ -102,6 +146,7 @@ interface BattleApiResponse {
             writeCurrentState,
             readNarrativeHistory,
             narrativeHistory,
+            narrativeHistoryReadLimit,
             isDowngrade = false,
             adjudicationEvents,
             storyLength,
@@ -110,9 +155,12 @@ interface BattleApiResponse {
             scenarioFileName,
             scenarioSourceDataCardId,
             scenarioSourceDataCardUpdatedAt,
+            questionnaires: rawQuestionnaires,
         } = body;
 
         const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
+        const loreText = buildQuestionnaireLoreText(normalizeQuestionnaires(rawQuestionnaires)).trim();
+        const hasQuestionnaireLore = Boolean(loreText);
 
         const normalizedAuxScenarios = Array.isArray(auxScenarios)
             ? auxScenarios.filter((item) => item && typeof item === 'object')
@@ -130,6 +178,15 @@ interface BattleApiResponse {
         const resolvedReadCurrentState = typeof readCurrentState === 'boolean' ? readCurrentState : true;
         const resolvedWriteCurrentState = typeof writeCurrentState === 'boolean' ? writeCurrentState : true;
         const resolvedReadNarrativeHistory = typeof readNarrativeHistory === 'boolean' ? readNarrativeHistory : false;
+        const resolvedNarrativeHistoryReadLimit = resolvedReadNarrativeHistory
+            ? (() => {
+                if (narrativeHistoryReadLimit === null) return Infinity;
+                if (typeof narrativeHistoryReadLimit === 'number' && Number.isFinite(narrativeHistoryReadLimit)) {
+                    return Math.max(1, Math.floor(narrativeHistoryReadLimit));
+                }
+                return 10;
+            })()
+            : 0;
         const resolvedHistoryReadLimit = resolvedReadArenaHistory
             ? (() => {
                 if (arenaHistoryReadLimit === null) return Infinity;
@@ -172,7 +229,18 @@ interface BattleApiResponse {
         };
 
         const narrativeHistoryForPrompt: NarrativeHistoryEntry[] | null = resolvedReadNarrativeHistory
-            ? normalizeNarrativeHistoryForPrompt(narrativeHistory)
+            ? (() => {
+                const normalized = normalizeNarrativeHistoryForPrompt(narrativeHistory);
+                if (normalized.length === 0) return [];
+                const parseTime = (entry: NarrativeHistoryEntry): number => {
+                    const t = Date.parse(entry.createdAt || entry.updatedAt);
+                    return Number.isFinite(t) ? t : 0;
+                };
+                normalized.sort((a, b) => parseTime(a) - parseTime(b));
+                if (resolvedNarrativeHistoryReadLimit === Infinity) return normalized;
+                const sliceLimit = Math.max(1, Math.floor(resolvedNarrativeHistoryReadLimit));
+                return normalized.slice(Math.max(0, normalized.length - sliceLimit));
+            })()
             : null;
 
         let customProviderOverride: AIProvider | null = null;
@@ -235,6 +303,7 @@ interface BattleApiResponse {
             && String(language ?? '').trim() === 'zh-CN'
             && !String(selectedLevel ?? '').trim()
             && !String(userGuidance ?? '').trim()
+            && !hasQuestionnaireLore
             && resolvedReadArenaHistory === false
             && resolvedReadCurrentState === false
             && resolvedReadNarrativeHistory === false
@@ -309,6 +378,13 @@ interface BattleApiResponse {
             if (narrativeText) {
                 inputsToCheck.push({ type: 'userGuidance', content: narrativeText, isNative: false });
             }
+        }
+        if (hasQuestionnaireLore) {
+            inputsToCheck.push({
+                type: 'userGuidance',
+                content: `【参考设定（问卷/设定卡 Lore）】\n${loreText}`,
+                isNative: false,
+            });
         }
         // 检查情景模式下的情景文件内容
         if (scenario) {
@@ -385,7 +461,8 @@ interface BattleApiResponse {
                 resolvedWriteCurrentState,
                 adjudicationResults,
                 storyLength,
-                narrativeHistoryForPrompt
+                narrativeHistoryForPrompt,
+                loreText
             ),
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,
@@ -593,6 +670,11 @@ interface BattleApiResponse {
                         auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                    resolvedModelOverride: usedModelOverride ?? null,
 	                    readNarrativeHistory: resolvedReadNarrativeHistory,
+                        narrativeHistoryReadLimit: resolvedReadNarrativeHistory
+                            ? (Number.isFinite(resolvedNarrativeHistoryReadLimit)
+                                ? (resolvedNarrativeHistoryReadLimit === Infinity ? null : resolvedNarrativeHistoryReadLimit)
+                                : null)
+                            : null,
 	                    narrativeHistoryReadCount: resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : 0,
 	                }),
 	            });

@@ -2,12 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 
 describe('问卷答案粘贴解析器', () => {
-  it('能从 Q/A 复制文本中提取答案（含空行分隔）', () => {
+  it('能从 Q/A 复制文本中提取答案（含问卷标题与空行分隔）', () => {
     const input = [
-      'Q1: 你叫什么？',
+      'Q1（基础问卷）: 你叫什么？',
       'A: 小红',
       '',
-      'Q2: 你喜欢什么？',
+      'Q2（基础问卷）: 你喜欢什么？',
       'A: 苹果',
     ].join('\n');
 
@@ -21,6 +21,21 @@ describe('问卷答案粘贴解析器', () => {
     const result = parseBulkQuestionnaireAnswers(input);
     expect(result.format).toBe('qa');
     expect(result.entries.map(entry => entry.value)).toEqual(['', '有内容']);
+  });
+
+  it('能根据 Q 序号对齐答案（如 Q1/Q3）', () => {
+    const input = [
+      'Q1（基础问卷）: 第一题',
+      'A: A1',
+      '',
+      'Q3（基础问卷）: 第三题',
+      'A: A3',
+    ].join('\n');
+
+    const result = parseBulkQuestionnaireAnswers(input, { expectedCount: 4 });
+    expect(result.format).toBe('qa');
+    expect(result.entries.map(entry => entry.index)).toEqual([0, 2]);
+    expect(result.entries.map(entry => entry.value)).toEqual(['A1', 'A3']);
   });
 
   it('能保留答案中的多行内容', () => {

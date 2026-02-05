@@ -7,8 +7,8 @@ describe('问卷字段配置', () => {
     const nameQuestion = questions.find((q: any) => q?.id === 'MG-1');
     const nounQuestion = questions.find((q: any) => q?.id === 'MG-7');
 
-    expect(nameQuestion?.maxLength).toBe(40);
+    expect(nameQuestion?.maxLength).toBe(180);
     expect(typeof nameQuestion?.placeholder).toBe('string');
-    expect(nounQuestion?.maxLength).toBe(20);
+    expect(nounQuestion?.maxLength).toBe(200);
   });
 });

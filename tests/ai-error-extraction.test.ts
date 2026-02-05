@@ -1,34 +1,34 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 
-import { enhanceErrorWithUpstreamMessage } from '@/lib/ai/utils/error-extraction';
+import { extractUpstreamErrorMessage } from '@/lib/ai/utils/error-extraction';
 
-describe('ai error extraction', () => {
-  it('能够从 responseBody(JSON) 提取上游错误信息', () => {
-    const error = {
+describe('ai-error-extraction', () => {
+  test('extract from capturedError.message with name/statusCode', () => {
+    const capturedError = {
       name: 'AI_APICallError',
-      message: 'Provider returned error',
-      statusCode: 500,
-      responseBody: JSON.stringify({ error: { message: 'Unsupported response_format' } }),
+      message: '余额不足(request id:2026010518...)',
+      statusCode: 402,
     };
 
-    const enhanced = enhanceErrorWithUpstreamMessage(error);
-    expect(enhanced.message).toContain('AI_APICallError:');
-    expect(enhanced.message).toContain('Unsupported response_format');
-    expect(enhanced.message).toContain('HTTP 500');
+    expect(extractUpstreamErrorMessage(capturedError, null, 'fallback')).toBe(
+      'AI_APICallError: 余额不足(request id:2026010518...)（HTTP 402）',
+    );
   });
 
-  it('能够从 data 提取上游错误信息（兼容部分 provider 形态）', () => {
-    const error = {
+  test('extract from capturedError.responseBody (string json)', () => {
+    const capturedError = {
       name: 'AI_APICallError',
-      message: 'Provider returned error',
-      statusCode: 400,
-      data: { error: { message: 'The model does not exist' } },
+      message: '',
+      statusCode: 401,
+      responseBody: JSON.stringify({ error: { message: 'API Key 无效或已过期' } }),
     };
 
-    const enhanced = enhanceErrorWithUpstreamMessage(error);
-    expect(enhanced.message).toContain('AI_APICallError:');
-    expect(enhanced.message).toContain('The model does not exist');
-    expect(enhanced.message).toContain('HTTP 400');
+    expect(extractUpstreamErrorMessage(capturedError, null, 'fallback')).toBe('AI_APICallError: API Key 无效或已过期（HTTP 401）');
+  });
+
+  test('falls back when nothing can be extracted', () => {
+    expect(extractUpstreamErrorMessage(null, null, 'fallback')).toBe('fallback');
+    expect(extractUpstreamErrorMessage(undefined, undefined, 'fallback')).toBe('fallback');
   });
 });
 
