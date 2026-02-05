@@ -19,8 +19,16 @@ type LeaderboardRow = {
   wins: number;
   losses: number;
   draws: number;
+  ratingUpdatedAt: string | null;
   dataCardName: string | null;
+  dataCardDescription: string | null;
   authorName: string | null;
+  authorId: number | null;
+  usageCount: number | null;
+  likeCount: number | null;
+  favoriteCount: number | null;
+  dataCardCreatedAt: string | null;
+  dataCardUpdatedAt: string | null;
   techScore: number | null;
   techLevel: string | null;
   isNative: number | null;
@@ -79,7 +87,20 @@ const pickSeasonToArchive = (config: SeasonsConfig, seasonIdArg: string | null):
   return current;
 };
 
-const buildLeaderboardBaseSql = () => {
+const buildLeaderboardBaseSql = (queue: Queue) => {
+  const strictPublicSinceClause =
+    queue === 'strict'
+      ? `AND (
+        dc.public_since IS NULL
+        OR dc.public_since <= datetime('now', '-3 days')
+        OR (
+          dc.created_at IS NOT NULL
+          AND dc.public_since IS NOT NULL
+          AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
+        )
+      )`
+      : '';
+
   const whereSql = `WHERE ar.queue = ?
     AND (
       ar.entity_type = 'preset'
@@ -89,6 +110,7 @@ const buildLeaderboardBaseSql = () => {
         AND dc.is_public = 1
         AND dc.review_status = 'approved'
         AND dc.deleted_at IS NULL
+        ${strictPublicSinceClause}
       )
     )`;
 
@@ -101,11 +123,19 @@ const buildLeaderboardBaseSql = () => {
       ar.wins as wins,
       ar.losses as losses,
       ar.draws as draws,
-      dc.name as dataCardName,
+      MAX(ar.updated_at) as ratingUpdatedAt,
+      MAX(dc.name) as dataCardName,
+      MAX(dc.description) as dataCardDescription,
+      MAX(dc.user_id) as authorId,
       MAX(u.username) as authorName,
-      dcm.tech_score as techScore,
-      dcm.tech_level as techLevel,
-      dcm.is_native as isNative,
+      MAX(dc.usage_count) as usageCount,
+      MAX(dc.like_count) as likeCount,
+      MAX(dc.favorite_count) as favoriteCount,
+      MAX(dc.created_at) as dataCardCreatedAt,
+      MAX(dc.updated_at) as dataCardUpdatedAt,
+      MAX(dcm.tech_score) as techScore,
+      MAX(dcm.tech_level) as techLevel,
+      MAX(dcm.is_native) as isNative,
       group_concat(DISTINCT dct.tag_id) as tagIds
     FROM arena_ratings ar
     LEFT JOIN data_cards dc
@@ -136,7 +166,7 @@ const buildLeaderboardBaseSql = () => {
 };
 
 const queryLeaderboardCount = async (queryFromD1: QueryFromD1, queue: Queue): Promise<number> => {
-  const { countSql } = buildLeaderboardBaseSql();
+  const { countSql } = buildLeaderboardBaseSql(queue);
   const result = await queryFromD1(countSql, [queue]);
   const row = readRows<{ count: number }>(result)[0];
   return typeof row?.count === 'number' && Number.isFinite(row.count) ? Math.max(0, Math.floor(row.count)) : 0;
@@ -148,7 +178,7 @@ const queryLeaderboardRows = async (
   orderBy: string,
   limit: number,
 ): Promise<LeaderboardRow[]> => {
-  const { selectSql } = buildLeaderboardBaseSql();
+  const { selectSql } = buildLeaderboardBaseSql(queue);
   const sql = `${selectSql}\n${orderBy}\nLIMIT ?;`;
   const result = await queryFromD1(sql, [queue, limit]);
   return readRows<LeaderboardRow>(result);
@@ -185,6 +215,16 @@ const buildItems = async (
         row.entityType === 'data_card' && typeof row.authorName === 'string' && row.authorName.trim()
           ? row.authorName.trim()
           : null,
+      authorId: row.entityType === 'data_card' && typeof row.authorId === 'number' && Number.isFinite(row.authorId) ? row.authorId : null,
+      likeCount: row.entityType === 'data_card' && typeof row.likeCount === 'number' && Number.isFinite(row.likeCount) ? row.likeCount : null,
+      favoriteCount:
+        row.entityType === 'data_card' && typeof row.favoriteCount === 'number' && Number.isFinite(row.favoriteCount) ? row.favoriteCount : null,
+      usageCount: row.entityType === 'data_card' && typeof row.usageCount === 'number' && Number.isFinite(row.usageCount) ? row.usageCount : null,
+      createdAt: row.entityType === 'data_card' && typeof row.dataCardCreatedAt === 'string' ? row.dataCardCreatedAt : null,
+      updatedAt: row.entityType === 'data_card' && typeof row.dataCardUpdatedAt === 'string' ? row.dataCardUpdatedAt : null,
+      ratingUpdatedAt: typeof row.ratingUpdatedAt === 'string' ? row.ratingUpdatedAt : null,
+      description:
+        row.entityType === 'data_card' && typeof row.dataCardDescription === 'string' ? row.dataCardDescription : null,
       rating,
       games,
       wins: typeof row.wins === 'number' ? row.wins : 0,
@@ -209,13 +249,13 @@ const archiveQueue = async (queryFromD1: QueryFromD1, queue: Queue) => {
     queryFromD1,
     queue,
     'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC',
-    50,
+    100,
   );
   const bottomRowsRaw = await queryLeaderboardRows(
     queryFromD1,
     queue,
     'ORDER BY ar.rating ASC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC',
-    20,
+    50,
   );
   const bottomRows = bottomRowsRaw.slice().reverse();
 
@@ -232,12 +272,13 @@ const main = async () => {
   if (args.has('--help') || args.has('-h')) {
     console.log(`[season-archive]
 用法：
-  bun tsx scripts/season-archive.ts [--season-id <id>] [--force] [--require-db]
+  bun tsx scripts/season-archive.ts [--season-id <id>] [--force] [--require-db] [--snapshot-only]
 
 说明：
   - 默认归档当前赛季（status=current）
+  - 默认会把该赛季在 public/config/seasons.json 中标记为 status=history（可用 --snapshot-only 仅生成快照）
   - 生成 public/data/seasons/archive_<season_id>.json
-  - 并将该赛季在 public/config/seasons.json 中标记为 status=history
+  - 快照范围：Top 100 + Bottom 50（按排位分）
 `);
     return;
   }
@@ -253,13 +294,14 @@ const main = async () => {
   const seasonIdArg = args.get('--season-id') ?? args.get('--seasonId') ?? null;
   const force = args.has('--force');
   const requireDb = args.has('--require-db') || args.has('--requireDb');
+  const snapshotOnly = args.has('--snapshot-only') || args.has('--snapshotOnly') || args.has('--snapshot');
 
   const target = pickSeasonToArchive(seasons, seasonIdArg);
   if (!isSafeSeasonId(target.id)) {
     throw new Error(`赛季 ID 不安全（仅允许字母数字/下划线/短横线，且长度 <= 32）：${target.id}`);
   }
 
-  if (!force) {
+  if (!force && !snapshotOnly) {
     if (!target.endsAt) {
       throw new Error(`赛季未设置结束时间 endsAt，无法归档：${formatSeasonTitle(target)}（可用 --force 覆盖）`);
     }
@@ -303,6 +345,13 @@ const main = async () => {
   const archivePath = resolve(process.cwd(), 'public', 'data', 'seasons', `archive_${target.id}.json`);
   writeJson(archivePath, archive);
 
+  console.log(`[season-archive] 写入：${archivePath}`);
+
+  if (snapshotOnly) {
+    console.log(`[season-archive] 完成：${formatSeasonTitle(target)} -> 已生成快照（未修改 seasons.json 赛季状态）`);
+    return;
+  }
+
   const updatedSeasons: SeasonsConfig = {
     ...seasons,
     seasons: seasons.seasons.map((s) => {
@@ -317,8 +366,7 @@ const main = async () => {
 
   writeJson(seasonsPath, updatedSeasons);
 
-  console.log(`[season-archive] 完成：${formatSeasonTitle(target)} -> 已归档`);
-  console.log(`[season-archive] 写入：${archivePath}`);
+  console.log(`[season-archive] 完成：${formatSeasonTitle(target)} -> 已归档（status=history）`);
 };
 
 main().catch((error) => {

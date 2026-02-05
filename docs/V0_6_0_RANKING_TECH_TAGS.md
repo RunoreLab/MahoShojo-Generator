@@ -795,7 +795,7 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 **8.1 静态配置与存储**
 - **赛季元数据**：维护在 `public/config/seasons.json` 中，包含赛季名称、ID、起止时间、状态及说明等所需信息。
 - **历史归档**：赛季结束时，生成的历史快照存储于 `public/data/seasons/archive_{season_id}.json`。客户端直接读取此静态文件展示历史榜单。
-- **作者快照**：归档时会尝试写入数据卡作者 `authorName`（来自 `users.username`）；旧归档或无法解析作者时，前端统一显示为 “—”。
+- **作者与统计快照**：归档时会写入榜单所需的关键统计字段（不保存数据卡 `data` 正文，避免体积过大）。包括作者 `authorName/authorId`、点赞/收藏/使用量、创建/更新时间、技术值/原生性、标签、段位/排位分/对局数/W-L-D 等。
 
 **8.2 UI 展示变更**
 - **排行榜 (Leaderboard)**：
@@ -809,7 +809,8 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 **8.3 赛季结算流程**
 1. **冻结与归档**：
    - 运行归档脚本，锁定当前榜单。
-   - 提取全服 Top 50（最强）与 Bottom 20（最弱）的角色排行榜所需信息快照，写入静态文件。
+   - 提取全服 Top 100（最强）与 Bottom 50（最弱）的角色排行榜所需信息快照，写入静态文件。
+   - 如需在不切换赛季状态的情况下进行验证，可使用 `--snapshot-only` 仅生成快照文件（不修改 `seasons.json`）。
 2. **段位重置 (Soft Reset)**：
    - 参考成熟游戏的设计，将排位分重置到合适的段位。
 3. **新赛季开启**：

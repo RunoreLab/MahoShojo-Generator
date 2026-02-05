@@ -5,7 +5,7 @@
       "id": "S0",
       "name": "公测赛季",
       "startsAt": "2026-01-04",
-      "endsAt": null,
+      "endsAt": "2026-02-05",
       "status": "current",
       "description": "公开测试用赛季，排位功能可能仍有未发现的问题，因此该赛季的数据仅供参考。如有问题，请及时反馈。"
     },

@@ -57,6 +57,14 @@ export type SeasonArchiveItem = {
   entityId: string;
   displayName: string;
   authorName?: string | null;
+  authorId?: number | null;
+  likeCount?: number | null;
+  favoriteCount?: number | null;
+  usageCount?: number | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  ratingUpdatedAt?: string | null;
+  description?: string | null;
   rating: number;
   games: number;
   wins: number;
