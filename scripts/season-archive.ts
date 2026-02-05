@@ -94,6 +94,18 @@ const pickSeasonToArchive = (config: SeasonsConfig, seasonIdArg: string | null):
   return current;
 };
 
+const listCurrentSeasons = (config: SeasonsConfig): SeasonMeta[] => {
+  const seasons = Array.isArray(config.seasons) ? config.seasons : [];
+  return seasons.filter((s) => s?.status === 'current');
+};
+
+const formatSeasonIdList = (seasons: SeasonMeta[]): string => {
+  return seasons
+    .map((s) => (typeof s?.id === 'string' ? s.id.trim() : ''))
+    .filter(Boolean)
+    .join(', ');
+};
+
 const buildLeaderboardBaseSql = (queue: Queue) => {
   const strictPublicSinceClause =
     queue === 'strict'
@@ -412,6 +424,7 @@ const main = async () => {
 
 说明：
   - 默认归档当前赛季（status=current）
+  - 会校验 public/config/seasons.json 中 status=current 必须且仅有 1 个（除非 --force 或 --snapshot-only）
   - 默认会把该赛季在 public/config/seasons.json 中标记为 status=history（可用 --snapshot-only 仅生成快照）
   - 生成 public/data/seasons/archive_<season_id>.json
   - 快照范围：默认 Top 100 + Bottom 50（按排位分）；可用 --top/--bottom 调整；可用 --full 生成全量实体快照
@@ -432,6 +445,16 @@ const main = async () => {
   const requireDb = args.has('--require-db') || args.has('--requireDb');
   const snapshotOnly = args.has('--snapshot-only') || args.has('--snapshotOnly') || args.has('--snapshot');
   const full = args.has('--full');
+
+  const currentSeasons = listCurrentSeasons(seasons);
+  if (currentSeasons.length !== 1) {
+    const hint = currentSeasons.length > 0 ? `（当前标记为 current：${formatSeasonIdList(currentSeasons)}）` : '（当前没有任何 current）';
+    const message = `public/config/seasons.json 配置异常：status=current 数量=${currentSeasons.length}，期望为 1。${hint}`;
+    if (!force && !snapshotOnly) {
+      throw new Error(`${message}\n请先修复 seasons.json 后再归档；或使用 --snapshot-only 仅生成快照；或使用 --force 强制执行。`);
+    }
+    console.warn(`[season-archive] 警告：${message}`);
+  }
 
   const topArg = args.get('--top');
   const bottomArg = args.get('--bottom');
@@ -528,6 +551,13 @@ const main = async () => {
   };
 
   writeJson(seasonsPath, updatedSeasons);
+
+  const nextCurrent = listCurrentSeasons(updatedSeasons);
+  if (nextCurrent.length !== 1) {
+    const hint = nextCurrent.length > 0 ? `（当前标记为 current：${formatSeasonIdList(nextCurrent)}）` : '（归档后没有任何 current）';
+    console.warn(`[season-archive] 强提醒：归档完成后 seasons.json 的 status=current 数量=${nextCurrent.length}，期望为 1。${hint}`);
+    console.warn('[season-archive] 强提醒：请尽快在 public/config/seasons.json 中创建/切换新赛季（确保仅 1 个 current），并重新部署静态资源。');
+  }
 
   console.log(`[season-archive] 完成：${formatSeasonTitle(target)} -> 已归档（status=history）`);
 };

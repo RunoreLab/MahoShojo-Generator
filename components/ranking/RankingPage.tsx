@@ -10,6 +10,7 @@ import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { getArenaApproxRankLabel, getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
 import { ARENA_QUEEN_MIN_SCEPTER_COUNT, applyQueenTier, computeArenaBaseTier, isArenaScepterTier } from '@/lib/arena/tier';
+import { formatDateTime } from '@/lib/constants';
 import type { SeasonArchive, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
 import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
@@ -787,6 +788,22 @@ export function RankingPage() {
     return `${appliedSummary} · ${prefix}：${snapshotLabel}（已去重 ${snapshotCount} 条，${totalLabel}）`;
   }, [appliedSummary, historySnapshot, isArchiveMode, isHistoryMode, selectedSeason]);
 
+  const archiveGeneratedAtLabel = useMemo(() => {
+    if (!isArchiveMode) return null;
+    const generatedAt = typeof archiveQuery.data?.generatedAt === 'string' ? archiveQuery.data.generatedAt.trim() : '';
+    if (generatedAt) return formatDateTime(generatedAt);
+    if (archiveQuery.isLoading) return '加载中...';
+    if (archiveQuery.isError) return '加载失败';
+    return '未知';
+  }, [archiveQuery.data?.generatedAt, archiveQuery.isError, archiveQuery.isLoading, isArchiveMode]);
+
+  const seasonArchivedAtLabel = useMemo(() => {
+    if (!isHistoryMode) return null;
+    const archivedAt = typeof selectedSeason?.archivedAt === 'string' ? selectedSeason.archivedAt.trim() : '';
+    if (!archivedAt) return null;
+    return formatDateTime(archivedAt);
+  }, [isHistoryMode, selectedSeason?.archivedAt]);
+
   return (
     <>
       <Head>
@@ -867,7 +884,23 @@ export function RankingPage() {
                         </span>
                       ) : null}
                     </div>
+                    {isArchiveMode ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-500">
+                        <span>快照生成：{archiveGeneratedAtLabel}</span>
+                        {seasonArchivedAtLabel ? <span>归档标记：{seasonArchivedAtLabel}</span> : null}
+                      </div>
+                    ) : null}
                     <div className="mt-1 text-xs text-gray-500">{selectedSeason.description}</div>
+                    {isArchiveMode ? (
+                      <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-900">
+                        <div>
+                          提示：当前展示的是{isHistoryMode ? '历史赛季' : '当前赛季'}快照，段位/排序按当前版本规则重算，可能与结算时略有差异。
+                        </div>
+                        <div className="mt-1">
+                          提示：点击条目后的“角色详情”读取的是当前公开卡内容，可能与快照不一致，或因下架/转私有而无法加载。
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="mt-2 border-t border-gray-200/70 pt-2 text-xs text-gray-600">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-gray-800">特殊规则</span>
