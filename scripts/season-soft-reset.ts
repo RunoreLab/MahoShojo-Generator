@@ -174,28 +174,43 @@ const queryAutoTuningSummary = async (
 type QuantilesRow = { n: number; p25: number | null; p60: number | null };
 
 const queryPlayedGamesQuantiles = async (queryFromD1: QueryFromD1, queue: ArenaQueue): Promise<QuantilesRow> => {
-  const result = await queryFromD1(
-    `WITH ordered AS (
-      SELECT games
-      FROM arena_ratings
-      WHERE queue = ? AND games > 0
-      ORDER BY games ASC
-    ),
-    cnt AS (
-      SELECT COUNT(*) as n FROM ordered
-    )
-    SELECT
-      n,
-      (SELECT games FROM ordered LIMIT 1 OFFSET CAST((n - 1) * 0.25 AS INTEGER)) as p25,
-      (SELECT games FROM ordered LIMIT 1 OFFSET CAST((n - 1) * 0.60 AS INTEGER)) as p60
-    FROM cnt;`,
+  const countResult = await queryFromD1(
+    `SELECT COUNT(*) as n
+     FROM arena_ratings
+     WHERE queue = ? AND games > 0;`,
     [queue]
   );
-  const row = readRows<QuantilesRow>(result)[0];
+  const countRow = readRows<{ n: number }>(countResult)[0];
+  const n = typeof countRow?.n === 'number' ? Math.max(0, Math.floor(countRow.n)) : 0;
+  if (n <= 0) return { n: 0, p25: null, p60: null };
+
+  const offset25 = Math.max(0, Math.floor((n - 1) * 0.25));
+  const offset60 = Math.max(0, Math.floor((n - 1) * 0.6));
+
+  const p25Result = await queryFromD1(
+    `SELECT games as value
+     FROM arena_ratings
+     WHERE queue = ? AND games > 0
+     ORDER BY games ASC
+     LIMIT 1 OFFSET ?;`,
+    [queue, offset25]
+  );
+  const p60Result = await queryFromD1(
+    `SELECT games as value
+     FROM arena_ratings
+     WHERE queue = ? AND games > 0
+     ORDER BY games ASC
+     LIMIT 1 OFFSET ?;`,
+    [queue, offset60]
+  );
+
+  const p25Row = readRows<{ value: number }>(p25Result)[0];
+  const p60Row = readRows<{ value: number }>(p60Result)[0];
+
   return {
-    n: typeof row?.n === 'number' ? Math.max(0, Math.floor(row.n)) : 0,
-    p25: typeof row?.p25 === 'number' ? Math.max(0, Math.floor(row.p25)) : null,
-    p60: typeof row?.p60 === 'number' ? Math.max(0, Math.floor(row.p60)) : null,
+    n,
+    p25: typeof p25Row?.value === 'number' ? Math.max(0, Math.floor(p25Row.value)) : null,
+    p60: typeof p60Row?.value === 'number' ? Math.max(0, Math.floor(p60Row.value)) : null,
   };
 };
 
@@ -206,26 +221,29 @@ const queryPlayedInactiveDaysP85 = async (
   queue: ArenaQueue,
   nowIso: string
 ): Promise<InactiveQuantilesRow> => {
-  const result = await queryFromD1(
-    `WITH ordered AS (
-      SELECT (julianday(?) - julianday(updated_at)) as inactiveDays
-      FROM arena_ratings
-      WHERE queue = ? AND games > 0
-      ORDER BY inactiveDays ASC
-    ),
-    cnt AS (
-      SELECT COUNT(*) as n FROM ordered
-    )
-    SELECT
-      n,
-      (SELECT inactiveDays FROM ordered LIMIT 1 OFFSET CAST((n - 1) * 0.85 AS INTEGER)) as p85
-    FROM cnt;`,
-    [nowIso, queue]
+  const countResult = await queryFromD1(
+    `SELECT COUNT(*) as n
+     FROM arena_ratings
+     WHERE queue = ? AND games > 0;`,
+    [queue]
   );
-  const row = readRows<InactiveQuantilesRow>(result)[0];
+  const countRow = readRows<{ n: number }>(countResult)[0];
+  const n = typeof countRow?.n === 'number' ? Math.max(0, Math.floor(countRow.n)) : 0;
+  if (n <= 0) return { n: 0, p85: null };
+
+  const offset85 = Math.max(0, Math.floor((n - 1) * 0.85));
+  const valueResult = await queryFromD1(
+    `SELECT (julianday(?) - julianday(updated_at)) as inactiveDays
+     FROM arena_ratings
+     WHERE queue = ? AND games > 0
+     ORDER BY inactiveDays ASC
+     LIMIT 1 OFFSET ?;`,
+    [nowIso, queue, offset85]
+  );
+  const row = readRows<{ inactiveDays: number }>(valueResult)[0];
   return {
-    n: typeof row?.n === 'number' ? Math.max(0, Math.floor(row.n)) : 0,
-    p85: typeof row?.p85 === 'number' ? Math.max(0, row.p85) : null,
+    n,
+    p85: typeof row?.inactiveDays === 'number' ? Math.max(0, row.inactiveDays) : null,
   };
 };
 
@@ -592,10 +610,26 @@ END`,
           wins = 0,
           losses = 0,
           draws = 0,
+          last_delta = NULL,
+          last_applied_at = NULL,
           updated_at = ?
       WHERE queue = ?;`;
-    const updateResult = await queryFromD1(updateSql, params);
-    changes += readChanges(updateResult);
+    try {
+      const updateResult = await queryFromD1(updateSql, params);
+      changes += readChanges(updateResult);
+    } catch (error) {
+      console.warn('[season-soft-reset] 更新 last_delta / last_applied_at 失败（将回退到旧字段集）:', error);
+      const fallbackSql = `UPDATE arena_ratings
+        SET rating = ${ratingExpr},
+            games = 0,
+            wins = 0,
+            losses = 0,
+            draws = 0,
+            updated_at = ?
+        WHERE queue = ?;`;
+      const updateResult = await queryFromD1(fallbackSql, params);
+      changes += readChanges(updateResult);
+    }
   }
 
   const after = await queryQueueStats(queryFromD1, queue);

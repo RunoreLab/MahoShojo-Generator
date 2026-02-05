@@ -153,7 +153,15 @@ export async function queryFromD1(sql: string, params: unknown[] = []): Promise<
     const response = await query(sql, params);
 
     if (!response.ok) {
-      throw new Error(`D1 API 错误: ${response.status} ${response.statusText}`);
+      let extra = '';
+      try {
+        const text = await response.text();
+        const trimmed = typeof text === 'string' ? text.trim() : '';
+        if (trimmed) extra = ` - ${trimmed.slice(0, 800)}`;
+      } catch {
+        // ignore
+      }
+      throw new Error(`D1 API 错误: ${response.status} ${response.statusText}${extra}`);
     }
 
     const result = await response.json();

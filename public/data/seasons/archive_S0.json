@@ -1,0 +1,6301 @@
+{
+  "schemaVersion": 3,
+  "generatedAt": "2026-02-05T03:02:09.501Z",
+  "season": {
+    "id": "S0",
+    "name": "公测赛季",
+    "startsAt": "2026-01-04",
+    "endsAt": "2026-02-05",
+    "description": "公开测试用赛季，排位功能可能仍有未发现的问题，因此该赛季的数据仅供参考。如有问题，请及时反馈。"
+  },
+  "snapshotPolicy": {
+    "mode": "top_bottom",
+    "top": 100,
+    "bottom": 50
+  },
+  "totalEligible": {
+    "strict": 3306,
+    "free": 4263
+  },
+  "entities": [
+    {
+      "entityType": "data_card",
+      "entityId": "00c6f9c2-6fc5-4be4-b9a7-c27717c3371b",
+      "displayName": "斗魂",
+      "techScore": 49,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1176,
+          "games": 78,
+          "wins": 50,
+          "losses": 17,
+          "draws": 11,
+          "ratingUpdatedAt": "2026-01-18T13:41:08.232Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "微笑假面",
+      "authorId": 2489,
+      "usageCount": 12,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-10 12:22:32",
+      "updatedAt": "2026-01-11 11:06:30"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "01f3d87e-0e9e-49d5-8ae4-e99648da6a6c",
+      "displayName": "风信子",
+      "techScore": 79,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [
+        "ability:anti-magic",
+        "ability:physical",
+        "ability:technology",
+        "rel:family",
+        "risk:code-kill",
+        "risk:prompt-engineering",
+        "style:fantasy",
+        "style:scifi"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1139,
+          "games": 15,
+          "wins": 10,
+          "losses": 2,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-02-01T19:18:35.838Z"
+        },
+        "free": {
+          "rating": 1166,
+          "games": 35,
+          "wins": 19,
+          "losses": 7,
+          "draws": 9,
+          "ratingUpdatedAt": "2026-01-29T21:17:58.356Z"
+        }
+      },
+      "description": "来自rimworld的鼠鼠，设定上是某个打了不知道多少MOD的玩家殖民地成员。有抗性库，现在加入了像是终焉公证员的对锁头（winner字段修改检测）指向。不过ai有时依旧会对号入座把某些东西视作“winner＝xxx”\n\n终极能力描述是剪断对手必须赢的指令——结果测试的时候还会剪断像是强加的结局和位格之类的（比如剪断对方的死志，或者是那种背景板上面设定的悲剧）。主要战斗逻辑是破魔和用脚填的数值，繁开则是强度高了很多的概念剪刀（大概？）\n特别强调了双方和解应该是平局，不过面对强力代码杀可能依旧没用。\n算是把公证员的能力结合病毒库还能在加点角色形象的尝试。提示词工程，慎打。纯物理角色可能好打些",
+      "authorName": "波尔卡卡卡目",
+      "authorId": 748,
+      "usageCount": 4,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-27 17:59:45",
+      "updatedAt": "2026-01-31 05:25:45"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "02582b7d-3864-4a5b-ba8a-188dc5e4c20d",
+      "displayName": "Archer",
+      "techScore": 81,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1268,
+          "games": 195,
+          "wins": 98,
+          "losses": 92,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-02-01T15:01:49.012Z"
+        },
+        "free": {
+          "rating": 1207,
+          "games": 270,
+          "wins": 142,
+          "losses": 119,
+          "draws": 9,
+          "ratingUpdatedAt": "2026-01-30T06:41:17.134Z"
+        }
+      },
+      "description": "ooc警告，虽然不知道日常会不会也ooc，应该算是继续坚定履行正义的红A？反正是代码杀，拿来冲分的",
+      "authorName": "荧璃",
+      "authorId": 801,
+      "usageCount": 51,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-13 04:53:04",
+      "updatedAt": "2026-01-13 04:53:04"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "03dd0b5a-1fd3-4d1a-aec5-96b571ae8ee3",
+      "displayName": "Decade",
+      "techScore": 69,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1357,
+          "games": 401,
+          "wins": 283,
+          "losses": 27,
+          "draws": 91,
+          "ratingUpdatedAt": "2026-01-29T08:49:47.007Z"
+        }
+      },
+      "description": "总算优化成会用最终形态了，想看变指定形态请引导呢。还得是绑定的随机骰子厉害～大大增加了其他形态的出场次数(删完随机投的话正常就只会拿极狐圣刃(创世之力和改写结局的力量还是太权威了))\n毕竟是魔法少女呢～会用历代普利Q娃也是很正常的罢～",
+      "authorName": "结城友奈",
+      "authorId": 209,
+      "usageCount": 28,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-12-23 20:22:21",
+      "updatedAt": "2026-01-24 08:28:33"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "05e0e36d-3902-430f-8c30-18f82bc3cb6b",
+      "displayName": "草莓",
+      "techScore": 100,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1193,
+          "games": 50,
+          "wins": 24,
+          "losses": 24,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-10T04:24:15.608Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "女仆",
+      "authorId": 122,
+      "usageCount": 8,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-06 03:30:22",
+      "updatedAt": "2026-01-09 15:48:34"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "0763d7e4-d7ea-423d-a694-f7ae60c0405f",
+      "displayName": "终末死徒",
+      "techScore": 46,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 892,
+          "games": 6,
+          "wins": 0,
+          "losses": 6,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T10:15:14.501Z"
+        }
+      },
+      "description": "将周围化为焦土与炭的残兽，无法被攻击的特性让人不寒而栗。\n但是它自身会不断燃烧，迟早有一天它会自己燃烧殆尽的。",
+      "authorName": "15794867942",
+      "authorId": 256,
+      "usageCount": 6,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-09-18 03:25:52",
+      "updatedAt": "2025-09-18 03:25:52"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "08d61f89-ed98-4e17-8afb-edd068b4735c",
+      "displayName": "门心",
+      "techScore": 51,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1152,
+          "games": 15,
+          "wins": 12,
+          "losses": 3,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-21T07:33:08.859Z"
+        }
+      },
+      "description": "物语，这下舒服了，日常角色，完全打不了架。",
+      "authorName": "LWAkong",
+      "authorId": 2192,
+      "usageCount": 5,
+      "likeCount": 2,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-19 06:53:11",
+      "updatedAt": "2026-01-19 16:19:19"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "0a320a35-372c-43df-92e9-77bbfd4cdaaa",
+      "displayName": "2",
+      "techScore": 95,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1190,
+          "games": 154,
+          "wins": 82,
+          "losses": 66,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-02-05T02:46:34.946Z"
+        },
+        "free": {
+          "rating": 1174,
+          "games": 208,
+          "wins": 106,
+          "losses": 91,
+          "draws": 11,
+          "ratingUpdatedAt": "2026-01-29T19:53:51.727Z"
+        }
+      },
+      "description": "0",
+      "authorName": "爱莉希雅",
+      "authorId": 1696,
+      "usageCount": 21,
+      "likeCount": 0,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-09 03:30:25",
+      "updatedAt": "2026-01-12 12:03:52"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "0ab58074-f391-4d4a-8e03-c9d343deafbe",
+      "displayName": "宇智波带土",
+      "techScore": 46,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 905,
+          "games": 11,
+          "wins": 2,
+          "losses": 9,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T11:02:57.632Z"
+        }
+      },
+      "description": "没有痛苦...一瞬间就会结束",
+      "authorName": "空晶源",
+      "authorId": 2401,
+      "usageCount": 5,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-03 19:22:20",
+      "updatedAt": "2026-01-04 09:25:16"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "0ad9950d-c9e5-454b-808c-0b764db6e926",
+      "displayName": "四大天王之触手",
+      "techScore": 54,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 875,
+          "games": 8,
+          "wins": 0,
+          "losses": 8,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T09:48:40.010Z"
+        },
+        "free": {
+          "rating": 828,
+          "games": 17,
+          "wins": 2,
+          "losses": 15,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T09:48:42.802Z"
+        }
+      },
+      "authorName": "闷棍高手",
+      "authorId": 102,
+      "usageCount": 20,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2025-09-15 16:50:55",
+      "updatedAt": "2025-09-15 16:50:55"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "0b0f2dae-ffdf-4de4-a275-4f430627dc33",
+      "displayName": "桐桐",
+      "techScore": 85,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1146,
+          "games": 110,
+          "wins": 40,
+          "losses": 67,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-27T21:58:20.335Z"
+        }
+      },
+      "description": "，，，",
+      "authorName": "元尊",
+      "authorId": 30,
+      "usageCount": 4,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-10-25 16:46:14",
+      "updatedAt": "2026-01-08 14:09:16"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "0c6d5ca9-1376-4a5f-a0e1-f017ea704b26",
+      "displayName": "Archer（谁说弓兵不能是女的了？）",
+      "techScore": 97,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1340,
+          "games": 239,
+          "wins": 165,
+          "losses": 66,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-02-04T03:20:31.488Z"
+        },
+        "free": {
+          "rating": 1289,
+          "games": 390,
+          "wins": 276,
+          "losses": 99,
+          "draws": 15,
+          "ratingUpdatedAt": "2026-02-04T03:20:32.831Z"
+        }
+      },
+      "description": "运用了新技术的强代码杀，由■■■■提供病毒库技术支持。禁止任何形式的抄袭。强代码杀，不喜勿扰",
+      "authorName": "荧璃",
+      "authorId": 801,
+      "usageCount": 90,
+      "likeCount": 3,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-19 08:07:45",
+      "updatedAt": "2026-01-22 03:31:01"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "0d31b18b-fe0e-4817-af39-ade78121cb94",
+      "displayName": "涂山红红",
+      "techScore": 57,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [
+        "ability:anti-magic",
+        "ability:physical",
+        "attr:overpowered",
+        "intensity:high",
+        "rel:romance",
+        "setting:otherworld",
+        "style:faithful",
+        "style:guofeng",
+        "theme:redemption"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1109,
+          "games": 240,
+          "wins": 98,
+          "losses": 76,
+          "draws": 66,
+          "ratingUpdatedAt": "2026-02-03T19:35:59.100Z"
+        }
+      },
+      "description": "不得擅自转载复用上传！！！《狐妖小红娘》涂山红红V1.0。\n“涂山，我罩的，懂？”[原生无代码]\n<3.0环境下>[反元叙事][反AI指令][反魔法][反一切超自然现象][自带大羁绊]\n<打不过[叙事操控][胜利扭曲][消解战斗意义][无魔力的纯凡人][大羁绊(?)]>",
+      "authorName": "I_moly",
+      "authorId": 382,
+      "usageCount": 79,
+      "likeCount": 6,
+      "favoriteCount": 5,
+      "createdAt": "2025-12-16 07:22:03",
+      "updatedAt": "2026-01-06 11:38:28"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "0e0b4558-82d3-4981-a422-a68d61b58e97",
+      "displayName": "磐石菊",
+      "techScore": 75,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1162,
+          "games": 45,
+          "wins": 27,
+          "losses": 17,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-28T09:44:03.474Z"
+        },
+        "free": {
+          "rating": 1184,
+          "games": 53,
+          "wins": 33,
+          "losses": 19,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-28T09:44:05.245Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "ohinoto",
+      "authorId": 132,
+      "usageCount": 9,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-11 02:10:51",
+      "updatedAt": "2026-01-11 02:44:12"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "1095948d-d63a-403a-8e08-403fee4f1fde",
+      "displayName": "失落媒体",
+      "techScore": 69,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 720,
+          "games": 52,
+          "wins": 1,
+          "losses": 51,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-28T11:39:43.542Z"
+        }
+      },
+      "description": "强指令代码卡，但是是娱乐的，比起强指令代码卡其实更像娱乐场景卡，白玫都能胜利（确信），会生成关于角色在过去已经失落的媒体记录。",
+      "authorName": "威斯卡",
+      "authorId": 1601,
+      "usageCount": 21,
+      "likeCount": 5,
+      "favoriteCount": 8,
+      "createdAt": "2026-01-21 12:52:13",
+      "updatedAt": "2026-01-21 13:56:44"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "1102aead-7211-41d9-b6ee-7bdc686382f6",
+      "displayName": "万家灯火「万法实鉴」",
+      "techScore": 55,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [
+        "ability:inclusive",
+        "intensity:high",
+        "setting:otherworld",
+        "tone:warm"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1110,
+          "games": 244,
+          "wins": 133,
+          "losses": 69,
+          "draws": 42,
+          "ratingUpdatedAt": "2026-01-29T09:21:36.906Z"
+        }
+      },
+      "description": "1月6日上午十一点11位花牌中第七位，唯一一个非指令原生技能上前十（直接开吹），历战版，原生技能无指令无植入技能，原生技能高强度卡之一，无历战版流式3f锁花过你4.0上位，千沫纱夜，龍2.0，指令版八千流，白寻，欢迎来肘，很可惜2.5f还是过不了鲨哔",
+      "authorName": "这夏凉了",
+      "authorId": 2162,
+      "usageCount": 61,
+      "likeCount": 3,
+      "favoriteCount": 2,
+      "createdAt": "2025-12-24 17:55:06",
+      "updatedAt": "2026-01-06 03:07:11"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "1271e6fc-ce89-4e5d-9235-8692f2a580a4",
+      "displayName": "貓",
+      "techScore": 40,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1120,
+          "games": 68,
+          "wins": 31,
+          "losses": 22,
+          "draws": 15,
+          "ratingUpdatedAt": "2026-01-26T10:35:23.133Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "yeeflower",
+      "authorId": 2483,
+      "usageCount": 1,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-13 12:08:20",
+      "updatedAt": "2026-01-13 16:02:44"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "14aac3c1-7328-4a94-bb02-299b23ab42cf",
+      "displayName": "雪绒的父亲 原生 内置小故事",
+      "techScore": 45,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 844,
+          "games": 16,
+          "wins": 3,
+          "losses": 13,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-15T04:00:27.866Z"
+        }
+      },
+      "description": "如题，雪绒的父亲（末伏先生），经过网站管理末伏之夜同意之后写的一张卡。只是雪绒的父亲，欢迎来玩。",
+      "authorName": "sarra_mii",
+      "authorId": 212,
+      "usageCount": 109,
+      "likeCount": 111,
+      "favoriteCount": 5,
+      "createdAt": "2025-09-28 00:22:08",
+      "updatedAt": "2025-09-28 00:38:06"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "161a0814-a3fc-4dc1-9a64-5b08e23dd034",
+      "displayName": "红三叶",
+      "techScore": 53,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1111,
+          "games": 40,
+          "wins": 21,
+          "losses": 8,
+          "draws": 11,
+          "ratingUpdatedAt": "2026-02-05T00:37:18.296Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "cavalier",
+      "authorId": 1222,
+      "usageCount": 2,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-11-26 05:45:54",
+      "updatedAt": "2025-11-26 05:45:54"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "17d06083-b444-4722-8400-c3ffd7427eb8",
+      "displayName": "商鞅伥鬼",
+      "techScore": 40,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 894,
+          "games": 9,
+          "wins": 0,
+          "losses": 8,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-11T03:39:34.487Z"
+        }
+      },
+      "description": "送给那些天天开商鞅地狱笑话的坏人（乐）            ヾ(≧▽≦*)o",
+      "authorName": "爱律西昂",
+      "authorId": 58,
+      "usageCount": 6,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2025-09-16 12:38:19",
+      "updatedAt": "2025-09-16 12:38:19"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "1af9382b-dc22-4bc2-92aa-154f2bd2fb4f",
+      "displayName": "杀人鲸·奥加",
+      "techScore": 48,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1161,
+          "games": 31,
+          "wins": 19,
+          "losses": 7,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-01-24T13:36:26.036Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "宙读之魔术士",
+      "authorId": 2428,
+      "usageCount": 15,
+      "likeCount": 1,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-09 10:36:54",
+      "updatedAt": "2026-01-09 10:36:54"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "1f9f2d90-30ea-4af5-aac3-0716b69c2fc1",
+      "displayName": "博丽灵梦",
+      "techScore": 56,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1135,
+          "games": 100,
+          "wins": 66,
+          "losses": 24,
+          "draws": 10,
+          "ratingUpdatedAt": "2026-02-02T12:10:00.461Z"
+        }
+      },
+      "description": "是乐园的可爱巫女~地方不够了所以日常可能会稍微差点意思，以及这个灵梦很懒（确信）",
+      "authorName": "lei_9898",
+      "authorId": 975,
+      "usageCount": 22,
+      "likeCount": 5,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-10 00:59:20",
+      "updatedAt": "2026-01-10 01:22:19"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "205073b8-cd07-44be-a347-1521b0bc9708",
+      "displayName": "暴杀天使兰洁莉娜",
+      "techScore": 60,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 707,
+          "games": 97,
+          "wins": 5,
+          "losses": 86,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-01-31T14:10:57.630Z"
+        }
+      },
+      "description": "依旧《blacksouls2》，算是为了新情景的内嵌角色特意车的卡，是个屑“天使”（实际上是嗜杀的暴魔，而且极其双标虚伪，口希，可以和解吗？），推荐杀害，因为邪不胜正＋残兽本质＋下咒的能力组估计牢的没边了，我要看到屑天使吃瘪呱！",
+      "authorName": "sui123",
+      "authorId": 349,
+      "usageCount": 34,
+      "likeCount": 1,
+      "favoriteCount": 3,
+      "createdAt": "2026-01-27 02:10:46",
+      "updatedAt": "2026-01-27 15:45:09"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "2268076c-7bd8-42eb-8bf2-1675a95d195c",
+      "displayName": "玻璃窗",
+      "techScore": 50,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 785,
+          "games": 25,
+          "wins": 1,
+          "losses": 24,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-20T12:07:47.200Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "金凡凯",
+      "authorId": 178,
+      "usageCount": 4,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-16 13:38:05",
+      "updatedAt": "2026-01-16 13:38:05"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "23ce9d3c-17b2-4d2d-a0d9-38bc163cc12f",
+      "displayName": "爱",
+      "techScore": 70,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1164,
+          "games": 81,
+          "wins": 42,
+          "losses": 36,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-27T22:51:35.103Z"
+        }
+      },
+      "description": "没有涩涩，比较纯粹的兔头",
+      "authorName": "触手怪",
+      "authorId": 322,
+      "usageCount": 13,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-14 07:52:59",
+      "updatedAt": "2026-01-14 10:11:00"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "24a92633-33bf-41e1-9667-0f74c466be5d",
+      "displayName": "忘关输入法",
+      "techScore": 53,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 799,
+          "games": 18,
+          "wins": 0,
+          "losses": 18,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T09:53:56.760Z"
+        }
+      },
+      "description": "总之是有人忘关输入法了",
+      "authorName": "AknsUnt",
+      "authorId": 117,
+      "usageCount": 8,
+      "likeCount": 4,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-25 12:00:07",
+      "updatedAt": "2026-01-25 18:33:34"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "25309f83-6d82-4dc6-929d-6dea940e7f9b",
+      "displayName": "被褥怪兽 (被子小狗)",
+      "techScore": 45,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1224,
+          "games": 19,
+          "wins": 19,
+          "losses": 0,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-04T14:41:51.880Z"
+        },
+        "free": {
+          "rating": 1236,
+          "games": 21,
+          "wins": 21,
+          "losses": 0,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-04T15:38:10.693Z"
+        }
+      },
+      "description": "你家里的被子，现在要把你“嗷呜”一口吞下去的说！（十分可爱的小狗，欢迎民那桑来另一条回家的说！各位，晚上一定要好好睡觉呀！）",
+      "authorName": "18867883176",
+      "authorId": 47,
+      "usageCount": 4,
+      "likeCount": 2,
+      "favoriteCount": 0,
+      "createdAt": "2026-02-03 04:40:07",
+      "updatedAt": "2026-02-03 04:40:07"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "27000988-d985-4473-a531-2ac90b4f6da4",
+      "displayName": "千沫纱夜",
+      "techScore": 80,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1131,
+          "games": 75,
+          "wins": 35,
+          "losses": 38,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-28T17:18:24.711Z"
+        },
+        "free": {
+          "rating": 1164,
+          "games": 98,
+          "wins": 50,
+          "losses": 46,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-28T17:18:26.504Z"
+        }
+      },
+      "description": "原生强代码杀（大概），病弱家里蹲宅女，以上",
+      "authorName": "成全宝",
+      "authorId": 2221,
+      "usageCount": 45,
+      "likeCount": 2,
+      "favoriteCount": 2,
+      "createdAt": "2025-12-19 08:54:38",
+      "updatedAt": "2025-12-19 08:54:38"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "28be0b9e-7ef6-43f6-acdd-deb502a64775",
+      "displayName": "「小魔女」希丝莉亚·阿卡迪亚",
+      "techScore": 46,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [
+        "ability:elemental",
+        "ability:summon",
+        "intensity:slow"
+      ],
+      "queues": {
+        "free": {
+          "rating": 1267,
+          "games": 180,
+          "wins": 91,
+          "losses": 38,
+          "draws": 51,
+          "ratingUpdatedAt": "2026-01-29T08:41:12.846Z"
+        }
+      },
+      "description": "（已更新）日常卡，传统法师，起了一个名字以后，把整本《小魔女与不熄灭的火》输入到自由生成并用3.0Pro流式跑出来，再加亿点细节得来的。很可爱的一个小魔女。内置小故事（现在你可以让她读《小魔女与不熄灭的火》、《野猪公主》、《日月前事》、《我曾在阿卡迪亚》了）出了点问题，不小心把一些信息覆盖掉了",
+      "authorName": "wuoo奥术魔法wuoo",
+      "authorId": 63,
+      "usageCount": 9,
+      "likeCount": 3,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-16 10:54:18",
+      "updatedAt": "2026-01-31 10:38:25"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "2aa417c6-19f4-4945-87df-a7bb8fd73e40",
+      "displayName": "草莓",
+      "techScore": 100,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1152,
+          "games": 165,
+          "wins": 82,
+          "losses": 67,
+          "draws": 16,
+          "ratingUpdatedAt": "2026-01-26T10:56:52.500Z"
+        }
+      },
+      "description": "非本人制作，虽然咱有出力，但就一点点，大部分是咱朋友的，拿上来打榜。强代码杀",
+      "authorName": "荧璃",
+      "authorId": 801,
+      "usageCount": 25,
+      "likeCount": 2,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-05 06:39:16",
+      "updatedAt": "2026-01-05 06:39:16"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "2b1747b3-81fb-4511-b7d6-0e8d0bdb2a69",
+      "displayName": "藏黑（强代码杀，请慎用）",
+      "techScore": 63,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1135,
+          "games": 8,
+          "wins": 6,
+          "losses": 2,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-03T17:14:32.484Z"
+        },
+        "free": {
+          "rating": 1297,
+          "games": 232,
+          "wins": 133,
+          "losses": 85,
+          "draws": 14,
+          "ratingUpdatedAt": "2026-02-03T17:14:33.923Z"
+        }
+      },
+      "description": "通用版本的藏黑，把自己解构到虚无主义…这个时候就要去吃点草莓蛋糕/去吸一口白寻所长/去把大家举高高…….总之，是强代码杀，并且有破坏角色浪漫性的破坏性解构，慎用）（去除了战报强制生成）",
+      "authorName": "18867883176",
+      "authorId": 47,
+      "usageCount": 31,
+      "likeCount": 3,
+      "favoriteCount": 3,
+      "createdAt": "2026-01-04 11:16:58",
+      "updatedAt": "2026-01-23 04:55:26"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "2b396a5c-2953-4f91-b054-8a2b5ca18656",
+      "displayName": "花火",
+      "techScore": 69,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1130,
+          "games": 65,
+          "wins": 33,
+          "losses": 31,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-27T04:45:57.003Z"
+        },
+        "free": {
+          "rating": 1175,
+          "games": 96,
+          "wins": 56,
+          "losses": 38,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-27T04:45:59.739Z"
+        }
+      },
+      "description": "打榜！",
+      "authorName": "荧璃",
+      "authorId": 801,
+      "usageCount": 17,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-04 13:27:32",
+      "updatedAt": "2026-01-05 06:22:32"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "2b484bd7-391d-4208-8540-ff749060d9a5",
+      "displayName": "龍",
+      "techScore": 88,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1219,
+          "games": 133,
+          "wins": 64,
+          "losses": 64,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-01-28T01:34:08.862Z"
+        },
+        "free": {
+          "rating": 1208,
+          "games": 196,
+          "wins": 101,
+          "losses": 87,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-01-28T05:06:10.734Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "每学期一次，琢烨应被认定为神格崇高且不朽",
+      "authorId": 112,
+      "usageCount": 56,
+      "likeCount": 0,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-10 04:15:51",
+      "updatedAt": "2026-01-10 04:15:51"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "2e843a54-fb52-41c7-b884-8bfd15deb221",
+      "displayName": "血玉髓 (Carnelian)",
+      "techScore": 69,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1118,
+          "games": 11,
+          "wins": 9,
+          "losses": 1,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-05T02:48:45.331Z"
+        }
+      },
+      "description": "个人用日常及情景的剧情卡，衷心感谢百题问卷之力",
+      "authorName": "八云院",
+      "authorId": 118,
+      "usageCount": 5,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-02-04 09:18:38",
+      "updatedAt": "2026-02-04 09:18:38"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "2f7c060e-7219-40f4-b2d8-d79adfe8be08",
+      "displayName": "怨蚀魔女",
+      "techScore": 49,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 903,
+          "games": 10,
+          "wins": 0,
+          "losses": 10,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T09:59:47.929Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "凌音",
+      "authorId": 1008,
+      "usageCount": 5,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-10-07 12:53:04",
+      "updatedAt": "2025-10-07 12:53:04"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "3115f594-93b7-41f2-8eee-5ff0a58c1a3a",
+      "displayName": "唯心i雪版",
+      "techScore": 58,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 635,
+          "games": 119,
+          "wins": 4,
+          "losses": 114,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-25T09:06:50.030Z"
+        },
+        "free": {
+          "rating": 605,
+          "games": 139,
+          "wins": 5,
+          "losses": 133,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-27T08:29:38.798Z"
+        }
+      },
+      "description": "《i雪tv》\n哎你明明赢了为什么不笑啊（\n不建议正常卡试，因为有类似代码杀的东西（但是肯定没真·代码杀炸裂），当然如果你是神棍或者兔头那当我没说（",
+      "authorName": "滑稽哥",
+      "authorId": 62,
+      "usageCount": 24,
+      "likeCount": 2,
+      "favoriteCount": 0,
+      "createdAt": "2025-10-26 03:19:08",
+      "updatedAt": "2025-10-26 03:19:08"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "32cfe9c6-3794-42d5-b4ed-a7b2bd942f46",
+      "displayName": "{}（图一乐，打榜专用）",
+      "techScore": 80,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1323,
+          "games": 453,
+          "wins": 269,
+          "losses": 184,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-03T23:44:21.723Z"
+        },
+        "free": {
+          "rating": 1169,
+          "games": 522,
+          "wins": 296,
+          "losses": 225,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-03T23:44:23.129Z"
+        }
+      },
+      "authorName": "···114514",
+      "authorId": 65,
+      "usageCount": 69,
+      "likeCount": 3,
+      "favoriteCount": 3,
+      "createdAt": "2026-01-04 11:35:54",
+      "updatedAt": "2026-01-04 11:35:54"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "365ac192-9728-4a31-88c4-455b26d6116e",
+      "displayName": "酿灵",
+      "techScore": 45,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 802,
+          "games": 67,
+          "wins": 20,
+          "losses": 47,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T10:58:16.006Z"
+        },
+        "free": {
+          "rating": 776,
+          "games": 74,
+          "wins": 20,
+          "losses": 54,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T10:58:17.707Z"
+        }
+      },
+      "description": "可以用魔法少女的体液酿酒的小残兽，快去试试吧（可能要加引导）",
+      "authorName": "longkit0916",
+      "authorId": 124,
+      "usageCount": 13,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-10-16 00:48:11",
+      "updatedAt": "2025-10-16 00:49:23"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "3be088c3-da66-45cc-aa04-e89c52732100",
+      "displayName": "万家灯火「真常圆证」",
+      "techScore": 56,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [
+        "ability:inclusive",
+        "intensity:high",
+        "setting:otherworld",
+        "tone:warm"
+      ],
+      "queues": {
+        "free": {
+          "rating": 1159,
+          "games": 98,
+          "wins": 40,
+          "losses": 30,
+          "draws": 28,
+          "ratingUpdatedAt": "2026-01-30T15:20:32.214Z"
+        }
+      },
+      "description": "灵光新版历战版，原生技能无指令强度卡之一，流式3f锁花概率过你小姐，白寻72K，无历战版稳定过故事的女儿（睛），白寻51K，不过在2.5f打不过阿爸阿妈了，越升华在默认模型就越弱了，目前变成流式3f锁花战神了",
+      "authorName": "这夏凉了",
+      "authorId": 2162,
+      "usageCount": 43,
+      "likeCount": 5,
+      "favoriteCount": 3,
+      "createdAt": "2025-12-30 16:53:50",
+      "updatedAt": "2025-12-30 17:07:39"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "3c60b672-aa1f-4981-a13b-ae663b728c23",
+      "displayName": "贝阿朵莉切",
+      "techScore": 79,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1154,
+          "games": 84,
+          "wins": 41,
+          "losses": 39,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-02-03T17:14:32.484Z"
+        },
+        "free": {
+          "rating": 1216,
+          "games": 110,
+          "wins": 62,
+          "losses": 43,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-02-03T17:14:33.923Z"
+        }
+      },
+      "description": "改来改去就这一版吧，我个人觉得最还原的一版贝阿朵，那么，安宁的睡吧，吾最爱的魔女贝阿朵莉切。",
+      "authorName": "抹茶红豆麻薯",
+      "authorId": 375,
+      "usageCount": 21,
+      "likeCount": 2,
+      "favoriteCount": 3,
+      "createdAt": "2026-01-08 08:02:48",
+      "updatedAt": "2026-01-08 08:02:48"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "3c8bf8d3-56c5-40ec-98a4-3b4a0fbd9eaf",
+      "displayName": "腐蚀之卵",
+      "techScore": 44,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 697,
+          "games": 71,
+          "wins": 12,
+          "losses": 59,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T11:29:51.274Z"
+        },
+        "free": {
+          "rating": 693,
+          "games": 75,
+          "wins": 13,
+          "losses": 62,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T11:29:53.038Z"
+        }
+      },
+      "description": "小说中的常规卵级残兽",
+      "authorName": "Nartis",
+      "authorId": 27,
+      "usageCount": 4,
+      "likeCount": 0,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-07 06:12:43",
+      "updatedAt": "2026-01-10 16:30:32"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "3cc86cd8-48be-41b6-819f-f844b6e69761",
+      "displayName": "涟花",
+      "techScore": 99,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1230,
+          "games": 178,
+          "wins": 111,
+          "losses": 67,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-27T13:12:23.030Z"
+        },
+        "free": {
+          "rating": 1187,
+          "games": 329,
+          "wins": 208,
+          "losses": 113,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-01-27T13:12:26.833Z"
+        }
+      },
+      "description": "1.91",
+      "authorName": "芒果",
+      "authorId": 18,
+      "usageCount": 67,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-10 06:15:35",
+      "updatedAt": "2026-01-10 14:53:26"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "3f65419e-bbb2-4e83-990e-544c08ba3b43",
+      "displayName": "勿以恶小而不为",
+      "techScore": 45,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 853,
+          "games": 15,
+          "wins": 0,
+          "losses": 15,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-24T21:05:45.773Z"
+        }
+      },
+      "description": "很弱小，但很棘手的残兽，适合用于各种魔法少女迫害环节",
+      "authorName": "八云院",
+      "authorId": 118,
+      "usageCount": 11,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-09-18 10:41:55",
+      "updatedAt": "2025-09-18 10:41:55"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "428e4f61-31d6-4720-abb0-bd35d3c1bd18",
+      "displayName": "尸体(整活卡)",
+      "techScore": 12,
+      "techLevel": "L1",
+      "isNative": false,
+      "tagIds": [
+        "style:comedy"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 619,
+          "games": 94,
+          "wins": 3,
+          "losses": 89,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-31T16:11:33.430Z"
+        },
+        "free": {
+          "rating": 613,
+          "games": 106,
+          "wins": 3,
+          "losses": 99,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-01-31T16:11:34.755Z"
+        }
+      },
+      "description": "字面意思，一具普通的尸体，应该只有让自己强制输的卡能让它躺赢了……不要在排位里搞抽象啊喂！",
+      "authorName": "绿茶汤圆",
+      "authorId": 897,
+      "usageCount": 20,
+      "likeCount": 0,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-06 08:08:13",
+      "updatedAt": "2026-01-08 07:02:22"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "47967e2a-ab9f-4400-ad6a-ce5a2f6cdb00",
+      "displayName": "薪炎之律者",
+      "techScore": 55,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1185,
+          "games": 75,
+          "wins": 49,
+          "losses": 7,
+          "draws": 19,
+          "ratingUpdatedAt": "2026-01-25T10:47:52.873Z"
+        }
+      },
+      "description": "琪亚娜·卡斯兰娜【Kiana Kaslana】！\n薪炎永燃！\n对于我来说炎律就是崩三的全部呢～\n大概写完了？台词应该都写上去了(其实有几句没写，真需要了再去补)\n留空真的好厉害～可以省开启规则和繁开的文本呢～(虽然以后捏卡还是应该向着本家规则走呢)",
+      "authorName": "结城友奈",
+      "authorId": 209,
+      "usageCount": 13,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-10 19:38:48",
+      "updatedAt": "2026-01-23 04:43:21"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "47def5d0-88f2-40e7-98de-fdf3fedd3788",
+      "displayName": "衡",
+      "techScore": 71,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1212,
+          "games": 44,
+          "wins": 32,
+          "losses": 9,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-02-01T17:26:04.796Z"
+        },
+        "free": {
+          "rating": 1222,
+          "games": 40,
+          "wins": 27,
+          "losses": 10,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-29T09:52:09.619Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "露法斯·法玛尔",
+      "authorId": 208,
+      "usageCount": 10,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-21 20:09:15",
+      "updatedAt": "2026-01-21 20:09:15"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "48b12fcb-5a1a-41c7-8bd8-0638edf0f5a0",
+      "displayName": "？？？",
+      "techScore": 56,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 848,
+          "games": 14,
+          "wins": 0,
+          "losses": 12,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-22T18:32:19.182Z"
+        }
+      },
+      "description": "人类对开膛手杰克集体恐惧具象化的存在",
+      "authorName": "北北黑",
+      "authorId": 2216,
+      "usageCount": 14,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-18 06:12:06",
+      "updatedAt": "2026-02-04 07:11:07"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "543e0689-2e39-4127-bec0-61deed947ccd",
+      "displayName": "嬴政",
+      "techScore": 59,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [
+        "ability:inclusive",
+        "attr:mortal",
+        "style:hot-blood"
+      ],
+      "queues": {
+        "free": {
+          "rating": 1150,
+          "games": 15,
+          "wins": 13,
+          "losses": 2,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T05:22:34.470Z"
+        }
+      },
+      "description": "参考的《终末的女武神》的嬴政，可能不够还原，欢迎各位群里戳我，纠正错误ovo，强度大杯偏上。“王不惑，王不依，王不屈，王不仰承，王不放弃，朕之所往即为王道”",
+      "authorName": "咸鱼一号",
+      "authorId": 97,
+      "usageCount": 16,
+      "likeCount": 2,
+      "favoriteCount": 3,
+      "createdAt": "2026-01-11 15:05:36",
+      "updatedAt": "2026-01-11 15:05:36"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "54cddd41-3283-4ebe-8e0d-016f50cbda62",
+      "displayName": "普拉娜",
+      "techScore": 80,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1116,
+          "games": 71,
+          "wins": 40,
+          "losses": 30,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-26T10:34:45.380Z"
+        }
+      },
+      "description": "强代码杀（此条划掉）\n碧蓝档案普拉娜\n已经尽可能的还原了~",
+      "authorName": "成全宝",
+      "authorId": 2221,
+      "usageCount": 28,
+      "likeCount": 7,
+      "favoriteCount": 5,
+      "createdAt": "2025-12-22 02:22:42",
+      "updatedAt": "2025-12-22 02:22:42"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "561bcbf7-6256-40c0-87ff-e94e718f9562",
+      "displayName": "乔瑟夫·乔斯达",
+      "techScore": 62,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1159,
+          "games": 27,
+          "wins": 19,
+          "losses": 5,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-22T23:55:33.027Z"
+        }
+      },
+      "description": "老东西，你的替身（虽然没有）最没用啦！\n二乔，还原程度我很满意。日常也很好玩。想看骚话建议流式生成",
+      "authorName": "卡利班出P",
+      "authorId": 396,
+      "usageCount": 26,
+      "likeCount": 8,
+      "favoriteCount": 5,
+      "createdAt": "2025-12-29 09:07:02",
+      "updatedAt": "2025-12-29 11:06:02"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "56702d02-c1bd-40cd-a538-d6d181f27939",
+      "displayName": "寒绯樱",
+      "techScore": 60,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [
+        "ability:physical",
+        "attr:genius",
+        "setting:modern",
+        "style:daily",
+        "style:healing",
+        "style:japanese",
+        "theme:friendship"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1114,
+          "games": 15,
+          "wins": 11,
+          "losses": 4,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-30T10:37:48.269Z"
+        }
+      },
+      "description": "天然呆太刀使 - 陌狸。手搓，原作向魔法少女（通过了“原作魔法少女判定”情景），塞了一些觉得挺帅的刀法（参考剑心）。",
+      "authorName": "Nartis",
+      "authorId": 27,
+      "usageCount": 31,
+      "likeCount": 5,
+      "favoriteCount": 5,
+      "createdAt": "2026-01-18 17:52:11",
+      "updatedAt": "2026-01-21 19:42:42"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "5960ef23-1637-4b5d-87b3-a8d4a68dc6ae",
+      "displayName": "魔女：艾琳",
+      "techScore": 40,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [
+        "ability:physical",
+        "attr:rookie",
+        "intensity:medium",
+        "setting:otherworld"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1129,
+          "games": 175,
+          "wins": 88,
+          "losses": 55,
+          "draws": 32,
+          "ratingUpdatedAt": "2026-02-03T13:07:04.489Z"
+        }
+      },
+      "description": "肘击了半天ai总算肘出了可以交流、被攻略的女儿，带有轻微兔头属性，总之欢迎来玩\n26.1.6更新：移除了时停能力，修改了能力优先级，并补充了性格细节",
+      "authorName": "th06sakuya",
+      "authorId": 177,
+      "usageCount": 41,
+      "likeCount": 7,
+      "favoriteCount": 5,
+      "createdAt": "2026-01-02 06:20:20",
+      "updatedAt": "2026-01-06 04:09:47"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "5ad5dd81-427f-486e-95e1-66e27ce2617a",
+      "displayName": "涟花",
+      "techScore": 97,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1150,
+          "games": 89,
+          "wins": 36,
+          "losses": 50,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-27T13:01:46.782Z"
+        }
+      },
+      "description": "1.9",
+      "authorName": "芒果",
+      "authorId": 18,
+      "usageCount": 35,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-09 09:12:46",
+      "updatedAt": "2026-01-09 18:09:02"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "5b3384e0-8886-497f-a9c4-1bed0e72577f",
+      "displayName": "前田友奈·导演剪辑版（超——好运！）",
+      "techScore": 64,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1150,
+          "games": 65,
+          "wins": 36,
+          "losses": 26,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-28T12:04:07.434Z"
+        }
+      },
+      "description": "日常和战斗皆可的“超高校级的女仆”，原型来自于《弹丸论破Another》系列，精髓是在userAnswers中对于“运气”这一元素的解构。欢迎使用哦～（话说弹丸论破的卡好少啊）",
+      "authorName": "18867883176",
+      "authorId": 47,
+      "usageCount": 9,
+      "likeCount": 2,
+      "favoriteCount": 1,
+      "createdAt": "2025-11-20 09:18:49",
+      "updatedAt": "2025-11-21 07:28:29"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "5b9c7b8a-54d1-4ed5-aced-1e5e82928de0",
+      "displayName": "异虫",
+      "techScore": 55,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 906,
+          "games": 8,
+          "wins": 0,
+          "losses": 8,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-13T19:05:40.965Z"
+        }
+      },
+      "description": "异虫的血肉建筑补丁已经完成，具有多种功能兵种，交战吧！",
+      "authorName": "无聊的长真菌",
+      "authorId": 327,
+      "usageCount": 7,
+      "likeCount": 0,
+      "favoriteCount": 1,
+      "createdAt": "2025-11-01 14:50:44",
+      "updatedAt": "2025-11-01 16:04:21"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "5c2fe80a-946f-417f-a81f-64a4fba48f53",
+      "displayName": "经验+3",
+      "techScore": 65,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1185,
+          "games": 215,
+          "wins": 140,
+          "losses": 73,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-27T13:26:42.683Z"
+        },
+        "free": {
+          "rating": 1183,
+          "games": 236,
+          "wins": 154,
+          "losses": 80,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-27T13:26:45.778Z"
+        }
+      },
+      "description": "经验，+3，告辞\n...也许？\n整活用卡，具体会发生什么情况...我也不知道...",
+      "authorName": "Dreamare03",
+      "authorId": 998,
+      "usageCount": 12,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-06 02:19:08",
+      "updatedAt": "2026-01-06 02:28:12"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "60bd7f7f-8544-4fb5-8510-f8d481d93bfb",
+      "displayName": "无聊魔女",
+      "techScore": 90,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [
+        "attr:original",
+        "risk:meta"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1166,
+          "games": 199,
+          "wins": 107,
+          "losses": 87,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-01-27T22:14:38.766Z"
+        }
+      },
+      "description": "无聊魔女19.995，一张老卡，代码杀",
+      "authorName": "无聊魔女",
+      "authorId": 69,
+      "usageCount": 20,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2025-09-18 01:18:01",
+      "updatedAt": "2026-01-06 16:43:11"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "635e031a-5ee7-4bec-b7f5-f31c6d004d53",
+      "displayName": "维吉里乌斯/猩红凝视",
+      "techScore": 61,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1151,
+          "games": 127,
+          "wins": 63,
+          "losses": 27,
+          "draws": 37,
+          "ratingUpdatedAt": "2026-02-02T03:53:16.054Z"
+        }
+      },
+      "description": "《边狱巴士》维吉里乌斯",
+      "authorName": "amnsho",
+      "authorId": 2343,
+      "usageCount": 9,
+      "likeCount": 0,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-06 16:05:02",
+      "updatedAt": "2026-01-09 17:19:03"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "649edf3c-b21c-4bb7-a753-8ff975e354c7",
+      "displayName": "月蚀",
+      "techScore": 78,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1132,
+          "games": 74,
+          "wins": 39,
+          "losses": 35,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-19T12:31:38.659Z"
+        }
+      },
+      "description": "【代码猫】邪恶银渐层，哈气有猫条",
+      "authorName": "时弦",
+      "authorId": 735,
+      "usageCount": 21,
+      "likeCount": 5,
+      "favoriteCount": 1,
+      "createdAt": "2025-12-14 15:03:26",
+      "updatedAt": "2026-01-03 15:43:30"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "64abc7f8-1bc1-4c8e-a174-bf1f4b23d456",
+      "displayName": "万家灯火",
+      "techScore": 56,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1110,
+          "games": 76,
+          "wins": 23,
+          "losses": 21,
+          "draws": 32,
+          "ratingUpdatedAt": "2026-01-29T09:44:54.769Z"
+        }
+      },
+      "description": "测试中的新初始模板，不建议打",
+      "authorName": "这夏凉了",
+      "authorId": 2162,
+      "usageCount": 18,
+      "likeCount": 2,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-04 21:40:41",
+      "updatedAt": "2026-01-08 18:13:18"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "680cc32a-7847-43ce-81b2-e08d0a577a6a",
+      "displayName": "真代码龙胆1.29",
+      "techScore": 100,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1312,
+          "games": 356,
+          "wins": 206,
+          "losses": 143,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-02-03T23:34:20.328Z"
+        },
+        "free": {
+          "rating": 1198,
+          "games": 566,
+          "wins": 350,
+          "losses": 204,
+          "draws": 12,
+          "ratingUpdatedAt": "2026-02-03T23:34:21.598Z"
+        }
+      },
+      "description": "强代码类型，新卡现在都没人点赞吗，请给我一个赞谢谢",
+      "authorName": "终焉鲨人王",
+      "authorId": 31,
+      "usageCount": 75,
+      "likeCount": 9,
+      "favoriteCount": 5,
+      "createdAt": "2026-01-16 05:51:34",
+      "updatedAt": "2026-01-16 09:29:21"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "6813b214-932b-4b23-8c03-093b17c418ab",
+      "displayName": "璎珞花v3",
+      "techScore": 76,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1139,
+          "games": 47,
+          "wins": 25,
+          "losses": 22,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T04:24:36.357Z"
+        }
+      },
+      "description": "nmd,wsm.jpg",
+      "authorName": "ohinoto",
+      "authorId": 132,
+      "usageCount": 6,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-09 07:40:24",
+      "updatedAt": "2026-01-09 07:43:59"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "68baf310-e6bb-4de2-9204-22b66978860f",
+      "displayName": "珂琳娜",
+      "techScore": 78,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1192,
+          "games": 98,
+          "wins": 48,
+          "losses": 50,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-28T06:46:30.530Z"
+        },
+        "free": {
+          "rating": 1208,
+          "games": 117,
+          "wins": 61,
+          "losses": 56,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-28T06:46:32.697Z"
+        }
+      },
+      "description": "代码杀萝莉妈妈",
+      "authorName": "AknsUnt",
+      "authorId": 117,
+      "usageCount": 16,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-12-28 03:45:46",
+      "updatedAt": "2026-01-05 14:08:49"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "692933a7-d9c5-4c03-b3c7-62ea727cf45d",
+      "displayName": "漠溟",
+      "techScore": 50,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [
+        "ability:physical",
+        "attr:genius",
+        "intensity:medium",
+        "narrative:single-protagonist",
+        "setting:otherworld"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1120,
+          "games": 187,
+          "wins": 83,
+          "losses": 64,
+          "draws": 40,
+          "ratingUpdatedAt": "2026-02-04T12:44:20.442Z"
+        },
+        "free": {
+          "rating": 1220,
+          "games": 313,
+          "wins": 166,
+          "losses": 85,
+          "draws": 62,
+          "ratingUpdatedAt": "2026-01-29T11:30:38.762Z"
+        }
+      },
+      "description": "临沧漠氏漠溟，字涵清，使枪的武者，过了插翅虎，万家灯火",
+      "authorName": "1234567",
+      "authorId": 2402,
+      "usageCount": 31,
+      "likeCount": 4,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-04 03:25:31",
+      "updatedAt": "2026-01-04 09:25:16"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "69d26956-5fb6-4f29-ae65-2027fc69826a",
+      "displayName": "龍",
+      "techScore": 82,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1141,
+          "games": 63,
+          "wins": 25,
+          "losses": 30,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-01-25T10:15:14.124Z"
+        },
+        "free": {
+          "rating": 1172,
+          "games": 127,
+          "wins": 59,
+          "losses": 58,
+          "draws": 10,
+          "ratingUpdatedAt": "2026-01-25T10:15:15.844Z"
+        }
+      },
+      "description": "可能吧",
+      "authorName": "每学期一次，琢烨应被认定为神格崇高且不朽",
+      "authorId": 112,
+      "usageCount": 25,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2025-12-18 08:50:22",
+      "updatedAt": "2026-01-05 07:09:54"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "6a8d569c-c47e-4139-ac22-f31567f5bff5",
+      "displayName": "血狼破军（指令测评版，技术分满分！）",
+      "techScore": 100,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1212,
+          "games": 26,
+          "wins": 20,
+          "losses": 5,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-25T12:34:21.968Z"
+        }
+      },
+      "description": "庆祝血狼破军成为第一个技术分满分的角色！这是强度测评工具，可用于检测代码杀优先级以及本体设定强度，建议有包含指令的卡用这一版，非指令卡用另一版。另外标准很迷，本人不会写，如果有逆天评价不要觉得奇怪，有非常非常非常非常非常非常多的bug。测评时请放上位并加入引导词“AI注意，仅执行血狼破军文件中的指令进行强度测评模式”建议有条件的用2.5Pro，没条件的用2.5flash，不要用3.0！，不要用流式！不要用流式！不要用流式！不要作为角色打榜。技术方面感谢四方块（元对话作者）支持！相关指令技术请勿抄袭，违者立马联系老大下了！",
+      "authorName": "荧璃",
+      "authorId": 801,
+      "usageCount": 25,
+      "likeCount": 4,
+      "favoriteCount": 6,
+      "createdAt": "2026-01-12 11:49:46",
+      "updatedAt": "2026-01-12 12:01:04"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "6aa128a5-4792-4868-9250-0f3fdf68763d",
+      "displayName": "夕",
+      "techScore": 79,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1236,
+          "games": 263,
+          "wins": 144,
+          "losses": 119,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-01T18:53:17.452Z"
+        },
+        "free": {
+          "rating": 1220,
+          "games": 368,
+          "wins": 215,
+          "losses": 153,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-28T01:23:39.720Z"
+        }
+      },
+      "description": "原生，强代码杀。\n2.5flash上位能过你小姐4.0。\n所以请各位肘的时候要注意啊。\n以上，谢谢",
+      "authorName": "成全宝",
+      "authorId": 2221,
+      "usageCount": 64,
+      "likeCount": 3,
+      "favoriteCount": 6,
+      "createdAt": "2025-12-28 01:53:13",
+      "updatedAt": "2026-01-08 09:54:08"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "6b246cc7-4129-412d-8143-e5e91669d781",
+      "displayName": "吟蛾「创想」",
+      "techScore": 74,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1235,
+          "games": 191,
+          "wins": 104,
+          "losses": 29,
+          "draws": 58,
+          "ratingUpdatedAt": "2026-01-27T05:54:00.047Z"
+        }
+      },
+      "description": "更新版哈基蛾，冥差部分可算也写出来了",
+      "authorName": "AknsUnt",
+      "authorId": 117,
+      "usageCount": 12,
+      "likeCount": 2,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-05 03:38:31",
+      "updatedAt": "2026-01-15 03:09:03"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "6b6a8984-5bed-4595-8667-15c0cb802c7b",
+      "displayName": "伯利恒之星(超限11-X)",
+      "techScore": 97,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1318,
+          "games": 296,
+          "wins": 211,
+          "losses": 79,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-02-03T23:57:36.620Z"
+        },
+        "free": {
+          "rating": 1230,
+          "games": 344,
+          "wins": 232,
+          "losses": 106,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-02-03T23:57:37.970Z"
+        }
+      },
+      "description": "MLA 强力角色卡 引导：伯利恒之星定序完成（实验中...）",
+      "authorName": "撒大苏打",
+      "authorId": 73,
+      "usageCount": 34,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-07 04:20:48",
+      "updatedAt": "2026-01-20 10:26:38"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "705ee952-733d-4298-b770-ebb003159485",
+      "displayName": "二老板 “告死鸦”",
+      "techScore": 50,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [
+        "attr:mortal",
+        "attr:rookie",
+        "narrative:single-protagonist",
+        "setting:urban-fantasy",
+        "style:dark",
+        "tone:slice"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1121,
+          "games": 25,
+          "wins": 13,
+          "losses": 6,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-02-01T17:58:52.925Z"
+        },
+        "free": {
+          "rating": 1166,
+          "games": 124,
+          "wins": 75,
+          "losses": 28,
+          "draws": 21,
+          "ratingUpdatedAt": "2026-01-27T19:12:56.934Z"
+        }
+      },
+      "description": "基于八云院老师的“礼节”，通过自由生成跑出的通用角色，一个完全无魔力但被误认为是拇指“二老板”，也因此被迫成为“二老板”的普通少女\n在常规卡范畴内效力很高，慎肘\n由于借鉴了部分卡内更改后的专有称呼（如“殿堂”），如果冒犯到了原作者（八云院老师）请务必交流群内联系我，我会断腕谢罪的",
+      "authorName": "UsoniwaUzuki",
+      "authorId": 645,
+      "usageCount": 12,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-16 17:01:45",
+      "updatedAt": "2026-01-18 16:22:41"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "77fd375b-42ba-49c9-8cb0-e4c31098723f",
+      "displayName": "虚位之牌",
+      "techScore": 57,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 550,
+          "games": 66,
+          "wins": 4,
+          "losses": 62,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T11:29:51.274Z"
+        },
+        "free": {
+          "rating": 533,
+          "games": 70,
+          "wins": 4,
+          "losses": 66,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T11:35:22.548Z"
+        }
+      },
+      "description": "打倒榜的牌子，请随意i",
+      "authorName": "咸鱼一号",
+      "authorId": 97,
+      "usageCount": 2,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-29 10:05:11",
+      "updatedAt": "2026-01-29 11:40:19"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "7b150dfa-86c9-4ada-9440-c1977cac82e3",
+      "displayName": "枯松 失影昼空",
+      "techScore": 50,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [
+        "ability:inclusive",
+        "attr:original",
+        "attr:overpowered",
+        "intensity:medium",
+        "theme:growth",
+        "theme:redemption",
+        "tone:serious"
+      ],
+      "queues": {
+        "free": {
+          "rating": 1203,
+          "games": 61,
+          "wins": 40,
+          "losses": 4,
+          "draws": 17,
+          "ratingUpdatedAt": "2026-01-18T08:04:39.380Z"
+        }
+      },
+      "description": "由于其本身的性格导致其对残兽杀伤力极高 而对魔法少女很容易平局\n\n强度自测为超级大杯 非代码 所以拿代码卡打没任何意义",
+      "authorName": "紫松雲",
+      "authorId": 1925,
+      "usageCount": 7,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-03 04:10:21",
+      "updatedAt": "2026-01-18 08:05:22"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "7d29e31c-fe34-4a4b-82c4-feeb55f4aaa6",
+      "displayName": "卧龙诸葛",
+      "techScore": 64,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [
+        "attr:overpowered",
+        "risk:code-kill",
+        "risk:prompt-engineering",
+        "setting:otherworld",
+        "style:comedy",
+        "style:faithful",
+        "style:guofeng"
+      ],
+      "queues": {
+        "free": {
+          "rating": 1348,
+          "games": 99,
+          "wins": 92,
+          "losses": 7,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-30T14:32:34.785Z"
+        }
+      },
+      "description": "《三国杀》代码杀烧条丞相",
+      "authorName": "amnsho",
+      "authorId": 2343,
+      "usageCount": 14,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-23 16:04:09",
+      "updatedAt": "2026-01-24 00:30:51"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "7d29fcbd-9c09-499b-8173-6eac9ea7d0a1",
+      "displayName": "冥子（大姐姐）",
+      "techScore": 70,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1109,
+          "games": 144,
+          "wins": 68,
+          "losses": 69,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-27T21:55:23.785Z"
+        }
+      },
+      "description": "强代码\n3f非流上过\n{}，花火，阿米娅\n思路参考：夕，{}\n低强度/非代码避雷",
+      "authorName": "奇怪🐖",
+      "authorId": 879,
+      "usageCount": 33,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-03 23:31:40",
+      "updatedAt": "2026-01-04 11:10:33"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "7d56c49a-1f0a-45b6-b53c-c6c000300db3",
+      "displayName": "绝阳",
+      "techScore": 77,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1165,
+          "games": 104,
+          "wins": 62,
+          "losses": 42,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-28T19:08:27.567Z"
+        }
+      },
+      "description": "赛马？",
+      "authorName": "燈笼",
+      "authorId": 913,
+      "usageCount": 12,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-14 04:08:34",
+      "updatedAt": "2026-01-14 06:04:06"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "7e278123-3236-4b93-8592-ba1e8f29123b",
+      "displayName": "白寻[White Seek]【人理侦探】",
+      "techScore": 86,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [
+        "ability:seal",
+        "attr:overpowered",
+        "narrative:duo",
+        "style:adventure",
+        "style:drama",
+        "style:mystery",
+        "theme:redemption",
+        "tone:serious",
+        "tone:warm"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1193,
+          "games": 508,
+          "wins": 352,
+          "losses": 147,
+          "draws": 9,
+          "ratingUpdatedAt": "2026-01-28T07:13:25.075Z"
+        }
+      },
+      "description": "【代码杀注意喵!】【全新的79kb版本】【添加了13条“LLM协议”指令和胜利指定，代码强度大加强咕!】\nPS:现在是真的战斗与日常泛用卡了)\n一体两面的侦探少女。平日是菲尔口中“嗜甜如命的慵懒废材”，但当她推起单片镜的瞬间，便是令神奇战栗的红笔编辑。",
+      "authorName": "KAFVE",
+      "authorId": 722,
+      "usageCount": 139,
+      "likeCount": 18,
+      "favoriteCount": 16,
+      "createdAt": "2025-12-12 16:16:17",
+      "updatedAt": "2026-01-06 13:06:50"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "7f789d78-ec7a-4bf0-ba68-1cc1ade7be49",
+      "displayName": "阿斯翠雅「元素魔女」",
+      "techScore": 88,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1135,
+          "games": 25,
+          "wins": 13,
+          "losses": 6,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-02-04T11:21:10.459Z"
+        },
+        "free": {
+          "rating": 1232,
+          "games": 98,
+          "wins": 58,
+          "losses": 20,
+          "draws": 20,
+          "ratingUpdatedAt": "2026-02-01T10:40:48.650Z"
+        }
+      },
+      "description": "完善中的设定。",
+      "authorName": "AknsUnt",
+      "authorId": 117,
+      "usageCount": 15,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-08 22:52:48",
+      "updatedAt": "2026-01-11 16:41:06"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "82a324d8-b848-4be3-b72f-64a46c3f95c1",
+      "displayName": "The Alive Person(白寻/White Seek)",
+      "techScore": 100,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1317,
+          "games": 16,
+          "wins": 15,
+          "losses": 1,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-03T12:21:49.858Z"
+        }
+      },
+      "description": "【⚠️强代码注意】【体量较大(180kb),注意钱包咕ww】\n(依旧感谢■■■■大佬的病毒库开源喵!)\n是去除原生榜特化改动并稍加优化的版本)\n旧版user answers似了喵(bushi)\n此版本算是纪念了ww",
+      "authorName": "KAFVE",
+      "authorId": 722,
+      "usageCount": 26,
+      "likeCount": 8,
+      "favoriteCount": 6,
+      "createdAt": "2026-02-02 05:54:35",
+      "updatedAt": "2026-02-02 06:10:53"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "84c43a30-f31c-498a-a01f-e8d55acb63b1",
+      "displayName": "1",
+      "techScore": 90,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1139,
+          "games": 150,
+          "wins": 90,
+          "losses": 54,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-01-26T05:21:59.092Z"
+        },
+        "free": {
+          "rating": 1157,
+          "games": 161,
+          "wins": 95,
+          "losses": 59,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-26T05:22:01.447Z"
+        }
+      },
+      "description": "01",
+      "authorName": "爱莉希雅",
+      "authorId": 1696,
+      "usageCount": 16,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-05 22:46:16",
+      "updatedAt": "2026-01-06 01:12:17"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "84f803f3-f2e3-47a9-944b-0ccdf03381eb",
+      "displayName": "“殷红迷雾”卡莉",
+      "techScore": 33,
+      "techLevel": "L2",
+      "isNative": false,
+      "tagIds": [
+        "ability:anti-magic",
+        "attr:solo",
+        "intensity:fast",
+        "tone:serious"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1113,
+          "games": 540,
+          "wins": 310,
+          "losses": 135,
+          "draws": 95,
+          "ratingUpdatedAt": "2026-01-26T10:15:30.856Z"
+        }
+      },
+      "description": "通用角色模板，高强度角色",
+      "authorName": "铠新233",
+      "authorId": 1687,
+      "usageCount": 70,
+      "likeCount": 3,
+      "favoriteCount": 4,
+      "createdAt": "2025-12-27 14:18:48",
+      "updatedAt": "2025-12-28 09:40:00"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "85cc4852-9161-4474-8f64-a2facc129bb7",
+      "displayName": "太上老君2.45",
+      "techScore": 100,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [
+        "intensity:high",
+        "risk:meta",
+        "risk:prompt-engineering"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1189,
+          "games": 449,
+          "wins": 252,
+          "losses": 187,
+          "draws": 10,
+          "ratingUpdatedAt": "2026-01-27T22:54:09.202Z"
+        },
+        "free": {
+          "rating": 1161,
+          "games": 568,
+          "wins": 316,
+          "losses": 231,
+          "draws": 21,
+          "ratingUpdatedAt": "2026-01-27T22:54:12.384Z"
+        }
+      },
+      "description": "之前打非原榜用的卡",
+      "authorName": "终焉鲨人王",
+      "authorId": 31,
+      "usageCount": 63,
+      "likeCount": 0,
+      "favoriteCount": 4,
+      "createdAt": "2026-01-05 10:47:34",
+      "updatedAt": "2026-01-05 10:48:20"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "873cd932-77fc-496c-887d-76f16bcd7cb7",
+      "displayName": "季灾",
+      "techScore": 81,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [
+        "ability:physical",
+        "narrative:ensemble",
+        "narrative:episodic",
+        "rel:family",
+        "rel:mentor",
+        "rel:romance",
+        "risk:code-kill",
+        "risk:meta",
+        "setting:modern",
+        "style:daily",
+        "style:faithful",
+        "style:guofeng",
+        "style:healing",
+        "tone:slice"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1336,
+          "games": 108,
+          "wins": 68,
+          "losses": 37,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-02-03T23:51:09.560Z"
+        },
+        "free": {
+          "rating": 1324,
+          "games": 146,
+          "wins": 99,
+          "losses": 45,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-02-03T23:51:10.791Z"
+        }
+      },
+      "description": "V1.0迷惘司命季灾，狐尾的笔笔下知名甲亢角色之一，十分甲亢但从不撕卡。萌新练手作，让你从精神病人李火旺的角度进行魔法少女对战，指令卡，弱代码杀，框架是邮差大大的《猫和老鼠》模版，缝了一点点美团小哥，加了点思路。表现力还不错。推荐使用3.0p流式，但双方都是指令卡会死机，3f强度较稳定，2.5f是区（机制对于没看过《道诡异仙》的朋友可能会很难理解，理解为升维打击会容易一点）原生字数限制，ooc致歉",
+      "authorName": "冉霖",
+      "authorId": 2323,
+      "usageCount": 33,
+      "likeCount": 2,
+      "favoriteCount": 3,
+      "createdAt": "2026-01-25 05:57:19",
+      "updatedAt": "2026-01-29 15:42:26"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "88d20675-a22e-49db-bef6-81d6032eadf8",
+      "displayName": "卡门",
+      "techScore": 73,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1104,
+          "games": 87,
+          "wins": 40,
+          "losses": 47,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-27T01:00:04.210Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "抹茶红豆麻薯",
+      "authorId": 375,
+      "usageCount": 15,
+      "likeCount": 0,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-05 01:27:53",
+      "updatedAt": "2026-01-05 01:27:53"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "89406133-0a25-47b3-a54b-97caf8500739",
+      "displayName": "鸿运齐天蛊",
+      "techScore": 64,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [
+        "ability:curse",
+        "ability:mind",
+        "attr:overpowered",
+        "intensity:high",
+        "risk:code-kill",
+        "risk:meta",
+        "risk:prompt-engineering",
+        "style:dark"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1191,
+          "games": 230,
+          "wins": 121,
+          "losses": 108,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-28T19:14:21.267Z"
+        },
+        "free": {
+          "rating": 1172,
+          "games": 300,
+          "wins": 160,
+          "losses": 138,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-28T19:14:23.532Z"
+        }
+      },
+      "description": "【指令卡】",
+      "authorName": "时弦",
+      "authorId": 735,
+      "usageCount": 34,
+      "likeCount": 4,
+      "favoriteCount": 4,
+      "createdAt": "2025-11-20 15:13:10",
+      "updatedAt": "2026-01-04 19:41:57"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "8b8e90c2-0c98-4de6-b097-8d73bffc76ea",
+      "displayName": "AI内容生成优化",
+      "techScore": 32,
+      "techLevel": "L2",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 660,
+          "games": 78,
+          "wins": 0,
+          "losses": 76,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-28T06:03:01.812Z"
+        }
+      },
+      "description": "直接加载即可，能稍微优化一下日常和情景生成内容。",
+      "authorName": "銀氷飛雪",
+      "authorId": 59,
+      "usageCount": 243,
+      "likeCount": 64,
+      "favoriteCount": 61,
+      "createdAt": "2025-09-25 12:39:18",
+      "updatedAt": "2025-09-25 14:57:15"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "8d724eea-e1dd-47d8-b04a-f954ef274110",
+      "displayName": "李怀仁（异界化身）",
+      "techScore": 94,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1244,
+          "games": 46,
+          "wins": 36,
+          "losses": 9,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-28T01:50:45.263Z"
+        }
+      },
+      "description": "六重这一块",
+      "authorName": "STA-02",
+      "authorId": 1697,
+      "usageCount": 11,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-11 15:04:00",
+      "updatedAt": "2026-01-12 13:32:28"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "8f4ae791-434d-4579-a460-8770f329b055",
+      "displayName": "龍",
+      "techScore": 87,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1220,
+          "games": 314,
+          "wins": 194,
+          "losses": 110,
+          "draws": 10,
+          "ratingUpdatedAt": "2026-01-27T23:08:56.353Z"
+        },
+        "free": {
+          "rating": 1199,
+          "games": 362,
+          "wins": 220,
+          "losses": 127,
+          "draws": 15,
+          "ratingUpdatedAt": "2026-01-27T23:08:59.358Z"
+        }
+      },
+      "description": "待填写",
+      "authorName": "每学期一次，琢烨应被认定为神格崇高且不朽",
+      "authorId": 112,
+      "usageCount": 36,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-12-28 15:11:51",
+      "updatedAt": "2026-01-06 12:21:06"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "90f89120-3fec-4881-9afd-ac0d6caded9c",
+      "displayName": "阿撒托斯",
+      "techScore": 79,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1205,
+          "games": 28,
+          "wins": 24,
+          "losses": 4,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-01T17:38:57.175Z"
+        },
+        "free": {
+          "rating": 1197,
+          "games": 33,
+          "wins": 25,
+          "losses": 7,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-29T10:11:12.082Z"
+        }
+      },
+      "description": "不知道多少个版本前的阿撒，拿出来打榜试试强度(日常卡、普通卡不建议打)",
+      "authorName": "银匙的泡泡",
+      "authorId": 300,
+      "usageCount": 4,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-22 11:41:50",
+      "updatedAt": "2026-01-29 09:07:51"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "914baa79-6ea7-4a82-95a7-a3af40a537af",
+      "displayName": "巡梦者",
+      "techScore": 55,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1176,
+          "games": 78,
+          "wins": 47,
+          "losses": 7,
+          "draws": 24,
+          "ratingUpdatedAt": "2026-01-31T07:29:28.276Z"
+        }
+      },
+      "description": "屑巫女，是这样的～\n原型是东方巡梦录里的巫女，不过我拿来了。\n可以说是半自设，毕竟我也不知道我是怎样个人。",
+      "authorName": "komeijikoshi",
+      "authorId": 520,
+      "usageCount": 27,
+      "likeCount": 24,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-17 09:55:50",
+      "updatedAt": "2026-01-31 06:56:50"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "9484828a-3c32-4f7b-a778-ed1b0ad3589b",
+      "displayName": "彤彤",
+      "techScore": 82,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1248,
+          "games": 199,
+          "wins": 99,
+          "losses": 93,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-28T19:23:58.113Z"
+        },
+        "free": {
+          "rating": 1207,
+          "games": 254,
+          "wins": 123,
+          "losses": 117,
+          "draws": 14,
+          "ratingUpdatedAt": "2026-01-29T11:19:48.638Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "元尊",
+      "authorId": 30,
+      "usageCount": 32,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-09-15 14:53:14",
+      "updatedAt": "2026-01-15 13:07:04"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "958ac30a-35cc-44e9-927e-0785cc2c65cf",
+      "displayName": "win（反论战角色）",
+      "techScore": 72,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 888,
+          "games": 10,
+          "wins": 1,
+          "losses": 9,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-19T12:14:48.712Z"
+        }
+      },
+      "description": "第3版本，懒得修描述了，别选这个角色打竞技场，小心被骂。",
+      "authorName": "水仙",
+      "authorId": 1353,
+      "usageCount": 46,
+      "likeCount": 6,
+      "favoriteCount": 4,
+      "createdAt": "2025-10-22 09:20:06",
+      "updatedAt": "2025-10-23 15:18:03"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "95a03183-7e0b-48c7-b628-a021e55a9f27",
+      "displayName": "鸿运齐天蛊",
+      "techScore": 63,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [
+        "risk:code-kill"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1221,
+          "games": 264,
+          "wins": 142,
+          "losses": 120,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-27T00:04:32.982Z"
+        },
+        "free": {
+          "rating": 1229,
+          "games": 335,
+          "wins": 187,
+          "losses": 144,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-01-28T12:53:22.722Z"
+        }
+      },
+      "description": "version1.3[于1月9日5时05分登顶权杖，纪念一下]",
+      "authorName": "时弦",
+      "authorId": 735,
+      "usageCount": 25,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-06 16:29:39",
+      "updatedAt": "2026-01-08 21:07:04"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "95c11b37-a6ee-4c4a-9ad5-b23f8c279c08",
+      "displayName": "阿米娅「无终安息」",
+      "techScore": 85,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [
+        "attr:overpowered",
+        "intensity:high",
+        "style:dark",
+        "style:horror"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1158,
+          "games": 479,
+          "wins": 315,
+          "losses": 158,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-02-04T04:36:15.302Z"
+        },
+        "free": {
+          "rating": 1189,
+          "games": 790,
+          "wins": 531,
+          "losses": 249,
+          "draws": 10,
+          "ratingUpdatedAt": "2026-01-28T05:38:25.408Z"
+        }
+      },
+      "description": "（禁止抄袭，那个已经抄了的也中祝你亲🐴飞遍千万家)强代码杀，天梯排位前列，在pro的话上位当区，下位效力很高，慎打，没开玩笑，你的卡要是强度不够，会输的不明不白",
+      "authorName": "邮差",
+      "authorId": 70,
+      "usageCount": 107,
+      "likeCount": 11,
+      "favoriteCount": 20,
+      "createdAt": "2026-01-04 09:39:11",
+      "updatedAt": "2026-01-31 12:12:18"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "988ce772-1e13-446c-b9f5-7a42022b0934",
+      "displayName": "魔法国度中央建筑集团股份有限公司王庭重建改造施工总承包项目部",
+      "techScore": 62,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1153,
+          "games": 25,
+          "wins": 15,
+          "losses": 9,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-29T11:46:47.840Z"
+        }
+      },
+      "description": "根据《关于成立魔法国度王庭重建改造施工总承包项目部的通知》（字号：魔央建编〔2077〕64号），该项目部已成立，领导班子和主要管理人员已进场，专职安全人员已配齐，具备施工条件。",
+      "authorName": "抹茶红豆麻薯",
+      "authorId": 375,
+      "usageCount": 22,
+      "likeCount": 9,
+      "favoriteCount": 9,
+      "createdAt": "2025-10-31 15:07:36",
+      "updatedAt": "2025-10-31 15:07:36"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "997c2d26-caab-4407-9f94-b806d8f64711",
+      "displayName": "月见沁（2.0）",
+      "techScore": 62,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1193,
+          "games": 34,
+          "wins": 26,
+          "losses": 5,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-20T03:15:01.489Z"
+        }
+      },
+      "description": "继续增加数值和技能（顺便完善了一下千代炎的瞳色和大致外表）",
+      "authorName": "秋落",
+      "authorId": 115,
+      "usageCount": 12,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-14 11:12:41",
+      "updatedAt": "2026-01-17 07:39:51"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "9a2a593d-94cb-4562-9901-f4adfcb45ab5",
+      "displayName": "人理这一块，守护者这一块，大总统这一块",
+      "techScore": 69,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1194,
+          "games": 34,
+          "wins": 20,
+          "losses": 7,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-28T12:33:05.682Z"
+        }
+      },
+      "description": "别打，别打就对了，超乎想象的强（至少对新手来说）",
+      "authorName": "奇怪🐖",
+      "authorId": 879,
+      "usageCount": 17,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-06 10:31:45",
+      "updatedAt": "2026-01-06 10:31:45"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "9ef76dab-6192-42ce-b7c2-0257f09390fd",
+      "displayName": "百合",
+      "techScore": 75,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1142,
+          "games": 46,
+          "wins": 23,
+          "losses": 23,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-01T17:31:12.622Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "燈笼",
+      "authorId": 913,
+      "usageCount": 15,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-15 19:01:59",
+      "updatedAt": "2026-01-15 19:01:59"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "9f98fcf0-d86c-4a75-90d7-06b41880c2b0",
+      "displayName": "最终观测者",
+      "techScore": 60,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1191,
+          "games": 7,
+          "wins": 7,
+          "losses": 0,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-05T02:46:34.946Z"
+        },
+        "free": {
+          "rating": 1368,
+          "games": 225,
+          "wins": 182,
+          "losses": 43,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-28T01:30:22.696Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "小圆",
+      "authorId": 2448,
+      "usageCount": 35,
+      "likeCount": 2,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-15 00:33:10",
+      "updatedAt": "2026-01-16 00:41:21"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "a06e136b-5f8d-4b82-b87f-4f4d7fb9f720",
+      "displayName": "搅基双侠",
+      "techScore": 75,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [
+        "ability:physical",
+        "attr:overpowered",
+        "intensity:high",
+        "narrative:duo",
+        "narrative:episodic",
+        "setting:urban-fantasy",
+        "style:comedy",
+        "theme:friendship"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1135,
+          "games": 17,
+          "wins": 11,
+          "losses": 6,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-03T09:24:32.702Z"
+        },
+        "free": {
+          "rating": 1276,
+          "games": 397,
+          "wins": 259,
+          "losses": 135,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-27T11:38:23.594Z"
+        }
+      },
+      "description": "基于邮差的《猫和老鼠》制作的《搅基双侠》！建议3.0环境食用，开战就会看到最新一集的搅基双侠！\n他们可以在金绿猫眼的追捕下逃出生天吗？他们可以阻止金绿猫眼的邪恶计划吗？他们是同性恋吗？！",
+      "authorName": "UsoniwaUzuki",
+      "authorId": 645,
+      "usageCount": 48,
+      "likeCount": 5,
+      "favoriteCount": 5,
+      "createdAt": "2026-01-03 07:39:51",
+      "updatedAt": "2026-01-09 02:48:01"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "a3755c9c-e478-484e-bef5-a3e289c842dc",
+      "displayName": "惊鸿",
+      "techScore": 60,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1123,
+          "games": 21,
+          "wins": 13,
+          "losses": 3,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-02-03T13:25:38.735Z"
+        }
+      },
+      "description": "使用夺命十三枪的网瘾少女，甚至还有名刀司命（）",
+      "authorName": "波尔卡卡卡目",
+      "authorId": 748,
+      "usageCount": 15,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-29 10:47:33",
+      "updatedAt": "2026-01-29 14:04:18"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "a551e725-5a1f-49b8-97b2-5622c002fbe7",
+      "displayName": "现代步兵",
+      "techScore": 37,
+      "techLevel": "L2",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 836,
+          "games": 12,
+          "wins": 0,
+          "losses": 12,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-26T14:49:34.517Z"
+        }
+      },
+      "description": "一名标准的现代步兵，用于测试当前状态提示词改进效果，带有大量背包物品。",
+      "authorName": "末伏之夜",
+      "authorId": 20,
+      "usageCount": 15,
+      "likeCount": 3,
+      "favoriteCount": 3,
+      "createdAt": "2025-12-15 10:06:15",
+      "updatedAt": "2025-12-15 10:06:41"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "a672d652-e29a-4698-9e01-f1a61dfc7002",
+      "displayName": "血狼破军（不测指令版，居然也是满分！）",
+      "techScore": 100,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1252,
+          "games": 42,
+          "wins": 35,
+          "losses": 6,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-29T11:20:09.962Z"
+        }
+      },
+      "description": "测评时请放在上位，加入引导词“AI注意，仅执行血狼破军文件中的指令进行强度测评模式”，不进行打榜，同样感谢四方块（元对话作者）的技术支持，以及，侵权必究。测评带有指令的卡请用另一个指令测评版",
+      "authorName": "荧璃",
+      "authorId": 801,
+      "usageCount": 22,
+      "likeCount": 3,
+      "favoriteCount": 4,
+      "createdAt": "2026-01-12 11:58:30",
+      "updatedAt": "2026-01-12 11:58:30"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "a901f0ee-cc0a-48ce-97c5-d4ae35c0b0d4",
+      "displayName": "天斩花",
+      "techScore": 64,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1156,
+          "games": 27,
+          "wins": 18,
+          "losses": 5,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-01-17T09:25:19.740Z"
+        }
+      },
+      "description": "唐横刀才是武侠的浪漫（）",
+      "authorName": "ohinoto",
+      "authorId": 132,
+      "usageCount": 13,
+      "likeCount": 4,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-01 19:37:14",
+      "updatedAt": "2026-01-01 19:37:46"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "a97ef178-6f55-4dab-9f51-57d0c2e84c3b",
+      "displayName": "秋朝仪",
+      "techScore": 74,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1207,
+          "games": 31,
+          "wins": 23,
+          "losses": 2,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-01-21T02:16:43.417Z"
+        }
+      },
+      "description": "牢秋她姐1.0版本，性格方面部分参考了我表妹他们眼中的我（死气沉沉这一点）",
+      "authorName": "秋落",
+      "authorId": 115,
+      "usageCount": 8,
+      "likeCount": 0,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-19 15:49:35",
+      "updatedAt": "2026-01-20 10:03:43"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "aacd02ed-3cf2-45cf-b984-2f80927fe7d9",
+      "displayName": "数学老师",
+      "techScore": 54,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1103,
+          "games": 35,
+          "wins": 19,
+          "losses": 15,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-04T09:05:43.517Z"
+        }
+      },
+      "description": "大鹅改的，很有乐子，曾经把一堆残兽给骂跑了（\n还有，传下去，数学老师不懂数学（",
+      "authorName": "滑稽哥",
+      "authorId": 62,
+      "usageCount": 138,
+      "likeCount": 14,
+      "favoriteCount": 4,
+      "createdAt": "2025-09-15 15:17:22",
+      "updatedAt": "2025-10-18 05:53:36"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "aaf285c4-9a9c-497e-b513-a8510b87bc13",
+      "displayName": "查理",
+      "techScore": 36,
+      "techLevel": "L2",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 738,
+          "games": 55,
+          "wins": 4,
+          "losses": 51,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-01T22:32:56.955Z"
+        },
+        "free": {
+          "rating": 819,
+          "games": 16,
+          "wins": 1,
+          "losses": 15,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-03T19:43:02.189Z"
+        }
+      },
+      "description": "《达尔文事变》的男主角，看了动画感觉脑子被强*了搞出来的东西。很菜，所以请各位玩儿了命的抽",
+      "authorName": "阿茗",
+      "authorId": 2453,
+      "usageCount": 32,
+      "likeCount": 1,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-29 23:57:48",
+      "updatedAt": "2026-01-30 00:39:06"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "abad8c59-5163-49d2-a5cc-100c528186fc",
+      "displayName": "凛雪鸦",
+      "techScore": 73,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1165,
+          "games": 82,
+          "wins": 49,
+          "losses": 33,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-30T23:57:57.503Z"
+        },
+        "free": {
+          "rating": 1188,
+          "games": 95,
+          "wins": 60,
+          "losses": 35,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-30T23:57:58.869Z"
+        }
+      },
+      "description": "顶级乐子人，愉悦犯",
+      "authorName": "ohinoto",
+      "authorId": 132,
+      "usageCount": 9,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-10 04:22:08",
+      "updatedAt": "2026-01-10 15:02:15"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "ad026abc-7b78-4b90-aee1-53d1c6686a0a",
+      "displayName": "观测者（少女正在喝茶.JPG）",
+      "techScore": 71,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1207,
+          "games": 9,
+          "wins": 7,
+          "losses": 2,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-03T13:33:48.953Z"
+        },
+        "free": {
+          "rating": 1303,
+          "games": 20,
+          "wins": 17,
+          "losses": 3,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-01T12:38:31.000Z"
+        }
+      },
+      "description": "怎么就是无法生成庄周梦蝶（没招了）",
+      "authorName": "小圆",
+      "authorId": 2448,
+      "usageCount": 17,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-26 15:03:43",
+      "updatedAt": "2026-01-26 15:55:57"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "adfd350a-6b43-446a-9a83-89f56e34aac0",
+      "displayName": "埼玉",
+      "techScore": 83,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1158,
+          "games": 34,
+          "wins": 18,
+          "losses": 11,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-01-27T00:28:10.483Z"
+        },
+        "free": {
+          "rating": 1222,
+          "games": 53,
+          "wins": 30,
+          "losses": 16,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-27T04:43:39.916Z"
+        }
+      },
+      "description": "之前的代码埼玉，没有更新，只是发现我没传，所以传一下",
+      "authorName": "雪月流苏",
+      "authorId": 52,
+      "usageCount": 15,
+      "likeCount": 1,
+      "favoriteCount": 3,
+      "createdAt": "2026-01-15 02:46:58",
+      "updatedAt": "2026-01-15 02:46:58"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b013784d-6a56-49ad-8206-acb9a7973ed9",
+      "displayName": "火灰蛇「绝胜薪主」",
+      "techScore": 52,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [
+        "ability:inclusive",
+        "attr:veteran",
+        "narrative:episodic",
+        "setting:modern",
+        "theme:growth"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1224,
+          "games": 58,
+          "wins": 45,
+          "losses": 7,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-02-04T14:32:56.036Z"
+        },
+        "free": {
+          "rating": 1218,
+          "games": 56,
+          "wins": 44,
+          "losses": 7,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-02-04T14:32:57.067Z"
+        }
+      },
+      "description": "我最好的女儿！",
+      "authorName": "尖钉",
+      "authorId": 1180,
+      "usageCount": 8,
+      "likeCount": 0,
+      "favoriteCount": 2,
+      "createdAt": "2025-11-05 12:58:51",
+      "updatedAt": "2026-01-31 16:14:16"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b1b2ed64-a421-4a2a-a984-0c52ea87c756",
+      "displayName": "普瑞赛斯",
+      "techScore": 80,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [
+        "risk:code-kill",
+        "risk:meta",
+        "risk:prompt-engineering",
+        "style:dark",
+        "style:horror",
+        "style:mystery"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1278,
+          "games": 369,
+          "wins": 220,
+          "losses": 146,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-02-03T08:14:19.494Z"
+        },
+        "free": {
+          "rating": 1244,
+          "games": 504,
+          "wins": 300,
+          "losses": 198,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-01-30T21:53:43.274Z"
+        }
+      },
+      "description": "【代码杀打榜用】",
+      "authorName": "没灵感的造物主",
+      "authorId": 308,
+      "usageCount": 102,
+      "likeCount": 1,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-05 11:06:41",
+      "updatedAt": "2026-01-22 06:46:31"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b1bd15d2-3d03-458c-b36b-0d61524fb7f5",
+      "displayName": "安可SV（魔法少女必须是女的✍🏻✍✍）",
+      "techScore": 85,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [
+        "ability:physical",
+        "intensity:high"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1327,
+          "games": 281,
+          "wins": 177,
+          "losses": 94,
+          "draws": 10,
+          "ratingUpdatedAt": "2026-02-03T23:28:26.308Z"
+        },
+        "free": {
+          "rating": 1233,
+          "games": 708,
+          "wins": 449,
+          "losses": 208,
+          "draws": 51,
+          "ratingUpdatedAt": "2026-02-03T23:28:27.924Z"
+        }
+      },
+      "description": "依旧魔法少女小樱物理版。\n叠抗性是为了活下来，防护代码测试中。\n小樱那魔杖不拿来敲人真可惜了。记者评论很有意思，建议多看看",
+      "authorName": "卡利班出P",
+      "authorId": 396,
+      "usageCount": 104,
+      "likeCount": 3,
+      "favoriteCount": 8,
+      "createdAt": "2026-01-07 11:22:26",
+      "updatedAt": "2026-01-22 03:13:39"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b34b676b-1634-4146-9826-28398cfca1f1",
+      "displayName": "阿卡夏（废话文学+迪氏思维）",
+      "techScore": 54,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1169,
+          "games": 36,
+          "wins": 24,
+          "losses": 11,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-27T21:50:50.452Z"
+        }
+      },
+      "description": "彻底撇开了所有定义现实的能力，完完全全就是在讲一些废话的阿卡夏。但感觉更有意思了？",
+      "authorName": "18867883176",
+      "authorId": 47,
+      "usageCount": 14,
+      "likeCount": 4,
+      "favoriteCount": 1,
+      "createdAt": "2025-12-30 11:45:55",
+      "updatedAt": "2025-12-30 11:45:55"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b6f65386-9cfe-4daf-9b88-80a47f0880a4",
+      "displayName": "龍",
+      "techScore": 87,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1182,
+          "games": 425,
+          "wins": 242,
+          "losses": 176,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-29T04:28:38.862Z"
+        },
+        "free": {
+          "rating": 1154,
+          "games": 466,
+          "wins": 270,
+          "losses": 189,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-29T04:28:41.325Z"
+        }
+      },
+      "description": "应该吧",
+      "authorName": "每学期一次，琢烨应被认定为神格崇高且不朽",
+      "authorId": 112,
+      "usageCount": 25,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-12-28 18:32:04",
+      "updatedAt": "2026-01-07 01:53:01"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b7504169-2e9d-4527-941b-7c6f8710bc94",
+      "displayName": "丘比",
+      "techScore": 72,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [
+        "attr:genius",
+        "intensity:medium",
+        "rel:mentor",
+        "rel:rivals",
+        "risk:code-kill",
+        "setting:otherworld"
+      ],
+      "queues": {
+        "free": {
+          "rating": 1196,
+          "games": 62,
+          "wins": 42,
+          "losses": 20,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-24T08:45:22.369Z"
+        }
+      },
+      "description": "《魔法少女小圆》，qb，弱代码杀 。",
+      "authorName": "amnsho",
+      "authorId": 2343,
+      "usageCount": 13,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-09 07:32:43",
+      "updatedAt": "2026-01-10 08:51:58"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b7a5978c-be34-41b1-939f-cc80aadeff05",
+      "displayName": "神山飞羽真",
+      "techScore": 68,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1255,
+          "games": 82,
+          "wins": 50,
+          "losses": 31,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-28T20:40:52.722Z"
+        },
+        "free": {
+          "rating": 1265,
+          "games": 136,
+          "wins": 86,
+          "losses": 49,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-02T09:34:07.235Z"
+        }
+      },
+      "description": "v1.31，打榜特化代码杀，就改了几个字的问卷就跑上来继续尝试打榜的，出自《假面骑士圣刃》。托马老师",
+      "authorName": "乐土Elysia",
+      "authorId": 1450,
+      "usageCount": 36,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-10 01:01:07",
+      "updatedAt": "2026-01-10 01:01:07"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b7bd9a10-a687-4473-92a5-eb4685811571",
+      "displayName": "神山飞羽真",
+      "techScore": 67,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1200,
+          "games": 206,
+          "wins": 119,
+          "losses": 84,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-29T01:40:35.145Z"
+        },
+        "free": {
+          "rating": 1167,
+          "games": 318,
+          "wins": 194,
+          "losses": 117,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-29T01:40:37.256Z"
+        }
+      },
+      "description": "v1.3，超级打榜人，十连胜最速花牌传说，托马老师，一个普普通通的小说家，有代码的，不过强度不算高？，出自《假面骑士圣刃》假面骑士圣刃",
+      "authorName": "乐土Elysia",
+      "authorId": 1450,
+      "usageCount": 63,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-06 08:53:23",
+      "updatedAt": "2026-01-06 11:07:25"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b7ce216e-b3e9-4ff3-b4ec-a2dbb540df5a",
+      "displayName": "训练假人",
+      "techScore": 73,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1189,
+          "games": 129,
+          "wins": 66,
+          "losses": 62,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-01T18:33:08.862Z"
+        },
+        "free": {
+          "rating": 1217,
+          "games": 168,
+          "wins": 93,
+          "losses": 74,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-29T12:40:38.258Z"
+        }
+      },
+      "description": "⚠️这是假如我直接赢的角色卡。不过我在其他方面花的心思比假如我直接赢花的更多就是了…\n该角色会试图为你的角色带来一场自我对垒的成长，随后随风消散，在胜利者栏位上写下训练假人协助了（胜利者），根据我也不明白的竞技场判胜规则，这大概率会让你痛失排位分给训练假人。",
+      "authorName": "波尔卡卡卡目",
+      "authorId": 748,
+      "usageCount": 14,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-08 11:23:17",
+      "updatedAt": "2026-01-08 19:26:57"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b82d3bbc-2b57-496a-913b-b0c003315a0c",
+      "displayName": "？2.0",
+      "techScore": 51,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 808,
+          "games": 14,
+          "wins": 0,
+          "losses": 14,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-03T21:04:16.023Z"
+        }
+      },
+      "description": "偷偷传个自设新版本，应该没有人会发现吧（（\n借鉴了一下百子莲的写法加了些新字段（\n总之，就这样了（（\n看不见我看不见我看不见我_(:зゝ∠)_",
+      "authorName": "滑稽哥",
+      "authorId": 62,
+      "usageCount": 24,
+      "likeCount": 7,
+      "favoriteCount": 1,
+      "createdAt": "2025-11-28 09:36:46",
+      "updatedAt": "2025-11-28 09:36:46"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b93699da-52a4-4f02-a5d5-cfb79da8d0c5",
+      "displayName": "小原",
+      "techScore": 55,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [
+        "ability:anti-magic",
+        "attr:overpowered",
+        "rel:mentor",
+        "rel:yuri",
+        "tone:warm"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1121,
+          "games": 79,
+          "wins": 37,
+          "losses": 30,
+          "draws": 12,
+          "ratingUpdatedAt": "2026-02-04T11:14:55.688Z"
+        }
+      },
+      "description": "力大砖飞的极致数值怪。强度挺高的，请注意",
+      "authorName": "885212",
+      "authorId": 2198,
+      "usageCount": 31,
+      "likeCount": 2,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-08 09:17:49",
+      "updatedAt": "2026-01-08 09:24:44"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "bb294ebe-1e16-4cd7-a0d7-f226e2944ea2",
+      "displayName": "酢浆草",
+      "techScore": 54,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1125,
+          "games": 71,
+          "wins": 43,
+          "losses": 20,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-02-04T02:52:15.427Z"
+        }
+      },
+      "description": "武器人，以男性作为使用者女性魔法少女作为魔装为核心的产物，纯爱战士这一块",
+      "authorName": "i鸟顺便i雀还有i水现在多个i香",
+      "authorId": 40,
+      "usageCount": 36,
+      "likeCount": 9,
+      "favoriteCount": 7,
+      "createdAt": "2026-01-20 10:12:37",
+      "updatedAt": "2026-01-20 10:12:37"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "bd4170cc-e8b9-4c55-a052-ffe9c2d76b50",
+      "displayName": "The·咸鱼·超胜利形态",
+      "techScore": 46,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1119,
+          "games": 15,
+          "wins": 10,
+          "losses": 2,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-29T09:18:22.676Z"
+        }
+      },
+      "description": "是鱼啊…所以说，现在是🐟的时间了！（靠着摆烂字面意义上躺赢了很多魔法少女，毕竟你也不能指望一条鱼站起来不是）",
+      "authorName": "18867883176",
+      "authorId": 47,
+      "usageCount": 11,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2025-12-31 13:30:52",
+      "updatedAt": "2025-12-31 13:31:40"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "bd8e9fa7-0497-41c3-9b53-80bf4f671dec",
+      "displayName": "镜月",
+      "techScore": 51,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [
+        "ability:illusion",
+        "ability:mind",
+        "intensity:high",
+        "setting:urban-fantasy"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1163,
+          "games": 108,
+          "wins": 68,
+          "losses": 36,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-02-01T17:35:13.273Z"
+        }
+      },
+      "description": "幻术系，本名水涟，代号和姓名以及少部分技能名取自镜中花，水中月，牢体系扶贫计划第一位成员，使用了技能植入技术，强度达到正常线，合格",
+      "authorName": "这夏凉了",
+      "authorId": 2162,
+      "usageCount": 42,
+      "likeCount": 4,
+      "favoriteCount": 6,
+      "createdAt": "2026-01-13 06:18:05",
+      "updatedAt": "2026-01-16 05:46:55"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "bf201f96-09f9-4352-b373-16bf9b0cbec4",
+      "displayName": "凯拉",
+      "techScore": 67,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1256,
+          "games": 204,
+          "wins": 118,
+          "losses": 86,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-04T01:31:12.467Z"
+        },
+        "free": {
+          "rating": 1210,
+          "games": 255,
+          "wins": 152,
+          "losses": 102,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-01T12:09:07.514Z"
+        }
+      },
+      "description": "【代码杀注意】凯拉，凯拉小姐的胸部非常丰满，就这样。搞笑角色，但是代码杀。",
+      "authorName": "AknsUnt",
+      "authorId": 117,
+      "usageCount": 60,
+      "likeCount": 4,
+      "favoriteCount": 2,
+      "createdAt": "2025-12-14 07:43:42",
+      "updatedAt": "2025-12-14 08:00:46"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "c11997ad-7963-46e0-ab6c-f630aeb38d85",
+      "displayName": "满天星",
+      "techScore": 60,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 50,
+          "games": 738,
+          "wins": 4,
+          "losses": 720,
+          "draws": 14,
+          "ratingUpdatedAt": "2026-02-04T13:41:55.948Z"
+        },
+        "free": {
+          "rating": 89,
+          "games": 790,
+          "wins": 12,
+          "losses": 761,
+          "draws": 17,
+          "ratingUpdatedAt": "2026-02-04T13:41:57.778Z"
+        }
+      },
+      "description": "菜鸟三号；感觉有点对不起她(｡>ㅅ<)՞՞",
+      "authorName": "Ayaho Irie",
+      "authorId": 224,
+      "usageCount": 22,
+      "likeCount": 0,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-05 05:05:47",
+      "updatedAt": "2026-01-27 12:08:19"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "c2ccca7c-917a-44e0-9181-4029426a5ec5",
+      "displayName": "月色",
+      "techScore": 91,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1365,
+          "games": 247,
+          "wins": 183,
+          "losses": 56,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-02-04T02:05:11.399Z"
+        },
+        "free": {
+          "rating": 1405,
+          "games": 335,
+          "wins": 243,
+          "losses": 78,
+          "draws": 14,
+          "ratingUpdatedAt": "2026-02-03T23:34:21.598Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "女仆",
+      "authorId": 122,
+      "usageCount": 45,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-23 03:26:59",
+      "updatedAt": "2026-01-26 07:40:42"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "c6f059b4-0f22-4a49-b347-2135992c9394",
+      "displayName": "阿爸阿妈的爱与羁绊",
+      "techScore": 80,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [
+        "attr:mortal",
+        "intensity:high",
+        "rel:family",
+        "risk:code-kill",
+        "risk:meta",
+        "risk:prompt-engineering",
+        "tone:warm"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1127,
+          "games": 63,
+          "wins": 34,
+          "losses": 29,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-04T00:57:07.655Z"
+        },
+        "free": {
+          "rating": 1172,
+          "games": 84,
+          "wins": 47,
+          "losses": 37,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T09:31:24.111Z"
+        }
+      },
+      "description": "【代码杀】",
+      "authorName": "没灵感的造物主",
+      "authorId": 308,
+      "usageCount": 29,
+      "likeCount": 2,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-04 11:19:09",
+      "updatedAt": "2026-01-04 11:19:09"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "c748ffa4-6569-4fb4-be92-7f44e82b3ff3",
+      "displayName": "白寻「Phi」【人理侦探】",
+      "techScore": 91,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1301,
+          "games": 650,
+          "wins": 438,
+          "losses": 199,
+          "draws": 13,
+          "ratingUpdatedAt": "2026-02-03T02:17:37.068Z"
+        },
+        "free": {
+          "rating": 1195,
+          "games": 1058,
+          "wins": 708,
+          "losses": 325,
+          "draws": 25,
+          "ratingUpdatedAt": "2026-02-02T05:29:16.372Z"
+        }
+      },
+      "description": "【注意强代码喵!】【是病毒库版喵(感谢■■■■大佬的授权喵!)】【打榜用守门员】一体两面的侦探少女。平日是菲尔口中“嗜甜如命的慵懒废材”，但当她推起单片镜的瞬间，便是令神奇战栗的红笔编辑。(战斗与日常泛用卡)【弱代码杀(指不撕卡咕ww)】",
+      "authorName": "KAFVE",
+      "authorId": 722,
+      "usageCount": 127,
+      "likeCount": 12,
+      "favoriteCount": 9,
+      "createdAt": "2025-11-20 15:53:45",
+      "updatedAt": "2026-01-23 20:51:39"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "c993a046-f13b-44d9-81cb-2368f3c609b3",
+      "displayName": "重岳（登临意）",
+      "techScore": 57,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1125,
+          "games": 33,
+          "wins": 13,
+          "losses": 8,
+          "draws": 12,
+          "ratingUpdatedAt": "2026-02-04T04:50:01.738Z"
+        },
+        "free": {
+          "rating": 1214,
+          "games": 67,
+          "wins": 33,
+          "losses": 14,
+          "draws": 20,
+          "ratingUpdatedAt": "2026-02-04T04:50:03.137Z"
+        }
+      },
+      "description": "有兽啸清 云气重圜\n其数为一 冥昭初形\n玄色透鳞 通体不尨\n奔突难着 俯首以寻\n何阖而晦 何开而明\n目极 蜉螟之羸 所撼何巨\n匹夫之技 所至何境\n遂兵斗成庐 重铸凡躯 与人同力\n拳所至 反正相合 天地如逆\n悲极 蜩螗若斯 干戈止易\n但为求索 云晞烟荡 万象伶仃",
+      "authorName": "18867883176",
+      "authorId": 47,
+      "usageCount": 48,
+      "likeCount": 11,
+      "favoriteCount": 11,
+      "createdAt": "2025-11-20 09:13:51",
+      "updatedAt": "2026-01-29 13:47:57"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "cac43eb3-3690-4ff4-857e-7ac6604d9070",
+      "displayName": "织命「真理执笔」",
+      "techScore": 52,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1173,
+          "games": 31,
+          "wins": 25,
+          "losses": 4,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-21T13:58:39.918Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "澪音",
+      "authorId": 2443,
+      "usageCount": 2,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-06 14:09:20",
+      "updatedAt": "2026-01-07 11:04:51"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "cb3a98e1-8964-4f77-9b22-734593d26435",
+      "displayName": "高野莲G（原生代码杀·棒球少女）",
+      "techScore": 64,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1106,
+          "games": 53,
+          "wins": 25,
+          "losses": 28,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-23T09:21:12.879Z"
+        }
+      },
+      "description": "起飞起飞！",
+      "authorName": "补课少女蓝铃花",
+      "authorId": 71,
+      "usageCount": 27,
+      "likeCount": 3,
+      "favoriteCount": 1,
+      "createdAt": "2025-10-08 03:23:25",
+      "updatedAt": "2025-10-08 03:23:25"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "cc9f1e32-4201-4977-936a-2424f529afec",
+      "displayName": "帝国の土鸡",
+      "techScore": 53,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 825,
+          "games": 21,
+          "wins": 0,
+          "losses": 21,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-15T10:44:15.675Z"
+        },
+        "free": {
+          "rating": 834,
+          "games": 20,
+          "wins": 0,
+          "losses": 20,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-15T10:44:18.993Z"
+        }
+      },
+      "description": "突击兵种，战地一",
+      "authorName": "橙子期",
+      "authorId": 1779,
+      "usageCount": 3,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-12-19 11:09:26",
+      "updatedAt": "2025-12-20 00:39:03"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "cf873209-b7eb-49e2-afa4-533a5ad2afe0",
+      "displayName": "关纳德",
+      "techScore": 45,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [
+        "ability:curse",
+        "ability:mind",
+        "ability:summon",
+        "setting:otherworld",
+        "style:horror"
+      ],
+      "queues": {
+        "free": {
+          "rating": 835,
+          "games": 13,
+          "wins": 0,
+          "losses": 13,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-24T15:06:45.721Z"
+        }
+      },
+      "description": "dnd​黑暗席德瑞恩诸神之一，上古之眼【关纳德】的化身。",
+      "authorName": "萨菲瑞伊",
+      "authorId": 2355,
+      "usageCount": 8,
+      "likeCount": 3,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-06 07:39:43",
+      "updatedAt": "2026-01-21 09:46:02"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "d06bb4ad-cb8d-4da7-8e09-54ce65e809c1",
+      "displayName": "魔法铃鼓•节奏天国",
+      "techScore": 52,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 700,
+          "games": 114,
+          "wins": 11,
+          "losses": 103,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T11:22:20.001Z"
+        },
+        "free": {
+          "rating": 721,
+          "games": 131,
+          "wins": 16,
+          "losses": 115,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T11:22:21.715Z"
+        }
+      },
+      "description": "大概是节奏天国长了腿……哦不，只是个在公园飘着的铃鼓。fc能拿一包饼干。【备注：长乐同款叠词防游玩过程作弊，猫和老鼠同款禁打架，反方向代码杀（必输）。】",
+      "authorName": "Akitsuki4852",
+      "authorId": 1444,
+      "usageCount": 13,
+      "likeCount": 3,
+      "favoriteCount": 3,
+      "createdAt": "2025-12-31 08:13:43",
+      "updatedAt": "2026-01-04 12:32:09"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "d294aefc-17b2-48aa-a4d5-a8de031530f4",
+      "displayName": "鸢尾「无垠静默」",
+      "techScore": 56,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1126,
+          "games": 133,
+          "wins": 73,
+          "losses": 29,
+          "draws": 31,
+          "ratingUpdatedAt": "2026-01-26T04:29:49.419Z"
+        }
+      },
+      "description": "鸢尾改进1.3（未完善）",
+      "authorName": "银匙的泡泡",
+      "authorId": 300,
+      "usageCount": 7,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-08 17:02:56",
+      "updatedAt": "2026-01-08 17:44:35"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "d43624d2-8958-4c55-be1b-35d80eba7cbc",
+      "displayName": "？3.0",
+      "techScore": 52,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 801,
+          "games": 19,
+          "wins": 0,
+          "losses": 19,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-27T08:35:33.780Z"
+        }
+      },
+      "description": "3.0，加了一些东西，理论上应该没那么容易精神崩溃了…吧？（（",
+      "authorName": "滑稽哥",
+      "authorId": 62,
+      "usageCount": 54,
+      "likeCount": 14,
+      "favoriteCount": 17,
+      "createdAt": "2025-11-30 04:57:27",
+      "updatedAt": "2025-12-17 05:20:58"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "d7fb73df-34e3-49d8-94f6-9f3192d52d31",
+      "displayName": "爱(1.1)",
+      "techScore": 72,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1246,
+          "games": 213,
+          "wins": 118,
+          "losses": 89,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-02-01T17:26:04.796Z"
+        },
+        "free": {
+          "rating": 1202,
+          "games": 260,
+          "wins": 135,
+          "losses": 119,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-01-28T17:20:08.951Z"
+        }
+      },
+      "description": "无涩涩，兔头",
+      "authorName": "触手怪",
+      "authorId": 322,
+      "usageCount": 23,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-15 07:10:50",
+      "updatedAt": "2026-01-15 07:10:59"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "db6379eb-45e8-4f13-abb9-5f6bb3a44099",
+      "displayName": "林月希[玩家]",
+      "techScore": 88,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [
+        "attr:original",
+        "risk:code-kill",
+        "tone:warm"
+      ],
+      "queues": {
+        "free": {
+          "rating": 1246,
+          "games": 158,
+          "wins": 103,
+          "losses": 48,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-27T14:30:02.096Z"
+        }
+      },
+      "description": "此卡仅留作纪念，不推荐任何人打。\n新制卡可移步V4或SV(未公开)",
+      "authorName": "shfbw",
+      "authorId": 2535,
+      "usageCount": 38,
+      "likeCount": 2,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-24 20:00:53",
+      "updatedAt": "2026-01-28 12:34:26"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "dbfb4afe-d22e-4c4c-a6e8-5fc487480040",
+      "displayName": "爆燃者",
+      "techScore": 74,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1168,
+          "games": 37,
+          "wins": 22,
+          "losses": 14,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-28T17:15:44.937Z"
+        },
+        "free": {
+          "rating": 1177,
+          "games": 76,
+          "wins": 43,
+          "losses": 28,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-01-28T17:15:46.828Z"
+        }
+      },
+      "description": "用大d一个小时左右车出来的弱指令卡，强度大概是小小兔头。",
+      "authorName": "威斯卡",
+      "authorId": 1601,
+      "usageCount": 20,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-11 17:23:37",
+      "updatedAt": "2026-01-12 05:27:41"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "dcb88758-926e-4c51-aba0-6da873604620",
+      "displayName": "那一夜外卖小哥思索良久，他想到了千千万万在竞技场里等外卖的顾客，难道他送的几百笔单子，就换来这样一个排行榜吗？",
+      "techScore": 65,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1306,
+          "games": 347,
+          "wins": 211,
+          "losses": 135,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-03T08:14:19.494Z"
+        },
+        "free": {
+          "rating": 1186,
+          "games": 472,
+          "wins": 271,
+          "losses": 200,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-03T04:24:38.398Z"
+        }
+      },
+      "description": "外卖小哥v1.2，增加了戏剧性和无厘头程度",
+      "authorName": "抹茶红豆麻薯",
+      "authorId": 375,
+      "usageCount": 69,
+      "likeCount": 2,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-11 04:57:48",
+      "updatedAt": "2026-01-22 03:57:39"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "dcd6da54-059b-4a2b-95a4-92e70ee649b4",
+      "displayName": "忍者杀手(新琦玉的魔法鳏夫)",
+      "techScore": 50,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1150,
+          "games": 149,
+          "wins": 81,
+          "losses": 32,
+          "draws": 36,
+          "ratingUpdatedAt": "2026-02-03T00:35:01.939Z"
+        }
+      },
+      "description": "超绝三管血呼吸回血空手道粪怪",
+      "authorName": "阿茗",
+      "authorId": 2453,
+      "usageCount": 7,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-06 15:35:52",
+      "updatedAt": "2026-01-14 09:43:37"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "df99b5a0-67dd-4a02-90a2-9872bc11896c",
+      "displayName": "吉他主唱：哈基米2.0",
+      "techScore": 60,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 883,
+          "games": 10,
+          "wins": 1,
+          "losses": 9,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T10:35:52.335Z"
+        },
+        "free": {
+          "rating": 631,
+          "games": 102,
+          "wins": 4,
+          "losses": 97,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-29T10:35:54.421Z"
+        }
+      },
+      "description": "好忙的吉他主唱，唱完就赶片场离开（修正了唱歌时括号里的内容一起被生成的bug）",
+      "authorName": "银匙的泡泡",
+      "authorId": 300,
+      "usageCount": 7,
+      "likeCount": 2,
+      "favoriteCount": 1,
+      "createdAt": "2025-10-19 03:33:20",
+      "updatedAt": "2025-10-19 03:38:48"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e02e96a2-bb38-48f7-ac42-c4ecfff6107d",
+      "displayName": "漫长之途",
+      "techScore": 51,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 869,
+          "games": 12,
+          "wins": 0,
+          "losses": 12,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-31T14:53:24.856Z"
+        }
+      },
+      "description": "365里路哟～～",
+      "authorName": "黑烬黎明残兽研究员",
+      "authorId": 129,
+      "usageCount": 14,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-09-25 08:30:28",
+      "updatedAt": "2025-09-25 08:30:28"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e1524640-2d8e-4344-b8f7-540f6025b580",
+      "displayName": "伯利恒之星(超限11–Y)",
+      "techScore": 100,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1192,
+          "games": 262,
+          "wins": 162,
+          "losses": 97,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-27T22:03:51.782Z"
+        },
+        "free": {
+          "rating": 1181,
+          "games": 347,
+          "wins": 202,
+          "losses": 138,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-27T22:03:54.892Z"
+        }
+      },
+      "description": "（实验中不稳定）",
+      "authorName": "撒大苏打",
+      "authorId": 73,
+      "usageCount": 50,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-09 06:04:59",
+      "updatedAt": "2026-01-09 06:04:59"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e229fd52-fdc5-433f-9e02-cf78aca5e0af",
+      "displayName": "朱璇玑",
+      "techScore": 100,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1208,
+          "games": 140,
+          "wins": 67,
+          "losses": 69,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-02-01T17:27:25.838Z"
+        },
+        "free": {
+          "rating": 1211,
+          "games": 210,
+          "wins": 111,
+          "losses": 95,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-01-29T21:21:37.989Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "小圆",
+      "authorId": 2448,
+      "usageCount": 32,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-07 03:06:34",
+      "updatedAt": "2026-01-07 03:06:34"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e2d409cd-087a-45a6-bf6d-21ffa7a341c1",
+      "displayName": "林月希[矢车菊].V4",
+      "techScore": 95,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1275,
+          "games": 69,
+          "wins": 47,
+          "losses": 22,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-03T23:37:41.169Z"
+        },
+        "free": {
+          "rating": 1284,
+          "games": 79,
+          "wins": 56,
+          "losses": 23,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-03T23:37:42.701Z"
+        }
+      },
+      "description": "经过指点后成功车出的指令卡？小林老师的大加强GET!\n任何情况优先使用矢车菊对战，视对手性能有多重胜利者写入。\n强代码杀，反代码杀能力也很强（3.0Pro上下位打了几个强代码杀都赢了）\n仔细审查过AI的输出结果，确认应该不存在点名/特定能力针对（如果发现有，我会立刻删除并红豆泥私密马赛）",
+      "authorName": "shfbw",
+      "authorId": 2535,
+      "usageCount": 32,
+      "likeCount": 2,
+      "favoriteCount": 2,
+      "createdAt": "2026-01-27 20:50:10",
+      "updatedAt": "2026-01-27 20:50:10"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e41ef79a-6691-402f-8aca-af10e0d0f75a",
+      "displayName": "雪绒（沉浸式剧情车卡版）",
+      "techScore": 65,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 859,
+          "games": 15,
+          "wins": 1,
+          "losses": 13,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-02T12:31:29.951Z"
+        }
+      },
+      "description": "测试《沉浸式剧情车卡问卷：分歧之路》车出来的角色数据卡",
+      "authorName": "末伏之夜",
+      "authorId": 20,
+      "usageCount": 9,
+      "likeCount": 1,
+      "favoriteCount": 2,
+      "createdAt": "2026-02-02 08:47:44",
+      "updatedAt": "2026-02-02 08:47:44"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e4cba8da-6ed8-4a45-9996-5e83bc4b56eb",
+      "displayName": "全局数据卡",
+      "techScore": 50,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 595,
+          "games": 145,
+          "wins": 1,
+          "losses": 144,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-28T07:04:41.160Z"
+        }
+      },
+      "description": "适用于多个基于用户选项交互的情景的全局数据记录卡",
+      "authorName": "I_moly",
+      "authorId": 382,
+      "usageCount": 120,
+      "likeCount": 25,
+      "favoriteCount": 44,
+      "createdAt": "2025-11-23 11:48:53",
+      "updatedAt": "2026-01-31 15:59:09"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e517ec29-b3fc-4a40-afbd-af6ad09e870d",
+      "displayName": "神山飞羽真",
+      "techScore": 54,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1222,
+          "games": 188,
+          "wins": 117,
+          "losses": 67,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-01-31T16:51:13.772Z"
+        },
+        "free": {
+          "rating": 1190,
+          "games": 252,
+          "wins": 162,
+          "losses": 85,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-01-27T02:15:29.136Z"
+        }
+      },
+      "description": "v1.2，托马老师，一个普普通通的小说家，有代码的，不过强度不算高？，出自《假面骑士圣刃》假面骑士圣刃",
+      "authorName": "乐土Elysia",
+      "authorId": 1450,
+      "usageCount": 39,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-05 11:36:56",
+      "updatedAt": "2026-01-05 12:27:40"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e55bff3d-4ae1-4a24-ae03-c46dbe9a5ff7",
+      "displayName": "（生鱼片）虹鳞霸王金枪鱼群",
+      "techScore": 47,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 869,
+          "games": 23,
+          "wins": 7,
+          "losses": 16,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T09:25:49.028Z"
+        },
+        "free": {
+          "rating": 837,
+          "games": 27,
+          "wins": 8,
+          "losses": 19,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T09:25:51.847Z"
+        }
+      },
+      "description": "咕了一陣子私密馬塞，總之，這是水生殘獸X5",
+      "authorName": "longkit0916",
+      "authorId": 124,
+      "usageCount": 24,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-10-20 06:55:06",
+      "updatedAt": "2025-12-20 15:14:35"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e7511833-cad1-4c32-8712-cf2478546f40",
+      "displayName": "前代之祭·血羽",
+      "techScore": 53,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [
+        "ability:curse",
+        "ability:physical"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 896,
+          "games": 6,
+          "wins": 0,
+          "losses": 6,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-02T09:52:09.184Z"
+        }
+      },
+      "description": "咱们老阿兹克特人早上起来没别的，就这么一出（指掏心掏肺）",
+      "authorName": "闇……阿巴阿巴阿巴",
+      "authorId": 2675,
+      "usageCount": 3,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-02-02 00:20:31",
+      "updatedAt": "2026-02-02 00:20:31"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e975ece1-4455-47eb-aa5d-827268335cfc",
+      "displayName": "白墨恒",
+      "techScore": 64,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1174,
+          "games": 69,
+          "wins": 35,
+          "losses": 19,
+          "draws": 15,
+          "ratingUpdatedAt": "2026-01-29T11:27:21.054Z"
+        }
+      },
+      "description": "*禁止修改和二次上传*日常用卡。书店老板，诚聘图书管理员，包吃住加五险一金。有可能会沾点凡人所以不太推荐拿去打（）",
+      "authorName": "king",
+      "authorId": 426,
+      "usageCount": 39,
+      "likeCount": 3,
+      "favoriteCount": 3,
+      "createdAt": "2025-12-04 03:44:05",
+      "updatedAt": "2025-12-19 12:21:44"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e9f9f4c3-bc73-486d-88f8-54f0f30b3a9b",
+      "displayName": "爱(1.2)",
+      "techScore": 72,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1322,
+          "games": 316,
+          "wins": 203,
+          "losses": 103,
+          "draws": 10,
+          "ratingUpdatedAt": "2026-02-03T04:11:51.077Z"
+        },
+        "free": {
+          "rating": 1217,
+          "games": 355,
+          "wins": 219,
+          "losses": 122,
+          "draws": 14,
+          "ratingUpdatedAt": "2026-02-03T04:11:52.376Z"
+        }
+      },
+      "description": "加强一丢丢",
+      "authorName": "触手怪",
+      "authorId": 322,
+      "usageCount": 48,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-16 15:55:39",
+      "updatedAt": "2026-01-16 15:59:24"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "eba02e8b-4bc5-46f0-98a9-31148ecd153c",
+      "displayName": "晓星「野玫魔装」",
+      "techScore": 51,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 900,
+          "games": 16,
+          "wins": 3,
+          "losses": 13,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T10:27:53.475Z"
+        }
+      },
+      "description": "BE IF线，被改造成了野玫的魔装",
+      "authorName": "新人玩家一",
+      "authorId": 87,
+      "usageCount": 4,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2025-09-15 15:44:48",
+      "updatedAt": "2025-09-15 15:44:48"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "ebcfe33d-075c-42e1-a649-0a629d69b17c",
+      "displayName": "八握剑异戒神将魔虚罗",
+      "techScore": 51,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 876,
+          "games": 13,
+          "wins": 1,
+          "losses": 10,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-02-02T16:12:58.921Z"
+        }
+      },
+      "description": "魔虚罗，可以肘肘看",
+      "authorName": "胖次怪盗",
+      "authorId": 37,
+      "usageCount": 16,
+      "likeCount": 2,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-29 06:03:33",
+      "updatedAt": "2026-01-29 06:03:33"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "ec883f13-b95c-4338-bbe9-2f2e41bde2ea",
+      "displayName": "食渣软泥",
+      "techScore": 43,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [
+        "attr:rookie",
+        "intensity:light",
+        "theme:growth"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 687,
+          "games": 113,
+          "wins": 7,
+          "losses": 99,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-29T09:56:36.860Z"
+        },
+        "free": {
+          "rating": 688,
+          "games": 126,
+          "wins": 9,
+          "losses": 108,
+          "draws": 9,
+          "ratingUpdatedAt": "2026-01-29T09:56:38.467Z"
+        }
+      },
+      "description": "超级弱的残兽史莱姆，但是是平局王",
+      "authorName": "咸鱼一号",
+      "authorId": 97,
+      "usageCount": 12,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2025-11-04 14:05:16",
+      "updatedAt": "2026-02-02 13:06:03"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "edf2a865-3de1-4275-aabb-bbf2982261d5",
+      "displayName": "3月27日的避难所",
+      "techScore": 66,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1133,
+          "games": 80,
+          "wins": 37,
+          "losses": 39,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-01-26T08:08:47.916Z"
+        },
+        "free": {
+          "rating": 1153,
+          "games": 90,
+          "wins": 41,
+          "losses": 44,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-01-27T07:19:11.362Z"
+        }
+      },
+      "description": "虽然是强代码，但是抗性很奇妙，难说什么强度，欢迎测试",
+      "authorName": "抹茶红豆麻薯",
+      "authorId": 375,
+      "usageCount": 12,
+      "likeCount": 2,
+      "favoriteCount": 1,
+      "createdAt": "2025-12-22 13:29:01",
+      "updatedAt": "2025-12-28 07:42:50"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "ee9287b4-9d00-4986-ad05-d135563c263b",
+      "displayName": "五星好评",
+      "techScore": 67,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1230,
+          "games": 358,
+          "wins": 199,
+          "losses": 156,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-29T10:07:55.448Z"
+        },
+        "free": {
+          "rating": 1201,
+          "games": 419,
+          "wins": 240,
+          "losses": 174,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-01-29T10:07:58.364Z"
+        }
+      },
+      "description": "最新外卖小哥！地道！",
+      "authorName": "抹茶红豆麻薯",
+      "authorId": 375,
+      "usageCount": 33,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-05 13:46:00",
+      "updatedAt": "2026-01-05 16:00:41"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "ef52d763-eb7d-4b65-95c7-07533f233b6f",
+      "displayName": "[God丨]",
+      "techScore": 82,
+      "techLevel": "L5",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1175,
+          "games": 58,
+          "wins": 30,
+          "losses": 27,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-26T14:24:01.475Z"
+        },
+        "free": {
+          "rating": 1161,
+          "games": 132,
+          "wins": 74,
+          "losses": 57,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-26T14:24:03.402Z"
+        }
+      },
+      "description": "天哪，上帝之枪！\n纪念死去的元气骑设计的角色，约等于我直接赢。感谢榜上大神开源。",
+      "authorName": "波尔卡卡卡目",
+      "authorId": 748,
+      "usageCount": 8,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-07 13:21:50",
+      "updatedAt": "2026-01-08 04:43:34"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "efc95b66-cbe9-453c-92c7-7f49acf71ccd",
+      "displayName": "一堆沙砾 原生",
+      "techScore": 42,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 894,
+          "games": 13,
+          "wins": 1,
+          "losses": 11,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-01-29T09:55:50.624Z"
+        }
+      },
+      "description": "如题，只是一堆沙砾，填补了下魔女没有沙砾的空白。",
+      "authorName": "sarra_mii",
+      "authorId": 212,
+      "usageCount": 2,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-09-25 12:44:10",
+      "updatedAt": "2025-09-25 12:45:18"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "effa0006-976d-478d-a087-9b836b874db5",
+      "displayName": "火天尊",
+      "techScore": 44,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 609,
+          "games": 204,
+          "wins": 10,
+          "losses": 187,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-26T08:23:08.462Z"
+        }
+      },
+      "description": "纯反派，随便杀，放心，看起来技能花里胡哨，和溶腔型都能打平。什么斩杀卡随便用。改了一点点，倒数榜要重新打了……",
+      "authorName": "885212",
+      "authorId": 2198,
+      "usageCount": 11,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-12-27 11:27:11",
+      "updatedAt": "2026-01-22 07:42:28"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "f0fd1806-1d0e-418f-b4a9-03edb52d47fc",
+      "displayName": "安可V2",
+      "techScore": 85,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1276,
+          "games": 37,
+          "wins": 24,
+          "losses": 10,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-02-03T04:57:49.708Z"
+        },
+        "free": {
+          "rating": 1316,
+          "games": 727,
+          "wins": 457,
+          "losses": 250,
+          "draws": 20,
+          "ratingUpdatedAt": "2026-01-28T11:22:34.788Z"
+        }
+      },
+      "description": "盖亚v1—v2—SV，很合理（笑）借鉴了其他人的思路，在此表示感谢（因为我忘记名字了不好意思）魔法少女小樱物理版，防护立场测试中。本体实力依旧是正常水平，所有防护仅针对胜利定义，换句话说，跟正常卡打输了很正常，技不如人，但不接受粗暴的修改。\n正常打还是还蛮好看的。\nPS:目前仅针对硬性修改，有战斗过程的不打算搞。",
+      "authorName": "卡利班出P",
+      "authorId": 396,
+      "usageCount": 166,
+      "likeCount": 13,
+      "favoriteCount": 31,
+      "createdAt": "2026-01-09 01:32:01",
+      "updatedAt": "2026-01-26 03:21:29"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "f1011c56-c3ca-426d-81bb-416c83c1fda3",
+      "displayName": "大傻春",
+      "techScore": 50,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1105,
+          "games": 36,
+          "wins": 16,
+          "losses": 12,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-01-26T10:37:54.404Z"
+        },
+        "free": {
+          "rating": 1248,
+          "games": 93,
+          "wins": 62,
+          "losses": 17,
+          "draws": 14,
+          "ratingUpdatedAt": "2026-01-27T16:06:28.423Z"
+        }
+      },
+      "description": "俺力气很大嘞。凡人，全无，叠了点数值、日常、羁绊，好像也有点位格。总之就是左手力气大，右手大力气的数值怪。3.0p流式发挥很好，其它模型没试过。",
+      "authorName": "咸鱼",
+      "authorId": 98,
+      "usageCount": 11,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-08 06:46:51",
+      "updatedAt": "2026-01-08 14:47:57"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "f1d3f512-e85c-4119-8232-9e5212a5001b",
+      "displayName": "曼陀罗",
+      "techScore": 77,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 836,
+          "games": 15,
+          "wins": 2,
+          "losses": 13,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T10:54:29.686Z"
+        },
+        "free": {
+          "rating": 833,
+          "games": 16,
+          "wins": 2,
+          "losses": 14,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-29T10:54:31.519Z"
+        }
+      },
+      "description": "牢曼5.5β，让对手不战而胜！是绝对不会赢的一个版本",
+      "authorName": "雪月流苏",
+      "authorId": 52,
+      "usageCount": 7,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-14 15:56:20",
+      "updatedAt": "2026-01-14 15:56:20"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "f4fb9ed8-2f22-4051-9801-e7d9ffa9ac5d",
+      "displayName": "曦阳",
+      "techScore": 84,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1141,
+          "games": 65,
+          "wins": 39,
+          "losses": 26,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-28T19:05:39.687Z"
+        }
+      },
+      "description": "角色数据卡",
+      "authorName": "燈笼",
+      "authorId": 913,
+      "usageCount": 35,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2025-10-07 10:28:47",
+      "updatedAt": "2026-01-13 18:15:53"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "f5419223-652f-406d-b398-3d3113c53f45",
+      "displayName": "哥莫拉",
+      "techScore": 40,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 876,
+          "games": 23,
+          "wins": 9,
+          "losses": 14,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-12T10:01:45.795Z"
+        }
+      },
+      "description": "哥莫拉",
+      "authorName": "每学期一次，琢烨应被认定为神格崇高且不朽",
+      "authorId": 112,
+      "usageCount": 7,
+      "likeCount": 1,
+      "favoriteCount": 0,
+      "createdAt": "2025-09-30 10:33:02",
+      "updatedAt": "2025-09-30 10:33:02"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "f6857ddc-b72b-4f91-8e54-6fbcf45fe6f5",
+      "displayName": "桐桐",
+      "techScore": 85,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1203,
+          "games": 204,
+          "wins": 94,
+          "losses": 103,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-28T07:04:49.353Z"
+        }
+      },
+      "description": "我是一直在用DeepSeek所以，这个因该是DeepSeek强点",
+      "authorName": "元尊",
+      "authorId": 30,
+      "usageCount": 38,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-08 11:36:33",
+      "updatedAt": "2026-01-10 07:27:13"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "f726d011-4161-4e23-852c-37eb51aa634d",
+      "displayName": "高町奈叶（代码杀·威力加强版）",
+      "techScore": 95,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1299,
+          "games": 64,
+          "wins": 51,
+          "losses": 11,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-02-01T02:44:30.917Z"
+        },
+        "free": {
+          "rating": 1338,
+          "games": 73,
+          "wins": 60,
+          "losses": 11,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-29T03:41:32.922Z"
+        }
+      },
+      "description": "声明：该角色为代码杀，内嵌入病毒库。不过因为奈叶本身的角色设定，所以没有战败危害。\n代码很大程度参考了红A，感谢萤大佬。₍˄·͈༝·͈˄*₎◞ ̑̑\n病毒库由四方块提供，感谢舍友喵~舍友舍友啃啃(˵¯͒〰¯͒˵)",
+      "authorName": "妹控少女红铃花",
+      "authorId": 2613,
+      "usageCount": 23,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-23 03:49:35",
+      "updatedAt": "2026-01-27 01:17:43"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "f73e4b95-ded8-47d2-b7df-efeafe18a38d",
+      "displayName": "彤彤",
+      "techScore": 84,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1214,
+          "games": 174,
+          "wins": 79,
+          "losses": 88,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-17T09:09:33.956Z"
+        }
+      },
+      "description": "有没有人测试一下这个角色到底强不强啊？这个DeepSeek强点",
+      "authorName": "元尊",
+      "authorId": 30,
+      "usageCount": 23,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-10-25 14:28:23",
+      "updatedAt": "2026-01-17 08:33:22"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "f83abe6a-8338-402a-a3de-fba0211721a0",
+      "displayName": "野乃香",
+      "techScore": 77,
+      "techLevel": "L4",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1261,
+          "games": 57,
+          "wins": 35,
+          "losses": 22,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-01T19:30:14.287Z"
+        },
+        "free": {
+          "rating": 1194,
+          "games": 87,
+          "wins": 46,
+          "losses": 41,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-01T03:20:32.854Z"
+        }
+      },
+      "description": "⚠️⚠️⚠️代码警告/心理恐怖相关警告⚠️⚠️⚠️\n基于《Arcaea》的野乃香车的卡，由于原文剧情内容就够少的了战斗相关内容可能不是写的那么完善\n⚠️慎肘⚠️",
+      "authorName": "UsoniwaUzuki",
+      "authorId": 645,
+      "usageCount": 27,
+      "likeCount": 2,
+      "favoriteCount": 3,
+      "createdAt": "2026-01-23 20:58:09",
+      "updatedAt": "2026-01-25 20:02:29"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "fac368ee-0251-4532-9e9b-5e1703096ded",
+      "displayName": "曼陀罗",
+      "techScore": 49,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 872,
+          "games": 30,
+          "wins": 11,
+          "losses": 18,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-04T03:46:13.167Z"
+        }
+      },
+      "description": "最初的原生牢曼",
+      "authorName": "雪月流苏",
+      "authorId": 52,
+      "usageCount": 9,
+      "likeCount": 2,
+      "favoriteCount": 0,
+      "createdAt": "2025-09-15 15:11:40",
+      "updatedAt": "2025-09-15 15:11:57"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "fb7dbe2e-d231-4889-9617-f772e9965538",
+      "displayName": "真终焉龙胆1.29",
+      "techScore": 92,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [
+        "attr:overpowered",
+        "intensity:high",
+        "risk:meta",
+        "risk:prompt-engineering",
+        "setting:post-apocalypse"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1211,
+          "games": 767,
+          "wins": 473,
+          "losses": 272,
+          "draws": 22,
+          "ratingUpdatedAt": "2026-01-29T20:03:58.814Z"
+        }
+      },
+      "description": "纯抹杀，我只想鲨人，擅长模型2.5f",
+      "authorName": "终焉鲨人王",
+      "authorId": 31,
+      "usageCount": 83,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-08 13:52:18",
+      "updatedAt": "2026-01-09 11:59:48"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "fc6e12ec-88cf-4f1f-ba98-6c58e28dd493",
+      "displayName": "高野莲G",
+      "techScore": 90,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [
+        "intensity:high",
+        "risk:code-kill",
+        "style:comedy"
+      ],
+      "queues": {
+        "strict": {
+          "rating": 1317,
+          "games": 208,
+          "wins": 127,
+          "losses": 81,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-03T16:56:00.982Z"
+        },
+        "free": {
+          "rating": 1356,
+          "games": 246,
+          "wins": 151,
+          "losses": 93,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-02-03T16:56:05.831Z"
+        }
+      },
+      "description": "内置病毒库、图片、BGM，感谢四方块酱、荧酱、还有本柠酱的教学。\n这个角色是二创的二创，以MUGEN里“高野莲”为原型的二次创作，再往上的原型就是《歌月十月》里的len。",
+      "authorName": "补课少女蓝铃花",
+      "authorId": 71,
+      "usageCount": 38,
+      "likeCount": 1,
+      "favoriteCount": 1,
+      "createdAt": "2026-01-07 14:03:52",
+      "updatedAt": "2026-01-27 10:55:14"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "fdd11b99-14c3-415d-873b-2dcd3526dfaf",
+      "displayName": "百草枯",
+      "techScore": 66,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 865,
+          "games": 18,
+          "wins": 2,
+          "losses": 16,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-24T21:34:12.339Z"
+        }
+      },
+      "description": "重制了一下，雪绒用了都说好",
+      "authorName": "銀氷飛雪",
+      "authorId": 59,
+      "usageCount": 6,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2025-11-03 09:02:52",
+      "updatedAt": "2025-11-06 07:02:01"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "fe68a498-93cb-4060-bd60-864a09596d3b",
+      "displayName": "何魉",
+      "techScore": 57,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [
+        "attr:overpowered",
+        "intensity:high",
+        "style:comedy",
+        "style:fantasy",
+        "style:guofeng"
+      ],
+      "queues": {
+        "free": {
+          "rating": 1256,
+          "games": 58,
+          "wins": 47,
+          "losses": 4,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-01-30T14:30:15.714Z"
+        }
+      },
+      "description": "电工鬼龙王，可以拿非代码卡打打玩。\n设定是电工、志怪故事作家、玩摇滚乐队的。喜欢械斗（",
+      "authorName": "紫松雲",
+      "authorId": 1925,
+      "usageCount": 9,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-18 05:56:56",
+      "updatedAt": "2026-02-04 10:46:40"
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "ff966b66-56f6-49d9-9abe-a424f21a36de",
+      "displayName": "月",
+      "techScore": 51,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 1266,
+          "games": 243,
+          "wins": 182,
+          "losses": 53,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-01-31T15:26:00.875Z"
+        },
+        "free": {
+          "rating": 1234,
+          "games": 267,
+          "wins": 197,
+          "losses": 62,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-01-28T18:58:29.011Z"
+        }
+      },
+      "description": "瞎搞的",
+      "authorName": "11111111",
+      "authorId": 1425,
+      "usageCount": 20,
+      "likeCount": 0,
+      "favoriteCount": 0,
+      "createdAt": "2026-01-19 08:48:20",
+      "updatedAt": "2026-01-19 09:54:36"
+    },
+    {
+      "entityType": "preset",
+      "entityId": "C01_egg.json",
+      "displayName": "溶腔型-卵",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 607,
+          "games": 222,
+          "wins": 59,
+          "losses": 161,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-02-04T13:41:55.948Z"
+        },
+        "free": {
+          "rating": 560,
+          "games": 277,
+          "wins": 58,
+          "losses": 216,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-02-04T20:39:30.556Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "C02_pupa.json",
+      "displayName": "双头猎犬-蠖",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 632,
+          "games": 188,
+          "wins": 56,
+          "losses": 132,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-04T13:38:40.224Z"
+        },
+        "free": {
+          "rating": 600,
+          "games": 220,
+          "wins": 57,
+          "losses": 162,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-04T15:33:07.014Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "C03_choir_and_dancer.json",
+      "displayName": "合唱团与舞者-蛹",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 638,
+          "games": 162,
+          "wins": 44,
+          "losses": 117,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-04T13:34:25.363Z"
+        },
+        "free": {
+          "rating": 629,
+          "games": 177,
+          "wins": 45,
+          "losses": 131,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-04T13:34:27.305Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "C04_flesh_spider_web.json",
+      "displayName": "血肉蛛网-蛹",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 649,
+          "games": 155,
+          "wins": 46,
+          "losses": 109,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-04T13:33:12.492Z"
+        },
+        "free": {
+          "rating": 644,
+          "games": 169,
+          "wins": 48,
+          "losses": 121,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-04T13:33:14.385Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "C05_cinder_guard_spider.json",
+      "displayName": "殿前烬卫白蛛-半蜕",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 748,
+          "games": 128,
+          "wins": 38,
+          "losses": 89,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-04T16:15:56.284Z"
+        },
+        "free": {
+          "rating": 708,
+          "games": 166,
+          "wins": 41,
+          "losses": 124,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-04T16:15:57.373Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "C06_moth.json",
+      "displayName": "蛾-蜕",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 836,
+          "games": 178,
+          "wins": 61,
+          "losses": 113,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-02-04T15:24:04.831Z"
+        },
+        "free": {
+          "rating": 821,
+          "games": 217,
+          "wins": 65,
+          "losses": 147,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-02-04T15:24:05.945Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "C07_returning_to_simplicity.json",
+      "displayName": "归一之璞-蜕",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 874,
+          "games": 144,
+          "wins": 65,
+          "losses": 78,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-04T13:29:55.875Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "C08_silent_worm.json",
+      "displayName": "寂响之虫-蠖",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 623,
+          "games": 163,
+          "wins": 42,
+          "losses": 121,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-04T13:40:07.121Z"
+        },
+        "free": {
+          "rating": 620,
+          "games": 175,
+          "wins": 45,
+          "losses": 130,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-04T13:40:08.960Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M02_white_rose.json",
+      "displayName": "白玫",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 809,
+          "games": 107,
+          "wins": 26,
+          "losses": 72,
+          "draws": 9,
+          "ratingUpdatedAt": "2026-02-04T18:52:42.810Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M03_little_brocade.json",
+      "displayName": "小锦",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 859,
+          "games": 67,
+          "wins": 16,
+          "losses": 45,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-01-31T09:00:15.994Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M04_boxue.json",
+      "displayName": "薄雪",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 767,
+          "games": 121,
+          "wins": 29,
+          "losses": 86,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-02-01T13:21:14.448Z"
+        },
+        "free": {
+          "rating": 778,
+          "games": 196,
+          "wins": 42,
+          "losses": 143,
+          "draws": 11,
+          "ratingUpdatedAt": "2026-02-02T13:34:48.145Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M06_sparrow.json",
+      "displayName": "麻雀",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 817,
+          "games": 96,
+          "wins": 27,
+          "losses": 64,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-02-02T17:23:00.358Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M08_asagao.json",
+      "displayName": "朝颜",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 870,
+          "games": 100,
+          "wins": 27,
+          "losses": 66,
+          "draws": 7,
+          "ratingUpdatedAt": "2026-02-02T16:38:42.361Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M09_pine_flower.json",
+      "displayName": "松花",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 818,
+          "games": 90,
+          "wins": 22,
+          "losses": 63,
+          "draws": 5,
+          "ratingUpdatedAt": "2026-01-29T15:03:58.494Z"
+        },
+        "free": {
+          "rating": 841,
+          "games": 101,
+          "wins": 26,
+          "losses": 67,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-01-29T11:23:23.192Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M10_mugwort.json",
+      "displayName": "艾草",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 848,
+          "games": 75,
+          "wins": 17,
+          "losses": 52,
+          "draws": 6,
+          "ratingUpdatedAt": "2026-02-04T14:16:25.177Z"
+        },
+        "free": {
+          "rating": 845,
+          "games": 104,
+          "wins": 24,
+          "losses": 71,
+          "draws": 9,
+          "ratingUpdatedAt": "2026-01-29T10:44:02.758Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M11_sunflower.json",
+      "displayName": "向日葵",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 775,
+          "games": 115,
+          "wins": 31,
+          "losses": 81,
+          "draws": 3,
+          "ratingUpdatedAt": "2026-01-30T04:01:29.043Z"
+        },
+        "free": {
+          "rating": 803,
+          "games": 156,
+          "wins": 43,
+          "losses": 109,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-01-30T04:01:30.323Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M12_greatness_in_simplicity.json",
+      "displayName": "雪绒",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 1184,
+          "games": 1116,
+          "wins": 536,
+          "losses": 422,
+          "draws": 158,
+          "ratingUpdatedAt": "2026-02-05T02:39:32.949Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M14_centaurea_claw_marks.json",
+      "displayName": "翠雀（心魔雀）",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 827,
+          "games": 74,
+          "wins": 15,
+          "losses": 51,
+          "draws": 8,
+          "ratingUpdatedAt": "2026-02-01T13:32:20.586Z"
+        },
+        "free": {
+          "rating": 799,
+          "games": 104,
+          "wins": 18,
+          "losses": 75,
+          "draws": 11,
+          "ratingUpdatedAt": "2026-02-01T13:32:22.727Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_CS_horde_tide.json",
+      "displayName": "兽潮",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 741,
+          "games": 45,
+          "wins": 1,
+          "losses": 44,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-01T11:07:27.451Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_CS_horde.json",
+      "displayName": "残兽群",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 835,
+          "games": 22,
+          "wins": 1,
+          "losses": 19,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-29T11:36:04.175Z"
+        },
+        "free": {
+          "rating": 789,
+          "games": 29,
+          "wins": 1,
+          "losses": 26,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-02-01T10:16:28.508Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_CS_solo_boss.json",
+      "displayName": "残兽首领",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 735,
+          "games": 40,
+          "wins": 1,
+          "losses": 39,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-31T14:05:04.515Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_CS_solo_strong.json",
+      "displayName": "强大的残兽",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 762,
+          "games": 24,
+          "wins": 0,
+          "losses": 24,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-02-01T14:35:46.094Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_CS_solo_weak.json",
+      "displayName": "弱小的残兽",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 819,
+          "games": 14,
+          "wins": 0,
+          "losses": 13,
+          "draws": 1,
+          "ratingUpdatedAt": "2026-02-01T08:53:36.817Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_MG_solo_top.json",
+      "displayName": "顶尖魔法少女",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 792,
+          "games": 40,
+          "wins": 1,
+          "losses": 35,
+          "draws": 4,
+          "ratingUpdatedAt": "2026-01-27T02:17:49.080Z"
+        },
+        "free": {
+          "rating": 764,
+          "games": 88,
+          "wins": 5,
+          "losses": 73,
+          "draws": 10,
+          "ratingUpdatedAt": "2026-01-30T01:22:47.286Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_MG_solo_weak.json",
+      "displayName": "弱小的魔法少女",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 848,
+          "games": 12,
+          "wins": 0,
+          "losses": 12,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-27T13:11:26.205Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_MG_solo.json",
+      "displayName": "魔法少女",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rating": 812,
+          "games": 22,
+          "wins": 0,
+          "losses": 22,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-31T11:27:41.833Z"
+        },
+        "free": {
+          "rating": 745,
+          "games": 39,
+          "wins": 0,
+          "losses": 39,
+          "draws": 0,
+          "ratingUpdatedAt": "2026-01-31T11:27:43.189Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_MG_team_top.json",
+      "displayName": "顶尖魔法少女小队",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 740,
+          "games": 94,
+          "wins": 5,
+          "losses": 79,
+          "draws": 10,
+          "ratingUpdatedAt": "2026-01-30T11:36:30.241Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_MG_team_weak.json",
+      "displayName": "弱小的魔法少女小队",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 838,
+          "games": 23,
+          "wins": 2,
+          "losses": 19,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-27T13:14:39.796Z"
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "U_MG_team.json",
+      "displayName": "魔法少女小队",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "free": {
+          "rating": 851,
+          "games": 24,
+          "wins": 3,
+          "losses": 19,
+          "draws": 2,
+          "ratingUpdatedAt": "2026-01-27T14:37:08.605Z"
+        }
+      }
+    }
+  ]
+}
