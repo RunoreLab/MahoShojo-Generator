@@ -22,22 +22,67 @@ const isRetryableFetchError = (error: unknown): boolean => {
   return message.toLowerCase().includes('fetch failed');
 };
 
+const isRetryableStatus = (status: number): boolean => {
+  if (status === 408) return true;
+  if (status === 425) return true;
+  if (status === 429) return true;
+  return status >= 500 && status <= 599;
+};
+
+const parseRetryAfterMs = (response: Response): number | null => {
+  const value = response.headers.get('retry-after');
+  if (!value) return null;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const dateMs = Date.parse(value);
+  if (!Number.isFinite(dateMs)) return null;
+  return Math.max(0, dateMs - Date.now());
+};
+
+const jitterMs = (ms: number): number => {
+  if (ms <= 0) return 0;
+  const jitterRatio = 0.2;
+  const delta = ms * jitterRatio;
+  return Math.max(0, ms - delta + Math.random() * (2 * delta));
+};
+
 const fetchWithRetry = async (
   url: string,
   init: RequestInit,
-  options?: { attempts?: number; baseDelayMs?: number }
+  options?: { attempts?: number; baseDelayMs?: number; maxDelayMs?: number }
 ): Promise<Response> => {
   const attempts = Math.max(1, options?.attempts ?? 3);
   const baseDelayMs = Math.max(0, options?.baseDelayMs ?? 300);
+  const maxDelayMs = Math.max(0, options?.maxDelayMs ?? 10_000);
 
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await fetch(url, init);
+      const response = await fetch(url, init);
+
+      if (response.ok || i === attempts - 1 || !isRetryableStatus(response.status)) {
+        return response;
+      }
+
+      const retryAfterMs = parseRetryAfterMs(response);
+      const backoffMs = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, i));
+      const delayMs = retryAfterMs ?? backoffMs;
+
+      try {
+        await response.body?.cancel();
+      } catch {
+        // ignore
+      }
+
+      await sleep(jitterMs(delayMs));
     } catch (error) {
       lastError = error;
       if (!isRetryableFetchError(error) || i === attempts - 1) throw error;
-      await sleep(baseDelayMs * Math.pow(2, i));
+      await sleep(jitterMs(Math.min(maxDelayMs, baseDelayMs * Math.pow(2, i))));
     }
   }
 
@@ -143,7 +188,7 @@ async function query(sql: string, params: unknown[] = []): Promise<Response> {
         params,
       }),
     },
-    { attempts: 3, baseDelayMs: 400 }
+    { attempts: 5, baseDelayMs: 500, maxDelayMs: 8000 }
   );
 }
 
