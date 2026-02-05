@@ -9,6 +9,7 @@ import { getUtf8ByteLength } from '@/lib/data-card-size';
 import { getLogger } from '@/lib/logger';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 import { buildScenarioMarkdownRequirements } from '@/lib/prompts/scenario';
 import { TAVERN_IMPORT_ATTACHMENT_LIMITS } from '@/lib/tavern-card/limits';
@@ -290,6 +291,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       },
       providerOptions
     );
+    recordUserActivityFromRequest(req);
 
     return streamResult.response;
   } catch (error) {

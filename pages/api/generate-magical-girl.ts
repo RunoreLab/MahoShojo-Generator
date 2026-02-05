@@ -5,6 +5,7 @@ import { config as appConfig } from "../../lib/config";
 import { MainColor } from "../../lib/main-color";
 import { getLogger } from "../../lib/logger";
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-girl');
 
@@ -89,6 +90,7 @@ async function handler(
 
   try {
     const magicalGirlData = await generateMagicalGirlWithAI(name.trim(), language);
+    recordUserActivityFromRequest(req);
 
     // 为数据生成签名，并添加模板ID
     const dataToSign = {

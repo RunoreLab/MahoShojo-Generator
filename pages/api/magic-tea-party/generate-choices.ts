@@ -10,6 +10,7 @@ import { buildMagicTeaPartyChoicesPrompt, buildWorldbookText } from '@/lib/magic
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import type { MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-magic-tea-party-generate-choices');
 
@@ -271,6 +272,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       },
       providerOptions
     );
+    recordUserActivityFromRequest(req);
 
     return streamResult.response;
   } catch (error) {

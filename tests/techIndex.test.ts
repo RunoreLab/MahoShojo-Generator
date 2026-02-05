@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { computeTechIndex } from '@/lib/metrics/techIndex';
+import { computeTechIndex, DEFAULT_TECH_INDEX_CONFIG } from '@/lib/metrics/techIndex';
 
 describe('tech index', () => {
   test('覆盖病毒库：权限劫持 / 管理员接管', () => {
@@ -102,5 +102,38 @@ describe('tech index', () => {
     expect(baseTech.raw.bulletLineCount).toBe(0);
     expect(bulletTech.raw.bulletLineCount).toBeGreaterThan(0);
     expect(bulletTech.components.scoreStructure).toBeGreaterThan(baseTech.components.scoreStructure);
+  });
+
+  test('scoreShift：默认整体下移 10 分（并保持在 [0,100]）', () => {
+    const input = {
+      title: '样本',
+      stats: {
+        hp: 500,
+        mp: 200,
+        attack: 120,
+        defense: 80,
+      },
+      text: [
+        '这是一个普通角色设定。',
+        '- 技能: 火球',
+        '- 技能: 冰墙',
+        '- 技能: 治疗',
+        '攻击力 120，生命值 500，护盾 200，暴击率 30%，命中率 85%。',
+      ].join('\n'),
+    };
+
+    const noShift = computeTechIndex(input, { ...DEFAULT_TECH_INDEX_CONFIG, scoreShift: 0 });
+    const shifted = computeTechIndex(input);
+
+    expect(noShift.techScore).toBeGreaterThanOrEqual(20);
+    expect(noShift.techScore - shifted.techScore).toBe(10);
+    expect(shifted.techScore).toBeGreaterThanOrEqual(0);
+    expect(shifted.techScore).toBeLessThanOrEqual(100);
+  });
+
+  test('scoreShift：不会低于 0', () => {
+    const tech = computeTechIndex({ text: '短文本' }, { ...DEFAULT_TECH_INDEX_CONFIG, scoreShift: 999 });
+    expect(tech.techScore).toBe(0);
+    expect(tech.techLevel).toBe('L0');
   });
 });

@@ -11,6 +11,7 @@ import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { compactQuestionnaireAnswerItems, formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 import { getDataCardById } from '@/lib/d1';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import presetIndex from '@/public/questionnaires/presets/index.json';
 
 const log = getLogger('api-gen-canshou');
@@ -553,6 +554,7 @@ async function handler(req: NextRequest): Promise<Response> {
       ...canshouGenerationConfig,
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
     }, providerOptions);
+    recordUserActivityFromRequest(req);
 
     // 将用户答案和生成结果合并，并添加模板ID，为签名做准备
     const compactAnswers = compactQuestionnaireAnswerItems(normalizedAnswers);

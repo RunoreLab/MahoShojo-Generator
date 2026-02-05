@@ -15,6 +15,7 @@ import type {
 } from '@/lib/magic-tea-party/types';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { createBlankDataCard } from '@/lib/data-card-converter';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-magic-tea-party-generate-stream');
 
@@ -318,6 +319,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       },
       providerOptions
     );
+    recordUserActivityFromRequest(req);
 
     return streamResult.response;
   } catch (error) {

@@ -6,6 +6,8 @@ const ENCRYPTION_KEY = 'mahoshojo_2024_secret_encryption_key';
 export interface AuthData {
   username: string;
   authKey: string;
+  userId?: number;
+  activityToken?: string;
 }
 
 // Web Crypto API 加密工具
@@ -139,6 +141,21 @@ export const authStorage = {
   async getAuthHeader(): Promise<string | null> {
     const auth = await this.getAuth();
     return auth ? `Bearer ${auth.authKey}` : null;
+  },
+
+  // 获取“活跃统计”头（不依赖额外 D1 读取）
+  async getActivityHeaders(): Promise<Record<string, string>> {
+    const auth = await this.getAuth();
+    if (!auth) return {};
+
+    const headers: Record<string, string> = {};
+    if (auth.activityToken) {
+      headers['x-mahoshojo-activity-token'] = auth.activityToken;
+    }
+    if (typeof auth.userId === 'number' && Number.isSafeInteger(auth.userId) && auth.userId > 0) {
+      headers['x-mahoshojo-user-id'] = String(auth.userId);
+    }
+    return headers;
   }
 };
 
@@ -150,6 +167,8 @@ export const authApi = {
     authKey?: string;
     message?: string;
     error?: string;
+    user?: { id: number; username: string; prefix?: string | null };
+    activityToken?: string | null;
   }> {
     try {
       const response = await fetch('/api/auth/register', {
@@ -161,7 +180,12 @@ export const authApi = {
       const data = await response.json();
       
       if (response.ok && data.success) {
-        await authStorage.setAuth({ username, authKey: data.authKey });
+        await authStorage.setAuth({
+          username,
+          authKey: data.authKey,
+          userId: typeof data.user?.id === 'number' ? data.user.id : undefined,
+          activityToken: typeof data.activityToken === 'string' ? data.activityToken : undefined,
+        });
         return data;
       }
       
@@ -176,6 +200,7 @@ export const authApi = {
   async login(username: string, authKey: string, turnstileToken: string): Promise<{
     success: boolean;
     user?: { id: number; username: string; prefix?: string | null };
+    activityToken?: string | null;
     error?: string;
   }> {
     try {
@@ -188,7 +213,12 @@ export const authApi = {
       const data = await response.json();
       
       if (response.ok && data.success) {
-        await authStorage.setAuth({ username, authKey });
+        await authStorage.setAuth({
+          username,
+          authKey,
+          userId: typeof data.user?.id === 'number' ? data.user.id : undefined,
+          activityToken: typeof data.activityToken === 'string' ? data.activityToken : undefined,
+        });
         return data;
       }
       
@@ -204,6 +234,7 @@ export const authApi = {
     success: boolean;
     user?: { id: number; username: string; prefix?: string | null };
     badges?: UserBadge[];
+    activityToken?: string | null;
   }> {
     const authHeader = await authStorage.getAuthHeader();
     if (!authHeader) {
@@ -220,6 +251,14 @@ export const authApi = {
       });
 
       const data = await response.json();
+      const auth = await authStorage.getAuth();
+      if (auth && data?.success && data?.user?.id) {
+        await authStorage.setAuth({
+          ...auth,
+          userId: typeof data.user.id === 'number' ? data.user.id : auth.userId,
+          activityToken: typeof data.activityToken === 'string' ? data.activityToken : auth.activityToken,
+        });
+      }
       return data;
     } catch (error) {
       console.error('Verify error:', error);

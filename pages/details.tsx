@@ -40,6 +40,7 @@ import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-car
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
+import { authStorage } from '@/lib/auth';
 import {
   DETAILS_QUESTIONNAIRE_THEME,
   QuestionnaireQuestionPanel,
@@ -1300,10 +1301,12 @@ const DetailsPage: React.FC = () => {
         ? '/api/generate-magical-girl-details-stream'
         : '/api/generate-magical-girl-details';
 
+      const activityHeaders = await authStorage.getActivityHeaders();
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...activityHeaders,
         },
         body: JSON.stringify({
           answers: finalAnswerItems,

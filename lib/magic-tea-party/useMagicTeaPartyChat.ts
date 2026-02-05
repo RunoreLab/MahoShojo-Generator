@@ -4,6 +4,7 @@ import type { NextRouter } from 'next/router';
 
 import type { UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { persistArrestedBackup } from '@/lib/arrested-backup';
+import { authStorage } from '@/lib/auth';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
@@ -36,6 +37,11 @@ import { applyShieldWords } from '@/lib/shield-word-filter';
 import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 
 type MagicTeaPartyOutputFormat = NonNullable<MagicTeaPartySession['settings']['outputFormat']>;
+
+const buildMagicTeaPartyRequestHeaders = async (): Promise<Record<string, string>> => ({
+  'Content-Type': 'application/json',
+  ...(await authStorage.getActivityHeaders()),
+});
 
 export type UseMagicTeaPartyChatOptions = {
   activeSession: MagicTeaPartySession | null;
@@ -370,7 +376,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       try {
         const response = await fetch('/api/magic-tea-party/generate-choices', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await buildMagicTeaPartyRequestHeaders(),
           signal: controller.signal,
           body: JSON.stringify({
             sessionId: params.session.id,
@@ -560,7 +566,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
         try {
           const response = await fetch('/api/magic-tea-party/summarize', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: await buildMagicTeaPartyRequestHeaders(),
             body: JSON.stringify({
               sessionId: params.session.id,
               mode: 'summary',
@@ -640,7 +646,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
               : undefined;
           const response = await fetch('/api/magic-tea-party/generate-updates', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: await buildMagicTeaPartyRequestHeaders(),
             body: JSON.stringify({
               sessionId: params.session.id,
               sessionTitle: params.session.title,
@@ -786,7 +792,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       try {
         const response = await fetch('/api/magic-tea-party/generate-stream', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await buildMagicTeaPartyRequestHeaders(),
           signal: controller.signal,
           body: JSON.stringify({
             sessionId: params.session.id,
@@ -1132,7 +1138,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
       try {
         const response = await fetch('/api/magic-tea-party/summarize', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await buildMagicTeaPartyRequestHeaders(),
           signal: controller.signal,
           body: JSON.stringify({
             sessionId: session.id,
@@ -1468,7 +1474,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     try {
       const response = await fetch('/api/magic-tea-party/generate-choices', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await buildMagicTeaPartyRequestHeaders(),
         signal: controller.signal,
         body: JSON.stringify({
           sessionId: activeSession.id,
@@ -1660,7 +1666,7 @@ export function useMagicTeaPartyChat(options: UseMagicTeaPartyChatOptions): UseM
     try {
       const response = await fetch('/api/magic-tea-party/summarize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await buildMagicTeaPartyRequestHeaders(),
         signal: controller.signal,
         body: JSON.stringify({
           sessionId: activeSession.id,

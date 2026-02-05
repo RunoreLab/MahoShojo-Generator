@@ -8,6 +8,7 @@ import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-sublimation-stream');
 
@@ -285,6 +286,7 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
       },
       providerOptions
     );
+    recordUserActivityFromRequest(req);
 
     return streamResult.response;
   } catch (error) {

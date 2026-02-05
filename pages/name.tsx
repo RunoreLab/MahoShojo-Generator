@@ -16,6 +16,7 @@ import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { ThemeImage } from '@/components/shared/ThemeImage';
+import { authStorage } from '@/lib/auth';
 
 // 注意：QueueStatus 组件及其相关逻辑已被移除，因为它在Serverless环境下无法正常工作。
 
@@ -98,10 +99,12 @@ function checkNameLength(name: string): boolean {
 // 使用 API 路由生成魔法少女
 async function generateMagicalGirl(inputName: string, language: string): Promise<MagicalGirl> {
   try {
+    const activityHeaders = await authStorage.getActivityHeaders();
     const response = await fetch('/api/generate-magical-girl', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...activityHeaders,
       },
       body: JSON.stringify({ name: inputName, language: language }),
     });

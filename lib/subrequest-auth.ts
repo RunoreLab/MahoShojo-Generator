@@ -27,6 +27,8 @@ export const buildSubrequestAuthHeaders = (req: Request): HeaderRecord => {
 
   setIfPresent(headers, 'cookie', req.headers.get('cookie'));
   setIfPresent(headers, 'cf-access-jwt-assertion', req.headers.get('cf-access-jwt-assertion'));
+  setIfPresent(headers, 'x-mahoshojo-activity-token', req.headers.get('x-mahoshojo-activity-token'));
+  setIfPresent(headers, 'x-mahoshojo-user-id', req.headers.get('x-mahoshojo-user-id'));
 
   const clientId = getEnvString('CF_ACCESS_CLIENT_ID');
   const clientSecret = getEnvString('CF_ACCESS_CLIENT_SECRET');
@@ -37,4 +39,3 @@ export const buildSubrequestAuthHeaders = (req: Request): HeaderRecord => {
 
   return headers;
 };
-

@@ -4,6 +4,10 @@
 数据来源：Cloudflare D1（`data_card_metrics` / `data_cards` / `arena_ratings`），统计口径以“公开 + 已审核通过的角色卡”为主  
 目标：解释为何“顶格/上界”现象在高段位卡上明显、为何对排位分的区分度变差，并给出可落地的改进方案（含推荐 v2 参数）
 
+> 2026-02-05 补充：问卷生成角色卡的 `userAnswers` 新存储格式（对象数组 + 问题文本）会系统性推高 techScore，并造成新旧卡口径不可比。详见：`docs/TECH_INDEX_USER_ANSWERS_STORAGE_IMPACT_2026-02-05.md`。
+
+> 2026-02-05 补充：当前全库角色卡的 `<10` 技术值区间存在长期空置风险（曾出现 min=11）。现已改为在最终分数落点引入 `scoreShift=10` 的整体下移校准，以填充 `<10` 并缓解部分卡顶格到 100。详见：`docs/TECH_INDEX_LOW_SCORE_RANGE_CALIBRATION_2026-02-05.md`。
+
 > 注意：百科条目里强调过“技术值 ≠ 强度值”。本文仍以“风险/风格提示”为本意进行讨论，但会额外评估其对排位分（`arena_ratings.rating`）的**统计相关性**，因为你提出了“预测能力下降”的诉求。
 
 ---

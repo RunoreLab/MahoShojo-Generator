@@ -20,6 +20,7 @@ import { MagicTeaPartySessionSetupPanel } from '@/components/magic-tea-party/Ses
 import { MagicTeaPartySummaryPanel } from '@/components/magic-tea-party/SummaryPanel';
 import { MagicTeaPartyTachiePanel } from '@/components/magic-tea-party/TachiePanel';
 
+import { authStorage } from '@/lib/auth';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { estimateMagicTeaPartyTokens, resolveMagicTeaPartyTokenBudget } from '@/lib/magic-tea-party/budget';
@@ -482,9 +483,10 @@ export default function MagicTeaPartyPage() {
         params.messageRange ??
         normalizeMessageRange(session.protocolShadow?.messageRange) ??
         extractMessageRangeFromDrafts(params.drafts);
+      const activityHeaders = await authStorage.getActivityHeaders();
       const response = await fetch('/api/magic-tea-party/apply-updates', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...activityHeaders },
         body: JSON.stringify({
           sessionId: session.id,
           sessionTitle: session.title,
@@ -585,9 +587,10 @@ export default function MagicTeaPartyPage() {
     setIsGeneratingUpdates(true);
 
     try {
+      const activityHeaders = await authStorage.getActivityHeaders();
       const response = await fetch('/api/magic-tea-party/generate-updates', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...activityHeaders },
         body: JSON.stringify({
           sessionId: activeSession.id,
           sessionTitle: activeSession.title,

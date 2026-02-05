@@ -27,6 +27,7 @@ import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { authStorage } from '@/lib/auth';
 import { formatDateTime } from '@/lib/constants';
 import { formatNarrativeHistoryEntriesForReference, mergeNarrativeHistoryText } from '@/lib/narrative-history';
 import { normalizeQuestionnaireDefinition, type QuestionnaireDefinition, type QuestionnairePresetEntry } from '@/lib/questionnaires';
@@ -989,9 +990,10 @@ const SublimationPage: React.FC = () => {
             }
 
             const endpoint = generationMode === 'stream' ? '/api/generate-sublimation-stream' : '/api/generate-sublimation';
+            const activityHeaders = await authStorage.getActivityHeaders();
             const response = await fetch(endpoint, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...activityHeaders },
                 body: JSON.stringify(payload),
             });
 

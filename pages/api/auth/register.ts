@@ -1,4 +1,5 @@
 import { createUser, getUserByUsername, getUserByEmail } from '@/lib/d1';
+import { issueActivityToken } from '@/lib/auth/activity-token';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { getSecureRandomValues } from '@/lib/crypto';
@@ -107,11 +108,19 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
+    const activityToken = await issueActivityToken(userId);
+
     return new Response(JSON.stringify({
       success: true,
+      user: {
+        id: userId,
+        username,
+        prefix: null
+      },
       username,
       email,
       authKey,
+      activityToken: activityToken ?? null,
       message: '注册成功！请妥善保存您的登录密钥'
     }), {
       status: 200,

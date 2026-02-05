@@ -36,6 +36,7 @@ export interface TechIndexConfig {
   caps: TechIndexCaps;
   weights: TechIndexWeights;
   exploitBoost: number;
+  scoreShift: number;
   techLevelThresholds: ReadonlyArray<{ level: TechLevel; minScore: number }>;
 }
 
@@ -134,6 +135,7 @@ export const DEFAULT_TECH_INDEX_CONFIG: TechIndexConfig = {
     kwExploit: 1.5
   },
   exploitBoost: 10,
+  scoreShift: 10,
   techLevelThresholds: [
     { level: 'L5', minScore: 80 },
     { level: 'L4', minScore: 60 },
@@ -384,13 +386,15 @@ export const computeTechIndex = (jsonValue: unknown, config: TechIndexConfig = D
     0.04 * norm(layout.repeatLineRatio, config.caps.repeatLineRatioCap);
   const scoreSize = norm(extracted.jsonStringCharsTotal, config.caps.jsonStringCharsTotalCap);
 
-  let techScore = Math.round(
+  const rawTechScore = Math.round(
     100 * (0.25 * scoreControl + 0.05 * scoreMechanics + 0.4 * scoreStructure + 0.05 * scoreCode + 0.25 * scoreSize)
   );
+  let techScore = rawTechScore - config.scoreShift;
   if (keywords.kwExploit > 0) {
-    techScore = Math.min(100, techScore + config.exploitBoost);
+    techScore += config.exploitBoost;
     notes.push('检测到强风险信号（kw_exploit>0），已触发额外加分。');
   }
+  techScore = Math.max(0, Math.min(100, techScore));
 
   const techLevel = computeTechLevel(techScore, config.techLevelThresholds);
 

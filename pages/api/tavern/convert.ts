@@ -11,6 +11,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getUtf8ByteLength } from '@/lib/data-card-size';
 import { getLogger } from '@/lib/logger';
 import { createBlankDataCard } from '@/lib/data-card-converter';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 import { TAVERN_IMPORT_ATTACHMENT_LIMITS } from '@/lib/tavern-card/limits';
@@ -524,6 +525,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       };
 
       const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+      recordUserActivityFromRequest(req);
       const questionPairs = getMagicalGirlQuestionPairs();
       const fallbackQuestions = questionPairs.map((item) => item.question);
       const normalizedAnswers = normalizeUserAnswers((generated as any).userAnswers, fallbackQuestions);
@@ -572,6 +574,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       };
 
       const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+      recordUserActivityFromRequest(req);
       const questionPairs = getCanshouQuestions();
       const fallbackQuestions = questionPairs.map((item) => item.question);
       const normalizedAnswers = normalizeUserAnswers((generated as any).userAnswers, fallbackQuestions);
@@ -617,6 +620,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       };
 
       const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+      recordUserActivityFromRequest(req);
       const base = createBlankDataCard('scenario') as any;
       const merged = {
         ...base,
@@ -647,6 +651,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       };
 
       const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+      recordUserActivityFromRequest(req);
       const base = createBlankDataCard('general-scenario') as any;
       const merged = {
         ...base,
@@ -677,6 +682,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
     };
 
     const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+    recordUserActivityFromRequest(req);
     const base = createBlankDataCard('general') as any;
     const merged = {
       ...base,

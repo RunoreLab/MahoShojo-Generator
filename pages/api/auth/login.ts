@@ -1,4 +1,5 @@
 import { verifyUserLogin } from '@/lib/d1';
+import { issueActivityToken } from '@/lib/auth/activity-token';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
 export const runtime = 'edge';
@@ -40,13 +41,16 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
+    const activityToken = await issueActivityToken(user.id);
+
     return new Response(JSON.stringify({
       success: true,
       user: {
         id: user.id,
         username: user.username,
         prefix: user.prefix
-      }
+      },
+      activityToken: activityToken ?? null
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }

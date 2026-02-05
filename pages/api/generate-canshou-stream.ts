@@ -10,6 +10,7 @@ import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-canshou-stream');
 
@@ -291,6 +292,7 @@ ${answerText}
       },
       providerOptions
     );
+    recordUserActivityFromRequest(req);
 
     return streamResult.response;
   } catch (error) {

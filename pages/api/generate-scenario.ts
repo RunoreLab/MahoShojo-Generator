@@ -9,6 +9,7 @@ import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { buildScenarioCorePrinciples } from '@/lib/prompts/scenario';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-scenario');
 
@@ -193,6 +194,7 @@ async function handler(req: NextRequest): Promise<Response> {
       : undefined;
 
     const scenarioData = await generateWithAI(null, generationConfig, providerOptions);
+    recordUserActivityFromRequest(req);
 
     // [修改] 修正签名逻辑 (SRS 3.3.3 & 4.1)
     // 1. 先构建不含签名的完整数据载荷

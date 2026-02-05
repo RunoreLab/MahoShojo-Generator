@@ -8,6 +8,7 @@ import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { getLogger } from '@/lib/logger';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-tavern-ai-fill');
 
@@ -172,6 +173,7 @@ ${formatReferenceAttachmentsForPrompt(input.attachments)}
         : undefined;
 
     const result = await generateWithAI({ name, language, attachments: [attachment] }, generationConfig, providerOptions);
+    recordUserActivityFromRequest(req);
 
     return new Response(JSON.stringify(result), {
       status: 200,
