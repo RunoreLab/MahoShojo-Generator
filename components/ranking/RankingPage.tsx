@@ -9,6 +9,7 @@ import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } fr
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { getArenaApproxRankLabel, getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
+import { ARENA_QUEEN_MIN_SCEPTER_COUNT, applyQueenTier, computeArenaBaseTier, isArenaScepterTier } from '@/lib/arena/tier';
 import type { SeasonArchive, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
 import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
@@ -52,6 +53,36 @@ type LeaderboardItem = {
   isNative: boolean | null;
   tagIds: string[];
   ratingUpdatedAt?: string | null;
+};
+
+type HistoryBaseItem = Omit<LeaderboardItem, 'rank' | 'tier'>;
+
+const buildRowKey = (entityType: LeaderboardItem['entityType'], entityId: string): string => `${entityType}:${entityId}`;
+
+const compareQueenCandidate = (a: HistoryBaseItem, b: HistoryBaseItem): number => {
+  if (a.rating !== b.rating) return a.rating > b.rating ? -1 : 1;
+  if (a.games !== b.games) return a.games > b.games ? -1 : 1;
+
+  const aUpdated = typeof a.ratingUpdatedAt === 'string' ? a.ratingUpdatedAt : '';
+  const bUpdated = typeof b.ratingUpdatedAt === 'string' ? b.ratingUpdatedAt : '';
+  if (aUpdated !== bUpdated) return aUpdated > bUpdated ? -1 : 1;
+
+  if (a.entityType !== b.entityType) return a.entityType.localeCompare(b.entityType);
+  if (a.entityId !== b.entityId) return a.entityId.localeCompare(b.entityId);
+  return 0;
+};
+
+const deriveArchiveQueenKey = (items: HistoryBaseItem[]): string | null => {
+  const candidates = items.filter((item) => isArenaScepterTier(item.rating, item.games));
+  if (candidates.length < ARENA_QUEEN_MIN_SCEPTER_COUNT) return null;
+
+  let best = candidates[0];
+  for (let i = 1; i < candidates.length; i++) {
+    const next = candidates[i];
+    if (next && compareQueenCandidate(next, best) < 0) best = next;
+  }
+
+  return buildRowKey(best.entityType, best.entityId);
 };
 
 type Tag = {
@@ -344,68 +375,78 @@ export function RankingPage() {
     if (!isArchiveMode) return null;
     const data = archiveQuery.data;
     if (!data) return null;
-    const queue = appliedFilters.queue === 'free' ? 'free' : 'strict';
-    const board = queue === 'free' ? data.leaderboards.free : data.leaderboards.strict;
-    const topRefs = Array.isArray(board?.top) ? board.top : [];
-    const bottomRefs = Array.isArray(board?.bottom) ? board.bottom : [];
-
-    const entityByKey = new Map<string, SeasonArchive['entities'][number]>();
+    const queue: Queue = appliedFilters.queue === 'free' ? 'free' : 'strict';
     const entities = Array.isArray(data.entities) ? data.entities : [];
+
+    const items: HistoryBaseItem[] = [];
     for (const entity of entities) {
       if (!entity) continue;
       const entityType = entity.entityType === 'preset' ? 'preset' : 'data_card';
       const entityId = typeof entity.entityId === 'string' ? entity.entityId : '';
       if (!entityId) continue;
-      entityByKey.set(`${entityType}:${entityId}`, entity);
-    }
 
-    const byKey = new Map<string, LeaderboardItem>();
-    for (const ref of [...topRefs, ...bottomRefs]) {
-      if (!ref) continue;
-      const entityType = ref.entityType === 'preset' ? 'preset' : 'data_card';
-      const entityId = typeof ref.entityId === 'string' ? ref.entityId : '';
-      if (!entityId) continue;
+      const snapshot = queue === 'free' ? entity.queues?.free : entity.queues?.strict;
+      if (!snapshot) continue;
 
-      const key = `${entityType}:${entityId}`;
-      const entity = entityByKey.get(key);
-      const snapshot = queue === 'free' ? entity?.queues.free : entity?.queues.strict;
-      if (!entity || !snapshot) continue;
-
-      const item: LeaderboardItem = {
-        rank: snapshot.rank,
+      items.push({
         entityType,
         entityId,
         displayName: entity.displayName ?? entityId,
         authorName: typeof entity.authorName === 'string' ? entity.authorName : null,
-        rating: snapshot.rating,
-        games: snapshot.games,
-        wins: snapshot.wins,
-        losses: snapshot.losses,
-        draws: snapshot.draws,
-        tier: snapshot.tier,
+        rating: typeof snapshot.rating === 'number' && Number.isFinite(snapshot.rating) ? snapshot.rating : 0,
+        games: typeof snapshot.games === 'number' && Number.isFinite(snapshot.games) ? snapshot.games : 0,
+        wins: typeof snapshot.wins === 'number' && Number.isFinite(snapshot.wins) ? snapshot.wins : 0,
+        losses: typeof snapshot.losses === 'number' && Number.isFinite(snapshot.losses) ? snapshot.losses : 0,
+        draws: typeof snapshot.draws === 'number' && Number.isFinite(snapshot.draws) ? snapshot.draws : 0,
         techScore: entity.techScore,
         techLevel: entity.techLevel,
         isNative: entity.isNative,
         tagIds: Array.isArray(entity.tagIds) ? entity.tagIds : [],
-        ratingUpdatedAt: snapshot.ratingUpdatedAt,
-      };
-
-      const prev = byKey.get(key);
-      if (!prev || item.rank < prev.rank) {
-        byKey.set(key, item);
-      }
+        ratingUpdatedAt: typeof snapshot.ratingUpdatedAt === 'string' ? snapshot.ratingUpdatedAt : null,
+      });
     }
-    return {
-      total: typeof board?.total === 'number' && Number.isFinite(board.total) ? Math.max(0, Math.floor(board.total)) : 0,
-      topCount: topRefs.length,
-      bottomCount: bottomRefs.length,
-      items: Array.from(byKey.values()),
-    };
+
+    const queenKey = deriveArchiveQueenKey(items);
+
+    const totalEligible = (() => {
+      if (data.schemaVersion === 3) {
+        const raw = queue === 'free' ? data.totalEligible?.free : data.totalEligible?.strict;
+        return typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
+      }
+      const board = queue === 'free' ? data.leaderboards?.free : data.leaderboards?.strict;
+      const raw = board?.total;
+      return typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
+    })();
+
+    const { topCount, bottomCount, snapshotMode } = (() => {
+      if (data.schemaVersion === 2) {
+        const board = queue === 'free' ? data.leaderboards?.free : data.leaderboards?.strict;
+        return {
+          snapshotMode: 'top_bottom' as const,
+          topCount: Array.isArray(board?.top) ? board.top.length : 0,
+          bottomCount: Array.isArray(board?.bottom) ? board.bottom.length : 0,
+        };
+      }
+
+      const policy = data.snapshotPolicy;
+      if (policy?.mode === 'top_bottom') {
+        return {
+          snapshotMode: 'top_bottom' as const,
+          topCount: Math.min(Math.max(0, Math.floor(policy.top)), totalEligible),
+          bottomCount: Math.min(Math.max(0, Math.floor(policy.bottom)), totalEligible),
+        };
+      }
+
+      return { snapshotMode: 'full' as const, topCount: 0, bottomCount: 0 };
+    })();
+
+    return { totalEligible, topCount, bottomCount, items, queenKey, snapshotMode };
   }, [appliedFilters.queue, archiveQuery.data, isArchiveMode]);
 
   const historyFilteredSortedItems = useMemo((): LeaderboardItem[] => {
     if (!isArchiveMode) return [];
     const list = historySnapshot?.items ?? [];
+    const queenKey = historySnapshot?.queenKey ?? null;
     const minRating = parseOptionalInt(appliedFilters.minRating);
     const maxRating = parseOptionalInt(appliedFilters.maxRating);
     const minGames = parseOptionalInt(appliedFilters.minGames);
@@ -488,10 +529,19 @@ export function RankingPage() {
 
       if (a.entityType !== b.entityType) return compareText(a.entityType, b.entityType);
       if (a.entityId !== b.entityId) return compareText(a.entityId, b.entityId);
-      return compareNumber(a.rank, b.rank);
+      return 0;
     });
 
-    return filtered;
+    return filtered.map((item, index) => {
+      const baseTier = computeArenaBaseTier(item.rating, item.games);
+      const isQueen = queenKey === buildRowKey(item.entityType, item.entityId);
+      const tier = applyQueenTier(baseTier, isQueen);
+      return {
+        ...item,
+        rank: index + 1,
+        tier,
+      };
+    });
   }, [appliedFilters, historySnapshot, isArchiveMode]);
 
   const historyIndexByKey = useMemo(() => {
@@ -728,10 +778,11 @@ export function RankingPage() {
     const topCount = historySnapshot?.topCount ?? 0;
     const bottomCount = historySnapshot?.bottomCount ?? 0;
     const snapshotCount = historySnapshot?.items.length ?? 0;
-    const total = historySnapshot?.total ?? 0;
-    const snapshotLabel =
-      topCount > 0 || bottomCount > 0 ? `Top ${topCount} + Bottom ${bottomCount}` : '快照';
-    const totalLabel = total > 0 ? `全榜 ${total}` : '全榜未知';
+    const totalEligible = historySnapshot?.totalEligible ?? 0;
+    const snapshotLabel = historySnapshot?.snapshotMode === 'full'
+      ? '全量快照'
+      : topCount > 0 || bottomCount > 0 ? `Top ${topCount} + Bottom ${bottomCount}` : '快照';
+    const totalLabel = totalEligible > 0 ? `全榜 ${totalEligible}` : '全榜未知';
     const prefix = isHistoryMode ? '历史赛季快照' : '当前赛季快照（测试）';
     return `${appliedSummary} · ${prefix}：${snapshotLabel}（已去重 ${snapshotCount} 条，${totalLabel}）`;
   }, [appliedSummary, historySnapshot, isArchiveMode, isHistoryMode, selectedSeason]);
@@ -1511,8 +1562,11 @@ export function RankingPage() {
                         {hasPendingChanges ? <span className="ml-2 text-amber-700">（有未应用更改）</span> : null}
                         {isArchiveMode ? (
                           <div className="mt-1 text-xs text-gray-500">
-                            {isHistoryMode ? '历史赛季结算快照' : '当前赛季快照（测试）'}：Top {historySnapshot?.topCount ?? 0} + Bottom {historySnapshot?.bottomCount ?? 0}
-                            （已去重 {historySnapshot?.items.length ?? 0} 条 / 全榜 {historySnapshot?.total ? historySnapshot.total : '—'}）。
+                            {isHistoryMode ? '历史赛季结算快照' : '当前赛季快照（测试）'}：
+                            {historySnapshot?.snapshotMode === 'full'
+                              ? '全量快照'
+                              : `Top ${historySnapshot?.topCount ?? 0} + Bottom ${historySnapshot?.bottomCount ?? 0}`}
+                            （已去重 {historySnapshot?.items.length ?? 0} 条 / 全榜 {historySnapshot?.totalEligible ? historySnapshot.totalEligible : '—'}）。
                             仅在快照范围内支持筛选/搜索/排序/分页。
                           </div>
                         ) : null}

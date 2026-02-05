@@ -50,14 +50,18 @@ export type SeasonArchiveEntityRef = {
 };
 
 export type SeasonArchiveQueueSnapshot = {
-  rank: number;
   rating: number;
   games: number;
   wins: number;
   losses: number;
   draws: number;
-  tier: string;
   ratingUpdatedAt: string | null;
+  /**
+   * v2 历史归档曾在队列快照里写入 `rank/tier`（用于直接渲染 Top/Bottom）。
+   * v3 起不再把“榜单视图”当作归档必需数据，这两个字段会在前端按当前口径计算。
+   */
+  rank?: number;
+  tier?: string;
 };
 
 export type SeasonArchiveEntity = {
@@ -89,7 +93,17 @@ export type SeasonArchiveLeaderboard = {
   bottom: SeasonArchiveEntityRef[];
 };
 
-export type SeasonArchive = {
+export type SeasonArchiveSnapshotPolicy =
+  | {
+      mode: 'top_bottom';
+      top: number;
+      bottom: number;
+    }
+  | {
+      mode: 'full';
+    };
+
+export type SeasonArchiveV2 = {
   schemaVersion: 2;
   generatedAt: string;
   season: Pick<SeasonMeta, 'id' | 'name' | 'startsAt' | 'endsAt' | 'description' | 'specialRules'>;
@@ -99,6 +113,29 @@ export type SeasonArchive = {
     free: SeasonArchiveLeaderboard;
   };
 };
+
+export type SeasonArchiveV3 = {
+  schemaVersion: 3;
+  generatedAt: string;
+  season: Pick<SeasonMeta, 'id' | 'name' | 'startsAt' | 'endsAt' | 'description' | 'specialRules'>;
+  /**
+   * 赛季结算快照策略（用于解释“为什么历史榜单不是全量”）。
+   */
+  snapshotPolicy: SeasonArchiveSnapshotPolicy;
+  /**
+   * 全榜可上榜实体总数（按 strict/free 分别统计），用于 UI 文案解释与比例感知。
+   */
+  totalEligible: {
+    strict: number;
+    free: number;
+  };
+  /**
+   * 实体快照（facts）：仅保存角色事实数据；榜单视图在前端按当前口径计算。
+   */
+  entities: SeasonArchiveEntity[];
+};
+
+export type SeasonArchive = SeasonArchiveV2 | SeasonArchiveV3;
 
 const normalizeSeasonBattleMode = (value: unknown): SeasonBattleMode | null => {
   const raw = typeof value === 'string' ? value.trim() : '';

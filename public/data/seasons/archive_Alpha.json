@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "generatedAt": "2026-01-04T08:35:20.181Z",
   "season": {
     "id": "Alpha",
@@ -7,6 +7,15 @@
     "startsAt": "2026-01-01",
     "endsAt": "2026-01-04",
     "description": "内部测试用赛季。"
+  },
+  "snapshotPolicy": {
+    "mode": "top_bottom",
+    "top": 100,
+    "bottom": 50
+  },
+  "totalEligible": {
+    "strict": 8,
+    "free": 8
   },
   "entities": [
     {
@@ -19,23 +28,19 @@
       "tagIds": [],
       "queues": {
         "strict": {
-          "rank": 7,
           "rating": 980,
           "games": 3,
           "wins": 0,
           "losses": 1,
           "draws": 2,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         },
         "free": {
-          "rank": 7,
           "rating": 980,
           "games": 3,
           "wins": 0,
           "losses": 1,
           "draws": 2,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         }
       }
@@ -50,23 +55,19 @@
       "tagIds": [],
       "queues": {
         "strict": {
-          "rank": 5,
           "rating": 981,
           "games": 1,
           "wins": 0,
           "losses": 1,
           "draws": 0,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         },
         "free": {
-          "rank": 5,
           "rating": 981,
           "games": 1,
           "wins": 0,
           "losses": 1,
           "draws": 0,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         }
       }
@@ -81,23 +82,19 @@
       "tagIds": [],
       "queues": {
         "strict": {
-          "rank": 2,
           "rating": 1020,
           "games": 1,
           "wins": 1,
           "losses": 0,
           "draws": 0,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         },
         "free": {
-          "rank": 2,
           "rating": 1020,
           "games": 1,
           "wins": 1,
           "losses": 0,
           "draws": 0,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         }
       }
@@ -112,23 +109,19 @@
       "tagIds": [],
       "queues": {
         "strict": {
-          "rank": 6,
           "rating": 980,
           "games": 1,
           "wins": 0,
           "losses": 1,
           "draws": 0,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         },
         "free": {
-          "rank": 6,
           "rating": 980,
           "games": 1,
           "wins": 0,
           "losses": 1,
           "draws": 0,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         }
       }
@@ -143,23 +136,19 @@
       "tagIds": [],
       "queues": {
         "strict": {
-          "rank": 8,
           "rating": 979,
           "games": 1,
           "wins": 0,
           "losses": 1,
           "draws": 0,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         },
         "free": {
-          "rank": 8,
           "rating": 979,
           "games": 1,
           "wins": 0,
           "losses": 1,
           "draws": 0,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         }
       }
@@ -174,23 +163,19 @@
       "tagIds": [],
       "queues": {
         "strict": {
-          "rank": 3,
           "rating": 1020,
           "games": 2,
           "wins": 1,
           "losses": 0,
           "draws": 1,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         },
         "free": {
-          "rank": 3,
           "rating": 1001,
           "games": 3,
           "wins": 1,
           "losses": 1,
           "draws": 1,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         }
       }
@@ -205,23 +190,19 @@
       "tagIds": [],
       "queues": {
         "strict": {
-          "rank": 4,
           "rating": 1000,
           "games": 1,
           "wins": 0,
           "losses": 0,
           "draws": 1,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         },
         "free": {
-          "rank": 4,
           "rating": 1000,
           "games": 1,
           "wins": 0,
           "losses": 0,
           "draws": 1,
-          "tier": "无牌",
           "ratingUpdatedAt": null
         }
       }
@@ -236,172 +217,22 @@
       "tagIds": [],
       "queues": {
         "strict": {
-          "rank": 1,
           "rating": 1040,
           "games": 6,
           "wins": 3,
           "losses": 1,
           "draws": 2,
-          "tier": "白牌",
           "ratingUpdatedAt": null
         },
         "free": {
-          "rank": 1,
           "rating": 1059,
           "games": 7,
           "wins": 4,
           "losses": 1,
           "draws": 2,
-          "tier": "白牌",
           "ratingUpdatedAt": null
         }
       }
     }
-  ],
-  "leaderboards": {
-    "strict": {
-      "queue": "strict",
-      "total": 8,
-      "top": [
-        {
-          "entityType": "preset",
-          "entityId": "M12_greatness_in_simplicity.json"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47"
-        },
-        {
-          "entityType": "preset",
-          "entityId": "M01_centaurea.json"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff"
-        }
-      ],
-      "bottom": [
-        {
-          "entityType": "preset",
-          "entityId": "M12_greatness_in_simplicity.json"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c"
-        },
-        {
-          "entityType": "preset",
-          "entityId": "M01_centaurea.json"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff"
-        }
-      ]
-    },
-    "free": {
-      "queue": "free",
-      "total": 8,
-      "top": [
-        {
-          "entityType": "preset",
-          "entityId": "M12_greatness_in_simplicity.json"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c"
-        },
-        {
-          "entityType": "preset",
-          "entityId": "M01_centaurea.json"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff"
-        }
-      ],
-      "bottom": [
-        {
-          "entityType": "preset",
-          "entityId": "M12_greatness_in_simplicity.json"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c"
-        },
-        {
-          "entityType": "preset",
-          "entityId": "M01_centaurea.json"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de"
-        },
-        {
-          "entityType": "data_card",
-          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff"
-        }
-      ]
-    }
-  }
+  ]
 }

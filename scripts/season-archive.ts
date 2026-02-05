@@ -4,15 +4,15 @@ import { dirname, resolve } from 'node:path';
 import { loadEnvConfig } from '@next/env';
 
 import type {
-  SeasonArchive,
   SeasonArchiveEntity,
   SeasonArchiveEntityRef,
   SeasonArchiveQueueSnapshot,
+  SeasonArchiveSnapshotPolicy,
+  SeasonArchiveV3,
   SeasonsConfig,
   SeasonMeta,
 } from '../lib/seasons';
 import { formatSeasonTitle, isSafeSeasonId } from '../lib/seasons';
-import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '../lib/arena/tier';
 
 type Queue = 'strict' | 'free';
 
@@ -184,10 +184,11 @@ const queryLeaderboardRows = async (
   queue: Queue,
   orderBy: string,
   limit: number,
+  offset = 0,
 ): Promise<LeaderboardRow[]> => {
   const { selectSql } = buildLeaderboardBaseSql(queue);
-  const sql = `${selectSql}\n${orderBy}\nLIMIT ?;`;
-  const result = await queryFromD1(sql, [queue, limit]);
+  const sql = `${selectSql}\n${orderBy}\nLIMIT ? OFFSET ?;`;
+  const result = await queryFromD1(sql, [queue, limit, offset]);
   return readRows<LeaderboardRow>(result);
 };
 
@@ -281,22 +282,16 @@ const ensureEntity = (
 
 const buildQueueSnapshot = (
   row: LeaderboardRow,
-  options: { rank: number; queen: Awaited<ReturnType<typeof queryArenaPublicQueenEntity>> | null },
 ): SeasonArchiveQueueSnapshot => {
   const rating = typeof row.rating === 'number' ? row.rating : 0;
   const games = typeof row.games === 'number' ? row.games : 0;
-  const baseTier = computeArenaBaseTier(rating, games);
-  const isQueen = options.queen?.entityType === row.entityType && options.queen?.entityId === row.entityId;
-  const tier = applyQueenTier(baseTier, isQueen);
 
   return {
-    rank: options.rank,
     rating,
     games,
     wins: typeof row.wins === 'number' ? row.wins : 0,
     losses: typeof row.losses === 'number' ? row.losses : 0,
     draws: typeof row.draws === 'number' ? row.draws : 0,
-    tier,
     ratingUpdatedAt: typeof row.ratingUpdatedAt === 'string' ? row.ratingUpdatedAt : null,
   };
 };
@@ -305,13 +300,11 @@ const ingestRows = async (
   rows: LeaderboardRow[],
   options: {
     queue: Queue;
-    rankBase: number;
-    queen: Awaited<ReturnType<typeof queryArenaPublicQueenEntity>> | null;
     entityByKey: Map<string, SeasonArchiveEntity>;
     presetNameByFilename: Map<string, string>;
   },
-): Promise<SeasonArchiveEntityRef[]> => {
-  return rows.map((row, index) => {
+): Promise<void> => {
+  rows.forEach((row) => {
     const ref: SeasonArchiveEntityRef = {
       entityType: row.entityType === 'preset' ? 'preset' : 'data_card',
       entityId: typeof row.entityId === 'string' ? row.entityId : '',
@@ -342,62 +335,71 @@ const ingestRows = async (
       tagIds,
     });
 
-    const rank = options.rankBase + index;
-    const snapshot = buildQueueSnapshot(row, { rank, queen: options.queen });
+    const snapshot = buildQueueSnapshot(row);
     entity.queues[options.queue] = snapshot;
-
-    return ref;
   });
 };
 
 const archiveQueue = async (
   queryFromD1: QueryFromD1,
   queue: Queue,
-  options: { entityByKey: Map<string, SeasonArchiveEntity>; presetNameByFilename: Map<string, string> },
-): Promise<{ leaderboard: SeasonArchive['leaderboards'][Queue] }> => {
+  options: {
+    snapshotPolicy: SeasonArchiveSnapshotPolicy;
+    entityByKey: Map<string, SeasonArchiveEntity>;
+    presetNameByFilename: Map<string, string>;
+  },
+): Promise<{ totalEligible: number }> => {
   const total = await queryLeaderboardCount(queryFromD1, queue);
-  const queen = await queryArenaPublicQueenEntity(queryFromD1, queue).catch((error) => {
-    console.warn('[season-archive] 读取女王段位失败（降级为无女王）:', error);
-    return null;
-  });
-  const topRows = await queryLeaderboardRows(
-    queryFromD1,
-    queue,
-    'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC',
-    100,
-  );
-  const bottomRowsRaw = await queryLeaderboardRows(
-    queryFromD1,
-    queue,
-    'ORDER BY ar.rating ASC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC',
-    50,
-  );
-  const bottomRows = bottomRowsRaw.slice().reverse();
 
-  const top = await ingestRows(topRows, {
+  if (options.snapshotPolicy.mode === 'full') {
+    const orderBy = 'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
+    const pageSize = 1_000;
+    for (let offset = 0; offset < total; offset += pageSize) {
+      const rows = await queryLeaderboardRows(queryFromD1, queue, orderBy, Math.min(pageSize, total - offset), offset);
+      if (rows.length === 0) break;
+      await ingestRows(rows, {
+        queue,
+        entityByKey: options.entityByKey,
+        presetNameByFilename: options.presetNameByFilename,
+      });
+      if (rows.length < pageSize) break;
+    }
+    return { totalEligible: total };
+  }
+
+  const top = Math.max(0, Math.floor(options.snapshotPolicy.top));
+  const bottom = Math.max(0, Math.floor(options.snapshotPolicy.bottom));
+
+  const topRows = top > 0
+    ? await queryLeaderboardRows(
+        queryFromD1,
+        queue,
+        'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC',
+        top,
+      )
+    : [];
+
+  const bottomRows = bottom > 0
+    ? await queryLeaderboardRows(
+        queryFromD1,
+        queue,
+        'ORDER BY ar.rating ASC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC',
+        bottom,
+      )
+    : [];
+
+  await ingestRows(topRows, {
     queue,
-    rankBase: 1,
-    queen,
     entityByKey: options.entityByKey,
     presetNameByFilename: options.presetNameByFilename,
   });
-  const bottomRankBase = Math.max(1, total - bottomRows.length + 1);
-  const bottom = await ingestRows(bottomRows, {
+  await ingestRows(bottomRows, {
     queue,
-    rankBase: bottomRankBase,
-    queen,
     entityByKey: options.entityByKey,
     presetNameByFilename: options.presetNameByFilename,
   });
 
-  return {
-    leaderboard: {
-      queue,
-      total,
-      top,
-      bottom,
-    },
-  };
+  return { totalEligible: total };
 };
 
 const main = async () => {
@@ -406,13 +408,13 @@ const main = async () => {
   if (args.has('--help') || args.has('-h')) {
     console.log(`[season-archive]
 用法：
-  bun tsx scripts/season-archive.ts [--season-id <id>] [--force] [--require-db] [--snapshot-only]
+  bun tsx scripts/season-archive.ts [--season-id <id>] [--force] [--require-db] [--snapshot-only] [--top <n>] [--bottom <n>] [--full]
 
 说明：
   - 默认归档当前赛季（status=current）
   - 默认会把该赛季在 public/config/seasons.json 中标记为 status=history（可用 --snapshot-only 仅生成快照）
   - 生成 public/data/seasons/archive_<season_id>.json
-  - 快照范围：Top 100 + Bottom 50（按排位分）
+  - 快照范围：默认 Top 100 + Bottom 50（按排位分）；可用 --top/--bottom 调整；可用 --full 生成全量实体快照
 `);
     return;
   }
@@ -429,6 +431,16 @@ const main = async () => {
   const force = args.has('--force');
   const requireDb = args.has('--require-db') || args.has('--requireDb');
   const snapshotOnly = args.has('--snapshot-only') || args.has('--snapshotOnly') || args.has('--snapshot');
+  const full = args.has('--full');
+
+  const topArg = args.get('--top');
+  const bottomArg = args.get('--bottom');
+  const parsedTop = topArg == null ? null : Number(topArg);
+  const parsedBottom = bottomArg == null ? null : Number(bottomArg);
+  const top = parsedTop != null && Number.isFinite(parsedTop) && parsedTop >= 0 ? Math.floor(parsedTop) : 100;
+  const bottom = parsedBottom != null && Number.isFinite(parsedBottom) && parsedBottom >= 0 ? Math.floor(parsedBottom) : 50;
+
+  const snapshotPolicy: SeasonArchiveSnapshotPolicy = full ? { mode: 'full' } : { mode: 'top_bottom', top, bottom };
 
   const target = pickSeasonToArchive(seasons, seasonIdArg);
   if (!isSafeSeasonId(target.id)) {
@@ -443,8 +455,8 @@ const main = async () => {
 
   const generatedAt = new Date().toISOString();
 
-  let archive: SeasonArchive = {
-    schemaVersion: 2,
+  let archive: SeasonArchiveV3 = {
+    schemaVersion: 3,
     generatedAt,
     season: {
       id: target.id,
@@ -454,11 +466,9 @@ const main = async () => {
       description: target.description,
       ...(target.specialRules ? { specialRules: target.specialRules } : {}),
     },
+    snapshotPolicy,
+    totalEligible: { strict: 0, free: 0 },
     entities: [],
-    leaderboards: {
-      strict: { queue: 'strict', total: 0, top: [], bottom: [] },
-      free: { queue: 'free', total: 0, top: [], bottom: [] },
-    },
   };
 
   if (!hasD1Config()) {
@@ -469,8 +479,16 @@ const main = async () => {
     const { PRESET_LIST } = await import('../lib/presets');
     const presetNameByFilename = new Map(PRESET_LIST.map((preset) => [preset.filename, preset.name]));
     const entityByKey = new Map<string, SeasonArchiveEntity>();
-    const strict = await archiveQueue(queryFromD1, 'strict', { entityByKey, presetNameByFilename });
-    const free = await archiveQueue(queryFromD1, 'free', { entityByKey, presetNameByFilename });
+    const strict = await archiveQueue(queryFromD1, 'strict', {
+      snapshotPolicy,
+      entityByKey,
+      presetNameByFilename,
+    });
+    const free = await archiveQueue(queryFromD1, 'free', {
+      snapshotPolicy,
+      entityByKey,
+      presetNameByFilename,
+    });
 
     const entities = Array.from(entityByKey.values());
     entities.sort((a, b) => {
@@ -480,9 +498,9 @@ const main = async () => {
     archive = {
       ...archive,
       entities,
-      leaderboards: {
-        strict: strict.leaderboard,
-        free: free.leaderboard,
+      totalEligible: {
+        strict: strict.totalEligible,
+        free: free.totalEligible,
       },
     };
   }

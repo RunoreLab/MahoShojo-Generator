@@ -805,6 +805,10 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 
 结论：**历史赛季归档更适合以“facts 为主，views 可再生”为原则**。也就是说，若归档里已经包含足以重算排行榜的字段，那么 `leaderboards`（Top/Bottom refs 或多口径榜单）通常可以不作为必存内容；历史榜单在 UI 侧复用当前赛季的排序与筛选逻辑即可复现。
 
+已落地（schemaVersion=3）：
+- `archive_<season_id>.json` 仅保留 `season` + `snapshotPolicy` + `totalEligible` + `entities`（不再包含 `leaderboards`）
+- `entities.queues.*` 不再写入 `rank/tier`，由前端按当前赛季口径计算展示
+
 为什么不建议把 `leaderboards` 当作必存字段：
 - **去冗余 / 一致性更好**：榜单是派生结果，和实体快照高度重复；一旦字段增删或规则变动，更容易出现“榜单引用与实体快照不一致”的问题。
 - **更可扩展**：未来新增排序指标/筛选条件，不需要回填旧赛季的多份榜单；只要实体快照字段足够即可。
@@ -820,8 +824,8 @@ Request body（建议）：`{ dataCardId: string, tagIds: string[] }`
 
 推荐落地方向：
 - 归档文件以 `entities`（尽量全量、含 strict/free 关键字段）作为**唯一必需数据源**；
-- `leaderboards` 变为**可选的 UI 高光**（如 TopN/BottomN），或直接删除并由前端从 `entities` 计算；
-- 归档里显式记录 `snapshotPolicy`（全量/Top+Bottom、TopN/BottomN、统计口径）与 `rulesVersion`，保证历史解释清晰、可追溯。
+- `leaderboards` 不作为必需字段（建议删除），由前端从 `entities` 计算各口径榜单；
+- 归档里显式记录 `snapshotPolicy`（全量/Top+Bottom、TopN/BottomN、统计口径）与 `totalEligible`，保证历史解释清晰、可追溯。
 
 **8.2 UI 展示变更**
 - **排行榜 (Leaderboard)**：
