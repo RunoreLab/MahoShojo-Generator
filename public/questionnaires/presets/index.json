@@ -9,6 +9,20 @@
       "isDefault": true
     },
     {
+      "id": "magical-girl-heart-compass",
+      "kind": "magical-girl",
+      "title": "魔法少女潜力测试：心之罗盘",
+      "description": "偏测试/预测型问卷：用选择与短回答描绘你的倾向，其余细节交给 AI 补完。",
+      "path": "/questionnaires/presets/magical-girl-heart-compass.json"
+    },
+    {
+      "id": "magical-girl-squad-dynamics",
+      "kind": "magical-girl",
+      "title": "魔法少女小队定位测验：并肩与裂痕",
+      "description": "偏测试/预测型问卷：通过团队情境题推断你的小队位置、关系线与成长矛盾。",
+      "path": "/questionnaires/presets/magical-girl-squad-dynamics.json"
+    },
+    {
       "id": "magical-girl-immersive-vn",
       "kind": "magical-girl",
       "title": "沉浸式剧情车卡问卷：分歧之路",
@@ -50,6 +64,20 @@
       "description": "前进吧，残兽！",
       "path": "/questionnaires/presets/canshou-default.json",
       "isDefault": true
+    },
+    {
+      "id": "canshou-hunger-shape",
+      "kind": "canshou",
+      "title": "残兽本能测试：饥饿的形状",
+      "description": "偏测试/预测型问卷：用本能、狩猎与恐惧的选择题勾勒残兽，其余细节交给 AI 补完。",
+      "path": "/questionnaires/presets/canshou-hunger-shape.json"
+    },
+    {
+      "id": "canshou-nest-echo",
+      "kind": "canshou",
+      "title": "残兽生态测试：巢与回声",
+      "description": "偏测试/预测型问卷：用“领地、规则、传播方式”的选择题描出残兽生态与对抗要点。",
+      "path": "/questionnaires/presets/canshou-nest-echo.json"
     },
     {
       "id": "canshou-afterwork-world",
