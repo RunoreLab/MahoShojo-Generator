@@ -572,6 +572,11 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
     if (snapshot.hasUserGuidance !== 0) return false;
   }
 
+  // 严格排位：问卷/设定卡 Lore 需由赛季特殊规则显式许可。
+  if (readExtraJsonBoolean(snapshot.extraJson, 'questionnaireLoreEnabled') === true) {
+    if (readExtraJsonBoolean(snapshot.extraJson, 'seasonQuestionnaireLoreAllowed') !== true) return false;
+  }
+
   if (requiredMode === 'scenario') {
     const hasScenario = snapshot.hasScenario === 1 || snapshot.hasScenario === true;
     if (!hasScenario) return false;

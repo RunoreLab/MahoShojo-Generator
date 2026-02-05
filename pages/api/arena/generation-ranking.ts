@@ -96,6 +96,18 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
     ? readNarrativeHistoryRaw
     : (typeof readNarrativeHistoryRaw === 'number' && Number.isFinite(readNarrativeHistoryRaw) ? readNarrativeHistoryRaw !== 0 : null);
 
+  const questionnaireLoreEnabledRaw = parsedExtraJson?.questionnaireLoreEnabled;
+  const questionnaireLoreEnabled = typeof questionnaireLoreEnabledRaw === 'boolean'
+    ? questionnaireLoreEnabledRaw
+    : (typeof questionnaireLoreEnabledRaw === 'number' && Number.isFinite(questionnaireLoreEnabledRaw) ? questionnaireLoreEnabledRaw !== 0 : null);
+
+  const seasonQuestionnaireLoreAllowedRaw = parsedExtraJson?.seasonQuestionnaireLoreAllowed;
+  const seasonQuestionnaireLoreAllowed = typeof seasonQuestionnaireLoreAllowedRaw === 'boolean'
+    ? seasonQuestionnaireLoreAllowedRaw
+    : (typeof seasonQuestionnaireLoreAllowedRaw === 'number' && Number.isFinite(seasonQuestionnaireLoreAllowedRaw)
+      ? seasonQuestionnaireLoreAllowedRaw !== 0
+      : null);
+
   const resolvedModelOverride = typeof parsedExtraJson?.resolvedModelOverride === 'string'
     ? parsedExtraJson.resolvedModelOverride.trim()
     : '';
@@ -150,6 +162,10 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
     else if (actual !== seasonStoryGuidance) reasons.push('season-user-guidance-mismatch');
   } else {
     if (snapshot.hasUserGuidance !== 0) reasons.push('has-user-guidance');
+  }
+
+  if (questionnaireLoreEnabled === true && seasonQuestionnaireLoreAllowed !== true) {
+    reasons.push('season-questionnaire-lore-not-allowed');
   }
 
   if (requiredMode === 'scenario') {

@@ -195,6 +195,41 @@ describe('arena-ratings: 严格排位资格判定', () => {
     ).toBe(false);
   });
 
+  test('不满足：使用问卷/设定卡 Lore 且赛季未许可', () => {
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          extraJson: JSON.stringify({
+            readNarrativeHistory: false,
+            narrativeHistoryReadCount: 0,
+            rankedMatchOk: true,
+            questionnaireLoreEnabled: true,
+          }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(false);
+  });
+
+  test('满足：使用问卷/设定卡 Lore 且赛季已许可', () => {
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          extraJson: JSON.stringify({
+            readNarrativeHistory: false,
+            narrativeHistoryReadCount: 0,
+            rankedMatchOk: true,
+            questionnaireLoreEnabled: true,
+            seasonQuestionnaireLoreAllowed: true,
+          }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(true);
+  });
+
   test('不满足：语言非简体中文', () => {
     expect(isStrictEligible({ ...baseSnapshot, language: 'en' }, baseCombatants)).toBe(false);
   });

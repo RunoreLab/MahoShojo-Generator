@@ -78,6 +78,8 @@ const buildStrictSetupMissingReasons = (input: {
   userProviderConfigModelId: string | null;
   scenarioEnabled: boolean;
   auxScenarioCount: number;
+  questionnaireLoreEnabled: boolean;
+  questionnaireLoreAllowed: boolean;
 }): string[] => {
   const reasons: string[] = [];
   if (!input.isAuthenticated) reasons.push('需要先登录');
@@ -100,6 +102,9 @@ const buildStrictSetupMissingReasons = (input: {
   if (input.readNarrativeHistory) reasons.push('需关闭「读取叙事历史」');
   if (input.adjudicationEventCount > 0) reasons.push('需清空「随机判定器事件」');
   if (input.rankableCombatants.some((c) => (c.characterGuidance ?? '').trim())) reasons.push('需清空「角色行动引导」');
+  if (input.questionnaireLoreEnabled && !input.questionnaireLoreAllowed) {
+    reasons.push('需关闭「问卷/设定卡 Lore 注入」');
+  }
 
   if (input.requiredMode === 'scenario') {
     if (!input.scenarioEnabled) reasons.push('需启用「情景模式」并选择主情景');
@@ -157,6 +162,7 @@ const formatStrictReason = (code: string): string => {
     'mode-not-season': '需使用赛季指定模式',
     'combatant-count-not-2': '需 2 人对战',
     'combatants-unrankable': '参战者需为数据卡/预设',
+    'season-questionnaire-lore-not-allowed': '赛季规则不允许使用「问卷/设定卡 Lore 注入」',
     'strict-card-missing': '数据卡不存在/已删除（严格排位不计分）',
     'strict-not-character': '仅“角色”数据卡可参与严格排位计分',
     'strict-not-public': '严格排位仅允许公开角色卡',
@@ -224,6 +230,8 @@ export function RankingQuickActions() {
   const setUserProviderConfig = useBattleSelector((state) => state.setUserProviderConfig);
   const scenario = useBattleSelector((state) => state.scenario);
   const auxScenarios = useBattleSelector((state) => state.auxScenarios);
+  const selectedQuestionnaires = useBattleSelector((state) => state.selectedQuestionnaires);
+  const setQuestionnaireSelections = useBattleSelector((state) => state.setQuestionnaireSelections);
   const updateCombatantCharacterGuidance = useBattleSelector((state) => state.updateCombatantCharacterGuidance);
   const clearScenario = useBattleSelector((state) => state.clearScenario);
   const clearAuxScenarios = useBattleSelector((state) => state.clearAuxScenarios);
@@ -240,6 +248,14 @@ export function RankingQuickActions() {
 
   const [strictPreflight, setStrictPreflight] = useState<StrictPreflightResponse | null>(null);
   const [isCheckingStrictPreflight, setIsCheckingStrictPreflight] = useState(false);
+
+  const questionnaireLoreEnabled = useMemo(() => {
+    return selectedQuestionnaires.some((selection) => {
+      if (selection.useLore === false) return false;
+      const lore = selection.questionnaire?.loreMarkdown;
+      return typeof lore === 'string' && Boolean(lore.trim());
+    });
+  }, [selectedQuestionnaires]);
 
   const readableCombatants = useMemo(
     () => combatants.filter((c): c is CombatantData => c && typeof c === 'object' && 'data' in c),
@@ -275,18 +291,22 @@ export function RankingQuickActions() {
         userProviderConfigModelId: userProviderConfig?.modelId ?? null,
         scenarioEnabled: battleMode === 'scenario' && Boolean(scenario.content),
         auxScenarioCount: auxScenarios.length,
+        questionnaireLoreEnabled,
+        questionnaireLoreAllowed: seasonStrictRules.questionnaireLoreAllowed,
       }),
     [
       adjudicationEvents,
       auxScenarios.length,
       battleMode,
       isAuthenticated,
+      questionnaireLoreEnabled,
       rankableCombatants,
       scenario.content,
       scenario.fileName,
       selectedLanguage,
       selectedLevel,
       seasonStrictRules.mode,
+      seasonStrictRules.questionnaireLoreAllowed,
       seasonStrictRules.scenarioPresetFilename,
       seasonStrictRules.storyGuidance,
       settings.readArenaHistory,
@@ -356,6 +376,21 @@ export function RankingQuickActions() {
     }
     clearAuxScenarios();
 
+    const disabledQuestionnaireLoreCount = (() => {
+      if (seasonStrictRules.questionnaireLoreAllowed) return 0;
+      if (!questionnaireLoreEnabled) return 0;
+      const nextSelections = selectedQuestionnaires.map((selection) => {
+        if (selection.useLore === false) return selection;
+        return { ...selection, useLore: false };
+      });
+      let disabledCount = 0;
+      nextSelections.forEach((selection, index) => {
+        if (selection.useLore === false && selectedQuestionnaires[index]?.useLore !== false) disabledCount += 1;
+      });
+      setQuestionnaireSelections(nextSelections);
+      return disabledCount;
+    })();
+
     let seasonRuleMessage: string | null = null;
     if (seasonLabel) {
       const parts: string[] = [];
@@ -363,6 +398,7 @@ export function RankingQuickActions() {
       if (seasonStrictRules.mode !== 'classic') parts.push(`模式：${formatBattleModeLabel(seasonStrictRules.mode)}`);
       if (seasonStrictRules.storyGuidance) parts.push('已应用赛季故事引导');
       if (seasonPreset) parts.push(`预设情景：${seasonPreset.title}`);
+      if (!seasonStrictRules.questionnaireLoreAllowed) parts.push('禁止问卷设定注入');
       seasonRuleMessage = parts.length > 0 ? parts.join(' / ') : null;
     }
 
@@ -388,7 +424,9 @@ export function RankingQuickActions() {
         seasonStrictRules.storyGuidance ? '应用赛季故事引导' : '清空引导'
       } / 关闭读取 / 清空判定与行动引导${
         seasonRuleMessage ? ` / ${seasonRuleMessage}` : ''
-      }${modelFixMessage ? ` / ${modelFixMessage}` : ''}`,
+      }${disabledQuestionnaireLoreCount > 0 ? ` / 已关闭问卷设定注入 ${disabledQuestionnaireLoreCount} 张` : ''}${
+        modelFixMessage ? ` / ${modelFixMessage}` : ''
+      }`,
     );
   };
 
@@ -413,6 +451,7 @@ export function RankingQuickActions() {
       scenarioEnabled: battleMode === 'scenario' && Boolean(scenario.content),
       scenarioFileName: battleMode === 'scenario' ? scenario.fileName : null,
       auxScenarioCount: auxScenarios.length,
+      questionnaireLoreEnabled,
       settings: {
         userGuidance: settings.userGuidance,
         readArenaHistory: settings.readArenaHistory,
@@ -434,6 +473,7 @@ export function RankingQuickActions() {
     scenario.fileName,
     selectedLanguage,
     selectedLevel,
+    questionnaireLoreEnabled,
     settings.readArenaHistory,
     settings.readCurrentState,
     settings.readNarrativeHistory,
@@ -458,6 +498,10 @@ export function RankingQuickActions() {
       else if (actualStoryGuidance !== seasonStrictRules.storyGuidance) reasons.push('season-user-guidance-mismatch');
     } else if (actualStoryGuidance) {
       reasons.push('has-user-guidance');
+    }
+
+    if (questionnaireLoreEnabled && !seasonStrictRules.questionnaireLoreAllowed) {
+      reasons.push('season-questionnaire-lore-not-allowed');
     }
 
     if (settings.readArenaHistory) reasons.push('read-arena-history');
@@ -498,7 +542,9 @@ export function RankingQuickActions() {
     scenario.fileName,
     selectedLanguage,
     selectedLevel,
+    questionnaireLoreEnabled,
     seasonStrictRules.mode,
+    seasonStrictRules.questionnaireLoreAllowed,
     seasonStrictRules.scenarioPresetFilename,
     seasonStrictRules.storyGuidance,
     settings.readArenaHistory,

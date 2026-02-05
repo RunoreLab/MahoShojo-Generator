@@ -784,6 +784,8 @@ async function handler(req: NextRequest): Promise<Response> {
                             seasonMode: seasonStrictRules.mode !== 'classic' ? seasonStrictRules.mode : null,
                             seasonStoryGuidance: seasonStrictRules.storyGuidance || null,
                             seasonScenarioPreset: seasonStrictRules.scenarioPresetFilename ?? null,
+                            seasonQuestionnaireLoreAllowed: seasonStrictRules.questionnaireLoreAllowed ? true : null,
+                            questionnaireLoreEnabled: hasQuestionnaireLore ? true : null,
                             scenarioFileName: normalizedScenarioFileName,
                             auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                        resolvedModelOverride: usedModelOverride ?? null,

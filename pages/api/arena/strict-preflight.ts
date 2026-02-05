@@ -151,6 +151,7 @@ export default async function handler(req: NextRequest) {
     const scenarioEnabled = readBoolean(body?.scenarioEnabled);
     const scenarioFileName = trimString(body?.scenarioFileName);
     const auxScenarioCount = readNonNegativeInt(body?.auxScenarioCount);
+    const questionnaireLoreEnabled = readBoolean(body?.questionnaireLoreEnabled);
 
     const origin = new URL(req.url).origin;
     const currentSeason = await fetchCurrentSeasonFromOrigin(origin);
@@ -196,6 +197,10 @@ export default async function handler(req: NextRequest) {
         if (scenarioFileName !== seasonStrictRules.scenarioPresetFilename) reasons.push('season-scenario-preset-mismatch');
       }
       if (auxScenarioCount > 0) reasons.push('season-aux-scenarios-not-allowed');
+    }
+
+    if (questionnaireLoreEnabled && !seasonStrictRules.questionnaireLoreAllowed) {
+      reasons.push('season-questionnaire-lore-not-allowed');
     }
 
     if (readArenaHistory) reasons.push('read-arena-history');
