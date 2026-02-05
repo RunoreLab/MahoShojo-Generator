@@ -266,14 +266,14 @@ const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
           return {
             id: `Q-${index + 1}`,
             question: `问题 ${index + 1}`,
-            required: true,
+            required: false,
             maxLength: null,
           };
         }
         const qRecord = q as Record<string, unknown>;
         const qid = typeof qRecord.id === 'string' && qRecord.id.trim() ? qRecord.id.trim() : `Q-${index + 1}`;
         const qText = typeof qRecord.question === 'string' && qRecord.question.trim() ? qRecord.question.trim() : `问题 ${index + 1}`;
-        const required = typeof qRecord.required === 'boolean' ? qRecord.required : true;
+        const required = typeof qRecord.required === 'boolean' ? qRecord.required : false;
         const maxLengthRaw = qRecord.maxLength;
         const maxLength = typeof maxLengthRaw === 'number' && Number.isFinite(maxLengthRaw)
           ? Math.max(0, Math.floor(maxLengthRaw))

@@ -436,7 +436,7 @@ export const normalizeQuestionnaireDefinition = (
   if (!raw || typeof raw !== 'object') return null;
   const record = raw as Record<string, unknown>;
   const rawQuestions = record.questions;
-  const defaultRequired = typeof record.defaultRequired === 'boolean' ? record.defaultRequired : true;
+  const defaultRequired = typeof record.defaultRequired === 'boolean' ? record.defaultRequired : false;
   const loreMarkdown = typeof record.loreMarkdown === 'string'
     ? (record.loreMarkdown.trim() ? record.loreMarkdown : undefined)
     : undefined;

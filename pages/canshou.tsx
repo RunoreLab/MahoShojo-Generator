@@ -965,7 +965,7 @@ const CanshouPage: React.FC = () => {
     const item = mergedQuestions[currentQuestionIndex];
     if (!item) return;
     const normalizedAnswer = currentAnswer.trim();
-    const isRequired = item.question.required !== false;
+    const isRequired = item.question.required === true;
 
     if (isRequired && normalizedAnswer.length === 0) {
       setError('⚠️ 请输入或选择一个答案');
@@ -1107,7 +1107,7 @@ const CanshouPage: React.FC = () => {
             questions: selection.questionnaire.questions.map((question) => ({
               id: question.id,
               question: question.question,
-              required: question.required !== false,
+              required: question.required === true,
               maxLength: question.maxLength ?? null,
             })),
           })),
@@ -1401,7 +1401,7 @@ const CanshouPage: React.FC = () => {
     : currentLimitInfo.source === 'global'
       ? `原生统一上限 ${currentMaxLength} 字`
       : '不限';
-  const isCurrentRequired = currentQuestion?.required !== false;
+  const isCurrentRequired = currentQuestion?.required === true;
   const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
   const showTextInput = allowCustomInput || !hasOptions;
   const fallbackQuickOptions = allowCustomInput ? ['记录未知', '稍后补充'] : [];

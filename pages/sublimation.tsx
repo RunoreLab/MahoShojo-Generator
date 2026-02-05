@@ -979,7 +979,7 @@ const SublimationPage: React.FC = () => {
                     questions: selection.questionnaire.questions.map((question) => ({
                         id: question.id,
                         question: question.question,
-                        required: question.required !== false,
+                        required: question.required === true,
                         maxLength: question.maxLength ?? null,
                     })),
                 })),

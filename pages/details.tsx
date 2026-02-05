@@ -986,7 +986,7 @@ const DetailsPage: React.FC = () => {
     const item = mergedQuestions[currentQuestionIndex];
     if (!item) return;
     const normalizedAnswer = currentAnswer.trim();
-    const isRequired = item.question.required !== false;
+    const isRequired = item.question.required === true;
 
     if (isRequired && normalizedAnswer.length === 0) {
       setError('⚠️ 请输入答案后再继续');
@@ -1326,7 +1326,7 @@ const DetailsPage: React.FC = () => {
             questions: selection.questionnaire.questions.map((question) => ({
               id: question.id,
               question: question.question,
-              required: question.required !== false,
+              required: question.required === true,
               maxLength: question.maxLength ?? null,
           })),
         })),
@@ -1575,7 +1575,7 @@ const DetailsPage: React.FC = () => {
   const quickSuggestions = currentQuestion?.suggestions ?? [];
   const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
   const allowCustomInput = currentQuestion?.allowCustom !== false;
-  const isCurrentRequired = currentQuestion?.required !== false;
+  const isCurrentRequired = currentQuestion?.required === true;
   const showTextInput = allowCustomInput || !hasOptions;
   const navigatorItems = mergedQuestions.map((item) => ({
     id: item.key,
