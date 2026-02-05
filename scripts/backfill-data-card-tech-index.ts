@@ -12,6 +12,7 @@ type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
 interface CliOptions {
   dryRun: boolean;
   force: boolean;
+  onlyIds: string[];
   batchSize: number;
   concurrency: number;
   limit: number | null;
@@ -85,6 +86,14 @@ const parsePositiveInt = (value: string | undefined): number | null => {
   return i > 0 ? i : null;
 };
 
+const splitIds = (value: string | undefined): string[] => {
+  if (!value) return [];
+  return value
+    .split(/[\s,]+/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
 const parseOptions = (argv: string[]): CliOptions => {
   const args = parseArgs(argv);
   const typeValue = (args.get('--type') ?? '').trim();
@@ -93,10 +102,12 @@ const parseOptions = (argv: string[]): CliOptions => {
     : null;
 
   const limitValue = parsePositiveInt(args.get('--limit'));
+  const onlyIds = splitIds(args.get('--only-ids') ?? args.get('--ids'));
 
   return {
     dryRun: parseBool(args.get('--dry-run'), false),
     force: parseBool(args.get('--force'), false),
+    onlyIds,
     batchSize: parsePositiveInt(args.get('--batch')) ?? 20,
     concurrency: parsePositiveInt(args.get('--concurrency')) ?? 4,
     limit: limitValue,
@@ -195,6 +206,50 @@ type ProcessResult =
   | { ok: true; id: string; written: boolean }
   | { ok: false; id: string; error: string };
 
+const chunkArray = <T,>(items: T[], chunkSize: number): T[][] => {
+  const safeChunkSize = Math.max(1, Math.floor(chunkSize));
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += safeChunkSize) {
+    chunks.push(items.slice(i, i + safeChunkSize));
+  }
+  return chunks;
+};
+
+const fetchCandidatesByIds = async (options: CliOptions, dataCardIds: string[]): Promise<CandidateRow[]> => {
+  if (dataCardIds.length === 0) return [];
+
+  const forcedOptions: CliOptions = { ...options, force: true };
+  const { whereSql, params } = buildBaseWhere(forcedOptions);
+
+  const chunks = chunkArray(dataCardIds, 200);
+  const rows: CandidateRow[] = [];
+
+  for (const ids of chunks) {
+    const placeholders = ids.map(() => '?').join(', ');
+    const sql = `
+      SELECT
+        dc.id,
+        dc.type,
+        dc.is_public,
+        dc.review_status,
+        dc.updated_at,
+        dc.data,
+        dcm.data_card_updated_at as metrics_updated_at,
+        dcm.is_native as metrics_is_native
+      FROM data_cards dc
+      LEFT JOIN data_card_metrics dcm ON dcm.data_card_id = dc.id
+      WHERE ${whereSql}
+        AND dc.id IN (${placeholders})
+      ORDER BY dc.id
+    `;
+
+    const result = await queryFromD1(sql, [...params, ...ids]);
+    rows.push(...readRows<CandidateRow>(result));
+  }
+
+  return rows;
+};
+
 const processOne = async (row: CandidateRow, options: CliOptions, hasSignatureKey: boolean): Promise<ProcessResult> => {
   let parsed: unknown = null;
   try {
@@ -272,6 +327,7 @@ async function main() {
 Options：
   --dry-run                仅计算不落库
   --force                  忽略 updated_at 对比，强制重算所有卡
+  --only-ids <id1,id2>     仅重算指定 data_card_id（逗号/空格分隔；也可用 --ids）
   --batch <n>              每批拉取数量（默认 20）
   --concurrency <n>         并发写入数量（默认 4）
   --limit <n>              最多处理 n 张（默认不限）
@@ -301,6 +357,7 @@ Options：
       {
         dryRun: options.dryRun,
         force: options.force,
+        onlyIds: options.onlyIds.length ? options.onlyIds.length : null,
         type: options.type ?? 'all',
         publicOnly: options.publicOnly,
         approvedOnly: options.approvedOnly,
@@ -317,6 +374,66 @@ Options：
       2
     )
   );
+
+  const uniqueOnlyIds = Array.from(new Set(options.onlyIds));
+  if (uniqueOnlyIds.length > 0) {
+    console.log(`[backfill-tech-index] 仅重算指定 data_card_id：${uniqueOnlyIds.length} 条。`);
+
+    const candidates = await fetchCandidatesByIds(options, uniqueOnlyIds);
+    const candidateMap = new Map(candidates.map((row) => [row.id, row]));
+
+    const orderedCandidates = uniqueOnlyIds
+      .map((id) => candidateMap.get(id) ?? null)
+      .filter((row): row is CandidateRow => Boolean(row));
+
+    const missingIds = uniqueOnlyIds.filter((id) => !candidateMap.has(id));
+
+    let processed = 0;
+    let written = 0;
+    let errors = 0;
+    const failedIds: string[] = [];
+
+    const results = await mapWithConcurrency(orderedCandidates, options.concurrency, (row) =>
+      processOne(row, options, hasSignatureKey)
+    );
+
+    for (const result of results) {
+      processed += 1;
+      if (result.ok) {
+        if (result.written) written += 1;
+      } else {
+        errors += 1;
+        failedIds.push(result.id);
+        console.warn(`[backfill-tech-index] 处理失败: ${result.id}: ${result.error}`);
+      }
+    }
+
+    for (const id of missingIds) {
+      processed += 1;
+      errors += 1;
+      failedIds.push(id);
+      console.warn(`[backfill-tech-index] 未找到 data_card: ${id}`);
+    }
+
+    console.log('[backfill-tech-index] 完成。');
+    console.table({
+      processed,
+      written,
+      errors,
+      dryRun: options.dryRun,
+      force: options.force,
+      onlyIds: uniqueOnlyIds.length,
+    });
+
+    if (failedIds.length > 0) {
+      console.log('[backfill-tech-index] 失败的 data_card_id 列表（可用于排查/重跑）：');
+      for (const id of failedIds) {
+        console.log(id);
+      }
+    }
+
+    return;
+  }
 
   const total = options.noCount ? null : await countCandidates(options).catch(() => null);
   if (total != null) {
