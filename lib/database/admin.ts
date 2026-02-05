@@ -20,6 +20,9 @@ export type DashboardStats = {
   battleReportGenerationsToday: number;
   battleReportGenerationsAbortFailToday: number;
   battleReportGenerationAbortFailRateToday: number;
+  activeUsers24h: number;
+  activeUsers7d: number;
+  activityTrackingOk: boolean;
   serverTimeIso: string;
   d1NowUtc: string | null;
   d1NowLocal: string | null;
@@ -53,7 +56,7 @@ export type DashboardStats = {
   largeObjectsBattleReportOutputBytesTotal: number;
 };
 
-export type DashboardStatsSection = 'core' | 'arena' | 'tags' | 'storage';
+export type DashboardStatsSection = 'core' | 'arena' | 'tags' | 'storage' | 'activity';
 
 export type DashboardStatsCore = Pick<
   DashboardStats,
@@ -84,6 +87,8 @@ export type DashboardStatsArena = Pick<
   | 'leaderboardEligibleStrictDataCardTotal'
   | 'leaderboardEligibleFreeDataCardTotal'
 >;
+
+export type DashboardStatsActivity = Pick<DashboardStats, 'activeUsers24h' | 'activeUsers7d' | 'activityTrackingOk'>;
 
 export type DashboardStatsTags = Pick<
   DashboardStats,
@@ -210,6 +215,39 @@ export async function getDashboardStatsCore(): Promise<DashboardStatsCore> {
         : 0;
   } catch (error) {
     console.error('[Admin] 获取仪表盘核心统计失败:', error);
+  }
+
+  return stats;
+}
+
+export async function getDashboardStatsActivity(): Promise<DashboardStatsActivity> {
+  const stats: DashboardStatsActivity = {
+    activeUsers24h: 0,
+    activeUsers7d: 0,
+    activityTrackingOk: false,
+  };
+
+  try {
+    const now = Date.now();
+    const since24hIso = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    const since7dIso = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const sql = `
+      SELECT
+        COALESCE(SUM(CASE WHEN last_seen_at >= ? THEN 1 ELSE 0 END), 0) AS activeUsers24h,
+        COUNT(1) AS activeUsers7d
+      FROM user_last_activity
+      WHERE last_seen_at >= ?;
+    `;
+
+    const result = await queryFromD1(sql, [since24hIso, since7dIso]);
+    const row = readFirstRow(result as any);
+
+    stats.activeUsers24h = readInt(row.activeUsers24h);
+    stats.activeUsers7d = readInt(row.activeUsers7d);
+    stats.activityTrackingOk = true;
+  } catch (error) {
+    console.warn('[Admin] user_last_activity 未就绪，跳过活跃用户统计:', error);
   }
 
   return stats;
@@ -375,9 +413,10 @@ export async function getDashboardStatsStorage(): Promise<DashboardStatsStorage>
 }
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const [core, arena, tags, storage] = await Promise.all([
+  const [core, arena, activity, tags, storage] = await Promise.all([
     getDashboardStatsCore(),
     getDashboardStatsArena(),
+    getDashboardStatsActivity(),
     getDashboardStatsTags(),
     getDashboardStatsStorage(),
   ]);
@@ -385,6 +424,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   return {
     ...core,
     ...arena,
+    ...activity,
     ...tags,
     ...storage,
   };
@@ -808,10 +848,19 @@ export async function getAdminUsers(filters: {
 
   // --- 动态构建 WHERE 子句 (过滤用户属性) ---
   if (search) {
-    // 搜索范围包括用户名和邮箱，方便管理员通过邮件或用户名定位用户
-    whereClauses.push('(u.username LIKE ? OR u.email LIKE ?)');
-    const searchTerm = `%${search}%`;
-    params.push(searchTerm, searchTerm);
+    // 搜索范围包括：用户ID（精确匹配）、用户名、邮箱（模糊匹配）
+    const normalizedSearch = search.trim();
+    const searchTerm = `%${normalizedSearch}%`;
+    const isNumericId = /^\d+$/.test(normalizedSearch);
+    const numericId = isNumericId ? Number.parseInt(normalizedSearch, 10) : null;
+
+    if (typeof numericId === 'number' && Number.isFinite(numericId)) {
+      whereClauses.push('(u.id = ? OR u.username LIKE ? OR u.email LIKE ?)');
+      params.push(numericId, searchTerm, searchTerm);
+    } else {
+      whereClauses.push('(u.username LIKE ? OR u.email LIKE ?)');
+      params.push(searchTerm, searchTerm);
+    }
   }
   if (regDateStart) {
     whereClauses.push('u.created_at >= ?');

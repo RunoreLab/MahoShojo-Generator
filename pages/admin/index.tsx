@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award, Tags, BarChart3, Activity, HardDrive, Trophy, Cpu, BookOpen } from 'lucide-react';
 
 import { encyclopediaEntries } from '@/lib/encyclopedia';
@@ -28,6 +29,9 @@ interface DashboardStats {
   battleReportGenerationsToday: number;
   battleReportGenerationsAbortFailToday: number;
   battleReportGenerationAbortFailRateToday: number;
+  activeUsers24h: number;
+  activeUsers7d: number;
+  activityTrackingOk: boolean;
   serverTimeIso: string;
   d1NowUtc: string | null;
   d1NowLocal: string | null;
@@ -89,20 +93,23 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, color, no
 
 
 const AdminHomePage: React.FC = () => {
+  const router = useRouter();
   // 定义存储统计数据和加载状态的state
-  type DashboardSection = 'core' | 'arena' | 'tags' | 'storage';
+  type DashboardSection = 'core' | 'arena' | 'activity' | 'tags' | 'storage';
   type SectionStatus = 'idle' | 'loading' | 'loaded' | 'error';
 
   const [stats, setStats] = useState<Partial<DashboardStats>>({});
   const [sectionStatus, setSectionStatus] = useState<Record<DashboardSection, SectionStatus>>({
     core: 'idle',
     arena: 'idle',
+    activity: 'idle',
     tags: 'idle',
     storage: 'idle',
   });
   const [sectionError, setSectionError] = useState<Record<DashboardSection, string | null>>({
     core: null,
     arena: null,
+    activity: null,
     tags: null,
     storage: null,
   });
@@ -113,11 +120,16 @@ const AdminHomePage: React.FC = () => {
   const controllersRef = useRef<Record<DashboardSection, AbortController | null>>({
     core: null,
     arena: null,
+    activity: null,
     tags: null,
     storage: null,
   });
   const [lastServerTimeIso, setLastServerTimeIso] = useState<string | null>(null);
   const [lastD1NowLocal, setLastD1NowLocal] = useState<string | null>(null);
+
+  const [quickJumpTarget, setQuickJumpTarget] = useState<'user' | 'dataCard' | 'battleReport'>('user');
+  const [quickJumpValue, setQuickJumpValue] = useState('');
+  const [quickJumpError, setQuickJumpError] = useState<string | null>(null);
 
   // 在组件挂载时通过useEffect获取数据
   useEffect(() => {
@@ -177,12 +189,14 @@ const AdminHomePage: React.FC = () => {
 
     void fetchSection('core');
     void fetchSection('arena');
+    void fetchSection('activity');
     void fetchSection('tags');
     const storageDelayTimer = setTimeout(() => void fetchSection('storage'), 1_200);
 
     // 为了让"服务器时间"与当日统计更接近实时，这里定时刷新（避免频繁请求）
     const coreTimer = setInterval(() => void fetchSection('core'), 60_000);
     const arenaTimer = setInterval(() => void fetchSection('arena'), 60_000);
+    const activityTimer = setInterval(() => void fetchSection('activity'), 10 * 60_000);
     const tagsTimer = setInterval(() => void fetchSection('tags'), 5 * 60_000);
     const storageTimer = setInterval(() => void fetchSection('storage'), 10 * 60_000);
 
@@ -190,10 +204,12 @@ const AdminHomePage: React.FC = () => {
       clearTimeout(storageDelayTimer);
       clearInterval(coreTimer);
       clearInterval(arenaTimer);
+      clearInterval(activityTimer);
       clearInterval(tagsTimer);
       clearInterval(storageTimer);
       abortInFlight('core');
       abortInFlight('arena');
+      abortInFlight('activity');
       abortInFlight('tags');
       abortInFlight('storage');
     };
@@ -218,7 +234,31 @@ const AdminHomePage: React.FC = () => {
     return `${v.toFixed(u === 0 ? 0 : 2)} ${units[u]}`;
   };
 
+  const handleQuickJump = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const value = quickJumpValue.trim();
+    if (!value) {
+      setQuickJumpError('请输入要跳转的目标。');
+      return;
+    }
+
+    setQuickJumpError(null);
+
+    if (quickJumpTarget === 'user') {
+      await router.push({ pathname: '/admin/user-dashboard', query: { search: value } });
+      return;
+    }
+
+    if (quickJumpTarget === 'dataCard') {
+      await router.push({ pathname: '/admin/character-management', query: { id: value } });
+      return;
+    }
+
+    await router.push({ pathname: '/admin/battle-report-generations', query: { id: value } });
+  };
+
   const arenaReady = sectionStatus.arena === 'loaded';
+  const activityReady = sectionStatus.activity === 'loaded';
   const tagsReady = sectionStatus.tags === 'loaded';
   const storageReady = sectionStatus.storage === 'loaded';
 
@@ -240,6 +280,26 @@ const AdminHomePage: React.FC = () => {
       ? '—'
       : '加载中…';
 
+  const activityTrackingOk = activityReady ? Boolean(stats.activityTrackingOk) : false;
+  const activeUsers24hValue = activityReady
+    ? activityTrackingOk
+      ? (stats.activeUsers24h ?? 0)
+      : '未启用'
+    : sectionStatus.activity === 'error'
+      ? '—'
+      : '加载中…';
+  const activeUsers7dValue = activityReady
+    ? activityTrackingOk
+      ? (stats.activeUsers7d ?? 0)
+      : '未启用'
+    : sectionStatus.activity === 'error'
+      ? '—'
+      : '加载中…';
+  const activeUsers7dRate =
+    activityReady && activityTrackingOk && typeof stats.activeUsers7d === 'number' && typeof stats.totalUsers === 'number' && stats.totalUsers > 0
+      ? stats.activeUsers7d / stats.totalUsers
+      : 0;
+
   return (
     <>
       <Head>
@@ -250,6 +310,46 @@ const AdminHomePage: React.FC = () => {
           <div className="text-center mb-10">
             <h1 className="text-4xl font-bold text-gray-800 tracking-tight">MahoShojo Generator</h1>
             <p className="text-lg text-gray-500 mt-2">管理仪表盘</p>
+          </div>
+
+          <div className="mb-10 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold text-gray-800">快捷跳转</h2>
+                <p className="text-xs text-gray-500">支持用户（ID/用户名/邮箱）、数据卡 ID、战报 ID。</p>
+              </div>
+              <form onSubmit={handleQuickJump} className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                <label className="sr-only" htmlFor="quick-jump-target">
+                  跳转类型
+                </label>
+                <select
+                  id="quick-jump-target"
+                  value={quickJumpTarget}
+                  onChange={(e) => setQuickJumpTarget(e.target.value as typeof quickJumpTarget)}
+                  className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-200"
+                >
+                  <option value="user">用户</option>
+                  <option value="dataCard">数据卡</option>
+                  <option value="battleReport">战报</option>
+                </select>
+
+                <label className="sr-only" htmlFor="quick-jump-value">
+                  跳转目标
+                </label>
+                <input
+                  id="quick-jump-value"
+                  value={quickJumpValue}
+                  onChange={(e) => setQuickJumpValue(e.target.value)}
+                  placeholder={quickJumpTarget === 'user' ? '例如：123 / alice / alice@example.com' : '粘贴 ID...'}
+                  className="h-9 w-full min-w-[16rem] flex-1 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm placeholder:text-gray-400 focus:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-200 sm:w-72"
+                />
+
+                <button type="submit" className="admin-button-sm h-9 justify-center bg-gray-900 text-white hover:bg-gray-800">
+                  跳转
+                </button>
+              </form>
+            </div>
+            {quickJumpError ? <p className="mt-2 text-xs text-red-600">{quickJumpError}</p> : null}
           </div>
 
           {/* 数据统计卡片区域 */}
@@ -279,6 +379,20 @@ const AdminHomePage: React.FC = () => {
                     icon={FileText}
                     color="bg-purple-600"
                     note={`中断/失败：${stats?.battleReportGenerationsAbortFailToday ?? 0}（${formatPercent(stats?.battleReportGenerationAbortFailRateToday ?? 0)}）`}
+                  />
+                  <StatCard
+                    title="活跃用户（24h）"
+                    value={activeUsers24hValue}
+                    icon={Activity}
+                    color="bg-fuchsia-600"
+                    note={activityTrackingOk ? '口径：已登录用户（touch）' : '需要执行 D1 schema 迁移：user_last_activity'}
+                  />
+                  <StatCard
+                    title="活跃用户（7d）"
+                    value={activeUsers7dValue}
+                    icon={Users}
+                    color="bg-violet-600"
+                    note={activityTrackingOk ? `占比：${formatPercent(activeUsers7dRate)}（基于用户总数）` : '需要执行 D1 schema 迁移：user_last_activity'}
                   />
                   <StatCard title="违规档案总数" value={stats?.bannedDataCardsCount ?? 0} icon={AlertTriangle} color="bg-red-500" />
                   <StatCard title="用户总数" value={stats?.totalUsers ?? 0} icon={Users} color="bg-teal-500" />

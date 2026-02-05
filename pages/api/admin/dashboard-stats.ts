@@ -2,6 +2,7 @@
 
 import {
   getDashboardStats,
+  getDashboardStatsActivity,
   getDashboardStatsArena,
   getDashboardStatsCore,
   getDashboardStatsStorage,
@@ -30,13 +31,18 @@ export default async function handler(req: NextRequest) {
     const url = new URL(req.url);
     const sectionRaw = url.searchParams.get('section');
     const section: DashboardStatsSection | 'all' =
-      sectionRaw === 'core' || sectionRaw === 'arena' || sectionRaw === 'tags' || sectionRaw === 'storage'
+      sectionRaw === 'core' ||
+      sectionRaw === 'arena' ||
+      sectionRaw === 'tags' ||
+      sectionRaw === 'storage' ||
+      sectionRaw === 'activity'
         ? (sectionRaw as DashboardStatsSection)
         : 'all';
 
     const stats = await (async () => {
       if (section === 'core') return await getDashboardStatsCore();
       if (section === 'arena') return await getDashboardStatsArena();
+      if (section === 'activity') return await getDashboardStatsActivity();
       if (section === 'tags') return await getDashboardStatsTags();
       if (section === 'storage') return await getDashboardStatsStorage();
       return await getDashboardStats();
