@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } from '@/components/ranking/LeaderboardEntityDetailsModal';
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
-import { getArenaApproxRankLabel, getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
+import { getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
 import { ARENA_QUEEN_MIN_SCEPTER_COUNT, applyQueenTier, computeArenaBaseTier, isArenaScepterTier } from '@/lib/arena/tier';
 import { formatDateTime } from '@/lib/constants';
 import type { SeasonArchive, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
@@ -139,6 +139,8 @@ const parseOptionalInt = (value: string): number | null => {
   if (!Number.isFinite(parsed)) return null;
   return Math.floor(parsed);
 };
+
+const LIVE_LEADERBOARD_TOP_RANK_LIMIT = 300;
 
 const formatBattleModeLabel = (mode: string): string => {
   const normalized = mode.trim();
@@ -722,13 +724,17 @@ export function RankingPage() {
     }
 
     const rankFromItem = typeof item.rank === 'number' && Number.isFinite(item.rank) ? Math.floor(item.rank) : 0;
-    const cachedRank = rankFromItem > 0 || !isCanonicalPublicQuery
+    const cachedRankRaw = rankFromItem > 0 || !isCanonicalPublicQuery
       ? null
       : getArenaCachedRank({
         queue: appliedFilters.queue,
         entityType: item.entityType,
         entityId: item.entityId,
       });
+    const cachedRank =
+      typeof cachedRankRaw === 'number' && Number.isFinite(cachedRankRaw) && cachedRankRaw > 0 && cachedRankRaw <= 300
+        ? Math.floor(cachedRankRaw)
+        : null;
     const rank = rankFromItem > 0 ? rankFromItem : cachedRank ?? 0;
 
     if (rank > 0) {
@@ -754,7 +760,9 @@ export function RankingPage() {
 
   const historyTotal = isArchiveMode ? historyFilteredSortedItems.length : 0;
   const canGoPrev = offset > 0;
-  const canGoNext = isArchiveMode ? offset + limit < historyTotal : items.length >= limit;
+  const canGoNext = isArchiveMode
+    ? offset + limit < historyTotal
+    : items.length >= limit && offset + limit < LIVE_LEADERBOARD_TOP_RANK_LIMIT;
   const pageIndex = Math.floor(offset / limit) + 1;
 
   const appliedSummary = useMemo(() => {
@@ -1307,7 +1315,7 @@ export function RankingPage() {
                           ? (isArchiveMode ? '正在加载赛季快照...' : '正在加载排行榜...')
                           : listIsError
                             ? '加载失败'
-                            : `第 ${pageIndex} 页${isArchiveMode ? ' · 快照' : ''}`}
+                            : `第 ${pageIndex} 页${isArchiveMode ? ' · 快照' : ' · Top300'}`}
                         {!isArchiveMode && leaderboardQuery.isFetching && !leaderboardQuery.isLoading ? (
                           <span className="ml-2 text-xs text-gray-500">更新中…</span>
                         ) : null}
@@ -1377,7 +1385,7 @@ export function RankingPage() {
                         <span className="text-xs text-gray-500">
                           {isArchiveMode
                             ? '提示：快照模式仅在已归档范围内搜索与筛选。'
-                            : '提示：搜索结果默认不计算全榜名次；若本地已缓存名次，可点击尝试跳转，否则将打开详情。'}
+                            : '提示：搜索结果不提供精确名次（仅 Top300 在排行榜页展示名次）；若本地缓存过 Top300 名次，可点击跳转，否则将打开详情。'}
                         </span>
                       </form>
 
@@ -1395,12 +1403,17 @@ export function RankingPage() {
                             <div className="grid gap-2">
                               {searchResults.map((item) => {
                                 const author = formatAuthorLabel(item);
-                                const approx = !isArchiveMode && isCanonicalPublicQuery
-                                  ? getArenaApproxRankLabel({ queue: appliedFilters.queue, entityType: item.entityType, entityId: item.entityId })
+                                const cachedRankRaw = !isArchiveMode && isCanonicalPublicQuery
+                                  ? getArenaCachedRank({ queue: appliedFilters.queue, entityType: item.entityType, entityId: item.entityId })
                                   : null;
-                                const rankTitle = approx?.title ?? (item.rank > 0 ? `全榜 #${item.rank}` : '名次未计算');
-                                const rankLabel = item.rank > 0 ? `#${item.rank}` : approx?.label ?? '#—';
-                                const canJump = item.rank > 0 || Boolean(approx);
+                                const cachedRank =
+                                  typeof cachedRankRaw === 'number' && Number.isFinite(cachedRankRaw) && cachedRankRaw > 0 && cachedRankRaw <= 300
+                                    ? Math.floor(cachedRankRaw)
+                                    : null;
+                                const rank = item.rank > 0 ? item.rank : cachedRank ?? 0;
+                                const rankTitle = rank > 0 ? `Top300 #${rank}` : '名次仅在 Top300 展示';
+                                const rankLabel = rank > 0 ? `#${rank}` : '#—';
+                                const canJump = rank > 0;
                                 const { display: displayName, full: fullName } = buildTitleDisplay(item.displayName || '未命名');
                                 return (
                                   <button
@@ -1591,7 +1604,7 @@ export function RankingPage() {
 
                     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3 text-sm">
                       <div className="text-gray-500">
-                        当前：第 {pageIndex} 页 · 偏移 {offset}（每页 {limit}）
+                        当前：第 {pageIndex} 页 · 偏移 {offset}（每页 {limit}{isArchiveMode ? '' : ' · Top300'}）
                         {hasPendingChanges ? <span className="ml-2 text-amber-700">（有未应用更改）</span> : null}
                         {isArchiveMode ? (
                           <div className="mt-1 text-xs text-gray-500">

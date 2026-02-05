@@ -305,20 +305,17 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     }
   }
 
-  const computePublicRank = async (payload: {
-    queue: 'strict';
-    rating: number;
-    games: number;
-    updatedAt: string;
-    dataCardId: string;
-  }): Promise<number | null> => {
+  const strictTop300RankByDataCardId = await (async () => {
+    const map = new Map<string, number>();
+    if (characterHighlightIds.length === 0) return map;
+
     try {
       const result = (await queryFromD1(
-        `SELECT COUNT(*) as higherCount
+        `SELECT ar.entity_type as entityType, ar.entity_id as entityId
          FROM arena_ratings ar
          LEFT JOIN data_cards dc
            ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-         WHERE ar.queue = ?
+         WHERE ar.queue = 'strict'
            AND (
              ar.entity_type = 'preset'
              OR (
@@ -338,103 +335,43 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
                )
               )
             )
-           AND (
-             ar.rating > ?
-             OR (ar.rating = ? AND ar.games > ?)
-             OR (ar.rating = ? AND ar.games = ? AND ar.updated_at > ?)
-             OR (
-               ar.rating = ? AND ar.games = ? AND ar.updated_at = ?
-               AND (
-                 ar.entity_type < 'data_card'
-                 OR (ar.entity_type = 'data_card' AND ar.entity_id < ?)
-               )
-             )
-           )`,
-        [
-          payload.queue,
-          payload.rating,
-          payload.rating,
-          payload.games,
-          payload.rating,
-          payload.games,
-          payload.updatedAt,
-          payload.rating,
-          payload.games,
-          payload.updatedAt,
-          payload.dataCardId,
-        ],
+         ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC
+         LIMIT 300`,
       )) as any;
-      const row = readRows<{ higherCount: number }>(result)[0];
-      const higherCount = typeof row?.higherCount === 'number' ? row.higherCount : 0;
-      return Math.max(1, Math.floor(higherCount) + 1);
+      const rows = readRows<{ entityType: unknown; entityId: unknown }>(result);
+      rows.forEach((row, index) => {
+        const entityType = row?.entityType === 'data_card' ? 'data_card' : row?.entityType === 'preset' ? 'preset' : null;
+        if (entityType !== 'data_card') return;
+        const entityId = typeof row?.entityId === 'string' ? row.entityId.trim() : '';
+        if (!entityId) return;
+        map.set(entityId, index + 1);
+      });
     } catch {
-      return null;
+      return map;
     }
-  };
 
-  const computePublicTotal = async (queue: 'strict'): Promise<number | null> => {
-    try {
-      const result = (await queryFromD1(
-        `SELECT COUNT(*) as total
-         FROM arena_ratings ar
-         LEFT JOIN data_cards dc
-           ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-         WHERE ar.queue = ?
-           AND (
-             ar.entity_type = 'preset'
-             OR (
-                dc.id IS NOT NULL
-                AND dc.type = 'character'
-                AND dc.is_public = 1
-                AND dc.review_status = 'approved'
-                AND dc.deleted_at IS NULL
-               AND (
-                 dc.public_since IS NULL
-                 OR dc.public_since <= datetime('now', '-3 days')
-                 OR (
-                   dc.created_at IS NOT NULL
-                   AND dc.public_since IS NOT NULL
-                   AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
-                 )
-               )
-              )
-            )`,
-        [queue],
-      )) as any;
-      const row = readRows<{ total: unknown }>(result)[0];
-      return clampInt(row?.total);
-    } catch {
-      return null;
-    }
-  };
-
-  const strictPublicTotal = await computePublicTotal('strict');
+    return map;
+  })();
   const strictQueen = await queryArenaPublicQueenEntity(queryFromD1, 'strict').catch((error) => {
     console.warn('读取女王段位失败（降级为无女王）:', error);
     return null;
   });
 
-  const buildRating = async (row: RatingRow | undefined, publicTotal: number | null): Promise<CardRatingLite> => {
+  const buildRating = (row: RatingRow | undefined): CardRatingLite => {
     if (!row) return null;
     if (typeof row.rating !== 'number' || typeof row.games !== 'number') return null;
     const baseTier = computeArenaBaseTier(row.rating, row.games);
     const isQueen = strictQueen?.entityType === 'data_card' && strictQueen?.entityId === row.dataCardId;
     const tier = applyQueenTier(baseTier, isQueen);
-    const publicRank = await computePublicRank({
-      queue: row.queue,
-      rating: row.rating,
-      games: row.games,
-      updatedAt: row.updatedAt,
-      dataCardId: row.dataCardId,
-    });
-    return { rating: row.rating, games: row.games, tier, publicRank, publicTotal };
+    const publicRank = strictTop300RankByDataCardId.get(row.dataCardId) ?? null;
+    return { rating: row.rating, games: row.games, tier, publicRank, publicTotal: null };
   };
 
   const mapCharacterHighlight = async (row: UserTopDataCardRow): Promise<CharacterHighlight> => {
     const base = mapCard(row);
     const metrics = metricsById.get(row.id) ?? null;
     const ratingRows = ratingsById.get(row.id) ?? {};
-    const strict = await buildRating(ratingRows.strict, strictPublicTotal);
+    const strict = buildRating(ratingRows.strict);
     return {
       ...base,
       metrics,

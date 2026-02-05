@@ -9,6 +9,7 @@ import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
 import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
+import { shouldEnforceStrictRangeLimit } from '@/lib/arena/strict-range';
 import { addUsedCard, isCardUsed } from '@/lib/localStorage';
 import { buildTitleDisplay } from '@/lib/text';
 import type { Preset } from '@/lib/presets';
@@ -60,6 +61,8 @@ type StrictRangeDetails = {
   exceededBy: number;
 };
 
+const LEADERBOARD_TOP_RANK_LIMIT = 300;
+
 const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
   '无牌': 2000,
   '白牌': 1000,
@@ -78,6 +81,8 @@ const getStrictMaxAbsDiffForRatings = (a: { rating: number; games: number }, b: 
 const computeStrictRangeDetails = (a: { rating: number; games: number }, b: { rating: number; games: number }): StrictRangeDetails => {
   const absDiff = Math.abs(a.rating - b.rating);
   const maxAbsDiff = getStrictMaxAbsDiffForRatings(a, b);
+  const shouldCheckRange = shouldEnforceStrictRangeLimit(a, b);
+  if (!shouldCheckRange) return { ok: true, absDiff, maxAbsDiff, exceededBy: 0 };
   const exceededBy = Math.max(0, absDiff - maxAbsDiff);
   return { ok: absDiff <= maxAbsDiff, absDiff, maxAbsDiff, exceededBy };
 };
@@ -378,7 +383,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
   ]);
 
   const canGoPrev = offset > 0;
-  const canGoNext = items.length >= limit;
+  const canGoNext = items.length >= limit && offset + limit < LEADERBOARD_TOP_RANK_LIMIT;
 
   const toggleIncludeTag = (tagId: string) => {
     setOffset(0);
@@ -518,7 +523,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                 ) : null}
               </div>
               <div className="mt-1 text-xs text-gray-500">
-                这里展示公共榜单（公开 + 已审核）与预设。点击“加入参战”会把角色加入当前对战阵容。
+                这里展示公共榜单（公开 + 已审核）与预设。名次仅展示 Top300；未入榜角色不展示名次。点击“加入参战”会把角色加入当前对战阵容。
               </div>
             </div>
             <div className="flex items-center gap-3 text-sm">
@@ -682,7 +687,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
                 title={
                   queue !== 'strict'
                     ? '仅严格天梯可用'
-                    : (!strictRangePivotCandidate ? '需先在参战列表中只保留 1 位参战者作为我方' : '按严格分差区间筛选对手')
+                    : (!strictRangePivotCandidate ? '需先在参战列表中只保留 1 位参战者作为我方' : '按严格分差规则筛选对手（花牌及以上才启用分差限制）')
                 }
               >
                 <input

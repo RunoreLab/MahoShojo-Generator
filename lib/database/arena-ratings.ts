@@ -3,6 +3,7 @@ import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGen
 import { PRESET_LIST } from '@/lib/presets';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
+import { shouldEnforceStrictRangeLimit } from '@/lib/arena/strict-range';
 
 export type ArenaQueue = 'strict' | 'free';
 export type ArenaEntityType = 'data_card' | 'preset';
@@ -1350,11 +1351,17 @@ export async function settleArenaRatingsForGeneration(
 
         const involvesPreset = aEntity.entityType === 'preset' || bEntity.entityType === 'preset';
         if (!involvesPreset) {
-          const absDiff = Math.abs(aCurrent.rating - bCurrent.rating);
-          const maxAbsDiff = getStrictMaxAbsDiffForRatings(aCurrent, bCurrent);
-          if (absDiff > maxAbsDiff) {
-            await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
-            continue;
+          const shouldCheckRange = shouldEnforceStrictRangeLimit(
+            { rating: aCurrent.rating, games: aCurrent.games },
+            { rating: bCurrent.rating, games: bCurrent.games },
+          );
+          if (shouldCheckRange) {
+            const absDiff = Math.abs(aCurrent.rating - bCurrent.rating);
+            const maxAbsDiff = getStrictMaxAbsDiffForRatings(aCurrent, bCurrent);
+            if (absDiff > maxAbsDiff) {
+              await markArenaRatingEventStatus(eventId, 'skipped', { skipReason: 'strict-out-of-range' });
+              continue;
+            }
           }
         }
       }
