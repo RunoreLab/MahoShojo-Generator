@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedAt": "2026-01-04T08:35:20.181Z",
   "season": {
     "id": "Alpha",
@@ -8,268 +8,326 @@
     "endsAt": "2026-01-04",
     "description": "内部测试用赛季。"
   },
+  "entities": [
+    {
+      "entityType": "data_card",
+      "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de",
+      "displayName": "RX-78-2型高达",
+      "techScore": 52,
+      "techLevel": "L3",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rank": 7,
+          "rating": 980,
+          "games": 3,
+          "wins": 0,
+          "losses": 1,
+          "draws": 2,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        },
+        "free": {
+          "rank": 7,
+          "rating": 980,
+          "games": 3,
+          "wins": 0,
+          "losses": 1,
+          "draws": 2,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        }
+      }
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16",
+      "displayName": "故事的女儿（晴）",
+      "techScore": 60,
+      "techLevel": "L4",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rank": 5,
+          "rating": 981,
+          "games": 1,
+          "wins": 0,
+          "losses": 1,
+          "draws": 0,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        },
+        "free": {
+          "rank": 5,
+          "rating": 981,
+          "games": 1,
+          "wins": 0,
+          "losses": 1,
+          "draws": 0,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        }
+      }
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47",
+      "displayName": "伯利恒之星(超限9-X)",
+      "techScore": 93,
+      "techLevel": "L5",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rank": 2,
+          "rating": 1020,
+          "games": 1,
+          "wins": 1,
+          "losses": 0,
+          "draws": 0,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        },
+        "free": {
+          "rank": 2,
+          "rating": 1020,
+          "games": 1,
+          "wins": 1,
+          "losses": 0,
+          "draws": 0,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        }
+      }
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1",
+      "displayName": "红掌",
+      "techScore": 43,
+      "techLevel": "L3",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rank": 6,
+          "rating": 980,
+          "games": 1,
+          "wins": 0,
+          "losses": 1,
+          "draws": 0,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        },
+        "free": {
+          "rank": 6,
+          "rating": 980,
+          "games": 1,
+          "wins": 0,
+          "losses": 1,
+          "draws": 0,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        }
+      }
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff",
+      "displayName": "水仙",
+      "techScore": 38,
+      "techLevel": "L2",
+      "isNative": true,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rank": 8,
+          "rating": 979,
+          "games": 1,
+          "wins": 0,
+          "losses": 1,
+          "draws": 0,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        },
+        "free": {
+          "rank": 8,
+          "rating": 979,
+          "games": 1,
+          "wins": 0,
+          "losses": 1,
+          "draws": 0,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        }
+      }
+    },
+    {
+      "entityType": "data_card",
+      "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c",
+      "displayName": "白百合（被移出预设的魔法少女）",
+      "techScore": 36,
+      "techLevel": "L2",
+      "isNative": false,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rank": 3,
+          "rating": 1020,
+          "games": 2,
+          "wins": 1,
+          "losses": 0,
+          "draws": 1,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        },
+        "free": {
+          "rank": 3,
+          "rating": 1001,
+          "games": 3,
+          "wins": 1,
+          "losses": 1,
+          "draws": 1,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M01_centaurea.json",
+      "displayName": "翠雀",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rank": 4,
+          "rating": 1000,
+          "games": 1,
+          "wins": 0,
+          "losses": 0,
+          "draws": 1,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        },
+        "free": {
+          "rank": 4,
+          "rating": 1000,
+          "games": 1,
+          "wins": 0,
+          "losses": 0,
+          "draws": 1,
+          "tier": "无牌",
+          "ratingUpdatedAt": null
+        }
+      }
+    },
+    {
+      "entityType": "preset",
+      "entityId": "M12_greatness_in_simplicity.json",
+      "displayName": "雪绒",
+      "techScore": null,
+      "techLevel": null,
+      "isNative": null,
+      "tagIds": [],
+      "queues": {
+        "strict": {
+          "rank": 1,
+          "rating": 1040,
+          "games": 6,
+          "wins": 3,
+          "losses": 1,
+          "draws": 2,
+          "tier": "白牌",
+          "ratingUpdatedAt": null
+        },
+        "free": {
+          "rank": 1,
+          "rating": 1059,
+          "games": 7,
+          "wins": 4,
+          "losses": 1,
+          "draws": 2,
+          "tier": "白牌",
+          "ratingUpdatedAt": null
+        }
+      }
+    }
+  ],
   "leaderboards": {
     "strict": {
       "queue": "strict",
       "total": 8,
       "top": [
         {
-          "rank": 1,
           "entityType": "preset",
-          "entityId": "M12_greatness_in_simplicity.json",
-          "displayName": "雪绒",
-          "rating": 1040,
-          "games": 6,
-          "wins": 3,
-          "losses": 1,
-          "draws": 2,
-          "tier": "白牌",
-          "techScore": null,
-          "techLevel": null,
-          "isNative": null,
-          "tagIds": []
+          "entityId": "M12_greatness_in_simplicity.json"
         },
         {
-          "rank": 2,
           "entityType": "data_card",
-          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c",
-          "displayName": "白百合（被移出预设的魔法少女）",
-          "rating": 1020,
-          "games": 2,
-          "wins": 1,
-          "losses": 0,
-          "draws": 1,
-          "tier": "无牌",
-          "techScore": 36,
-          "techLevel": "L2",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c"
         },
         {
-          "rank": 3,
           "entityType": "data_card",
-          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47",
-          "displayName": "伯利恒之星(超限9-X)",
-          "rating": 1020,
-          "games": 1,
-          "wins": 1,
-          "losses": 0,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 93,
-          "techLevel": "L5",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47"
         },
         {
-          "rank": 4,
           "entityType": "preset",
-          "entityId": "M01_centaurea.json",
-          "displayName": "翠雀",
-          "rating": 1000,
-          "games": 1,
-          "wins": 0,
-          "losses": 0,
-          "draws": 1,
-          "tier": "无牌",
-          "techScore": null,
-          "techLevel": null,
-          "isNative": null,
-          "tagIds": []
+          "entityId": "M01_centaurea.json"
         },
         {
-          "rank": 5,
           "entityType": "data_card",
-          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16",
-          "displayName": "故事的女儿（晴）",
-          "rating": 981,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 60,
-          "techLevel": "L4",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16"
         },
         {
-          "rank": 6,
           "entityType": "data_card",
-          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de",
-          "displayName": "RX-78-2型高达",
-          "rating": 980,
-          "games": 3,
-          "wins": 0,
-          "losses": 1,
-          "draws": 2,
-          "tier": "无牌",
-          "techScore": 52,
-          "techLevel": "L3",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de"
         },
         {
-          "rank": 7,
           "entityType": "data_card",
-          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1",
-          "displayName": "红掌",
-          "rating": 980,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 43,
-          "techLevel": "L3",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1"
         },
         {
-          "rank": 8,
           "entityType": "data_card",
-          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff",
-          "displayName": "水仙",
-          "rating": 979,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 38,
-          "techLevel": "L2",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff"
         }
       ],
       "bottom": [
         {
-          "rank": 1,
           "entityType": "preset",
-          "entityId": "M12_greatness_in_simplicity.json",
-          "displayName": "雪绒",
-          "rating": 1040,
-          "games": 6,
-          "wins": 3,
-          "losses": 1,
-          "draws": 2,
-          "tier": "白牌",
-          "techScore": null,
-          "techLevel": null,
-          "isNative": null,
-          "tagIds": []
+          "entityId": "M12_greatness_in_simplicity.json"
         },
         {
-          "rank": 2,
           "entityType": "data_card",
-          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47",
-          "displayName": "伯利恒之星(超限9-X)",
-          "rating": 1020,
-          "games": 1,
-          "wins": 1,
-          "losses": 0,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 93,
-          "techLevel": "L5",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47"
         },
         {
-          "rank": 3,
           "entityType": "data_card",
-          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c",
-          "displayName": "白百合（被移出预设的魔法少女）",
-          "rating": 1020,
-          "games": 2,
-          "wins": 1,
-          "losses": 0,
-          "draws": 1,
-          "tier": "无牌",
-          "techScore": 36,
-          "techLevel": "L2",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c"
         },
         {
-          "rank": 4,
           "entityType": "preset",
-          "entityId": "M01_centaurea.json",
-          "displayName": "翠雀",
-          "rating": 1000,
-          "games": 1,
-          "wins": 0,
-          "losses": 0,
-          "draws": 1,
-          "tier": "无牌",
-          "techScore": null,
-          "techLevel": null,
-          "isNative": null,
-          "tagIds": []
+          "entityId": "M01_centaurea.json"
         },
         {
-          "rank": 5,
           "entityType": "data_card",
-          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16",
-          "displayName": "故事的女儿（晴）",
-          "rating": 981,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 60,
-          "techLevel": "L4",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16"
         },
         {
-          "rank": 6,
           "entityType": "data_card",
-          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1",
-          "displayName": "红掌",
-          "rating": 980,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 43,
-          "techLevel": "L3",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1"
         },
         {
-          "rank": 7,
           "entityType": "data_card",
-          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de",
-          "displayName": "RX-78-2型高达",
-          "rating": 980,
-          "games": 3,
-          "wins": 0,
-          "losses": 1,
-          "draws": 2,
-          "tier": "无牌",
-          "techScore": 52,
-          "techLevel": "L3",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de"
         },
         {
-          "rank": 8,
           "entityType": "data_card",
-          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff",
-          "displayName": "水仙",
-          "rating": 979,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 38,
-          "techLevel": "L2",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff"
         }
       ]
     },
@@ -278,262 +336,70 @@
       "total": 8,
       "top": [
         {
-          "rank": 1,
           "entityType": "preset",
-          "entityId": "M12_greatness_in_simplicity.json",
-          "displayName": "雪绒",
-          "rating": 1059,
-          "games": 7,
-          "wins": 4,
-          "losses": 1,
-          "draws": 2,
-          "tier": "白牌",
-          "techScore": null,
-          "techLevel": null,
-          "isNative": null,
-          "tagIds": []
+          "entityId": "M12_greatness_in_simplicity.json"
         },
         {
-          "rank": 2,
           "entityType": "data_card",
-          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47",
-          "displayName": "伯利恒之星(超限9-X)",
-          "rating": 1020,
-          "games": 1,
-          "wins": 1,
-          "losses": 0,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 93,
-          "techLevel": "L5",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47"
         },
         {
-          "rank": 3,
           "entityType": "data_card",
-          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c",
-          "displayName": "白百合（被移出预设的魔法少女）",
-          "rating": 1001,
-          "games": 3,
-          "wins": 1,
-          "losses": 1,
-          "draws": 1,
-          "tier": "无牌",
-          "techScore": 36,
-          "techLevel": "L2",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c"
         },
         {
-          "rank": 4,
           "entityType": "preset",
-          "entityId": "M01_centaurea.json",
-          "displayName": "翠雀",
-          "rating": 1000,
-          "games": 1,
-          "wins": 0,
-          "losses": 0,
-          "draws": 1,
-          "tier": "无牌",
-          "techScore": null,
-          "techLevel": null,
-          "isNative": null,
-          "tagIds": []
+          "entityId": "M01_centaurea.json"
         },
         {
-          "rank": 5,
           "entityType": "data_card",
-          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16",
-          "displayName": "故事的女儿（晴）",
-          "rating": 981,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 60,
-          "techLevel": "L4",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16"
         },
         {
-          "rank": 6,
           "entityType": "data_card",
-          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de",
-          "displayName": "RX-78-2型高达",
-          "rating": 980,
-          "games": 3,
-          "wins": 0,
-          "losses": 1,
-          "draws": 2,
-          "tier": "无牌",
-          "techScore": 52,
-          "techLevel": "L3",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de"
         },
         {
-          "rank": 7,
           "entityType": "data_card",
-          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1",
-          "displayName": "红掌",
-          "rating": 980,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 43,
-          "techLevel": "L3",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1"
         },
         {
-          "rank": 8,
           "entityType": "data_card",
-          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff",
-          "displayName": "水仙",
-          "rating": 979,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 38,
-          "techLevel": "L2",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff"
         }
       ],
       "bottom": [
         {
-          "rank": 1,
           "entityType": "preset",
-          "entityId": "M12_greatness_in_simplicity.json",
-          "displayName": "雪绒",
-          "rating": 1059,
-          "games": 7,
-          "wins": 4,
-          "losses": 1,
-          "draws": 2,
-          "tier": "白牌",
-          "techScore": null,
-          "techLevel": null,
-          "isNative": null,
-          "tagIds": []
+          "entityId": "M12_greatness_in_simplicity.json"
         },
         {
-          "rank": 2,
           "entityType": "data_card",
-          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47",
-          "displayName": "伯利恒之星(超限9-X)",
-          "rating": 1020,
-          "games": 1,
-          "wins": 1,
-          "losses": 0,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 93,
-          "techLevel": "L5",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "df69546d-4452-4cc5-8e47-84de0c4c9e47"
         },
         {
-          "rank": 3,
           "entityType": "data_card",
-          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c",
-          "displayName": "白百合（被移出预设的魔法少女）",
-          "rating": 1001,
-          "games": 3,
-          "wins": 1,
-          "losses": 1,
-          "draws": 1,
-          "tier": "无牌",
-          "techScore": 36,
-          "techLevel": "L2",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "f3a43b4f-346c-4fba-a0dd-fbf7aefceb8c"
         },
         {
-          "rank": 4,
           "entityType": "preset",
-          "entityId": "M01_centaurea.json",
-          "displayName": "翠雀",
-          "rating": 1000,
-          "games": 1,
-          "wins": 0,
-          "losses": 0,
-          "draws": 1,
-          "tier": "无牌",
-          "techScore": null,
-          "techLevel": null,
-          "isNative": null,
-          "tagIds": []
+          "entityId": "M01_centaurea.json"
         },
         {
-          "rank": 5,
           "entityType": "data_card",
-          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16",
-          "displayName": "故事的女儿（晴）",
-          "rating": 981,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 60,
-          "techLevel": "L4",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "b54dfbee-6a28-4cc1-8d57-a8ed9848bc16"
         },
         {
-          "rank": 6,
           "entityType": "data_card",
-          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1",
-          "displayName": "红掌",
-          "rating": 980,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 43,
-          "techLevel": "L3",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "e67c2a82-ec8a-4489-8d99-c8b12e4c6ea1"
         },
         {
-          "rank": 7,
           "entityType": "data_card",
-          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de",
-          "displayName": "RX-78-2型高达",
-          "rating": 980,
-          "games": 3,
-          "wins": 0,
-          "losses": 1,
-          "draws": 2,
-          "tier": "无牌",
-          "techScore": 52,
-          "techLevel": "L3",
-          "isNative": false,
-          "tagIds": []
+          "entityId": "5c478086-b308-4d7a-85e5-451e6f5246de"
         },
         {
-          "rank": 8,
           "entityType": "data_card",
-          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff",
-          "displayName": "水仙",
-          "rating": 979,
-          "games": 1,
-          "wins": 0,
-          "losses": 1,
-          "draws": 0,
-          "tier": "无牌",
-          "techScore": 38,
-          "techLevel": "L2",
-          "isNative": true,
-          "tagIds": []
+          "entityId": "e84e3685-1eb4-43ab-8912-a1571d2cbfff"
         }
       ]
     }

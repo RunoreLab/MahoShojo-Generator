@@ -3,7 +3,14 @@ import { dirname, resolve } from 'node:path';
 
 import { loadEnvConfig } from '@next/env';
 
-import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '../lib/seasons';
+import type {
+  SeasonArchive,
+  SeasonArchiveEntity,
+  SeasonArchiveEntityRef,
+  SeasonArchiveQueueSnapshot,
+  SeasonsConfig,
+  SeasonMeta,
+} from '../lib/seasons';
 import { formatSeasonTitle, isSafeSeasonId } from '../lib/seasons';
 import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '../lib/arena/tier';
 
@@ -184,62 +191,170 @@ const queryLeaderboardRows = async (
   return readRows<LeaderboardRow>(result);
 };
 
-const buildItems = async (
-  rows: LeaderboardRow[],
-  options: { rankBase: number; queen: Awaited<ReturnType<typeof queryArenaPublicQueenEntity>> | null },
-): Promise<SeasonArchiveItem[]> => {
-  const { PRESET_LIST } = await import('../lib/presets');
-  const presetNameByFilename = new Map(PRESET_LIST.map((preset) => [preset.filename, preset.name]));
+const buildEntityKey = (ref: SeasonArchiveEntityRef): string => `${ref.entityType}:${ref.entityId}`;
 
-  return rows.map((row, index) => {
-    const rating = typeof row.rating === 'number' ? row.rating : 0;
-    const games = typeof row.games === 'number' ? row.games : 0;
-    const baseTier = computeArenaBaseTier(rating, games);
-    const isQueen = options.queen?.entityType === row.entityType && options.queen?.entityId === row.entityId;
-    const tier = applyQueenTier(baseTier, isQueen);
+const normalizeTagIds = (raw: string | null): string[] => {
+  if (!raw) return [];
+  const ids = raw
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  return Array.from(new Set(ids)).sort();
+};
 
-    const displayName = row.entityType === 'preset'
-      ? (presetNameByFilename.get(row.entityId) ?? row.entityId)
-      : (row.dataCardName ?? row.entityId);
+const clampString = (value: string | null, maxLength: number): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= maxLength) return trimmed;
+  return trimmed.slice(0, maxLength);
+};
 
-    const tagIds = row.tagIds
-      ? row.tagIds.split(',').map((id) => id.trim()).filter(Boolean)
-      : [];
-
-    return {
-      rank: options.rankBase + index,
-      entityType: row.entityType,
-      entityId: row.entityId,
-      displayName,
-      authorName:
-        row.entityType === 'data_card' && typeof row.authorName === 'string' && row.authorName.trim()
-          ? row.authorName.trim()
-          : null,
-      authorId: row.entityType === 'data_card' && typeof row.authorId === 'number' && Number.isFinite(row.authorId) ? row.authorId : null,
-      likeCount: row.entityType === 'data_card' && typeof row.likeCount === 'number' && Number.isFinite(row.likeCount) ? row.likeCount : null,
-      favoriteCount:
-        row.entityType === 'data_card' && typeof row.favoriteCount === 'number' && Number.isFinite(row.favoriteCount) ? row.favoriteCount : null,
-      usageCount: row.entityType === 'data_card' && typeof row.usageCount === 'number' && Number.isFinite(row.usageCount) ? row.usageCount : null,
-      createdAt: row.entityType === 'data_card' && typeof row.dataCardCreatedAt === 'string' ? row.dataCardCreatedAt : null,
-      updatedAt: row.entityType === 'data_card' && typeof row.dataCardUpdatedAt === 'string' ? row.dataCardUpdatedAt : null,
-      ratingUpdatedAt: typeof row.ratingUpdatedAt === 'string' ? row.ratingUpdatedAt : null,
-      description:
-        row.entityType === 'data_card' && typeof row.dataCardDescription === 'string' ? row.dataCardDescription : null,
-      rating,
-      games,
-      wins: typeof row.wins === 'number' ? row.wins : 0,
-      losses: typeof row.losses === 'number' ? row.losses : 0,
-      draws: typeof row.draws === 'number' ? row.draws : 0,
-      tier,
-      techScore: typeof row.techScore === 'number' ? row.techScore : null,
-      techLevel: typeof row.techLevel === 'string' ? row.techLevel : null,
-      isNative: row.isNative === 1 ? true : row.isNative === 0 ? false : null,
-      tagIds,
+const ensureEntity = (
+  entityByKey: Map<string, SeasonArchiveEntity>,
+  payload: {
+    ref: SeasonArchiveEntityRef;
+    displayName: string;
+    description: string | null;
+    authorName: string | null;
+    authorId: number | null;
+    usageCount: number | null;
+    likeCount: number | null;
+    favoriteCount: number | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+    techScore: number | null;
+    techLevel: string | null;
+    isNative: boolean | null;
+    tagIds: string[];
+  },
+): SeasonArchiveEntity => {
+  const key = buildEntityKey(payload.ref);
+  const existing = entityByKey.get(key);
+  if (!existing) {
+    const entity: SeasonArchiveEntity = {
+      entityType: payload.ref.entityType,
+      entityId: payload.ref.entityId,
+      displayName: payload.displayName,
+      techScore: payload.techScore,
+      techLevel: payload.techLevel,
+      isNative: payload.isNative,
+      tagIds: payload.tagIds,
+      queues: {},
     };
+
+    if (payload.description) entity.description = payload.description;
+    if (payload.authorName) entity.authorName = payload.authorName;
+    if (payload.authorId != null) entity.authorId = payload.authorId;
+    if (payload.usageCount != null) entity.usageCount = payload.usageCount;
+    if (payload.likeCount != null) entity.likeCount = payload.likeCount;
+    if (payload.favoriteCount != null) entity.favoriteCount = payload.favoriteCount;
+    if (payload.createdAt) entity.createdAt = payload.createdAt;
+    if (payload.updatedAt) entity.updatedAt = payload.updatedAt;
+
+    entityByKey.set(key, entity);
+    return entity;
+  }
+
+  if (!existing.displayName && payload.displayName) existing.displayName = payload.displayName;
+  if (!existing.description && payload.description) existing.description = payload.description;
+  if (!existing.authorName && payload.authorName) existing.authorName = payload.authorName;
+  if (existing.authorId == null && payload.authorId != null) existing.authorId = payload.authorId;
+  if (existing.usageCount == null && payload.usageCount != null) existing.usageCount = payload.usageCount;
+  if (existing.likeCount == null && payload.likeCount != null) existing.likeCount = payload.likeCount;
+  if (existing.favoriteCount == null && payload.favoriteCount != null) existing.favoriteCount = payload.favoriteCount;
+  if (!existing.createdAt && payload.createdAt) existing.createdAt = payload.createdAt;
+  if (!existing.updatedAt && payload.updatedAt) existing.updatedAt = payload.updatedAt;
+
+  if (existing.techScore == null && payload.techScore != null) existing.techScore = payload.techScore;
+  if (existing.techLevel == null && payload.techLevel != null) existing.techLevel = payload.techLevel;
+  if (existing.isNative == null && payload.isNative != null) existing.isNative = payload.isNative;
+
+  if (payload.tagIds.length > 0) {
+    const next = new Set(existing.tagIds);
+    payload.tagIds.forEach((id) => next.add(id));
+    existing.tagIds = Array.from(next).sort();
+  }
+
+  return existing;
+};
+
+const buildQueueSnapshot = (
+  row: LeaderboardRow,
+  options: { rank: number; queen: Awaited<ReturnType<typeof queryArenaPublicQueenEntity>> | null },
+): SeasonArchiveQueueSnapshot => {
+  const rating = typeof row.rating === 'number' ? row.rating : 0;
+  const games = typeof row.games === 'number' ? row.games : 0;
+  const baseTier = computeArenaBaseTier(rating, games);
+  const isQueen = options.queen?.entityType === row.entityType && options.queen?.entityId === row.entityId;
+  const tier = applyQueenTier(baseTier, isQueen);
+
+  return {
+    rank: options.rank,
+    rating,
+    games,
+    wins: typeof row.wins === 'number' ? row.wins : 0,
+    losses: typeof row.losses === 'number' ? row.losses : 0,
+    draws: typeof row.draws === 'number' ? row.draws : 0,
+    tier,
+    ratingUpdatedAt: typeof row.ratingUpdatedAt === 'string' ? row.ratingUpdatedAt : null,
+  };
+};
+
+const ingestRows = async (
+  rows: LeaderboardRow[],
+  options: {
+    queue: Queue;
+    rankBase: number;
+    queen: Awaited<ReturnType<typeof queryArenaPublicQueenEntity>> | null;
+    entityByKey: Map<string, SeasonArchiveEntity>;
+    presetNameByFilename: Map<string, string>;
+  },
+): Promise<SeasonArchiveEntityRef[]> => {
+  return rows.map((row, index) => {
+    const ref: SeasonArchiveEntityRef = {
+      entityType: row.entityType === 'preset' ? 'preset' : 'data_card',
+      entityId: typeof row.entityId === 'string' ? row.entityId : '',
+    };
+
+    const displayName = ref.entityType === 'preset'
+      ? (options.presetNameByFilename.get(ref.entityId) ?? ref.entityId)
+      : (typeof row.dataCardName === 'string' && row.dataCardName.trim() ? row.dataCardName.trim() : ref.entityId);
+
+    const tagIds = normalizeTagIds(row.tagIds);
+
+    const isNative = row.isNative === 1 ? true : row.isNative === 0 ? false : null;
+
+    const entity = ensureEntity(options.entityByKey, {
+      ref,
+      displayName: clampString(displayName, 120) ?? ref.entityId,
+      description: clampString(ref.entityType === 'data_card' ? row.dataCardDescription : null, 800),
+      authorName: clampString(ref.entityType === 'data_card' ? row.authorName : null, 80),
+      authorId: ref.entityType === 'data_card' && typeof row.authorId === 'number' && Number.isFinite(row.authorId) ? row.authorId : null,
+      usageCount: ref.entityType === 'data_card' && typeof row.usageCount === 'number' && Number.isFinite(row.usageCount) ? row.usageCount : null,
+      likeCount: ref.entityType === 'data_card' && typeof row.likeCount === 'number' && Number.isFinite(row.likeCount) ? row.likeCount : null,
+      favoriteCount: ref.entityType === 'data_card' && typeof row.favoriteCount === 'number' && Number.isFinite(row.favoriteCount) ? row.favoriteCount : null,
+      createdAt: ref.entityType === 'data_card' ? clampString(row.dataCardCreatedAt, 40) : null,
+      updatedAt: ref.entityType === 'data_card' ? clampString(row.dataCardUpdatedAt, 40) : null,
+      techScore: typeof row.techScore === 'number' && Number.isFinite(row.techScore) ? row.techScore : null,
+      techLevel: typeof row.techLevel === 'string' && row.techLevel.trim() ? row.techLevel.trim() : null,
+      isNative,
+      tagIds,
+    });
+
+    const rank = options.rankBase + index;
+    const snapshot = buildQueueSnapshot(row, { rank, queen: options.queen });
+    entity.queues[options.queue] = snapshot;
+
+    return ref;
   });
 };
 
-const archiveQueue = async (queryFromD1: QueryFromD1, queue: Queue) => {
+const archiveQueue = async (
+  queryFromD1: QueryFromD1,
+  queue: Queue,
+  options: { entityByKey: Map<string, SeasonArchiveEntity>; presetNameByFilename: Map<string, string> },
+): Promise<{ leaderboard: SeasonArchive['leaderboards'][Queue] }> => {
   const total = await queryLeaderboardCount(queryFromD1, queue);
   const queen = await queryArenaPublicQueenEntity(queryFromD1, queue).catch((error) => {
     console.warn('[season-archive] 读取女王段位失败（降级为无女王）:', error);
@@ -259,11 +374,30 @@ const archiveQueue = async (queryFromD1: QueryFromD1, queue: Queue) => {
   );
   const bottomRows = bottomRowsRaw.slice().reverse();
 
-  const top = await buildItems(topRows, { rankBase: 1, queen });
+  const top = await ingestRows(topRows, {
+    queue,
+    rankBase: 1,
+    queen,
+    entityByKey: options.entityByKey,
+    presetNameByFilename: options.presetNameByFilename,
+  });
   const bottomRankBase = Math.max(1, total - bottomRows.length + 1);
-  const bottom = await buildItems(bottomRows, { rankBase: bottomRankBase, queen });
+  const bottom = await ingestRows(bottomRows, {
+    queue,
+    rankBase: bottomRankBase,
+    queen,
+    entityByKey: options.entityByKey,
+    presetNameByFilename: options.presetNameByFilename,
+  });
 
-  return { total, top, bottom };
+  return {
+    leaderboard: {
+      queue,
+      total,
+      top,
+      bottom,
+    },
+  };
 };
 
 const main = async () => {
@@ -310,7 +444,7 @@ const main = async () => {
   const generatedAt = new Date().toISOString();
 
   let archive: SeasonArchive = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt,
     season: {
       id: target.id,
@@ -320,6 +454,7 @@ const main = async () => {
       description: target.description,
       ...(target.specialRules ? { specialRules: target.specialRules } : {}),
     },
+    entities: [],
     leaderboards: {
       strict: { queue: 'strict', total: 0, top: [], bottom: [] },
       free: { queue: 'free', total: 0, top: [], bottom: [] },
@@ -331,13 +466,23 @@ const main = async () => {
     console.warn('[season-archive] 未检测到 D1 配置，将生成空的归档文件（仅用于本地/CI 验证）。');
   } else {
     const { queryFromD1 } = await import('../lib/d1');
-    const strict = await archiveQueue(queryFromD1, 'strict');
-    const free = await archiveQueue(queryFromD1, 'free');
+    const { PRESET_LIST } = await import('../lib/presets');
+    const presetNameByFilename = new Map(PRESET_LIST.map((preset) => [preset.filename, preset.name]));
+    const entityByKey = new Map<string, SeasonArchiveEntity>();
+    const strict = await archiveQueue(queryFromD1, 'strict', { entityByKey, presetNameByFilename });
+    const free = await archiveQueue(queryFromD1, 'free', { entityByKey, presetNameByFilename });
+
+    const entities = Array.from(entityByKey.values());
+    entities.sort((a, b) => {
+      if (a.entityType !== b.entityType) return a.entityType.localeCompare(b.entityType);
+      return a.entityId.localeCompare(b.entityId);
+    });
     archive = {
       ...archive,
+      entities,
       leaderboards: {
-        strict: { queue: 'strict', total: strict.total, top: strict.top, bottom: strict.bottom },
-        free: { queue: 'free', total: free.total, top: free.top, bottom: free.bottom },
+        strict: strict.leaderboard,
+        free: free.leaderboard,
       },
     };
   }

@@ -44,15 +44,23 @@ export type SeasonsConfig = {
   seasons: SeasonMeta[];
 };
 
-export type SeasonArchiveLeaderboard = {
-  queue: 'strict' | 'free';
-  total: number;
-  top: SeasonArchiveItem[];
-  bottom: SeasonArchiveItem[];
+export type SeasonArchiveEntityRef = {
+  entityType: 'data_card' | 'preset';
+  entityId: string;
 };
 
-export type SeasonArchiveItem = {
+export type SeasonArchiveQueueSnapshot = {
   rank: number;
+  rating: number;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  tier: string;
+  ratingUpdatedAt: string | null;
+};
+
+export type SeasonArchiveEntity = {
   entityType: 'data_card' | 'preset';
   entityId: string;
   displayName: string;
@@ -63,24 +71,29 @@ export type SeasonArchiveItem = {
   usageCount?: number | null;
   createdAt?: string | null;
   updatedAt?: string | null;
-  ratingUpdatedAt?: string | null;
   description?: string | null;
-  rating: number;
-  games: number;
-  wins: number;
-  losses: number;
-  draws: number;
-  tier: string;
   techScore: number | null;
   techLevel: string | null;
   isNative: boolean | null;
   tagIds: string[];
+  queues: {
+    strict?: SeasonArchiveQueueSnapshot | null;
+    free?: SeasonArchiveQueueSnapshot | null;
+  };
+};
+
+export type SeasonArchiveLeaderboard = {
+  queue: 'strict' | 'free';
+  total: number;
+  top: SeasonArchiveEntityRef[];
+  bottom: SeasonArchiveEntityRef[];
 };
 
 export type SeasonArchive = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generatedAt: string;
   season: Pick<SeasonMeta, 'id' | 'name' | 'startsAt' | 'endsAt' | 'description' | 'specialRules'>;
+  entities: SeasonArchiveEntity[];
   leaderboards: {
     strict: SeasonArchiveLeaderboard;
     free: SeasonArchiveLeaderboard;

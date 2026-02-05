@@ -9,7 +9,7 @@ import { LeaderboardEntityDetailsModal, type LeaderboardEntityDetailsTarget } fr
 import { TechBadge } from '@/components/ranking/TechBadge';
 import { TierBadge } from '@/components/ranking/TierBadge';
 import { getArenaApproxRankLabel, getArenaCachedRank, isCanonicalPublicLeaderboardQuery, upsertArenaRankCacheFromLeaderboard } from '@/lib/arena/rank-cache';
-import type { SeasonArchive, SeasonArchiveItem, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
+import type { SeasonArchive, SeasonsConfig, SeasonMeta } from '@/lib/seasons';
 import { formatSeasonTitle, formatYmdSlash, getCurrentSeason, seasonArchiveUrl } from '@/lib/seasons';
 import { getScenarioPresetByFilename } from '@/lib/scenario-presets';
 import { buildTitleDisplay } from '@/lib/text';
@@ -35,8 +35,23 @@ type RankingFilters = {
   maxTechScore: string;
 };
 
-type LeaderboardItem = SeasonArchiveItem & {
-  authorName?: string | null;
+type LeaderboardItem = {
+  rank: number;
+  entityType: 'data_card' | 'preset';
+  entityId: string;
+  displayName: string;
+  authorName: string | null;
+  rating: number;
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  tier: string;
+  techScore: number | null;
+  techLevel: string | null;
+  isNative: boolean | null;
+  tagIds: string[];
+  ratingUpdatedAt?: string | null;
 };
 
 type Tag = {
@@ -329,25 +344,61 @@ export function RankingPage() {
     if (!isArchiveMode) return null;
     const data = archiveQuery.data;
     if (!data) return null;
-    const board = appliedFilters.queue === 'free' ? data.leaderboards.free : data.leaderboards.strict;
-    const top = Array.isArray(board?.top) ? board.top : [];
-    const bottom = Array.isArray(board?.bottom) ? board.bottom : [];
-    const byKey = new Map<string, LeaderboardItem>();
-    for (const item of [...top, ...bottom]) {
-      if (!item) continue;
-      const entityType = item.entityType === 'preset' ? 'preset' : 'data_card';
-      const entityId = typeof item.entityId === 'string' ? item.entityId : '';
+    const queue = appliedFilters.queue === 'free' ? 'free' : 'strict';
+    const board = queue === 'free' ? data.leaderboards.free : data.leaderboards.strict;
+    const topRefs = Array.isArray(board?.top) ? board.top : [];
+    const bottomRefs = Array.isArray(board?.bottom) ? board.bottom : [];
+
+    const entityByKey = new Map<string, SeasonArchive['entities'][number]>();
+    const entities = Array.isArray(data.entities) ? data.entities : [];
+    for (const entity of entities) {
+      if (!entity) continue;
+      const entityType = entity.entityType === 'preset' ? 'preset' : 'data_card';
+      const entityId = typeof entity.entityId === 'string' ? entity.entityId : '';
       if (!entityId) continue;
+      entityByKey.set(`${entityType}:${entityId}`, entity);
+    }
+
+    const byKey = new Map<string, LeaderboardItem>();
+    for (const ref of [...topRefs, ...bottomRefs]) {
+      if (!ref) continue;
+      const entityType = ref.entityType === 'preset' ? 'preset' : 'data_card';
+      const entityId = typeof ref.entityId === 'string' ? ref.entityId : '';
+      if (!entityId) continue;
+
       const key = `${entityType}:${entityId}`;
+      const entity = entityByKey.get(key);
+      const snapshot = queue === 'free' ? entity?.queues.free : entity?.queues.strict;
+      if (!entity || !snapshot) continue;
+
+      const item: LeaderboardItem = {
+        rank: snapshot.rank,
+        entityType,
+        entityId,
+        displayName: entity.displayName ?? entityId,
+        authorName: typeof entity.authorName === 'string' ? entity.authorName : null,
+        rating: snapshot.rating,
+        games: snapshot.games,
+        wins: snapshot.wins,
+        losses: snapshot.losses,
+        draws: snapshot.draws,
+        tier: snapshot.tier,
+        techScore: entity.techScore,
+        techLevel: entity.techLevel,
+        isNative: entity.isNative,
+        tagIds: Array.isArray(entity.tagIds) ? entity.tagIds : [],
+        ratingUpdatedAt: snapshot.ratingUpdatedAt,
+      };
+
       const prev = byKey.get(key);
-      if (!prev || (typeof item.rank === 'number' && typeof prev.rank === 'number' && item.rank < prev.rank)) {
+      if (!prev || item.rank < prev.rank) {
         byKey.set(key, item);
       }
     }
     return {
       total: typeof board?.total === 'number' && Number.isFinite(board.total) ? Math.max(0, Math.floor(board.total)) : 0,
-      topCount: top.length,
-      bottomCount: bottom.length,
+      topCount: topRefs.length,
+      bottomCount: bottomRefs.length,
       items: Array.from(byKey.values()),
     };
   }, [appliedFilters.queue, archiveQuery.data, isArchiveMode]);
