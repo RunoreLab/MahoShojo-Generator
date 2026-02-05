@@ -300,6 +300,18 @@ CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_room_id ON battle_r
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_match_id ON battle_report_generations(pvp_match_id);
 CREATE INDEX IF NOT EXISTS idx_battle_report_generations_pvp_round_id ON battle_report_generations(pvp_round_id);
 
+-- 用户活跃追踪（后台统计用）
+-- 说明：用于以较低 D1_ROWS_READ 代价统计「最近24小时/7天活跃用户」等指标。
+-- 统计口径：用户在任意业务操作中被“触达”（touch）后会更新 last_seen_at。
+CREATE TABLE IF NOT EXISTS user_last_activity (
+  user_id INTEGER PRIMARY KEY NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_last_activity_last_seen_at ON user_last_activity(last_seen_at);
+
 -- 大对象索引表（R2 外部化）
 -- 用于把大字段（战报正文、PVP 快照、立绘等）外部化到 R2，并在 D1 内保存可查询的索引。
 CREATE TABLE IF NOT EXISTS large_objects (
