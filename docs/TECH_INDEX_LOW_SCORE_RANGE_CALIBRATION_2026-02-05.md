@@ -1,59 +1,51 @@
-# 技术值（Tech Index）低分段区间（<10）校准：问题核实与算法调整（2026-02-05）
+# 技术值（Tech Index）分布校准：填充 <10 区间并缓解 100 顶格（2026-02-05）
 
 更新时间：2026-02-05  
 数据来源：Cloudflare D1（`data_cards` / `data_card_metrics.details_json`）  
 代码位置：`lib/metrics/techIndex.ts`  
 关联文档：`docs/TECH_INDEX_RESEARCH_2026-02-04.md`、`docs/TECH_INDEX_USER_ANSWERS_STORAGE_IMPACT_2026-02-05.md`
 
-目标：让技术值的 **0~9（<10）** 区间不再长期空置，同时保持技术值稳定落在 **[0,100]**，并尽量不扰动主分布（中位数/P90 等）。
+目标：让技术值的 **0~9（<10）** 区间不再长期空置，同时缓解部分卡“顶格到 100”导致的区分度下降；并保持技术值稳定落在 **[0,100]**。
 
 ---
 
 ## 0. 结论先行（TL;DR）
 
-### 0.1 现状核实：<10 区间确实“全库空置”
+### 0.1 现状核实：<10 区间存在长期空置风险
 
-统计时间：2026-02-05（本机执行）  
-统计对象：`type='character' AND deleted_at IS NULL`
+在现行 v1 算法下，全库角色卡的最小技术值曾出现过 `min=11` 的情况，导致 `<10` 区间长期空置（详见旧口径核实记录与 SQL 复现段落）。
 
-现行算法（旧口径）下：
+与此同时，近期 `userAnswers` 的存储结构升级会系统性抬升技术值（不要求做 canonicalize 的前提下，我们只在“打分映射阶段”做校准），进一步放大 `<10` 空置的概率。
 
-- `min(tech_score)=11`
-- `<10`：**0 张**
-- `<15`：**6 张**
-- `<20`：**19 张**
-- `<25`：**约 40 张**
+结论：需要一个**低侵入、可解释**的校准手段，把一部分“极低技术”卡拉回 `<10` 区间。
 
-结论：**L0（<10）在实际数据中完全不触发**，这个区间等于被浪费。
+### 0.2 方案（推荐）：整体下移 `scoreShift=-10` + 输出限幅
 
-### 0.2 方案：只对“低分段”做曲线压缩（不动中高分）
+在保持现有特征提取与加权合成不变的前提下，只在“最终分数落点”做一个 **整体下移校准**：
 
-在 `computeTechIndex` 的“组件加权合成得到 compositeScore”之后，新增一个“低分段压缩曲线（lowEndCurve）”：
+1) 先得到基础分（以及可选的风险加成）：
 
-- 当 `compositeScore <= pivot` 时：`f(s) = pivot * (s / pivot) ^ gamma`
-- 当 `compositeScore > pivot` 时：`f(s) = s`（完全不改）
+```
+baseScore = round(100 * compositeScore)
+rawScore = baseScore + (kwExploit>0 ? exploitBoost : 0)
+```
 
-默认参数（已落地到代码默认配置）：
+2) 再做整体下移与限幅：
 
-- `pivot = 0.4`
-- `gamma = 8`
+```
+techScore = clamp(rawScore - scoreShift, 0, 100)
+```
 
-性质：
+默认配置（已落地到代码默认配置）：
 
-- 输出严格保持在 `[0,1]`（进而 `techScore` 保持在 `[0,100]`）
-- `f(pivot)=pivot`，且 **只会压低** 低分段（不会抬高任何卡）
-- 由于仅影响 `compositeScore<0.4` 的卡，整体分布基本不动
+- `scoreShift = 10`（即整体 `-10`，低于 0 则钳制到 0）
+- 保持 `exploitBoost = 10`（但由于我们在**最终落点**做校准，能显著缓解“加成 + 封顶”带来的 100 顶格堆叠）
 
-### 0.3 影响评估（基于 D1 已落库的组件分等价重算）
+这样做的直观效果：
 
-使用 `data_card_metrics.details_json` 中保存的组件分（`scoreControl/scoreStructure/...`）按新曲线“等价重算”：
-
-- `<10`：**≈ 200 张**（从 0 变为“有一定数量”）
-- `min`：**11 → 0**
-- `max`：保持 **100**
-- 受影响的卡数量：**≈ 800 张**（仅占全库角色卡约 4%）
-- `P50 / P90`：保持不变（实测仍为 50 / 63）
-- mean：仅小幅下降（约 -0.6 分）
+- `<10` 会被填充：原本落在 `10~19` 的卡会落入 `0~9`（并保持不越界）
+- `100` 顶格会减少：尤其是“因为 `exploitBoost` 被推到 100”的卡，不再集中在 100 上（区分度更好）
+- 输出严格保持在 `[0,100]`
 
 ---
 
@@ -73,28 +65,18 @@ techScore = round(100 * compositeScore) + exploitBoost(可选)
 
 其中 `scoreSize`、`scoreStructure` 在“正常数据卡”上很难接近 0（尤其角色卡通常至少有若干字段与一定文本），导致 `compositeScore` 的下界被“抬起来”，最终实际最小值停在 11 左右，使 0~9 无卡落入。
 
-近期 `userAnswers` 新存储格式会进一步抬升部分卡的结构复杂度（详见另一份核实文档），但这不是 <10 空置的唯一原因：**即便不考虑问卷问题文本，旧口径也已经没有 <10。**
+近期 `userAnswers` 新存储格式会进一步抬升部分卡的结构复杂度（详见另一份核实文档），从而增加 `<10` 空置的风险。
 
 ---
 
-## 2. 低分段压缩曲线（lowEndCurve）设计说明
+## 2. 为什么不采用“低分段压缩曲线”
 
-### 2.1 公式与直觉
+先前文档里曾讨论过“只压低低分段、尽量不动中高分”的曲线方案，但它对另一个痛点——**部分卡顶格到 100**——帮助有限：
 
-对低分段使用幂函数压缩：
+- 低分段曲线只能“把低分更低”，并不会直接减少高分段到达 100 的概率
+- 反而整体下移 `-10` 同时对低分与高分都有效：既填充 `<10`，也能把一部分顶格卡从 100 拉回可区分的区间
 
-- `pivot` 控制“从哪开始不动”：`compositeScore >= pivot` 完全保持原值
-- `gamma` 控制“压缩力度”：越大，越会把接近 0 的分数压向 0
-
-这相当于“把本来挤在 10~40 的少量低分卡，向 0~20 拉开”，从而腾出并填充 <10 区间，同时避免破坏中高分段的可读性。
-
-### 2.2 为什么选 pivot=0.4
-
-实测全库角色卡中，`techScore < 40` 的占比很小（约几个百分点）。  
-因此把 pivot 定在 0.4，天然做到：
-
-- 只影响少量卡（主要是最简单/最短/结构最薄的卡）
-- 榜单与大多数卡的技术值不变（更符合“轻量修补”的目标）
+因此本次选择更简单、效果更直接的 `scoreShift` 校准。
 
 ---
 
@@ -121,8 +103,9 @@ WHERE dc.type='character'
 由于新算法只改变 `compositeScore -> techScore` 的映射（组件分不变），可以直接读取 `details_json.components` 做等价重算：
 
 - `compositeScore = 0.25*c + 0.05*m + 0.40*s + 0.05*code + 0.25*size`
-- `techScore = round(100 * lowEndCurve(compositeScore))`
-- `kwExploit>0` 仍保留原有 `exploitBoost`
+- `baseScore = round(100 * compositeScore)`
+- `rawScore = baseScore + (kwExploit>0 ? exploitBoost : 0)`（`kwExploit` 可从 `details_json.raw.kwExploit` 获取）
+- `techScore = clamp(rawScore - scoreShift, 0, 100)`
 
 ---
 
@@ -132,7 +115,7 @@ WHERE dc.type='character'
 
 `lib/metrics/techIndex.ts` 已新增并启用默认配置：
 
-- `lowEndCurve: { pivot: 0.4, gamma: 8 }`
+- `scoreShift: 10`（最终分数整体下移 10，并在 `[0,100]` 限幅）
 
 ### 4.2 需要回填 data_card_metrics
 
@@ -146,4 +129,3 @@ bun scripts/backfill-data-card-tech-index.ts --force --type character
 ```
 
 > 如果只想观察影响，可以先 `--dry-run`（但 dry-run 不会输出分布，需要配合额外统计脚本）。
-
