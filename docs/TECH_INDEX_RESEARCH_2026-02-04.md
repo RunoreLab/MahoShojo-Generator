@@ -6,6 +6,8 @@
 
 > 2026-02-05 补充：问卷生成角色卡的 `userAnswers` 新存储格式（对象数组 + 问题文本）会系统性推高 techScore，并造成新旧卡口径不可比。详见：`docs/TECH_INDEX_USER_ANSWERS_STORAGE_IMPACT_2026-02-05.md`。
 
+> 2026-02-05 补充：当前全库角色卡的 `<10` 技术值区间为空（min=11）。已新增“低分段压缩曲线（lowEndCurve）”以填充该区间且尽量不扰动主分布。详见：`docs/TECH_INDEX_LOW_SCORE_RANGE_CALIBRATION_2026-02-05.md`。
+
 > 注意：百科条目里强调过“技术值 ≠ 强度值”。本文仍以“风险/风格提示”为本意进行讨论，但会额外评估其对排位分（`arena_ratings.rating`）的**统计相关性**，因为你提出了“预测能力下降”的诉求。
 
 ---
