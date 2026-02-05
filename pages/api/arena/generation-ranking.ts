@@ -108,6 +108,19 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
       ? seasonQuestionnaireLoreAllowedRaw !== 0
       : null);
 
+  const seasonQuestionnaireLorePresetIds = Array.isArray(parsedExtraJson?.seasonQuestionnaireLorePresetIds)
+    ? (parsedExtraJson?.seasonQuestionnaireLorePresetIds as unknown[])
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter((value) => Boolean(value))
+        .slice(0, 20)
+    : [];
+  const questionnaireLoreIds = Array.isArray(parsedExtraJson?.questionnaireLoreIds)
+    ? (parsedExtraJson?.questionnaireLoreIds as unknown[])
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter((value) => Boolean(value))
+        .slice(0, 20)
+    : [];
+
   const resolvedModelOverride = typeof parsedExtraJson?.resolvedModelOverride === 'string'
     ? parsedExtraJson.resolvedModelOverride.trim()
     : '';
@@ -164,7 +177,20 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
     if (snapshot.hasUserGuidance !== 0) reasons.push('has-user-guidance');
   }
 
-  if (questionnaireLoreEnabled === true && seasonQuestionnaireLoreAllowed !== true) {
+  if (seasonQuestionnaireLorePresetIds.length > 0) {
+    const requiredSet = new Set(seasonQuestionnaireLorePresetIds);
+    const actualSet = new Set(questionnaireLoreIds);
+    let ok = requiredSet.size === actualSet.size;
+    if (ok) {
+      for (const id of requiredSet) {
+        if (!actualSet.has(id)) {
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (!ok) reasons.push('season-questionnaire-lore-mismatch');
+  } else if (questionnaireLoreEnabled === true && seasonQuestionnaireLoreAllowed !== true) {
     reasons.push('season-questionnaire-lore-not-allowed');
   }
 

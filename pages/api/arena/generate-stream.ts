@@ -167,9 +167,13 @@ async function handler(req: NextRequest): Promise<Response> {
               questionnaires: rawQuestionnaires,
 	        } = body;
 
-            const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
-            const loreText = buildQuestionnaireLoreText(normalizeQuestionnaires(rawQuestionnaires)).trim();
-            const hasQuestionnaireLore = Boolean(loreText);
+	            const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
+	            const normalizedQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
+	            const loreText = buildQuestionnaireLoreText(normalizedQuestionnaires).trim();
+	            const hasQuestionnaireLore = Boolean(loreText);
+	            const questionnaireLoreIds = normalizedQuestionnaires
+	                .filter((questionnaire) => typeof questionnaire.loreMarkdown === 'string' && Boolean(questionnaire.loreMarkdown.trim()))
+	                .map((questionnaire) => questionnaire.id);
 
 	          const normalizedAuxScenarios = Array.isArray(auxScenarios)
 	              ? auxScenarios.filter((item) => item && typeof item === 'object')
@@ -407,10 +411,10 @@ async function handler(req: NextRequest): Promise<Response> {
             inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
         });
 
-	        const { combinedText, usedBundle } = buildPolicySafetyCheckText(inputsToCheck, {
-	            policy: appConfig.SAFETY_CHECK_POLICY,
-	            enableBundle: appConfig.ENABLE_BUNDLE_SAFETY_CHECK,
-	        });
+		    const { combinedText, usedBundle } = buildPolicySafetyCheckText(inputsToCheck, {
+		        policy: appConfig.SAFETY_CHECK_POLICY,
+		        enableBundle: appConfig.ENABLE_BUNDLE_SAFETY_CHECK,
+		    });
 	        if (usedBundle) {
 	            log.info('触发"连坐"机制，打包所有非原生内容进行检查。');
 	        }
@@ -786,6 +790,8 @@ async function handler(req: NextRequest): Promise<Response> {
                             seasonScenarioPreset: seasonStrictRules.scenarioPresetFilename ?? null,
                             seasonQuestionnaireLoreAllowed: seasonStrictRules.questionnaireLoreAllowed ? true : null,
                             questionnaireLoreEnabled: hasQuestionnaireLore ? true : null,
+                            seasonQuestionnaireLorePresetIds: seasonStrictRules.questionnaireLorePresetIds,
+                            questionnaireLoreIds,
                             scenarioFileName: normalizedScenarioFileName,
                             auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                        resolvedModelOverride: usedModelOverride ?? null,

@@ -152,6 +152,12 @@ export default async function handler(req: NextRequest) {
     const scenarioFileName = trimString(body?.scenarioFileName);
     const auxScenarioCount = readNonNegativeInt(body?.auxScenarioCount);
     const questionnaireLoreEnabled = readBoolean(body?.questionnaireLoreEnabled);
+    const questionnaireLoreIds = Array.isArray(body?.questionnaireLoreIds)
+      ? (body.questionnaireLoreIds as unknown[])
+          .map((value) => (typeof value === 'string' ? value.trim() : ''))
+          .filter((value) => Boolean(value))
+          .slice(0, 20)
+      : [];
 
     const origin = new URL(req.url).origin;
     const currentSeason = await fetchCurrentSeasonFromOrigin(origin);
@@ -199,7 +205,20 @@ export default async function handler(req: NextRequest) {
       if (auxScenarioCount > 0) reasons.push('season-aux-scenarios-not-allowed');
     }
 
-    if (questionnaireLoreEnabled && !seasonStrictRules.questionnaireLoreAllowed) {
+    if (seasonStrictRules.questionnaireLorePresetIds.length > 0) {
+      const requiredSet = new Set(seasonStrictRules.questionnaireLorePresetIds);
+      const actualSet = new Set(questionnaireLoreIds);
+      let ok = requiredSet.size === actualSet.size;
+      if (ok) {
+        for (const id of requiredSet) {
+          if (!actualSet.has(id)) {
+            ok = false;
+            break;
+          }
+        }
+      }
+      if (!ok) reasons.push('season-questionnaire-lore-mismatch');
+    } else if (questionnaireLoreEnabled && !seasonStrictRules.questionnaireLoreAllowed) {
       reasons.push('season-questionnaire-lore-not-allowed');
     }
 

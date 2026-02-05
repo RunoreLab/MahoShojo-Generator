@@ -160,8 +160,12 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         } = body;
 
         const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
-        const loreText = buildQuestionnaireLoreText(normalizeQuestionnaires(rawQuestionnaires)).trim();
+        const normalizedQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
+        const loreText = buildQuestionnaireLoreText(normalizedQuestionnaires).trim();
         const hasQuestionnaireLore = Boolean(loreText);
+        const questionnaireLoreIds = normalizedQuestionnaires
+            .filter((questionnaire) => typeof questionnaire.loreMarkdown === 'string' && Boolean(questionnaire.loreMarkdown.trim()))
+            .map((questionnaire) => questionnaire.id);
 
         const normalizedAuxScenarios = Array.isArray(auxScenarios)
             ? auxScenarios.filter((item) => item && typeof item === 'object')
@@ -670,6 +674,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                         seasonScenarioPreset: seasonStrictRules.scenarioPresetFilename ?? null,
                         seasonQuestionnaireLoreAllowed: seasonStrictRules.questionnaireLoreAllowed ? true : null,
                         questionnaireLoreEnabled: hasQuestionnaireLore ? true : null,
+                        seasonQuestionnaireLorePresetIds: seasonStrictRules.questionnaireLorePresetIds,
+                        questionnaireLoreIds,
                         scenarioFileName: normalizedScenarioFileName,
                         auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                    resolvedModelOverride: usedModelOverride ?? null,

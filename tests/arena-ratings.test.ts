@@ -176,6 +176,60 @@ describe('arena-ratings: 严格排位资格判定', () => {
     ).toBe(true);
   });
 
+  test('满足：赛季要求指定问卷 Lore 且完全匹配时可计 strict', () => {
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          extraJson: JSON.stringify({
+            readNarrativeHistory: false,
+            narrativeHistoryReadCount: 0,
+            rankedMatchOk: true,
+            questionnaireLoreEnabled: true,
+            seasonQuestionnaireLorePresetIds: ['lore-a', 'lore-b'],
+            questionnaireLoreIds: ['lore-b', 'lore-a'],
+          }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(true);
+  });
+
+  test('不满足：赛季要求指定问卷 Lore 但缺失/多选时不可计 strict', () => {
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          extraJson: JSON.stringify({
+            readNarrativeHistory: false,
+            narrativeHistoryReadCount: 0,
+            rankedMatchOk: true,
+            questionnaireLoreEnabled: true,
+            seasonQuestionnaireLorePresetIds: ['lore-a', 'lore-b'],
+            questionnaireLoreIds: ['lore-a'],
+          }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(false);
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          extraJson: JSON.stringify({
+            readNarrativeHistory: false,
+            narrativeHistoryReadCount: 0,
+            rankedMatchOk: true,
+            questionnaireLoreEnabled: true,
+            seasonQuestionnaireLorePresetIds: ['lore-a'],
+            questionnaireLoreIds: ['lore-a', 'lore-b'],
+          }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(false);
+  });
+
   test('不满足：赛季故事引导下缺失 arenaStrictPolicy 时仍要求 rankedMatchOk', () => {
     const guidance = '双方全力以赴禁止平局';
     expect(

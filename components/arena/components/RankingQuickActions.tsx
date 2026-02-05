@@ -80,6 +80,8 @@ const buildStrictSetupMissingReasons = (input: {
   auxScenarioCount: number;
   questionnaireLoreEnabled: boolean;
   questionnaireLoreAllowed: boolean;
+  requiredQuestionnaireLorePresetIds: string[];
+  questionnaireLoreIds: string[];
 }): string[] => {
   const reasons: string[] = [];
   if (!input.isAuthenticated) reasons.push('需要先登录');
@@ -102,7 +104,20 @@ const buildStrictSetupMissingReasons = (input: {
   if (input.readNarrativeHistory) reasons.push('需关闭「读取叙事历史」');
   if (input.adjudicationEventCount > 0) reasons.push('需清空「随机判定器事件」');
   if (input.rankableCombatants.some((c) => (c.characterGuidance ?? '').trim())) reasons.push('需清空「角色行动引导」');
-  if (input.questionnaireLoreEnabled && !input.questionnaireLoreAllowed) {
+  if (input.requiredQuestionnaireLorePresetIds.length > 0) {
+    const requiredSet = new Set(input.requiredQuestionnaireLorePresetIds);
+    const actualSet = new Set(input.questionnaireLoreIds);
+    let ok = requiredSet.size === actualSet.size;
+    if (ok) {
+      for (const id of requiredSet) {
+        if (!actualSet.has(id)) {
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (!ok) reasons.push('需启用赛季指定的「问卷/设定卡 Lore 注入」');
+  } else if (input.questionnaireLoreEnabled && !input.questionnaireLoreAllowed) {
     reasons.push('需关闭「问卷/设定卡 Lore 注入」');
   }
 
@@ -163,6 +178,7 @@ const formatStrictReason = (code: string): string => {
     'combatant-count-not-2': '需 2 人对战',
     'combatants-unrankable': '参战者需为数据卡/预设',
     'season-questionnaire-lore-not-allowed': '赛季规则不允许使用「问卷/设定卡 Lore 注入」',
+    'season-questionnaire-lore-mismatch': '「问卷/设定卡 Lore 注入」不符合赛季规则',
     'strict-card-missing': '数据卡不存在/已删除（严格排位不计分）',
     'strict-not-character': '仅“角色”数据卡可参与严格排位计分',
     'strict-not-public': '严格排位仅允许公开角色卡',

@@ -26,6 +26,12 @@ export type SeasonSpecialRules = {
    * - true：允许。
    */
   questionnaireLoreAllowed?: boolean;
+  /**
+   * 严格排位要求注入的“问卷/设定卡 Lore”（预设问卷 ID）。
+   * - 未填写/空数组：不要求；若已允许问卷注入，用户可自选。
+   * - 非空：严格排位必须注入这些 Lore，并且不允许注入列表外的其它 Lore。
+   */
+  questionnaireLorePresetIds?: string[];
 };
 
 export type SeasonStrictRules = {
@@ -33,6 +39,7 @@ export type SeasonStrictRules = {
   storyGuidance: string;
   scenarioPresetFilename: string | null;
   questionnaireLoreAllowed: boolean;
+  questionnaireLorePresetIds: string[];
 };
 
 export type SeasonMeta = {
@@ -181,13 +188,23 @@ const normalizeSeasonQuestionnaireLoreAllowed = (value: unknown): boolean => {
   return false;
 };
 
+const normalizeSeasonQuestionnaireLorePresetIds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const cleaned = value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter((item) => Boolean(item));
+  return cleaned.slice(0, 10);
+};
+
 export const deriveSeasonStrictRules = (season: SeasonMeta | null | undefined): SeasonStrictRules => {
   const special = season?.specialRules && typeof season.specialRules === 'object' ? season.specialRules : null;
   const mode = normalizeSeasonBattleMode(special?.mode) ?? 'classic';
   const storyGuidance = normalizeSeasonStoryGuidance(special?.storyGuidance);
   const scenarioPresetFilename = normalizeSeasonScenarioPresetFilename(mode, special?.scenarioPresetFilename);
-  const questionnaireLoreAllowed = normalizeSeasonQuestionnaireLoreAllowed(special?.questionnaireLoreAllowed);
-  return { mode, storyGuidance, scenarioPresetFilename, questionnaireLoreAllowed };
+  const questionnaireLorePresetIds = normalizeSeasonQuestionnaireLorePresetIds(special?.questionnaireLorePresetIds);
+  const questionnaireLoreAllowed =
+    questionnaireLorePresetIds.length > 0 || normalizeSeasonQuestionnaireLoreAllowed(special?.questionnaireLoreAllowed);
+  return { mode, storyGuidance, scenarioPresetFilename, questionnaireLoreAllowed, questionnaireLorePresetIds };
 };
 
 export const isSafeSeasonId = (value: string): boolean => {

@@ -171,8 +171,12 @@ async function handler(req: NextRequest): Promise<Response> {
 	        } = body;
 
             const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
-            const loreText = buildQuestionnaireLoreText(normalizeQuestionnaires(rawQuestionnaires)).trim();
+            const normalizedQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
+            const loreText = buildQuestionnaireLoreText(normalizedQuestionnaires).trim();
             const hasQuestionnaireLore = Boolean(loreText);
+            const questionnaireLoreIds = normalizedQuestionnaires
+                .filter((questionnaire) => typeof questionnaire.loreMarkdown === 'string' && Boolean(questionnaire.loreMarkdown.trim()))
+                .map((questionnaire) => questionnaire.id);
 
 	        snapshotMode = typeof mode === 'string' ? mode : 'classic';
 	        snapshotLanguage = normalizeOptionalString(language);
@@ -858,6 +862,8 @@ async function handler(req: NextRequest): Promise<Response> {
                         seasonScenarioPreset: seasonStrictRules.scenarioPresetFilename ?? null,
                         seasonQuestionnaireLoreAllowed: seasonStrictRules.questionnaireLoreAllowed ? true : null,
                         questionnaireLoreEnabled: hasQuestionnaireLore ? true : null,
+                        seasonQuestionnaireLorePresetIds: seasonStrictRules.questionnaireLorePresetIds,
+                        questionnaireLoreIds,
                         scenarioFileName: normalizedScenarioFileName,
                         auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                    resolvedModelOverride: usedModelOverride ?? null,
