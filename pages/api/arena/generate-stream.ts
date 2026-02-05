@@ -919,7 +919,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                controller.enqueue(encodeEvent('debug', payload));
 	            };
 
-		            const META_GUARD_CHARS = 2048;
+		            const META_GUARD_CHARS = 256;
 		            const META_FALLBACK_TAIL_CHARS = 120_000;
 
             const [clientUpstream, r2Body] = originalBody.tee();
