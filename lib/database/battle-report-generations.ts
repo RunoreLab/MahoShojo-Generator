@@ -1,4 +1,5 @@
 import { queryFromD1, generateUUID } from './core';
+import { touchUserLastActivity } from './user-activity';
 
 export type BattleReportGenerationStatus = 'completed' | 'aborted' | 'failed';
 export type BattleReportGenerationMode = 'stream' | 'non-stream';
@@ -235,7 +236,12 @@ export async function createBattleReportGenerationRecord(
     ];
 
     const result = (await queryFromD1(sql, params)) as any;
-    if (result?.success) return id;
+    if (result?.success) {
+      if (typeof payload.userId === 'number' && Number.isFinite(payload.userId) && payload.userId > 0) {
+        await touchUserLastActivity(payload.userId, payload.endedAt || payload.startedAt);
+      }
+      return id;
+    }
     return null;
   } catch (error) {
     console.error('写入 battle_report_generations 失败:', error);

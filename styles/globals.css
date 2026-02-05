@@ -36,6 +36,15 @@
   }
 }
 
+@layer components {
+  .admin-button-sm {
+    @apply inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition;
+    @apply hover:border-gray-300 hover:bg-gray-50;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-200;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+}
+
 :root {
   color-scheme: light;
   --app-page-bg: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
