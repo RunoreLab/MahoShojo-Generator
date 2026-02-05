@@ -11,6 +11,7 @@ type CollapsibleSectionProps = {
   description?: ReactNode;
   headerRight?: ReactNode;
   defaultOpen?: boolean;
+  autoOpen?: boolean;
   collapsible?: boolean;
   disabled?: boolean;
   keepMounted?: boolean;
@@ -48,6 +49,7 @@ export function CollapsibleSection({
   description,
   headerRight,
   defaultOpen = true,
+  autoOpen = false,
   collapsible = true,
   disabled = false,
   keepMounted = false,
@@ -72,6 +74,11 @@ export function CollapsibleSection({
     }
     setRestored(true);
   }, [storageKey]);
+
+  useEffect(() => {
+    if (!autoOpen) return;
+    setOpen(true);
+  }, [autoOpen]);
 
   useEffect(() => {
     if (!storageKey) return;
