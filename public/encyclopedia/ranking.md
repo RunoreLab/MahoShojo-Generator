@@ -1,7 +1,7 @@
 # 排位与排行榜
 
 > 作者：[末伏之夜](https://github.com/notuhao)  
-> 更新时间：2026-01-27
+> 更新时间：2026-02-05
 
 排位分是一个「近似强度/稳定性」的统计指标：它来自 LLM 叙事裁判，不追求电竞级公平。
 
@@ -129,18 +129,20 @@ free 会对“同一脱敏 IP + 同一对手组合”做时间窗去重（默认
 
 这不是 bug，而是防刷分/防抖动的风控设计。
 
-### 6) strict 未登录 / 未排位匹配 / 票据失效（ranked-match-xxx）
+### 6) strict 未登录 /（历史）排位匹配票据（ranked-match-xxx）
 
-strict 的核心是“可比性”：它要求你先通过 **排位匹配** 获取一张有签名的“对局票据”，并在生成时验证通过。
+strict 的核心是“可比性”：它会对生成设置做更严格的约束，并且 **必须登录才计分**。
 
-因此 strict 常见不计分原因包括：
+旧版本 strict 曾要求先通过「排位匹配」获取签名票据，因此你可能在**历史战报**里看到 `need-ranked-match` / `ranked-match-xxx`。  
+目前该机制已下线，strict 已切换为「自选对手 + 护栏」模式：**不再需要排位匹配按钮/票据**。
+
+当前 strict 常见不计分原因包括：
 
 - 未登录（`need-login`）
-- 没做排位匹配（`ranked-match-missing` / `need-ranked-match`）
-- 排位票据过期（`ranked-match-expired`，默认有效期 10 分钟）
-- 匹配后改了关键设置（`ranked-match-settings-changed`，比如语言/等级/模式/长度等）
-- 匹配后改了参战列表/对手（`ranked-match-roster-changed`）
-- 参战者不具备 strict 可计分实体身份（`ranked-match-unrankable`）
+- 赛季规则不满足（`mode-not-season` / `season-user-guidance-xxx` / `season-scenario-xxx`）
+- 开启了不允许的读写/上下文功能（`read-arena-history` / `read-current-state` / `read-narrative-history` / `has-adjudication-events` / `has-character-guidance`）
+- 对手/数据卡不满足 strict 条件（`strict-not-public` / `strict-not-approved` / `strict-not-character` / `strict-card-missing`）
+- strict 风控跳过（`daily-limit` / `dedup-user-pair` / `strict-out-of-range`）
 
 ### 7) strict 达到每日计分上限（daily-limit）
 
@@ -248,8 +250,7 @@ strict 更强调“同一份设定”的可比性。
 
 ## 风控提示
 
-strict：必须先通过「排位匹配」随机匹配对手才会计分；匹配票据默认 10 分钟有效。匹配后如修改参战列表或关键设置，该局不计 strict。  
-另外，strict 会在 10 分钟时间窗内尽量避免再次匹配到相同对手组合（除非候选不足）。  
+strict：采用「自选对手 + 护栏」——对局满足严格设置才计分，同时会启用公开/审核校验、分差区间限制、短时间重复对手去重（`dedup-user-pair`）与每日上限等。  
 free：仍允许自由挑选对手，并以脱敏 IP 做类似限速/去重（前提是有 `ip_anonymized`）。
 
 ## 每日刷新时间（严格排位）

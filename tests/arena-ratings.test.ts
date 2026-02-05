@@ -127,7 +127,9 @@ describe('arena-ratings: 严格排位资格判定', () => {
     ipAnonymized: '203.0.113.0',
     language: 'zh-CN',
     selectedLevel: null,
+    hasScenario: 0,
     hasUserGuidance: 0,
+    userGuidancePreview: null,
     hasAdjudicationEvents: 0,
     readArenaHistory: 0,
     readCurrentState: 0,
@@ -152,6 +154,45 @@ describe('arena-ratings: 严格排位资格判定', () => {
         baseCombatants,
       ),
     ).toBe(true);
+  });
+
+  test('满足：赛季故事引导 + arenaStrictPolicy=1+3:v1 时可计 strict（无需 rankedMatchOk）', () => {
+    const guidance = '双方全力以赴禁止平局';
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          hasUserGuidance: 1,
+          userGuidancePreview: guidance,
+          extraJson: JSON.stringify({
+            readNarrativeHistory: false,
+            narrativeHistoryReadCount: 0,
+            arenaStrictPolicy: '1+3:v1',
+            seasonStoryGuidance: guidance,
+          }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(true);
+  });
+
+  test('不满足：赛季故事引导下缺失 arenaStrictPolicy 时仍要求 rankedMatchOk', () => {
+    const guidance = '双方全力以赴禁止平局';
+    expect(
+      isStrictEligible(
+        {
+          ...baseSnapshot,
+          hasUserGuidance: 1,
+          userGuidancePreview: guidance,
+          extraJson: JSON.stringify({
+            readNarrativeHistory: false,
+            narrativeHistoryReadCount: 0,
+            seasonStoryGuidance: guidance,
+          }),
+        },
+        baseCombatants,
+      ),
+    ).toBe(false);
   });
 
   test('不满足：语言非简体中文', () => {
@@ -215,7 +256,9 @@ describe('arena-ratings: 自由排位开关（arenaFreeRankingEnabled）', () =>
     ipAnonymized: '203.0.113.0',
     language: 'zh-CN',
     selectedLevel: null,
+    hasScenario: 0,
     hasUserGuidance: 0,
+    userGuidancePreview: null,
     hasAdjudicationEvents: 0,
     readArenaHistory: 0,
     readCurrentState: 0,

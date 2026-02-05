@@ -779,7 +779,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    extraJson: compactExtraJson({
 	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
                             arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
-                            arenaStrictPolicy: isStrictRankedMatchRequest ? '1+3:v1' : null,
+                            arenaStrictPolicy: '1+3:v1',
                             seasonId: typeof currentSeason?.id === 'string' ? currentSeason.id : null,
                             seasonMode: seasonStrictRules.mode !== 'classic' ? seasonStrictRules.mode : null,
                             seasonStoryGuidance: seasonStrictRules.storyGuidance || null,
