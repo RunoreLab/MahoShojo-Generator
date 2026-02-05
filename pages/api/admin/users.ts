@@ -1,7 +1,6 @@
 // pages/api/admin/users.ts
 
-import { getAdminUsers } from '@/lib/database/admin';
-import { getUserByUsername } from '@/lib/database/users';
+import { getAdminUserDetailsByUsername, getAdminUsers } from '@/lib/database/admin';
 import type { NextRequest } from 'next/server';
 
 export const runtime = 'experimental-edge';
@@ -17,7 +16,7 @@ export default async function handler(req: NextRequest) {
     // 兼容旧版 user-management 页面根据 username 查询单个用户的请求
     const username = searchParams.get('username');
     if (username) {
-      const user = await getUserByUsername(username);
+      const user = await getAdminUserDetailsByUsername(username);
       if (user) {
         return new Response(JSON.stringify(user), {
           status: 200,
@@ -29,6 +28,11 @@ export default async function handler(req: NextRequest) {
     }
 
     // 新版 user-dashboard 页面完整的筛选和统计功能
+    const activityRaw = (searchParams.get('activity') || '').trim();
+    const activity = (['24h', '7d', '30d', 'tracked', 'untracked'] as const).includes(activityRaw as any)
+      ? (activityRaw as any)
+      : undefined;
+
     const filters = {
       page: parseInt(searchParams.get('page') || '1', 10),
       limit: parseInt(searchParams.get('limit') || '20', 10),
@@ -37,6 +41,9 @@ export default async function handler(req: NextRequest) {
       regDateEnd: searchParams.get('regDateEnd') || undefined,
       loginDateStart: searchParams.get('loginDateStart') || undefined,
       loginDateEnd: searchParams.get('loginDateEnd') || undefined,
+      activeDateStart: searchParams.get('activeDateStart') || undefined,
+      activeDateEnd: searchParams.get('activeDateEnd') || undefined,
+      activity,
       status: searchParams.get('status') as any || undefined,
       minPublicCards: searchParams.has('minPublicCards') ? parseInt(searchParams.get('minPublicCards')!, 10) : undefined,
       maxPublicCards: searchParams.has('maxPublicCards') ? parseInt(searchParams.get('maxPublicCards')!, 10) : undefined,

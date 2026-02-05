@@ -11,6 +11,7 @@ interface User {
   auth_key: string;
   created_at: string;
   last_login_at: string | null;
+  last_active_at?: string | null;
   is_banned: string | null;
   slot_count: number | null;
   registration_ip: string | null;
@@ -496,6 +497,15 @@ export default function UserManagement() {
                         <input
                           type="text"
                           value={selectedUser.last_login_at ? new Date(selectedUser.last_login_at).toLocaleString('zh-CN') : '从未登录'}
+                          disabled
+                          className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">最近活跃</label>
+                        <input
+                          type="text"
+                          value={selectedUser.last_active_at ? new Date(selectedUser.last_active_at).toLocaleString('zh-CN') : '从未记录'}
                           disabled
                           className="w-full p-3 border border-gray-300 rounded-lg bg-gray-50"
                         />

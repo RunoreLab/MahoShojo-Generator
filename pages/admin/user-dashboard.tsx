@@ -16,6 +16,7 @@ interface User {
   is_review_exempt: 0 | 1;
   created_at: string;
   last_login_at: string | null;
+  last_active_at: string | null;
   total_cards: number;
   public_cards: number;
   banned_cards: number;
@@ -38,6 +39,9 @@ const UserManagementPage: React.FC = () => {
     regDateEnd: '',
     loginDateStart: '',
     loginDateEnd: '',
+    activeDateStart: '',
+    activeDateEnd: '',
+    activity: '',
     minPublicCards: '',
     maxPublicCards: '',
     minBannedCards: '',
@@ -90,6 +94,9 @@ const UserManagementPage: React.FC = () => {
       regDateEnd: (router.query.regDateEnd as string) || '',
       loginDateStart: (router.query.loginDateStart as string) || '',
       loginDateEnd: (router.query.loginDateEnd as string) || '',
+      activeDateStart: (router.query.activeDateStart as string) || '',
+      activeDateEnd: (router.query.activeDateEnd as string) || '',
+      activity: (router.query.activity as string) || '',
       minPublicCards: (router.query.minPublicCards as string) || '',
       maxPublicCards: (router.query.maxPublicCards as string) || '',
       minBannedCards: (router.query.minBannedCards as string) || '',
@@ -121,7 +128,15 @@ const UserManagementPage: React.FC = () => {
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    const newFilters = { ...filters, [name]: value, page: 1 };
+    let newFilters = { ...filters, [name]: value, page: 1 };
+
+    // 活跃筛选项与“活跃时间范围”避免叠加造成困惑：二者择一
+    if (name === 'activity' && value) {
+      newFilters = { ...newFilters, activeDateStart: '', activeDateEnd: '' };
+    }
+    if ((name === 'activeDateStart' || name === 'activeDateEnd') && value) {
+      newFilters = { ...newFilters, activity: '' };
+    }
     setFilters(newFilters);
 
     const isComposing = name === 'search' && (isComposingSearchRef.current || (e.nativeEvent as unknown as { isComposing?: boolean }).isComposing);
@@ -236,6 +251,14 @@ const UserManagementPage: React.FC = () => {
                 <option value="banned">已封禁</option>
                 <option value="exempt">审查豁免</option>
               </select>
+              <select name="activity" value={filters.activity} onChange={handleFilterChange} className="input-field">
+                <option value="">所有活跃</option>
+                <option value="24h">24 小时内活跃</option>
+                <option value="7d">7 天内活跃</option>
+                <option value="30d">30 天内活跃</option>
+                <option value="tracked">有活跃记录</option>
+                <option value="untracked">无活跃记录</option>
+              </select>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -310,6 +333,13 @@ const UserManagementPage: React.FC = () => {
                         <input type="date" name="loginDateEnd" value={filters.loginDateEnd} onChange={handleFilterChange} className="input-field"/>
                     </div>
                 </div>
+                <div>
+                    <label className="text-xs font-medium">最近活跃时间范围</label>
+                    <div className="flex gap-2">
+                        <input type="date" name="activeDateStart" value={filters.activeDateStart} onChange={handleFilterChange} className="input-field"/>
+                        <input type="date" name="activeDateEnd" value={filters.activeDateEnd} onChange={handleFilterChange} className="input-field"/>
+                    </div>
+                </div>
             </div>
           </div>
 
@@ -331,13 +361,14 @@ const UserManagementPage: React.FC = () => {
                   <th className="px-6 py-3">数据卡 (总/公/封/拒)</th>
                   <th className="px-6 py-3">注册时间</th>
                   <th className="px-6 py-3">最后登录</th>
+                  <th className="px-6 py-3">最近活跃</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                    <tr><td colSpan={6} className="text-center p-8">加载中...</td></tr>
+                    <tr><td colSpan={7} className="text-center p-8">加载中...</td></tr>
                 ) : users.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center p-8">未找到符合条件的用户</td></tr>
+                    <tr><td colSpan={7} className="text-center p-8">未找到符合条件的用户</td></tr>
                 ) : (
                   users.map(user => (
                     <tr key={user.id} className="bg-white border-b hover:bg-gray-50">
@@ -350,6 +381,7 @@ const UserManagementPage: React.FC = () => {
                       <td className="px-6 py-4 font-mono text-xs">{user.total_cards}/{user.public_cards}/{user.banned_cards}/{user.rejected_cards}</td>
                       <td className="px-6 py-4">{new Date(user.created_at).toLocaleDateString()}</td>
                       <td className="px-6 py-4">{user.last_login_at ? new Date(user.last_login_at).toLocaleDateString() : '从未'}</td>
+                      <td className="px-6 py-4">{user.last_active_at ? new Date(user.last_active_at).toLocaleString('zh-CN') : '从未记录'}</td>
                     </tr>
                   ))
                 )}

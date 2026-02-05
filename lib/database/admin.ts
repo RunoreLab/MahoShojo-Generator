@@ -818,6 +818,9 @@ export async function getAdminUsers(filters: {
   regDateEnd?: string;
   loginDateStart?: string;
   loginDateEnd?: string;
+  activeDateStart?: string;
+  activeDateEnd?: string;
+  activity?: '24h' | '7d' | '30d' | 'tracked' | 'untracked';
   status?: 'normal' | 'banned' | 'exempt';
   minPublicCards?: number; // 新增：最少公开卡片数
   maxPublicCards?: number; // 新增：最多公开卡片数
@@ -834,6 +837,9 @@ export async function getAdminUsers(filters: {
     regDateEnd,
     loginDateStart,
     loginDateEnd,
+    activeDateStart,
+    activeDateEnd,
+    activity,
     status,
     minPublicCards,
     maxPublicCards,
@@ -842,9 +848,28 @@ export async function getAdminUsers(filters: {
   } = filters;
 
   const offset = (page - 1) * limit;
-  const whereClauses: string[] = [];
-  const havingClauses: string[] = []; // 新增：用于 HAVING 子句
-  const params: (string | number)[] = []; // WHERE 和 HAVING 共用参数列表
+  const baseWhereClauses: string[] = [];
+  const activityWhereClauses: string[] = [];
+  const havingClauses: string[] = [];
+  const baseWhereParams: (string | number)[] = [];
+  const activityWhereParams: (string | number)[] = [];
+  const havingParams: (string | number)[] = [];
+
+  const isIsoDateOnly = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+  const normalizeActivityDateStart = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (isIsoDateOnly(trimmed)) return `${trimmed}T00:00:00.000Z`;
+    return trimmed;
+  };
+
+  const normalizeActivityDateEnd = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (isIsoDateOnly(trimmed)) return `${trimmed}T23:59:59.999Z`;
+    return trimmed;
+  };
 
   // --- 动态构建 WHERE 子句 (过滤用户属性) ---
   if (search) {
@@ -855,64 +880,119 @@ export async function getAdminUsers(filters: {
     const numericId = isNumericId ? Number.parseInt(normalizedSearch, 10) : null;
 
     if (typeof numericId === 'number' && Number.isFinite(numericId)) {
-      whereClauses.push('(u.id = ? OR u.username LIKE ? OR u.email LIKE ?)');
-      params.push(numericId, searchTerm, searchTerm);
+      baseWhereClauses.push('(u.id = ? OR u.username LIKE ? OR u.email LIKE ?)');
+      baseWhereParams.push(numericId, searchTerm, searchTerm);
     } else {
-      whereClauses.push('(u.username LIKE ? OR u.email LIKE ?)');
-      params.push(searchTerm, searchTerm);
+      baseWhereClauses.push('(u.username LIKE ? OR u.email LIKE ?)');
+      baseWhereParams.push(searchTerm, searchTerm);
     }
   }
   if (regDateStart) {
-    whereClauses.push('u.created_at >= ?');
-    params.push(regDateStart);
+    baseWhereClauses.push('DATE(u.created_at) >= DATE(?)');
+    baseWhereParams.push(regDateStart);
   }
   if (regDateEnd) {
-    whereClauses.push('u.created_at <= ?');
-    params.push(regDateEnd);
+    baseWhereClauses.push('DATE(u.created_at) <= DATE(?)');
+    baseWhereParams.push(regDateEnd);
   }
   if (loginDateStart) {
-    whereClauses.push('u.last_login_at >= ?');
-    params.push(loginDateStart);
+    baseWhereClauses.push('DATE(u.last_login_at) >= DATE(?)');
+    baseWhereParams.push(loginDateStart);
   }
   if (loginDateEnd) {
-    whereClauses.push('u.last_login_at <= ?');
-    params.push(loginDateEnd);
+    baseWhereClauses.push('DATE(u.last_login_at) <= DATE(?)');
+    baseWhereParams.push(loginDateEnd);
+  }
+  if (activity) {
+    const now = Date.now();
+    if (activity === 'tracked') {
+      activityWhereClauses.push('ula.user_id IS NOT NULL');
+    } else if (activity === 'untracked') {
+      activityWhereClauses.push('ula.user_id IS NULL');
+    } else if (activity === '24h') {
+      activityWhereClauses.push('ula.last_seen_at >= ?');
+      activityWhereParams.push(new Date(now - 24 * 60 * 60 * 1000).toISOString());
+    } else if (activity === '7d') {
+      activityWhereClauses.push('ula.last_seen_at >= ?');
+      activityWhereParams.push(new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString());
+    } else if (activity === '30d') {
+      activityWhereClauses.push('ula.last_seen_at >= ?');
+      activityWhereParams.push(new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString());
+    }
+  }
+  if (activeDateStart) {
+    const normalized = normalizeActivityDateStart(activeDateStart);
+    if (normalized) {
+      activityWhereClauses.push('ula.last_seen_at >= ?');
+      activityWhereParams.push(normalized);
+    }
+  }
+  if (activeDateEnd) {
+    const normalized = normalizeActivityDateEnd(activeDateEnd);
+    if (normalized) {
+      activityWhereClauses.push('ula.last_seen_at <= ?');
+      activityWhereParams.push(normalized);
+    }
   }
   if (status) {
-    if (status === 'banned') whereClauses.push("u.is_banned IS NOT NULL AND u.is_banned != ''");
-    else if (status === 'exempt') whereClauses.push('u.is_review_exempt = 1');
-    else if (status === 'normal') whereClauses.push("(u.is_banned IS NULL OR u.is_banned = '') AND u.is_review_exempt = 0");
+    if (status === 'banned') baseWhereClauses.push("u.is_banned IS NOT NULL AND u.is_banned != ''");
+    else if (status === 'exempt') baseWhereClauses.push('u.is_review_exempt = 1');
+    else if (status === 'normal') baseWhereClauses.push("(u.is_banned IS NULL OR u.is_banned = '') AND u.is_review_exempt = 0");
   }
 
   // --- 动态构建 HAVING 子句 (过滤聚合结果) ---
-  if (minPublicCards !== undefined) { havingClauses.push('public_cards >= ?'); params.push(minPublicCards); }
-  if (maxPublicCards !== undefined) { havingClauses.push('public_cards <= ?'); params.push(maxPublicCards); }
-  if (minBannedCards !== undefined) { havingClauses.push('banned_cards >= ?'); params.push(minBannedCards); }
-  if (maxBannedCards !== undefined) { havingClauses.push('banned_cards <= ?'); params.push(maxBannedCards); }
+  if (minPublicCards !== undefined) { havingClauses.push('public_cards >= ?'); havingParams.push(minPublicCards); }
+  if (maxPublicCards !== undefined) { havingClauses.push('public_cards <= ?'); havingParams.push(maxPublicCards); }
+  if (minBannedCards !== undefined) { havingClauses.push('banned_cards >= ?'); havingParams.push(minBannedCards); }
+  if (maxBannedCards !== undefined) { havingClauses.push('banned_cards <= ?'); havingParams.push(maxBannedCards); }
   // 处理特殊情况： "no banned cards"
   if (maxBannedCards === 0 && minBannedCards === undefined) {
       if (!havingClauses.some(c => c.includes('banned_cards <= ?'))) {
           havingClauses.push('banned_cards <= ?');
-          params.push(0);
+          havingParams.push(0);
       }
   }
 
+  const baseWhereSql = baseWhereClauses.length > 0 ? `WHERE ${baseWhereClauses.join(' AND ')}` : '';
+  const whereClauses = [...baseWhereClauses, ...activityWhereClauses];
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
   const havingSql = havingClauses.length > 0 ? `HAVING ${havingClauses.join(' AND ')}` : '';
+
+  const params = [...baseWhereParams, ...activityWhereParams, ...havingParams];
+  const fallbackParams = [...baseWhereParams, ...havingParams];
 
   // D1 不支持在 FROM 子句中使用复杂的子查询，所以我们将使用 LEFT JOIN 和 COUNT
   const dataSql = `
     SELECT
       u.id, u.username, u.email, u.created_at, u.last_login_at, u.is_banned, u.is_review_exempt,
+      MAX(ula.last_seen_at) AS last_active_at,
       COUNT(dc.id) as total_cards,
       SUM(CASE WHEN dc.is_public = 1 THEN 1 ELSE 0 END) as public_cards,
       SUM(CASE WHEN dc.is_public = -1 THEN 1 ELSE 0 END) as banned_cards,
       SUM(CASE WHEN dc.review_status = 'rejected' THEN 1 ELSE 0 END) as rejected_cards
     FROM users u
     LEFT JOIN data_cards dc ON u.id = dc.user_id
+    LEFT JOIN user_last_activity ula ON u.id = ula.user_id
     ${whereSql}
     GROUP BY u.id -- 按用户分组
     ${havingSql} -- 在分组后应用聚合筛选
+    ORDER BY u.${sortBy} ${sortOrder.toUpperCase()}
+    LIMIT ? OFFSET ?;
+  `;
+
+  const fallbackDataSql = `
+    SELECT
+      u.id, u.username, u.email, u.created_at, u.last_login_at, u.is_banned, u.is_review_exempt,
+      NULL AS last_active_at,
+      COUNT(dc.id) as total_cards,
+      SUM(CASE WHEN dc.is_public = 1 THEN 1 ELSE 0 END) as public_cards,
+      SUM(CASE WHEN dc.is_public = -1 THEN 1 ELSE 0 END) as banned_cards,
+      SUM(CASE WHEN dc.review_status = 'rejected' THEN 1 ELSE 0 END) as rejected_cards
+    FROM users u
+    LEFT JOIN data_cards dc ON u.id = dc.user_id
+    ${baseWhereSql}
+    GROUP BY u.id
+    ${havingSql}
     ORDER BY u.${sortBy} ${sortOrder.toUpperCase()}
     LIMIT ? OFFSET ?;
   `;
@@ -927,7 +1007,23 @@ export async function getAdminUsers(filters: {
         SUM(CASE WHEN dc.is_public = -1 THEN 1 ELSE 0 END) as banned_cards
       FROM users u
       LEFT JOIN data_cards dc ON u.id = dc.user_id
+      LEFT JOIN user_last_activity ula ON u.id = ula.user_id
       ${whereSql}
+      GROUP BY u.id
+      ${havingSql}
+    ) AS subquery;
+  `;
+
+  const fallbackCountSql = `
+    SELECT COUNT(*) as total
+    FROM (
+      SELECT
+        u.id,
+        SUM(CASE WHEN dc.is_public = 1 THEN 1 ELSE 0 END) as public_cards,
+        SUM(CASE WHEN dc.is_public = -1 THEN 1 ELSE 0 END) as banned_cards
+      FROM users u
+      LEFT JOIN data_cards dc ON u.id = dc.user_id
+      ${baseWhereSql}
       GROUP BY u.id
       ${havingSql}
     ) AS subquery;
@@ -948,8 +1044,100 @@ export async function getAdminUsers(filters: {
 
     return { users, total };
   } catch (error) {
-    console.error('[Admin] 获取用户列表失败:', error);
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    const missingActivityTable = message.includes('user_last_activity') && message.toLowerCase().includes('no such table');
+    if (!missingActivityTable) {
+      console.error('[Admin] 获取用户列表失败:', error);
+      throw error;
+    }
+
+    // 兼容：若 user_last_activity 尚未建表，则退化为不返回活跃时间、且忽略活跃筛选条件。
+    try {
+      const fallbackDataParams = [...fallbackParams, limit, offset];
+      const fallbackCountParams = [...fallbackParams];
+      const [dataResult, countResult] = await Promise.all([
+        queryFromD1(fallbackDataSql, fallbackDataParams),
+        queryFromD1(fallbackCountSql, fallbackCountParams),
+      ]) as [any, any];
+
+      const users = dataResult.success ? dataResult.result[0]?.results || [] : [];
+      const total = countResult.success ? countResult.result[0]?.results[0]?.total || 0 : 0;
+      return { users, total };
+    } catch (fallbackError) {
+      console.error('[Admin] user_last_activity 未就绪，且回退查询失败:', error, fallbackError);
+      throw fallbackError;
+    }
+  }
+}
+
+const readFirstAdminUserRow = (result: any): any | null => {
+  const row = result?.result?.[0]?.results?.[0];
+  return row && typeof row === 'object' ? row : null;
+};
+
+export async function getAdminUserDetailsById(userId: number): Promise<any | null> {
+  const safeUserId = Number.isFinite(userId) ? Math.floor(userId) : 0;
+  if (safeUserId <= 0) return null;
+
+  try {
+    const result = (await queryFromD1(
+      `SELECT
+        u.*,
+        ula.last_seen_at AS last_active_at
+       FROM users u
+       LEFT JOIN user_last_activity ula ON ula.user_id = u.id
+       WHERE u.id = ?
+       LIMIT 1`,
+      [safeUserId]
+    )) as any;
+
+    const row = readFirstAdminUserRow(result);
+    if (row) return row;
+    return null;
+  } catch (error) {
+    // 兼容：若 user_last_activity 尚未建表，则退化为仅 users 表
+    try {
+      const fallback = (await queryFromD1('SELECT * FROM users WHERE id = ? LIMIT 1', [safeUserId])) as any;
+      const row = readFirstAdminUserRow(fallback);
+      if (!row) return null;
+      return { ...row, last_active_at: null };
+    } catch (fallbackError) {
+      console.error('[Admin] 获取用户详情失败:', error, fallbackError);
+      return null;
+    }
+  }
+}
+
+export async function getAdminUserDetailsByUsername(username: string): Promise<any | null> {
+  const safeUsername = typeof username === 'string' ? username.trim() : '';
+  if (!safeUsername) return null;
+
+  try {
+    const result = (await queryFromD1(
+      `SELECT
+        u.*,
+        ula.last_seen_at AS last_active_at
+       FROM users u
+       LEFT JOIN user_last_activity ula ON ula.user_id = u.id
+       WHERE u.username = ?
+       LIMIT 1`,
+      [safeUsername]
+    )) as any;
+
+    const row = readFirstAdminUserRow(result);
+    if (row) return row;
+    return null;
+  } catch (error) {
+    // 兼容：若 user_last_activity 尚未建表，则退化为仅 users 表
+    try {
+      const fallback = (await queryFromD1('SELECT * FROM users WHERE username = ? LIMIT 1', [safeUsername])) as any;
+      const row = readFirstAdminUserRow(fallback);
+      if (!row) return null;
+      return { ...row, last_active_at: null };
+    } catch (fallbackError) {
+      console.error('[Admin] 获取用户详情失败:', error, fallbackError);
+      return null;
+    }
   }
 }
 

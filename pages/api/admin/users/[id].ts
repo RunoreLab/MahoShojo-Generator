@@ -1,4 +1,5 @@
 import { queryFromD1 } from '../../../../lib/database/core';
+import { getAdminUserDetailsById } from '@/lib/database/admin';
 
 export const runtime = 'edge';
 
@@ -70,14 +71,8 @@ export default async function handler(req: Request): Promise<Response> {
       const result = await queryFromD1(query, params) as any;
 
       if (result.success) {
-        // 获取更新后的用户信息
-        const getUserQuery = 'SELECT * FROM users WHERE id = ?';
-        const userResult = await queryFromD1(getUserQuery, [userId]) as any;
-        
-        if (userResult.success && userResult.result && userResult.result[0]?.results?.length > 0) {
-          const updatedUser = userResult.result[0].results[0];
-          return jsonResponse(updatedUser, 200);
-        }
+        const updatedUser = await getAdminUserDetailsById(userId);
+        if (updatedUser) return jsonResponse(updatedUser, 200);
         return jsonResponse({ error: '用户未找到' }, 404);
       }
       return jsonResponse({ error: '更新用户信息失败' }, 500);
@@ -90,13 +85,8 @@ export default async function handler(req: Request): Promise<Response> {
   if (req.method === 'GET') {
     // 获取单个用户信息
     try {
-      const query = 'SELECT * FROM users WHERE id = ?';
-      const result = await queryFromD1(query, [userId]) as any;
-      
-      if (result.success && result.result && result.result[0]?.results?.length > 0) {
-        const user = result.result[0].results[0];
-        return jsonResponse(user, 200);
-      }
+      const user = await getAdminUserDetailsById(userId);
+      if (user) return jsonResponse(user, 200);
       return jsonResponse({ error: '用户未找到' }, 404);
     } catch (error) {
       console.error('获取用户信息失败:', error);
