@@ -9,6 +9,7 @@ import { buildMagicTeaPartyUpdatePrompt } from '@/lib/magic-tea-party/prompts';
 import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
 import { generateWithAI, LoadBalanceStrategy } from '@/lib/ai';
 import { applyShieldWords } from '@/lib/shield-word-filter';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-magic-tea-party-generate-updates');
 
@@ -248,6 +249,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       providerOverride,
       loadBalanceStrategy: LoadBalanceStrategy.CUSTOM,
     });
+    recordUserActivityFromRequest(req);
 
     const updates = Array.isArray((result as any)?.updates) ? (result as any).updates : [];
     const updateList: MagicTeaPartyUpdateDraft[] = normalizedRoles.map((role) => {

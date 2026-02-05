@@ -10,6 +10,7 @@ import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limit
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { type AIProvider } from '@/lib/config';
 import { getDataCardById } from '@/lib/d1';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import presetIndex from '@/public/questionnaires/presets/index.json';
 
 const log = getLogger('api-gen-details');
@@ -585,6 +586,7 @@ async function handler(req: Request): Promise<Response> {
       ...magicalGirlDetailsConfig,
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
     }, providerOptions);
+    recordUserActivityFromRequest(req);
 
     // 异步保存到D1数据库，不阻塞对用户的响应
     // const saveData = {

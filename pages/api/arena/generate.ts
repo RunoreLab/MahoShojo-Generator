@@ -42,6 +42,7 @@ import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-report-output-storage';
 import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
 import { deriveSeasonStrictRules } from '@/lib/seasons';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-battle-story');
 const MAX_COMBATANTS = 10;
@@ -495,6 +496,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         if (!aiResult) {
             throw lastModelOverrideError;
         }
+        recordUserActivityFromRequest(req);
         if (!usedModelOverride && typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim()) {
             usedModelOverride = aiTelemetry.model.trim();
         }

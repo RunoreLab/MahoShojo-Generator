@@ -7,6 +7,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
 import { buildMagicTeaPartySummarizePrompt, type MagicTeaPartySummarizeMode } from '@/lib/magic-tea-party/prompts';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-magic-tea-party-summarize');
 
@@ -141,6 +142,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       },
       providerOptions
     );
+    recordUserActivityFromRequest(req);
 
     const text = (await streamResult.response.text()).trim();
     if (!text) {

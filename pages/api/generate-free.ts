@@ -7,6 +7,7 @@ import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt,
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import {
   CanshouSchema as AppCanshouSchema,
   GeneralCharacterSchema as AppGeneralCharacterSchema,
@@ -427,6 +428,7 @@ ${input.prompt}
       : undefined;
 
     const result = await generateWithAI({ prompt, language, attachments }, generationConfig, providerOptions);
+    recordUserActivityFromRequest(req);
     const sanitized = sanitizeFreeCard(schemaId, result);
     const validated = validateForApp(schemaId, sanitized);
 

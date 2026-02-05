@@ -1010,9 +1010,10 @@ export function TavernExportPanel() {
           : {}),
       };
 
+      const activityHeaders = await authStorage.getActivityHeaders();
       const response = await fetch('/api/tavern/ai-fill', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...activityHeaders },
         body: JSON.stringify(requestBody),
       });
 

@@ -24,6 +24,7 @@ import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt 
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { authStorage } from '@/lib/auth';
 
 type FreeSchemaId = 'magical-girl' | 'canshou' | 'scenario' | 'general' | 'general-scenario';
 
@@ -502,9 +503,10 @@ export default function FreeGeneratorPage() {
       }
 
       const endpoint = generationMode === 'stream' ? '/api/generate-free-stream' : '/api/generate-free';
+      const activityHeaders = await authStorage.getActivityHeaders();
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...activityHeaders },
         body: JSON.stringify(requestBody),
       });
 

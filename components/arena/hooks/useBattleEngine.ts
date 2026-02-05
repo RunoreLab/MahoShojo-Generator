@@ -478,6 +478,7 @@ export const useBattleEngine = () => {
       const authHeader = await authStorage.getAuthHeader();
       const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
       if (authHeader) requestHeaders.Authorization = authHeader;
+      Object.assign(requestHeaders, await authStorage.getActivityHeaders());
 
       const applyBattleResult = async (result: BattleApiResponse, origin: 'battle' | 'battle-stream') => {
         if (typeof result.generationId === 'string' && result.generationId.trim()) {

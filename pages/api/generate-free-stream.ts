@@ -7,6 +7,7 @@ import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-free-stream');
 
@@ -194,6 +195,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       },
       providerOptions
     );
+    recordUserActivityFromRequest(req);
 
     return streamResult.response;
   } catch (error) {
@@ -205,4 +207,3 @@ export default async function handler(req: NextRequest): Promise<Response> {
     });
   }
 }
-

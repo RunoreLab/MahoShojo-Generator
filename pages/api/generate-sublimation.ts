@@ -13,6 +13,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { getDataCardById } from '@/lib/d1';
 import presetIndex from '@/public/questionnaires/presets/index.json';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import {
   convertDataCard,
   createBlankDataCard,
@@ -887,6 +888,7 @@ async function handler(req: NextRequest): Promise<Response> {
       : undefined;
 
     const aiResult = await generateWithAI(null, generationConfig, providerOptions);
+    recordUserActivityFromRequest(req);
     const updatedDataFromAI = aiResult.updatedCharacterData;
     if (updatedDataFromAI && 'userAnswers' in updatedDataFromAI && updatedDataFromAI.userAnswers) {
       const embeddedQuestions = extractQuestionTextsFromUserAnswers(originalCharacterData?.userAnswers);

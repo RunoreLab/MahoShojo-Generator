@@ -10,6 +10,7 @@ import { config as appConfig, SafetyCheckPolicy, type AIProvider } from '@/lib/c
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { buildPolicySafetyCheckText } from '@/lib/content-safety/server';
 import { verifySignature } from '@/lib/signature';
+import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import {
@@ -204,6 +205,7 @@ async function handler(req: NextRequest): Promise<Response> {
     };
 
     const redo = await generateWithAI<RedoResult, null>(null, generationConfig, providerOptions);
+    recordUserActivityFromRequest(req);
 
     const normalizedImpacts = (() => {
       const impacts = Array.isArray((redo as any).impacts) ? (redo as any).impacts : [];

@@ -13,6 +13,7 @@ import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared
 import { ImagePreviewModal } from '@/components/shared/ImagePreviewModal';
 import { OFFICIAL_KEY_MAX_AI_COOLDOWN_MS, USER_PROVIDED_KEY_COOLDOWN_MS } from '@/lib/ai/cooldowns';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+import { authStorage } from '@/lib/auth';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -649,6 +650,7 @@ export function TavernImportPanel() {
           : {}),
       };
 
+      const activityHeaders = await authStorage.getActivityHeaders();
       if (generationMode === 'stream') {
         setStreamingMarkdown('');
         setStreamedGeneralCard(null);
@@ -656,7 +658,7 @@ export function TavernImportPanel() {
 
         const response = await fetch('/api/tavern/convert-stream', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...activityHeaders },
           body: JSON.stringify(requestBody),
         });
 
@@ -714,7 +716,7 @@ export function TavernImportPanel() {
 
       const response = await fetch('/api/tavern/convert', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...activityHeaders },
         body: JSON.stringify(requestBody),
       });
 

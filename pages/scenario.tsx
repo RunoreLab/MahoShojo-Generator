@@ -17,6 +17,7 @@ import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
 import { buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { authStorage } from '@/lib/auth';
 
 // 定义引导性问题
 const scenarioQuestions = [
@@ -219,9 +220,10 @@ const ScenarioPage: React.FC = () => {
       }
 
       const endpoint = generationMode === 'stream' ? '/api/generate-scenario-stream' : '/api/generate-scenario';
+      const activityHeaders = await authStorage.getActivityHeaders();
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...activityHeaders },
         body: JSON.stringify({
           ...requestBody,
           ...(generationMode === 'stream' ? { titleHint: scenarioTitleHint.trim() } : {}),
