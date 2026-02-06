@@ -379,6 +379,52 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         ]
     },
     {
+        id: 'siliconflow',
+        name: '硅基流动 SiliconFlow',
+        description: '硅基流动官方 OpenAI 兼容通道，覆盖 DeepSeek/GLM/Qwen/Kimi 等主流模型。',
+        docsUrl: 'https://docs.siliconflow.cn/cn/userguide/quickstart',
+        baseUrl: 'https://api.siliconflow.cn/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'deepseek-ai/DeepSeek-V3.2',
+                label: 'DeepSeek V3.2',
+                description: '通用对话与推理兼顾，适合剧情推进、设定整理与中文写作。'
+            },
+            {
+                value: 'deepseek-ai/DeepSeek-R1',
+                label: 'DeepSeek R1',
+                description: '偏推理的思考模型，适合复杂规划、多步分析与高约束任务。'
+            },
+            {
+                value: 'zai-org/GLM-4.6',
+                label: 'GLM-4.6',
+                description: '中文场景表现稳定，适合结构化输出、改写与多轮对话。'
+            },
+            {
+                value: 'Qwen/Qwen3-32B',
+                label: 'Qwen3-32B',
+                description: '响应速度与质量较均衡，适合高频交互与草稿生成。'
+            },
+            {
+                value: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
+                label: 'Qwen3-235B',
+                description: '旗舰级长文本与复杂指令能力，适合高质量内容生成。'
+            },
+            {
+                value: 'moonshotai/Kimi-K2-Instruct-0905',
+                label: 'Kimi K2 Instruct',
+                description: '擅长中文创作与多轮指令跟随，适合角色设定与风格化文案。'
+            },
+            {
+                value: 'moonshotai/Kimi-K2-Thinking',
+                label: 'Kimi K2 Thinking',
+                description: 'Kimi K2 的思考版本，适合需要更强推理链路的任务。'
+            },
+        ]
+    },
+    {
         id: 'openrouter',
         name: 'OpenRouter',
         description: '海外主流模型聚合平台，贵，但是最稳定。如果它炸了谷歌也就炸了。',
