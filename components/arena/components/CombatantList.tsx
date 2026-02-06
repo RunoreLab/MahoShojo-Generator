@@ -140,6 +140,7 @@ const formatIneligibleReasons = (reasons: string[]): string => {
     'season-user-guidance-missing': '缺少赛季故事引导',
     'season-user-guidance-mismatch': '故事引导不符合赛季规则',
     'season-questionnaire-lore-not-allowed': '存在问卷/设定卡 Lore（赛季规则不允许）',
+    'season-questionnaire-lore-mismatch': '问卷/设定卡 Lore 不符合赛季规则',
     'season-scenario-missing': '缺少主情景（赛季规则）',
     'season-scenario-preset-mismatch': '主情景不是赛季指定预设',
     'season-aux-scenarios-not-allowed': '存在辅助情景（赛季规则不允许）',
