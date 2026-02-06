@@ -17,7 +17,6 @@ import {
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
-import { RankedMatchReportPanel } from '@/components/ranking/RankedMatchReportPanel';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
@@ -67,14 +66,13 @@ export interface NewsReport {
 
 interface BattleReportCardProps {
   report: NewsReport;
-  generationId?: string | null;
   onSaveImage?: (imageUrl: string) => void;
   // 战斗模式，设为可选以兼容旧功能
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
   liveBody?: string;
 }
 
-const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, generationId, onSaveImage, mode, liveBody }) => {
+const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isSavingImage, setIsSavingImage] = useState(false);
 
@@ -503,8 +501,6 @@ ${adjudicationMarkdown}
           )}  
         </div>
 
-        <RankedMatchReportPanel generationId={generationId} />
-        
         <div className="result-item">
           <div className="result-value">
             <ReactMarkdown
