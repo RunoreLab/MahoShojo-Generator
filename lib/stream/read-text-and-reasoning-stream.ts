@@ -67,6 +67,16 @@ const normalizeReasoningDoneStatus = (value: unknown): AIReasoningStatus => {
   return 'done';
 };
 
+const extractReasoningTokensFromTelemetry = (payload: Record<string, unknown> | null): number | null => {
+  if (!payload || typeof payload !== 'object') return null;
+  const usage = payload.usage;
+  if (!usage || typeof usage !== 'object') return null;
+  const usageRecord = usage as Record<string, unknown>;
+  const value = usageRecord.reasoningTokens ?? usageRecord.reasoning_tokens;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return value;
+};
+
 export async function readTextAndReasoningStreamFromResponse(
   response: Response,
   options: ReadTextAndReasoningStreamOptions = {}
@@ -100,6 +110,7 @@ export async function readTextAndReasoningStreamFromResponse(
   let latestTelemetry: Record<string, unknown> | null = null;
   let latestMeta: Record<string, unknown> | null = null;
   let latestReasoning: AIReasoningEnvelope | null = null;
+  let latestReasoningTokens: number | null = null;
 
   const readWithTimeout = createStreamReadWithTimeout({
     label: options.label,
@@ -140,6 +151,7 @@ export async function readTextAndReasoningStreamFromResponse(
       const normalizedSource = source === 'unknown' ? 'sdk' : source;
       const nextReasoning = appendReasoningDelta(latestReasoning, chunk, {
         source: normalizedSource,
+        reasoningTokens: latestReasoningTokens,
         status: 'thinking',
       });
       emitReasoning(nextReasoning);
@@ -152,6 +164,7 @@ export async function readTextAndReasoningStreamFromResponse(
       const nextReasoning = updateReasoningStatus(latestReasoning, {
         status: normalizeReasoningDoneStatus(payload?.status),
         source: normalizedSource,
+        reasoningTokens: latestReasoningTokens,
       });
       emitReasoning(nextReasoning);
       return;
@@ -159,6 +172,16 @@ export async function readTextAndReasoningStreamFromResponse(
 
     if (event === 'telemetry') {
       latestTelemetry = payload ?? null;
+      const reasoningTokens = extractReasoningTokensFromTelemetry(latestTelemetry);
+      if (typeof reasoningTokens === 'number') {
+        latestReasoningTokens = reasoningTokens;
+        if (latestReasoning) {
+          emitReasoning({
+            ...latestReasoning,
+            reasoningTokens,
+          });
+        }
+      }
       if (latestTelemetry) {
         onTelemetry?.(latestTelemetry);
       }
@@ -240,12 +263,21 @@ export async function readTextAndReasoningStreamFromResponse(
     const finalizedReasoning = updateReasoningStatus(reasoningSnapshot, {
       status: hasText ? 'done' : 'unavailable',
       source: reasoningSnapshot.source ?? 'sdk',
+      reasoningTokens: latestReasoningTokens,
     });
     emitReasoning(finalizedReasoning);
   } else if (!reasoningSnapshot) {
     const heuristicReasoning = extractHeuristicReasoningFromMarkdown(accumulatedText);
     if (heuristicReasoning) {
       emitReasoning(heuristicReasoning);
+    } else {
+      emitReasoning(
+        updateReasoningStatus(null, {
+          status: 'unavailable',
+          source: 'sdk',
+          reasoningTokens: latestReasoningTokens,
+        })
+      );
     }
   }
 

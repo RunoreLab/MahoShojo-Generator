@@ -1156,7 +1156,7 @@ async function handler(req: NextRequest): Promise<Response> {
 		                }
 
                         flushReasoningQueue(controller);
-                        if (hasReasoningStarted && !reasoningCompleted) {
+                        if (!reasoningCompleted) {
                             reasoningCompleted = true;
                             controller.enqueue(
                                 encodeEvent('reasoning_done', {

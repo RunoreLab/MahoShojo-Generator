@@ -16,9 +16,9 @@ type AiReasoningPanelProps = {
 
 const getStatusText = (status: AIReasoningStatus, summary: string | null, hasText: boolean): string => {
   if (summary) return `AI 思考摘要：${summary}`;
+  if (status === 'error') return 'AI 思考过程读取失败';
   if (status === 'thinking') return 'AI 正在思考…';
   if (!hasText || status === 'unavailable') return '该模型未返回可展示思考内容';
-  if (status === 'error') return 'AI 思考过程读取失败';
   return 'AI 思考过程';
 };
 
@@ -52,7 +52,8 @@ export function AiReasoningPanel({
   const hasReasoningText = Boolean(reasoningText);
 
   const shouldRender = useMemo(() => {
-    return resolvedStatus === 'thinking' || resolvedStatus === 'error' || hasReasoningText || Boolean(resolvedSummary);
+    if (resolvedStatus !== 'idle') return true;
+    return hasReasoningText || Boolean(resolvedSummary);
   }, [hasReasoningText, resolvedStatus, resolvedSummary]);
 
   const statusText = getStatusText(resolvedStatus, resolvedSummary, hasReasoningText);

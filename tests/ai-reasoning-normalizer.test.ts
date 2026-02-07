@@ -29,9 +29,11 @@ describe('ai/reasoning-normalizer', () => {
     expect(typeof second.summary).toBe('string');
   });
 
-  test('updateReasoningStatus: 空状态 + unavailable 默认返回 null', () => {
+  test('updateReasoningStatus: 空状态 + unavailable 会返回可展示状态', () => {
     const next = updateReasoningStatus(null, { status: 'unavailable' });
-    expect(next).toBeNull();
+    expect(next).not.toBeNull();
+    expect(next?.status).toBe('unavailable');
+    expect(next?.source).toBe('sdk');
   });
 
   test('extractHeuristicReasoningFromMarkdown 可识别 thought 泄漏前缀', () => {

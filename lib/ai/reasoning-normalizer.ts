@@ -66,11 +66,7 @@ export const updateReasoningStatus = (
     errorMessage?: string | null;
   }
 ): AIReasoningEnvelope | null => {
-  if (!current && payload.status === 'unavailable') {
-    return null;
-  }
-
-  const source = payload.source ?? current?.source ?? 'unknown';
+  const source = payload.source ?? current?.source ?? 'sdk';
   const text = current?.text ?? null;
   const summary =
     typeof payload.summary === 'string'

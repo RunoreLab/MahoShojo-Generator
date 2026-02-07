@@ -74,4 +74,23 @@ describe('stream/read-text-and-reasoning-stream', () => {
       })
     ).rejects.toThrow('quota exceeded');
   });
+
+  test('SSE 无 reasoning 事件时会收敛为 unavailable', async () => {
+    const rawSse = [
+      encodeSse('markdown', { chunk: '仅正文输出' }),
+      encodeSse('telemetry', { usage: { promptTokens: 21, completionTokens: 9, reasoningTokens: 0 } }),
+      encodeSse('done', { ok: true }),
+    ].join('');
+    const response = new Response(rawSse, {
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    });
+
+    const result = await readTextAndReasoningStreamFromResponse(response, {
+      label: '测试 SSE 无 reasoning',
+    });
+
+    expect(result.reasoning?.status).toBe('unavailable');
+    expect(result.reasoning?.source).toBe('sdk');
+    expect(result.reasoning?.reasoningTokens).toBe(0);
+  });
 });

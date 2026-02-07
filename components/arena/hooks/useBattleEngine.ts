@@ -991,7 +991,9 @@ export const useBattleEngine = () => {
 
               if (event === 'done') {
                 const currentReasoning = useBattleStore.getState().streamReasoning;
-                if (currentReasoning?.status === 'thinking') {
+                if (!currentReasoning) {
+                  markReasoningStatusInStore('unavailable', { source: 'sdk' });
+                } else if (currentReasoning.status === 'thinking') {
                   const hasReasoningText =
                     typeof currentReasoning.text === 'string' && currentReasoning.text.trim().length > 0;
                   markReasoningStatusInStore(hasReasoningText ? 'done' : 'unavailable');
