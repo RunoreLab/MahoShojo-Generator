@@ -1,5 +1,7 @@
 # 非流式 AI 思考内容展示设计方案（2026-02-07）
 
+> 状态更新（2026-02-07）：本文推荐方案已落地，实施结果见 `docs/AI_REASONING_VISIBILITY_IMPLEMENTATION_2026-02-07.md` 第 6 节。
+
 ## 1. 背景
 
 在 `docs/AI_REASONING_VISIBILITY_DESIGN_2026-02-06.md` 与 `docs/AI_REASONING_VISIBILITY_IMPLEMENTATION_2026-02-07.md` 的基础上，流式链路（SSE）已经具备较完整的 AI 思考展示能力。  

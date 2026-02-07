@@ -6,6 +6,7 @@ import canshouQuestionnaire from '@/public/questionnaires/presets/canshou-defaul
 import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
+import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import type { AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getUtf8ByteLength } from '@/lib/data-card-size';
@@ -505,6 +506,19 @@ export default async function handler(req: NextRequest): Promise<Response> {
             ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
           }
         : undefined;
+    const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const aiOptions: GenerateWithAIOptions = providerOptions
+      ? { ...providerOptions, telemetry: aiTelemetry }
+      : { telemetry: aiTelemetry };
+
+    const toSuccessResponse = (data: unknown) =>
+      buildJsonResponseWithOptionalAiMeta({
+        requestHeaders: req.headers,
+        data,
+        telemetry: aiTelemetry,
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
 
     if (template === 'magical-girl') {
       const questionCount = getMagicalGirlQuestionList().length || 16;
@@ -524,7 +538,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       };
 
-      const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+      const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, aiOptions);
       recordUserActivityFromRequest(req);
       const questionPairs = getMagicalGirlQuestionPairs();
       const fallbackQuestions = questionPairs.map((item) => item.question);
@@ -548,10 +562,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       delete merged.isPreset;
 
       const validated = AppMagicalGirlSchema.parse(merged);
-      return new Response(JSON.stringify(validated), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return toSuccessResponse(validated);
     }
 
     if (template === 'canshou') {
@@ -573,7 +584,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       };
 
-      const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+      const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, aiOptions);
       recordUserActivityFromRequest(req);
       const questionPairs = getCanshouQuestions();
       const fallbackQuestions = questionPairs.map((item) => item.question);
@@ -597,10 +608,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       delete merged.isPreset;
 
       const validated = AppCanshouSchema.parse(merged);
-      return new Response(JSON.stringify(validated), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return toSuccessResponse(validated);
     }
 
     if (template === 'scenario') {
@@ -619,7 +627,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       };
 
-      const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+      const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, aiOptions);
       recordUserActivityFromRequest(req);
       const base = createBlankDataCard('scenario') as any;
       const merged = {
@@ -628,10 +636,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       };
 
       const validated = AppScenarioSchema.parse(merged);
-      return new Response(JSON.stringify(validated), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return toSuccessResponse(validated);
     }
 
     if (template === 'general-scenario') {
@@ -650,7 +655,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       };
 
-      const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+      const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, aiOptions);
       recordUserActivityFromRequest(req);
       const base = createBlankDataCard('general-scenario') as any;
       const merged = {
@@ -660,10 +665,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       };
 
       const validated = AppGeneralScenarioSchema.parse(merged);
-      return new Response(JSON.stringify(validated), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return toSuccessResponse(validated);
     }
 
     const schema = buildGeneralImportSchema();
@@ -681,7 +683,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
     };
 
-    const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, providerOptions);
+    const generated = await generateWithAI({ language, sourceName, attachments }, generationConfig, aiOptions);
     recordUserActivityFromRequest(req);
     const base = createBlankDataCard('general') as any;
     const merged = {
@@ -694,10 +696,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
     delete merged.isPreset;
 
     const validated = AppGeneralCharacterSchema.parse(merged);
-    return new Response(JSON.stringify(validated), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return toSuccessResponse(validated);
   } catch (error) {
     log.error('酒馆导入 AI 转换失败', { error });
     const errorMessage = error instanceof Error ? error.message : '未知错误';

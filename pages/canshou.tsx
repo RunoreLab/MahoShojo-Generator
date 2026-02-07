@@ -29,6 +29,7 @@ import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/Quest
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
 import {
@@ -227,6 +228,7 @@ const CanshouPage: React.FC = () => {
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
@@ -1049,10 +1051,11 @@ const CanshouPage: React.FC = () => {
     }
     setSubmitting(true);
     setError(null);
-    setCanshouDetails(null);
-    setStreamingMarkdown(null);
-    setStreamedGeneralCard(null);
-    setStreamingReasoning(null);
+      setCanshouDetails(null);
+      setStreamingMarkdown(null);
+      setStreamedGeneralCard(null);
+      setStreamingReasoning(null);
+      setNonStreamReasoning(null);
 
     try {
       const snapshot = answersSnapshot ?? answersByKey;
@@ -1096,6 +1099,8 @@ const CanshouPage: React.FC = () => {
       };
       if (generationMode === 'stream') {
         requestHeaders.Accept = 'text/event-stream';
+      } else {
+        requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
       }
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -1189,8 +1194,9 @@ const CanshouPage: React.FC = () => {
         return;
       }
 
-      const result: CanshouResultPayload = await response.json();
+      const { data: result, aiMeta } = await readJsonWithAiMeta<CanshouResultPayload>(response);
       setCanshouDetails(result);
+      setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       startCooldown();
     } catch (err) {
       setError(err instanceof Error ? `✨ 魔法失效了！${err.message}` : '发生未知错误');
@@ -1957,6 +1963,14 @@ const CanshouPage: React.FC = () => {
                   </>
                 ) : (
                   <>
+                    {nonStreamReasoning && (
+                      <AiReasoningPanel
+                        reasoning={nonStreamReasoning}
+                        status={nonStreamReasoning.status}
+                        displayMode="content-only"
+                        compact
+                      />
+                    )}
                     <CanshouCard
                       canshou={canshouDetails!}
                       onSaveImage={handleSaveImage}

@@ -17,6 +17,7 @@ import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
@@ -53,6 +54,7 @@ const ScenarioPage: React.FC = () => {
   const [resultData, setResultData] = useState<any | null>(null);
   const [generalScenarioDraft, setGeneralScenarioDraft] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [scenarioTitleHint, setScenarioTitleHint] = useState('');
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
@@ -185,6 +187,7 @@ const ScenarioPage: React.FC = () => {
     }
     setIsGenerating(true);
     setError(null);
+    setNonStreamReasoning(null);
     setResultData(null);
     setStreamingReasoning(null);
     if (generationMode === 'stream') {
@@ -231,6 +234,8 @@ const ScenarioPage: React.FC = () => {
       };
       if (generationMode === 'stream') {
         requestHeaders.Accept = 'text/event-stream';
+      } else {
+        requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
       }
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -292,8 +297,9 @@ const ScenarioPage: React.FC = () => {
         return;
       }
 
-      const result = await response.json();
+      const { data: result, aiMeta } = await readJsonWithAiMeta<any>(response);
       setResultData(result);
+      setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       startCooldown();
 
     } catch (err) {
@@ -488,26 +494,36 @@ const ScenarioPage: React.FC = () => {
           </div>
 
           {generationMode === 'non-stream' && resultData && (
-            <div className="card mt-6">
-              <h2 className="text-2xl font-bold text-center mb-4">{resultData.title}</h2>
-              <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
-                <pre>{JSON.stringify(resultData, null, 2)}</pre>
-              </div>
-              <div className="flex flex-col md:flex-row justify-center mt-6">
-                <button onClick={() => downloadJson(resultData)} className="generate-button flex-1">
-                  下载情景文件
-                </button>
-                <SaveToCloudButton
-                  data={resultData}
-                  buttonText="保存到云端"
-                  className="generate-button flex-1"
-                  style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+            <>
+              {nonStreamReasoning && (
+                <AiReasoningPanel
+                  reasoning={nonStreamReasoning}
+                  status={nonStreamReasoning.status}
+                  displayMode="content-only"
+                  compact
                 />
-                <button onClick={() => copyToClipboard(resultData)} className="generate-button flex-1" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
-                  复制到剪贴板
-                </button>
+              )}
+              <div className="card mt-6">
+                <h2 className="text-2xl font-bold text-center mb-4">{resultData.title}</h2>
+                <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
+                  <pre>{JSON.stringify(resultData, null, 2)}</pre>
+                </div>
+                <div className="flex flex-col md:flex-row justify-center mt-6">
+                  <button onClick={() => downloadJson(resultData)} className="generate-button flex-1">
+                    下载情景文件
+                  </button>
+                  <SaveToCloudButton
+                    data={resultData}
+                    buttonText="保存到云端"
+                    className="generate-button flex-1"
+                    style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                  />
+                  <button onClick={() => copyToClipboard(resultData)} className="generate-button flex-1" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
+                    复制到剪贴板
+                  </button>
+                </div>
               </div>
-            </div>
+            </>
           )}
 
           <div className="card mt-6">

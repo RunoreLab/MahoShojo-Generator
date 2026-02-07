@@ -39,6 +39,7 @@ import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 import { authStorage } from '@/lib/auth';
@@ -264,6 +265,7 @@ const DetailsPage: React.FC = () => {
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
 
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -1284,6 +1286,7 @@ const DetailsPage: React.FC = () => {
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
     setStreamingReasoning(null);
+    setNonStreamReasoning(null);
 
     const safetyText = finalAnswerItems.map((item) => item.answer).join('');
     console.log('检查敏感词:', safetyText);
@@ -1312,6 +1315,8 @@ const DetailsPage: React.FC = () => {
       };
       if (generationMode === 'stream') {
         requestHeaders.Accept = 'text/event-stream';
+      } else {
+        requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
       }
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -1423,7 +1428,7 @@ const DetailsPage: React.FC = () => {
         return;
       }
 
-      const result: MagicalGirlDetails = await response.json();
+      const { data: result, aiMeta } = await readJsonWithAiMeta<MagicalGirlDetails>(response);
       console.log('生成结果:', result);
       // 加入后置生成敏感词检测
       if (await checkSensitiveWords(JSON.stringify(result), {
@@ -1434,6 +1439,7 @@ const DetailsPage: React.FC = () => {
       })) return;
 
       setMagicalGirlDetails(result);
+      setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       setError(null); // 成功时清除错误
     } catch (error) {
       console.error('提交失败:', error);
@@ -2182,6 +2188,14 @@ const DetailsPage: React.FC = () => {
                 imageSaveMode={imageSaveMode}
                 saveButtonLabel={imageSaveButtonLabel}
               />
+              {nonStreamReasoning && (
+                <AiReasoningPanel
+                  reasoning={nonStreamReasoning}
+                  status={nonStreamReasoning.status}
+                  displayMode="content-only"
+                  compact
+                />
+              )}
               <div className="card" style={{ marginTop: '1rem' }}>
                 <div className="space-y-5 text-left">
                   <div>

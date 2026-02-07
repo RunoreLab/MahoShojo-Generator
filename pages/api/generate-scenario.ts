@@ -5,6 +5,8 @@ import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib
 import { getLogger } from '../../lib/logger';
 import { NextRequest } from 'next/server';
 import { generateSignature } from '@/lib/signature';
+import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
+import type { GenerateWithAIOptions } from '@/lib/ai';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
@@ -193,7 +195,9 @@ async function handler(req: NextRequest): Promise<Response> {
       }
       : undefined;
 
-    const scenarioData = await generateWithAI(null, generationConfig, providerOptions);
+    const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+    const scenarioData = await generateWithAI(null, generationConfig, aiOptions);
     recordUserActivityFromRequest(req);
 
     // [修改] 修正签名逻辑 (SRS 3.3.3 & 4.1)
@@ -218,7 +222,13 @@ async function handler(req: NextRequest): Promise<Response> {
     };
 
 
-    return new Response(JSON.stringify(finalScenario), { status: 200 });
+    return buildJsonResponseWithOptionalAiMeta({
+      requestHeaders: req.headers,
+      data: finalScenario,
+      telemetry: aiTelemetry,
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
 
   } catch (error) {
     log.error('情景生成失败', { error });

@@ -1,9 +1,10 @@
 import { z } from 'zod/v3';
 import { NextRequest } from 'next/server';
 
-import { generateWithAI, LoadBalanceStrategy, type GenerationConfig } from '@/lib/ai';
+import { generateWithAI, LoadBalanceStrategy, type GenerationConfig, type GenerateWithAIOptions } from '@/lib/ai';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt, type AITextAttachment } from '@/lib/ai/attachments';
+import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { getLogger } from '@/lib/logger';
@@ -427,12 +428,18 @@ ${input.prompt}
       }
       : undefined;
 
-    const result = await generateWithAI({ prompt, language, attachments }, generationConfig, providerOptions);
+    const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+
+    const result = await generateWithAI({ prompt, language, attachments }, generationConfig, aiOptions);
     recordUserActivityFromRequest(req);
     const sanitized = sanitizeFreeCard(schemaId, result);
     const validated = validateForApp(schemaId, sanitized);
 
-    return new Response(JSON.stringify(validated), {
+    return buildJsonResponseWithOptionalAiMeta({
+      requestHeaders: req.headers,
+      data: validated,
+      telemetry: aiTelemetry,
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

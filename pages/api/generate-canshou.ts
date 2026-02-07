@@ -1,10 +1,11 @@
 // pages/api/generate-canshou.ts
 import { z } from 'zod/v3';
-import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
+import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '../../lib/ai';
 import { getLogger } from '../../lib/logger';
 import { NextRequest } from 'next/server';
 import { generateSignature } from '../../lib/signature'; // 导入签名工具
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
@@ -550,10 +551,13 @@ async function handler(req: NextRequest): Promise<Response> {
     const loreText = buildQuestionnaireLoreText(effectiveQuestionnaires);
 
     // 调用通用AI生成函数
+    const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+
     const canshouDetails = await generateWithAI({ answers: normalizedAnswers, language, loreText }, {
       ...canshouGenerationConfig,
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
-    }, providerOptions);
+    }, aiOptions);
     recordUserActivityFromRequest(req);
 
     // 将用户答案和生成结果合并，并添加模板ID，为签名做准备
@@ -565,7 +569,10 @@ async function handler(req: NextRequest): Promise<Response> {
     };
 
     if (allowNativeSignature !== true) {
-      return new Response(JSON.stringify(dataToSign), {
+      return buildJsonResponseWithOptionalAiMeta({
+        requestHeaders: req.headers,
+        data: dataToSign,
+        telemetry: aiTelemetry,
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -580,7 +587,10 @@ async function handler(req: NextRequest): Promise<Response> {
         signature: signature
     };
 
-    return new Response(JSON.stringify(finalResult), {
+    return buildJsonResponseWithOptionalAiMeta({
+      requestHeaders: req.headers,
+      data: finalResult,
+      telemetry: aiTelemetry,
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

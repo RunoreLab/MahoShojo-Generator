@@ -17,6 +17,7 @@ import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/cus
 import { authStorage } from '@/lib/auth';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { useCooldown } from '@/lib/cooldown';
@@ -379,6 +380,7 @@ export function TavernImportPanel() {
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
   const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
   const tavernAiCooldownMs = isUserCustomKey ? USER_PROVIDED_KEY_COOLDOWN_MS : OFFICIAL_KEY_MAX_AI_COOLDOWN_MS;
   const tavernAiCooldownKey = isUserCustomKey ? 'tavernConvertCooldown:custom' : 'tavernConvertCooldown:system';
@@ -661,6 +663,7 @@ export function TavernImportPanel() {
         setStreamingMarkdown('');
         setStreamedGeneralCard(null);
         setStreamingReasoning(null);
+        setNonStreamReasoning(null);
         setCopyStatus('idle');
 
         const response = await fetch('/api/tavern/convert-stream?format=sse', {
@@ -722,9 +725,14 @@ export function TavernImportPanel() {
         return { ...card, _tavern: tavernPayload };
       }
 
+      setNonStreamReasoning(null);
       const response = await fetch('/api/tavern/convert', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...activityHeaders },
+        headers: {
+          'Content-Type': 'application/json',
+          [AI_META_REQUEST_HEADER]: AI_META_REQUEST_VALUE,
+          ...activityHeaders,
+        },
         body: JSON.stringify(requestBody),
       });
 
@@ -743,8 +751,9 @@ export function TavernImportPanel() {
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 转换失败' }));
       }
 
-      const generated = (await response.json()) as unknown;
+      const { data: generated, aiMeta } = await readJsonWithAiMeta<unknown>(response);
       const generatedRecord = typeof generated === 'object' && generated !== null ? (generated as Record<string, unknown>) : {};
+      setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       startCooldown(tavernAiCooldownMs);
       return { ...generatedRecord, _tavern: tavernPayload };
     }
@@ -1358,6 +1367,14 @@ export function TavernImportPanel() {
                 </div>
                 {state.convertMode === 'ai' && generationMode === 'stream' && (
                   <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
+                )}
+                {state.convertMode === 'ai' && generationMode === 'non-stream' && nonStreamReasoning && (
+                  <AiReasoningPanel
+                    reasoning={nonStreamReasoning}
+                    status={nonStreamReasoning.status}
+                    displayMode="content-only"
+                    compact
+                  />
                 )}
 
                 {outputDataCard ? (

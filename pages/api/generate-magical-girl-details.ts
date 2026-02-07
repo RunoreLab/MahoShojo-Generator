@@ -1,5 +1,5 @@
 // pages/api/generate-magical-girl-details.ts
-import { generateWithAI, GenerationConfig, LoadBalanceStrategy } from '../../lib/ai';
+import { generateWithAI, GenerationConfig, LoadBalanceStrategy, type GenerateWithAIOptions } from '../../lib/ai';
 import { z } from 'zod/v3';
 import { getRandomFlowers } from '../../lib/random-choose-hana-name';
 // import { saveToD1 } from '../../lib/d1';
@@ -8,6 +8,7 @@ import { generateSignature } from '../../lib/signature'; // 导入签名工具
 import { compactQuestionnaireAnswerItems, formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '../../lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import { type AIProvider } from '@/lib/config';
 import { getDataCardById } from '@/lib/d1';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
@@ -582,10 +583,13 @@ async function handler(req: Request): Promise<Response> {
 
     const loreText = buildQuestionnaireLoreText(effectiveQuestionnaires);
 
+    const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+
     const magicalGirlDetails = await generateWithAI({ answers: normalizedAnswers, language, loreText }, {
       ...magicalGirlDetailsConfig,
       ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
-    }, providerOptions);
+    }, aiOptions);
     recordUserActivityFromRequest(req);
 
     // 异步保存到D1数据库，不阻塞对用户的响应
@@ -612,9 +616,12 @@ async function handler(req: Request): Promise<Response> {
     };
 
     if (!allowNativeSignature) {
-      return new Response(JSON.stringify(dataToSign), {
+      return buildJsonResponseWithOptionalAiMeta({
+        requestHeaders: req.headers,
+        data: dataToSign,
+        telemetry: aiTelemetry,
         status: 200,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
       });
     }
 
@@ -627,9 +634,12 @@ async function handler(req: Request): Promise<Response> {
         signature: signature
     };
 
-    return new Response(JSON.stringify(finalResult), {
+    return buildJsonResponseWithOptionalAiMeta({
+      requestHeaders: req.headers,
+      data: finalResult,
+      telemetry: aiTelemetry,
       status: 200,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {
     log.error('生成魔法少女详细信息失败', { error, answersLength: normalizedAnswers.length });

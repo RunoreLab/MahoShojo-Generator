@@ -27,6 +27,7 @@ import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
 import { formatDateTime } from '@/lib/constants';
@@ -202,6 +203,7 @@ const SublimationPage: React.FC = () => {
     const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
     const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
     const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
+    const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
     const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
     const [showImageModal, setShowImageModal] = useState(false);
     const [pastedJson, setPastedJson] = useState('');
@@ -920,6 +922,7 @@ const SublimationPage: React.FC = () => {
         setStreamingMarkdown(null);
         setStreamedGeneralCard(null);
         setStreamingReasoning(null);
+        setNonStreamReasoning(null);
 
 	        try {
                 const selectedArenaNarrativeEntryIds = new Set(
@@ -1001,6 +1004,8 @@ const SublimationPage: React.FC = () => {
             };
             if (generationMode === 'stream') {
                 requestHeaders.Accept = 'text/event-stream';
+            } else {
+                requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
             }
             const response = await fetch(endpoint, {
                 method: 'POST',
@@ -1079,11 +1084,12 @@ const SublimationPage: React.FC = () => {
                 return;
             }
 
-            const result: SublimationResponse = await response.json();
+            const { data: result, aiMeta } = await readJsonWithAiMeta<SublimationResponse>(response);
             if (result.targetTemplate && TARGET_TEMPLATE_OPTIONS.includes(result.targetTemplate)) {
                 setTargetTemplate(result.targetTemplate);
             }
             setResultData(result);
+            setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
             startCooldown();
 
         } catch (err) {
@@ -1852,6 +1858,14 @@ const SublimationPage: React.FC = () => {
 
                     {generationMode === 'non-stream' && resultData && (
                         <>
+                            {nonStreamReasoning && (
+                                <AiReasoningPanel
+                                    reasoning={nonStreamReasoning}
+                                    status={nonStreamReasoning.status}
+                                    displayMode="content-only"
+                                    compact
+                                />
+                            )}
                             {resultData.unchangedFields && resultData.unchangedFields.length > 0 && (
                                 <div className="card mt-6 bg-blue-50 border border-blue-200">
                                     <h4 className="font-bold text-blue-800 mb-2">升华报告</h4>
