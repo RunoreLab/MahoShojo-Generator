@@ -29,6 +29,39 @@ export const buildReasoningSummary = (reasoningText: string, maxLength = SUMMARY
   return `${base.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
 };
 
+export const buildLiveReasoningSummary = (reasoningText: string, maxLength = SUMMARY_MAX_LENGTH): string | null => {
+  const normalized = normalizeReasoningText(reasoningText);
+  if (!normalized) return null;
+
+  const blocks = normalized
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const candidates = blocks.length > 0 ? [...blocks].reverse() : [normalized];
+  let picked = '';
+
+  for (const candidate of candidates) {
+    const compact = candidate
+      .replace(/^\s*#{1,6}\s*/gm, '')
+      .replace(/^\s*[-*+]\s+/gm, '')
+      .replace(/[*_`~]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (compact.length >= 6) {
+      picked = compact;
+      break;
+    }
+  }
+
+  const baseRaw = picked || normalized.replace(/\s+/g, ' ').trim();
+  const stripped = baseRaw.replace(/^(thought|thinking|reasoning|思考|推理)\s*[:：-]?\s*/i, '').trim();
+  const base = stripped || baseRaw;
+  if (!base) return null;
+  if (base.length <= maxLength) return base;
+  return `${base.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
+};
+
 export const appendReasoningDelta = (
   current: AIReasoningEnvelope | null,
   delta: string,
@@ -43,7 +76,7 @@ export const appendReasoningDelta = (
   const nextText = `${previousText}${safeDelta}`;
   const source = options?.source ?? current?.source ?? 'sdk';
   const status = options?.status ?? 'thinking';
-  const summary = buildReasoningSummary(nextText);
+  const summary = buildLiveReasoningSummary(nextText) ?? buildReasoningSummary(nextText);
 
   return {
     ...(current ?? {}),

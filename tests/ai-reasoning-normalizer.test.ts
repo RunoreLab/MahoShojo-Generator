@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   appendReasoningDelta,
+  buildLiveReasoningSummary,
   buildReasoningSummary,
   extractHeuristicReasoningFromMarkdown,
   updateReasoningStatus,
@@ -27,6 +28,29 @@ describe('ai/reasoning-normalizer', () => {
     expect(second.source).toBe('sdk');
     expect(second.text).toContain('第一段推理。第二段推理。');
     expect(typeof second.summary).toBe('string');
+  });
+
+  test('appendReasoningDelta 的摘要会跟随最新思考段落', () => {
+    const first = appendReasoningDelta(null, '**Defining Battle Parameters** 我先定义战斗边界。');
+    const second = appendReasoningDelta(
+      first,
+      '\n\n**Revising Power Disparity** 我重新评估双方等级差并修正叙事重点。'
+    );
+
+    expect(second.summary).toContain('Revising Power Disparity');
+    expect(second.summary).not.toContain('Defining Battle Parameters');
+  });
+
+  test('buildLiveReasoningSummary 优先取末段摘要', () => {
+    const text = [
+      '**阶段一** 先整理输入约束。',
+      '',
+      '**阶段二** 再修正胜负判定逻辑并对齐输出格式。',
+    ].join('\n');
+    const summary = buildLiveReasoningSummary(text, 40);
+
+    expect(summary).toContain('阶段二');
+    expect(summary).not.toContain('阶段一');
   });
 
   test('updateReasoningStatus: 空状态 + unavailable 会返回可展示状态', () => {
