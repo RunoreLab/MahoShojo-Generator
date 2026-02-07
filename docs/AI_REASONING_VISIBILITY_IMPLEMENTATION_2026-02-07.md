@@ -164,6 +164,28 @@
 - 修复：
   - 统一按小写进行 `text/event-stream` 协商判断，减少环境差异导致的降级风险。
 
+### 4.5 已修复：reasoning 事件被正文流“卡住”，导致面板晚出现
+
+- 位置：
+  - `lib/stream/reasoning-sse.ts`
+  - `pages/api/arena/generate-stream.ts`
+- 现象：
+  - 原逻辑仅在读取到正文 chunk 时才 flush reasoning 队列。
+  - 当模型先进行长时间 thinking、正文迟迟未返回时，前端不会及时收到 `event: reasoning`，导致“思考面板晚出现/只在收尾出现”。
+- 修复：
+  - 增加“活跃 controller 即时 flush”机制：收到 `onReasoningEvent` 后可直接下发 SSE 事件，不再依赖正文 chunk 触发。
+  - 流关闭/取消时同步回收 flush 回调，避免尾阶段重复 enqueue。
+
+### 4.6 已修复：上游预取策略等待正文首字，放大首屏等待
+
+- 位置：`lib/stream/raw-ai.ts`
+- 现象：
+  - 预检阶段原本会持续等待“非空正文文本”，reasoning 先行时会被阻塞在服务端，客户端无法尽早进入可视化阶段。
+- 修复：
+  - 预取改为“低延迟连接探测”：拿到首个有效 chunk（文本或 reasoning）即交给上层持续消费。
+  - 空输出判定仅在“预取阶段已读到 done 且正文仍为空”时触发，避免误伤正常慢启动流式请求。
+  - Google 通道显式请求 `thinkingConfig.includeThoughts = true`，提高可展示 reasoning 文本的返回概率。
+
 ---
 
 ## 5. 验收建议（手工）

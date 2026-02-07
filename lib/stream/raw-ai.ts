@@ -274,6 +274,18 @@ export async function generateWithStreamAI(
 	                    typeof generationConfig.maxOutputTokens === 'number'
 	                        ? { maxOutputTokens: generationConfig.maxOutputTokens }
 	                        : {};
+	                const googleThinkingOptions =
+	                    provider.type === 'google'
+	                        ? {
+	                            providerOptions: {
+	                                google: {
+	                                    thinkingConfig: {
+	                                        includeThoughts: true,
+	                                    },
+	                                },
+	                            },
+	                        }
+	                        : {};
 
 		                const looksLikeTrivialEmptyOutput = (text: string) => {
 		                    const trimmed = text.trim().replace(/^\uFEFF/, '');
@@ -301,6 +313,7 @@ export async function generateWithStreamAI(
                     temperature: generationConfig.temperature,
                     maxRetries: 0,
                     ...maxOutputTokensOption,
+                    ...googleThinkingOptions,
                     onError: ({ error }) => {
                         capturedError = error;
                         log.error(`流式传输过程中出错: 提供商: ${provider.name} 模型: ${selectedModel}`, { error });
@@ -312,14 +325,20 @@ export async function generateWithStreamAI(
 	                    const type = (part as any).type;
 
 	                    if (type === 'text-delta') {
-	                        const text = typeof (part as any).text === 'string' ? (part as any).text : '';
+	                        const text =
+	                            typeof (part as any).text === 'string'
+	                                ? (part as any).text
+	                                : (typeof (part as any).delta === 'string' ? (part as any).delta : '');
 	                        return { type: 'text-delta', id: typeof (part as any).id === 'string' ? (part as any).id : undefined, text };
 	                    }
 	                    if (type === 'reasoning-start') {
 	                        return { type: 'reasoning-start', id: typeof (part as any).id === 'string' ? (part as any).id : undefined };
 	                    }
 	                    if (type === 'reasoning-delta') {
-	                        const text = typeof (part as any).text === 'string' ? (part as any).text : '';
+	                        const text =
+	                            typeof (part as any).text === 'string'
+	                                ? (part as any).text
+	                                : (typeof (part as any).delta === 'string' ? (part as any).delta : '');
 	                        return { type: 'reasoning-delta', id: typeof (part as any).id === 'string' ? (part as any).id : undefined, text };
 	                    }
 	                    if (type === 'reasoning-end') {
@@ -339,7 +358,7 @@ export async function generateWithStreamAI(
 	                    }
 	                };
 
-	                // 预检流：在返回流之前，先尝试读取前几个 part 来验证连接成功且正文非空
+	                // 预检流：仅做“连接可用”探测，避免等待正文首字导致流式首屏阻塞。
 	                const reader = result.fullStream.getReader();
                 const readWithTimeout = createStreamReadWithTimeout({
                     label: `上游流式(${provider.name}/${selectedModel})`,
@@ -352,25 +371,29 @@ export async function generateWithStreamAI(
                             // ignore
                         }
                     },
-                });
+	                });
 	                const prefetchedChunks: RawUnifiedStreamChunk[] = [];
 	                let prefetchedText = '';
-	                const MAX_PREFETCH_PARTS = 64;
-	                const MAX_PREFETCH_TEXT_CHARS = 8_192;
+	                let prefetchedDone = false;
+	                const MAX_PREFETCH_PARTS = 16;
 
-		                for (let i = 0; i < MAX_PREFETCH_PARTS && prefetchedText.length < MAX_PREFETCH_TEXT_CHARS; i++) {
+		                for (let i = 0; i < MAX_PREFETCH_PARTS; i++) {
 		                    const part = await readWithTimeout(reader);
-		                    if (part.done) break;
+		                    if (part.done) {
+	                        prefetchedDone = true;
+	                        break;
+	                    }
 	                    const mapped = mapToUnifiedChunk(part.value);
 	                    if (!mapped) continue;
 	                    prefetchedChunks.push(mapped);
 	                    if (mapped.type === 'text-delta') {
 	                        prefetchedText += mapped.text;
-	                        if (prefetchedText.trim() && !looksLikeTrivialEmptyOutput(prefetchedText)) break;
 	                    }
+	                    // 低延迟优先：拿到首个有效 chunk（文本或 reasoning）后立即交由上层持续消费。
+	                    break;
 	                }
 
-		                if (looksLikeTrivialEmptyOutput(prefetchedText)) {
+		                if (prefetchedDone && looksLikeTrivialEmptyOutput(prefetchedText)) {
 		                    try {
 		                        void reader.cancel('empty-output').catch(() => {});
 		                    } catch {

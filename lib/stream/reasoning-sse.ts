@@ -51,6 +51,8 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
   const queuedEvents: SseQueuedEvent[] = [];
   let sawReasoningDone = false;
   let hasReasoningText = false;
+  let activeController: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let streamClosed = false;
 
   const enqueue = (event: string, payload: unknown) => {
     queuedEvents.push({ event, payload });
@@ -59,12 +61,14 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
   const onReasoningEvent = (event: RawReasoningStreamEvent) => {
     if (event.type === 'reasoning-start') {
       enqueue('reasoning', { source: 'sdk', status: 'thinking', chunk: '' });
+      flushQueuedEventsIfReady();
       return;
     }
     if (event.type === 'reasoning-delta') {
       const chunk = typeof event.text === 'string' ? event.text : '';
       if (chunk.trim()) hasReasoningText = true;
       enqueue('reasoning', { source: 'sdk', status: 'thinking', chunk });
+      flushQueuedEventsIfReady();
       return;
     }
     if (event.type === 'reasoning-end') {
@@ -73,6 +77,7 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
         source: 'sdk',
         status: hasReasoningText ? 'done' : 'unavailable',
       });
+      flushQueuedEventsIfReady();
     }
   };
 
@@ -82,6 +87,10 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
       if (!next) continue;
       controller.enqueue(encodeSseEvent(next.event, next.payload));
     }
+  };
+  const flushQueuedEventsIfReady = () => {
+    if (streamClosed || !activeController) return;
+    flushQueuedEvents(activeController);
   };
 
   const enqueueReasoningDoneIfNeeded = (controller: ReadableStreamDefaultController<Uint8Array>) => {
@@ -134,7 +143,10 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
     const body = new ReadableStream<Uint8Array>({
       async start(controller) {
         const decoder = new TextDecoder();
+        activeController = controller;
+        streamClosed = false;
         try {
+          flushQueuedEvents(controller);
           while (true) {
             const { done, value } = await readWithTimeout(upstreamReader);
             if (done) break;
@@ -168,6 +180,8 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
           }
 
           controller.enqueue(encodeSseEvent('done', { ok: true }));
+          streamClosed = true;
+          activeController = null;
           controller.close();
         } catch (error) {
           flushQueuedEvents(controller);
@@ -178,10 +192,14 @@ export const createReasoningSseBridge = (label?: string): ReasoningSseBridge => 
               error: error instanceof Error ? error.message : String(error ?? '上游流读取失败'),
             })
           );
+          streamClosed = true;
+          activeController = null;
           controller.close();
         }
       },
       cancel(reason) {
+        streamClosed = true;
+        activeController = null;
         try {
           void upstreamReader.cancel(reason).catch(() => {});
         } catch {

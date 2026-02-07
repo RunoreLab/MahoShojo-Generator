@@ -45,6 +45,44 @@ describe('stream/reasoning-sse', () => {
     expect(sseRaw).toContain('event: done');
   });
 
+  test('正文延迟时，reasoning 事件可先于 markdown 输出', async () => {
+    const bridge = createReasoningSseBridge('延迟正文测试');
+    bridge.onReasoningEvent({ type: 'reasoning-start' });
+    bridge.onReasoningEvent({ type: 'reasoning-delta', text: '先做任务分解。' });
+
+    const encoder = new TextEncoder();
+    const delayedTextBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        setTimeout(() => {
+          controller.enqueue(encoder.encode('正文稍后到达'));
+          controller.close();
+        }, 40);
+      },
+    });
+    const textResponse = new Response(delayedTextBody, {
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+
+    const sseResponse = bridge.toResponse(textResponse);
+    const reader = sseResponse.body?.getReader();
+    expect(reader).toBeTruthy();
+    const decoder = new TextDecoder();
+
+    const first = await reader!.read();
+    const firstChunk = decoder.decode(first.value ?? new Uint8Array(), { stream: true });
+    expect(firstChunk).toContain('event: reasoning');
+    expect(firstChunk).not.toContain('event: markdown');
+
+    let merged = firstChunk;
+    for (let i = 0; i < 6; i++) {
+      const next = await reader!.read();
+      if (next.done) break;
+      merged += decoder.decode(next.value ?? new Uint8Array(), { stream: true });
+      if (merged.includes('event: markdown')) break;
+    }
+    expect(merged).toContain('event: markdown');
+  });
+
   test('无 reasoning 时会发出 unavailable', async () => {
     const bridge = createReasoningSseBridge('无推理测试');
     const textResponse = new Response('纯正文');

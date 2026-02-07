@@ -577,6 +577,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
         const reasoningEventQueue: RawReasoningStreamEvent[] = [];
+        let flushReasoningQueueNow: (() => void) | null = null;
         const aiOptions: GenerateWithAIOptions = {
             ...(providerOptions ?? {}),
             telemetry: aiTelemetry,
@@ -584,6 +585,7 @@ async function handler(req: NextRequest): Promise<Response> {
                 ? {
                     onReasoningEvent: (event) => {
                         reasoningEventQueue.push(event);
+                        flushReasoningQueueNow?.();
                     },
                 }
                 : {}),
@@ -970,16 +972,18 @@ async function handler(req: NextRequest): Promise<Response> {
                 },
             });
 
-	            let pendingMarkdownTail = '';
-	            let metaBuffer = '';
-		            let metaFallbackTail = '';
-		            let inMeta = false;
-		            let markdownCharsSent = 0;
-		            let hasMeaningfulMarkdown = false;
+		            let pendingMarkdownTail = '';
+		            let metaBuffer = '';
+			            let metaFallbackTail = '';
+			            let inMeta = false;
+			            let markdownCharsSent = 0;
+			            let hasMeaningfulMarkdown = false;
                 let reasoningCharsSent = 0;
                 let hasReasoningStarted = false;
                 let hasReasoningDelta = false;
                 let reasoningCompleted = false;
+                let activeSseController: ReadableStreamDefaultController<Uint8Array> | null = null;
+                let sseStreamClosed = false;
 
 		            const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
 		                if (!chunk) return;
@@ -1036,6 +1040,11 @@ async function handler(req: NextRequest): Promise<Response> {
                         }
                     }
                 };
+                const flushReasoningQueueIfReady = () => {
+                    if (!activeSseController || sseStreamClosed) return;
+                    flushReasoningQueue(activeSseController);
+                };
+                flushReasoningQueueNow = flushReasoningQueueIfReady;
 
 	            const processText = (controller: ReadableStreamDefaultController<Uint8Array>, text: string) => {
 	                if (!text) return;
@@ -1218,9 +1227,9 @@ async function handler(req: NextRequest): Promise<Response> {
 		                }
 
 		                // 若未下发任何有效正文（非空白），且也没有可用的 impacts，则视为异常：AI 返回空输出 / 或正文被吞掉。
-		                if (!hasMeaningfulMarkdown && !metaHasImpacts) {
-		                    const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
-		                    const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
+			                if (!hasMeaningfulMarkdown && !metaHasImpacts) {
+			                    const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
+			                    const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
 		                    controller.enqueue(
 		                        encodeEvent('error', {
 		                            ok: false,
@@ -1240,16 +1249,22 @@ async function handler(req: NextRequest): Promise<Response> {
 		                                  }
 		                                : null,
 		                        })
-		                    );
-		                    await finalizeOnce('failed', 'empty stream output');
-		                    controller.close();
-		                    return;
-		                }
+			                    );
+			                    await finalizeOnce('failed', 'empty stream output');
+                                sseStreamClosed = true;
+                                activeSseController = null;
+                                flushReasoningQueueNow = null;
+			                    controller.close();
+			                    return;
+			                }
 
-		                controller.enqueue(encodeEvent('done', { ok: true }));
-		                await finalizeOnce('completed');
-		                controller.close();
-		            };
+			                controller.enqueue(encodeEvent('done', { ok: true }));
+			                await finalizeOnce('completed');
+                            sseStreamClosed = true;
+                            activeSseController = null;
+                            flushReasoningQueueNow = null;
+			                controller.close();
+			            };
 
 		            const pumpSse = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
 		                if (pumpStarted) return;
@@ -1289,34 +1304,42 @@ async function handler(req: NextRequest): Promise<Response> {
 		                        } catch {
 		                            // ignore
 		                        }
-		                        await finalizeOnce('failed', message);
-		                        try {
-		                            controller.close();
-		                        } catch {
-		                            // ignore
+			                        await finalizeOnce('failed', message);
+			                        try {
+                                    sseStreamClosed = true;
+                                    activeSseController = null;
+                                    flushReasoningQueueNow = null;
+			                            controller.close();
+			                        } catch {
+			                            // ignore
 		                        }
 		                        return;
 		                    }
 		                }
 		            };
 
-		            const sseBody = new ReadableStream<Uint8Array>({
-		                start(controller) {
-		                    enqueueDebug(controller, {
-		                        phase: 'open',
-		                        generationId,
+			            const sseBody = new ReadableStream<Uint8Array>({
+			                start(controller) {
+                                activeSseController = controller;
+                                sseStreamClosed = false;
+			                    enqueueDebug(controller, {
+			                        phase: 'open',
+			                        generationId,
 		                        shouldAllowStreamMeta,
 		                        idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
 		                        totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
 		                    });
                         flushReasoningQueue(controller);
-		                    void pumpSse(controller);
-		                },
-		                async cancel(reason) {
-		                    sseCancelled = true;
-		                    try {
-		                        void reader.cancel(reason).catch(() => {});
-		                    } catch {
+			                    void pumpSse(controller);
+			                },
+			                async cancel(reason) {
+			                    sseCancelled = true;
+                                sseStreamClosed = true;
+                                activeSseController = null;
+                                flushReasoningQueueNow = null;
+			                    try {
+			                        void reader.cancel(reason).catch(() => {});
+			                    } catch {
 		                        // 忽略取消时的二次错误
 		                    }
 		                    await finalizeOnce(
