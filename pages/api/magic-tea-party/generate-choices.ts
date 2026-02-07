@@ -10,6 +10,7 @@ import { buildMagicTeaPartyChoicesPrompt, buildWorldbookText } from '@/lib/magic
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import type { MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-magic-tea-party-generate-choices');
@@ -171,6 +172,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, { status: 405 });
   }
+  const wantsClientSse = shouldUseClientSse(req);
 
   try {
     const parsedBody = RequestBodySchema.safeParse(await req.json().catch(() => null));
@@ -264,15 +266,28 @@ export default async function handler(req: NextRequest): Promise<Response> {
       providerOverride,
       loadBalanceStrategy: LoadBalanceStrategy.CUSTOM,
     };
+    const reasoningBridge = wantsClientSse ? createReasoningSseBridge('魔法茶会选项生成') : null;
+    const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
 
     const streamResult = await generateWithStreamAI(
       {
         prompt,
         temperature: typeof settings.temperature === 'number' ? settings.temperature : 0.5,
       },
-      providerOptions
+      {
+        ...providerOptions,
+        telemetry: aiTelemetry,
+        ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
+      }
     );
     recordUserActivityFromRequest(req);
+
+    if (wantsClientSse && reasoningBridge) {
+      return reasoningBridge.toResponse(streamResult.response, {
+        usagePromise: streamResult.usagePromise,
+        aiModel: aiTelemetry.model ?? customProvider.modelId.trim() ?? null,
+      });
+    }
 
     return streamResult.response;
   } catch (error) {

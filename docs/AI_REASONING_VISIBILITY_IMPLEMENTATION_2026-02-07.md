@@ -1,4 +1,4 @@
-# AI 思考内容展示功能落地记录（Phase 1 + Phase 2）
+# AI 思考内容展示功能落地记录（Phase 1 + Phase 2 + Phase 3）
 
 更新时间：2026-02-07  
 对应设计：`docs/AI_REASONING_VISIBILITY_DESIGN_2026-02-06.md`
@@ -86,6 +86,23 @@
   - `tests/read-text-and-reasoning-stream.test.ts`
   - `tests/reasoning-sse.test.ts`
 
+### 1.8 Phase 3：magic-tea-party 全链路接入（本次新增）
+
+- 前端流式读取统一到 reasoning SSE：
+  - `lib/magic-tea-party/useMagicTeaPartyChat.ts`
+  - `runGenerateStream` / `requestChoicesFallback` / `generateChoices` 均改为请求 `?format=sse`
+  - 统一使用 `readTextAndReasoningStreamFromResponse` 解析 `markdown/reasoning/reasoning_done/telemetry`
+  - 通过 `mergeAssistantAiMeta` 将 `aiReasoning / aiUsage / aiModel` 实时回写到 assistant 消息 `meta`
+- 后端 API 输出统一桥接：
+  - `pages/api/magic-tea-party/generate-stream.ts`
+  - `pages/api/magic-tea-party/generate-choices.ts`
+  - 新增 `shouldUseClientSse + createReasoningSseBridge`
+  - 把上游文本流与 SDK reasoning 回调桥接为标准 SSE 事件，并在结束时回传 usage + aiModel telemetry
+- 聊天消息 UI 接入思考面板：
+  - `components/magic-tea-party/ChatMessage.tsx`
+  - assistant 泡泡（raw / segments / markdown / plain）统一渲染 `AiReasoningPanel`
+  - 生成中但尚无思考正文时显示“AI 正在思考…”，有摘要后优先展示摘要
+
 ---
 
 ## 2. 异常样例处理策略（Gemini thought 泄漏）
@@ -100,9 +117,9 @@
 
 ## 3. 当前限制与后续建议
 
-1. 竞技场/PVP/通用生成页（free/details/canshou/sublimation/scenario/tavern）已完成统一接入。
-2. `magic-tea-party` 相关流式链路仍未并入统一 reasoning 面板，建议作为下一阶段。
-3. 当前 telemetry 标准仍以“通用 usage”字段为主，不同供应商的明细字段粒度可能不同。
+1. 竞技场/PVP/通用生成页 + `magic-tea-party` 已完成统一接入。
+2. 当前 `magic-tea-party` 聊天 UI 仅展示 reasoning 面板；`aiUsage/aiModel` 尚未在消息卡片显式展示，可作为后续增强。
+3. telemetry 仍以“通用 usage”字段为主，不同供应商的细粒度 token 指标可能缺失或口径不一致。
 
 ---
 
@@ -112,9 +129,12 @@
    - 生成中显示“AI 正在思考…”或摘要
    - 点击后可查看详细思考内容
 2. 在 free/details/canshou/sublimation/scenario/tavern 的流式模式下，验证思考面板可实时更新。
-3. 检查 metadata 区域与正文渲染无回归。
-4. 导出图片时确认 reasoning panel 默认不出现在截图内。
-5. 回归命令：
+3. 在 `magic-tea-party` 中验证：
+   - 普通回复与“生成选项”都能实时显示思考摘要/正文
+   - 展开面板可查看完整思考文本，流结束后状态从 `thinking` 变为 `done/unavailable`
+4. 检查 metadata 区域与正文渲染无回归。
+5. 导出图片时确认 reasoning panel 默认不出现在截图内。
+6. 回归命令：
    - `bun run lint`
    - `bun test`
    - `bun run build`

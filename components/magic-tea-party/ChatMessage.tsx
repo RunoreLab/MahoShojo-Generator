@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { inferErrorCategoryForError } from '@/lib/error-help';
@@ -10,6 +11,7 @@ import type {
   MagicTeaPartySession,
   MagicTeaPartyTachieAsset,
 } from '@/lib/magic-tea-party/types';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 type MagicTeaPartyChatMessageProps = {
   message: MagicTeaPartyMessage;
@@ -34,6 +36,19 @@ type MagicTeaPartyChatMessageProps = {
 const isMessageSuperseded = (message: MagicTeaPartyMessage): boolean => {
   const meta = message.meta && typeof message.meta === 'object' ? (message.meta as Record<string, unknown>) : null;
   return Boolean(meta && meta.superseded === true);
+};
+
+const getMessageMetaRecord = (message: MagicTeaPartyMessage): Record<string, unknown> | null => {
+  if (!message.meta || typeof message.meta !== 'object') return null;
+  return message.meta as Record<string, unknown>;
+};
+
+const getMessageAiReasoning = (message: MagicTeaPartyMessage): AIReasoningEnvelope | null => {
+  const meta = getMessageMetaRecord(message);
+  if (!meta) return null;
+  const payload = meta.aiReasoning;
+  if (!payload || typeof payload !== 'object') return null;
+  return payload as AIReasoningEnvelope;
 };
 
 const getSpeakerNameFromRole = (session: MagicTeaPartySession | null, roleId: string): string => {
@@ -280,6 +295,8 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
   const isUser = message.role === 'user';
   const bubbleClass = isUser ? 'bg-pink-600 text-white' : 'bg-white border border-pink-100 text-gray-800';
   const isRawView = message.role === 'assistant' && props.outputView === 'raw';
+  const messageReasoning = message.role === 'assistant' ? getMessageAiReasoning(message) : null;
+  const reasoningStatus = messageReasoning?.status ?? (message.status === 'streaming' ? 'thinking' : 'idle');
   const speakerName =
     message.meta && typeof message.meta === 'object' && typeof (message.meta as any).speakerName === 'string'
       ? String((message.meta as any).speakerName).trim()
@@ -311,6 +328,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
       <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
         <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
         {renderMessageAttachments(message, session, tachieAssets)}
+        <AiReasoningPanel reasoning={messageReasoning} status={reasoningStatus} compact />
         {renderAssistantFooter(message)}
         {renderAssistantActions({
           message,
@@ -370,6 +388,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
           return null;
         })}
         {renderMessageAttachments(message, session, tachieAssets)}
+        <AiReasoningPanel reasoning={messageReasoning} status={reasoningStatus} compact />
         {renderAssistantFooter(message)}
         {renderAssistantActions({
           message,
@@ -426,6 +445,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
       <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
         <MarkdownBlock content={message.content || ''} variant="light" mode="article" />
         {renderMessageAttachments(message, session, tachieAssets)}
+        <AiReasoningPanel reasoning={messageReasoning} status={reasoningStatus} compact />
         {renderAssistantFooter(message)}
         {renderAssistantActions({
           message,
@@ -445,7 +465,12 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
       <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
       {renderMessageAttachments(message, session, tachieAssets)}
       {message.role === 'assistant'
-        ? renderAssistantFooter(message)
+        ? (
+            <>
+              <AiReasoningPanel reasoning={messageReasoning} status={reasoningStatus} compact />
+              {renderAssistantFooter(message)}
+            </>
+          )
         : null}
       {message.role === 'assistant'
         ? renderAssistantActions({
