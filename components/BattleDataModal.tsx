@@ -71,6 +71,26 @@ const getCardTagIds = (card: any): string[] => {
   return [];
 };
 
+const resolveQuestionnaireNativeAllowed = (card: any): boolean => {
+  if (!card || card.type !== 'questionnaire') return false;
+  if (typeof card.nativeAllowed === 'boolean') return card.nativeAllowed;
+  if (typeof card.native_allowed === 'boolean') return card.native_allowed;
+
+  let payload = card.data;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return false;
+    }
+  }
+
+  if (!payload || typeof payload !== 'object') return false;
+  if (typeof (payload as any).nativeAllowed === 'boolean') return (payload as any).nativeAllowed;
+  if (typeof (payload as any).native_allowed === 'boolean') return (payload as any).native_allowed;
+  return false;
+};
+
 type PvpHandTabCard = {
   snapshotId: string;
   name: string;
@@ -1540,6 +1560,7 @@ export default function BattleDataModal({
 	                    const quickToggleTitle = isSelected
 	                      ? (canToggle ? '移除' : '当前模式不支持移除')
 	                      : (itemDisabled ? '已达到上限' : '加入');
+                      const questionnaireNativeAllowed = resolveQuestionnaireNativeAllowed(card);
 
 		                  return (
 		                    <div
@@ -1588,6 +1609,7 @@ export default function BattleDataModal({
                           techLevel={cardMetaById[card.id]?.techLevel ?? null}
                           strictTier={cardMetaById[card.id]?.strictTier ?? null}
                           isNative={cardMetaById[card.id]?.isNative ?? null}
+                          questionnaireNativeAllowed={questionnaireNativeAllowed}
 	                        isFavorited={isFavorited}
 	                        canFavorite={enableFavorite}
 	                        isRecommended={card.is_recommended === 1}
