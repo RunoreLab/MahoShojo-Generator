@@ -17,6 +17,9 @@ import {
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { extractHeuristicReasoningFromMarkdown } from '@/lib/ai/reasoning-normalizer';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
@@ -46,6 +49,8 @@ export interface NewsReport {
     cachedTokens?: number | null;
     [key: string]: unknown;
   };
+  /** AI 思考内容（结构化，可能为空）。 */
+  aiReasoning?: AIReasoningEnvelope | null;
   /**
    * 读取叙事历史条数：仅在开启 readNarrativeHistory 时由后端写入（未开启则不返回）。
    * 可能为 0（已开启但本地无可用条目）。
@@ -83,6 +88,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
   const analysisContent = (report.article?.analysis ?? '').trimEnd();
   const officialWinner = (report.officialReport?.winner ?? '').trim();
   const officialConclusion = (report.officialReport?.conclusion ?? '').trimEnd();
+  const reportReasoning = report.aiReasoning ?? null;
 
   const aiModel = typeof report.aiModel === 'string' ? report.aiModel.trim() : '';
   const aiUsage = report.aiUsage;
@@ -93,6 +99,12 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
     );
   const shouldShowNarrativeReadCount = typeof report.narrativeHistoryReadCount === 'number';
   const shouldShowAiModel = Boolean(aiModel);
+  const reportReasoningText = typeof reportReasoning?.text === 'string' ? reportReasoning.text.trim() : '';
+  const heuristicReasoning = !reportReasoningText ? extractHeuristicReasoningFromMarkdown(bodyContent) : null;
+  const reasoningForPanel =
+    reportReasoningText || reportReasoning?.status === 'thinking'
+      ? reportReasoning
+      : (heuristicReasoning ?? reportReasoning);
 
   const getModeDisplay = (mode: string) => {
     switch (mode) {
@@ -124,6 +136,7 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
 
     const buttonsContainer = cardRef.current.querySelector('.buttons-container') as HTMLElement;
     const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
+    const reasoningPanels = Array.from(cardRef.current.querySelectorAll('.ai-reasoning-panel')) as HTMLElement[];
 
     try {
       setIsSavingImage(true);
@@ -131,6 +144,9 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
       // 截图前隐藏按钮和显示Logo
       if (buttonsContainer) buttonsContainer.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
+      reasoningPanels.forEach((panel) => {
+        panel.style.display = 'none';
+      });
 
       const sanitizedTitle = headline.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_') || 'battle_report';
       const filename = `魔法少女速报_${sanitizedTitle}.png`;
@@ -162,6 +178,9 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
       // 截图后恢复按钮和隐藏Logo
       if (buttonsContainer) buttonsContainer.style.display = 'flex';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';
+      reasoningPanels.forEach((panel) => {
+        panel.style.display = '';
+      });
       setIsSavingImage(false);
     }
   };
@@ -500,6 +519,15 @@ ${adjudicationMarkdown}
             />
           )}  
         </div>
+
+        {reasoningForPanel && (
+          <AiReasoningPanel
+            reasoning={reasoningForPanel}
+            status={reasoningForPanel.status}
+            compact
+            defaultExpanded={false}
+          />
+        )}
 
         <div className="result-item">
           <div className="result-value">

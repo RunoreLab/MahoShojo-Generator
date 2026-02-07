@@ -20,6 +20,8 @@ import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { appendReasoningDelta, normalizeReasoningSource, updateReasoningStatus } from '@/lib/ai/reasoning-normalizer';
+import type { AIReasoningSource } from '@/types/ai-reasoning';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
 
@@ -256,6 +258,7 @@ export const useBattleEngine = () => {
   const setStreamAiUsage = useBattleSelector((state) => state.setStreamAiUsage);
   const setStreamAiModel = useBattleSelector((state) => state.setStreamAiModel);
   const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
+  const setStreamReasoning = useBattleSelector((state) => state.setStreamReasoning);
   const setStreamUpdateMetaDebug = useBattleSelector((state) => state.setStreamUpdateMetaDebug);
   const setLastGenerationId = useBattleSelector((state) => state.setLastGenerationId);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
@@ -334,6 +337,7 @@ export const useBattleEngine = () => {
     setStreamAiUsage(null);
     setStreamAiModel(null);
     setStreamNarrativeHistoryReadCount(null);
+    setStreamReasoning(null);
     setStreamUpdateMetaDebug(null);
     setLastGenerationId(null);
 
@@ -779,6 +783,36 @@ export const useBattleEngine = () => {
               return { event, data: dataLines.join('\n') };
             };
 
+            const resolveReasoningSource = (value: unknown): AIReasoningSource => {
+              const normalized = normalizeReasoningSource(value);
+              return normalized === 'unknown' ? 'sdk' : normalized;
+            };
+
+            const appendReasoningChunkToStore = (chunk: string, source: AIReasoningSource) => {
+              const previous = useBattleStore.getState().streamReasoning;
+              const next = appendReasoningDelta(previous, sanitizeTextByShieldWords(chunk), {
+                source,
+                status: 'thinking',
+              });
+              setStreamReasoning(next);
+            };
+
+            const markReasoningStatusInStore = (
+              nextStatus: 'thinking' | 'done' | 'error' | 'unavailable',
+              options?: { source?: AIReasoningSource; summary?: string | null; errorMessage?: string | null }
+            ) => {
+              const previous = useBattleStore.getState().streamReasoning;
+              const next = updateReasoningStatus(previous, {
+                status: nextStatus,
+                ...(options?.source ? { source: options.source } : {}),
+                ...(typeof options?.summary === 'string' || options?.summary === null
+                  ? { summary: options.summary }
+                  : {}),
+                ...(typeof options?.errorMessage === 'string' ? { errorMessage: options.errorMessage } : {}),
+              });
+              setStreamReasoning(next);
+            };
+
             const handleSensitiveIfNeeded = async () => {
               const { slice: sliceToCheck, startIndex: sliceStartIndex } = getIncrementalCheckSlice(accumulatedText);
               const sensitiveCheck = await quickCheck(sliceToCheck);
@@ -830,6 +864,23 @@ export const useBattleEngine = () => {
                 payload = null;
               }
 
+              if (event === 'reasoning') {
+                const source = resolveReasoningSource(payload?.source);
+                const chunk = typeof payload?.chunk === 'string' ? payload.chunk : '';
+                if (chunk) {
+                  appendReasoningChunkToStore(chunk, source);
+                } else {
+                  markReasoningStatusInStore('thinking', { source });
+                }
+                return;
+              }
+
+              if (event === 'reasoning_done') {
+                const source = resolveReasoningSource(payload?.source);
+                markReasoningStatusInStore('done', { source });
+                return;
+              }
+
               if (event === 'markdown') {
                 const chunk = typeof payload?.chunk === 'string' ? payload.chunk : '';
                 if (chunk) {
@@ -843,6 +894,16 @@ export const useBattleEngine = () => {
               if (event === 'telemetry') {
                 const usage = payload?.usage ?? null;
                 setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
+                if (usage && typeof usage === 'object' && typeof usage.reasoningTokens === 'number') {
+                  const previous = useBattleStore.getState().streamReasoning;
+                  if (previous) {
+                    const next = {
+                      ...previous,
+                      reasoningTokens: usage.reasoningTokens,
+                    };
+                    setStreamReasoning(next);
+                  }
+                }
                 const narrativeCount =
                   typeof payload?.narrativeHistoryReadCount === 'number' ? payload.narrativeHistoryReadCount : null;
                 setStreamNarrativeHistoryReadCount(narrativeCount);
@@ -896,6 +957,10 @@ export const useBattleEngine = () => {
               if (event === 'error') {
                 const message = typeof payload?.error === 'string' ? payload.error : '服务器流式响应异常';
                 setError(`✨ 生成失败：${sanitizeTextByShieldWords(message)}`);
+                markReasoningStatusInStore('error', {
+                  source: resolveReasoningSource(payload?.source),
+                  errorMessage: sanitizeTextByShieldWords(message),
+                });
                 shouldAbort = true;
                 sawDoneEvent = true;
                 try {
@@ -907,6 +972,10 @@ export const useBattleEngine = () => {
               }
 
               if (event === 'done') {
+                const currentReasoning = useBattleStore.getState().streamReasoning;
+                if (currentReasoning?.status === 'thinking') {
+                  markReasoningStatusInStore('done');
+                }
                 sawDoneEvent = true;
                 return;
               }
@@ -1296,6 +1365,7 @@ export const useBattleEngine = () => {
 	    setStreamAiUsage,
 	    setStreamAiModel,
 	    setStreamNarrativeHistoryReadCount,
+      setStreamReasoning,
       setStreamUpdateMetaDebug,
       setLastGenerationId,
 		    setCombatants,

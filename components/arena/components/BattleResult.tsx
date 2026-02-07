@@ -33,6 +33,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const streamAiUsage = useBattleSelector((state) => state.streamAiUsage);
   const streamAiModel = useBattleSelector((state) => state.streamAiModel);
   const streamNarrativeHistoryReadCount = useBattleSelector((state) => state.streamNarrativeHistoryReadCount);
+  const streamReasoning = useBattleSelector((state) => state.streamReasoning);
   const streamUpdateMetaDebug = useBattleSelector((state) => state.streamUpdateMetaDebug);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
@@ -145,6 +146,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               aiUsage={streamAiUsage}
               aiModel={streamAiModel}
               narrativeHistoryReadCount={streamNarrativeHistoryReadCount}
+              aiReasoning={streamReasoning}
               isStreaming={isGenerating}
             />
           </div>

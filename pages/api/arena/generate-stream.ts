@@ -14,7 +14,13 @@ import { getSystemPrompt } from '@/lib/arena/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
 	import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
-	import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+	import {
+    generateWithStreamAI,
+    LoadBalanceStrategy,
+    RawGenerationConfig,
+    GenerateWithAIOptions,
+    RawReasoningStreamEvent
+} from '@/lib/stream/raw-ai';
 import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
@@ -105,6 +111,15 @@ async function handler(req: NextRequest): Promise<Response> {
 
 	    const startedAtMs = Date.now();
 	    const startedAtIso = new Date(startedAtMs).toISOString();
+    const requestUrl = new URL(req.url);
+    const wantsSse =
+        requestUrl.searchParams.get('format') === 'sse' ||
+        (req.headers.get('accept') || '').includes('text/event-stream');
+    const debugSseRequested =
+        requestUrl.searchParams.get('debug') === '1' ||
+        requestUrl.searchParams.get('debug') === 'true' ||
+        requestUrl.searchParams.get('debugSse') === '1' ||
+        requestUrl.searchParams.get('debugSse') === 'true';
 
 	    // 用于在异常/提前返回时补齐 battle_report_generations 记录（避免“失败/敏感词拦截没有记录”）。
 	    let snapshotMode: string = 'classic';
@@ -561,7 +576,18 @@ async function handler(req: NextRequest): Promise<Response> {
         )({ combatants });
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
-        const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+        const reasoningEventQueue: RawReasoningStreamEvent[] = [];
+        const aiOptions: GenerateWithAIOptions = {
+            ...(providerOptions ?? {}),
+            telemetry: aiTelemetry,
+            ...(wantsSse
+                ? {
+                    onReasoningEvent: (event) => {
+                        reasoningEventQueue.push(event);
+                    },
+                }
+                : {}),
+        };
         const isStrictRankedMatchRequest =
             mode === 'classic'
             && String(language ?? '').trim() === 'zh-CN'
@@ -894,20 +920,13 @@ async function handler(req: NextRequest): Promise<Response> {
             }
         };
 
-        const url = new URL(req.url);
-        const wantsSse =
-            url.searchParams.get('format') === 'sse' || (req.headers.get('accept') || '').includes('text/event-stream');
         const shouldAllowStreamMeta = shouldForceStreamMeta || resolvedWriteArenaHistory || resolvedWriteCurrentState;
 
 	        if (wantsSse) {
 	            const sseHeaders = new Headers(headers);
 	            sseHeaders.set('Content-Type', 'text/event-stream; charset=utf-8');
 	            sseHeaders.set('Cache-Control', 'no-cache, no-transform');
-	            const debugSse =
-	                url.searchParams.get('debug') === '1' ||
-	                url.searchParams.get('debug') === 'true' ||
-	                url.searchParams.get('debugSse') === '1' ||
-	                url.searchParams.get('debugSse') === 'true';
+	            const debugSse = debugSseRequested;
 
 	            const encoder = new TextEncoder();
 	            const encodeEvent = (event: string, payload: unknown) => {
@@ -957,6 +976,10 @@ async function handler(req: NextRequest): Promise<Response> {
 		            let inMeta = false;
 		            let markdownCharsSent = 0;
 		            let hasMeaningfulMarkdown = false;
+                let reasoningCharsSent = 0;
+                let hasReasoningStarted = false;
+                let hasReasoningDelta = false;
+                let reasoningCompleted = false;
 
 		            const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
 		                if (!chunk) return;
@@ -966,6 +989,53 @@ async function handler(req: NextRequest): Promise<Response> {
 		                }
 		                controller.enqueue(encodeEvent('markdown', { chunk }));
 		            };
+
+                const flushReasoningQueue = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+                    while (reasoningEventQueue.length > 0) {
+                        const event = reasoningEventQueue.shift();
+                        if (!event) continue;
+
+                        if (event.type === 'reasoning-start') {
+                            hasReasoningStarted = true;
+                            controller.enqueue(
+                                encodeEvent('reasoning', {
+                                    source: 'sdk',
+                                    status: 'thinking',
+                                    chunk: '',
+                                })
+                            );
+                            continue;
+                        }
+
+                        if (event.type === 'reasoning-delta') {
+                            const chunk = typeof event.text === 'string' ? event.text : '';
+                            if (!chunk) continue;
+                            hasReasoningStarted = true;
+                            hasReasoningDelta = true;
+                            reasoningCharsSent += chunk.length;
+                            controller.enqueue(
+                                encodeEvent('reasoning', {
+                                    source: 'sdk',
+                                    status: 'thinking',
+                                    chunk,
+                                })
+                            );
+                            continue;
+                        }
+
+                        if (event.type === 'reasoning-end') {
+                            hasReasoningStarted = true;
+                            reasoningCompleted = true;
+                            controller.enqueue(
+                                encodeEvent('reasoning_done', {
+                                    source: 'sdk',
+                                    status: 'done',
+                                    chars: reasoningCharsSent,
+                                })
+                            );
+                        }
+                    }
+                };
 
 	            const processText = (controller: ReadableStreamDefaultController<Uint8Array>, text: string) => {
 	                if (!text) return;
@@ -1027,6 +1097,7 @@ async function handler(req: NextRequest): Promise<Response> {
 		                    appendText(flushed);
 		                    processText(controller, flushed);
 		                }
+                        flushReasoningQueue(controller);
 
 		                if (!inMeta && pendingMarkdownTail) {
 		                    flushMarkdown(controller, pendingMarkdownTail);
@@ -1043,6 +1114,10 @@ async function handler(req: NextRequest): Promise<Response> {
 		                    pendingMarkdownTailLength: pendingMarkdownTail.length,
 		                    metaBufferLength: metaBuffer.length,
 		                    metaFallbackTailLength: metaFallbackTail.length,
+                        reasoningCharsSent,
+                        hasReasoningStarted,
+                        hasReasoningDelta,
+                        reasoningCompleted,
 		                });
 
 		                // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
@@ -1079,6 +1154,18 @@ async function handler(req: NextRequest): Promise<Response> {
 		                    };
 		                    controller.enqueue(encodeEvent('telemetry', telemetryPayload));
 		                }
+
+                        flushReasoningQueue(controller);
+                        if (hasReasoningStarted && !reasoningCompleted) {
+                            reasoningCompleted = true;
+                            controller.enqueue(
+                                encodeEvent('reasoning_done', {
+                                    source: 'sdk',
+                                    status: hasReasoningDelta ? 'done' : 'unavailable',
+                                    chars: reasoningCharsSent,
+                                })
+                            );
+                        }
 
 		                let metaHasImpacts = false;
 		                if (shouldAllowStreamMeta) {
@@ -1190,9 +1277,11 @@ async function handler(req: NextRequest): Promise<Response> {
 		                            const decoded = decoder.decode(value, { stream: true });
 		                            appendText(decoded);
 		                            processText(controller, decoded);
+                                flushReasoningQueue(controller);
 		                        }
 		                    } catch (streamError) {
 		                        if (sseCancelled) return;
+                            flushReasoningQueue(controller);
 		                        const message =
 		                            streamError instanceof Error ? streamError.message : String(streamError ?? 'stream error');
 		                        try {
@@ -1220,6 +1309,7 @@ async function handler(req: NextRequest): Promise<Response> {
 		                        idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
 		                        totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
 		                    });
+                        flushReasoningQueue(controller);
 		                    void pumpSse(controller);
 		                },
 		                async cancel(reason) {
@@ -1342,14 +1432,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	        log.error('生成战斗故事时发生顶层错误', { error });
 	        const errorMessage = error instanceof Error ? error.message : '未知错误';
 
-	        const url = new URL(req.url);
-	        const wantsSse =
-	            url.searchParams.get('format') === 'sse' || (req.headers.get('accept') || '').includes('text/event-stream');
-	        const debugSse =
-	            url.searchParams.get('debug') === '1' ||
-	            url.searchParams.get('debug') === 'true' ||
-	            url.searchParams.get('debugSse') === '1' ||
-	            url.searchParams.get('debugSse') === 'true';
+	        const debugSse = debugSseRequested;
 
 	        const endedAtMs = Date.now();
 	        const endedAtIso = new Date(endedAtMs).toISOString();

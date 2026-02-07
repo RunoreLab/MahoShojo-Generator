@@ -3252,6 +3252,7 @@ export function PvpRoomPage() {
                         characterGuidances={(reportMetaForUi as any)?.characterGuidances ?? null}
                         adjudicationResults={(reportMetaForUi as any)?.adjudicationResults ?? null}
                         aiModel={(reportMetaForUi as any)?.ai?.model ?? null}
+                        aiReasoning={(reportMetaForUi as any)?.aiReasoning ?? null}
                         onSaveImage={(imageUrl) => {
                           setSavedImageUrl(imageUrl);
                           setShowImageModal(true);

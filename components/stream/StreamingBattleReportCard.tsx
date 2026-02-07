@@ -17,6 +17,9 @@ import {
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
+import { extractHeuristicReasoningFromMarkdown } from '@/lib/ai/reasoning-normalizer';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 interface StreamingBattleReportCardProps {
     /** 流式输入的 Markdown 文本内容 */
@@ -46,6 +49,8 @@ interface StreamingBattleReportCardProps {
     aiModel?: string | null;
     /** 读取叙事历史条数：仅在开启 readNarrativeHistory 时传入（没开就不显示）。 */
     narrativeHistoryReadCount?: number | null;
+    /** AI 思考内容（结构化，优先使用）。 */
+    aiReasoning?: AIReasoningEnvelope | null;
     /** 是否正在生成中（可选，用于显示加载光标等） */
     isStreaming?: boolean;
 }
@@ -62,6 +67,7 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     aiUsage = null,
     aiModel = null,
     narrativeHistoryReadCount = null,
+    aiReasoning = null,
     isStreaming = false
 }) => {
     const cardRef = useRef<HTMLDivElement>(null);
@@ -69,6 +75,12 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
     const headlineMatch = content.match(/^\s*#{1,3}\s*(.*)(?:\r?\n|$)/);
     const headline = headlineMatch ? headlineMatch[1].trim() : '';
     const markdownBody = headlineMatch && headline ? content.slice(headlineMatch[0].length).trimStart() : content;
+    const aiReasoningText = typeof aiReasoning?.text === 'string' ? aiReasoning.text.trim() : '';
+    const heuristicReasoning = !aiReasoningText ? extractHeuristicReasoningFromMarkdown(markdownBody) : null;
+    const reasoningForPanel =
+        aiReasoningText || aiReasoning?.status === 'thinking'
+            ? aiReasoning
+            : (heuristicReasoning ?? aiReasoning);
 
     const getModeDisplay = (mode: string) => {
         switch (mode) {
@@ -168,12 +180,16 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
 
         const buttonsContainer = cardRef.current.querySelector('.buttons-container') as HTMLElement | null;
         const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement | null;
+        const reasoningPanels = Array.from(cardRef.current.querySelectorAll('.ai-reasoning-panel')) as HTMLElement[];
 
         try {
             setIsSavingImage(true);
 
             if (buttonsContainer) buttonsContainer.style.display = 'none';
             if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
+            reasoningPanels.forEach((panel) => {
+                panel.style.display = 'none';
+            });
 
             const titleMatch = content.match(/^#{1,3}\s*(.+)$/m);
             const title = titleMatch ? titleMatch[1] : '战斗战报';
@@ -217,6 +233,9 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
         } finally {
             if (buttonsContainer) buttonsContainer.style.display = 'flex';
             if (logoPlaceholder) logoPlaceholder.style.display = 'none';
+            reasoningPanels.forEach((panel) => {
+                panel.style.display = '';
+            });
             setIsSavingImage(false);
         }
     };
@@ -557,6 +576,15 @@ const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps> = ({
                         )}
                     </div>
                 ) : null}
+
+                {reasoningForPanel && (
+                    <AiReasoningPanel
+                        reasoning={reasoningForPanel}
+                        status={reasoningForPanel.status}
+                        compact
+                        defaultExpanded={false}
+                    />
+                )}
 
                 {/* Markdown 内容渲染区域 */}
                 <div className="min-h-[200px]">
