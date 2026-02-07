@@ -9,15 +9,17 @@ import { useCooldown } from '../lib/cooldown';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { convertDataCard, createBlankDataCard } from '@/lib/data-card-converter';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
-import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 // 定义引导性问题
 const scenarioQuestions = [
@@ -50,6 +52,7 @@ const ScenarioPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [resultData, setResultData] = useState<any | null>(null);
   const [generalScenarioDraft, setGeneralScenarioDraft] = useState<any | null>(null);
+  const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [scenarioTitleHint, setScenarioTitleHint] = useState('');
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
@@ -183,6 +186,7 @@ const ScenarioPage: React.FC = () => {
     setIsGenerating(true);
     setError(null);
     setResultData(null);
+    setStreamingReasoning(null);
     if (generationMode === 'stream') {
       const blank = createBlankDataCard('general-scenario');
       setGeneralScenarioDraft({
@@ -219,11 +223,18 @@ const ScenarioPage: React.FC = () => {
         };
       }
 
-      const endpoint = generationMode === 'stream' ? '/api/generate-scenario-stream' : '/api/generate-scenario';
+      const endpoint = generationMode === 'stream' ? '/api/generate-scenario-stream?format=sse' : '/api/generate-scenario';
       const activityHeaders = await authStorage.getActivityHeaders();
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...activityHeaders,
+      };
+      if (generationMode === 'stream') {
+        requestHeaders.Accept = 'text/event-stream';
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...activityHeaders },
+        headers: requestHeaders,
         body: JSON.stringify({
           ...requestBody,
           ...(generationMode === 'stream' ? { titleHint: scenarioTitleHint.trim() } : {}),
@@ -252,11 +263,12 @@ const ScenarioPage: React.FC = () => {
           throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: '生成失败' }));
         }
 
-        const markdown = await readTextStreamFromResponse(response, {
+        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
           label: '情景卡（流式）',
           onText: (text) => {
             setGeneralScenarioDraft((prev: any) => (prev ? { ...prev, content: text } : prev));
           },
+          onReasoning: (reasoning) => setStreamingReasoning(reasoning),
         });
 
         const { card } = buildGeneralScenarioCardFromMarkdown({
@@ -541,6 +553,9 @@ const ScenarioPage: React.FC = () => {
                         placeholder="请在此处编写情景设定，建议使用 Markdown 小标题/列表。"
                       />
                     </div>
+                    {generationMode === 'stream' && (
+                      <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
+                    )}
                   </div>
 
                   <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">

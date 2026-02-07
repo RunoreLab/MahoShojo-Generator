@@ -19,11 +19,12 @@ import { NarrativeHistoryPickerModal } from '@/components/arena/components/Narra
 import { useNarrativeHistoryStore } from '@/components/arena/stores/useNarrativeHistoryStore';
 import { useAuth } from '@/lib/useAuth';
 import AiProviderSelector, { UserAIProviderConfig } from '@/components/AiProviderSelector';
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
-import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -31,6 +32,7 @@ import { authStorage } from '@/lib/auth';
 import { formatDateTime } from '@/lib/constants';
 import { formatNarrativeHistoryEntriesForReference, mergeNarrativeHistoryText } from '@/lib/narrative-history';
 import { normalizeQuestionnaireDefinition, type QuestionnaireDefinition, type QuestionnairePresetEntry } from '@/lib/questionnaires';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import {
 	    inferTemplate,
 	    TEMPLATE_LABELS,
@@ -199,6 +201,7 @@ const SublimationPage: React.FC = () => {
     const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
     const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
     const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
+    const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
     const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
     const [showImageModal, setShowImageModal] = useState(false);
     const [pastedJson, setPastedJson] = useState('');
@@ -916,6 +919,7 @@ const SublimationPage: React.FC = () => {
         setResultData(null);
         setStreamingMarkdown(null);
         setStreamedGeneralCard(null);
+        setStreamingReasoning(null);
 
 	        try {
                 const selectedArenaNarrativeEntryIds = new Set(
@@ -989,11 +993,18 @@ const SublimationPage: React.FC = () => {
                 payload.sourceTemplate = sourceTemplate;
             }
 
-            const endpoint = generationMode === 'stream' ? '/api/generate-sublimation-stream' : '/api/generate-sublimation';
+            const endpoint = generationMode === 'stream' ? '/api/generate-sublimation-stream?format=sse' : '/api/generate-sublimation';
             const activityHeaders = await authStorage.getActivityHeaders();
+            const requestHeaders: Record<string, string> = {
+                'Content-Type': 'application/json',
+                ...activityHeaders,
+            };
+            if (generationMode === 'stream') {
+                requestHeaders.Accept = 'text/event-stream';
+            }
             const response = await fetch(endpoint, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...activityHeaders },
+                headers: requestHeaders,
                 body: JSON.stringify(payload),
             });
 
@@ -1020,9 +1031,10 @@ const SublimationPage: React.FC = () => {
                 }
 
                 setStreamingMarkdown('');
-                const markdown = await readTextStreamFromResponse(response, {
+                const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
                     label: '升华（流式）',
                     onText: (text) => setStreamingMarkdown(text),
+                    onReasoning: (reasoning) => setStreamingReasoning(reasoning),
                 });
 
                 const fallbackName =
@@ -1808,6 +1820,7 @@ const SublimationPage: React.FC = () => {
                                         onSaveImage={handleSaveImage}
                                         isStreaming={isGenerating}
                                     />
+                                    <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
                                     <p className="mt-3 text-xs text-gray-500 text-center">
                                         提示：流式模式生成的是通用角色卡（Markdown），不保证与目标模板字段一一对应。
                                     </p>

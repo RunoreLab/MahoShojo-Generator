@@ -14,6 +14,7 @@ import QuestionNavigator from '../components/QuestionNavigator';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
@@ -25,7 +26,7 @@ import {
   QuestionnaireQuestionPanel,
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
-import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -44,6 +45,7 @@ import {
   type QuestionnaireQuestion,
 } from '@/lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -224,6 +226,7 @@ const CanshouPage: React.FC = () => {
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
+  const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
@@ -1049,6 +1052,7 @@ const CanshouPage: React.FC = () => {
     setCanshouDetails(null);
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
+    setStreamingReasoning(null);
 
     try {
       const snapshot = answersSnapshot ?? answersByKey;
@@ -1084,11 +1088,18 @@ const CanshouPage: React.FC = () => {
         apiKey: userProviderConfig.apiKey,
       } : undefined;
 
-      const endpoint = generationMode === 'stream' ? '/api/generate-canshou-stream' : '/api/generate-canshou';
+      const endpoint = generationMode === 'stream' ? '/api/generate-canshou-stream?format=sse' : '/api/generate-canshou';
       const activityHeaders = await authStorage.getActivityHeaders();
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...activityHeaders,
+      };
+      if (generationMode === 'stream') {
+        requestHeaders.Accept = 'text/event-stream';
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...activityHeaders },
+        headers: requestHeaders,
         body: JSON.stringify({
           answers: finalAnswerItems,
           questionnaireSelections: selectedQuestionnaires.map((selection) => ({
@@ -1137,9 +1148,10 @@ const CanshouPage: React.FC = () => {
         }
 
         setStreamingMarkdown('');
-        const markdown = await readTextStreamFromResponse(response, {
+        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
           label: '残兽档案（流式）',
           onText: (text) => setStreamingMarkdown(text),
+          onReasoning: (reasoning) => setStreamingReasoning(reasoning),
         });
 
         const { card } = buildGeneralCharacterCardFromMarkdown({
@@ -1755,6 +1767,7 @@ const CanshouPage: React.FC = () => {
                 {generationMode === 'stream' && streamedGeneralCardForDisplay && (
                   <div className="my-6">
                     <GeneralCharacterCard general={streamedGeneralCardForDisplay} isStreaming={submitting} />
+                    <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
                   </div>
                 )}
 
@@ -1901,6 +1914,7 @@ const CanshouPage: React.FC = () => {
                       imageSaveMode={imageSaveMode}
                       saveButtonLabel={imageSaveButtonLabel}
                     />
+                    <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
 
                     <div className="card" style={{ marginTop: '1rem' }}>
                       <div className="text-center">

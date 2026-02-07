@@ -1,4 +1,4 @@
-# AI 思考内容展示功能落地记录（Phase 1）
+# AI 思考内容展示功能落地记录（Phase 1 + Phase 2）
 
 更新时间：2026-02-07  
 对应设计：`docs/AI_REASONING_VISIBILITY_DESIGN_2026-02-06.md`
@@ -67,7 +67,24 @@
   - 在回合 `resultJson.streamMeta` 中落库 `aiReasoning`（含 `status/source/summary/text/reasoningTokens`）
 - `components/pvp/PvpRoomPage.tsx`
   - 已透传 `streamMeta.aiReasoning` 到 `StreamingBattleReportCard`
-  - 当前表现：本轮结算完成并刷新后可看到 reasoning 面板（非实时）
+  - 现已支持 SSE 实时消费：生成过程中即可更新 reasoning 摘要与详情
+
+### 1.7 Phase 2：通用生成页批量接入（本次新增）
+
+- 新增客户端统一读取器：`lib/stream/read-text-and-reasoning-stream.ts`
+  - 自动兼容 `text/plain` 与 `text/event-stream`
+  - 支持回调：`onText / onReasoning / onTelemetry / onMeta`
+  - 普通文本流会尝试启发式提取 thought 泄漏（低置信）
+- 新增服务端 SSE 桥接：`lib/stream/reasoning-sse.ts`
+  - `shouldUseClientSse`：按 `?format=sse` 或 `Accept: text/event-stream` 判定
+  - `createReasoningSseBridge`：把文本流 + SDK reasoning 回调统一桥接为 `markdown/reasoning/reasoning_done/telemetry/done/error`
+- 已接入页面与 API：
+  - 页面：`pages/free.tsx`、`pages/details.tsx`、`pages/canshou.tsx`、`pages/sublimation.tsx`、`pages/scenario.tsx`、`components/tavern/TavernImportPanel.tsx`
+  - API：`pages/api/generate-free-stream.ts`、`pages/api/generate-magical-girl-details-stream.ts`、`pages/api/generate-canshou-stream.ts`、`pages/api/generate-sublimation-stream.ts`、`pages/api/generate-scenario-stream.ts`、`pages/api/tavern/convert-stream.ts`
+  - 前端请求改为 `?format=sse + Accept: text/event-stream`，生成过程中可实时展示思考摘要与详情
+- 测试补充：
+  - `tests/read-text-and-reasoning-stream.test.ts`
+  - `tests/reasoning-sse.test.ts`
 
 ---
 
@@ -83,9 +100,9 @@
 
 ## 3. 当前限制与后续建议
 
-1. 当前主打通路径为“竞技场 SSE 战报”。
-2. PVP 已完成上游 SSE 解析与 reasoning 落库，但前端仍为“结算完成后展示”，暂未做到实时 reasoning UI。
-3. 其他 stream 页面（free/details/canshou/sublimation/scenario/tavern/magic-tea-party）尚未统一接入，建议按设计文档 Phase 2 批量推进。
+1. 竞技场/PVP/通用生成页（free/details/canshou/sublimation/scenario/tavern）已完成统一接入。
+2. `magic-tea-party` 相关流式链路仍未并入统一 reasoning 面板，建议作为下一阶段。
+3. 当前 telemetry 标准仍以“通用 usage”字段为主，不同供应商的明细字段粒度可能不同。
 
 ---
 
@@ -94,5 +111,10 @@
 1. 竞技场开启流式生成，观察战报卡片：
    - 生成中显示“AI 正在思考…”或摘要
    - 点击后可查看详细思考内容
-2. 检查 metadata 区域与正文渲染无回归。
-3. 导出图片时确认 reasoning panel 默认不出现在截图内。
+2. 在 free/details/canshou/sublimation/scenario/tavern 的流式模式下，验证思考面板可实时更新。
+3. 检查 metadata 区域与正文渲染无回归。
+4. 导出图片时确认 reasoning panel 默认不出现在截图内。
+5. 回归命令：
+   - `bun run lint`
+   - `bun test`
+   - `bun run build`

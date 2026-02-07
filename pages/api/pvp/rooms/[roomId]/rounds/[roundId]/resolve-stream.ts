@@ -110,8 +110,33 @@ const buildMarkdownFromArrestReport = (report: ReturnType<typeof buildPvpSensiti
   return body ? `${head}\n${body}\n` : `${head}\n`;
 };
 
+const shouldUseClientSse = (req: Request): boolean => {
+  try {
+    const url = new URL(req.url);
+    if (url.searchParams.get('format') === 'sse') return true;
+  } catch {
+    // ignore
+  }
+  return (req.headers.get('accept') || '').includes('text/event-stream');
+};
+
+const encodeSseEvent = (event: string, payload: unknown): Uint8Array => {
+  const encoder = new TextEncoder();
+  let data = 'null';
+  try {
+    data = JSON.stringify(payload ?? null);
+  } catch (error) {
+    data = JSON.stringify({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error ?? 'json stringify failed'),
+    });
+  }
+  return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
+};
+
 async function resolveStreamHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
+  const wantsClientSse = shouldUseClientSse(req);
 
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
@@ -232,6 +257,20 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       const existing = JSON.parse(round.result_json);
       const reportMarkdown = typeof existing?.reportMarkdown === 'string' ? existing.reportMarkdown : '';
       if (reportMarkdown.trim()) {
+        if (wantsClientSse) {
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encodeSseEvent('markdown', { chunk: reportMarkdown }));
+              controller.enqueue(encodeSseEvent('done', { ok: true }));
+              controller.close();
+            },
+          });
+          return new Response(body, {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' },
+          });
+        }
+
         return new Response(reportMarkdown, {
           status: 200,
           headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
@@ -496,6 +535,20 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         last_activity_at: new Date().toISOString(),
       });
 
+      if (wantsClientSse) {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encodeSseEvent('markdown', { chunk: markdown }));
+            controller.enqueue(encodeSseEvent('done', { ok: true }));
+            controller.close();
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
+
       return new Response(markdown, { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
     }
 
@@ -535,7 +588,6 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
 
   const reader = upstreamBody.getReader();
   const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
   const upstreamContentType = (upstreamRes.headers.get('content-type') || '').toLowerCase();
   const isSseUpstream = upstreamContentType.includes('text/event-stream');
   let accumulatedText = '';
@@ -560,6 +612,8 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
   let reasoningSource: AIReasoningSource = 'unknown';
   let reasoningTruncated = false;
   let upstreamStreamErrorMessage: string | null = null;
+  const toDisplayReasoningSource = (source: AIReasoningSource): 'sdk' | 'provider' | 'heuristic' =>
+    source === 'unknown' ? 'sdk' : source;
   const shouldTerminateByTelemetry = (text: string) => {
     const marker = '<!-- MAHOSHOJO_TELEMETRY_META';
     const trimmed = text.trimEnd();
@@ -620,7 +674,11 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       const chunk = typeof payload?.chunk === 'string' ? payload.chunk : '';
       if (!chunk) return;
       accumulatedText += chunk;
-      controller.enqueue(encoder.encode(chunk));
+      if (wantsClientSse) {
+        controller.enqueue(encodeSseEvent('markdown', { chunk }));
+      } else {
+        controller.enqueue(new TextEncoder().encode(chunk));
+      }
       return;
     }
 
@@ -632,6 +690,15 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         applySseReasoningDelta(chunk);
       }
       reasoningStatus = 'thinking';
+      if (wantsClientSse) {
+        controller.enqueue(
+          encodeSseEvent('reasoning', {
+            source: toDisplayReasoningSource(reasoningSource),
+            status: 'thinking',
+            chunk,
+          })
+        );
+      }
       return;
     }
 
@@ -640,6 +707,15 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       reasoningSource = source === 'unknown' ? reasoningSource : source;
       const status = typeof payload?.status === 'string' ? payload.status : '';
       reasoningStatus = status === 'unavailable' ? 'unavailable' : 'done';
+      if (wantsClientSse) {
+        controller.enqueue(
+          encodeSseEvent('reasoning_done', {
+            source: toDisplayReasoningSource(reasoningSource),
+            status: reasoningStatus,
+            chars: reasoningText.length,
+          })
+        );
+      }
       return;
     }
 
@@ -649,6 +725,20 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         aiModel: typeof payload?.aiModel === 'string' ? payload.aiModel : null,
         narrativeHistoryReadCount: typeof payload?.narrativeHistoryReadCount === 'number' ? payload.narrativeHistoryReadCount : null,
       };
+      if (wantsClientSse) {
+        controller.enqueue(
+          encodeSseEvent('telemetry', {
+            version: 1,
+            ...(typeof latestTelemetryFromSse.aiModel === 'string' && latestTelemetryFromSse.aiModel.trim()
+              ? { aiModel: latestTelemetryFromSse.aiModel.trim() }
+              : {}),
+            ...(latestTelemetryFromSse.usage ? { usage: latestTelemetryFromSse.usage } : {}),
+            ...(typeof latestTelemetryFromSse.narrativeHistoryReadCount === 'number'
+              ? { narrativeHistoryReadCount: latestTelemetryFromSse.narrativeHistoryReadCount }
+              : {}),
+          })
+        );
+      }
       return;
     }
 
@@ -656,12 +746,39 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       if (payload?.parseOk && payload?.meta && typeof payload.meta === 'object') {
         latestStreamMetaFromSse = payload.meta;
       }
+      if (wantsClientSse) {
+        controller.enqueue(
+          encodeSseEvent('meta', {
+            parseOk: true,
+            ...(payload?.meta && typeof payload.meta === 'object' ? { meta: payload.meta } : {}),
+            ...(typeof payload?.raw === 'string' ? { raw: payload.raw } : {}),
+            ...(typeof payload?.rawTruncated === 'boolean' ? { rawTruncated: payload.rawTruncated } : {}),
+          })
+        );
+      }
+      return;
+    }
+
+    if (parsed.event === 'meta_error') {
+      if (wantsClientSse) {
+        controller.enqueue(
+          encodeSseEvent('meta_error', {
+            parseOk: false,
+            ...(typeof payload?.error === 'string' ? { error: payload.error } : {}),
+            ...(typeof payload?.raw === 'string' ? { raw: payload.raw } : {}),
+            ...(typeof payload?.rawTruncated === 'boolean' ? { rawTruncated: payload.rawTruncated } : {}),
+          })
+        );
+      }
       return;
     }
 
     if (parsed.event === 'error') {
       const message = typeof payload?.error === 'string' ? payload.error : '上游流式生成失败';
       upstreamStreamErrorMessage = message;
+      if (wantsClientSse) {
+        controller.enqueue(encodeSseEvent('error', { ok: false, error: message }));
+      }
       throw new Error(message);
     }
 
@@ -773,7 +890,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         ? {
             aiReasoning: {
               status: normalizedReasoningStatus,
-              source: reasoningSource === 'unknown' ? 'sdk' : reasoningSource,
+              source: toDisplayReasoningSource(reasoningSource),
               summary: reasoningSummary ?? null,
               text: reasoningText || null,
               ...(reasoningTruncated ? { anomalyFlags: ['truncated'] } : {}),
@@ -961,7 +1078,11 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
           }
 
           accumulatedText += chunkText;
-          controller.enqueue(value);
+          if (wantsClientSse) {
+            controller.enqueue(encodeSseEvent('markdown', { chunk: chunkText }));
+          } else {
+            controller.enqueue(value);
+          }
           if (shouldTerminateByTelemetry(accumulatedText)) {
             try {
               void reader.cancel('telemetry-meta-received').catch(() => {});
@@ -994,6 +1115,21 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         }
         await finalizeAndPersist(accumulatedText);
         clearUpstreamTimeout();
+        if (wantsClientSse) {
+          const reasoningSummary = buildReasoningSummary(reasoningText);
+          if (reasoningStatus === 'thinking') {
+            const finalizedStatus = reasoningText.trim() ? 'done' : 'unavailable';
+            controller.enqueue(
+              encodeSseEvent('reasoning_done', {
+                source: toDisplayReasoningSource(reasoningSource),
+                status: finalizedStatus,
+                chars: reasoningText.length,
+                ...(reasoningSummary ? { summary: reasoningSummary } : {}),
+              })
+            );
+          }
+          controller.enqueue(encodeSseEvent('done', { ok: true }));
+        }
         controller.close();
       } catch (e) {
         clearUpstreamTimeout();
@@ -1002,6 +1138,13 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
           await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
         } catch {
           // ignore
+        }
+        if (wantsClientSse) {
+          const message = e instanceof Error ? e.message : '流式结算失败';
+          controller.enqueue(encodeSseEvent('error', { ok: false, error: message }));
+          controller.enqueue(encodeSseEvent('done', { ok: false }));
+          controller.close();
+          return;
         }
         controller.error(e);
       }
@@ -1029,7 +1172,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
 
   const headers = new Headers(upstreamRes.headers);
   headers.set('cache-control', 'no-store');
-  headers.set('content-type', 'text/plain; charset=utf-8');
+  headers.set('content-type', wantsClientSse ? 'text/event-stream; charset=utf-8' : 'text/plain; charset=utf-8');
 
   return new Response(wrappedBody, { status: 200, headers });
 }

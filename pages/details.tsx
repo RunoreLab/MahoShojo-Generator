@@ -30,12 +30,13 @@ import {
 } from '@/lib/questionnaires';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
-import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
@@ -46,6 +47,7 @@ import {
   QuestionnaireQuestionPanel,
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -261,6 +263,7 @@ const DetailsPage: React.FC = () => {
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
+  const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
 
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -1280,6 +1283,7 @@ const DetailsPage: React.FC = () => {
     setMagicalGirlDetails(null);
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
+    setStreamingReasoning(null);
 
     const safetyText = finalAnswerItems.map((item) => item.answer).join('');
     console.log('检查敏感词:', safetyText);
@@ -1298,16 +1302,20 @@ const DetailsPage: React.FC = () => {
       } : undefined;
 
       const endpoint = generationMode === 'stream'
-        ? '/api/generate-magical-girl-details-stream'
+        ? '/api/generate-magical-girl-details-stream?format=sse'
         : '/api/generate-magical-girl-details';
 
       const activityHeaders = await authStorage.getActivityHeaders();
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...activityHeaders,
+      };
+      if (generationMode === 'stream') {
+        requestHeaders.Accept = 'text/event-stream';
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...activityHeaders,
-        },
+        headers: requestHeaders,
         body: JSON.stringify({
           answers: finalAnswerItems,
           questionnaireSelections: selectedQuestionnaires.map((selection) => ({
@@ -1368,9 +1376,10 @@ const DetailsPage: React.FC = () => {
         }
 
         setStreamingMarkdown('');
-        const markdown = await readTextStreamFromResponse(response, {
+        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
           label: '魔法少女角色卡（流式）',
           onText: (text) => setStreamingMarkdown(text),
+          onReasoning: (reasoning) => setStreamingReasoning(reasoning),
         });
 
         if (await checkSensitiveWords(markdown, {
@@ -2114,13 +2123,16 @@ const DetailsPage: React.FC = () => {
           {generationMode === 'stream' && (streamingMarkdown !== null || streamedGeneralCard) && (
             <>
               {streamedGeneralCardForDisplay && (
-                <GeneralCharacterCard
-                  general={streamedGeneralCardForDisplay}
-                  isStreaming={submitting}
-                  onSaveImage={handleSaveImage}
-                  imageSaveMode={imageSaveMode}
-                  saveButtonLabel={imageSaveButtonLabel}
-                />
+                <>
+                  <GeneralCharacterCard
+                    general={streamedGeneralCardForDisplay}
+                    isStreaming={submitting}
+                    onSaveImage={handleSaveImage}
+                    imageSaveMode={imageSaveMode}
+                    saveButtonLabel={imageSaveButtonLabel}
+                  />
+                  <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
+                </>
               )}
 
               {streamedGeneralCard && (
