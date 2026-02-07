@@ -184,7 +184,7 @@
 - 修复：
   - 预取改为“低延迟连接探测”：拿到首个有效 chunk（文本或 reasoning）即交给上层持续消费。
   - 空输出判定仅在“预取阶段已读到 done 且正文仍为空”时触发，避免误伤正常慢启动流式请求。
-  - Google 通道显式请求 `thinkingConfig.includeThoughts = true`，提高可展示 reasoning 文本的返回概率。
+  - Google 通道按模型能力启用 `thinkingConfig.includeThoughts = true`（仅 Gemini 系列），提高可展示 reasoning 文本的返回概率，同时避免 Gemma 等不支持 thinking 的模型报错。
 
 ---
 

@@ -274,8 +274,10 @@ export async function generateWithStreamAI(
 	                    typeof generationConfig.maxOutputTokens === 'number'
 	                        ? { maxOutputTokens: generationConfig.maxOutputTokens }
 	                        : {};
+	                const shouldEnableGoogleThinking =
+	                    provider.type === 'google' && typeof selectedModel === 'string' && /^gemini/i.test(selectedModel.trim());
 	                const googleThinkingOptions =
-	                    provider.type === 'google'
+	                    shouldEnableGoogleThinking
 	                        ? {
 	                            providerOptions: {
 	                                google: {
