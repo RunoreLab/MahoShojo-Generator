@@ -51,6 +51,7 @@
 
 ## 相关条目
 
+- AI 思考过程查看说明（在哪里看）：`/encyclopedia/ai-reasoning-visibility`
 - AI 生成失败：`/encyclopedia/ai-errors`
 - AI 拒答与安全策略提示：`/encyclopedia/ai-refusal`
 - AI 返回空对象/空内容：`/encyclopedia/ai-empty-output`
