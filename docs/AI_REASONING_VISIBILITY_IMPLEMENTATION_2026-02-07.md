@@ -1,6 +1,6 @@
 # AI 思考内容展示功能落地记录（Phase 1 + Phase 2 + Phase 3）
 
-更新时间：2026-02-07（复查修订）  
+更新时间：2026-02-07（复查修订 + 非流式方案补充）  
 对应设计：`docs/AI_REASONING_VISIBILITY_DESIGN_2026-02-06.md`
 
 ---
@@ -181,3 +181,95 @@
    - `bun run lint`
    - `bun test`
    - `bun run build`
+
+---
+
+## 6. 待决策方案：非流式仅展示“思考内容”，不展示“思考状态”
+
+### 6.1 诉求与目标
+
+基于最新反馈，非流式（non-stream）是“一次性返回最终结果”的交互，不需要像流式那样展示 `thinking / done / unavailable / error` 过程状态。  
+因此目标调整为：
+
+1. **非流式只在“有可展示思考文本/摘要”时展示面板**。  
+2. **非流式不展示状态文案**（如“正在思考…”、“未返回思考内容”）。  
+3. **无思考内容时不占位，不渲染该组件**，避免视觉噪声。  
+
+### 6.2 适用范围（待定）
+
+- 竞技场非流式战报卡：`components/BattleReportCard.tsx`
+- 以及各非流式生成页结果区（free/details/canshou/sublimation/scenario/tavern 等）在采用非流式 API 时的结果卡片
+
+> 说明：流式链路保持现状（仍需状态展示），本方案仅针对 non-stream。
+
+### 6.3 UI 方案（建议）
+
+非流式模式下新增 `content-only` 展示分支（命名可调整）：
+
+- 标题固定为：`AI 思考内容`
+- 仅展示：
+  - 摘要（若有）
+  - 正文（若有）
+  - 来源 / tokens（可保留为二级信息）
+- 不展示：
+  - `thinking / unavailable / error` 状态文案
+  - “暂无可展示思考内容”占位提示
+
+可选实现方式：
+
+- 在 `AiReasoningPanel` 增加 `displayMode?: 'stream' | 'content-only'`；
+- 或拆分一个轻量组件 `AiReasoningContentPanel`，专供 non-stream 使用。
+
+### 6.4 数据来源方案对比（后端）
+
+#### 方案 A（推荐）：主通道按“有则展示、无则静默”
+
+- 在 non-stream API 中尝试读取 SDK 的 reasoning 字段（若模型/SDK 返回）；
+- 有 `text/summary` 才回传 `aiReasoning`；
+- 没有则不回传该字段，前端不显示面板。
+
+**优点**：实现成本低、延迟/费用几乎不变、语义清晰。  
+**缺点**：不同供应商可见性不一致，很多请求可能无思考内容可展示。
+
+#### 方案 B（不建议默认）：额外补一轮“思考总结生成”
+
+- non-stream 正文完成后，再发起一次附加调用生成“可展示推理”。
+
+**优点**：展示率高。  
+**缺点**：额外耗时和成本、语义并非原始推理、一致性风险高。
+
+#### 方案 C（增强可选）：Provider 原始字段适配兜底
+
+- 增加 provider 适配器，解析如 `reasoning_content` 等供应商字段。
+
+**优点**：在特定模型可提升命中率。  
+**缺点**：维护成本高，接口耦合重，需要逐供应商回归。
+
+### 6.5 推荐决策
+
+建议采用 **A 主方案 + C 渐进增强**：
+
+1. 先落地“non-stream content-only UI + 有则展示、无则静默”；
+2. 保持零额外调用；
+3. 后续按供应商收益再决定是否引入 C。
+
+### 6.6 实施清单（拍板后）
+
+1. 前端：
+   - `AiReasoningPanel` 增加 `content-only` 渲染模式（或新增轻量面板组件）
+   - non-stream 结果卡切到 `content-only` 模式
+2. 后端：
+   - non-stream API（如 `pages/api/arena/generate.ts` 与各 `generate-*.ts`）补充 `aiReasoning` 回传通道（仅在有内容时）
+3. 类型与契约：
+   - 明确 non-stream 的 `aiReasoning` 为可选字段（无内容可省略）
+4. 测试：
+   - “有 reasoning 内容时显示”
+   - “无 reasoning 内容时不显示”
+   - “non-stream 不展示状态文案”
+
+### 6.7 验收标准（拍板后）
+
+1. non-stream 正常生成且无 reasoning 内容：页面不出现 reasoning 组件。  
+2. non-stream 存在 reasoning 内容：页面出现“AI 思考内容”面板，仅展示内容本身。  
+3. non-stream 页面不再出现“正在思考/未返回思考内容”等状态型文案。  
+4. 流式页面行为不受影响。  
