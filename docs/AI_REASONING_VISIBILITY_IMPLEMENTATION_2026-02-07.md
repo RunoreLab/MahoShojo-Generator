@@ -1,6 +1,6 @@
 # AI 思考内容展示功能落地记录（Phase 1 + Phase 2 + Phase 3）
 
-更新时间：2026-02-07  
+更新时间：2026-02-07（复查修订）  
 对应设计：`docs/AI_REASONING_VISIBILITY_DESIGN_2026-02-06.md`
 
 ---
@@ -123,7 +123,50 @@
 
 ---
 
-## 4. 验收建议（手工）
+## 4. 复查结果与已修复项（2026-02-07）
+
+本轮针对 `4bf3de3` 起 6 个提交做了全链路代码复查，重点覆盖：竞技场流式、PVP 流式桥接、通用页面流式桥接、`magic-tea-party` 流式接入、前端面板渲染与状态机收敛。
+
+### 4.1 已修复：`reasoning_done` 状态被前端固定写成 `done`
+
+- 位置：`components/arena/hooks/useBattleEngine.ts`
+- 现象：
+  - 原逻辑在处理 `event: reasoning_done` 时，无论上游给出 `done/unavailable`，都会写死为 `done`。
+  - 这会让“无可展示思考正文”的场景在状态语义上被误报为已完成推理。
+- 修复：
+  - 现已按上游 payload 的 `status` 还原为 `done | unavailable | error`。
+  - 同时支持透传 `summary / errorMessage`，并做安全词过滤后再写入状态。
+
+### 4.2 已修复：竞技场 SSE 在 `reasoning-end` 时固定下发 `done`
+
+- 位置：`pages/api/arena/generate-stream.ts`
+- 现象：
+  - 原逻辑在收到 `reasoning-end` 时固定下发 `reasoning_done: done`。
+  - 若该轮只有 `reasoning-start/end` 且没有任何 `reasoning-delta`，会产生“空正文但 done”语义偏差。
+- 修复：
+  - 现已基于是否收到有效 reasoning delta 决定状态：
+    - 有增量文本 → `done`
+    - 无增量文本 → `unavailable`
+
+### 4.3 已修复：SSE 结束兜底状态与正文存在性对齐
+
+- 位置：`components/arena/hooks/useBattleEngine.ts`
+- 现象：
+  - 原逻辑在收到 `event: done` 且本地状态仍为 `thinking` 时，会直接收敛为 `done`。
+- 修复：
+  - 现已按本地 reasoning 文本是否非空，兜底收敛为 `done/unavailable`，避免“空文本 done”。
+
+### 4.4 已修复：PVP SSE 协商大小写兼容
+
+- 位置：`pages/api/pvp/rooms/[roomId]/rounds/[roundId]/resolve-stream.ts`
+- 现象：
+  - `Accept` 头判断未统一小写，极端情况下可能漏判 `Text/Event-Stream` 之类大小写组合。
+- 修复：
+  - 统一按小写进行 `text/event-stream` 协商判断，减少环境差异导致的降级风险。
+
+---
+
+## 5. 验收建议（手工）
 
 1. 竞技场开启流式生成，观察战报卡片：
    - 生成中显示“AI 正在思考…”或摘要

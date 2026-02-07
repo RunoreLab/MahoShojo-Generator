@@ -117,7 +117,7 @@ const shouldUseClientSse = (req: Request): boolean => {
   } catch {
     // ignore
   }
-  return (req.headers.get('accept') || '').includes('text/event-stream');
+  return (req.headers.get('accept') || '').toLowerCase().includes('text/event-stream');
 };
 
 const encodeSseEvent = (event: string, payload: unknown): Uint8Array => {

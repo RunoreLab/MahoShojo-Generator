@@ -1029,7 +1029,7 @@ async function handler(req: NextRequest): Promise<Response> {
                             controller.enqueue(
                                 encodeEvent('reasoning_done', {
                                     source: 'sdk',
-                                    status: 'done',
+                                    status: hasReasoningDelta ? 'done' : 'unavailable',
                                     chars: reasoningCharsSent,
                                 })
                             );

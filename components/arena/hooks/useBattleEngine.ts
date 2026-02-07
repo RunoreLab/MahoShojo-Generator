@@ -877,7 +877,25 @@ export const useBattleEngine = () => {
 
               if (event === 'reasoning_done') {
                 const source = resolveReasoningSource(payload?.source);
-                markReasoningStatusInStore('done', { source });
+                const statusValue = typeof payload?.status === 'string' ? payload.status : '';
+                const nextStatus =
+                  statusValue === 'unavailable'
+                    ? 'unavailable'
+                    : statusValue === 'error'
+                      ? 'error'
+                      : 'done';
+                const summary =
+                  typeof payload?.summary === 'string' ? sanitizeTextByShieldWords(payload.summary) : undefined;
+                const errorMessage =
+                  typeof payload?.errorMessage === 'string'
+                    ? sanitizeTextByShieldWords(payload.errorMessage)
+                    : undefined;
+
+                markReasoningStatusInStore(nextStatus, {
+                  source,
+                  ...(typeof summary === 'string' ? { summary } : {}),
+                  ...(typeof errorMessage === 'string' ? { errorMessage } : {}),
+                });
                 return;
               }
 
@@ -974,7 +992,9 @@ export const useBattleEngine = () => {
               if (event === 'done') {
                 const currentReasoning = useBattleStore.getState().streamReasoning;
                 if (currentReasoning?.status === 'thinking') {
-                  markReasoningStatusInStore('done');
+                  const hasReasoningText =
+                    typeof currentReasoning.text === 'string' && currentReasoning.text.trim().length > 0;
+                  markReasoningStatusInStore(hasReasoningText ? 'done' : 'unavailable');
                 }
                 sawDoneEvent = true;
                 return;
