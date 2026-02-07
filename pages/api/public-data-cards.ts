@@ -62,6 +62,8 @@ export default async function handler(req: Request): Promise<Response> {
       const minFavorites = readNonNegativeInt(url.searchParams.get('minFavorites'));
       const maxFavorites = readNonNegativeInt(url.searchParams.get('maxFavorites'));
       const recommendedOnly = url.searchParams.get('recommendedOnly') === '1';
+      const nativeOnly = url.searchParams.get('nativeOnly') === '1';
+      const nativeAllowedOnly = url.searchParams.get('nativeAllowedOnly') === '1';
 
       const search = typeof searchRaw === 'string' ? searchRaw.trim() : '';
       if (search.length > MAX_SEARCH_LENGTH) {
@@ -147,6 +149,8 @@ export default async function handler(req: Request): Promise<Response> {
         minFavorites,
         maxFavorites,
         recommendedOnly,
+        nativeOnly,
+        nativeAllowedOnly,
       );
 
       return new Response(
