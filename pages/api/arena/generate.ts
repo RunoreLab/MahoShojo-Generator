@@ -529,6 +529,9 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         if (typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim()) {
             report.aiModel = aiTelemetry.model.trim();
         }
+        if (aiTelemetry.reasoning) {
+            report.aiReasoning = aiTelemetry.reasoning;
+        }
 
         // 异步更新数据库统计，不阻塞响应
         // 仅在写入历战记录时更新统计，避免污染数据

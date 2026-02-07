@@ -524,6 +524,7 @@ ${adjudicationMarkdown}
           <AiReasoningPanel
             reasoning={reasoningForPanel}
             status={reasoningForPanel.status}
+            displayMode="content-only"
             compact
             defaultExpanded={false}
           />

@@ -8,6 +8,8 @@ import { getLogger } from "./logger";
 import { getProviderFetch } from "@/lib/ai/middleware/provider-fetch";
 import { enhanceErrorWithUpstreamMessage } from "@/lib/ai/utils/error-extraction";
 import { buildStructuredJsonInstructionFromZodSchema, parseStructuredJsonWithSchema } from "@/lib/ai/utils/structured-json";
+import { buildReasoningSummary } from "@/lib/ai/reasoning-normalizer";
+import type { AIReasoningEnvelope } from "@/types/ai-reasoning";
 
 // 延迟函数
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -92,6 +94,94 @@ const shouldForceTextJsonFallback = (modelId: string): boolean => {
   if (normalized.includes('glm')) return true;
 
   return false;
+};
+
+const MAX_NON_STREAM_REASONING_CHARS = 12_000;
+
+const normalizeReasoningText = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\r\n/g, '\n').replace(/\u0000/g, '').trim();
+};
+
+const clampReasoningText = (
+  text: string,
+  maxChars = MAX_NON_STREAM_REASONING_CHARS
+): { text: string; truncated: boolean } => {
+  if (!text) return { text: '', truncated: false };
+  if (text.length <= maxChars) return { text, truncated: false };
+  return { text: text.slice(0, maxChars), truncated: true };
+};
+
+const readReasoningTokensFromUsage = (usage: unknown): number | null => {
+  if (!usage || typeof usage !== 'object') return null;
+
+  const readNumber = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : null;
+
+  const readPath = (obj: unknown, path: string): number | null => {
+    let current: any = obj;
+    for (const key of path.split('.')) {
+      if (!current || typeof current !== 'object') return null;
+      current = current[key];
+    }
+    return readNumber(current);
+  };
+
+  const usageRecord = usage as Record<string, unknown>;
+  const root =
+    (usageRecord.usage && typeof usageRecord.usage === 'object'
+      ? (usageRecord.usage as Record<string, unknown>)
+      : null) ??
+    (usageRecord.tokenUsage && typeof usageRecord.tokenUsage === 'object'
+      ? (usageRecord.tokenUsage as Record<string, unknown>)
+      : null) ??
+    usageRecord;
+
+  const candidatePaths = [
+    'reasoningTokens',
+    'reasoning_tokens',
+    'outputTokensDetails.reasoningTokens',
+    'output_tokens_details.reasoning_tokens',
+    'completionTokensDetails.reasoningTokens',
+    'completion_tokens_details.reasoning_tokens',
+  ];
+
+  for (const path of candidatePaths) {
+    const value = readPath(root, path);
+    if (value !== null) return value;
+  }
+
+  return null;
+};
+
+const buildNonStreamReasoningEnvelope = (
+  rawReasoningText: unknown,
+  usage: unknown
+): AIReasoningEnvelope | null => {
+  const normalizedText = normalizeReasoningText(rawReasoningText);
+  const { text: reasoningText, truncated } = clampReasoningText(normalizedText);
+  const reasoningTokens = readReasoningTokensFromUsage(usage);
+
+  if (!reasoningText) {
+    if (reasoningTokens === null) return null;
+    return {
+      status: 'unavailable',
+      source: 'sdk',
+      summary: null,
+      text: null,
+      reasoningTokens,
+    };
+  }
+
+  const summary = buildReasoningSummary(reasoningText);
+  return {
+    status: 'done',
+    source: 'sdk',
+    summary,
+    text: reasoningText,
+    reasoningTokens,
+    ...(truncated ? { anomalyFlags: ['truncated'] } : {}),
+  };
 };
 
 /**
@@ -191,6 +281,7 @@ export interface GenerateWithAIOptions {
     attempt?: number;
     usage?: unknown;
     finishReason?: unknown;
+    reasoning?: AIReasoningEnvelope | null;
   };
 }
 
@@ -368,6 +459,7 @@ export async function generateWithAI<T, I = string>(
           if (options?.telemetry) {
             options.telemetry.usage = textResult.usage;
             options.telemetry.finishReason = textResult.finishReason;
+            options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
           }
 
           return parsed.data as T;
@@ -376,12 +468,14 @@ export async function generateWithAI<T, I = string>(
         let object: unknown;
         let usage: unknown;
         let finishReason: unknown;
+        let reasoning: AIReasoningEnvelope | null = null;
 
         try {
           const result = await tryGenerateObject();
           object = result.object;
           usage = result.usage;
           finishReason = result.finishReason;
+          reasoning = buildNonStreamReasoningEnvelope((result as { reasoning?: unknown }).reasoning, result.usage);
         } catch (rawError) {
           // 1) Schema/JSON 生成失败：尝试直接从 error.text 做解析/修复（无需额外调用模型）
           if (NoObjectGeneratedError.isInstance(rawError) && typeof rawError.text === 'string') {
@@ -399,6 +493,7 @@ export async function generateWithAI<T, I = string>(
               if (options?.telemetry) {
                 options.telemetry.usage = rawError.usage;
                 options.telemetry.finishReason = rawError.finishReason;
+                options.telemetry.reasoning = buildNonStreamReasoningEnvelope(undefined, rawError.usage);
               }
 
               return repaired.data as T;
@@ -443,6 +538,7 @@ export async function generateWithAI<T, I = string>(
             if (options?.telemetry) {
               options.telemetry.usage = textResult.usage;
               options.telemetry.finishReason = textResult.finishReason;
+              options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
             }
 
             return parsed.data as T;
@@ -490,6 +586,7 @@ export async function generateWithAI<T, I = string>(
               if (options?.telemetry) {
                 options.telemetry.usage = textResult.usage;
                 options.telemetry.finishReason = textResult.finishReason;
+                options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
               }
 
               return parsed.data as T;
@@ -505,6 +602,7 @@ export async function generateWithAI<T, I = string>(
         if (options?.telemetry) {
           options.telemetry.usage = usage;
           options.telemetry.finishReason = finishReason;
+          options.telemetry.reasoning = reasoning;
         }
         return object as T;
       } catch (error) {

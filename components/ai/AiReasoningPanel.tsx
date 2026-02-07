@@ -5,16 +5,28 @@ import { Brain, Check, ChevronDown, Copy } from 'lucide-react';
 
 import type { AIReasoningEnvelope, AIReasoningStatus } from '@/types/ai-reasoning';
 
+type AiReasoningDisplayMode = 'stream' | 'content-only';
+
 type AiReasoningPanelProps = {
   status?: AIReasoningStatus;
   summary?: string | null;
   reasoning?: AIReasoningEnvelope | null;
   compact?: boolean;
+  displayMode?: AiReasoningDisplayMode;
   defaultExpanded?: boolean;
   onToggle?: (expanded: boolean) => void;
 };
 
-const getStatusText = (status: AIReasoningStatus, summary: string | null, hasText: boolean): string => {
+const getStatusText = (
+  displayMode: AiReasoningDisplayMode,
+  status: AIReasoningStatus,
+  summary: string | null,
+  hasText: boolean
+): string => {
+  if (displayMode === 'content-only') {
+    if (summary) return `AI 思考内容：${summary}`;
+    return 'AI 思考内容';
+  }
   if (summary) return `AI 思考摘要：${summary}`;
   if (status === 'error') return 'AI 思考过程读取失败';
   if (status === 'thinking') return 'AI 正在思考…';
@@ -40,6 +52,7 @@ export function AiReasoningPanel({
   summary,
   reasoning = null,
   compact = false,
+  displayMode = 'stream',
   defaultExpanded = false,
   onToggle,
 }: AiReasoningPanelProps) {
@@ -50,14 +63,21 @@ export function AiReasoningPanel({
   const reasoningText = typeof reasoning?.text === 'string' ? reasoning.text.trim() : '';
   const resolvedSummary = summary ?? reasoning?.summary ?? null;
   const hasReasoningText = Boolean(reasoningText);
+  const hasRenderableContent = hasReasoningText || Boolean(resolvedSummary);
+  const detailText =
+    hasReasoningText
+      ? reasoningText
+      : (displayMode === 'content-only' && typeof resolvedSummary === 'string' ? resolvedSummary.trim() : '');
+  const hasDetailText = Boolean(detailText);
 
   const shouldRender = useMemo(() => {
+    if (displayMode === 'content-only') return hasRenderableContent;
     if (resolvedStatus !== 'idle') return true;
-    return hasReasoningText || Boolean(resolvedSummary);
-  }, [hasReasoningText, resolvedStatus, resolvedSummary]);
+    return hasRenderableContent;
+  }, [displayMode, hasRenderableContent, resolvedStatus]);
 
-  const statusText = getStatusText(resolvedStatus, resolvedSummary, hasReasoningText);
-  const reasoningChars = hasReasoningText ? reasoningText.length : 0;
+  const statusText = getStatusText(displayMode, resolvedStatus, resolvedSummary, hasReasoningText);
+  const reasoningChars = hasDetailText ? detailText.length : 0;
 
   if (!shouldRender) return null;
 
@@ -109,8 +129,8 @@ export function AiReasoningPanel({
           </div>
 
           <div className="rounded-lg border border-white/10 bg-black/25 p-3">
-            {hasReasoningText ? (
-              <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-gray-100">{reasoningText}</pre>
+            {hasDetailText ? (
+              <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-gray-100">{detailText}</pre>
             ) : (
               <p className="text-xs text-gray-300">
                 {resolvedStatus === 'thinking' ? '正在等待模型返回可展示的思考内容…' : '暂无可展示思考内容。'}
@@ -118,14 +138,14 @@ export function AiReasoningPanel({
             )}
           </div>
 
-          {hasReasoningText ? (
+          {hasDetailText ? (
             <div className="flex justify-end">
               <button
                 type="button"
                 className="inline-flex items-center gap-1 rounded-md border border-white/15 bg-black/20 px-2 py-1 text-[11px] text-gray-200 hover:bg-black/35"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(reasoningText);
+                    await navigator.clipboard.writeText(detailText);
                     setCopied(true);
                     window.setTimeout(() => setCopied(false), 1200);
                   } catch {

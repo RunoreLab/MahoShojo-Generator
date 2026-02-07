@@ -115,6 +115,26 @@ const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
         })
         .filter((item): item is { characterName: string; guidance: string } => Boolean(item))
     : undefined,
+  aiReasoning: (() => {
+    const reasoning = report.aiReasoning;
+    if (!reasoning || typeof reasoning !== 'object') return reasoning;
+
+    const sanitizedParts = Array.isArray(reasoning.parts)
+      ? reasoning.parts.map((part) => ({
+          ...part,
+          text: typeof part?.text === 'string' ? sanitizeTextByShieldWords(part.text) : part?.text,
+        }))
+      : reasoning.parts;
+
+    return {
+      ...reasoning,
+      summary: typeof reasoning.summary === 'string' ? sanitizeTextByShieldWords(reasoning.summary) : reasoning.summary,
+      text: typeof reasoning.text === 'string' ? sanitizeTextByShieldWords(reasoning.text) : reasoning.text,
+      errorMessage:
+        typeof reasoning.errorMessage === 'string' ? sanitizeTextByShieldWords(reasoning.errorMessage) : reasoning.errorMessage,
+      parts: sanitizedParts,
+    };
+  })(),
 });
 
 const buildBattleBackupItems = (
