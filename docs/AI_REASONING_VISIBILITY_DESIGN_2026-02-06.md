@@ -217,6 +217,83 @@ type AIReasoningEnvelope = {
 - 显示统计：推理 tokens、思考文本长度、是否异常  
 - 支持复制文本；导出图片时默认不包含（防止卡片污染）
 
+### 5.4.1 交互形态（参考官方网页端风格）
+
+建议采用“**摘要条 + 可展开详情**”两层结构：
+
+1. **折叠态（默认）**
+   - 展示一行状态条：`🧠 AI 思考中` / `🧠 AI 思考摘要：xxx`
+   - 若有摘要：显示 1 行截断摘要（40~80 字）
+   - 若无摘要：显示 `正在思考…`（并带轻量 loading 动效）
+2. **展开态（点击）**
+   - 展示完整思考内容（或分段内容）
+   - 展示来源标记：`SDK` / `Provider` / `正文提取(低置信)`
+   - 展示统计信息：推理 tokens、文本长度、异常标记
+3. **流式过程**
+   - 生成中优先更新“摘要条”（低频刷新，避免抖动）
+   - 展开后才实时渲染详细思考内容（控制渲染成本）
+
+### 5.4.2 组件 API 建议（便于全项目统一接入）
+
+```ts
+type AiReasoningPanelProps = {
+  status: 'idle' | 'thinking' | 'done' | 'unavailable' | 'error';
+  summary?: string | null;                   // 无摘要时显示“正在思考…”
+  reasoning?: AIReasoningEnvelope | null;    // 统一数据结构（见 5.2）
+  compact?: boolean;                         // 卡片内紧凑模式
+  defaultExpanded?: boolean;                 // 默认是否展开
+  onToggle?: (expanded: boolean) => void;
+};
+```
+
+设计原则：**业务组件只传统一结构，不直接处理供应商差异**。
+
+### 5.4.3 UI / UX 细则
+
+- **位置**：放在“模型与 tokens 信息”下方，正文上方或下方（建议下方，避免打断阅读）。  
+- **层级**：视觉弱于正文标题、强于辅助统计；避免喧宾夺主。  
+- **文案**：  
+  - thinking 且无摘要：`AI 正在思考…`  
+  - 有摘要：`AI 思考摘要：{summary}`  
+  - 无可用思考：`该模型未返回可展示思考内容`  
+- **可访问性**：展开按钮可键盘操作；`aria-expanded` 与状态文本同步。  
+- **导出策略**：截图/分享默认不带思考详情（可配开关），避免“战报正文污染感”。  
+
+### 5.4.4 全项目接入架构（关键）
+
+建议增加一个跨页面可复用的“接入中间层”：
+
+- `lib/ai/reasoning-normalizer.ts`  
+  - 负责把 SDK / provider raw / heuristic 统一到 `AIReasoningEnvelope`
+- `lib/stream/read-text-and-reasoning-stream.ts`  
+  - 统一处理流式 chunk：正文、reasoning、telemetry
+- `components/ai/AiReasoningPanel.tsx`  
+  - 纯展示组件（不关心数据来源）
+
+这样可避免在每个页面重复写“思考解析 + 展示”逻辑。
+
+### 5.4.5 各 AI 功能接入清单（建议顺序）
+
+**第一批（高优先级）**
+- 竞技场：`components/arena/components/BattleResult.tsx` + `StreamingBattleReportCard`
+- PVP：`components/pvp/PvpRoomPage.tsx` 战报区域
+
+**第二批（通用生成页）**
+- `pages/free.tsx`
+- `pages/details.tsx`
+- `pages/canshou.tsx`
+- `pages/sublimation.tsx`
+- `pages/scenario.tsx`
+- `components/tavern/TavernImportPanel.tsx`
+
+**第三批（Magic Tea Party）**
+- `pages/api/magic-tea-party/*` 对应前端消费点统一接入
+
+统一要求：
+- 每个页面都使用同一 `AiReasoningPanel`
+- 每个流式页面都走同一 `readTextAndReasoningStream`
+- 页面只关心“显示什么”，不关心“如何解析供应商差异”
+
 ### 战报组件接入
 
 - `components/stream/StreamingBattleReportCard.tsx`
@@ -255,7 +332,7 @@ type AIReasoningEnvelope = {
 
 1. 扩展 telemetry 数据模型（后端）  
 2. 战报 SSE 增加 reasoning 事件  
-3. 新建 `AiReasoningPanel` 并接入战报卡片  
+3. 新建 `AiReasoningPanel`（折叠摘要 + 展开详情）并接入战报卡片  
 4. 加入正文 thought 泄漏兜底抽离  
 5. 补测试与灰度开关
 
@@ -331,4 +408,3 @@ type AIReasoningEnvelope = {
    - https://openrouter.ai/docs/use-cases/reasoning-tokens
 9. Google AI 开发者论坛（Gemini usage 字段偶发不完整案例，作为异常佐证）  
    - https://discuss.ai.google.dev/t/missing-candidates-token-count-in-usage-metadata/102090
-
