@@ -58,6 +58,17 @@
     - `event: reasoning_done`
   - 保留既有 `markdown / telemetry / meta / done` 事件体系
 
+### 1.6 PVP 结算链路（第二步补齐）
+
+- `pages/api/pvp/rooms/[roomId]/rounds/[roundId]/resolve-stream.ts`
+  - 上游改为请求 `/api/arena/generate-stream?format=sse`
+  - 服务端解析上游 SSE 的 `markdown/reasoning/telemetry/meta/done/error` 事件
+  - 对客户端继续输出纯 Markdown 流（保持现有 PVP 前端兼容）
+  - 在回合 `resultJson.streamMeta` 中落库 `aiReasoning`（含 `status/source/summary/text/reasoningTokens`）
+- `components/pvp/PvpRoomPage.tsx`
+  - 已透传 `streamMeta.aiReasoning` 到 `StreamingBattleReportCard`
+  - 当前表现：本轮结算完成并刷新后可看到 reasoning 面板（非实时）
+
 ---
 
 ## 2. 异常样例处理策略（Gemini thought 泄漏）
@@ -73,7 +84,7 @@
 ## 3. 当前限制与后续建议
 
 1. 当前主打通路径为“竞技场 SSE 战报”。
-2. PVP 已预留 `aiReasoning` 透传位，但其上游仍是纯文本流，尚未完整升级到 reasoning 事件通道。
+2. PVP 已完成上游 SSE 解析与 reasoning 落库，但前端仍为“结算完成后展示”，暂未做到实时 reasoning UI。
 3. 其他 stream 页面（free/details/canshou/sublimation/scenario/tavern/magic-tea-party）尚未统一接入，建议按设计文档 Phase 2 批量推进。
 
 ---
@@ -85,4 +96,3 @@
    - 点击后可查看详细思考内容
 2. 检查 metadata 区域与正文渲染无回归。
 3. 导出图片时确认 reasoning panel 默认不出现在截图内。
-
