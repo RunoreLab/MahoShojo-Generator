@@ -443,7 +443,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         id: 'siliconflow',
         name: '硅基流动 SiliconFlow',
         description: '硅基流动官方 OpenAI 兼容通道，覆盖 DeepSeek/GLM/Qwen/Kimi 等主流模型。',
-        docsUrl: 'https://docs.siliconflow.cn/cn/userguide/quickstart',
+        docsUrl: 'https://cloud.siliconflow.cn/i/1FLkYGHc',
         baseUrl: 'https://api.siliconflow.cn/v1',
         type: 'openai',
         mode: 'auto',
