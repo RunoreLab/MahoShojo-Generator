@@ -11,6 +11,7 @@ const PROVIDER_TOKEN_MULTIPLIER: Record<string, number> = {
   google: 1.05,
   deepseek: 1.0,
   siliconflow: 1.0,
+  chatbox: 1.0,
 };
 
 const clampNumber = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));

@@ -34,5 +34,24 @@ describe('ai-provider-catalog', () => {
 
     expect(errors).toEqual([]);
   });
-});
 
+  it('chatbox 提供商模型应限制在项目允许名单中', () => {
+    const chatboxProvider = AI_PROVIDER_CATALOG.find((provider) => provider.id === 'chatbox');
+    expect(chatboxProvider).toBeDefined();
+
+    const expectedModels = new Set([
+      'gpt-5',
+      'claude-4.5-sonnet',
+      'gemini-3-pro',
+      'deepseek-chat',
+      'deepseek-reasoner',
+      'deepseek-v3.2',
+      'kimi-k2',
+      'gpt-5-mini',
+      'gemini-2.5-flash',
+    ]);
+
+    const actualModels = new Set(chatboxProvider?.models.map((model) => model.value));
+    expect(Array.from(actualModels).sort()).toEqual(Array.from(expectedModels).sort());
+  });
+});

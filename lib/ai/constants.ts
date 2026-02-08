@@ -194,6 +194,62 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         ]
     },
     {
+        id: 'chatbox',
+        name: 'Chatbox AI',
+        description: 'Chatbox AI 官方 OpenAI 兼容 API，按订阅计划可选不同模型梯度。',
+        docsUrl: 'https://docs.chatboxai.app/en/chatbox-ai-premium/openai-compatible-api',
+        baseUrl: 'https://ai.chatboxai.app/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'gpt-5',
+                label: 'GPT 5（高级）',
+                description: '高级模型（Pro/Pro+）。适合高质量生成与复杂任务。'
+            },
+            {
+                value: 'claude-4.5-sonnet',
+                label: 'Claude 4.5 Sonnet（高级）',
+                description: '高级模型（Pro/Pro+）。擅长长文本写作与稳健推理。'
+            },
+            {
+                value: 'gemini-3-pro',
+                label: 'Gemini 3 Pro（高级）',
+                description: '高级模型（Pro/Pro+）。适合复杂指令与高难度创作。'
+            },
+            {
+                value: 'deepseek-chat',
+                label: 'DeepSeek V3（标准）',
+                description: '标准模型（所有付费方案）。适合日常对话与内容生成。'
+            },
+            {
+                value: 'deepseek-reasoner',
+                label: 'DeepSeek R1（标准）',
+                description: '标准模型（所有付费方案）。适合多步推理与规划。'
+            },
+            {
+                value: 'deepseek-v3.2',
+                label: 'DeepSeek V3.2（标准）',
+                description: '标准模型（所有付费方案）。作为 DeepSeek 新版本可选项。'
+            },
+            {
+                value: 'kimi-k2',
+                label: 'Kimi K2（标准）',
+                description: '标准模型（所有付费方案）。中文内容生成与角色创作表现稳定。'
+            },
+            {
+                value: 'gpt-5-mini',
+                label: 'GPT 5-mini（标准）',
+                description: '标准模型（所有付费方案）。更快更省，适合高频交互。'
+            },
+            {
+                value: 'gemini-2.5-flash',
+                label: 'Gemini 2.5 Flash（标准）',
+                description: '标准模型（所有付费方案）。速度与质量均衡。'
+            },
+        ]
+    },
+    {
         id: 'yiye',
         name: '一叶知秋 API',
         description: '一叶知秋 API 为用户提供了国内外广泛的模型库，性价比高但不太稳定。',
