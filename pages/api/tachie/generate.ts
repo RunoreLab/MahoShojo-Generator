@@ -5,6 +5,19 @@ export const config = {
   runtime: 'edge',
 };
 
+const parseJsonSafe = (raw: string): Record<string, unknown> => {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      return parsed as Record<string, unknown>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+};
+
 export default async function handler(req: Request) {
   if (req.method !== "POST") {
     return new Response(
@@ -46,16 +59,76 @@ export default async function handler(req: Request) {
   };
 
   const payload = await req.json();
-  const { accessKey, secretKey, prompt } = payload ?? {};
-
-  if (!accessKey || !secretKey || !prompt) {
-    return new Response(
-      JSON.stringify({ error: "Missing required parameters" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  const sourceRaw = typeof payload?.source === "string" ? payload.source.trim().toLowerCase() : "";
+  const source = sourceRaw === "modelscope" ? "modelscope" : "liblib";
 
   try {
+    if (source === "modelscope") {
+      const prompt = typeof payload?.prompt === "string" ? payload.prompt.trim() : "";
+      const modelscopeToken = typeof payload?.modelscopeToken === "string" ? payload.modelscopeToken.trim() : "";
+      const modelscopeModelRaw = typeof payload?.modelscopeModel === "string" ? payload.modelscopeModel.trim() : "";
+      const modelscopeModel = modelscopeModelRaw || "Stonego/XiabanmostyleV3";
+
+      if (!modelscopeToken || !prompt) {
+        return new Response(
+          JSON.stringify({ error: "Missing required parameters" }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      const response = await fetch("https://api-inference.modelscope.cn/v1/images/generations", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${modelscopeToken}`,
+          "Content-Type": "application/json",
+          "X-ModelScope-Async-Mode": "true",
+        },
+        body: JSON.stringify({
+          model: modelscopeModel,
+          prompt,
+        }),
+      });
+
+      const raw = await response.text();
+      const upstream = parseJsonSafe(raw);
+
+      if (!response.ok) {
+        const messageCandidates = [upstream.message, upstream.msg, upstream.error, upstream.detail];
+        const message = messageCandidates.find((item): item is string => typeof item === "string" && item.trim().length > 0);
+        return new Response(
+          JSON.stringify({ error: message || `ModelScope API error: ${response.status}` }),
+          { status: response.status, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      const taskId = upstream.task_id;
+      if (typeof taskId !== "string" || !taskId.trim()) {
+        return new Response(
+          JSON.stringify({ error: "ModelScope API error: task_id missing" }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      return new Response(JSON.stringify({
+        code: 0,
+        msg: "success",
+        data: {
+          generateUuid: taskId.trim(),
+        },
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const { accessKey, secretKey, prompt } = payload ?? {};
+    if (!accessKey || !secretKey || !prompt) {
+      return new Response(
+        JSON.stringify({ error: "Missing required parameters" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const modeRaw = typeof payload?.mode === 'string' ? payload.mode.trim() : '';
     const mode = modeRaw === 'illustration' ? 'illustration' : 'tachie';
 

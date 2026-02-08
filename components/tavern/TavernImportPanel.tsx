@@ -1522,8 +1522,8 @@ export function TavernImportPanel() {
 
               {outputDataCard && tachiePrompt.trim() ? (
                 <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-                  <div className="text-sm font-semibold text-pink-700">生成立绘（LibLib，可选）</div>
-                  <div className="mt-2 text-xs text-gray-600">提示：立绘生成会直接调用 LibLib API；凭据仅存于本地。</div>
+                  <div className="text-sm font-semibold text-pink-700">生成立绘（LibLib / ModelScope，可选）</div>
+                  <div className="mt-2 text-xs text-gray-600">提示：立绘生成会直接调用对应平台 API；凭据仅存于本地。</div>
                   <div className="mt-3">
                     <TachieGenerator prompt={tachiePrompt} />
                   </div>

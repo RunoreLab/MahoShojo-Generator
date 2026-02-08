@@ -485,7 +485,7 @@ export default function CharacterPartyPage() {
     <>
       <Head>
         <title>角色组队 - 魔法少女生成器</title>
-        <meta name="description" content="将多个角色卡拼接组合成一张角色卡，支持保存图片/下载/保存到云端与生成 LibLib 立绘。" />
+        <meta name="description" content="将多个角色卡拼接组合成一张角色卡，支持保存图片/下载/保存到云端与生成 LibLib 或 ModelScope 立绘。" />
       </Head>
 
       <div className="magic-background-white">
@@ -768,7 +768,7 @@ export default function CharacterPartyPage() {
                   <summary
                     className="cursor-pointer text-sm font-semibold text-pink-700"
                   >
-                    {isTachieVisible ? '▼' : '▶'} 生成 LibLib 立绘（可选）
+                    {isTachieVisible ? '▼' : '▶'} 生成立绘（LibLib / ModelScope，可选）
                   </summary>
                   {isTachieVisible ? (
                     <div className="mt-3">

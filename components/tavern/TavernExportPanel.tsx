@@ -1620,7 +1620,7 @@ export function TavernExportPanel() {
 
               {tachiePrompt.trim() ? (
                 <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
-                  <div className="text-sm font-semibold text-pink-700">生成立绘（LibLib，可选）</div>
+                  <div className="text-sm font-semibold text-pink-700">生成立绘（LibLib / ModelScope，可选）</div>
                   <div className="mt-1 text-xs text-gray-600">生成完成后可一键设为底图（会自动转为 PNG）。</div>
                   <div className="mt-3">
                     <TachieGenerator
