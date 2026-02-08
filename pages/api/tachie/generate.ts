@@ -58,6 +58,14 @@ export default async function handler(req: Request) {
     return null;
   };
 
+  const MODELSCOPE_SIZE_WHITELIST = new Set([
+    "928x1664",
+    "1664x928",
+    "1328x1328",
+    "1104x1472",
+    "1472x1104",
+  ]);
+
   const payload = await req.json();
   const sourceRaw = typeof payload?.source === "string" ? payload.source.trim().toLowerCase() : "";
   const source = sourceRaw === "modelscope" ? "modelscope" : "liblib";
@@ -68,6 +76,8 @@ export default async function handler(req: Request) {
       const modelscopeToken = typeof payload?.modelscopeToken === "string" ? payload.modelscopeToken.trim() : "";
       const modelscopeModelRaw = typeof payload?.modelscopeModel === "string" ? payload.modelscopeModel.trim() : "";
       const modelscopeModel = modelscopeModelRaw || "Stonego/XiabanmostyleV3";
+      const modelscopeSizeRaw = typeof payload?.modelscopeSize === "string" ? payload.modelscopeSize.trim() : "";
+      const modelscopeSize = MODELSCOPE_SIZE_WHITELIST.has(modelscopeSizeRaw) ? modelscopeSizeRaw : "1328x1328";
 
       if (!modelscopeToken || !prompt) {
         return new Response(
@@ -86,6 +96,7 @@ export default async function handler(req: Request) {
         body: JSON.stringify({
           model: modelscopeModel,
           prompt,
+          size: modelscopeSize,
         }),
       });
 
@@ -153,13 +164,13 @@ export default async function handler(req: Request) {
       },
       ...(negativePrompt && negativePromptNodeId
         ? {
-            [String(negativePromptNodeId)]: {
-              class_type: "CLIPTextEncode",
-              inputs: {
-                text: negativePrompt
-              }
+          [String(negativePromptNodeId)]: {
+            class_type: "CLIPTextEncode",
+            inputs: {
+              text: negativePrompt
             }
           }
+        }
         : {}),
       workflowUuid
     };

@@ -11,6 +11,7 @@ export interface TachieGenerationRequest {
     secretKey?: string;
     modelscopeToken?: string;
     modelscopeModel?: string;
+    modelscopeSize?: string;
     prompt: string;
     mode?: TachieGenerateMode;
     workflowUuid?: string;
@@ -149,6 +150,7 @@ export const generateTachieWithProgress = async (
                     request.prompt,
                     {
                         model: request.modelscopeModel,
+                        size: request.modelscopeSize,
                     },
                 );
 

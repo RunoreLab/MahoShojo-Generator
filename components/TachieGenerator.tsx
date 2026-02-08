@@ -4,6 +4,21 @@ import { useState, useEffect } from "react";
 import { generateTachieWithProgress, type TachieGenerationResult, type TachieSource } from "@/lib/tachie/manager";
 import { ErrorMessage } from "@/components/ErrorMessage";
 
+const MODELSCOPE_SIZE_OPTIONS = [
+  { value: "928x1664", label: "16:9 竖屏（928×1664）" },
+  { value: "1664x928", label: "16:9 横屏（1664×928）" },
+  { value: "1328x1328", label: "正方形（1328×1328）" },
+  { value: "1104x1472", label: "4:3 竖屏（1104×1472）" },
+  { value: "1472x1104", label: "4:3 横屏（1472×1104）" },
+] as const;
+
+type ModelScopePresetSize = (typeof MODELSCOPE_SIZE_OPTIONS)[number]["value"];
+
+const DEFAULT_MODELSCOPE_SIZE: ModelScopePresetSize = "1328x1328";
+
+const isModelScopePresetSize = (value: unknown): value is ModelScopePresetSize =>
+  typeof value === "string" && MODELSCOPE_SIZE_OPTIONS.some((option) => option.value === value);
+
 interface TachieGeneratorProps {
   prompt: string;
   mode?: 'tachie' | 'illustration';
@@ -32,6 +47,7 @@ export default function TachieGenerator({
   const [secretKey, setSecretKey] = useState("");
   const [modelscopeToken, setModelscopeToken] = useState("");
   const [modelscopeModel, setModelscopeModel] = useState("Stonego/XiabanmostyleV3");
+  const [modelscopeSize, setModelscopeSize] = useState<ModelScopePresetSize>(DEFAULT_MODELSCOPE_SIZE);
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<TachieGenerationResult | null>(null);
   const [rememberCredentials, setRememberCredentials] = useState(false);
@@ -67,6 +83,7 @@ export default function TachieGenerator({
                 ? parsed.modelscopeModel
                 : 'Stonego/XiabanmostyleV3'
             );
+            setModelscopeSize(isModelScopePresetSize(parsed.modelscopeSize) ? parsed.modelscopeSize : DEFAULT_MODELSCOPE_SIZE);
           } catch (error) {
             console.error('Failed to parse saved credentials:', error);
           }
@@ -84,7 +101,8 @@ export default function TachieGenerator({
           accessKey: accessKey.trim(),
           secretKey: secretKey.trim(),
           modelscopeToken: modelscopeToken.trim(),
-          modelscopeModel: modelscopeModel.trim() || 'Stonego/XiabanmostyleV3'
+          modelscopeModel: modelscopeModel.trim() || 'Stonego/XiabanmostyleV3',
+          modelscopeSize,
         }));
         localStorage.setItem(REMEMBER_KEY, 'true');
       } else {
@@ -105,6 +123,7 @@ export default function TachieGenerator({
       setSecretKey('');
       setModelscopeToken('');
       setModelscopeModel('Stonego/XiabanmostyleV3');
+      setModelscopeSize(DEFAULT_MODELSCOPE_SIZE);
     }
   };
 
@@ -163,6 +182,7 @@ export default function TachieGenerator({
         secretKey: secretKey.trim(),
         modelscopeToken: modelscopeToken.trim(),
         modelscopeModel: modelscopeModel.trim() || undefined,
+        modelscopeSize,
         prompt: normalizedPrompt,
         mode,
         workflowUuid,
@@ -300,6 +320,25 @@ export default function TachieGenerator({
                 disabled={isGenerating}
               />
             </div>
+
+            <div className="input-group">
+              <label htmlFor="modelscopeSize" className="input-label">
+                图片尺寸
+              </label>
+              <select
+                id="modelscopeSize"
+                value={modelscopeSize}
+                onChange={(e) => setModelscopeSize(e.target.value as ModelScopePresetSize)}
+                className="input-field"
+                disabled={isGenerating}
+              >
+                {MODELSCOPE_SIZE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </>
         )}
       </div>
@@ -315,7 +354,7 @@ export default function TachieGenerator({
           />
           在本地记住我的凭据，方便下次使用
         </label>
-        {rememberCredentials && (accessKey || secretKey || modelscopeToken || modelscopeModel) && (
+        {rememberCredentials && (accessKey || secretKey || modelscopeToken || modelscopeModel || modelscopeSize) && (
           <button
             type="button"
             onClick={clearSavedCredentials}

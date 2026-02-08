@@ -1,5 +1,6 @@
 export interface ModelScopeGenerateOptions {
   model?: string;
+  size?: string;
 }
 
 export interface ModelScopeTaskStatus {
@@ -38,6 +39,7 @@ export const generateModelScopeText2Image = async (
       modelscopeToken,
       prompt,
       modelscopeModel: options?.model,
+      modelscopeSize: options?.size,
     }),
   });
 
