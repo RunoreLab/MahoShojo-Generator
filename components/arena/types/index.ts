@@ -15,6 +15,7 @@ export type CombatantType = 'magical-girl' | 'canshou' | 'general-character';
 export type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type StoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 export type GenerationMode = 'non-stream' | 'stream';
+export type StreamTransportMode = 'sse' | 'plain-stream';
 
 export type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -118,6 +119,7 @@ export interface BattleSettings {
   readNarrativeHistoryLimit: number;
   isNarrativeHistoryUnlimited: boolean;
   writeNarrativeHistory: boolean;
+  streamTransport: StreamTransportMode;
   userGuidance: string;
 }
 

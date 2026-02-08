@@ -664,7 +664,14 @@ async function handler(req: NextRequest): Promise<Response> {
         }
         const streamResponse = streamResult.response;
         const usagePromise = streamResult.usagePromise;
+        const finishReasonPromise = streamResult.finishReasonPromise;
         const resolvedUsagePromise = (async () => normalizeUsage(await usagePromise?.catch(() => null)))();
+        const resolvedFinishReasonPromise = (async () => {
+            const value = await finishReasonPromise?.catch(() => null);
+            if (typeof value !== 'string') return null;
+            const trimmed = value.trim();
+            return trimmed || null;
+        })();
 
         log.info('✅ 流式响应已生成，准备返回');
 
@@ -732,6 +739,7 @@ async function handler(req: NextRequest): Promise<Response> {
             const recordPromise = (async () => {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
                 const usage = await resolvedUsagePromise;
+                const finishReason = await resolvedFinishReasonPromise;
                 const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
                 const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
 
@@ -828,6 +836,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    outputHasShieldWords: shieldResult.hasShieldWords,
 	                    extraJson: compactExtraJson({
 	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+                            finishReason,
                             arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
                             arenaStrictPolicy: '1+3:v1',
                             seasonId: typeof currentSeason?.id === 'string' ? currentSeason.id : null,
@@ -948,8 +957,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	            sseHeaders.set('Cache-Control', 'no-cache, no-transform');
 	            const debugSse = debugSseRequested;
 
-	            const encoder = new TextEncoder();
-	            const encodeEvent = (event: string, payload: unknown) => {
+		            const encoder = new TextEncoder();
+                    const HEARTBEAT_INTERVAL_MS = 15_000;
+		            const encodeEvent = (event: string, payload: unknown) => {
 	                let data: string;
 	                try {
 	                    data = JSON.stringify(payload ?? null);
@@ -961,10 +971,11 @@ async function handler(req: NextRequest): Promise<Response> {
                 }
 	                return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
 	            };
-	            const enqueueDebug = (controller: ReadableStreamDefaultController<Uint8Array>, payload: unknown) => {
-	                if (!debugSse) return;
-	                controller.enqueue(encodeEvent('debug', payload));
-	            };
+		            const enqueueDebug = (controller: ReadableStreamDefaultController<Uint8Array>, payload: unknown) => {
+		                if (!debugSse) return;
+		                controller.enqueue(encodeEvent('debug', payload));
+		            };
+                    const HEARTBEAT_PAYLOAD = encoder.encode(': keepalive\n\n');
 
 		            const META_GUARD_CHARS = 256;
 		            const META_FALLBACK_TAIL_CHARS = 120_000;
@@ -999,9 +1010,29 @@ async function handler(req: NextRequest): Promise<Response> {
                 let reasoningCharsSent = 0;
                 let hasReasoningStarted = false;
                 let hasReasoningDelta = false;
-                let reasoningCompleted = false;
-                let activeSseController: ReadableStreamDefaultController<Uint8Array> | null = null;
-                let sseStreamClosed = false;
+	                let reasoningCompleted = false;
+	                let activeSseController: ReadableStreamDefaultController<Uint8Array> | null = null;
+	                let sseStreamClosed = false;
+                    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+                    const clearHeartbeatTimer = () => {
+                        if (!heartbeatTimer) return;
+                        clearInterval(heartbeatTimer);
+                        heartbeatTimer = null;
+                    };
+                    const startHeartbeatTimer = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+                        clearHeartbeatTimer();
+                        heartbeatTimer = setInterval(() => {
+                            if (sseCancelled || sseStreamClosed || activeSseController !== controller) {
+                                clearHeartbeatTimer();
+                                return;
+                            }
+                            try {
+                                controller.enqueue(HEARTBEAT_PAYLOAD);
+                            } catch {
+                                clearHeartbeatTimer();
+                            }
+                        }, HEARTBEAT_INTERVAL_MS);
+                    };
 
 		            const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
 		                if (!chunk) return;
@@ -1117,9 +1148,10 @@ async function handler(req: NextRequest): Promise<Response> {
 		            let sseCancelled = false;
 		            let pumpStarted = false;
 
-		            const finalizeSseAndClose = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
-		                // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
-		                const flushed = decoder.decode();
+			            const finalizeSseAndClose = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
+                        clearHeartbeatTimer();
+			                // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
+			                const flushed = decoder.decode();
 		                if (flushed) {
 		                    appendText(flushed);
 		                    processText(controller, flushed);
@@ -1147,28 +1179,36 @@ async function handler(req: NextRequest): Promise<Response> {
                         reasoningCompleted,
 		                });
 
-		                // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
-		                const usageForTelemetry = await Promise.race([
-		                    resolvedUsagePromise,
-		                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
-		                ]);
-		                const shouldIncludeTelemetry =
-		                    (usageForTelemetry != null &&
-		                        (typeof usageForTelemetry.promptTokens === 'number' ||
-		                            typeof usageForTelemetry.completionTokens === 'number' ||
-		                            typeof usageForTelemetry.reasoningTokens === 'number')) ||
-		                    typeof narrativeHistoryReadCount === 'number' ||
-		                    (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
+			                // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
+			                const usageForTelemetry = await Promise.race([
+			                    resolvedUsagePromise,
+			                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+			                ]);
+                        const finishReasonForTelemetry = await Promise.race([
+                            resolvedFinishReasonPromise,
+                            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+                        ]);
+			                const shouldIncludeTelemetry =
+			                    (usageForTelemetry != null &&
+			                        (typeof usageForTelemetry.promptTokens === 'number' ||
+			                            typeof usageForTelemetry.completionTokens === 'number' ||
+			                            typeof usageForTelemetry.reasoningTokens === 'number')) ||
+                                (typeof finishReasonForTelemetry === 'string' && Boolean(finishReasonForTelemetry.trim())) ||
+			                    typeof narrativeHistoryReadCount === 'number' ||
+			                    (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
 
 		                if (shouldIncludeTelemetry) {
 		                    const aiModelForTelemetry =
 		                        typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim() ? aiTelemetry.model.trim() : null;
-		                    const telemetryPayload = {
-		                        version: 1,
-		                        ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
-		                        ...(usageForTelemetry
-		                            ? {
-		                                usage: {
+			                    const telemetryPayload = {
+			                        version: 1,
+			                        ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
+                                    ...(typeof finishReasonForTelemetry === 'string' && finishReasonForTelemetry.trim()
+                                        ? { finishReason: finishReasonForTelemetry.trim() }
+                                        : {}),
+			                        ...(usageForTelemetry
+			                            ? {
+			                                usage: {
 		                                    promptTokens: usageForTelemetry.promptTokens ?? null,
 		                                    reasoningTokens: usageForTelemetry.reasoningTokens ?? null,
 		                                    completionTokens: usageForTelemetry.completionTokens ?? null,
@@ -1330,8 +1370,9 @@ async function handler(req: NextRequest): Promise<Response> {
 			                        } catch {
 			                            // ignore
 			                        }
-				                        await finalizeOnce(statusForRecord, message);
-				                        try {
+					                        await finalizeOnce(statusForRecord, message);
+					                        try {
+                                    clearHeartbeatTimer();
                                     sseStreamClosed = true;
                                     activeSseController = null;
                                     flushReasoningQueueNow = null;
@@ -1345,12 +1386,13 @@ async function handler(req: NextRequest): Promise<Response> {
 		            };
 
 			            const sseBody = new ReadableStream<Uint8Array>({
-			                start(controller) {
+				                start(controller) {
                                 activeSseController = controller;
                                 sseStreamClosed = false;
-			                    enqueueDebug(controller, {
-			                        phase: 'open',
-			                        generationId,
+                                startHeartbeatTimer(controller);
+				                    enqueueDebug(controller, {
+				                        phase: 'open',
+				                        generationId,
 		                        shouldAllowStreamMeta,
 		                        idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
 		                        totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
@@ -1358,8 +1400,9 @@ async function handler(req: NextRequest): Promise<Response> {
                         flushReasoningQueue(controller);
 			                    void pumpSse(controller);
 			                },
-			                async cancel(reason) {
-			                    sseCancelled = true;
+				                async cancel(reason) {
+                                clearHeartbeatTimer();
+				                    sseCancelled = true;
                                 sseStreamClosed = true;
                                 activeSseController = null;
                                 flushReasoningQueueNow = null;
@@ -1401,28 +1444,36 @@ async function handler(req: NextRequest): Promise<Response> {
                     if (done) {
                         appendText(decoder.decode());
 
-                        // 在流式末尾追加一段系统 telemetry 注释，用于前端展示 token 与叙事历史读取条数。
-                        const usageForTelemetry = await Promise.race([
-                            resolvedUsagePromise,
-                            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+	                        // 在流式末尾追加一段系统 telemetry 注释，用于前端展示 token 与叙事历史读取条数。
+	                        const usageForTelemetry = await Promise.race([
+	                            resolvedUsagePromise,
+	                            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+	                        ]);
+                        const finishReasonForTelemetry = await Promise.race([
+                            resolvedFinishReasonPromise,
+                            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
                         ]);
-                        const shouldIncludeTelemetry =
-                            (usageForTelemetry != null &&
-                                (typeof usageForTelemetry.promptTokens === 'number' ||
-                                    typeof usageForTelemetry.completionTokens === 'number' ||
-                                    typeof usageForTelemetry.reasoningTokens === 'number')) ||
-                            typeof narrativeHistoryReadCount === 'number' ||
-                            (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
+	                        const shouldIncludeTelemetry =
+	                            (usageForTelemetry != null &&
+	                                (typeof usageForTelemetry.promptTokens === 'number' ||
+	                                    typeof usageForTelemetry.completionTokens === 'number' ||
+	                                    typeof usageForTelemetry.reasoningTokens === 'number')) ||
+                                (typeof finishReasonForTelemetry === 'string' && Boolean(finishReasonForTelemetry.trim())) ||
+	                            typeof narrativeHistoryReadCount === 'number' ||
+	                            (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
 
                         if (shouldIncludeTelemetry) {
                             const aiModelForTelemetry =
                                 typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim() ? aiTelemetry.model.trim() : null;
-                            const telemetryPayload = {
-                                version: 1,
-                                ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
-                                ...(usageForTelemetry
-                                    ? {
-                                        usage: {
+	                            const telemetryPayload = {
+	                                version: 1,
+	                                ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
+                                ...(typeof finishReasonForTelemetry === 'string' && finishReasonForTelemetry.trim()
+                                    ? { finishReason: finishReasonForTelemetry.trim() }
+                                    : {}),
+	                                ...(usageForTelemetry
+	                                    ? {
+	                                        usage: {
                                             promptTokens: usageForTelemetry.promptTokens ?? null,
                                             reasoningTokens: usageForTelemetry.reasoningTokens ?? null,
                                             completionTokens: usageForTelemetry.completionTokens ?? null,

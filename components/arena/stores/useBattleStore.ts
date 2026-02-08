@@ -28,6 +28,7 @@ const defaultSettings: BattleSettings = {
   readNarrativeHistoryLimit: 10,
   isNarrativeHistoryUnlimited: false,
   writeNarrativeHistory: false,
+  streamTransport: 'sse',
   userGuidance: '',
 };
 

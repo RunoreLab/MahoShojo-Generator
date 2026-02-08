@@ -133,7 +133,7 @@
    - `SSE 调试：读取结束`（重点看 `sawDoneEvent`）
 4. 服务端记录：
    - generation status（completed/failed/aborted）
-   - finishReason（待补采）
+   - finishReason（已接入，可用于区分 length/content-filter/stop）
    - outputChars / usage（尤其 completion tokens）
 
 ---
@@ -167,6 +167,12 @@
   - `sse`（默认）
   - `plain-stream`（兼容/排障模式）
 - 通过灰度和埋点比较两种策略的 `aborted` 与 `failed` 比例，再决定是否扩大 plain-stream 覆盖。
+
+### 8.4 当前实现状态（2026-02-08）
+
+- 已在竞技场前端加入“流式传输策略”开关（SSE / 纯文本流）。
+- SSE 侧已补充链路保活心跳（`keepalive` 注释帧），用于降低空闲断连概率。
+- 服务端中断错误事件已带 `status`/`interrupted` 字段，前端可做三态处理。
 
 ---
 

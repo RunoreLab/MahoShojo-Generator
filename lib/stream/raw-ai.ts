@@ -170,6 +170,7 @@ export async function generateWithStreamAI(
 ): Promise<{
     response: Response;
     usagePromise?: Promise<unknown>;
+    finishReasonPromise?: Promise<unknown>;
     telemetry?: GenerateWithAIOptions['telemetry'];
 }> {
     const baseProviders: AIProvider[] = [
@@ -455,6 +456,7 @@ export async function generateWithStreamAI(
                         },
                     }),
                     usagePromise: (result as any).usage,
+                    finishReasonPromise: (result as any).finishReason,
                     telemetry: options?.telemetry,
                 };
             } catch (error) {

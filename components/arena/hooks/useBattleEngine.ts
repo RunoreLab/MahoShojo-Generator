@@ -606,30 +606,44 @@ export const useBattleEngine = () => {
         return false;
       };
 
-      if (generationMode === 'stream') {
-        const abortController = new AbortController();
-        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+	      if (generationMode === 'stream') {
+	        const abortController = new AbortController();
+	        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
-	        try {
-	          setStreamCharacterGuidances(null);
-	          const debugSseQuery = (() => {
-	            try {
-	              if (typeof window === 'undefined') return '';
-	              const raw = new URLSearchParams(window.location.search).get('debugSse') || '';
-	              const normalized = raw.trim().toLowerCase();
-	              if (normalized === '1' || normalized === 'true') return '&debugSse=1';
-	              return '';
-	            } catch {
-	              return '';
-	            }
-	          })();
-	          const debugSseEnabled = Boolean(debugSseQuery);
-	          const response = await fetch(`/api/arena/generate-stream?format=sse${debugSseQuery}`, {
-	            method: 'POST',
-	            headers: requestHeaders,
-	            body: JSON.stringify(requestBody),
-	            signal: abortController.signal,
-	          });
+		        try {
+		          setStreamCharacterGuidances(null);
+              const streamTransportMode = settings.streamTransport === 'plain-stream' ? 'plain-stream' : 'sse';
+		          const debugSseQuery = (() => {
+		            try {
+		              if (typeof window === 'undefined') return '';
+		              const raw = new URLSearchParams(window.location.search).get('debugSse') || '';
+		              const normalized = raw.trim().toLowerCase();
+		              if (normalized === '1' || normalized === 'true') return 'debugSse=1';
+		              return '';
+		            } catch {
+		              return '';
+		            }
+		          })();
+		          const debugSseEnabled = streamTransportMode === 'sse' && Boolean(debugSseQuery);
+              const query = new URLSearchParams();
+              if (streamTransportMode === 'sse') {
+                query.set('format', 'sse');
+              }
+              if (debugSseQuery) {
+                query.set('debugSse', '1');
+              }
+              const endpoint = `/api/arena/generate-stream${query.toString() ? `?${query.toString()}` : ''}`;
+              if (streamTransportMode === 'sse') {
+                requestHeaders.Accept = 'text/event-stream';
+              } else {
+                delete requestHeaders.Accept;
+              }
+		          const response = await fetch(endpoint, {
+		            method: 'POST',
+		            headers: requestHeaders,
+		            body: JSON.stringify(requestBody),
+		            signal: abortController.signal,
+		          });
 
           if (!response.ok) {
             const text = await response.text();
