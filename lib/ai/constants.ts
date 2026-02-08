@@ -289,7 +289,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
             },
             {
-                value: 'gemini-2.5-flash-lite',
+                value: 'gemini-2.5-flash-lite-preview-09-2025',
                 label: 'Gemini 2.5 Flash Lite',
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
