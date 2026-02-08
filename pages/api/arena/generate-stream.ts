@@ -21,7 +21,12 @@ import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
     GenerateWithAIOptions,
     RawReasoningStreamEvent
 } from '@/lib/stream/raw-ai';
-import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
+import {
+    createStreamReadWithTimeout,
+    STREAM_READ_IDLE_TIMEOUT_MS,
+    STREAM_READ_TOTAL_TIMEOUT_MS,
+    StreamReadTimeoutError,
+} from '@/lib/stream/timeout';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
     createBattleReportGenerationRecord,
@@ -55,6 +60,19 @@ import { deleteObject } from '@/lib/r2';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
+
+const isInterruptedStreamError = (error: unknown): boolean => {
+    if (error instanceof StreamReadTimeoutError) return true;
+    if (!error) return false;
+    const errorRecord = error as { name?: unknown; message?: unknown };
+    const name = typeof errorRecord.name === 'string' ? errorRecord.name.toLowerCase() : '';
+    const message = typeof errorRecord.message === 'string' ? errorRecord.message.toLowerCase() : '';
+    if (name === 'aborterror' || name === 'streamreadtimeouterror') return true;
+    if (message.includes('timeout') || message.includes('timed out')) return true;
+    if (message.includes('流式读取超时') || message.includes('流式生成超时')) return true;
+    if (message.includes('aborted') || message.includes('中断')) return true;
+    return false;
+};
 
 export const config = {
     runtime: 'edge',
@@ -1294,18 +1312,26 @@ async function handler(req: NextRequest): Promise<Response> {
 		                            processText(controller, decoded);
                                 flushReasoningQueue(controller);
 		                        }
-		                    } catch (streamError) {
-		                        if (sseCancelled) return;
+			                    } catch (streamError) {
+			                        if (sseCancelled) return;
                             flushReasoningQueue(controller);
-		                        const message =
-		                            streamError instanceof Error ? streamError.message : String(streamError ?? 'stream error');
-		                        try {
-		                            controller.enqueue(encodeEvent('error', { ok: false, error: message }));
-		                        } catch {
-		                            // ignore
-		                        }
-			                        await finalizeOnce('failed', message);
+			                        const message =
+			                            streamError instanceof Error ? streamError.message : String(streamError ?? 'stream error');
+                            const interrupted = isInterruptedStreamError(streamError);
+                            const statusForRecord: 'aborted' | 'failed' = interrupted ? 'aborted' : 'failed';
 			                        try {
+			                            controller.enqueue(encodeEvent('error', {
+                                    ok: false,
+                                    error: message,
+                                    status: statusForRecord,
+                                    interrupted,
+                                    ...(interrupted ? { errorCode: 'stream_interrupted' } : {}),
+                                }));
+			                        } catch {
+			                            // ignore
+			                        }
+				                        await finalizeOnce(statusForRecord, message);
+				                        try {
                                     sseStreamClosed = true;
                                     activeSseController = null;
                                     flushReasoningQueueNow = null;
@@ -1427,7 +1453,8 @@ async function handler(req: NextRequest): Promise<Response> {
                     }
                 } catch (streamError) {
                     controller.error(streamError);
-                    await finalizeOnce('failed', streamError instanceof Error ? streamError.message : 'stream error');
+                    const statusForRecord: 'aborted' | 'failed' = isInterruptedStreamError(streamError) ? 'aborted' : 'failed';
+                    await finalizeOnce(statusForRecord, streamError instanceof Error ? streamError.message : 'stream error');
                 }
             },
             async cancel(reason) {
@@ -1460,6 +1487,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	        const endedAtMs = Date.now();
 	        const endedAtIso = new Date(endedAtMs).toISOString();
 	        const durationMs = Math.max(0, endedAtMs - startedAtMs);
+            const statusForRecord: 'aborted' | 'failed' = isInterruptedStreamError(error) ? 'aborted' : 'failed';
 	        const ip = getClientIpFromHeaders(req.headers);
 	        const ipAnonymized = anonymizeIp(ip);
 	        const authHeader = req.headers.get('authorization');
@@ -1472,7 +1500,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    startedAt: startedAtIso,
 	                    endedAt: endedAtIso,
 	                    durationMs,
-	                    status: 'failed',
+	                    status: statusForRecord,
 	                    generationMode: 'stream',
 	                    endpoint: 'api/arena/generate-stream',
 	                    ip,
@@ -1495,6 +1523,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    extraJson: {
 	                        errorMessage,
 	                        stage: 'top-level-catch',
+                            status: statusForRecord,
 	                    },
 	                });
 	            } catch (writeError) {
@@ -1539,8 +1568,14 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            })
 	                        );
 	                    }
-	                    controller.enqueue(encodeEvent('error', { ok: false, error: errorMessage }));
-	                    controller.enqueue(encodeEvent('done', { ok: false }));
+	                    controller.enqueue(encodeEvent('error', {
+                            ok: false,
+                            error: errorMessage,
+                            status: statusForRecord,
+                            interrupted: statusForRecord === 'aborted',
+                            ...(statusForRecord === 'aborted' ? { errorCode: 'stream_interrupted' } : {}),
+                        }));
+	                    controller.enqueue(encodeEvent('done', { ok: false, status: statusForRecord }));
 	                    controller.close();
 	                },
 	            });

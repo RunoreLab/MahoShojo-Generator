@@ -15,7 +15,12 @@ import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
-import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
+import {
+  createStreamReadWithTimeout,
+  STREAM_READ_IDLE_TIMEOUT_MS,
+  STREAM_READ_TOTAL_TIMEOUT_MS,
+  StreamReadTimeoutError,
+} from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
@@ -24,6 +29,32 @@ import { appendReasoningDelta, normalizeReasoningSource, updateReasoningStatus }
 import type { AIReasoningSource } from '@/types/ai-reasoning';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
+
+const isStreamInterruptedError = (error: unknown): boolean => {
+  if (error instanceof StreamReadTimeoutError) return true;
+  if (!error) return false;
+  const errorRecord = error as { name?: unknown; message?: unknown };
+  const name = typeof errorRecord.name === 'string' ? errorRecord.name.toLowerCase() : '';
+  const message = typeof errorRecord.message === 'string' ? errorRecord.message.toLowerCase() : '';
+  if (name === 'aborterror' || name === 'streamreadtimeouterror') return true;
+  if (message.includes('流式读取超时') || message.includes('流式生成超时')) return true;
+  if (message.includes('timeout') || message.includes('timed out')) return true;
+  if (message.includes('aborted') || message.includes('中断')) return true;
+  return false;
+};
+
+const buildStreamInterruptedMessage = (details?: string): string => {
+  const tail = typeof details === 'string' && details.trim() ? `：${details.trim()}` : '';
+  return `⚠️ 战报流中断${tail}，请稍后再试。`;
+};
+
+const isServerInterruptedPayload = (payload: any, fallbackMessage: string): boolean => {
+  const status = typeof payload?.status === 'string' ? payload.status.trim().toLowerCase() : '';
+  if (status === 'aborted' || status === 'interrupted') return true;
+  if (payload?.interrupted === true) return true;
+  if (typeof payload?.errorCode === 'string' && payload.errorCode === 'stream_interrupted') return true;
+  return isStreamInterruptedError({ message: fallbackMessage });
+};
 
 const extractTitleFromBattleMarkdown = (markdown: string): string => {
   const lines = markdown.split(/\r?\n/).map((line) => line.trim());
@@ -707,13 +738,16 @@ export const useBattleEngine = () => {
             }
           }
 
-          const decoder = new TextDecoder();
-          let accumulatedText = '';
-          let shouldAbort = false;
-          let metaOverrideFromSse:
-            | {
-              report?: { headline?: string; winner?: string };
-              impacts?: Array<{ characterName: string; impact?: string; currentStateSummary?: string }>;
+	          const decoder = new TextDecoder();
+	          let accumulatedText = '';
+	          let shouldAbort = false;
+	          let isInterruptedAbort = false;
+	          let interruptedMessage: string | null = null;
+	          let sseEndedWithoutDone = false;
+	          let metaOverrideFromSse:
+	            | {
+	              report?: { headline?: string; winner?: string };
+	              impacts?: Array<{ characterName: string; impact?: string; currentStateSummary?: string }>;
             }
             | undefined;
           const shouldTerminateByTelemetry = (text: string) => {
@@ -992,13 +1026,20 @@ export const useBattleEngine = () => {
                 return;
               }
 
-              if (event === 'error') {
-                const message = typeof payload?.error === 'string' ? payload.error : '服务器流式响应异常';
-                setError(`✨ 生成失败：${sanitizeTextByShieldWords(message)}`);
-                markReasoningStatusInStore('error', {
-                  source: resolveReasoningSource(payload?.source),
-                  errorMessage: sanitizeTextByShieldWords(message),
-                });
+	              if (event === 'error') {
+	                const message = typeof payload?.error === 'string' ? payload.error : '服务器流式响应异常';
+	                const interruptedFromServer = isServerInterruptedPayload(payload, message);
+	                if (interruptedFromServer) {
+	                  isInterruptedAbort = true;
+	                  interruptedMessage = sanitizeTextByShieldWords(message);
+	                  setError(buildStreamInterruptedMessage(interruptedMessage));
+	                } else {
+	                  setError(`✨ 生成失败：${sanitizeTextByShieldWords(message)}`);
+	                }
+	                markReasoningStatusInStore('error', {
+	                  source: resolveReasoningSource(payload?.source),
+	                  errorMessage: sanitizeTextByShieldWords(message),
+	                });
                 shouldAbort = true;
                 sawDoneEvent = true;
                 try {
@@ -1087,10 +1128,14 @@ export const useBattleEngine = () => {
                 console.warn('SSE 调试：响应流为 0 字节（服务端可能提前结束，或中间层吞掉了流式内容）');
               } else if (sseEventsParsed === 0) {
                 console.warn('SSE 调试：收到 SSE 字节但未解析出任何事件（可能是分隔符/格式不符合 SSE）');
-              }
-            }
-          } else {
-            while (true) {
+	              }
+	            }
+
+	            if (!shouldAbort && !sawDoneEvent) {
+	              sseEndedWithoutDone = true;
+	            }
+	          } else {
+	            while (true) {
               const { value, done } = await readWithTimeout(reader);
               if (done) {
                 break;
@@ -1158,13 +1203,25 @@ export const useBattleEngine = () => {
               if (shouldAbort) {
                 break;
               }
-            }
-          }
+	            }
+	          }
 
-          if (shouldAbort) {
-            setNewsReport(null);
-            return;
-          }
+	          if (sseEndedWithoutDone) {
+	            setError(buildStreamInterruptedMessage('连接结束但未收到 done 事件'));
+	            startCooldown();
+	            return;
+	          }
+
+	          if (shouldAbort) {
+	            if (isInterruptedAbort) {
+	              if (interruptedMessage) {
+	                setError(buildStreamInterruptedMessage(interruptedMessage));
+	              }
+	              startCooldown();
+	            }
+	            setNewsReport(null);
+	            return;
+	          }
 
           let markdownForUi = accumulatedText;
           let metaOverride =
@@ -1370,13 +1427,20 @@ export const useBattleEngine = () => {
       }
 
       startCooldown();
-    } catch (error) {
-      setError(`✨ 魔法失效了！${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
-      setNewsReport(null);
-    } finally {
-      setIsGenerating(false);
-      setIsStreaming(false);
-    }
+	    } catch (error) {
+	      const shouldTreatAsInterrupted = generationMode === 'stream' && isStreamInterruptedError(error);
+	      if (shouldTreatAsInterrupted) {
+	        const details = error instanceof Error ? error.message : '连接被中断';
+	        setError(buildStreamInterruptedMessage(details));
+	        startCooldown();
+	      } else {
+	        setError(`✨ 魔法失效了！${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
+	        setNewsReport(null);
+	      }
+	    } finally {
+	      setIsGenerating(false);
+	      setIsStreaming(false);
+	    }
   }, [
     isCooldown,
     remainingTime,
