@@ -197,7 +197,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         id: 'chatbox',
         name: 'Chatbox AI',
         description: 'Chatbox AI 官方 OpenAI 兼容 API，按订阅计划可选不同模型梯度。',
-        docsUrl: 'https://docs.chatboxai.app/en/chatbox-ai-premium/openai-compatible-api',
+        docsUrl: 'https://chatboxai.app/zh/#pricing',
         baseUrl: 'https://ai.chatboxai.app/v1',
         type: 'openai',
         mode: 'auto',
@@ -216,6 +216,16 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-3-pro',
                 label: 'Gemini 3 Pro（高级）',
                 description: '高级模型（Pro/Pro+）。适合复杂指令与高难度创作。'
+            },
+            {
+                value: 'gemini-3-flash',
+                label: 'Gemini 3 Flash（标准）',
+                description: '标准模型（所有付费方案）。适合各类任务。'
+            },
+            {
+                value: 'gemini-2.5-flash',
+                label: 'Gemini 2.5 Flash（标准）',
+                description: '标准模型（所有付费方案）。速度与质量均衡。'
             },
             {
                 value: 'deepseek-chat',
@@ -241,11 +251,6 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gpt-5-mini',
                 label: 'GPT 5-mini（标准）',
                 description: '标准模型（所有付费方案）。更快更省，适合高频交互。'
-            },
-            {
-                value: 'gemini-2.5-flash',
-                label: 'Gemini 2.5 Flash（标准）',
-                description: '标准模型（所有付费方案）。速度与质量均衡。'
             },
         ]
     },
