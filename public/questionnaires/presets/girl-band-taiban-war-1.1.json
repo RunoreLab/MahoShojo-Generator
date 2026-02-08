@@ -81,6 +81,22 @@
       "required": false
     },
     {
+      "id": "GB-05A",
+      "question": "【语言与行为】台词示例",
+      "type": "text",
+      "placeholder": "用于对齐AI故事创作的台词（建议写 1~3 句最能体现角色状态的话）。",
+      "helperText": "可写日常/排练/演出失控时的代表台词；可留空。",
+      "suggestions": [
+        "“这就是大少女乐队时代吗？”",
+        "“为什么要演奏那首歌！”",
+        "“求求你了…让我忘掉一切吧…！”",
+        "“我是来结束这个乐队的。”（坚毅地）"
+      ],
+      "allowCustom": true,
+      "maxLength": 260,
+      "required": false
+    },
+    {
       "id": "GB-06",
       "question": "当前/目标乐队：乐队名、标语（1句）、主风格标签（2-3个）、排练地点（可虚构）",
       "type": "text",

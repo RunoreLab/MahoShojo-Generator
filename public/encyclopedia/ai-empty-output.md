@@ -54,6 +54,7 @@
 
 ## 相关条目
 
+- AI 思考过程查看说明（在哪里看）：`/encyclopedia/ai-reasoning-visibility`
 - AI 输出格式异常（缺字段/校验失败）：`/encyclopedia/ai-output-format`
 - AI 拒答与安全策略提示：`/encyclopedia/ai-refusal`
 - AI 生成失败：`/encyclopedia/ai-errors`

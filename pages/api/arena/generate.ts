@@ -160,8 +160,12 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         } = body;
 
         const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
-        const loreText = buildQuestionnaireLoreText(normalizeQuestionnaires(rawQuestionnaires)).trim();
+        const normalizedQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
+        const loreText = buildQuestionnaireLoreText(normalizedQuestionnaires).trim();
         const hasQuestionnaireLore = Boolean(loreText);
+        const questionnaireLoreIds = normalizedQuestionnaires
+            .filter((questionnaire) => typeof questionnaire.loreMarkdown === 'string' && Boolean(questionnaire.loreMarkdown.trim()))
+            .map((questionnaire) => questionnaire.id);
 
         const normalizedAuxScenarios = Array.isArray(auxScenarios)
             ? auxScenarios.filter((item) => item && typeof item === 'object')
@@ -525,6 +529,9 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         if (typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim()) {
             report.aiModel = aiTelemetry.model.trim();
         }
+        if (aiTelemetry.reasoning) {
+            report.aiReasoning = aiTelemetry.reasoning;
+        }
 
         // 异步更新数据库统计，不阻塞响应
         // 仅在写入历战记录时更新统计，避免污染数据
@@ -663,11 +670,15 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 	                outputHasShieldWords: shieldResult.hasShieldWords,
 	                extraJson: compactExtraJson({
                         arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
-                        arenaStrictPolicy: isStrictRankedMatchRequest ? '1+3:v1' : null,
+                        arenaStrictPolicy: '1+3:v1',
                         seasonId: typeof currentSeason?.id === 'string' ? currentSeason.id : null,
                         seasonMode: seasonStrictRules.mode !== 'classic' ? seasonStrictRules.mode : null,
                         seasonStoryGuidance: seasonStrictRules.storyGuidance || null,
                         seasonScenarioPreset: seasonStrictRules.scenarioPresetFilename ?? null,
+                        seasonQuestionnaireLoreAllowed: seasonStrictRules.questionnaireLoreAllowed ? true : null,
+                        questionnaireLoreEnabled: hasQuestionnaireLore ? true : null,
+                        seasonQuestionnaireLorePresetIds: seasonStrictRules.questionnaireLorePresetIds,
+                        questionnaireLoreIds,
                         scenarioFileName: normalizedScenarioFileName,
                         auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                    resolvedModelOverride: usedModelOverride ?? null,

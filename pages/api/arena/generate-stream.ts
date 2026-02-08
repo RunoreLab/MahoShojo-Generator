@@ -14,8 +14,19 @@ import { getSystemPrompt } from '@/lib/arena/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
 	import { processAdjudicationChain, createStreamPromptBuilder } from '@/lib/arena/logic';
-	import { generateWithStreamAI, LoadBalanceStrategy, RawGenerationConfig, GenerateWithAIOptions } from '@/lib/stream/raw-ai';
-import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
+	import {
+    generateWithStreamAI,
+    LoadBalanceStrategy,
+    RawGenerationConfig,
+    GenerateWithAIOptions,
+    RawReasoningStreamEvent
+} from '@/lib/stream/raw-ai';
+import {
+    createStreamReadWithTimeout,
+    STREAM_READ_IDLE_TIMEOUT_MS,
+    STREAM_READ_TOTAL_TIMEOUT_MS,
+    StreamReadTimeoutError,
+} from '@/lib/stream/timeout';
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
     createBattleReportGenerationRecord,
@@ -49,6 +60,19 @@ import { deleteObject } from '@/lib/r2';
 
 const log = getLogger('api-gen-battle-stream');
 const MAX_COMBATANTS = 10;
+
+const isInterruptedStreamError = (error: unknown): boolean => {
+    if (error instanceof StreamReadTimeoutError) return true;
+    if (!error) return false;
+    const errorRecord = error as { name?: unknown; message?: unknown };
+    const name = typeof errorRecord.name === 'string' ? errorRecord.name.toLowerCase() : '';
+    const message = typeof errorRecord.message === 'string' ? errorRecord.message.toLowerCase() : '';
+    if (name === 'aborterror' || name === 'streamreadtimeouterror') return true;
+    if (message.includes('timeout') || message.includes('timed out')) return true;
+    if (message.includes('流式读取超时') || message.includes('流式生成超时')) return true;
+    if (message.includes('aborted') || message.includes('中断')) return true;
+    return false;
+};
 
 export const config = {
     runtime: 'edge',
@@ -105,6 +129,15 @@ async function handler(req: NextRequest): Promise<Response> {
 
 	    const startedAtMs = Date.now();
 	    const startedAtIso = new Date(startedAtMs).toISOString();
+    const requestUrl = new URL(req.url);
+    const wantsSse =
+        requestUrl.searchParams.get('format') === 'sse' ||
+        (req.headers.get('accept') || '').includes('text/event-stream');
+    const debugSseRequested =
+        requestUrl.searchParams.get('debug') === '1' ||
+        requestUrl.searchParams.get('debug') === 'true' ||
+        requestUrl.searchParams.get('debugSse') === '1' ||
+        requestUrl.searchParams.get('debugSse') === 'true';
 
 	    // 用于在异常/提前返回时补齐 battle_report_generations 记录（避免“失败/敏感词拦截没有记录”）。
 	    let snapshotMode: string = 'classic';
@@ -167,9 +200,13 @@ async function handler(req: NextRequest): Promise<Response> {
               questionnaires: rawQuestionnaires,
 	        } = body;
 
-            const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
-            const loreText = buildQuestionnaireLoreText(normalizeQuestionnaires(rawQuestionnaires)).trim();
-            const hasQuestionnaireLore = Boolean(loreText);
+	            const resolvedArenaFreeRankingEnabled = normalizeOptionalBoolean(arenaFreeRankingEnabled, false);
+	            const normalizedQuestionnaires = normalizeQuestionnaires(rawQuestionnaires);
+	            const loreText = buildQuestionnaireLoreText(normalizedQuestionnaires).trim();
+	            const hasQuestionnaireLore = Boolean(loreText);
+	            const questionnaireLoreIds = normalizedQuestionnaires
+	                .filter((questionnaire) => typeof questionnaire.loreMarkdown === 'string' && Boolean(questionnaire.loreMarkdown.trim()))
+	                .map((questionnaire) => questionnaire.id);
 
 	          const normalizedAuxScenarios = Array.isArray(auxScenarios)
 	              ? auxScenarios.filter((item) => item && typeof item === 'object')
@@ -407,10 +444,10 @@ async function handler(req: NextRequest): Promise<Response> {
             inputsToCheck.push({ type: 'character', content: JSON.stringify(c.data), isNative: c.isNative });
         });
 
-	        const { combinedText, usedBundle } = buildPolicySafetyCheckText(inputsToCheck, {
-	            policy: appConfig.SAFETY_CHECK_POLICY,
-	            enableBundle: appConfig.ENABLE_BUNDLE_SAFETY_CHECK,
-	        });
+		    const { combinedText, usedBundle } = buildPolicySafetyCheckText(inputsToCheck, {
+		        policy: appConfig.SAFETY_CHECK_POLICY,
+		        enableBundle: appConfig.ENABLE_BUNDLE_SAFETY_CHECK,
+		    });
 	        if (usedBundle) {
 	            log.info('触发"连坐"机制，打包所有非原生内容进行检查。');
 	        }
@@ -557,7 +594,20 @@ async function handler(req: NextRequest): Promise<Response> {
         )({ combatants });
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
-        const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+        const reasoningEventQueue: RawReasoningStreamEvent[] = [];
+        let flushReasoningQueueNow: (() => void) | null = null;
+        const aiOptions: GenerateWithAIOptions = {
+            ...(providerOptions ?? {}),
+            telemetry: aiTelemetry,
+            ...(wantsSse
+                ? {
+                    onReasoningEvent: (event) => {
+                        reasoningEventQueue.push(event);
+                        flushReasoningQueueNow?.();
+                    },
+                }
+                : {}),
+        };
         const isStrictRankedMatchRequest =
             mode === 'classic'
             && String(language ?? '').trim() === 'zh-CN'
@@ -614,7 +664,14 @@ async function handler(req: NextRequest): Promise<Response> {
         }
         const streamResponse = streamResult.response;
         const usagePromise = streamResult.usagePromise;
+        const finishReasonPromise = streamResult.finishReasonPromise;
         const resolvedUsagePromise = (async () => normalizeUsage(await usagePromise?.catch(() => null)))();
+        const resolvedFinishReasonPromise = (async () => {
+            const value = await finishReasonPromise?.catch(() => null);
+            if (typeof value !== 'string') return null;
+            const trimmed = value.trim();
+            return trimmed || null;
+        })();
 
         log.info('✅ 流式响应已生成，准备返回');
 
@@ -682,6 +739,7 @@ async function handler(req: NextRequest): Promise<Response> {
             const recordPromise = (async () => {
                 const user = authKey ? await getUserByAuthKey(authKey) : null;
                 const usage = await resolvedUsagePromise;
+                const finishReason = await resolvedFinishReasonPromise;
                 const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
                 const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
 
@@ -778,12 +836,17 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    outputHasShieldWords: shieldResult.hasShieldWords,
 	                    extraJson: compactExtraJson({
 	                        errorMessage: normalizeErrorMessage(normalizedErrorMessage),
+                            finishReason,
                             arenaFreeRankingEnabled: resolvedArenaFreeRankingEnabled,
-                            arenaStrictPolicy: isStrictRankedMatchRequest ? '1+3:v1' : null,
+                            arenaStrictPolicy: '1+3:v1',
                             seasonId: typeof currentSeason?.id === 'string' ? currentSeason.id : null,
                             seasonMode: seasonStrictRules.mode !== 'classic' ? seasonStrictRules.mode : null,
                             seasonStoryGuidance: seasonStrictRules.storyGuidance || null,
                             seasonScenarioPreset: seasonStrictRules.scenarioPresetFilename ?? null,
+                            seasonQuestionnaireLoreAllowed: seasonStrictRules.questionnaireLoreAllowed ? true : null,
+                            questionnaireLoreEnabled: hasQuestionnaireLore ? true : null,
+                            seasonQuestionnaireLorePresetIds: seasonStrictRules.questionnaireLorePresetIds,
+                            questionnaireLoreIds,
                             scenarioFileName: normalizedScenarioFileName,
                             auxScenarioCount: auxScenarioCount > 0 ? auxScenarioCount : null,
 	                        resolvedModelOverride: usedModelOverride ?? null,
@@ -886,23 +949,17 @@ async function handler(req: NextRequest): Promise<Response> {
             }
         };
 
-        const url = new URL(req.url);
-        const wantsSse =
-            url.searchParams.get('format') === 'sse' || (req.headers.get('accept') || '').includes('text/event-stream');
         const shouldAllowStreamMeta = shouldForceStreamMeta || resolvedWriteArenaHistory || resolvedWriteCurrentState;
 
 	        if (wantsSse) {
 	            const sseHeaders = new Headers(headers);
 	            sseHeaders.set('Content-Type', 'text/event-stream; charset=utf-8');
 	            sseHeaders.set('Cache-Control', 'no-cache, no-transform');
-	            const debugSse =
-	                url.searchParams.get('debug') === '1' ||
-	                url.searchParams.get('debug') === 'true' ||
-	                url.searchParams.get('debugSse') === '1' ||
-	                url.searchParams.get('debugSse') === 'true';
+	            const debugSse = debugSseRequested;
 
-	            const encoder = new TextEncoder();
-	            const encodeEvent = (event: string, payload: unknown) => {
+		            const encoder = new TextEncoder();
+                    const HEARTBEAT_INTERVAL_MS = 15_000;
+		            const encodeEvent = (event: string, payload: unknown) => {
 	                let data: string;
 	                try {
 	                    data = JSON.stringify(payload ?? null);
@@ -914,10 +971,11 @@ async function handler(req: NextRequest): Promise<Response> {
                 }
 	                return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
 	            };
-	            const enqueueDebug = (controller: ReadableStreamDefaultController<Uint8Array>, payload: unknown) => {
-	                if (!debugSse) return;
-	                controller.enqueue(encodeEvent('debug', payload));
-	            };
+		            const enqueueDebug = (controller: ReadableStreamDefaultController<Uint8Array>, payload: unknown) => {
+		                if (!debugSse) return;
+		                controller.enqueue(encodeEvent('debug', payload));
+		            };
+                    const HEARTBEAT_PAYLOAD = encoder.encode(': keepalive\n\n');
 
 		            const META_GUARD_CHARS = 256;
 		            const META_FALLBACK_TAIL_CHARS = 120_000;
@@ -943,12 +1001,38 @@ async function handler(req: NextRequest): Promise<Response> {
                 },
             });
 
-	            let pendingMarkdownTail = '';
-	            let metaBuffer = '';
-		            let metaFallbackTail = '';
-		            let inMeta = false;
-		            let markdownCharsSent = 0;
-		            let hasMeaningfulMarkdown = false;
+		            let pendingMarkdownTail = '';
+		            let metaBuffer = '';
+			            let metaFallbackTail = '';
+			            let inMeta = false;
+			            let markdownCharsSent = 0;
+			            let hasMeaningfulMarkdown = false;
+                let reasoningCharsSent = 0;
+                let hasReasoningStarted = false;
+                let hasReasoningDelta = false;
+	                let reasoningCompleted = false;
+	                let activeSseController: ReadableStreamDefaultController<Uint8Array> | null = null;
+	                let sseStreamClosed = false;
+                    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+                    const clearHeartbeatTimer = () => {
+                        if (!heartbeatTimer) return;
+                        clearInterval(heartbeatTimer);
+                        heartbeatTimer = null;
+                    };
+                    const startHeartbeatTimer = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+                        clearHeartbeatTimer();
+                        heartbeatTimer = setInterval(() => {
+                            if (sseCancelled || sseStreamClosed || activeSseController !== controller) {
+                                clearHeartbeatTimer();
+                                return;
+                            }
+                            try {
+                                controller.enqueue(HEARTBEAT_PAYLOAD);
+                            } catch {
+                                clearHeartbeatTimer();
+                            }
+                        }, HEARTBEAT_INTERVAL_MS);
+                    };
 
 		            const flushMarkdown = (controller: ReadableStreamDefaultController<Uint8Array>, chunk: string) => {
 		                if (!chunk) return;
@@ -958,6 +1042,58 @@ async function handler(req: NextRequest): Promise<Response> {
 		                }
 		                controller.enqueue(encodeEvent('markdown', { chunk }));
 		            };
+
+                const flushReasoningQueue = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+                    while (reasoningEventQueue.length > 0) {
+                        const event = reasoningEventQueue.shift();
+                        if (!event) continue;
+
+                        if (event.type === 'reasoning-start') {
+                            hasReasoningStarted = true;
+                            controller.enqueue(
+                                encodeEvent('reasoning', {
+                                    source: 'sdk',
+                                    status: 'thinking',
+                                    chunk: '',
+                                })
+                            );
+                            continue;
+                        }
+
+                        if (event.type === 'reasoning-delta') {
+                            const chunk = typeof event.text === 'string' ? event.text : '';
+                            if (!chunk) continue;
+                            hasReasoningStarted = true;
+                            hasReasoningDelta = true;
+                            reasoningCharsSent += chunk.length;
+                            controller.enqueue(
+                                encodeEvent('reasoning', {
+                                    source: 'sdk',
+                                    status: 'thinking',
+                                    chunk,
+                                })
+                            );
+                            continue;
+                        }
+
+                        if (event.type === 'reasoning-end') {
+                            hasReasoningStarted = true;
+                            reasoningCompleted = true;
+                            controller.enqueue(
+                                encodeEvent('reasoning_done', {
+                                    source: 'sdk',
+                                    status: hasReasoningDelta ? 'done' : 'unavailable',
+                                    chars: reasoningCharsSent,
+                                })
+                            );
+                        }
+                    }
+                };
+                const flushReasoningQueueIfReady = () => {
+                    if (!activeSseController || sseStreamClosed) return;
+                    flushReasoningQueue(activeSseController);
+                };
+                flushReasoningQueueNow = flushReasoningQueueIfReady;
 
 	            const processText = (controller: ReadableStreamDefaultController<Uint8Array>, text: string) => {
 	                if (!text) return;
@@ -1012,13 +1148,15 @@ async function handler(req: NextRequest): Promise<Response> {
 		            let sseCancelled = false;
 		            let pumpStarted = false;
 
-		            const finalizeSseAndClose = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
-		                // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
-		                const flushed = decoder.decode();
+			            const finalizeSseAndClose = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
+                        clearHeartbeatTimer();
+			                // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
+			                const flushed = decoder.decode();
 		                if (flushed) {
 		                    appendText(flushed);
 		                    processText(controller, flushed);
 		                }
+                        flushReasoningQueue(controller);
 
 		                if (!inMeta && pendingMarkdownTail) {
 		                    flushMarkdown(controller, pendingMarkdownTail);
@@ -1035,30 +1173,42 @@ async function handler(req: NextRequest): Promise<Response> {
 		                    pendingMarkdownTailLength: pendingMarkdownTail.length,
 		                    metaBufferLength: metaBuffer.length,
 		                    metaFallbackTailLength: metaFallbackTail.length,
+                        reasoningCharsSent,
+                        hasReasoningStarted,
+                        hasReasoningDelta,
+                        reasoningCompleted,
 		                });
 
-		                // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
-		                const usageForTelemetry = await Promise.race([
-		                    resolvedUsagePromise,
-		                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
-		                ]);
-		                const shouldIncludeTelemetry =
-		                    (usageForTelemetry != null &&
-		                        (typeof usageForTelemetry.promptTokens === 'number' ||
-		                            typeof usageForTelemetry.completionTokens === 'number' ||
-		                            typeof usageForTelemetry.reasoningTokens === 'number')) ||
-		                    typeof narrativeHistoryReadCount === 'number' ||
-		                    (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
+			                // 在 SSE 模式下以事件发送 telemetry（不再通过尾部注释注入正文）。
+			                const usageForTelemetry = await Promise.race([
+			                    resolvedUsagePromise,
+			                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+			                ]);
+                        const finishReasonForTelemetry = await Promise.race([
+                            resolvedFinishReasonPromise,
+                            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+                        ]);
+			                const shouldIncludeTelemetry =
+			                    (usageForTelemetry != null &&
+			                        (typeof usageForTelemetry.promptTokens === 'number' ||
+			                            typeof usageForTelemetry.completionTokens === 'number' ||
+			                            typeof usageForTelemetry.reasoningTokens === 'number')) ||
+                                (typeof finishReasonForTelemetry === 'string' && Boolean(finishReasonForTelemetry.trim())) ||
+			                    typeof narrativeHistoryReadCount === 'number' ||
+			                    (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
 
 		                if (shouldIncludeTelemetry) {
 		                    const aiModelForTelemetry =
 		                        typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim() ? aiTelemetry.model.trim() : null;
-		                    const telemetryPayload = {
-		                        version: 1,
-		                        ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
-		                        ...(usageForTelemetry
-		                            ? {
-		                                usage: {
+			                    const telemetryPayload = {
+			                        version: 1,
+			                        ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
+                                    ...(typeof finishReasonForTelemetry === 'string' && finishReasonForTelemetry.trim()
+                                        ? { finishReason: finishReasonForTelemetry.trim() }
+                                        : {}),
+			                        ...(usageForTelemetry
+			                            ? {
+			                                usage: {
 		                                    promptTokens: usageForTelemetry.promptTokens ?? null,
 		                                    reasoningTokens: usageForTelemetry.reasoningTokens ?? null,
 		                                    completionTokens: usageForTelemetry.completionTokens ?? null,
@@ -1071,6 +1221,18 @@ async function handler(req: NextRequest): Promise<Response> {
 		                    };
 		                    controller.enqueue(encodeEvent('telemetry', telemetryPayload));
 		                }
+
+                        flushReasoningQueue(controller);
+                        if (!reasoningCompleted) {
+                            reasoningCompleted = true;
+                            controller.enqueue(
+                                encodeEvent('reasoning_done', {
+                                    source: 'sdk',
+                                    status: hasReasoningDelta ? 'done' : 'unavailable',
+                                    chars: reasoningCharsSent,
+                                })
+                            );
+                        }
 
 		                let metaHasImpacts = false;
 		                if (shouldAllowStreamMeta) {
@@ -1123,9 +1285,9 @@ async function handler(req: NextRequest): Promise<Response> {
 		                }
 
 		                // 若未下发任何有效正文（非空白），且也没有可用的 impacts，则视为异常：AI 返回空输出 / 或正文被吞掉。
-		                if (!hasMeaningfulMarkdown && !metaHasImpacts) {
-		                    const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
-		                    const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
+			                if (!hasMeaningfulMarkdown && !metaHasImpacts) {
+			                    const metaCandidate = metaBuffer && metaBuffer.trim() ? metaBuffer : metaFallbackTail;
+			                    const rawPreview = metaCandidate && metaCandidate.trim() ? metaCandidate.slice(0, 400) : null;
 		                    controller.enqueue(
 		                        encodeEvent('error', {
 		                            ok: false,
@@ -1145,16 +1307,22 @@ async function handler(req: NextRequest): Promise<Response> {
 		                                  }
 		                                : null,
 		                        })
-		                    );
-		                    await finalizeOnce('failed', 'empty stream output');
-		                    controller.close();
-		                    return;
-		                }
+			                    );
+			                    await finalizeOnce('failed', 'empty stream output');
+                                sseStreamClosed = true;
+                                activeSseController = null;
+                                flushReasoningQueueNow = null;
+			                    controller.close();
+			                    return;
+			                }
 
-		                controller.enqueue(encodeEvent('done', { ok: true }));
-		                await finalizeOnce('completed');
-		                controller.close();
-		            };
+			                controller.enqueue(encodeEvent('done', { ok: true }));
+			                await finalizeOnce('completed');
+                            sseStreamClosed = true;
+                            activeSseController = null;
+                            flushReasoningQueueNow = null;
+			                controller.close();
+			            };
 
 		            const pumpSse = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
 		                if (pumpStarted) return;
@@ -1182,43 +1350,65 @@ async function handler(req: NextRequest): Promise<Response> {
 		                            const decoded = decoder.decode(value, { stream: true });
 		                            appendText(decoded);
 		                            processText(controller, decoded);
+                                flushReasoningQueue(controller);
 		                        }
-		                    } catch (streamError) {
-		                        if (sseCancelled) return;
-		                        const message =
-		                            streamError instanceof Error ? streamError.message : String(streamError ?? 'stream error');
-		                        try {
-		                            controller.enqueue(encodeEvent('error', { ok: false, error: message }));
-		                        } catch {
-		                            // ignore
-		                        }
-		                        await finalizeOnce('failed', message);
-		                        try {
-		                            controller.close();
-		                        } catch {
-		                            // ignore
+			                    } catch (streamError) {
+			                        if (sseCancelled) return;
+                            flushReasoningQueue(controller);
+			                        const message =
+			                            streamError instanceof Error ? streamError.message : String(streamError ?? 'stream error');
+                            const interrupted = isInterruptedStreamError(streamError);
+                            const statusForRecord: 'aborted' | 'failed' = interrupted ? 'aborted' : 'failed';
+			                        try {
+			                            controller.enqueue(encodeEvent('error', {
+                                    ok: false,
+                                    error: message,
+                                    status: statusForRecord,
+                                    interrupted,
+                                    ...(interrupted ? { errorCode: 'stream_interrupted' } : {}),
+                                }));
+			                        } catch {
+			                            // ignore
+			                        }
+					                        await finalizeOnce(statusForRecord, message);
+					                        try {
+                                    clearHeartbeatTimer();
+                                    sseStreamClosed = true;
+                                    activeSseController = null;
+                                    flushReasoningQueueNow = null;
+			                            controller.close();
+			                        } catch {
+			                            // ignore
 		                        }
 		                        return;
 		                    }
 		                }
 		            };
 
-		            const sseBody = new ReadableStream<Uint8Array>({
-		                start(controller) {
-		                    enqueueDebug(controller, {
-		                        phase: 'open',
-		                        generationId,
+			            const sseBody = new ReadableStream<Uint8Array>({
+				                start(controller) {
+                                activeSseController = controller;
+                                sseStreamClosed = false;
+                                startHeartbeatTimer(controller);
+				                    enqueueDebug(controller, {
+				                        phase: 'open',
+				                        generationId,
 		                        shouldAllowStreamMeta,
 		                        idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
 		                        totalTimeoutMs: STREAM_READ_TOTAL_TIMEOUT_MS,
 		                    });
-		                    void pumpSse(controller);
-		                },
-		                async cancel(reason) {
-		                    sseCancelled = true;
-		                    try {
-		                        void reader.cancel(reason).catch(() => {});
-		                    } catch {
+                        flushReasoningQueue(controller);
+			                    void pumpSse(controller);
+			                },
+				                async cancel(reason) {
+                                clearHeartbeatTimer();
+				                    sseCancelled = true;
+                                sseStreamClosed = true;
+                                activeSseController = null;
+                                flushReasoningQueueNow = null;
+			                    try {
+			                        void reader.cancel(reason).catch(() => {});
+			                    } catch {
 		                        // 忽略取消时的二次错误
 		                    }
 		                    await finalizeOnce(
@@ -1254,28 +1444,36 @@ async function handler(req: NextRequest): Promise<Response> {
                     if (done) {
                         appendText(decoder.decode());
 
-                        // 在流式末尾追加一段系统 telemetry 注释，用于前端展示 token 与叙事历史读取条数。
-                        const usageForTelemetry = await Promise.race([
-                            resolvedUsagePromise,
-                            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+	                        // 在流式末尾追加一段系统 telemetry 注释，用于前端展示 token 与叙事历史读取条数。
+	                        const usageForTelemetry = await Promise.race([
+	                            resolvedUsagePromise,
+	                            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+	                        ]);
+                        const finishReasonForTelemetry = await Promise.race([
+                            resolvedFinishReasonPromise,
+                            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
                         ]);
-                        const shouldIncludeTelemetry =
-                            (usageForTelemetry != null &&
-                                (typeof usageForTelemetry.promptTokens === 'number' ||
-                                    typeof usageForTelemetry.completionTokens === 'number' ||
-                                    typeof usageForTelemetry.reasoningTokens === 'number')) ||
-                            typeof narrativeHistoryReadCount === 'number' ||
-                            (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
+	                        const shouldIncludeTelemetry =
+	                            (usageForTelemetry != null &&
+	                                (typeof usageForTelemetry.promptTokens === 'number' ||
+	                                    typeof usageForTelemetry.completionTokens === 'number' ||
+	                                    typeof usageForTelemetry.reasoningTokens === 'number')) ||
+                                (typeof finishReasonForTelemetry === 'string' && Boolean(finishReasonForTelemetry.trim())) ||
+	                            typeof narrativeHistoryReadCount === 'number' ||
+	                            (typeof aiTelemetry.model === 'string' && Boolean(aiTelemetry.model.trim()));
 
                         if (shouldIncludeTelemetry) {
                             const aiModelForTelemetry =
                                 typeof aiTelemetry.model === 'string' && aiTelemetry.model.trim() ? aiTelemetry.model.trim() : null;
-                            const telemetryPayload = {
-                                version: 1,
-                                ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
-                                ...(usageForTelemetry
-                                    ? {
-                                        usage: {
+	                            const telemetryPayload = {
+	                                version: 1,
+	                                ...(aiModelForTelemetry ? { aiModel: aiModelForTelemetry } : {}),
+                                ...(typeof finishReasonForTelemetry === 'string' && finishReasonForTelemetry.trim()
+                                    ? { finishReason: finishReasonForTelemetry.trim() }
+                                    : {}),
+	                                ...(usageForTelemetry
+	                                    ? {
+	                                        usage: {
                                             promptTokens: usageForTelemetry.promptTokens ?? null,
                                             reasoningTokens: usageForTelemetry.reasoningTokens ?? null,
                                             completionTokens: usageForTelemetry.completionTokens ?? null,
@@ -1306,7 +1504,8 @@ async function handler(req: NextRequest): Promise<Response> {
                     }
                 } catch (streamError) {
                     controller.error(streamError);
-                    await finalizeOnce('failed', streamError instanceof Error ? streamError.message : 'stream error');
+                    const statusForRecord: 'aborted' | 'failed' = isInterruptedStreamError(streamError) ? 'aborted' : 'failed';
+                    await finalizeOnce(statusForRecord, streamError instanceof Error ? streamError.message : 'stream error');
                 }
             },
             async cancel(reason) {
@@ -1334,18 +1533,12 @@ async function handler(req: NextRequest): Promise<Response> {
 	        log.error('生成战斗故事时发生顶层错误', { error });
 	        const errorMessage = error instanceof Error ? error.message : '未知错误';
 
-	        const url = new URL(req.url);
-	        const wantsSse =
-	            url.searchParams.get('format') === 'sse' || (req.headers.get('accept') || '').includes('text/event-stream');
-	        const debugSse =
-	            url.searchParams.get('debug') === '1' ||
-	            url.searchParams.get('debug') === 'true' ||
-	            url.searchParams.get('debugSse') === '1' ||
-	            url.searchParams.get('debugSse') === 'true';
+	        const debugSse = debugSseRequested;
 
 	        const endedAtMs = Date.now();
 	        const endedAtIso = new Date(endedAtMs).toISOString();
 	        const durationMs = Math.max(0, endedAtMs - startedAtMs);
+            const statusForRecord: 'aborted' | 'failed' = isInterruptedStreamError(error) ? 'aborted' : 'failed';
 	        const ip = getClientIpFromHeaders(req.headers);
 	        const ipAnonymized = anonymizeIp(ip);
 	        const authHeader = req.headers.get('authorization');
@@ -1358,7 +1551,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    startedAt: startedAtIso,
 	                    endedAt: endedAtIso,
 	                    durationMs,
-	                    status: 'failed',
+	                    status: statusForRecord,
 	                    generationMode: 'stream',
 	                    endpoint: 'api/arena/generate-stream',
 	                    ip,
@@ -1381,6 +1574,7 @@ async function handler(req: NextRequest): Promise<Response> {
 	                    extraJson: {
 	                        errorMessage,
 	                        stage: 'top-level-catch',
+                            status: statusForRecord,
 	                    },
 	                });
 	            } catch (writeError) {
@@ -1425,8 +1619,14 @@ async function handler(req: NextRequest): Promise<Response> {
 	                            })
 	                        );
 	                    }
-	                    controller.enqueue(encodeEvent('error', { ok: false, error: errorMessage }));
-	                    controller.enqueue(encodeEvent('done', { ok: false }));
+	                    controller.enqueue(encodeEvent('error', {
+                            ok: false,
+                            error: errorMessage,
+                            status: statusForRecord,
+                            interrupted: statusForRecord === 'aborted',
+                            ...(statusForRecord === 'aborted' ? { errorCode: 'stream_interrupted' } : {}),
+                        }));
+	                    controller.enqueue(encodeEvent('done', { ok: false, status: statusForRecord }));
 	                    controller.close();
 	                },
 	            });

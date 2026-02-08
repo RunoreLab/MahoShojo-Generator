@@ -14,6 +14,7 @@ import QuestionNavigator from '../components/QuestionNavigator';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
@@ -25,9 +26,10 @@ import {
   QuestionnaireQuestionPanel,
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
-import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
 import {
@@ -44,6 +46,7 @@ import {
   type QuestionnaireQuestion,
 } from '@/lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -224,6 +227,8 @@ const CanshouPage: React.FC = () => {
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
+  const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
   const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
@@ -965,7 +970,7 @@ const CanshouPage: React.FC = () => {
     const item = mergedQuestions[currentQuestionIndex];
     if (!item) return;
     const normalizedAnswer = currentAnswer.trim();
-    const isRequired = item.question.required !== false;
+    const isRequired = item.question.required === true;
 
     if (isRequired && normalizedAnswer.length === 0) {
       setError('⚠️ 请输入或选择一个答案');
@@ -1046,9 +1051,11 @@ const CanshouPage: React.FC = () => {
     }
     setSubmitting(true);
     setError(null);
-    setCanshouDetails(null);
-    setStreamingMarkdown(null);
-    setStreamedGeneralCard(null);
+      setCanshouDetails(null);
+      setStreamingMarkdown(null);
+      setStreamedGeneralCard(null);
+      setStreamingReasoning(null);
+      setNonStreamReasoning(null);
 
     try {
       const snapshot = answersSnapshot ?? answersByKey;
@@ -1084,11 +1091,20 @@ const CanshouPage: React.FC = () => {
         apiKey: userProviderConfig.apiKey,
       } : undefined;
 
-      const endpoint = generationMode === 'stream' ? '/api/generate-canshou-stream' : '/api/generate-canshou';
+      const endpoint = generationMode === 'stream' ? '/api/generate-canshou-stream?format=sse' : '/api/generate-canshou';
       const activityHeaders = await authStorage.getActivityHeaders();
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...activityHeaders,
+      };
+      if (generationMode === 'stream') {
+        requestHeaders.Accept = 'text/event-stream';
+      } else {
+        requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...activityHeaders },
+        headers: requestHeaders,
         body: JSON.stringify({
           answers: finalAnswerItems,
           questionnaireSelections: selectedQuestionnaires.map((selection) => ({
@@ -1107,7 +1123,7 @@ const CanshouPage: React.FC = () => {
             questions: selection.questionnaire.questions.map((question) => ({
               id: question.id,
               question: question.question,
-              required: question.required !== false,
+              required: question.required === true,
               maxLength: question.maxLength ?? null,
             })),
           })),
@@ -1137,9 +1153,10 @@ const CanshouPage: React.FC = () => {
         }
 
         setStreamingMarkdown('');
-        const markdown = await readTextStreamFromResponse(response, {
+        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
           label: '残兽档案（流式）',
           onText: (text) => setStreamingMarkdown(text),
+          onReasoning: (reasoning) => setStreamingReasoning(reasoning),
         });
 
         const { card } = buildGeneralCharacterCardFromMarkdown({
@@ -1177,8 +1194,9 @@ const CanshouPage: React.FC = () => {
         return;
       }
 
-      const result: CanshouResultPayload = await response.json();
+      const { data: result, aiMeta } = await readJsonWithAiMeta<CanshouResultPayload>(response);
       setCanshouDetails(result);
+      setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       startCooldown();
     } catch (err) {
       setError(err instanceof Error ? `✨ 魔法失效了！${err.message}` : '发生未知错误');
@@ -1401,7 +1419,7 @@ const CanshouPage: React.FC = () => {
     : currentLimitInfo.source === 'global'
       ? `原生统一上限 ${currentMaxLength} 字`
       : '不限';
-  const isCurrentRequired = currentQuestion?.required !== false;
+  const isCurrentRequired = currentQuestion?.required === true;
   const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
   const showTextInput = allowCustomInput || !hasOptions;
   const fallbackQuickOptions = allowCustomInput ? ['记录未知', '稍后补充'] : [];
@@ -1755,6 +1773,7 @@ const CanshouPage: React.FC = () => {
                 {generationMode === 'stream' && streamedGeneralCardForDisplay && (
                   <div className="my-6">
                     <GeneralCharacterCard general={streamedGeneralCardForDisplay} isStreaming={submitting} />
+                    <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
                   </div>
                 )}
 
@@ -1901,6 +1920,7 @@ const CanshouPage: React.FC = () => {
                       imageSaveMode={imageSaveMode}
                       saveButtonLabel={imageSaveButtonLabel}
                     />
+                    <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
 
                     <div className="card" style={{ marginTop: '1rem' }}>
                       <div className="text-center">
@@ -1943,6 +1963,14 @@ const CanshouPage: React.FC = () => {
                   </>
                 ) : (
                   <>
+                    {nonStreamReasoning && (
+                      <AiReasoningPanel
+                        reasoning={nonStreamReasoning}
+                        status={nonStreamReasoning.status}
+                        displayMode="content-only"
+                        compact
+                      />
+                    )}
                     <CanshouCard
                       canshou={canshouDetails!}
                       onSaveImage={handleSaveImage}

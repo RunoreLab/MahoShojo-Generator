@@ -5,6 +5,7 @@ import type { StatsData } from '@/pages/api/get-stats';
 import type { AdjudicatorEvent, AdjudicationResult, CharacterCurrentState } from '@/types/arena';
 import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import type { QuestionnaireDefinition } from '@/lib/questionnaires';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 export const MAX_COMBATANTS = 10;
 export const MAX_AUX_SCENARIOS = 10;
@@ -14,6 +15,7 @@ export type CombatantType = 'magical-girl' | 'canshou' | 'general-character';
 export type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type StoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 export type GenerationMode = 'non-stream' | 'stream';
+export type StreamTransportMode = 'sse' | 'plain-stream';
 
 export type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -117,6 +119,7 @@ export interface BattleSettings {
   readNarrativeHistoryLimit: number;
   isNarrativeHistoryUnlimited: boolean;
   writeNarrativeHistory: boolean;
+  streamTransport: StreamTransportMode;
   userGuidance: string;
 }
 
@@ -156,6 +159,7 @@ export interface BattleStoreState {
   streamAiUsage: NewsReport['aiUsage'] | null;
   streamAiModel: string | null;
   streamNarrativeHistoryReadCount: number | null;
+  streamReasoning: AIReasoningEnvelope | null;
   streamUpdateMetaDebug: StreamUpdateMetaDebug | null;
   storyLength: StoryLengthOption;
   selectedLevel: string;
@@ -186,6 +190,7 @@ export interface BattleStoreState {
   setStreamAiUsage: (usage: NewsReport['aiUsage'] | null) => void;
   setStreamAiModel: (model: string | null) => void;
   setStreamNarrativeHistoryReadCount: (count: number | null) => void;
+  setStreamReasoning: (reasoning: AIReasoningEnvelope | null) => void;
   setStreamUpdateMetaDebug: (debug: StreamUpdateMetaDebug | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setSelectedLevel: (level: string) => void;

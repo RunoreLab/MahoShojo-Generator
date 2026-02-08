@@ -8,6 +8,7 @@ import { type AIProvider } from '@/lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-sublimation-stream');
@@ -58,14 +59,14 @@ const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
           return {
             id: `Q-${index + 1}`,
             question: `问题 ${index + 1}`,
-            required: true,
+            required: false,
             maxLength: null,
           };
         }
         const qRecord = q as Record<string, unknown>;
         const qid = typeof qRecord.id === 'string' && qRecord.id.trim() ? qRecord.id.trim() : `Q-${index + 1}`;
         const qText = typeof qRecord.question === 'string' && qRecord.question.trim() ? qRecord.question.trim() : `问题 ${index + 1}`;
-        const required = typeof qRecord.required === 'boolean' ? qRecord.required : true;
+        const required = typeof qRecord.required === 'boolean' ? qRecord.required : false;
         const maxLengthRaw = qRecord.maxLength;
         const maxLength = typeof maxLengthRaw === 'number' && Number.isFinite(maxLengthRaw)
           ? Math.max(0, Math.floor(maxLengthRaw))
@@ -124,6 +125,7 @@ async function handler(req: NextRequest): Promise<Response> {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+  const wantsClientSse = shouldUseClientSse(req);
 
   try {
     const body = await req.json();
@@ -277,6 +279,8 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
         ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
       }
       : undefined;
+    const reasoningBridge = wantsClientSse ? createReasoningSseBridge('角色升华（流式）') : null;
+    const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
 
     const streamResult = await generateWithStreamAI(
       {
@@ -284,9 +288,20 @@ ${identityHint ? `角色当前标识：${identityHint}` : '（无）'}
         temperature: 0.7,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       },
-      providerOptions
+      {
+        ...(providerOptions ?? {}),
+        telemetry: aiTelemetry,
+        ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
+      }
     );
     recordUserActivityFromRequest(req);
+
+    if (wantsClientSse && reasoningBridge) {
+      return reasoningBridge.toResponse(streamResult.response, {
+        usagePromise: streamResult.usagePromise,
+        aiModel: aiTelemetry.model ?? customModelOverride ?? null,
+      });
+    }
 
     return streamResult.response;
   } catch (error) {

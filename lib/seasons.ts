@@ -20,12 +20,26 @@ export type SeasonSpecialRules = {
    * 支持省略 .json 扩展名（会自动补齐并校验存在性）。
    */
   scenarioPresetFilename?: string;
+  /**
+   * 是否允许严格排位使用“问卷/设定卡 Lore 注入”。
+   * - 未填写/false：不允许（视为无许可）。
+   * - true：允许。
+   */
+  questionnaireLoreAllowed?: boolean;
+  /**
+   * 严格排位要求注入的“问卷/设定卡 Lore”（预设问卷 ID）。
+   * - 未填写/空数组：不要求；若已允许问卷注入，用户可自选。
+   * - 非空：严格排位必须注入这些 Lore，并且不允许注入列表外的其它 Lore。
+   */
+  questionnaireLorePresetIds?: string[];
 };
 
 export type SeasonStrictRules = {
   mode: SeasonBattleMode;
   storyGuidance: string;
   scenarioPresetFilename: string | null;
+  questionnaireLoreAllowed: boolean;
+  questionnaireLorePresetIds: string[];
 };
 
 export type SeasonMeta = {
@@ -163,12 +177,34 @@ const normalizeSeasonScenarioPresetFilename = (mode: SeasonBattleMode, value: un
   }
 };
 
+const normalizeSeasonQuestionnaireLoreAllowed = (value: unknown): boolean => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true;
+    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false;
+  }
+  return false;
+};
+
+const normalizeSeasonQuestionnaireLorePresetIds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const cleaned = value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter((item) => Boolean(item));
+  return cleaned.slice(0, 10);
+};
+
 export const deriveSeasonStrictRules = (season: SeasonMeta | null | undefined): SeasonStrictRules => {
   const special = season?.specialRules && typeof season.specialRules === 'object' ? season.specialRules : null;
   const mode = normalizeSeasonBattleMode(special?.mode) ?? 'classic';
   const storyGuidance = normalizeSeasonStoryGuidance(special?.storyGuidance);
   const scenarioPresetFilename = normalizeSeasonScenarioPresetFilename(mode, special?.scenarioPresetFilename);
-  return { mode, storyGuidance, scenarioPresetFilename };
+  const questionnaireLorePresetIds = normalizeSeasonQuestionnaireLorePresetIds(special?.questionnaireLorePresetIds);
+  const questionnaireLoreAllowed =
+    questionnaireLorePresetIds.length > 0 || normalizeSeasonQuestionnaireLoreAllowed(special?.questionnaireLoreAllowed);
+  return { mode, storyGuidance, scenarioPresetFilename, questionnaireLoreAllowed, questionnaireLorePresetIds };
 };
 
 export const isSafeSeasonId = (value: string): boolean => {

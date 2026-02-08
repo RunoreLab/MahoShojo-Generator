@@ -26,7 +26,6 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
   const generationMode = useBattleSelector((state) => state.generationMode);
-  const lastGenerationId = useBattleSelector((state) => state.lastGenerationId);
   const streamingMarkdown = useBattleSelector((state) => state.streamingMarkdown);
   const streamReporterInfo = useBattleSelector((state) => state.streamReporterInfo);
   const streamUserGuidance = useBattleSelector((state) => state.streamUserGuidance);
@@ -34,6 +33,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const streamAiUsage = useBattleSelector((state) => state.streamAiUsage);
   const streamAiModel = useBattleSelector((state) => state.streamAiModel);
   const streamNarrativeHistoryReadCount = useBattleSelector((state) => state.streamNarrativeHistoryReadCount);
+  const streamReasoning = useBattleSelector((state) => state.streamReasoning);
   const streamUpdateMetaDebug = useBattleSelector((state) => state.streamUpdateMetaDebug);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
   const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
@@ -136,7 +136,6 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
           <div className="mt-6">
             <StreamingBattleReportCard
               content={streamingMarkdown ?? ''}
-              generationId={typeof lastGenerationId === 'string' ? lastGenerationId : null}
               onSaveImage={onSaveImage}
               mode={battleMode}
               scenarioName={scenarioDisplayName}
@@ -147,6 +146,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               aiUsage={streamAiUsage}
               aiModel={streamAiModel}
               narrativeHistoryReadCount={streamNarrativeHistoryReadCount}
+              aiReasoning={streamReasoning}
               isStreaming={isGenerating}
             />
           </div>
@@ -155,7 +155,6 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
         newsReport && (
           <BattleReportCard
             report={newsReport as NewsReport}
-            generationId={typeof lastGenerationId === 'string' ? lastGenerationId : null}
             onSaveImage={onSaveImage}
             mode={battleMode}
           />

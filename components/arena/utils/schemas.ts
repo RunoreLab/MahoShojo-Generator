@@ -42,6 +42,7 @@ export const BattleSettingsSchema = z.object({
   readNarrativeHistoryLimit: z.number().min(1).max(999),
   isNarrativeHistoryUnlimited: z.boolean(),
   writeNarrativeHistory: z.boolean(),
+  streamTransport: z.enum(['sse', 'plain-stream']).default('sse'),
 });
 
 export const StoryPreferencesSchema = z.object({

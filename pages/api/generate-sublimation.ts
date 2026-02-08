@@ -11,6 +11,8 @@ import canshouQuestionnaire from '../../public/questionnaires/presets/canshou-de
 import { config as appConfig, type AIProvider } from '../../lib/config';
 import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
+import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
+import type { GenerateWithAIOptions } from '@/lib/ai';
 import { getDataCardById } from '@/lib/d1';
 import presetIndex from '@/public/questionnaires/presets/index.json';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
@@ -161,14 +163,14 @@ const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
           return {
             id: `Q-${index + 1}`,
             question: `问题 ${index + 1}`,
-            required: true,
+            required: false,
             maxLength: null,
           };
         }
         const qRecord = q as Record<string, unknown>;
         const qid = typeof qRecord.id === 'string' && qRecord.id.trim() ? qRecord.id.trim() : `Q-${index + 1}`;
         const qText = typeof qRecord.question === 'string' && qRecord.question.trim() ? qRecord.question.trim() : `问题 ${index + 1}`;
-        const required = typeof qRecord.required === 'boolean' ? qRecord.required : true;
+        const required = typeof qRecord.required === 'boolean' ? qRecord.required : false;
         const maxLengthRaw = qRecord.maxLength;
         const maxLength = typeof maxLengthRaw === 'number' && Number.isFinite(maxLengthRaw)
           ? Math.max(0, Math.floor(maxLengthRaw))
@@ -887,7 +889,9 @@ async function handler(req: NextRequest): Promise<Response> {
       }
       : undefined;
 
-    const aiResult = await generateWithAI(null, generationConfig, providerOptions);
+    const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
+    const aiOptions = providerOptions ? { ...providerOptions, telemetry: aiTelemetry } : { telemetry: aiTelemetry };
+    const aiResult = await generateWithAI(null, generationConfig, aiOptions);
     recordUserActivityFromRequest(req);
     const updatedDataFromAI = aiResult.updatedCharacterData;
     if (updatedDataFromAI && 'userAnswers' in updatedDataFromAI && updatedDataFromAI.userAnswers) {
@@ -1030,7 +1034,13 @@ async function handler(req: NextRequest): Promise<Response> {
       targetTemplate
     };
 
-    return new Response(JSON.stringify(finalResponse), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return buildJsonResponseWithOptionalAiMeta({
+      requestHeaders: req.headers,
+      data: finalResponse,
+      telemetry: aiTelemetry,
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
 
   } catch (error) {
     log.error('成长升华失败', { error });

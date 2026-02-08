@@ -194,6 +194,67 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         ]
     },
     {
+        id: 'chatbox',
+        name: 'Chatbox AI',
+        description: 'Chatbox AI 官方 OpenAI 兼容 API，按订阅计划可选不同模型梯度。',
+        docsUrl: 'https://chatboxai.app/zh/#pricing',
+        baseUrl: 'https://ai.chatboxai.app/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'gpt-5',
+                label: 'GPT 5（高级）',
+                description: '高级模型（Pro/Pro+）。适合高质量生成与复杂任务。'
+            },
+            {
+                value: 'claude-4.5-sonnet',
+                label: 'Claude 4.5 Sonnet（高级）',
+                description: '高级模型（Pro/Pro+）。擅长长文本写作与稳健推理。'
+            },
+            {
+                value: 'gemini-3-pro',
+                label: 'Gemini 3 Pro（高级）',
+                description: '高级模型（Pro/Pro+）。适合复杂指令与高难度创作。'
+            },
+            {
+                value: 'gemini-3-flash',
+                label: 'Gemini 3 Flash（标准）',
+                description: '标准模型（所有付费方案）。适合各类任务。'
+            },
+            {
+                value: 'gemini-2.5-flash',
+                label: 'Gemini 2.5 Flash（标准）',
+                description: '标准模型（所有付费方案）。速度与质量均衡。'
+            },
+            {
+                value: 'deepseek-chat',
+                label: 'DeepSeek V3（标准）',
+                description: '标准模型（所有付费方案）。适合日常对话与内容生成。'
+            },
+            {
+                value: 'deepseek-reasoner',
+                label: 'DeepSeek R1（标准）',
+                description: '标准模型（所有付费方案）。适合多步推理与规划。'
+            },
+            {
+                value: 'deepseek-v3.2',
+                label: 'DeepSeek V3.2（标准）',
+                description: '标准模型（所有付费方案）。作为 DeepSeek 新版本可选项。'
+            },
+            {
+                value: 'kimi-k2',
+                label: 'Kimi K2（标准）',
+                description: '标准模型（所有付费方案）。中文内容生成与角色创作表现稳定。'
+            },
+            {
+                value: 'gpt-5-mini',
+                label: 'GPT 5-mini（标准）',
+                description: '标准模型（所有付费方案）。更快更省，适合高频交互。'
+            },
+        ]
+    },
+    {
         id: 'yiye',
         name: '一叶知秋 API',
         description: '一叶知秋 API 为用户提供了国内外广泛的模型库，性价比高但不太稳定。',
@@ -228,7 +289,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下上一代的最先进模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。'
             },
             {
-                value: 'gemini-2.5-flash-lite',
+                value: 'gemini-2.5-flash-lite-preview-09-2025',
                 label: 'Gemini 2.5 Flash Lite',
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
@@ -376,6 +437,52 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         models: [
             { value: 'deepseek-chat', label: 'DeepSeek-V3.2', description: '通用对话与分析模型，适合日常问答、写作与总结。' },
             { value: 'deepseek-reasoner', label: 'DeepSeek-V3.2 思考模式', description: '思考模式会拉长推理链路，适合复杂问题与多步分析。' },
+        ]
+    },
+    {
+        id: 'siliconflow',
+        name: '硅基流动 SiliconFlow',
+        description: '硅基流动官方 OpenAI 兼容通道，覆盖 DeepSeek/GLM/Qwen/Kimi 等主流模型。',
+        docsUrl: 'https://cloud.siliconflow.cn/i/1FLkYGHc',
+        baseUrl: 'https://api.siliconflow.cn/v1',
+        type: 'openai',
+        mode: 'auto',
+        models: [
+            {
+                value: 'deepseek-ai/DeepSeek-V3.2',
+                label: 'DeepSeek V3.2',
+                description: '通用对话与推理兼顾，适合剧情推进、设定整理与中文写作。'
+            },
+            {
+                value: 'deepseek-ai/DeepSeek-R1',
+                label: 'DeepSeek R1',
+                description: '偏推理的思考模型，适合复杂规划、多步分析与高约束任务。'
+            },
+            {
+                value: 'zai-org/GLM-4.6',
+                label: 'GLM-4.6',
+                description: '中文场景表现稳定，适合结构化输出、改写与多轮对话。'
+            },
+            {
+                value: 'Qwen/Qwen3-32B',
+                label: 'Qwen3-32B',
+                description: '响应速度与质量较均衡，适合高频交互与草稿生成。'
+            },
+            {
+                value: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
+                label: 'Qwen3-235B',
+                description: '旗舰级长文本与复杂指令能力，适合高质量内容生成。'
+            },
+            {
+                value: 'moonshotai/Kimi-K2-Instruct-0905',
+                label: 'Kimi K2 Instruct',
+                description: '擅长中文创作与多轮指令跟随，适合角色设定与风格化文案。'
+            },
+            {
+                value: 'moonshotai/Kimi-K2-Thinking',
+                label: 'Kimi K2 Thinking',
+                description: 'Kimi K2 的思考版本，适合需要更强推理链路的任务。'
+            },
         ]
     },
     {

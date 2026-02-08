@@ -9,6 +9,7 @@ import { getUtf8ByteLength } from '@/lib/data-card-size';
 import { getLogger } from '@/lib/logger';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import { getRandomFlowers } from '@/lib/random-choose-hana-name';
 import { buildScenarioMarkdownRequirements } from '@/lib/prompts/scenario';
@@ -201,6 +202,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+  const wantsClientSse = shouldUseClientSse(req);
 
   try {
     const parsedBody = RequestBodySchema.safeParse(await req.json().catch(() => null));
@@ -282,6 +284,8 @@ export default async function handler(req: NextRequest): Promise<Response> {
           ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
         }
       : undefined;
+    const reasoningBridge = wantsClientSse ? createReasoningSseBridge('酒馆导入（流式）') : null;
+    const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
 
     const streamResult = await generateWithStreamAI(
       {
@@ -289,9 +293,20 @@ export default async function handler(req: NextRequest): Promise<Response> {
         temperature: 0.75,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       },
-      providerOptions
+      {
+        ...(providerOptions ?? {}),
+        telemetry: aiTelemetry,
+        ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
+      }
     );
     recordUserActivityFromRequest(req);
+
+    if (wantsClientSse && reasoningBridge) {
+      return reasoningBridge.toResponse(streamResult.response, {
+        usagePromise: streamResult.usagePromise,
+        aiModel: aiTelemetry.model ?? customModelOverride ?? null,
+      });
+    }
 
     return streamResult.response;
   } catch (error) {

@@ -511,6 +511,8 @@ export async function incrementDataCardUsage(cardId: string): Promise<boolean> {
  * @param maxLikes - 最大点赞数
  * @param minUsage - 最少使用数
  * @param maxUsage - 最多使用数
+ * @param nativeOnly - 仅返回原生数据卡（依赖 data_card_metrics.is_native = 1）
+ * @param nativeAllowedOnly - 仅返回问卷中的“原生许可”数据（nativeAllowed=true）
  */
 export async function getPublicDataCards(
   limit: number = 20,
@@ -527,7 +529,9 @@ export async function getPublicDataCards(
   maxUsage?: number,
   minFavorites?: number,
   maxFavorites?: number,
-  recommendedOnly?: boolean
+  recommendedOnly?: boolean,
+  nativeOnly?: boolean,
+  nativeAllowedOnly?: boolean,
 ): Promise<any[]> {
   try {
     // 基础查询语句
@@ -605,6 +609,28 @@ export async function getPublicDataCards(
     }
     if (recommendedOnly) {
       sql += ' AND dc.is_recommended = 1';
+    }
+    if (nativeOnly) {
+      sql += ` AND EXISTS (
+        SELECT 1
+        FROM data_card_metrics dcm
+        WHERE dcm.data_card_id = dc.id
+          AND dcm.is_native = 1
+      )`;
+    }
+    if (nativeAllowedOnly) {
+      sql += ` AND dc.type = 'questionnaire'
+        AND (
+          CASE
+            WHEN json_valid(dc.data) = 1
+            THEN COALESCE(
+              json_extract(dc.data, '$.nativeAllowed'),
+              json_extract(dc.data, '$.native_allowed'),
+              0
+            )
+            ELSE 0
+          END
+        ) = 1`;
     }
     
     // -- 排序逻辑 --

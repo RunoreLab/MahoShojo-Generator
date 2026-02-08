@@ -30,14 +30,16 @@ import {
 } from '@/lib/questionnaires';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { parseBulkQuestionnaireAnswers } from '@/lib/questionnaire-bulk-parser';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
-import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS } from '@/lib/questionnaire-limits';
 import { authStorage } from '@/lib/auth';
@@ -46,6 +48,7 @@ import {
   QuestionnaireQuestionPanel,
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -261,6 +264,8 @@ const DetailsPage: React.FC = () => {
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
+  const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
 
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -986,7 +991,7 @@ const DetailsPage: React.FC = () => {
     const item = mergedQuestions[currentQuestionIndex];
     if (!item) return;
     const normalizedAnswer = currentAnswer.trim();
-    const isRequired = item.question.required !== false;
+    const isRequired = item.question.required === true;
 
     if (isRequired && normalizedAnswer.length === 0) {
       setError('⚠️ 请输入答案后再继续');
@@ -1280,6 +1285,8 @@ const DetailsPage: React.FC = () => {
     setMagicalGirlDetails(null);
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
+    setStreamingReasoning(null);
+    setNonStreamReasoning(null);
 
     const safetyText = finalAnswerItems.map((item) => item.answer).join('');
     console.log('检查敏感词:', safetyText);
@@ -1298,16 +1305,22 @@ const DetailsPage: React.FC = () => {
       } : undefined;
 
       const endpoint = generationMode === 'stream'
-        ? '/api/generate-magical-girl-details-stream'
+        ? '/api/generate-magical-girl-details-stream?format=sse'
         : '/api/generate-magical-girl-details';
 
       const activityHeaders = await authStorage.getActivityHeaders();
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...activityHeaders,
+      };
+      if (generationMode === 'stream') {
+        requestHeaders.Accept = 'text/event-stream';
+      } else {
+        requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...activityHeaders,
-        },
+        headers: requestHeaders,
         body: JSON.stringify({
           answers: finalAnswerItems,
           questionnaireSelections: selectedQuestionnaires.map((selection) => ({
@@ -1326,7 +1339,7 @@ const DetailsPage: React.FC = () => {
             questions: selection.questionnaire.questions.map((question) => ({
               id: question.id,
               question: question.question,
-              required: question.required !== false,
+              required: question.required === true,
               maxLength: question.maxLength ?? null,
           })),
         })),
@@ -1368,9 +1381,10 @@ const DetailsPage: React.FC = () => {
         }
 
         setStreamingMarkdown('');
-        const markdown = await readTextStreamFromResponse(response, {
+        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
           label: '魔法少女角色卡（流式）',
           onText: (text) => setStreamingMarkdown(text),
+          onReasoning: (reasoning) => setStreamingReasoning(reasoning),
         });
 
         if (await checkSensitiveWords(markdown, {
@@ -1414,7 +1428,7 @@ const DetailsPage: React.FC = () => {
         return;
       }
 
-      const result: MagicalGirlDetails = await response.json();
+      const { data: result, aiMeta } = await readJsonWithAiMeta<MagicalGirlDetails>(response);
       console.log('生成结果:', result);
       // 加入后置生成敏感词检测
       if (await checkSensitiveWords(JSON.stringify(result), {
@@ -1425,6 +1439,7 @@ const DetailsPage: React.FC = () => {
       })) return;
 
       setMagicalGirlDetails(result);
+      setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       setError(null); // 成功时清除错误
     } catch (error) {
       console.error('提交失败:', error);
@@ -1575,7 +1590,7 @@ const DetailsPage: React.FC = () => {
   const quickSuggestions = currentQuestion?.suggestions ?? [];
   const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
   const allowCustomInput = currentQuestion?.allowCustom !== false;
-  const isCurrentRequired = currentQuestion?.required !== false;
+  const isCurrentRequired = currentQuestion?.required === true;
   const showTextInput = allowCustomInput || !hasOptions;
   const navigatorItems = mergedQuestions.map((item) => ({
     id: item.key,
@@ -2114,13 +2129,16 @@ const DetailsPage: React.FC = () => {
           {generationMode === 'stream' && (streamingMarkdown !== null || streamedGeneralCard) && (
             <>
               {streamedGeneralCardForDisplay && (
-                <GeneralCharacterCard
-                  general={streamedGeneralCardForDisplay}
-                  isStreaming={submitting}
-                  onSaveImage={handleSaveImage}
-                  imageSaveMode={imageSaveMode}
-                  saveButtonLabel={imageSaveButtonLabel}
-                />
+                <>
+                  <GeneralCharacterCard
+                    general={streamedGeneralCardForDisplay}
+                    isStreaming={submitting}
+                    onSaveImage={handleSaveImage}
+                    imageSaveMode={imageSaveMode}
+                    saveButtonLabel={imageSaveButtonLabel}
+                  />
+                  <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
+                </>
               )}
 
               {streamedGeneralCard && (
@@ -2170,6 +2188,14 @@ const DetailsPage: React.FC = () => {
                 imageSaveMode={imageSaveMode}
                 saveButtonLabel={imageSaveButtonLabel}
               />
+              {nonStreamReasoning && (
+                <AiReasoningPanel
+                  reasoning={nonStreamReasoning}
+                  status={nonStreamReasoning.status}
+                  displayMode="content-only"
+                  compact
+                />
+              )}
               <div className="card" style={{ marginTop: '1rem' }}>
                 <div className="space-y-5 text-left">
                   <div>

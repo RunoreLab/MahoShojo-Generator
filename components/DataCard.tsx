@@ -38,6 +38,7 @@ interface DataCardProps {
   techLevel?: string | null;
   strictTier?: string | null;
   isNative?: boolean | null;
+  questionnaireNativeAllowed?: boolean;
   hot?: boolean;
   pending?: boolean;
   onReplace?: () => void;
@@ -93,6 +94,7 @@ export default function DataCard({
   techLevel = null,
   strictTier = null,
   isNative = null,
+  questionnaireNativeAllowed = false,
   hot = false,
   pending = false,
   onReplace,
@@ -331,7 +333,12 @@ export default function DataCard({
                 {roleTypeLabelMap[roleType]}
               </span>
             )}
-            {isNative === true && (
+            {type === 'questionnaire' && questionnaireNativeAllowed === true && (
+              <span className="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-700">
+                原生许可
+              </span>
+            )}
+            {type !== 'questionnaire' && isNative === true && (
               <span className="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-700">
                 原生
               </span>

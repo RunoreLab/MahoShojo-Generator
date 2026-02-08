@@ -9,6 +9,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
+import { createReasoningSseBridge, shouldUseClientSse } from '@/lib/stream/reasoning-sse';
 import { formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
@@ -60,14 +61,14 @@ const normalizeQuestionnaires = (raw: unknown): RequestQuestionnaire[] => {
           return {
             id: `Q-${index + 1}`,
             question: `问题 ${index + 1}`,
-            required: true,
+            required: false,
             maxLength: null,
           };
         }
         const qRecord = q as Record<string, unknown>;
         const qid = typeof qRecord.id === 'string' && qRecord.id.trim() ? qRecord.id.trim() : `Q-${index + 1}`;
         const qText = typeof qRecord.question === 'string' && qRecord.question.trim() ? qRecord.question.trim() : `问题 ${index + 1}`;
-        const required = typeof qRecord.required === 'boolean' ? qRecord.required : true;
+        const required = typeof qRecord.required === 'boolean' ? qRecord.required : false;
         const maxLengthRaw = qRecord.maxLength;
         const maxLength = typeof maxLengthRaw === 'number' && Number.isFinite(maxLengthRaw)
           ? Math.max(0, Math.floor(maxLengthRaw))
@@ -178,6 +179,7 @@ async function handler(req: NextRequest): Promise<Response> {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+  const wantsClientSse = shouldUseClientSse(req);
 
   try {
     const parsedBody = await req.json();
@@ -283,6 +285,8 @@ ${answerText}
         ...(shouldDisablePolling ? { loadBalanceStrategy: LoadBalanceStrategy.CUSTOM } : { loadBalanceStrategy: LoadBalanceStrategy.SEQUENTIAL }),
       }
       : undefined;
+    const reasoningBridge = wantsClientSse ? createReasoningSseBridge('残兽档案（流式）') : null;
+    const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
 
     const streamResult = await generateWithStreamAI(
       {
@@ -290,9 +294,20 @@ ${answerText}
         temperature: 0.8,
         ...(customModelOverride ? { modelOverride: customModelOverride } : {}),
       },
-      providerOptions
+      {
+        ...(providerOptions ?? {}),
+        telemetry: aiTelemetry,
+        ...(reasoningBridge ? { onReasoningEvent: reasoningBridge.onReasoningEvent } : {}),
+      }
     );
     recordUserActivityFromRequest(req);
+
+    if (wantsClientSse && reasoningBridge) {
+      return reasoningBridge.toResponse(streamResult.response, {
+        usagePromise: streamResult.usagePromise,
+        aiModel: aiTelemetry.model ?? customModelOverride ?? null,
+      });
+    }
 
     return streamResult.response;
   } catch (error) {

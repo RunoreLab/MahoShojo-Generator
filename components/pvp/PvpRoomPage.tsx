@@ -35,6 +35,7 @@ import { inferTemplate } from '@/lib/data-card-converter';
 	import { config as appConfig } from '@/lib/config';
 	import { useAuth } from '@/lib/useAuth';
 	import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
+	import { buildReasoningSummary, normalizeReasoningSource } from '@/lib/ai/reasoning-normalizer';
 	import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 	import { formatPvpDisplayName } from '@/lib/pvp/displayName';
 	import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';
@@ -1091,10 +1092,10 @@ export function PvpRoomPage() {
       setIsStreamingResolve(true);
       try {
         const res = await fetchWithTimeout(
-          `/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve-stream`,
+          `/api/pvp/rooms/${roomId}/rounds/${latestRound?.id}/resolve-stream?format=sse`,
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+            headers: { 'Content-Type': 'application/json', Authorization: authHeader, Accept: 'text/event-stream' },
             body: JSON.stringify({
               expectedVersion: version,
               ...(payload?.force ? { force: true } : {}),
@@ -1104,7 +1105,7 @@ export function PvpRoomPage() {
           RESOLVE_REQUEST_TIMEOUT_MS,
         );
 
-        // resolve-stream 成功时会返回 text/plain（Markdown stream）；失败则返回 JSON 错误
+        // resolve-stream 成功时通常返回 SSE（也兼容 text/plain）；失败返回 JSON 错误
         const contentType = (res.headers.get('content-type') || '').toLowerCase();
         const looksLikeJson = contentType.includes('application/json') || contentType.includes('+json');
         if (!res.ok || looksLikeJson) {
@@ -1132,6 +1133,167 @@ export function PvpRoomPage() {
 	        const reader = res.body.getReader();
 	        const decoder = new TextDecoder();
 	        let accumulated = '';
+          let sseBuffer = '';
+          let sawDone = false;
+          const isSseResponse = contentType.includes('text/event-stream');
+          let reasoningText = '';
+          let reasoningStatus: 'idle' | 'thinking' | 'done' | 'unavailable' | 'error' = 'idle';
+          let reasoningSource: 'sdk' | 'provider' | 'heuristic' | 'unknown' = 'unknown';
+
+          const patchStreamingResolveMeta = (patch: Record<string, unknown>) => {
+            setStreamingResolveMeta((previous: any) => ({
+              ...(previous && typeof previous === 'object' ? previous : {}),
+              ...patch,
+            }));
+          };
+
+          const patchReasoningMeta = (patch: {
+            status?: 'idle' | 'thinking' | 'done' | 'unavailable' | 'error';
+            source?: 'sdk' | 'provider' | 'heuristic' | 'unknown';
+            summary?: string | null;
+            text?: string | null;
+            reasoningTokens?: number | null;
+            anomalyFlags?: string[] | null;
+          }) => {
+            setStreamingResolveMeta((previous: any) => {
+              const prevMeta = previous && typeof previous === 'object' ? previous : {};
+              const prevReasoning =
+                prevMeta.aiReasoning && typeof prevMeta.aiReasoning === 'object'
+                  ? prevMeta.aiReasoning
+                  : {};
+              return {
+                ...prevMeta,
+                aiReasoning: {
+                  ...prevReasoning,
+                  ...patch,
+                },
+              };
+            });
+          };
+
+          const parseSseBlock = (block: string): { event: string; data: string } | null => {
+            const lines = block.split('\n');
+            let event = 'message';
+            const dataLines: string[] = [];
+            for (const line of lines) {
+              if (!line) continue;
+              if (line.startsWith(':')) continue;
+              if (line.startsWith('event:')) {
+                event = line.slice('event:'.length).trim() || 'message';
+                continue;
+              }
+              if (line.startsWith('data:')) {
+                dataLines.push(line.slice('data:'.length).trimStart());
+                continue;
+              }
+            }
+            if (dataLines.length === 0) return null;
+            return { event, data: dataLines.join('\n') };
+          };
+
+          const handleSseEvent = (event: string, data: string) => {
+            let payload: any = null;
+            try {
+              payload = data ? JSON.parse(data) : null;
+            } catch {
+              payload = null;
+            }
+
+            if (event === 'markdown') {
+              const chunk = typeof payload?.chunk === 'string' ? payload.chunk : '';
+              if (!chunk) return;
+              accumulated += chunk;
+              setStreamingResolveMarkdown(accumulated);
+              return;
+            }
+
+            if (event === 'reasoning') {
+              const chunk = typeof payload?.chunk === 'string' ? payload.chunk : '';
+              const source = normalizeReasoningSource(payload?.source);
+              reasoningSource = source === 'unknown' ? 'sdk' : source;
+              if (chunk) {
+                const MAX_REASONING_CHARS = 20_000;
+                const remaining = MAX_REASONING_CHARS - reasoningText.length;
+                if (remaining > 0) {
+                  if (chunk.length <= remaining) {
+                    reasoningText += chunk;
+                  } else {
+                    reasoningText += chunk.slice(0, remaining);
+                    patchReasoningMeta({ anomalyFlags: ['truncated'] });
+                  }
+                } else {
+                  patchReasoningMeta({ anomalyFlags: ['truncated'] });
+                }
+              }
+              reasoningStatus = 'thinking';
+              patchReasoningMeta({
+                status: 'thinking',
+                source: reasoningSource,
+                text: reasoningText || null,
+                summary: buildReasoningSummary(reasoningText) ?? null,
+              });
+              return;
+            }
+
+            if (event === 'reasoning_done') {
+              const source = normalizeReasoningSource(payload?.source);
+              reasoningSource = source === 'unknown' ? reasoningSource : source;
+              const status = typeof payload?.status === 'string' ? payload.status : '';
+              reasoningStatus = status === 'unavailable' ? 'unavailable' : 'done';
+              patchReasoningMeta({
+                status: reasoningStatus,
+                source: reasoningSource === 'unknown' ? 'sdk' : reasoningSource,
+                text: reasoningText || null,
+                summary: buildReasoningSummary(reasoningText) ?? null,
+              });
+              return;
+            }
+
+            if (event === 'telemetry') {
+              const usage = payload?.usage ?? null;
+              const aiModel = typeof payload?.aiModel === 'string' ? payload.aiModel.trim() : '';
+              const nextPatch: Record<string, unknown> = {};
+              if (usage && typeof usage === 'object') {
+                nextPatch.aiUsage = usage;
+                if (typeof usage.reasoningTokens === 'number') {
+                  patchReasoningMeta({ reasoningTokens: usage.reasoningTokens });
+                }
+              }
+              if (aiModel) {
+                nextPatch.ai = { model: aiModel };
+              }
+              if (typeof payload?.narrativeHistoryReadCount === 'number') {
+                nextPatch.narrativeHistoryReadCount = payload.narrativeHistoryReadCount;
+              }
+              if (Object.keys(nextPatch).length > 0) {
+                patchStreamingResolveMeta(nextPatch);
+              }
+              return;
+            }
+
+            if (event === 'meta') {
+              if (payload?.meta && typeof payload.meta === 'object') {
+                patchStreamingResolveMeta(payload.meta);
+              }
+              return;
+            }
+
+            if (event === 'error') {
+              const message = typeof payload?.error === 'string' ? payload.error : '上游流式结算失败';
+              reasoningStatus = 'error';
+              patchReasoningMeta({
+                status: 'error',
+                source: reasoningSource === 'unknown' ? 'sdk' : reasoningSource,
+                text: reasoningText || null,
+                summary: buildReasoningSummary(reasoningText) ?? null,
+              });
+              throw new Error(message);
+            }
+
+            if (event === 'done') {
+              sawDone = true;
+            }
+          };
 	        const shouldTerminateByTelemetry = (text: string) => {
 	          const marker = '<!-- MAHOSHOJO_TELEMETRY_META';
 	          const trimmed = text.trimEnd();
@@ -1156,19 +1318,71 @@ export function PvpRoomPage() {
 	          const { value, done } = await readWithTimeout(reader);
 	          if (done) break;
 	          if (!value) continue;
-	          accumulated += decoder.decode(value, { stream: true });
-	          setStreamingResolveMarkdown(accumulated);
-		          if (shouldTerminateByTelemetry(accumulated)) {
-		            try {
-		              void reader.cancel('telemetry-meta-received').catch(() => {});
-		            } catch {
-		              // ignore
-		            }
-		            break;
-		          }
+
+            const chunk = decoder.decode(value, { stream: true });
+            if (isSseResponse) {
+              sseBuffer += chunk.replace(/\r\n/g, '\n');
+              let idx = sseBuffer.indexOf('\n\n');
+              while (idx !== -1) {
+                const block = sseBuffer.slice(0, idx);
+                sseBuffer = sseBuffer.slice(idx + 2);
+                const parsed = parseSseBlock(block);
+                if (parsed) {
+                  handleSseEvent(parsed.event, parsed.data);
+                }
+                if (sawDone) break;
+                idx = sseBuffer.indexOf('\n\n');
+              }
+              if (sawDone) {
+                try {
+                  void reader.cancel('sse_done').catch(() => {});
+                } catch {
+                  // ignore
+                }
+                break;
+              }
+              continue;
+            }
+
+            accumulated += chunk;
+            setStreamingResolveMarkdown(accumulated);
+            if (shouldTerminateByTelemetry(accumulated)) {
+              try {
+                void reader.cancel('telemetry-meta-received').catch(() => {});
+              } catch {
+                // ignore
+              }
+              break;
+            }
 	        }
-	        accumulated += decoder.decode();
-	        setStreamingResolveMarkdown(accumulated);
+
+          const flushed = decoder.decode();
+          if (isSseResponse) {
+            sseBuffer += flushed.replace(/\r\n/g, '\n');
+            let idx = sseBuffer.indexOf('\n\n');
+            while (idx !== -1) {
+              const block = sseBuffer.slice(0, idx);
+              sseBuffer = sseBuffer.slice(idx + 2);
+              const parsed = parseSseBlock(block);
+              if (parsed) {
+                handleSseEvent(parsed.event, parsed.data);
+              }
+              if (sawDone) break;
+              idx = sseBuffer.indexOf('\n\n');
+            }
+            if ((reasoningStatus as string) === 'thinking') {
+              const status = reasoningText.trim() ? 'done' : 'unavailable';
+              patchReasoningMeta({
+                status,
+                source: reasoningSource === 'unknown' ? 'sdk' : reasoningSource,
+                text: reasoningText || null,
+                summary: buildReasoningSummary(reasoningText) ?? null,
+              });
+            }
+          } else {
+            accumulated += flushed;
+            setStreamingResolveMarkdown(accumulated);
+          }
 	        return { success: true, streamed: true };
 	      } finally {
         setIsStreamingResolve(false);
@@ -3251,7 +3465,10 @@ export function PvpRoomPage() {
                         userGuidance={(reportMetaForUi as any)?.userGuidance ?? null}
                         characterGuidances={(reportMetaForUi as any)?.characterGuidances ?? null}
                         adjudicationResults={(reportMetaForUi as any)?.adjudicationResults ?? null}
+                        aiUsage={(reportMetaForUi as any)?.aiUsage ?? null}
                         aiModel={(reportMetaForUi as any)?.ai?.model ?? null}
+                        narrativeHistoryReadCount={(reportMetaForUi as any)?.narrativeHistoryReadCount ?? null}
+                        aiReasoning={(reportMetaForUi as any)?.aiReasoning ?? null}
                         onSaveImage={(imageUrl) => {
                           setSavedImageUrl(imageUrl);
                           setShowImageModal(true);

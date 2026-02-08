@@ -126,6 +126,29 @@ export enum LoadBalanceStrategy {
 // 全局轮询计数器（用于轮询策略）
 let roundRobinCounter = 0;
 
+export type RawReasoningStreamEvent =
+    | {
+        type: 'reasoning-start';
+        id?: string;
+    }
+    | {
+        type: 'reasoning-delta';
+        id?: string;
+        text: string;
+    }
+    | {
+        type: 'reasoning-end';
+        id?: string;
+    };
+
+type RawUnifiedStreamChunk =
+    | {
+        type: 'text-delta';
+        id?: string;
+        text: string;
+    }
+    | RawReasoningStreamEvent;
+
 export interface GenerateWithAIOptions {
     loadBalanceStrategy?: LoadBalanceStrategy;
     providerOverride?: AIProvider;
@@ -137,13 +160,19 @@ export interface GenerateWithAIOptions {
         providerIndex?: number;
         attempt?: number;
     };
+    onReasoningEvent?: (event: RawReasoningStreamEvent) => void;
 }
 
 // 通用 AI 生成函数
 export async function generateWithStreamAI(
     generationConfig: RawGenerationConfig,
     options?: GenerateWithAIOptions
-): Promise<{ response: Response; usagePromise?: Promise<unknown>; telemetry?: GenerateWithAIOptions['telemetry'] }> {
+): Promise<{
+    response: Response;
+    usagePromise?: Promise<unknown>;
+    finishReasonPromise?: Promise<unknown>;
+    telemetry?: GenerateWithAIOptions['telemetry'];
+}> {
     const baseProviders: AIProvider[] = [
         ...(options?.providerOverride ? [options.providerOverride] : []),
         ...config.PROVIDERS,
@@ -246,6 +275,20 @@ export async function generateWithStreamAI(
 	                    typeof generationConfig.maxOutputTokens === 'number'
 	                        ? { maxOutputTokens: generationConfig.maxOutputTokens }
 	                        : {};
+	                const shouldEnableGoogleThinking =
+	                    provider.type === 'google' && typeof selectedModel === 'string' && /^gemini/i.test(selectedModel.trim());
+	                const googleThinkingOptions =
+	                    shouldEnableGoogleThinking
+	                        ? {
+	                            providerOptions: {
+	                                google: {
+	                                    thinkingConfig: {
+	                                        includeThoughts: true,
+	                                    },
+	                                },
+	                            },
+	                        }
+	                        : {};
 
 		                const looksLikeTrivialEmptyOutput = (text: string) => {
 		                    const trimmed = text.trim().replace(/^\uFEFF/, '');
@@ -273,14 +316,53 @@ export async function generateWithStreamAI(
                     temperature: generationConfig.temperature,
                     maxRetries: 0,
                     ...maxOutputTokensOption,
+                    ...googleThinkingOptions,
                     onError: ({ error }) => {
                         capturedError = error;
                         log.error(`流式传输过程中出错: 提供商: ${provider.name} 模型: ${selectedModel}`, { error });
                     },
 	                });
 
-	                // 预检流：在返回流之前，先尝试读取前几个 chunk 来验证连接成功且内容非空
-	                const reader = result.textStream.getReader();
+	                const mapToUnifiedChunk = (part: unknown): RawUnifiedStreamChunk | null => {
+	                    if (!part || typeof part !== 'object') return null;
+	                    const type = (part as any).type;
+
+	                    if (type === 'text-delta') {
+	                        const text =
+	                            typeof (part as any).text === 'string'
+	                                ? (part as any).text
+	                                : (typeof (part as any).delta === 'string' ? (part as any).delta : '');
+	                        return { type: 'text-delta', id: typeof (part as any).id === 'string' ? (part as any).id : undefined, text };
+	                    }
+	                    if (type === 'reasoning-start') {
+	                        return { type: 'reasoning-start', id: typeof (part as any).id === 'string' ? (part as any).id : undefined };
+	                    }
+	                    if (type === 'reasoning-delta') {
+	                        const text =
+	                            typeof (part as any).text === 'string'
+	                                ? (part as any).text
+	                                : (typeof (part as any).delta === 'string' ? (part as any).delta : '');
+	                        return { type: 'reasoning-delta', id: typeof (part as any).id === 'string' ? (part as any).id : undefined, text };
+	                    }
+	                    if (type === 'reasoning-end') {
+	                        return { type: 'reasoning-end', id: typeof (part as any).id === 'string' ? (part as any).id : undefined };
+	                    }
+	                    return null;
+	                };
+
+	                const emitReasoningEvent = (chunk: RawUnifiedStreamChunk) => {
+	                    if (chunk.type !== 'reasoning-start' && chunk.type !== 'reasoning-delta' && chunk.type !== 'reasoning-end') {
+	                        return;
+	                    }
+	                    try {
+	                        options?.onReasoningEvent?.(chunk);
+	                    } catch (reasoningError) {
+	                        log.warn('reasoning 回调执行失败（已忽略）', { reasoningError });
+	                    }
+	                };
+
+	                // 预检流：仅做“连接可用”探测，避免等待正文首字导致流式首屏阻塞。
+	                const reader = result.fullStream.getReader();
                 const readWithTimeout = createStreamReadWithTimeout({
                     label: `上游流式(${provider.name}/${selectedModel})`,
                     idleTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
@@ -292,32 +374,29 @@ export async function generateWithStreamAI(
                             // ignore
                         }
                     },
-                });
-	                const prefetchedChunks: string[] = [];
+	                });
+	                const prefetchedChunks: RawUnifiedStreamChunk[] = [];
 	                let prefetchedText = '';
-	                const MAX_PREFETCH_READS = 8;
-	                const MAX_PREFETCH_CHARS = 8_192;
+	                let prefetchedDone = false;
+	                const MAX_PREFETCH_PARTS = 16;
 
-		                for (let i = 0; i < MAX_PREFETCH_READS && prefetchedText.length < MAX_PREFETCH_CHARS; i++) {
-		                    const chunk = await readWithTimeout(reader);
-		                    if (chunk.done) {
-		                        if (looksLikeTrivialEmptyOutput(prefetchedText)) {
-		                            try {
-		                                void reader.cancel('empty-output').catch(() => {});
-		                            } catch {
-		                                // ignore
-		                            }
-		                            throw new Error(extractUpstreamErrorMessage(capturedError, result, EMPTY_OUTPUT_ERROR_MESSAGE));
-		                        }
-		                        const errorMessage = extractUpstreamErrorMessage(capturedError, result);
-		                        throw new Error(errorMessage);
-		                    }
-	                    prefetchedChunks.push(chunk.value ?? '');
-	                    prefetchedText += chunk.value ?? '';
-	                    if (prefetchedText.trim() && !looksLikeTrivialEmptyOutput(prefetchedText)) break;
+		                for (let i = 0; i < MAX_PREFETCH_PARTS; i++) {
+		                    const part = await readWithTimeout(reader);
+		                    if (part.done) {
+	                        prefetchedDone = true;
+	                        break;
+	                    }
+	                    const mapped = mapToUnifiedChunk(part.value);
+	                    if (!mapped) continue;
+	                    prefetchedChunks.push(mapped);
+	                    if (mapped.type === 'text-delta') {
+	                        prefetchedText += mapped.text;
+	                    }
+	                    // 低延迟优先：拿到首个有效 chunk（文本或 reasoning）后立即交由上层持续消费。
+	                    break;
 	                }
 
-		                if (looksLikeTrivialEmptyOutput(prefetchedText)) {
+		                if (prefetchedDone && looksLikeTrivialEmptyOutput(prefetchedText)) {
 		                    try {
 		                        void reader.cancel('empty-output').catch(() => {});
 		                    } catch {
@@ -326,36 +405,58 @@ export async function generateWithStreamAI(
 		                    throw new Error(extractUpstreamErrorMessage(capturedError, result, EMPTY_OUTPUT_ERROR_MESSAGE));
 		                }
 
-	                // 创建一个新的 ReadableStream，将已读取的 chunk 和剩余流合并
-	                const combinedStream = new ReadableStream<string>({
+	                // 创建一个新的 ReadableStream，将已预取 part 与剩余流合并；正文走 text-delta，reasoning 走回调。
+	                const combinedStream = new ReadableStream<RawUnifiedStreamChunk>({
                     start(controller) {
-                        // 先推送已预检的内容（避免上游首包为空字符串时导致整体输出为空）
                         for (const chunk of prefetchedChunks) {
+                            emitReasoningEvent(chunk);
                             controller.enqueue(chunk);
                         }
                     },
                     async pull(controller) {
-                        const { done, value } = await readWithTimeout(reader);
-                        if (done) {
-                            controller.close();
-                        } else {
-                            controller.enqueue(value);
+                        while (true) {
+                            const { done, value } = await readWithTimeout(reader);
+                            if (done) {
+                                controller.close();
+                                return;
+                            }
+
+                            const mapped = mapToUnifiedChunk(value);
+                            if (!mapped) continue;
+                            emitReasoningEvent(mapped);
+                            controller.enqueue(mapped);
+                            return;
                         }
                     },
-                    cancel() {
-                        reader.cancel();
+                    cancel(reason) {
+                        try {
+                            void reader.cancel(reason).catch(() => {});
+                        } catch {
+                            // ignore
+                        }
                     }
                 });
+
+	                const textOnlyStream = combinedStream.pipeThrough(
+	                    new TransformStream<RawUnifiedStreamChunk, string>({
+	                        transform(chunk, controller) {
+	                            if (chunk.type !== 'text-delta') return;
+	                            if (!chunk.text) return;
+	                            controller.enqueue(chunk.text);
+	                        },
+	                    })
+	                );
 
                 log.info(`提供商生成成功: 提供商: ${provider.name} 尝试次数: ${attempt + 1}`);
 
                 return {
-                    response: new Response(combinedStream.pipeThrough(new TextEncoderStream()), {
+                    response: new Response(textOnlyStream.pipeThrough(new TextEncoderStream()), {
                         headers: {
                             'Content-Type': 'text/plain; charset=utf-8',
                         },
                     }),
                     usagePromise: (result as any).usage,
+                    finishReasonPromise: (result as any).finishReason,
                     telemetry: options?.telemetry,
                 };
             } catch (error) {

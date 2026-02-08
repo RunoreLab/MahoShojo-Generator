@@ -28,6 +28,7 @@ const defaultSettings: BattleSettings = {
   readNarrativeHistoryLimit: 10,
   isNarrativeHistoryUnlimited: false,
   writeNarrativeHistory: false,
+  streamTransport: 'sse',
   userGuidance: '',
 };
 
@@ -65,6 +66,7 @@ export const useBattleStore = create<BattleStoreState>()(
       streamAiUsage: null,
       streamAiModel: null,
       streamNarrativeHistoryReadCount: null,
+      streamReasoning: null,
       streamUpdateMetaDebug: null,
       storyLength: 'default',
       selectedLevel: '',
@@ -94,6 +96,7 @@ export const useBattleStore = create<BattleStoreState>()(
       setStreamAiUsage: (usage) => set({ streamAiUsage: usage }),
       setStreamAiModel: (model) => set({ streamAiModel: model }),
       setStreamNarrativeHistoryReadCount: (count) => set({ streamNarrativeHistoryReadCount: count }),
+      setStreamReasoning: (reasoning) => set({ streamReasoning: reasoning }),
       setStreamUpdateMetaDebug: (debug) => set({ streamUpdateMetaDebug: debug }),
       setStoryLength: (storyLength) => set({ storyLength }),
       setSelectedLevel: (selectedLevel) => set({ selectedLevel }),
@@ -152,6 +155,7 @@ export const useBattleStore = create<BattleStoreState>()(
           streamAiUsage: null,
           streamAiModel: null,
           streamNarrativeHistoryReadCount: null,
+          streamReasoning: null,
           streamUpdateMetaDebug: null,
           lastGenerationId: null,
         }),

@@ -566,6 +566,21 @@ const readExtraJsonString = (extraJson: string | null, key: string): string | nu
   }
 };
 
+const readExtraJsonStringArray = (extraJson: string | null, key: string): string[] | null => {
+  if (typeof extraJson !== 'string' || !extraJson.trim()) return null;
+  try {
+    const parsed = JSON.parse(extraJson) as Record<string, unknown>;
+    const raw = parsed?.[key];
+    if (!Array.isArray(raw)) return null;
+    const normalized = raw
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter((item) => Boolean(item));
+    return normalized.slice(0, 20);
+  } catch {
+    return null;
+  }
+};
+
 export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants: BattleReportGenerationCombatantRow[]): boolean => {
   if (snapshot.status !== 'completed') return false;
   if (snapshot.combatantCount !== 2) return false;
@@ -604,6 +619,22 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
     if (actual !== requiredStoryGuidance) return false;
   } else {
     if (snapshot.hasUserGuidance !== 0) return false;
+  }
+
+  const requiredQuestionnaireLorePresetIds = readExtraJsonStringArray(snapshot.extraJson, 'seasonQuestionnaireLorePresetIds') ?? [];
+  const actualQuestionnaireLoreIds = readExtraJsonStringArray(snapshot.extraJson, 'questionnaireLoreIds') ?? [];
+  if (requiredQuestionnaireLorePresetIds.length > 0) {
+    const requiredSet = new Set(requiredQuestionnaireLorePresetIds);
+    const actualSet = new Set(actualQuestionnaireLoreIds);
+    if (requiredSet.size !== actualSet.size) return false;
+    for (const id of requiredSet) {
+      if (!actualSet.has(id)) return false;
+    }
+  } else {
+    // 严格排位：问卷/设定卡 Lore 需由赛季特殊规则显式许可。
+    if (readExtraJsonBoolean(snapshot.extraJson, 'questionnaireLoreEnabled') === true) {
+      if (readExtraJsonBoolean(snapshot.extraJson, 'seasonQuestionnaireLoreAllowed') !== true) return false;
+    }
   }
 
   if (requiredMode === 'scenario') {

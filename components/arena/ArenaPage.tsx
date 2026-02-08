@@ -233,23 +233,12 @@ export function ArenaPage() {
               <BattleModeSwitcher />
             </CollapsibleSection>
 
-            <CollapsibleSection
-              title="🏁 排位与快速设置"
-              description="用于排位计分相关的一键检查/修复（高级）"
-              defaultOpen={false}
-              disabled={isGenerating}
-              keepMounted
-              storageKey="arena.section.rankingQuickActions.open"
-              className="mt-4"
-            >
-              <RankingQuickActions />
-            </CollapsibleSection>
-
             {battleMode === 'scenario' && (
               <CollapsibleSection
                 title="🎭 情景设置"
                 description={scenarioSummary}
                 defaultOpen
+                autoOpen={scenario.content === null}
                 disabled={isGenerating}
                 keepMounted
                 storageKey="arena.section.scenario.open"
@@ -263,6 +252,18 @@ export function ArenaPage() {
                 />
               </CollapsibleSection>
             )}
+
+            <CollapsibleSection
+              title="🏁 排位与快速设置"
+              description="用于排位计分相关的一键检查/修复（高级）"
+              defaultOpen={false}
+              disabled={isGenerating}
+              keepMounted
+              storageKey="arena.section.rankingQuickActions.open"
+              className="mt-4"
+            >
+              <RankingQuickActions />
+            </CollapsibleSection>
 
             <CollapsibleSection
               title="⚙️ 读写设置（历战 / 当前状态 / 叙事历史）"

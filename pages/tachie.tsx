@@ -73,7 +73,7 @@ export default function TachiePage() {
             这是一个测试页面，用于测试 TachieGenerator 组件的功能
           </p>
           <p className="text-xs text-gray-500 mt-2">
-            需要有效的 LibLib Access Key 和 Secret Key 才能进行图片生成
+            支持 LibLib（Access Key + Secret Key）与 ModelScope（Token）两种图片生成
           </p>
         </div>
       </div>

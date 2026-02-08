@@ -6,6 +6,7 @@ import { useRouter } from 'next/router';
 import Footer from '@/components/Footer';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import { ErrorMessage } from '@/components/ErrorMessage';
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
@@ -16,15 +17,17 @@ import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 
 import { useCooldown } from '@/lib/cooldown';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
-import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { USER_PROVIDED_KEY_COOLDOWN_MS, OFFICIAL_KEY_MAX_AI_COOLDOWN_MS } from '@/lib/ai/cooldowns';
 import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
 import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt } from '@/lib/ai/attachments';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { authStorage } from '@/lib/auth';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 type FreeSchemaId = 'magical-girl' | 'canshou' | 'scenario' | 'general' | 'general-scenario';
 
@@ -227,9 +230,11 @@ export default function FreeGeneratorPage() {
   const [isReadingAttachments, setIsReadingAttachments] = useState(false);
 
   const [resultData, setResultData] = useState<any | null>(null);
+  const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
 
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
+  const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
 
   const [showFieldGuide, setShowFieldGuide] = useState(false);
   const [showLanguageSection, setShowLanguageSection] = useState(false);
@@ -463,8 +468,10 @@ export default function FreeGeneratorPage() {
     setSubmitting(true);
     setError(null);
     setResultData(null);
+    setNonStreamReasoning(null);
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
+    setStreamingReasoning(null);
 
     try {
       const combinedForSafety = [prompt, ...attachments.map((item) => item.content)].filter((t) => t.trim()).join('\n\n');
@@ -502,11 +509,20 @@ export default function FreeGeneratorPage() {
         };
       }
 
-      const endpoint = generationMode === 'stream' ? '/api/generate-free-stream' : '/api/generate-free';
+      const endpoint = generationMode === 'stream' ? '/api/generate-free-stream?format=sse' : '/api/generate-free';
       const activityHeaders = await authStorage.getActivityHeaders();
+      const requestHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...activityHeaders,
+      };
+      if (generationMode === 'stream') {
+        requestHeaders.Accept = 'text/event-stream';
+      } else {
+        requestHeaders[AI_META_REQUEST_HEADER] = AI_META_REQUEST_VALUE;
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...activityHeaders },
+        headers: requestHeaders,
         body: JSON.stringify(requestBody),
       });
 
@@ -533,9 +549,10 @@ export default function FreeGeneratorPage() {
         }
 
         setStreamingMarkdown('');
-        const markdown = await readTextStreamFromResponse(response, {
+        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
           label: '自由生成（流式）',
           onText: (text) => setStreamingMarkdown(text),
+          onReasoning: (reasoning) => setStreamingReasoning(reasoning),
         });
 
         if (schemaId === 'general') {
@@ -556,8 +573,9 @@ export default function FreeGeneratorPage() {
         return;
       }
 
-      const json = await response.json();
-      setResultData(json);
+      const { data, aiMeta } = await readJsonWithAiMeta<any>(response);
+      setResultData(data);
+      setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       startCooldown(freeCooldownMs);
     } catch (err) {
       const message = err instanceof Error ? err.message : '发生未知错误';
@@ -622,6 +640,7 @@ export default function FreeGeneratorPage() {
                   <div className="text-sm text-gray-500 text-center">生成结果将显示在此处</div>
                 )}
               </div>
+              <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
               <p className="mt-3 text-xs text-gray-500">
                 提示：流式模式只输出 Markdown，再由前端转换为通用数据卡；自由生成产物不会包含签名，因此会被视为非原生。
               </p>
@@ -633,6 +652,7 @@ export default function FreeGeneratorPage() {
                 const { card } = buildGeneralCharacterCardFromMarkdown({ markdown, defaultName: '角色' });
                 return <GeneralCharacterCard general={card} isStreaming={submitting} />;
               })()}
+              <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
               <p className="mt-3 text-xs text-gray-500 text-center">
                 提示：流式模式只输出 Markdown，再由前端转换为通用数据卡；自由生成产物不会包含签名，因此会被视为非原生。
               </p>
@@ -666,11 +686,20 @@ export default function FreeGeneratorPage() {
 
     const selectedOption = SCHEMA_OPTIONS.find(item => item.id === schemaId) ?? null;
     const kind = selectedOption?.kind ?? 'character';
+    const nonStreamReasoningNode = nonStreamReasoning ? (
+      <AiReasoningPanel
+        reasoning={nonStreamReasoning}
+        status={nonStreamReasoning.status}
+        displayMode="content-only"
+        compact
+      />
+    ) : null;
 
     if (schemaId === 'magical-girl') {
       const safe = normalizeMagicalGirlForCard(resultData);
       return (
         <>
+          {nonStreamReasoningNode}
           <MagicalGirlCard
             magicalGirl={safe}
             gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)"
@@ -691,6 +720,7 @@ export default function FreeGeneratorPage() {
       const safe = normalizeCanshouForCard(resultData);
       return (
         <>
+          {nonStreamReasoningNode}
           <CanshouCard canshou={safe} />
           <div className="card !max-w-none">
             <div className="text-center">
@@ -707,6 +737,7 @@ export default function FreeGeneratorPage() {
     if (schemaId === 'general') {
       return (
         <>
+          {nonStreamReasoningNode}
           <GeneralCharacterCard general={resultData} />
           <div className="card !max-w-none">
             <div className="text-center">
@@ -720,6 +751,7 @@ export default function FreeGeneratorPage() {
     if (schemaId === 'general-scenario') {
       return (
         <>
+          {nonStreamReasoningNode}
           <div className="card !max-w-none">
             <h2 className="text-2xl font-bold text-center mb-4">{resultData.title || '通用情景卡'}</h2>
             <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
@@ -741,18 +773,21 @@ export default function FreeGeneratorPage() {
 
     // scenario（结构化）
     return (
-      <div className="card !max-w-none">
-        <h2 className="text-2xl font-bold text-center mb-4">{resultData.title || '结构化情景'}</h2>
-        <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
-          <pre>{JSON.stringify(resultData, null, 2)}</pre>
+      <>
+        {nonStreamReasoningNode}
+        <div className="card !max-w-none">
+          <h2 className="text-2xl font-bold text-center mb-4">{resultData.title || '结构化情景'}</h2>
+          <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
+            <pre>{JSON.stringify(resultData, null, 2)}</pre>
+          </div>
+          <p className="mt-3 text-xs text-gray-500 text-center">
+            提示：自由生成产物不会包含签名，因此会被视为非原生卡。
+          </p>
+          <div className="mt-4 text-center">
+            {renderResultActions(resultData, kind)}
+          </div>
         </div>
-        <p className="mt-3 text-xs text-gray-500 text-center">
-          提示：自由生成产物不会包含签名，因此会被视为非原生卡。
-        </p>
-        <div className="mt-4 text-center">
-          {renderResultActions(resultData, kind)}
-        </div>
-      </div>
+      </>
     );
   };
 

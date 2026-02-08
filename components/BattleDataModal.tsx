@@ -71,6 +71,26 @@ const getCardTagIds = (card: any): string[] => {
   return [];
 };
 
+const resolveQuestionnaireNativeAllowed = (card: any): boolean => {
+  if (!card || card.type !== 'questionnaire') return false;
+  if (typeof card.nativeAllowed === 'boolean') return card.nativeAllowed;
+  if (typeof card.native_allowed === 'boolean') return card.native_allowed;
+
+  let payload = card.data;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return false;
+    }
+  }
+
+  if (!payload || typeof payload !== 'object') return false;
+  if (typeof (payload as any).nativeAllowed === 'boolean') return (payload as any).nativeAllowed;
+  if (typeof (payload as any).native_allowed === 'boolean') return (payload as any).native_allowed;
+  return false;
+};
+
 type PvpHandTabCard = {
   snapshotId: string;
   name: string;
@@ -131,6 +151,8 @@ interface Filters {
   maxFavorites: string;
   recommendedOnly: boolean;
   roleType: '' | 'magical-girl' | 'canshou' | 'general';
+  nativeOnly: boolean;
+  nativeAllowedOnly: boolean;
 }
 
 type ApiTag = {
@@ -193,7 +215,9 @@ export default function BattleDataModal({
     minFavorites: '',
     maxFavorites: '',
     recommendedOnly: false,
-    roleType: ''
+    roleType: '',
+    nativeOnly: false,
+    nativeAllowedOnly: false,
   }), []);
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [activeFilters, setActiveFilters] = useState<Filters>(initialFilters);
@@ -216,6 +240,21 @@ export default function BattleDataModal({
   }, []);
 
   const publicFilters = useMemo(() => buildPublicFilters(activeFilters, activeTab), [activeFilters, activeTab, buildPublicFilters]);
+  const normalizeFiltersBySelectedType = useCallback((source: Filters): Filters => {
+    let next = source;
+
+    if (selectedType !== 'character' && next.roleType) {
+      next = { ...next, roleType: '' };
+    }
+    if (selectedType === 'questionnaire' && next.nativeOnly) {
+      next = { ...next, nativeOnly: false };
+    }
+    if (selectedType !== 'questionnaire' && next.nativeAllowedOnly) {
+      next = { ...next, nativeAllowedOnly: false };
+    }
+
+    return next;
+  }, [selectedType]);
 
   const effectiveTabs = useMemo<BattleDataTab[]>(() => {
     const candidates = Array.isArray(visibleTabs) && visibleTabs.length > 0
@@ -399,6 +438,8 @@ export default function BattleDataModal({
         if (currentFilters.minFavorites) params.append('minFavorites', currentFilters.minFavorites);
         if (currentFilters.maxFavorites) params.append('maxFavorites', currentFilters.maxFavorites);
         if (currentFilters.recommendedOnly) params.append('recommendedOnly', '1');
+        if (currentFilters.nativeOnly) params.append('nativeOnly', '1');
+        if (currentFilters.nativeAllowedOnly) params.append('nativeAllowedOnly', '1');
       }
 
       const response = await fetch(`/api/public-data-cards?${params}`, { signal: abortController.signal });
@@ -613,13 +654,11 @@ export default function BattleDataModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, selectedType, isAuthenticated]);
 
-  // 切换到情景时清除角色类型筛选，避免误筛
+  // 切换数据卡类型时，清除不适配当前类型的筛选项，避免误筛
   useEffect(() => {
-    if (selectedType !== 'character') {
-      setFilters((prev) => ({ ...prev, roleType: '' }));
-      setActiveFilters((prev) => ({ ...prev, roleType: '' }));
-    }
-  }, [selectedType]);
+    setFilters((prev) => normalizeFiltersBySelectedType(prev));
+    setActiveFilters((prev) => normalizeFiltersBySelectedType(prev));
+  }, [normalizeFiltersBySelectedType]);
 
   const selectedIdSet = useMemo(() => new Set((selectedCardIds || []).filter((x): x is string => typeof x === 'string' && Boolean(x))), [selectedCardIds]);
   const selectedCount = typeof selectedCountOverride === 'number' ? selectedCountOverride : selectedIdSet.size;
@@ -823,8 +862,12 @@ export default function BattleDataModal({
 
   // 【新增】应用高级筛选
   const applyFilters = () => {
+    const nextFilters = normalizeFiltersBySelectedType(filters);
+    if (nextFilters !== filters) {
+      setFilters(nextFilters);
+    }
     setCurrentPage(1);
-    setActiveFilters(filters);
+    setActiveFilters(nextFilters);
   };
 
   // 【新增】重置高级筛选
@@ -1148,7 +1191,9 @@ export default function BattleDataModal({
       publicFilters.minFavorites ||
       publicFilters.maxFavorites ||
       publicFilters.recommendedOnly ||
-      publicFilters.roleType
+      publicFilters.roleType ||
+      publicFilters.nativeOnly ||
+      publicFilters.nativeAllowedOnly
     );
   }, [publicFilters]);
 
@@ -1373,6 +1418,28 @@ export default function BattleDataModal({
                     </select>
                   </div>
                 </div>
+                <div className="flex flex-wrap items-center gap-4">
+                  <label className="inline-flex items-center gap-2 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      name="nativeOnly"
+                      checked={filters.nativeOnly}
+                      onChange={handleFilterChange}
+                      disabled={selectedType === 'questionnaire'}
+                    />
+                    <span className={selectedType === 'questionnaire' ? 'text-gray-400' : ''}>仅看原生</span>
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      name="nativeAllowedOnly"
+                      checked={filters.nativeAllowedOnly}
+                      onChange={handleFilterChange}
+                      disabled={selectedType !== 'questionnaire'}
+                    />
+                    <span className={selectedType !== 'questionnaire' ? 'text-gray-400' : ''}>仅看原生许可</span>
+                  </label>
+                </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button onClick={resetFilters} className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">重置</button>
                   <button onClick={applyFilters} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700">应用筛选</button>
@@ -1540,6 +1607,7 @@ export default function BattleDataModal({
 	                    const quickToggleTitle = isSelected
 	                      ? (canToggle ? '移除' : '当前模式不支持移除')
 	                      : (itemDisabled ? '已达到上限' : '加入');
+                      const questionnaireNativeAllowed = resolveQuestionnaireNativeAllowed(card);
 
 		                  return (
 		                    <div
@@ -1588,6 +1656,7 @@ export default function BattleDataModal({
                           techLevel={cardMetaById[card.id]?.techLevel ?? null}
                           strictTier={cardMetaById[card.id]?.strictTier ?? null}
                           isNative={cardMetaById[card.id]?.isNative ?? null}
+                          questionnaireNativeAllowed={questionnaireNativeAllowed}
 	                        isFavorited={isFavorited}
 	                        canFavorite={enableFavorite}
 	                        isRecommended={card.is_recommended === 1}

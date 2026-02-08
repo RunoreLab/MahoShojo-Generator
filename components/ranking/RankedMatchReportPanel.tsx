@@ -1,3 +1,5 @@
+// 严格排位数据面板，原先会在用户满足严格排位设置并进行匹配时显示，目前由于移除了匹配功能和排名数据限制在 Top 300 而暂时不再使用。
+
 'use client';
 
 import Link from 'next/link';
@@ -73,6 +75,8 @@ const formatIneligibleReasons = (reasons: string[]): string => {
     'has-user-guidance': '存在故事引导',
     'season-user-guidance-missing': '缺少赛季故事引导',
     'season-user-guidance-mismatch': '故事引导不符合赛季规则',
+    'season-questionnaire-lore-not-allowed': '存在问卷/设定卡 Lore（赛季规则不允许）',
+    'season-questionnaire-lore-mismatch': '问卷/设定卡 Lore 不符合赛季规则',
     'season-scenario-missing': '缺少主情景（赛季规则）',
     'season-scenario-preset-mismatch': '主情景不是赛季指定预设',
     'season-aux-scenarios-not-allowed': '存在辅助情景（赛季规则不允许）',

@@ -159,6 +159,26 @@ const getTimeValue = (value: unknown): number => {
   return 0;
 };
 
+const resolveQuestionnaireNativeAllowed = (card: any): boolean => {
+  if (!card || card.type !== 'questionnaire') return false;
+  if (typeof card.nativeAllowed === 'boolean') return card.nativeAllowed;
+  if (typeof card.native_allowed === 'boolean') return card.native_allowed;
+
+  let payload = card.data;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return false;
+    }
+  }
+
+  if (!payload || typeof payload !== 'object') return false;
+  if (typeof (payload as any).nativeAllowed === 'boolean') return (payload as any).nativeAllowed;
+  if (typeof (payload as any).native_allowed === 'boolean') return (payload as any).native_allowed;
+  return false;
+};
+
 export default function DataCardsModal({
   isOpen,
   onClose,
@@ -640,6 +660,7 @@ export default function DataCardsModal({
 
                       const hot = isHotCard({ favorite_count: card.favorite_count, usage_count: card.usage_count });
                       const hasPendingUpdate = Boolean(card.pending_data);
+                      const questionnaireNativeAllowed = resolveQuestionnaireNativeAllowed(card);
 
                       return editingCard?.id === card.id ? (
                         <EditCardForm
@@ -668,6 +689,7 @@ export default function DataCardsModal({
                           techLevel={cardMetaById[card.id]?.techLevel ?? null}
                           strictTier={cardMetaById[card.id]?.strictTier ?? null}
                           isNative={cardMetaById[card.id]?.isNative ?? null}
+                          questionnaireNativeAllowed={questionnaireNativeAllowed}
                           hot={hot}
                           pending={hasPendingUpdate}
                           author={author}

@@ -96,6 +96,31 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
     ? readNarrativeHistoryRaw
     : (typeof readNarrativeHistoryRaw === 'number' && Number.isFinite(readNarrativeHistoryRaw) ? readNarrativeHistoryRaw !== 0 : null);
 
+  const questionnaireLoreEnabledRaw = parsedExtraJson?.questionnaireLoreEnabled;
+  const questionnaireLoreEnabled = typeof questionnaireLoreEnabledRaw === 'boolean'
+    ? questionnaireLoreEnabledRaw
+    : (typeof questionnaireLoreEnabledRaw === 'number' && Number.isFinite(questionnaireLoreEnabledRaw) ? questionnaireLoreEnabledRaw !== 0 : null);
+
+  const seasonQuestionnaireLoreAllowedRaw = parsedExtraJson?.seasonQuestionnaireLoreAllowed;
+  const seasonQuestionnaireLoreAllowed = typeof seasonQuestionnaireLoreAllowedRaw === 'boolean'
+    ? seasonQuestionnaireLoreAllowedRaw
+    : (typeof seasonQuestionnaireLoreAllowedRaw === 'number' && Number.isFinite(seasonQuestionnaireLoreAllowedRaw)
+      ? seasonQuestionnaireLoreAllowedRaw !== 0
+      : null);
+
+  const seasonQuestionnaireLorePresetIds = Array.isArray(parsedExtraJson?.seasonQuestionnaireLorePresetIds)
+    ? (parsedExtraJson?.seasonQuestionnaireLorePresetIds as unknown[])
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter((value) => Boolean(value))
+        .slice(0, 20)
+    : [];
+  const questionnaireLoreIds = Array.isArray(parsedExtraJson?.questionnaireLoreIds)
+    ? (parsedExtraJson?.questionnaireLoreIds as unknown[])
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter((value) => Boolean(value))
+        .slice(0, 20)
+    : [];
+
   const resolvedModelOverride = typeof parsedExtraJson?.resolvedModelOverride === 'string'
     ? parsedExtraJson.resolvedModelOverride.trim()
     : '';
@@ -150,6 +175,23 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
     else if (actual !== seasonStoryGuidance) reasons.push('season-user-guidance-mismatch');
   } else {
     if (snapshot.hasUserGuidance !== 0) reasons.push('has-user-guidance');
+  }
+
+  if (seasonQuestionnaireLorePresetIds.length > 0) {
+    const requiredSet = new Set(seasonQuestionnaireLorePresetIds);
+    const actualSet = new Set(questionnaireLoreIds);
+    let ok = requiredSet.size === actualSet.size;
+    if (ok) {
+      for (const id of requiredSet) {
+        if (!actualSet.has(id)) {
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (!ok) reasons.push('season-questionnaire-lore-mismatch');
+  } else if (questionnaireLoreEnabled === true && seasonQuestionnaireLoreAllowed !== true) {
+    reasons.push('season-questionnaire-lore-not-allowed');
   }
 
   if (requiredMode === 'scenario') {

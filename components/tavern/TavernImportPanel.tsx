@@ -2,6 +2,7 @@ import { useRouter } from 'next/router';
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
+import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import CanshouCard from '@/components/CanshouCard';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
@@ -16,13 +17,14 @@ import { buildCustomProviderPayload, isUsingUserProvidedKey } from '@/lib/ai/cus
 import { authStorage } from '@/lib/auth';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
+import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import { useCooldown } from '@/lib/cooldown';
 import { createBlankDataCard, type DataCardTemplate } from '@/lib/data-card-converter';
 import { formatKilobytes, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
 import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMarkdown } from '@/lib/stream/markdown-card';
-import { readTextStreamFromResponse } from '@/lib/stream/read-text-stream';
+import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import {
   buildTavernCloudSavePayload,
   buildTavernAiAttachment,
@@ -36,6 +38,7 @@ import {
 } from '@/lib/tavern-card';
 import { buildTavernScenarioFragment } from '@/lib/tavern-card/scenario';
 import type { CanshouData, GeneralCharacterData, GeneralScenarioData, MagicalGirlData, ScenarioData } from '@/lib/schemas';
+import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import { useAuth } from '@/lib/useAuth';
 
 import { TavernCardPreview } from './TavernCardPreview';
@@ -376,6 +379,8 @@ export function TavernImportPanel() {
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [streamingMarkdown, setStreamingMarkdown] = useState<string | null>(null);
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
+  const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
   const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
   const tavernAiCooldownMs = isUserCustomKey ? USER_PROVIDED_KEY_COOLDOWN_MS : OFFICIAL_KEY_MAX_AI_COOLDOWN_MS;
   const tavernAiCooldownKey = isUserCustomKey ? 'tavernConvertCooldown:custom' : 'tavernConvertCooldown:system';
@@ -524,6 +529,7 @@ export function TavernImportPanel() {
   const resetGeneratedPreview = () => {
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
+    setStreamingReasoning(null);
     setCopyStatus('idle');
   };
 
@@ -531,6 +537,7 @@ export function TavernImportPanel() {
     setUserProviderConfig(config);
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
+    setStreamingReasoning(null);
     setCopyStatus('idle');
   }, []);
 
@@ -568,6 +575,7 @@ export function TavernImportPanel() {
     dispatch({ type: 'parsing' });
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
+    setStreamingReasoning(null);
     setCopyStatus('idle');
     setShowImageModal(false);
     setSavedImageUrl(null);
@@ -654,11 +662,13 @@ export function TavernImportPanel() {
       if (generationMode === 'stream') {
         setStreamingMarkdown('');
         setStreamedGeneralCard(null);
+        setStreamingReasoning(null);
+        setNonStreamReasoning(null);
         setCopyStatus('idle');
 
-        const response = await fetch('/api/tavern/convert-stream', {
+        const response = await fetch('/api/tavern/convert-stream?format=sse', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...activityHeaders },
+          headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...activityHeaders },
           body: JSON.stringify(requestBody),
         });
 
@@ -684,9 +694,10 @@ export function TavernImportPanel() {
           throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 转换失败' }));
         }
 
-        const markdown = await readTextStreamFromResponse(response, {
+        const { text: markdown } = await readTextAndReasoningStreamFromResponse(response, {
           label: '酒馆导入（流式）',
           onText: (text) => setStreamingMarkdown(text),
+          onReasoning: (reasoning) => setStreamingReasoning(reasoning),
         });
 
         const isScenarioTarget = state.targetTemplate === 'scenario' || state.targetTemplate === 'general-scenario';
@@ -714,9 +725,14 @@ export function TavernImportPanel() {
         return { ...card, _tavern: tavernPayload };
       }
 
+      setNonStreamReasoning(null);
       const response = await fetch('/api/tavern/convert', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...activityHeaders },
+        headers: {
+          'Content-Type': 'application/json',
+          [AI_META_REQUEST_HEADER]: AI_META_REQUEST_VALUE,
+          ...activityHeaders,
+        },
         body: JSON.stringify(requestBody),
       });
 
@@ -735,8 +751,9 @@ export function TavernImportPanel() {
         throw new Error(formatHttpErrorMessage({ serverMessage, status: response.status, fallback: 'AI 转换失败' }));
       }
 
-      const generated = (await response.json()) as unknown;
+      const { data: generated, aiMeta } = await readJsonWithAiMeta<unknown>(response);
       const generatedRecord = typeof generated === 'object' && generated !== null ? (generated as Record<string, unknown>) : {};
+      setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       startCooldown(tavernAiCooldownMs);
       return { ...generatedRecord, _tavern: tavernPayload };
     }
@@ -1348,6 +1365,17 @@ export function TavernImportPanel() {
                     )}
                   </div>
                 </div>
+                {state.convertMode === 'ai' && generationMode === 'stream' && (
+                  <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
+                )}
+                {state.convertMode === 'ai' && generationMode === 'non-stream' && nonStreamReasoning && (
+                  <AiReasoningPanel
+                    reasoning={nonStreamReasoning}
+                    status={nonStreamReasoning.status}
+                    displayMode="content-only"
+                    compact
+                  />
+                )}
 
                 {outputDataCard ? (
                   <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
@@ -1494,8 +1522,8 @@ export function TavernImportPanel() {
 
               {outputDataCard && tachiePrompt.trim() ? (
                 <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-                  <div className="text-sm font-semibold text-pink-700">生成立绘（LibLib，可选）</div>
-                  <div className="mt-2 text-xs text-gray-600">提示：立绘生成会直接调用 LibLib API；凭据仅存于本地。</div>
+                  <div className="text-sm font-semibold text-pink-700">生成立绘（LibLib / ModelScope，可选）</div>
+                  <div className="mt-2 text-xs text-gray-600">提示：立绘生成会直接调用对应平台 API；凭据仅存于本地。</div>
                   <div className="mt-3">
                     <TachieGenerator prompt={tachiePrompt} />
                   </div>

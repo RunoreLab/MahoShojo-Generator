@@ -1,8 +1,23 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { generateTachieWithProgress, type TachieGenerationResult } from "@/lib/tachie/manager";
+import { generateTachieWithProgress, type TachieGenerationResult, type TachieSource } from "@/lib/tachie/manager";
 import { ErrorMessage } from "@/components/ErrorMessage";
+
+const MODELSCOPE_SIZE_OPTIONS = [
+  { value: "928x1664", label: "16:9 竖屏（928×1664）" },
+  { value: "1664x928", label: "16:9 横屏（1664×928）" },
+  { value: "1328x1328", label: "正方形（1328×1328）" },
+  { value: "1104x1472", label: "4:3 竖屏（1104×1472）" },
+  { value: "1472x1104", label: "4:3 横屏（1472×1104）" },
+] as const;
+
+type ModelScopePresetSize = (typeof MODELSCOPE_SIZE_OPTIONS)[number]["value"];
+
+const DEFAULT_MODELSCOPE_SIZE: ModelScopePresetSize = "1328x1328";
+
+const isModelScopePresetSize = (value: unknown): value is ModelScopePresetSize =>
+  typeof value === "string" && MODELSCOPE_SIZE_OPTIONS.some((option) => option.value === value);
 
 interface TachieGeneratorProps {
   prompt: string;
@@ -27,8 +42,12 @@ export default function TachieGenerator({
   onImageUrlChange,
   onResult,
 }: TachieGeneratorProps) {
+  const [source, setSource] = useState<TachieSource>("modelscope");
   const [accessKey, setAccessKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
+  const [modelscopeToken, setModelscopeToken] = useState("");
+  const [modelscopeModel, setModelscopeModel] = useState("Stonego/XiabanmostyleV3");
+  const [modelscopeSize, setModelscopeSize] = useState<ModelScopePresetSize>(DEFAULT_MODELSCOPE_SIZE);
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<TachieGenerationResult | null>(null);
   const [rememberCredentials, setRememberCredentials] = useState(false);
@@ -49,9 +68,22 @@ export default function TachieGenerator({
         const savedCredentials = localStorage.getItem(CREDENTIALS_KEY);
         if (savedCredentials) {
           try {
-            const { accessKey: savedAccessKey, secretKey: savedSecretKey } = JSON.parse(savedCredentials);
-            setAccessKey(savedAccessKey || '');
-            setSecretKey(savedSecretKey || '');
+            const parsed = JSON.parse(savedCredentials) as Record<string, unknown>;
+            if (parsed.source === 'liblib') {
+              setSource('liblib');
+            } else {
+              setSource('modelscope');
+            }
+
+            setAccessKey(typeof parsed.accessKey === 'string' ? parsed.accessKey : '');
+            setSecretKey(typeof parsed.secretKey === 'string' ? parsed.secretKey : '');
+            setModelscopeToken(typeof parsed.modelscopeToken === 'string' ? parsed.modelscopeToken : '');
+            setModelscopeModel(
+              typeof parsed.modelscopeModel === 'string' && parsed.modelscopeModel.trim()
+                ? parsed.modelscopeModel
+                : 'Stonego/XiabanmostyleV3'
+            );
+            setModelscopeSize(isModelScopePresetSize(parsed.modelscopeSize) ? parsed.modelscopeSize : DEFAULT_MODELSCOPE_SIZE);
           } catch (error) {
             console.error('Failed to parse saved credentials:', error);
           }
@@ -63,10 +95,14 @@ export default function TachieGenerator({
   // 保存凭据到localStorage
   const saveCredentials = () => {
     if (typeof window !== 'undefined') {
-      if (rememberCredentials && accessKey.trim() && secretKey.trim()) {
+      if (rememberCredentials) {
         localStorage.setItem(CREDENTIALS_KEY, JSON.stringify({
+          source,
           accessKey: accessKey.trim(),
-          secretKey: secretKey.trim()
+          secretKey: secretKey.trim(),
+          modelscopeToken: modelscopeToken.trim(),
+          modelscopeModel: modelscopeModel.trim() || 'Stonego/XiabanmostyleV3',
+          modelscopeSize,
         }));
         localStorage.setItem(REMEMBER_KEY, 'true');
       } else {
@@ -82,16 +118,35 @@ export default function TachieGenerator({
       localStorage.removeItem(CREDENTIALS_KEY);
       localStorage.setItem(REMEMBER_KEY, 'false');
       setRememberCredentials(false);
+      setSource('modelscope');
       setAccessKey('');
       setSecretKey('');
+      setModelscopeToken('');
+      setModelscopeModel('Stonego/XiabanmostyleV3');
+      setModelscopeSize(DEFAULT_MODELSCOPE_SIZE);
     }
   };
 
+  const requiredCredentialsReady = source === 'liblib'
+    ? Boolean(accessKey.trim() && secretKey.trim())
+    : Boolean(modelscopeToken.trim());
+
   const handleGenerate = async () => {
-    if (!accessKey.trim() || !secretKey.trim()) {
+    if (source === 'liblib' && (!accessKey.trim() || !secretKey.trim())) {
       const nextResult = {
         success: false,
-        error: "请填写 Access Key 和 Secret Key",
+        error: "请填写 LibLib Access Key 和 Secret Key",
+      } satisfies TachieGenerationResult;
+      setResult(nextResult);
+      onResult?.(nextResult);
+      onImageUrlChange?.(null);
+      return;
+    }
+
+    if (source === 'modelscope' && !modelscopeToken.trim()) {
+      const nextResult = {
+        success: false,
+        error: "请填写 ModelScope Token",
       } satisfies TachieGenerationResult;
       setResult(nextResult);
       onResult?.(nextResult);
@@ -122,9 +177,12 @@ export default function TachieGenerator({
 
     try {
       const generationResult = await generateTachieWithProgress({
-        source: "liblib",
+        source,
         accessKey: accessKey.trim(),
         secretKey: secretKey.trim(),
+        modelscopeToken: modelscopeToken.trim(),
+        modelscopeModel: modelscopeModel.trim() || undefined,
+        modelscopeSize,
         prompt: normalizedPrompt,
         mode,
         workflowUuid,
@@ -156,53 +214,133 @@ export default function TachieGenerator({
 
   return (
     <div>
-      <div style={{ marginBottom: '1.5rem' }}>
-        <p className="text-center text-sm text-gray-500 mt-4 leading-relaxed">
-          请前往&nbsp;
-          <a
-            href="https://www.liblib.art/apis"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="footer-link"
+      <div className="input-group">
+        <label className="input-label">图片生成来源</label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setSource('modelscope')}
+            disabled={isGenerating}
+            className={source === 'modelscope' ? 'generate-button !mb-0 !py-2 !px-4 !text-sm' : 'bg-white border border-pink-200 text-pink-600 rounded-lg px-4 py-2 text-sm font-medium hover:bg-pink-50 disabled:opacity-50'}
+          >
+            ModelScope
+          </button>
+          <button
+            type="button"
+            onClick={() => setSource('liblib')}
+            disabled={isGenerating}
+            className={source === 'liblib' ? 'generate-button !mb-0 !py-2 !px-4 !text-sm' : 'bg-white border border-pink-200 text-pink-600 rounded-lg px-4 py-2 text-sm font-medium hover:bg-pink-50 disabled:opacity-50'}
           >
             LibLib
-          </a>
-          &nbsp;获取 Access Key 和 Secret Key
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '1.5rem' }}>
+        <p className="text-center text-sm text-gray-500 mt-4 leading-relaxed">
+          请前往
+          {source === 'liblib' ? (
+            <>
+              &nbsp;
+              <a
+                href="https://www.liblib.art/apis"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="footer-link"
+              >
+                LibLib
+              </a>
+              &nbsp;获取 Access Key 和 Secret Key
+            </>
+          ) : (
+            <>
+              &nbsp;
+              <a
+                href="https://modelscope.cn/my/access/token"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="footer-link"
+              >
+                ModelScope
+              </a>
+              &nbsp;获取 Token
+            </>
+          )}
           <br />
           本系统代码已开源，不会存储您的凭据，请放心食用~
         </p>
       </div>
 
       <div style={{ marginBottom: '1.5rem' }}>
-        <div className="input-group">
-          <label htmlFor="accessKey" className="input-label">
-            LibLib Access Key
-          </label>
-          <input
-            id="accessKey"
-            type="password"
-            value={accessKey}
-            onChange={(e) => setAccessKey(e.target.value)}
-            placeholder="输入你的 Access Key"
-            className="input-field"
-            disabled={isGenerating}
-          />
-        </div>
+        {source === 'liblib' ? (
+          <>
+            <div className="input-group">
+              <label htmlFor="accessKey" className="input-label">
+                LibLib Access Key
+              </label>
+              <input
+                id="accessKey"
+                type="password"
+                value={accessKey}
+                onChange={(e) => setAccessKey(e.target.value)}
+                placeholder="输入你的 Access Key"
+                className="input-field"
+                disabled={isGenerating}
+              />
+            </div>
 
-        <div className="input-group">
-          <label htmlFor="secretKey" className="input-label">
-            LibLib Secret Key
-          </label>
-          <input
-            id="secretKey"
-            type="password"
-            value={secretKey}
-            onChange={(e) => setSecretKey(e.target.value)}
-            placeholder="输入你的 Secret Key"
-            className="input-field"
-            disabled={isGenerating}
-          />
-        </div>
+            <div className="input-group">
+              <label htmlFor="secretKey" className="input-label">
+                LibLib Secret Key
+              </label>
+              <input
+                id="secretKey"
+                type="password"
+                value={secretKey}
+                onChange={(e) => setSecretKey(e.target.value)}
+                placeholder="输入你的 Secret Key"
+                className="input-field"
+                disabled={isGenerating}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="input-group">
+              <label htmlFor="modelscopeToken" className="input-label">
+                ModelScope Token
+              </label>
+              <input
+                id="modelscopeToken"
+                type="password"
+                value={modelscopeToken}
+                onChange={(e) => setModelscopeToken(e.target.value)}
+                placeholder="输入你的 ModelScope Token"
+                className="input-field"
+                disabled={isGenerating}
+              />
+            </div>
+
+            <div className="input-group">
+              <label htmlFor="modelscopeSize" className="input-label">
+                图片尺寸
+              </label>
+              <select
+                id="modelscopeSize"
+                value={modelscopeSize}
+                onChange={(e) => setModelscopeSize(e.target.value as ModelScopePresetSize)}
+                className="input-field"
+                disabled={isGenerating}
+              >
+                {MODELSCOPE_SIZE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
       </div>
 
       {/* 记住凭据选项 */}
@@ -216,7 +354,7 @@ export default function TachieGenerator({
           />
           在本地记住我的凭据，方便下次使用
         </label>
-        {rememberCredentials && (accessKey || secretKey) && (
+        {rememberCredentials && (accessKey || secretKey || modelscopeToken || modelscopeModel || modelscopeSize) && (
           <button
             type="button"
             onClick={clearSavedCredentials}
@@ -229,10 +367,10 @@ export default function TachieGenerator({
 
       <button
         onClick={handleGenerate}
-        disabled={isGenerating || !accessKey.trim() || !secretKey.trim() || !prompt.trim()}
+        disabled={isGenerating || !requiredCredentialsReady || !prompt.trim()}
         className="generate-button"
       >
-        {isGenerating ? "立绘生成中，请稍后捏 (≖ᴗ≖)✧✨" : "✨ 生成立绘 ✨"}
+        {isGenerating ? "立绘生成中，请稍后捏 (≖ᴗ≖)✧✨" : `✨ 使用 ${source === 'liblib' ? 'LibLib' : 'ModelScope'} 生成立绘 ✨`}
       </button>
 
       {isGenerating && (
@@ -242,7 +380,7 @@ export default function TachieGenerator({
               {progressStatus || "立绘生成中，请稍后捏 (≖ᴗ≖)✧"}
             </span>
           </div>
-          
+
           {/* 进度条 */}
           <div className="w-full h-2 rounded bg-pink-100/60 overflow-hidden mb-2">
             <div style={{

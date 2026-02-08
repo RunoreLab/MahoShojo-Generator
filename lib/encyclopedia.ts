@@ -194,6 +194,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['JSON', '校验失败', '缺字段', '截断'],
   },
   {
+    slug: 'ai-reasoning-visibility',
+    title: 'AI 思考过程查看说明（在哪里看）',
+    summary: '各页面查看 AI 思考摘要与详情的位置、状态含义及常见疑问。',
+    markdownPath: '/encyclopedia/ai-reasoning-visibility.md',
+    categoryId: 'ai',
+    keywords: ['AI 思考', 'reasoning', '思考过程', '推理内容', '在哪看', '摘要'],
+  },
+  {
     slug: 'data-card-errors',
     title: '数据卡问题：导入/解析/格式校验/签名',
     summary: '导入/解析失败、字段校验、templateId/version 不匹配等问题的排查清单。',

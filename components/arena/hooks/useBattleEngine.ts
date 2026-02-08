@@ -15,13 +15,46 @@ import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { precheckBattleReportForRedo, STREAM_TRUNCATED_BY_SENSITIVE_MARKER } from '@/lib/arena/redo-updates';
 import { extractStreamTelemetryMeta, extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
-import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
+import {
+  createStreamReadWithTimeout,
+  STREAM_READ_IDLE_TIMEOUT_MS,
+  STREAM_READ_TOTAL_TIMEOUT_MS,
+  StreamReadTimeoutError,
+} from '@/lib/stream/timeout';
 import { authStorage } from '@/lib/auth';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { resolveApiErrorMessage } from '@/lib/client/apiError';
 import { formatHttpErrorMessage } from '@/lib/client/httpError';
+import { appendReasoningDelta, normalizeReasoningSource, updateReasoningStatus } from '@/lib/ai/reasoning-normalizer';
+import type { AIReasoningSource } from '@/types/ai-reasoning';
 
 const sanitizeTextByShieldWords = (text: string): string => applyShieldWords(text).filteredText;
+
+const isStreamInterruptedError = (error: unknown): boolean => {
+  if (error instanceof StreamReadTimeoutError) return true;
+  if (!error) return false;
+  const errorRecord = error as { name?: unknown; message?: unknown };
+  const name = typeof errorRecord.name === 'string' ? errorRecord.name.toLowerCase() : '';
+  const message = typeof errorRecord.message === 'string' ? errorRecord.message.toLowerCase() : '';
+  if (name === 'aborterror' || name === 'streamreadtimeouterror') return true;
+  if (message.includes('流式读取超时') || message.includes('流式生成超时')) return true;
+  if (message.includes('timeout') || message.includes('timed out')) return true;
+  if (message.includes('aborted') || message.includes('中断')) return true;
+  return false;
+};
+
+const buildStreamInterruptedMessage = (details?: string): string => {
+  const tail = typeof details === 'string' && details.trim() ? `：${details.trim()}` : '';
+  return `⚠️ 战报流中断${tail}，请稍后再试。`;
+};
+
+const isServerInterruptedPayload = (payload: any, fallbackMessage: string): boolean => {
+  const status = typeof payload?.status === 'string' ? payload.status.trim().toLowerCase() : '';
+  if (status === 'aborted' || status === 'interrupted') return true;
+  if (payload?.interrupted === true) return true;
+  if (typeof payload?.errorCode === 'string' && payload.errorCode === 'stream_interrupted') return true;
+  return isStreamInterruptedError({ message: fallbackMessage });
+};
 
 const extractTitleFromBattleMarkdown = (markdown: string): string => {
   const lines = markdown.split(/\r?\n/).map((line) => line.trim());
@@ -113,6 +146,26 @@ const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
         })
         .filter((item): item is { characterName: string; guidance: string } => Boolean(item))
     : undefined,
+  aiReasoning: (() => {
+    const reasoning = report.aiReasoning;
+    if (!reasoning || typeof reasoning !== 'object') return reasoning;
+
+    const sanitizedParts = Array.isArray(reasoning.parts)
+      ? reasoning.parts.map((part) => ({
+          ...part,
+          text: typeof part?.text === 'string' ? sanitizeTextByShieldWords(part.text) : part?.text,
+        }))
+      : reasoning.parts;
+
+    return {
+      ...reasoning,
+      summary: typeof reasoning.summary === 'string' ? sanitizeTextByShieldWords(reasoning.summary) : reasoning.summary,
+      text: typeof reasoning.text === 'string' ? sanitizeTextByShieldWords(reasoning.text) : reasoning.text,
+      errorMessage:
+        typeof reasoning.errorMessage === 'string' ? sanitizeTextByShieldWords(reasoning.errorMessage) : reasoning.errorMessage,
+      parts: sanitizedParts,
+    };
+  })(),
 });
 
 const buildBattleBackupItems = (
@@ -256,6 +309,7 @@ export const useBattleEngine = () => {
   const setStreamAiUsage = useBattleSelector((state) => state.setStreamAiUsage);
   const setStreamAiModel = useBattleSelector((state) => state.setStreamAiModel);
   const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
+  const setStreamReasoning = useBattleSelector((state) => state.setStreamReasoning);
   const setStreamUpdateMetaDebug = useBattleSelector((state) => state.setStreamUpdateMetaDebug);
   const setLastGenerationId = useBattleSelector((state) => state.setLastGenerationId);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
@@ -334,6 +388,7 @@ export const useBattleEngine = () => {
     setStreamAiUsage(null);
     setStreamAiModel(null);
     setStreamNarrativeHistoryReadCount(null);
+    setStreamReasoning(null);
     setStreamUpdateMetaDebug(null);
     setLastGenerationId(null);
 
@@ -551,30 +606,44 @@ export const useBattleEngine = () => {
         return false;
       };
 
-      if (generationMode === 'stream') {
-        const abortController = new AbortController();
-        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+	      if (generationMode === 'stream') {
+	        const abortController = new AbortController();
+	        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
-	        try {
-	          setStreamCharacterGuidances(null);
-	          const debugSseQuery = (() => {
-	            try {
-	              if (typeof window === 'undefined') return '';
-	              const raw = new URLSearchParams(window.location.search).get('debugSse') || '';
-	              const normalized = raw.trim().toLowerCase();
-	              if (normalized === '1' || normalized === 'true') return '&debugSse=1';
-	              return '';
-	            } catch {
-	              return '';
-	            }
-	          })();
-	          const debugSseEnabled = Boolean(debugSseQuery);
-	          const response = await fetch(`/api/arena/generate-stream?format=sse${debugSseQuery}`, {
-	            method: 'POST',
-	            headers: requestHeaders,
-	            body: JSON.stringify(requestBody),
-	            signal: abortController.signal,
-	          });
+		        try {
+		          setStreamCharacterGuidances(null);
+              const streamTransportMode = settings.streamTransport === 'plain-stream' ? 'plain-stream' : 'sse';
+		          const debugSseQuery = (() => {
+		            try {
+		              if (typeof window === 'undefined') return '';
+		              const raw = new URLSearchParams(window.location.search).get('debugSse') || '';
+		              const normalized = raw.trim().toLowerCase();
+		              if (normalized === '1' || normalized === 'true') return 'debugSse=1';
+		              return '';
+		            } catch {
+		              return '';
+		            }
+		          })();
+		          const debugSseEnabled = streamTransportMode === 'sse' && Boolean(debugSseQuery);
+              const query = new URLSearchParams();
+              if (streamTransportMode === 'sse') {
+                query.set('format', 'sse');
+              }
+              if (debugSseQuery) {
+                query.set('debugSse', '1');
+              }
+              const endpoint = `/api/arena/generate-stream${query.toString() ? `?${query.toString()}` : ''}`;
+              if (streamTransportMode === 'sse') {
+                requestHeaders.Accept = 'text/event-stream';
+              } else {
+                delete requestHeaders.Accept;
+              }
+		          const response = await fetch(endpoint, {
+		            method: 'POST',
+		            headers: requestHeaders,
+		            body: JSON.stringify(requestBody),
+		            signal: abortController.signal,
+		          });
 
           if (!response.ok) {
             const text = await response.text();
@@ -683,13 +752,16 @@ export const useBattleEngine = () => {
             }
           }
 
-          const decoder = new TextDecoder();
-          let accumulatedText = '';
-          let shouldAbort = false;
-          let metaOverrideFromSse:
-            | {
-              report?: { headline?: string; winner?: string };
-              impacts?: Array<{ characterName: string; impact?: string; currentStateSummary?: string }>;
+	          const decoder = new TextDecoder();
+	          let accumulatedText = '';
+	          let shouldAbort = false;
+	          let isInterruptedAbort = false;
+	          let interruptedMessage: string | null = null;
+	          let sseEndedWithoutDone = false;
+	          let metaOverrideFromSse:
+	            | {
+	              report?: { headline?: string; winner?: string };
+	              impacts?: Array<{ characterName: string; impact?: string; currentStateSummary?: string }>;
             }
             | undefined;
           const shouldTerminateByTelemetry = (text: string) => {
@@ -779,6 +851,36 @@ export const useBattleEngine = () => {
               return { event, data: dataLines.join('\n') };
             };
 
+            const resolveReasoningSource = (value: unknown): AIReasoningSource => {
+              const normalized = normalizeReasoningSource(value);
+              return normalized === 'unknown' ? 'sdk' : normalized;
+            };
+
+            const appendReasoningChunkToStore = (chunk: string, source: AIReasoningSource) => {
+              const previous = useBattleStore.getState().streamReasoning;
+              const next = appendReasoningDelta(previous, sanitizeTextByShieldWords(chunk), {
+                source,
+                status: 'thinking',
+              });
+              setStreamReasoning(next);
+            };
+
+            const markReasoningStatusInStore = (
+              nextStatus: 'thinking' | 'done' | 'error' | 'unavailable',
+              options?: { source?: AIReasoningSource; summary?: string | null; errorMessage?: string | null }
+            ) => {
+              const previous = useBattleStore.getState().streamReasoning;
+              const next = updateReasoningStatus(previous, {
+                status: nextStatus,
+                ...(options?.source ? { source: options.source } : {}),
+                ...(typeof options?.summary === 'string' || options?.summary === null
+                  ? { summary: options.summary }
+                  : {}),
+                ...(typeof options?.errorMessage === 'string' ? { errorMessage: options.errorMessage } : {}),
+              });
+              setStreamReasoning(next);
+            };
+
             const handleSensitiveIfNeeded = async () => {
               const { slice: sliceToCheck, startIndex: sliceStartIndex } = getIncrementalCheckSlice(accumulatedText);
               const sensitiveCheck = await quickCheck(sliceToCheck);
@@ -830,6 +932,41 @@ export const useBattleEngine = () => {
                 payload = null;
               }
 
+              if (event === 'reasoning') {
+                const source = resolveReasoningSource(payload?.source);
+                const chunk = typeof payload?.chunk === 'string' ? payload.chunk : '';
+                if (chunk) {
+                  appendReasoningChunkToStore(chunk, source);
+                } else {
+                  markReasoningStatusInStore('thinking', { source });
+                }
+                return;
+              }
+
+              if (event === 'reasoning_done') {
+                const source = resolveReasoningSource(payload?.source);
+                const statusValue = typeof payload?.status === 'string' ? payload.status : '';
+                const nextStatus =
+                  statusValue === 'unavailable'
+                    ? 'unavailable'
+                    : statusValue === 'error'
+                      ? 'error'
+                      : 'done';
+                const summary =
+                  typeof payload?.summary === 'string' ? sanitizeTextByShieldWords(payload.summary) : undefined;
+                const errorMessage =
+                  typeof payload?.errorMessage === 'string'
+                    ? sanitizeTextByShieldWords(payload.errorMessage)
+                    : undefined;
+
+                markReasoningStatusInStore(nextStatus, {
+                  source,
+                  ...(typeof summary === 'string' ? { summary } : {}),
+                  ...(typeof errorMessage === 'string' ? { errorMessage } : {}),
+                });
+                return;
+              }
+
               if (event === 'markdown') {
                 const chunk = typeof payload?.chunk === 'string' ? payload.chunk : '';
                 if (chunk) {
@@ -843,6 +980,16 @@ export const useBattleEngine = () => {
               if (event === 'telemetry') {
                 const usage = payload?.usage ?? null;
                 setStreamAiUsage((usage ?? null) as NewsReport['aiUsage'] | null);
+                if (usage && typeof usage === 'object' && typeof usage.reasoningTokens === 'number') {
+                  const previous = useBattleStore.getState().streamReasoning;
+                  if (previous) {
+                    const next = {
+                      ...previous,
+                      reasoningTokens: usage.reasoningTokens,
+                    };
+                    setStreamReasoning(next);
+                  }
+                }
                 const narrativeCount =
                   typeof payload?.narrativeHistoryReadCount === 'number' ? payload.narrativeHistoryReadCount : null;
                 setStreamNarrativeHistoryReadCount(narrativeCount);
@@ -893,9 +1040,20 @@ export const useBattleEngine = () => {
                 return;
               }
 
-              if (event === 'error') {
-                const message = typeof payload?.error === 'string' ? payload.error : '服务器流式响应异常';
-                setError(`✨ 生成失败：${sanitizeTextByShieldWords(message)}`);
+	              if (event === 'error') {
+	                const message = typeof payload?.error === 'string' ? payload.error : '服务器流式响应异常';
+	                const interruptedFromServer = isServerInterruptedPayload(payload, message);
+	                if (interruptedFromServer) {
+	                  isInterruptedAbort = true;
+	                  interruptedMessage = sanitizeTextByShieldWords(message);
+	                  setError(buildStreamInterruptedMessage(interruptedMessage));
+	                } else {
+	                  setError(`✨ 生成失败：${sanitizeTextByShieldWords(message)}`);
+	                }
+	                markReasoningStatusInStore('error', {
+	                  source: resolveReasoningSource(payload?.source),
+	                  errorMessage: sanitizeTextByShieldWords(message),
+	                });
                 shouldAbort = true;
                 sawDoneEvent = true;
                 try {
@@ -907,6 +1065,14 @@ export const useBattleEngine = () => {
               }
 
               if (event === 'done') {
+                const currentReasoning = useBattleStore.getState().streamReasoning;
+                if (!currentReasoning) {
+                  markReasoningStatusInStore('unavailable', { source: 'sdk' });
+                } else if (currentReasoning.status === 'thinking') {
+                  const hasReasoningText =
+                    typeof currentReasoning.text === 'string' && currentReasoning.text.trim().length > 0;
+                  markReasoningStatusInStore(hasReasoningText ? 'done' : 'unavailable');
+                }
                 sawDoneEvent = true;
                 return;
               }
@@ -976,10 +1142,14 @@ export const useBattleEngine = () => {
                 console.warn('SSE 调试：响应流为 0 字节（服务端可能提前结束，或中间层吞掉了流式内容）');
               } else if (sseEventsParsed === 0) {
                 console.warn('SSE 调试：收到 SSE 字节但未解析出任何事件（可能是分隔符/格式不符合 SSE）');
-              }
-            }
-          } else {
-            while (true) {
+	              }
+	            }
+
+	            if (!shouldAbort && !sawDoneEvent) {
+	              sseEndedWithoutDone = true;
+	            }
+	          } else {
+	            while (true) {
               const { value, done } = await readWithTimeout(reader);
               if (done) {
                 break;
@@ -1047,13 +1217,25 @@ export const useBattleEngine = () => {
               if (shouldAbort) {
                 break;
               }
-            }
-          }
+	            }
+	          }
 
-          if (shouldAbort) {
-            setNewsReport(null);
-            return;
-          }
+	          if (sseEndedWithoutDone) {
+	            setError(buildStreamInterruptedMessage('连接结束但未收到 done 事件'));
+	            startCooldown();
+	            return;
+	          }
+
+	          if (shouldAbort) {
+	            if (isInterruptedAbort) {
+	              if (interruptedMessage) {
+	                setError(buildStreamInterruptedMessage(interruptedMessage));
+	              }
+	              startCooldown();
+	            }
+	            setNewsReport(null);
+	            return;
+	          }
 
           let markdownForUi = accumulatedText;
           let metaOverride =
@@ -1259,13 +1441,20 @@ export const useBattleEngine = () => {
       }
 
       startCooldown();
-    } catch (error) {
-      setError(`✨ 魔法失效了！${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
-      setNewsReport(null);
-    } finally {
-      setIsGenerating(false);
-      setIsStreaming(false);
-    }
+	    } catch (error) {
+	      const shouldTreatAsInterrupted = generationMode === 'stream' && isStreamInterruptedError(error);
+	      if (shouldTreatAsInterrupted) {
+	        const details = error instanceof Error ? error.message : '连接被中断';
+	        setError(buildStreamInterruptedMessage(details));
+	        startCooldown();
+	      } else {
+	        setError(`✨ 魔法失效了！${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
+	        setNewsReport(null);
+	      }
+	    } finally {
+	      setIsGenerating(false);
+	      setIsStreaming(false);
+	    }
   }, [
     isCooldown,
     remainingTime,
@@ -1296,6 +1485,7 @@ export const useBattleEngine = () => {
 	    setStreamAiUsage,
 	    setStreamAiModel,
 	    setStreamNarrativeHistoryReadCount,
+      setStreamReasoning,
       setStreamUpdateMetaDebug,
       setLastGenerationId,
 		    setCombatants,

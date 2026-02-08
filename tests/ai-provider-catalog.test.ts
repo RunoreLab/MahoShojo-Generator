@@ -35,4 +35,3 @@ describe('ai-provider-catalog', () => {
     expect(errors).toEqual([]);
   });
 });
-

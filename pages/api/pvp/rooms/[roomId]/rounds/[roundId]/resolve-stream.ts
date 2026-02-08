@@ -16,6 +16,7 @@ import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { extractStreamUpdateMeta, stripStreamUpdateMetaComment } from '@/lib/arena/stream-meta';
 import { extractWinnerFromText } from '@/lib/arena/battle-report-log-utils';
 import { createStreamReadWithTimeout, STREAM_READ_IDLE_TIMEOUT_MS, STREAM_READ_TOTAL_TIMEOUT_MS } from '@/lib/stream/timeout';
+import { buildReasoningSummary, normalizeReasoningSource } from '@/lib/ai/reasoning-normalizer';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { normalizeWinnerFromCandidates } from '@/lib/pvp/logic';
@@ -30,6 +31,7 @@ import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';
 import { createPvpWinnerVoteState } from '@/lib/pvp/winner-vote';
 import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 import { extractWinnerLineFromMarkdown, parsePvpWinnerFromText } from '@/lib/pvp/winner-parse';
+import type { AIReasoningSource, AIReasoningStatus } from '@/types/ai-reasoning';
 
 export const runtime = 'edge';
 
@@ -108,8 +110,33 @@ const buildMarkdownFromArrestReport = (report: ReturnType<typeof buildPvpSensiti
   return body ? `${head}\n${body}\n` : `${head}\n`;
 };
 
+const shouldUseClientSse = (req: Request): boolean => {
+  try {
+    const url = new URL(req.url);
+    if (url.searchParams.get('format') === 'sse') return true;
+  } catch {
+    // ignore
+  }
+  return (req.headers.get('accept') || '').toLowerCase().includes('text/event-stream');
+};
+
+const encodeSseEvent = (event: string, payload: unknown): Uint8Array => {
+  const encoder = new TextEncoder();
+  let data = 'null';
+  try {
+    data = JSON.stringify(payload ?? null);
+  } catch (error) {
+    data = JSON.stringify({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error ?? 'json stringify failed'),
+    });
+  }
+  return encoder.encode(`event: ${event}\ndata: ${data}\n\n`);
+};
+
 async function resolveStreamHandler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, { status: 405 });
+  const wantsClientSse = shouldUseClientSse(req);
 
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
@@ -230,6 +257,20 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
       const existing = JSON.parse(round.result_json);
       const reportMarkdown = typeof existing?.reportMarkdown === 'string' ? existing.reportMarkdown : '';
       if (reportMarkdown.trim()) {
+        if (wantsClientSse) {
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encodeSseEvent('markdown', { chunk: reportMarkdown }));
+              controller.enqueue(encodeSseEvent('done', { ok: true }));
+              controller.close();
+            },
+          });
+          return new Response(body, {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' },
+          });
+        }
+
         return new Response(reportMarkdown, {
           status: 200,
           headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
@@ -377,10 +418,11 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     req.headers.get('x-real-ip')?.trim() ||
     '';
 
-  const upstreamRes = await fetch(new URL('/api/arena/generate-stream', origin).toString(), {
+  const upstreamRes = await fetch(new URL('/api/arena/generate-stream?format=sse', origin).toString(), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
       ...(forwardedFor ? { 'x-forwarded-for': forwardedFor } : {}),
       ...(authHeader ? { Authorization: authHeader } : {}),
       ...subrequestAuthHeaders,
@@ -493,6 +535,20 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         last_activity_at: new Date().toISOString(),
       });
 
+      if (wantsClientSse) {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encodeSseEvent('markdown', { chunk: markdown }));
+            controller.enqueue(encodeSseEvent('done', { ok: true }));
+            controller.close();
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
+
       return new Response(markdown, { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
     }
 
@@ -532,7 +588,32 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
 
   const reader = upstreamBody.getReader();
   const decoder = new TextDecoder();
+  const upstreamContentType = (upstreamRes.headers.get('content-type') || '').toLowerCase();
+  const isSseUpstream = upstreamContentType.includes('text/event-stream');
   let accumulatedText = '';
+  let sseBuffer = '';
+  let sawSseDone = false;
+  let latestStreamMetaFromSse: any = null;
+  let latestTelemetryFromSse:
+    | {
+        usage?: {
+          promptTokens?: number | null;
+          reasoningTokens?: number | null;
+          completionTokens?: number | null;
+          totalTokens?: number | null;
+          cachedTokens?: number | null;
+        } | null;
+        aiModel?: string | null;
+        narrativeHistoryReadCount?: number | null;
+      }
+    | null = null;
+  let reasoningText = '';
+  let reasoningStatus: AIReasoningStatus = 'unavailable';
+  let reasoningSource: AIReasoningSource = 'unknown';
+  let reasoningTruncated = false;
+  let upstreamStreamErrorMessage: string | null = null;
+  const toDisplayReasoningSource = (source: AIReasoningSource): 'sdk' | 'provider' | 'heuristic' =>
+    source === 'unknown' ? 'sdk' : source;
   const shouldTerminateByTelemetry = (text: string) => {
     const marker = '<!-- MAHOSHOJO_TELEMETRY_META';
     const trimmed = text.trimEnd();
@@ -540,6 +621,170 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     if (idx < 0) return false;
     if (!trimmed.endsWith('-->')) return false;
     return trimmed.length - idx < 4096;
+  };
+
+  const parseSseBlock = (block: string): { event: string; data: string } | null => {
+    const lines = block.split('\n');
+    let event = 'message';
+    const dataLines: string[] = [];
+    for (const line of lines) {
+      if (!line) continue;
+      if (line.startsWith(':')) continue;
+      if (line.startsWith('event:')) {
+        event = line.slice('event:'.length).trim() || 'message';
+        continue;
+      }
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice('data:'.length).trimStart());
+        continue;
+      }
+    }
+    if (dataLines.length === 0) return null;
+    return { event, data: dataLines.join('\n') };
+  };
+
+  const applySseReasoningDelta = (chunk: string) => {
+    if (!chunk) return;
+    const MAX_REASONING_CHARS = 20_000;
+    const remaining = MAX_REASONING_CHARS - reasoningText.length;
+    if (remaining <= 0) {
+      reasoningTruncated = true;
+      return;
+    }
+    if (chunk.length <= remaining) {
+      reasoningText += chunk;
+      return;
+    }
+    reasoningText += chunk.slice(0, remaining);
+    reasoningTruncated = true;
+  };
+
+  const handleUpstreamSseEvent = (
+    parsed: { event: string; data: string },
+    controller: ReadableStreamDefaultController<Uint8Array>
+  ) => {
+    let payload: any = null;
+    try {
+      payload = parsed.data ? JSON.parse(parsed.data) : null;
+    } catch {
+      payload = null;
+    }
+
+    if (parsed.event === 'markdown') {
+      const chunk = typeof payload?.chunk === 'string' ? payload.chunk : '';
+      if (!chunk) return;
+      accumulatedText += chunk;
+      if (wantsClientSse) {
+        controller.enqueue(encodeSseEvent('markdown', { chunk }));
+      } else {
+        controller.enqueue(new TextEncoder().encode(chunk));
+      }
+      return;
+    }
+
+    if (parsed.event === 'reasoning') {
+      const source = normalizeReasoningSource(payload?.source);
+      reasoningSource = source === 'unknown' ? 'sdk' : source;
+      const chunk = typeof payload?.chunk === 'string' ? payload.chunk : '';
+      if (chunk) {
+        applySseReasoningDelta(chunk);
+      }
+      reasoningStatus = 'thinking';
+      if (wantsClientSse) {
+        controller.enqueue(
+          encodeSseEvent('reasoning', {
+            source: toDisplayReasoningSource(reasoningSource),
+            status: 'thinking',
+            chunk,
+          })
+        );
+      }
+      return;
+    }
+
+    if (parsed.event === 'reasoning_done') {
+      const source = normalizeReasoningSource(payload?.source);
+      reasoningSource = source === 'unknown' ? reasoningSource : source;
+      const status = typeof payload?.status === 'string' ? payload.status : '';
+      reasoningStatus = status === 'unavailable' ? 'unavailable' : 'done';
+      if (wantsClientSse) {
+        controller.enqueue(
+          encodeSseEvent('reasoning_done', {
+            source: toDisplayReasoningSource(reasoningSource),
+            status: reasoningStatus,
+            chars: reasoningText.length,
+          })
+        );
+      }
+      return;
+    }
+
+    if (parsed.event === 'telemetry') {
+      latestTelemetryFromSse = {
+        usage: payload?.usage ?? null,
+        aiModel: typeof payload?.aiModel === 'string' ? payload.aiModel : null,
+        narrativeHistoryReadCount: typeof payload?.narrativeHistoryReadCount === 'number' ? payload.narrativeHistoryReadCount : null,
+      };
+      if (wantsClientSse) {
+        controller.enqueue(
+          encodeSseEvent('telemetry', {
+            version: 1,
+            ...(typeof latestTelemetryFromSse.aiModel === 'string' && latestTelemetryFromSse.aiModel.trim()
+              ? { aiModel: latestTelemetryFromSse.aiModel.trim() }
+              : {}),
+            ...(latestTelemetryFromSse.usage ? { usage: latestTelemetryFromSse.usage } : {}),
+            ...(typeof latestTelemetryFromSse.narrativeHistoryReadCount === 'number'
+              ? { narrativeHistoryReadCount: latestTelemetryFromSse.narrativeHistoryReadCount }
+              : {}),
+          })
+        );
+      }
+      return;
+    }
+
+    if (parsed.event === 'meta') {
+      if (payload?.parseOk && payload?.meta && typeof payload.meta === 'object') {
+        latestStreamMetaFromSse = payload.meta;
+      }
+      if (wantsClientSse) {
+        controller.enqueue(
+          encodeSseEvent('meta', {
+            parseOk: true,
+            ...(payload?.meta && typeof payload.meta === 'object' ? { meta: payload.meta } : {}),
+            ...(typeof payload?.raw === 'string' ? { raw: payload.raw } : {}),
+            ...(typeof payload?.rawTruncated === 'boolean' ? { rawTruncated: payload.rawTruncated } : {}),
+          })
+        );
+      }
+      return;
+    }
+
+    if (parsed.event === 'meta_error') {
+      if (wantsClientSse) {
+        controller.enqueue(
+          encodeSseEvent('meta_error', {
+            parseOk: false,
+            ...(typeof payload?.error === 'string' ? { error: payload.error } : {}),
+            ...(typeof payload?.raw === 'string' ? { raw: payload.raw } : {}),
+            ...(typeof payload?.rawTruncated === 'boolean' ? { rawTruncated: payload.rawTruncated } : {}),
+          })
+        );
+      }
+      return;
+    }
+
+    if (parsed.event === 'error') {
+      const message = typeof payload?.error === 'string' ? payload.error : '上游流式生成失败';
+      upstreamStreamErrorMessage = message;
+      if (wantsClientSse) {
+        controller.enqueue(encodeSseEvent('error', { ok: false, error: message }));
+      }
+      throw new Error(message);
+    }
+
+    if (parsed.event === 'done') {
+      sawSseDone = true;
+    }
   };
 
   const finalizeAndPersist = async (finalText: string) => {
@@ -556,7 +801,8 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     }
 
     const extractedMeta = await extractStreamUpdateMeta(finalText).catch(() => null);
-    const meta: any = extractedMeta?.meta ?? null;
+    const inlineMeta: any = extractedMeta?.meta ?? null;
+    const meta: any = inlineMeta ?? latestStreamMetaFromSse ?? null;
 
     const candidateRawList: Array<{ raw: string | null; source: string }> = [];
     const pvpTokenFromMeta =
@@ -612,6 +858,51 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
     const resolvedWinnerUserId = shouldStartWinnerVote ? null : (typeof winnerUserIdRaw === 'number' ? winnerUserIdRaw : null);
     const resolvedWinnerName = shouldStartWinnerVote ? null : (isDraw || winnerIndex === null ? '平局' : picked[winnerIndex]!.snapshot.name);
 
+    const reasoningSummary = buildReasoningSummary(reasoningText);
+    const normalizedReasoningStatus: AIReasoningStatus =
+      reasoningStatus === 'thinking' ? (reasoningText.trim() ? 'done' : 'unavailable') : reasoningStatus;
+    const hasReasoningPayload =
+      normalizedReasoningStatus === 'done' ||
+      normalizedReasoningStatus === 'error' ||
+      Boolean(reasoningSummary);
+
+    const mergedStreamMeta = {
+      ...(streamMeta && typeof streamMeta === 'object' ? streamMeta : {}),
+      ...(meta && typeof meta === 'object' ? meta : {}),
+      ...(latestTelemetryFromSse?.usage
+        ? {
+            aiUsage: {
+              promptTokens: latestTelemetryFromSse.usage.promptTokens ?? null,
+              reasoningTokens: latestTelemetryFromSse.usage.reasoningTokens ?? null,
+              completionTokens: latestTelemetryFromSse.usage.completionTokens ?? null,
+              totalTokens: latestTelemetryFromSse.usage.totalTokens ?? null,
+              cachedTokens: latestTelemetryFromSse.usage.cachedTokens ?? null,
+            },
+          }
+        : {}),
+      ...(typeof latestTelemetryFromSse?.aiModel === 'string' && latestTelemetryFromSse.aiModel.trim()
+        ? { ai: { ...((streamMeta as any)?.ai ?? {}), model: latestTelemetryFromSse.aiModel.trim() } }
+        : {}),
+      ...(typeof latestTelemetryFromSse?.narrativeHistoryReadCount === 'number'
+        ? { narrativeHistoryReadCount: latestTelemetryFromSse.narrativeHistoryReadCount }
+        : {}),
+      ...(hasReasoningPayload
+        ? {
+            aiReasoning: {
+              status: normalizedReasoningStatus,
+              source: toDisplayReasoningSource(reasoningSource),
+              summary: reasoningSummary ?? null,
+              text: reasoningText || null,
+              ...(reasoningTruncated ? { anomalyFlags: ['truncated'] } : {}),
+              ...(latestTelemetryFromSse?.usage && typeof latestTelemetryFromSse.usage.reasoningTokens === 'number'
+                ? { reasoningTokens: latestTelemetryFromSse.usage.reasoningTokens }
+                : {}),
+            },
+          }
+        : {}),
+    };
+    streamMeta = mergedStreamMeta;
+
     const resultJson = JSON.stringify({
       generationMode: 'stream',
       winnerUserId: resolvedWinnerUserId,
@@ -643,7 +934,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
         ...(p.characterGuidance ? { characterGuidance: p.characterGuidance } : {}),
       })),
       reportMarkdown: markdownForStorage,
-      streamMeta,
+      streamMeta: mergedStreamMeta,
       updatedCombatants: [],
     });
 
@@ -761,20 +1052,84 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
           if (done) break;
           if (!value) continue;
           const chunkText = decoder.decode(value, { stream: true });
+
+          if (isSseUpstream) {
+            sseBuffer += chunkText.replace(/\r\n/g, '\n');
+            let idx = sseBuffer.indexOf('\n\n');
+            while (idx !== -1) {
+              const block = sseBuffer.slice(0, idx);
+              sseBuffer = sseBuffer.slice(idx + 2);
+              const parsed = parseSseBlock(block);
+              if (parsed) {
+                handleUpstreamSseEvent(parsed, controller);
+              }
+              if (sawSseDone || upstreamStreamErrorMessage) break;
+              idx = sseBuffer.indexOf('\n\n');
+            }
+            if (sawSseDone || upstreamStreamErrorMessage) {
+              try {
+                void reader.cancel('sse_done').catch(() => {});
+              } catch {
+                // ignore
+              }
+              break;
+            }
+            continue;
+          }
+
           accumulatedText += chunkText;
-          controller.enqueue(value);
-	          if (shouldTerminateByTelemetry(accumulatedText)) {
-	            try {
-	              void reader.cancel('telemetry-meta-received').catch(() => {});
-	            } catch {
-	              // ignore
-	            }
-	            break;
-	          }
+          if (wantsClientSse) {
+            controller.enqueue(encodeSseEvent('markdown', { chunk: chunkText }));
+          } else {
+            controller.enqueue(value);
+          }
+          if (shouldTerminateByTelemetry(accumulatedText)) {
+            try {
+              void reader.cancel('telemetry-meta-received').catch(() => {});
+            } catch {
+              // ignore
+            }
+            break;
+          }
         }
-        accumulatedText += decoder.decode();
+        const flushed = decoder.decode();
+        if (isSseUpstream) {
+          sseBuffer += flushed.replace(/\r\n/g, '\n');
+          let idx = sseBuffer.indexOf('\n\n');
+          while (idx !== -1) {
+            const block = sseBuffer.slice(0, idx);
+            sseBuffer = sseBuffer.slice(idx + 2);
+            const parsed = parseSseBlock(block);
+            if (parsed) {
+              handleUpstreamSseEvent(parsed, controller);
+            }
+            if (upstreamStreamErrorMessage) break;
+            idx = sseBuffer.indexOf('\n\n');
+          }
+        } else {
+          accumulatedText += flushed;
+        }
+
+        if (upstreamStreamErrorMessage) {
+          throw new Error(upstreamStreamErrorMessage);
+        }
         await finalizeAndPersist(accumulatedText);
         clearUpstreamTimeout();
+        if (wantsClientSse) {
+          const reasoningSummary = buildReasoningSummary(reasoningText);
+          if (reasoningStatus === 'thinking') {
+            const finalizedStatus = reasoningText.trim() ? 'done' : 'unavailable';
+            controller.enqueue(
+              encodeSseEvent('reasoning_done', {
+                source: toDisplayReasoningSource(reasoningSource),
+                status: finalizedStatus,
+                chars: reasoningText.length,
+                ...(reasoningSummary ? { summary: reasoningSummary } : {}),
+              })
+            );
+          }
+          controller.enqueue(encodeSseEvent('done', { ok: true }));
+        }
         controller.close();
       } catch (e) {
         clearUpstreamTimeout();
@@ -783,6 +1138,13 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
           await updatePvpRoomCas(roomId, resolvingVersion, { phase: 'choosing', last_activity_at: new Date().toISOString() });
         } catch {
           // ignore
+        }
+        if (wantsClientSse) {
+          const message = e instanceof Error ? e.message : '流式结算失败';
+          controller.enqueue(encodeSseEvent('error', { ok: false, error: message }));
+          controller.enqueue(encodeSseEvent('done', { ok: false }));
+          controller.close();
+          return;
         }
         controller.error(e);
       }
@@ -810,9 +1172,7 @@ async function resolveStreamHandler(req: Request): Promise<Response> {
 
   const headers = new Headers(upstreamRes.headers);
   headers.set('cache-control', 'no-store');
-  if (!headers.get('content-type')) {
-    headers.set('content-type', 'text/plain; charset=utf-8');
-  }
+  headers.set('content-type', wantsClientSse ? 'text/event-stream; charset=utf-8' : 'text/plain; charset=utf-8');
 
   return new Response(wrappedBody, { status: 200, headers });
 }

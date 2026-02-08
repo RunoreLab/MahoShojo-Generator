@@ -40,6 +40,7 @@
 
 ## 相关条目
 
+- AI 思考过程查看说明（在哪里看）：`/encyclopedia/ai-reasoning-visibility`
 - AI_APICallError（上游 AI 接口调用失败）：`/encyclopedia/ai-api-call-error`
 - 请求过于频繁（429）：`/encyclopedia/rate-limit-429`
 - 网络问题：`/encyclopedia/network-errors`

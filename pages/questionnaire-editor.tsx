@@ -113,7 +113,7 @@ const createEmptyQuestion = (
   allowCustom: true,
   helperText: '',
   maxLengthText: '',
-  required: true,
+  required: false,
   displayIfEnabled: false,
   displayIfQuestionId: '',
   displayIfOperator: 'equals',
@@ -713,7 +713,7 @@ const QuestionnaireEditorPage: React.FC = () => {
           allowCustom: q.allowCustom ?? true,
           helperText: q.helperText || '',
           maxLengthText: q.maxLength == null ? '' : String(q.maxLength),
-          required: q.required !== false,
+          required: q.required === true,
           displayIfEnabled: Boolean(displayIfParsed),
           displayIfQuestionId: displayIfParsed?.questionId || '',
           displayIfOperator: displayIfParsed?.operator || 'equals',
@@ -1296,7 +1296,7 @@ const QuestionnaireEditorPage: React.FC = () => {
                       <div className="font-semibold text-slate-700">{getQuestionLabel(question, index)}</div>
                       <div className="mt-1 flex flex-wrap gap-2 text-slate-500">
                         <span>类型：{question.type === 'select' ? '选项优先' : '文本输入'}</span>
-                        <span>必答：{question.required === false ? '否' : '是'}</span>
+                        <span>必答：{question.required === true ? '是' : '否'}</span>
                         <span>最大字数：{question.maxLengthText.trim() || '未设置'}</span>
                       </div>
                     </div>
@@ -1544,7 +1544,7 @@ const QuestionnaireEditorPage: React.FC = () => {
                         <label className="flex items-center gap-2">
                           <input
                             type="checkbox"
-                            checked={question.required ?? true}
+                            checked={question.required ?? false}
                             onChange={(e) => updateQuestion(index, { required: e.target.checked })}
                           />
                           必答题
