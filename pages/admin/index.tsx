@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award, Tags, BarChart3, Activity, HardDrive, Trophy, Cpu, BookOpen } from 'lucide-react';
+import { FileText, Users, FileCheck, UserCog, Clock, UserPlus, FilePlus, AlertTriangle, ShieldOff, Award, Tags, BarChart3, Activity, HardDrive, Trophy, Cpu, BookOpen, Database } from 'lucide-react';
 
 import { encyclopediaEntries } from '@/lib/encyclopedia';
 
@@ -649,6 +649,18 @@ const AdminHomePage: React.FC = () => {
                   </div>
                   <p className="text-gray-600 text-sm">
                     管理 large_objects 与 R2：筛选/检索大对象索引，生成下载链接，并支持清理索引与对象。
+                  </p>
+                </a>
+              </Link>
+
+              <Link href="/admin/data-maintenance" legacyBehavior>
+                <a className="admin-card bg-violet-50 border-violet-200 hover:border-violet-400">
+                  <div className="flex items-center text-violet-700 mb-3">
+                    <Database className="w-8 h-8" />
+                    <h2 className="text-xl font-semibold ml-3">数据库清理</h2>
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    按范围与字段预览并执行清理：支持截断、设空/默认、整行删除，适合战报/PVP/排位历史数据瘦身。
                   </p>
                 </a>
               </Link>
