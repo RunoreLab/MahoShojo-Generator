@@ -205,7 +205,12 @@ const UserManagementPage: React.FC = () => {
           <div className="mb-4">
             <Link href="/admin"><span className="text-sm text-purple-600 hover:underline cursor-pointer">&larr; 返回管理后台主页</span></Link>
           </div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-4">用户管理</h1>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h1 className="text-2xl font-bold text-gray-800">用户管理</h1>
+            <Link href="/admin/user-analytics" className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700 hover:bg-indigo-100">
+              查看用户统计分析
+            </Link>
+          </div>
 
           <div className="bg-white p-4 rounded-lg shadow-sm mb-4 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
