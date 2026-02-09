@@ -154,6 +154,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['429', '限流', '冷却', 'API Key'],
   },
   {
+    slug: 'modelscope-auth-401',
+    title: 'ModelScope 立绘 401（鉴权失败）排查',
+    summary: '立绘生成提示 ModelScope 401 时，如何核查 Token、权限、模型访问与 request id。',
+    markdownPath: '/encyclopedia/modelscope-auth-401.md',
+    categoryId: 'troubleshooting',
+    keywords: ['ModelScope', '401', '鉴权失败', 'Token', '立绘', 'request id'],
+  },
+  {
     slug: 'ai-errors',
     title: 'AI 生成失败：常见原因与自救',
     summary: '高峰期/配置/额度/输入过长等导致的生成失败排查与恢复建议。',

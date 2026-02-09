@@ -41,6 +41,22 @@ describe('error-help', () => {
     expect(inferEncyclopediaSlugForError({ message: 'TypeError: Failed to fetch' })).toBe('network-errors');
   });
 
+  test('infer modelscope auth by HTTP 401 message', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: 'ModelScope 鉴权失败（HTTP 401）：Authentication failed, please make sure that a valid ModelScope token is supplied.',
+      }),
+    ).toBe('modelscope-auth-401');
+  });
+
+  test('infer modelscope auth by message without explicit status', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: 'ModelScope 任务查询失败：Authentication failed, invalid token',
+      }),
+    ).toBe('modelscope-auth-401');
+  });
+
   test('infer by message: data card', () => {
     expect(inferEncyclopediaSlugForError({ message: 'JSON 解析失败：Unexpected token' })).toBe('data-card-errors');
   });
@@ -87,5 +103,13 @@ describe('error-help', () => {
 
   test('category: network', () => {
     expect(inferErrorCategoryForError({ message: 'TypeError: Failed to fetch' })?.id).toBe('network');
+  });
+
+  test('category: modelscope auth', () => {
+    expect(
+      inferErrorCategoryForError({
+        message: 'ModelScope 任务查询失败：Authentication failed, invalid token',
+      })?.id,
+    ).toBe('auth');
   });
 });

@@ -1,21 +1,14 @@
 import { getSignedUrl } from "@/lib/tachie/liblib/utils";
 import type { GenerateResponse, ComfyUIAppParams } from "@/lib/tachie/liblib/types";
+import {
+  buildModelScopeErrorPayload,
+  extractModelScopeTaskId,
+  normalizeModelScopeToken,
+  parseModelScopeJsonSafe,
+} from "@/lib/tachie/modelscope/error";
 
 export const config = {
   runtime: 'edge',
-};
-
-const parseJsonSafe = (raw: string): Record<string, unknown> => {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") {
-      return parsed as Record<string, unknown>;
-    }
-    return {};
-  } catch {
-    return {};
-  }
 };
 
 export default async function handler(req: Request) {
@@ -66,22 +59,33 @@ export default async function handler(req: Request) {
     "1472x1104",
   ]);
 
-  const payload = await req.json();
-  const sourceRaw = typeof payload?.source === "string" ? payload.source.trim().toLowerCase() : "";
-  const source = sourceRaw === "modelscope" ? "modelscope" : "liblib";
-
   try {
+    const payloadRaw = await req.json().catch(() => null);
+    const payload = payloadRaw && typeof payloadRaw === "object"
+      ? (payloadRaw as Record<string, unknown>)
+      : {};
+
+    const sourceRaw = typeof payload.source === "string" ? payload.source.trim().toLowerCase() : "";
+    const source = sourceRaw === "modelscope" ? "modelscope" : "liblib";
+
     if (source === "modelscope") {
-      const prompt = typeof payload?.prompt === "string" ? payload.prompt.trim() : "";
-      const modelscopeToken = typeof payload?.modelscopeToken === "string" ? payload.modelscopeToken.trim() : "";
-      const modelscopeModelRaw = typeof payload?.modelscopeModel === "string" ? payload.modelscopeModel.trim() : "";
+      const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
+      const modelscopeToken = normalizeModelScopeToken(payload.modelscopeToken);
+      const modelscopeModelRaw = typeof payload.modelscopeModel === "string" ? payload.modelscopeModel.trim() : "";
       const modelscopeModel = modelscopeModelRaw || "Stonego/XiabanmostyleV3";
-      const modelscopeSizeRaw = typeof payload?.modelscopeSize === "string" ? payload.modelscopeSize.trim() : "";
+      const modelscopeSizeRaw = typeof payload.modelscopeSize === "string" ? payload.modelscopeSize.trim() : "";
       const modelscopeSize = MODELSCOPE_SIZE_WHITELIST.has(modelscopeSizeRaw) ? modelscopeSizeRaw : "1328x1328";
 
-      if (!modelscopeToken || !prompt) {
+      if (!prompt) {
         return new Response(
-          JSON.stringify({ error: "Missing required parameters" }),
+          JSON.stringify({ error: "缺少提示词：prompt 不能为空" }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (!modelscopeToken) {
+        return new Response(
+          JSON.stringify({ error: "缺少 ModelScope Token（可直接粘贴 Token，本系统会自动处理 Bearer 前缀）" }),
           { status: 400, headers: { "Content-Type": "application/json" } },
         );
       }
@@ -101,22 +105,29 @@ export default async function handler(req: Request) {
       });
 
       const raw = await response.text();
-      const upstream = parseJsonSafe(raw);
+      const upstream = parseModelScopeJsonSafe(raw);
 
       if (!response.ok) {
-        const messageCandidates = [upstream.message, upstream.msg, upstream.error, upstream.detail];
-        const message = messageCandidates.find((item): item is string => typeof item === "string" && item.trim().length > 0);
         return new Response(
-          JSON.stringify({ error: message || `ModelScope API error: ${response.status}` }),
+          JSON.stringify(buildModelScopeErrorPayload({
+            status: response.status,
+            payload: upstream,
+            requestIdHeader: response.headers.get("x-request-id"),
+          })),
           { status: response.status, headers: { "Content-Type": "application/json" } },
         );
       }
 
-      const taskId = upstream.task_id;
-      if (typeof taskId !== "string" || !taskId.trim()) {
+      const taskId = extractModelScopeTaskId(upstream);
+      if (!taskId) {
         return new Response(
-          JSON.stringify({ error: "ModelScope API error: task_id missing" }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
+          JSON.stringify(buildModelScopeErrorPayload({
+            status: 502,
+            payload: upstream,
+            fallbackError: "ModelScope 返回结果异常：缺少 task_id",
+            requestIdHeader: response.headers.get("x-request-id"),
+          })),
+          { status: 502, headers: { "Content-Type": "application/json" } },
         );
       }
 
@@ -124,7 +135,7 @@ export default async function handler(req: Request) {
         code: 0,
         msg: "success",
         data: {
-          generateUuid: taskId.trim(),
+          generateUuid: taskId,
         },
       }), {
         status: 200,
@@ -132,7 +143,9 @@ export default async function handler(req: Request) {
       });
     }
 
-    const { accessKey, secretKey, prompt } = payload ?? {};
+    const accessKey = typeof payload.accessKey === "string" ? payload.accessKey.trim() : "";
+    const secretKey = typeof payload.secretKey === "string" ? payload.secretKey.trim() : "";
+    const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
     if (!accessKey || !secretKey || !prompt) {
       return new Response(
         JSON.stringify({ error: "Missing required parameters" }),
@@ -140,16 +153,16 @@ export default async function handler(req: Request) {
       );
     }
 
-    const modeRaw = typeof payload?.mode === 'string' ? payload.mode.trim() : '';
+    const modeRaw = typeof payload.mode === 'string' ? payload.mode.trim() : '';
     const mode = modeRaw === 'illustration' ? 'illustration' : 'tachie';
 
     const preset = DEFAULT_WORKFLOWS[mode];
-    const workflowUuid = isLibLibUuid(payload?.workflowUuid) ? payload.workflowUuid.trim() : preset.workflowUuid;
-    const templateUuid = isLibLibUuid(payload?.templateUuid) ? payload.templateUuid.trim() : preset.templateUuid;
-    const promptNodeId = parseNodeId(payload?.promptNodeId) ?? preset.promptNodeId;
+    const workflowUuid = isLibLibUuid(payload.workflowUuid) ? payload.workflowUuid.trim() : preset.workflowUuid;
+    const templateUuid = isLibLibUuid(payload.templateUuid) ? payload.templateUuid.trim() : preset.templateUuid;
+    const promptNodeId = parseNodeId(payload.promptNodeId) ?? preset.promptNodeId;
 
-    const negativePrompt = typeof payload?.negativePrompt === 'string' ? payload.negativePrompt.trim() : '';
-    const negativePromptNodeId = parseNodeId(payload?.negativePromptNodeId);
+    const negativePrompt = typeof payload.negativePrompt === 'string' ? payload.negativePrompt.trim() : '';
+    const negativePromptNodeId = parseNodeId(payload.negativePromptNodeId);
 
     const endpoint = "/api/generate/comfyui/app";
     const signedUrl = await getSignedUrl(accessKey, secretKey, endpoint);

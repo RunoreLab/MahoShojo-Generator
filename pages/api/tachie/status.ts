@@ -1,21 +1,16 @@
 import { getSignedUrl } from "@/lib/tachie/liblib/utils";
 import type { StatusResponse } from "@/lib/tachie/liblib/types";
+import {
+  buildModelScopeErrorPayload,
+  extractModelScopeMessage,
+  extractModelScopeOutputImages,
+  extractModelScopeTaskStatus,
+  normalizeModelScopeToken,
+  parseModelScopeJsonSafe,
+} from "@/lib/tachie/modelscope/error";
 
 export const config = {
   runtime: 'edge',
-};
-
-const parseJsonSafe = (raw: string): Record<string, unknown> => {
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") {
-      return parsed as Record<string, unknown>;
-    }
-    return {};
-  } catch {
-    return {};
-  }
 };
 
 export default async function handler(req: Request) {
@@ -26,18 +21,29 @@ export default async function handler(req: Request) {
     );
   }
 
-  const payload = await req.json();
-  const sourceRaw = typeof payload?.source === "string" ? payload.source.trim().toLowerCase() : "";
-  const source = sourceRaw === "modelscope" ? "modelscope" : "liblib";
-
   try {
-    if (source === "modelscope") {
-      const modelscopeToken = typeof payload?.modelscopeToken === "string" ? payload.modelscopeToken.trim() : "";
-      const taskIdRaw = typeof payload?.generateUuid === "string" ? payload.generateUuid.trim() : "";
+    const payloadRaw = await req.json().catch(() => null);
+    const payload = payloadRaw && typeof payloadRaw === "object"
+      ? (payloadRaw as Record<string, unknown>)
+      : {};
 
-      if (!modelscopeToken || !taskIdRaw) {
+    const sourceRaw = typeof payload.source === "string" ? payload.source.trim().toLowerCase() : "";
+    const source = sourceRaw === "modelscope" ? "modelscope" : "liblib";
+
+    if (source === "modelscope") {
+      const modelscopeToken = normalizeModelScopeToken(payload.modelscopeToken);
+      const taskIdRaw = typeof payload.generateUuid === "string" ? payload.generateUuid.trim() : "";
+
+      if (!taskIdRaw) {
         return new Response(
-          JSON.stringify({ error: "Missing required parameters" }),
+          JSON.stringify({ error: "缺少任务 ID：generateUuid 不能为空" }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (!modelscopeToken) {
+        return new Response(
+          JSON.stringify({ error: "缺少 ModelScope Token（可直接粘贴 Token，本系统会自动处理 Bearer 前缀）" }),
           { status: 400, headers: { "Content-Type": "application/json" } },
         );
       }
@@ -52,38 +58,43 @@ export default async function handler(req: Request) {
       });
 
       const raw = await response.text();
-      const upstream = parseJsonSafe(raw);
+      const upstream = parseModelScopeJsonSafe(raw);
 
       if (!response.ok) {
-        const messageCandidates = [upstream.message, upstream.msg, upstream.error, upstream.detail];
-        const message = messageCandidates.find((item): item is string => typeof item === "string" && item.trim().length > 0);
         return new Response(
-          JSON.stringify({ error: message || `ModelScope API error: ${response.status}` }),
+          JSON.stringify(buildModelScopeErrorPayload({
+            status: response.status,
+            payload: upstream,
+            requestIdHeader: response.headers.get("x-request-id"),
+          })),
           { status: response.status, headers: { "Content-Type": "application/json" } },
         );
       }
 
-      const taskStatusRaw = upstream.task_status;
-      const taskStatus = typeof taskStatusRaw === "string" ? taskStatusRaw.trim().toUpperCase() : "UNKNOWN";
-      const outputImagesRaw = upstream.output_images;
-      const outputImages = Array.isArray(outputImagesRaw)
-        ? outputImagesRaw.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-        : [];
-
-      const errorMessageRaw = upstream.message;
-      const errorMessage = typeof errorMessageRaw === "string" ? errorMessageRaw : undefined;
+      const taskStatus = extractModelScopeTaskStatus(upstream) ?? "UNKNOWN";
+      const outputImages = extractModelScopeOutputImages(upstream);
+      const message = extractModelScopeMessage(upstream);
+      const messageLower = message?.toLowerCase();
+      const hasMeaningfulMessage = Boolean(
+        message
+        && messageLower
+        && messageLower !== "success"
+        && messageLower !== "ok",
+      );
 
       return new Response(JSON.stringify({
         taskStatus,
         outputImages,
-        ...(errorMessage ? { errorMessage } : {}),
+        ...(hasMeaningfulMessage ? { errorMessage: message } : {}),
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    const { accessKey, secretKey, generateUuid } = payload;
+    const accessKey = typeof payload.accessKey === "string" ? payload.accessKey.trim() : "";
+    const secretKey = typeof payload.secretKey === "string" ? payload.secretKey.trim() : "";
+    const generateUuid = typeof payload.generateUuid === "string" ? payload.generateUuid.trim() : "";
     if (!accessKey || !secretKey || !generateUuid) {
       return new Response(
         JSON.stringify({ error: "Missing required parameters" }),

@@ -127,6 +127,23 @@ const AI_EMPTY_OUTPUT_MESSAGE_HINTS = [
   'empty object',
 ] as const;
 
+const MODELSCOPE_MESSAGE_HINTS = [
+  'modelscope',
+  'api-inference.modelscope.cn',
+] as const;
+
+const MODELSCOPE_AUTH_MESSAGE_HINTS = [
+  'authentication failed',
+  'unauthorized',
+  'token 无效',
+  'token invalid',
+  'invalid token',
+  'access token',
+  '鉴权失败',
+  '授权失败',
+  'api token',
+] as const;
+
 function normalizeMessage(message: string) {
   return message
     .trim()
@@ -156,6 +173,12 @@ function includesAny(message: string, hints: readonly string[]) {
   return hints.some((hint) => message.includes(hint));
 }
 
+function isModelScopeAuthError(message: string, status: number | null) {
+  if (!includesAny(message, MODELSCOPE_MESSAGE_HINTS)) return false;
+  if (status === 401) return true;
+  return includesAny(message, MODELSCOPE_AUTH_MESSAGE_HINTS);
+}
+
 export function inferErrorCategoryForError(input: ErrorHelpInput): ErrorCategory | null {
   const rawMessage = typeof input.message === 'string' ? input.message : '';
   const message = rawMessage.trim() ? normalizeMessage(rawMessage) : '';
@@ -180,6 +203,7 @@ export function inferErrorCategoryForError(input: ErrorHelpInput): ErrorCategory
 
   if (!message) return null;
 
+  if (isModelScopeAuthError(message, status)) return { id: 'auth', label: '鉴权失败 / API Key 问题' };
   if (includesAny(message, NETWORK_MESSAGE_HINTS)) return { id: 'network', label: '网络连接问题' };
   if (includesAny(message, RATE_LIMIT_MESSAGE_HINTS)) return { id: 'rate_limit', label: '请求过于频繁 / 限流' };
   if (message.includes('cloudflare') || message.includes('cf-ray') || message.includes('52x') || message.includes('5xx')) {
@@ -205,8 +229,11 @@ export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | n
   const rawMessage = typeof input.message === 'string' ? input.message : '';
   const message = rawMessage.trim() ? normalizeMessage(rawMessage) : '';
   const isAiApiCallError = message ? includesAny(message, AI_API_CALL_ERROR_MESSAGE_HINTS) : false;
+  const statusInput = typeof input.status === 'number' ? input.status : null;
+  const statusFromMessage = rawMessage.trim() ? extractHttpStatusFromMessage(rawMessage) : null;
+  const status = statusInput ?? statusFromMessage;
+  if (message && isModelScopeAuthError(message, status)) return 'modelscope-auth-401';
 
-  const status = input.status ?? null;
   if (status === 524) return 'cloudflare-524-timeout';
   if (status === 429) return 'rate-limit-429';
   if (
@@ -221,21 +248,6 @@ export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | n
   if (statusSlug) return statusSlug;
 
   if (!rawMessage.trim()) return null;
-
-  const statusFromMessage = extractHttpStatusFromMessage(rawMessage);
-  if (typeof statusFromMessage === 'number') {
-    if (statusFromMessage === 524) return 'cloudflare-524-timeout';
-    if (statusFromMessage === 429) return 'rate-limit-429';
-    if (
-      isAiApiCallError
-      && (CLOUDFLARE_OTHER_STATUSES.has(statusFromMessage) || SERVER_ERROR_STATUSES.has(statusFromMessage))
-    ) {
-      return 'ai-api-call-error';
-    }
-
-    const inferred = inferSlugFromStatus(statusFromMessage);
-    if (inferred) return inferred;
-  }
 
   if (message.includes('cloudflare') && message.includes('524')) return 'cloudflare-524-timeout';
   if (message.includes('524') && message.includes('timeout')) return 'cloudflare-524-timeout';

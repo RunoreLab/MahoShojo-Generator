@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { generateTachieWithProgress, type TachieGenerationResult, type TachieSource } from "@/lib/tachie/manager";
 import { ErrorMessage } from "@/components/ErrorMessage";
+import { normalizeModelScopeToken } from "@/lib/tachie/modelscope/error";
 
 const MODELSCOPE_SIZE_OPTIONS = [
   { value: "928x1664", label: "16:9 竖屏（928×1664）" },
@@ -53,6 +54,7 @@ export default function TachieGenerator({
   const [rememberCredentials, setRememberCredentials] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressStatus, setProgressStatus] = useState("");
+  const normalizedModelScopeToken = normalizeModelScopeToken(modelscopeToken);
 
   // localStorage keys
   const CREDENTIALS_KEY = 'tachie_credentials';
@@ -77,7 +79,7 @@ export default function TachieGenerator({
 
             setAccessKey(typeof parsed.accessKey === 'string' ? parsed.accessKey : '');
             setSecretKey(typeof parsed.secretKey === 'string' ? parsed.secretKey : '');
-            setModelscopeToken(typeof parsed.modelscopeToken === 'string' ? parsed.modelscopeToken : '');
+            setModelscopeToken(typeof parsed.modelscopeToken === 'string' ? normalizeModelScopeToken(parsed.modelscopeToken) : '');
             setModelscopeModel(
               typeof parsed.modelscopeModel === 'string' && parsed.modelscopeModel.trim()
                 ? parsed.modelscopeModel
@@ -100,7 +102,7 @@ export default function TachieGenerator({
           source,
           accessKey: accessKey.trim(),
           secretKey: secretKey.trim(),
-          modelscopeToken: modelscopeToken.trim(),
+          modelscopeToken: normalizedModelScopeToken,
           modelscopeModel: modelscopeModel.trim() || 'Stonego/XiabanmostyleV3',
           modelscopeSize,
         }));
@@ -129,7 +131,7 @@ export default function TachieGenerator({
 
   const requiredCredentialsReady = source === 'liblib'
     ? Boolean(accessKey.trim() && secretKey.trim())
-    : Boolean(modelscopeToken.trim());
+    : Boolean(normalizedModelScopeToken);
 
   const handleGenerate = async () => {
     if (source === 'liblib' && (!accessKey.trim() || !secretKey.trim())) {
@@ -143,7 +145,7 @@ export default function TachieGenerator({
       return;
     }
 
-    if (source === 'modelscope' && !modelscopeToken.trim()) {
+    if (source === 'modelscope' && !normalizedModelScopeToken) {
       const nextResult = {
         success: false,
         error: "请填写 ModelScope Token",
@@ -180,7 +182,7 @@ export default function TachieGenerator({
         source,
         accessKey: accessKey.trim(),
         secretKey: secretKey.trim(),
-        modelscopeToken: modelscopeToken.trim(),
+        modelscopeToken: normalizedModelScopeToken,
         modelscopeModel: modelscopeModel.trim() || undefined,
         modelscopeSize,
         prompt: normalizedPrompt,
@@ -319,6 +321,9 @@ export default function TachieGenerator({
                 className="input-field"
                 disabled={isGenerating}
               />
+              <div className="mt-2 text-xs text-gray-500">
+                可直接粘贴 Token；若误贴了 <code>Bearer </code> 前缀，系统会自动去除。
+              </div>
             </div>
 
             <div className="input-group">
