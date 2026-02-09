@@ -1,6 +1,6 @@
 import { queryFromD1 } from './core';
 
-export type AdminUserAnalyticsSection = 'overview' | 'frequency' | 'all';
+export type AdminUserAnalyticsSection = 'overview' | 'frequency' | 'retention' | 'composition' | 'all';
 export type AdminFrequencySample = 'active7d' | 'tracked' | 'all';
 export type AdminFrequencyProfile = 'v20260209';
 
@@ -48,6 +48,44 @@ export type AdminUserAnalyticsFrequency = {
   activityTrackingOk: boolean;
 };
 
+export type AdminUserAnalyticsRetentionPoint = {
+  key: 'd1' | 'd7' | 'd30' | 'd90';
+  label: string;
+  days: number;
+  eligible: number;
+  retained: number;
+  rate: number;
+};
+
+export type AdminUserAnalyticsRetention = {
+  totalUsers: number;
+  avgObservedRetentionDays: number;
+  medianObservedRetentionDays: number;
+  p90ObservedRetentionDays: number;
+  points: AdminUserAnalyticsRetentionPoint[];
+  activityTrackingOk: boolean;
+};
+
+export type AdminUserAnalyticsCompositionBucket = {
+  key: string;
+  label: string;
+  count: number;
+  share: number;
+};
+
+export type AdminUserAnalyticsComposition = {
+  activeWindowDays: number;
+  sampleUsers: number;
+  newUsers: number;
+  oldUsers: number;
+  newUsersShare: number;
+  avgTenureDays: number;
+  medianTenureDays: number;
+  p90TenureDays: number;
+  buckets: AdminUserAnalyticsCompositionBucket[];
+  activityTrackingOk: boolean;
+};
+
 const readFirstRow = (result: unknown): Record<string, unknown> => {
   const row = (result as any)?.result?.[0]?.results?.[0];
   return row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
@@ -77,6 +115,12 @@ const clampLookbackDays = (input?: number): number => {
   return Math.max(7, Math.min(365, Math.floor(input as number)));
 };
 
+const clampActiveWindowDays = (input?: number): number => {
+  const fallback = 7;
+  if (!Number.isFinite(input)) return fallback;
+  return Math.max(1, Math.min(180, Math.floor(input as number)));
+};
+
 const isMissingActivityTableError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes('user_last_activity') && message.toLowerCase().includes('no such table');
@@ -91,6 +135,28 @@ const normalizeSample = (sample?: string): AdminFrequencySample => {
 const toRate = (part: number, total: number): number => {
   if (total <= 0) return 0;
   return Math.max(0, Math.min(1, part / total));
+};
+
+const toFixed2 = (value: number): number => {
+  if (!Number.isFinite(value)) return 0;
+  return Number(value.toFixed(2));
+};
+
+const quantileFromHistogram = (
+  buckets: Array<{ value: number; count: number }>,
+  quantile: number,
+): number => {
+  if (buckets.length <= 0) return 0;
+  const safeQuantile = Math.max(0, Math.min(1, quantile));
+  const total = buckets.reduce((sum, bucket) => sum + Math.max(0, bucket.count), 0);
+  if (total <= 0) return 0;
+  const target = (total - 1) * safeQuantile;
+  let cumulative = 0;
+  for (const bucket of buckets) {
+    cumulative += Math.max(0, bucket.count);
+    if (cumulative > target) return bucket.value;
+  }
+  return buckets[buckets.length - 1]?.value ?? 0;
 };
 
 export const getAdminUserAnalyticsOverview = async (lookbackDaysInput?: number): Promise<AdminUserAnalyticsOverview> => {
@@ -323,6 +389,294 @@ export const getAdminUserAnalyticsFrequency = async (options?: {
       await runQuery(false);
     } catch (fallbackError) {
       console.error('[AdminUserAnalytics] 高频分层回退失败:', fallbackError);
+      return output;
+    }
+  }
+
+  return output;
+};
+
+const buildRetentionSql = (useActivityTable: boolean): {
+  aggregateSql: string;
+  distributionSql: string;
+  paramsBuilder: (nowIso: string) => unknown[];
+} => {
+  const activityJoinSql = useActivityTable ? 'LEFT JOIN user_last_activity ula ON ula.user_id = u.id' : '';
+  const observedAtExpr = useActivityTable
+    ? 'COALESCE(ula.last_seen_at, u.last_login_at, u.created_at)'
+    : 'COALESCE(u.last_login_at, u.created_at)';
+
+  const baseCte = `
+    WITH base AS (
+      SELECT
+        u.id,
+        CASE
+          WHEN (julianday(?) - julianday(u.created_at)) < 0 THEN 0
+          ELSE CAST((julianday(?) - julianday(u.created_at)) AS INTEGER)
+        END AS user_age_days,
+        CASE
+          WHEN (julianday(${observedAtExpr}) - julianday(u.created_at)) < 0 THEN 0
+          ELSE CAST((julianday(${observedAtExpr}) - julianday(u.created_at)) AS INTEGER)
+        END AS retention_days
+      FROM users u
+      ${activityJoinSql}
+    )
+  `;
+
+  const aggregateSql = `
+    ${baseCte}
+    SELECT
+      COUNT(1) AS total_users,
+      COALESCE(AVG(retention_days), 0) AS avg_retention_days,
+      COALESCE(SUM(CASE WHEN user_age_days >= 1 THEN 1 ELSE 0 END), 0) AS d1_eligible,
+      COALESCE(SUM(CASE WHEN user_age_days >= 1 AND retention_days >= 1 THEN 1 ELSE 0 END), 0) AS d1_retained,
+      COALESCE(SUM(CASE WHEN user_age_days >= 7 THEN 1 ELSE 0 END), 0) AS d7_eligible,
+      COALESCE(SUM(CASE WHEN user_age_days >= 7 AND retention_days >= 7 THEN 1 ELSE 0 END), 0) AS d7_retained,
+      COALESCE(SUM(CASE WHEN user_age_days >= 30 THEN 1 ELSE 0 END), 0) AS d30_eligible,
+      COALESCE(SUM(CASE WHEN user_age_days >= 30 AND retention_days >= 30 THEN 1 ELSE 0 END), 0) AS d30_retained,
+      COALESCE(SUM(CASE WHEN user_age_days >= 90 THEN 1 ELSE 0 END), 0) AS d90_eligible,
+      COALESCE(SUM(CASE WHEN user_age_days >= 90 AND retention_days >= 90 THEN 1 ELSE 0 END), 0) AS d90_retained
+    FROM base;
+  `;
+
+  const distributionSql = `
+    ${baseCte}
+    SELECT retention_days AS retention_days, COUNT(1) AS bucket_count
+    FROM base
+    GROUP BY retention_days
+    ORDER BY retention_days ASC;
+  `;
+
+  return {
+    aggregateSql,
+    distributionSql,
+    paramsBuilder: (nowIso: string) => [nowIso, nowIso],
+  };
+};
+
+export const getAdminUserAnalyticsRetention = async (): Promise<AdminUserAnalyticsRetention> => {
+  const nowIso = new Date().toISOString();
+  const output: AdminUserAnalyticsRetention = {
+    totalUsers: 0,
+    avgObservedRetentionDays: 0,
+    medianObservedRetentionDays: 0,
+    p90ObservedRetentionDays: 0,
+    points: [
+      { key: 'd1', label: 'D1', days: 1, eligible: 0, retained: 0, rate: 0 },
+      { key: 'd7', label: 'D7', days: 7, eligible: 0, retained: 0, rate: 0 },
+      { key: 'd30', label: 'D30', days: 30, eligible: 0, retained: 0, rate: 0 },
+      { key: 'd90', label: 'D90', days: 90, eligible: 0, retained: 0, rate: 0 },
+    ],
+    activityTrackingOk: false,
+  };
+
+  const runQuery = async (useActivityTable: boolean): Promise<void> => {
+    const { aggregateSql, distributionSql, paramsBuilder } = buildRetentionSql(useActivityTable);
+    const params = paramsBuilder(nowIso);
+    const [aggregateResult, distributionResult] = await Promise.all([
+      queryFromD1(aggregateSql, params),
+      queryFromD1(distributionSql, params),
+    ]);
+
+    const aggregateRow = readFirstRow(aggregateResult);
+    output.totalUsers = readInt(aggregateRow.total_users);
+    output.avgObservedRetentionDays = toFixed2(readFloat(aggregateRow.avg_retention_days));
+
+    const pointsMap: Array<{ key: 'd1' | 'd7' | 'd30' | 'd90'; eligibleField: string; retainedField: string }> = [
+      { key: 'd1', eligibleField: 'd1_eligible', retainedField: 'd1_retained' },
+      { key: 'd7', eligibleField: 'd7_eligible', retainedField: 'd7_retained' },
+      { key: 'd30', eligibleField: 'd30_eligible', retainedField: 'd30_retained' },
+      { key: 'd90', eligibleField: 'd90_eligible', retainedField: 'd90_retained' },
+    ];
+
+    output.points = output.points.map((point) => {
+      const mapping = pointsMap.find((item) => item.key === point.key);
+      if (!mapping) return point;
+      const eligible = readInt(aggregateRow[mapping.eligibleField]);
+      const retained = readInt(aggregateRow[mapping.retainedField]);
+      return { ...point, eligible, retained, rate: toRate(retained, eligible) };
+    });
+
+    const distributionRows = ((distributionResult as any)?.result?.[0]?.results ?? []) as Array<Record<string, unknown>>;
+    const histogram = distributionRows.map((row) => ({
+      value: readInt(row.retention_days),
+      count: readInt(row.bucket_count),
+    })).filter((row) => row.count > 0);
+
+    output.medianObservedRetentionDays = quantileFromHistogram(histogram, 0.5);
+    output.p90ObservedRetentionDays = quantileFromHistogram(histogram, 0.9);
+    output.activityTrackingOk = useActivityTable;
+  };
+
+  try {
+    await runQuery(true);
+  } catch (error) {
+    if (!isMissingActivityTableError(error)) {
+      console.error('[AdminUserAnalytics] 读取留存统计失败:', error);
+      return output;
+    }
+    try {
+      await runQuery(false);
+    } catch (fallbackError) {
+      console.error('[AdminUserAnalytics] 留存统计回退失败:', fallbackError);
+      return output;
+    }
+  }
+
+  return output;
+};
+
+const buildCompositionSql = (useActivityTable: boolean): {
+  aggregateSql: string;
+  bucketSql: string;
+  distributionSql: string;
+  paramsBuilder: (nowIso: string, sinceActiveIso: string) => unknown[];
+} => {
+  const activityJoinSql = useActivityTable ? 'LEFT JOIN user_last_activity ula ON ula.user_id = u.id' : '';
+  const activityWhereSql = useActivityTable
+    ? 'ula.last_seen_at IS NOT NULL AND julianday(ula.last_seen_at) >= julianday(?)'
+    : 'u.last_login_at IS NOT NULL AND julianday(u.last_login_at) >= julianday(?)';
+
+  const baseCte = `
+    WITH active_sample AS (
+      SELECT
+        u.id,
+        CASE
+          WHEN (julianday(?) - julianday(u.created_at)) < 0 THEN 0
+          ELSE CAST((julianday(?) - julianday(u.created_at)) AS INTEGER)
+        END AS tenure_days
+      FROM users u
+      ${activityJoinSql}
+      WHERE ${activityWhereSql}
+    )
+  `;
+
+  const aggregateSql = `
+    ${baseCte}
+    SELECT
+      COUNT(1) AS sample_users,
+      COALESCE(SUM(CASE WHEN tenure_days <= 30 THEN 1 ELSE 0 END), 0) AS new_users,
+      COALESCE(AVG(tenure_days), 0) AS avg_tenure_days
+    FROM active_sample;
+  `;
+
+  const bucketSql = `
+    ${baseCte}
+    SELECT
+      CASE
+        WHEN tenure_days BETWEEN 0 AND 3 THEN '0_3d'
+        WHEN tenure_days BETWEEN 4 AND 7 THEN '4_7d'
+        WHEN tenure_days BETWEEN 8 AND 30 THEN '8_30d'
+        WHEN tenure_days BETWEEN 31 AND 90 THEN '31_90d'
+        WHEN tenure_days BETWEEN 91 AND 180 THEN '91_180d'
+        ELSE '180d_plus'
+      END AS bucket_key,
+      CASE
+        WHEN tenure_days BETWEEN 0 AND 3 THEN '0~3 天'
+        WHEN tenure_days BETWEEN 4 AND 7 THEN '4~7 天'
+        WHEN tenure_days BETWEEN 8 AND 30 THEN '8~30 天'
+        WHEN tenure_days BETWEEN 31 AND 90 THEN '31~90 天'
+        WHEN tenure_days BETWEEN 91 AND 180 THEN '91~180 天'
+        ELSE '180 天以上'
+      END AS bucket_label,
+      CASE
+        WHEN tenure_days BETWEEN 0 AND 3 THEN 1
+        WHEN tenure_days BETWEEN 4 AND 7 THEN 2
+        WHEN tenure_days BETWEEN 8 AND 30 THEN 3
+        WHEN tenure_days BETWEEN 31 AND 90 THEN 4
+        WHEN tenure_days BETWEEN 91 AND 180 THEN 5
+        ELSE 6
+      END AS bucket_order,
+      COUNT(1) AS bucket_count
+    FROM active_sample
+    GROUP BY bucket_key, bucket_label, bucket_order
+    ORDER BY bucket_order ASC;
+  `;
+
+  const distributionSql = `
+    ${baseCte}
+    SELECT tenure_days AS tenure_days, COUNT(1) AS bucket_count
+    FROM active_sample
+    GROUP BY tenure_days
+    ORDER BY tenure_days ASC;
+  `;
+
+  return {
+    aggregateSql,
+    bucketSql,
+    distributionSql,
+    paramsBuilder: (nowIso: string, sinceActiveIso: string) => [nowIso, nowIso, sinceActiveIso],
+  };
+};
+
+export const getAdminUserAnalyticsComposition = async (activeWindowDaysInput?: number): Promise<AdminUserAnalyticsComposition> => {
+  const activeWindowDays = clampActiveWindowDays(activeWindowDaysInput);
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  const sinceActiveIso = new Date(now - activeWindowDays * 24 * 60 * 60 * 1000).toISOString();
+
+  const output: AdminUserAnalyticsComposition = {
+    activeWindowDays,
+    sampleUsers: 0,
+    newUsers: 0,
+    oldUsers: 0,
+    newUsersShare: 0,
+    avgTenureDays: 0,
+    medianTenureDays: 0,
+    p90TenureDays: 0,
+    buckets: [],
+    activityTrackingOk: false,
+  };
+
+  const runQuery = async (useActivityTable: boolean): Promise<void> => {
+    const { aggregateSql, bucketSql, distributionSql, paramsBuilder } = buildCompositionSql(useActivityTable);
+    const params = paramsBuilder(nowIso, sinceActiveIso);
+    const [aggregateResult, bucketResult, distributionResult] = await Promise.all([
+      queryFromD1(aggregateSql, params),
+      queryFromD1(bucketSql, params),
+      queryFromD1(distributionSql, params),
+    ]);
+
+    const aggregateRow = readFirstRow(aggregateResult);
+    output.sampleUsers = readInt(aggregateRow.sample_users);
+    output.newUsers = readInt(aggregateRow.new_users);
+    output.oldUsers = Math.max(0, output.sampleUsers - output.newUsers);
+    output.newUsersShare = toRate(output.newUsers, output.sampleUsers);
+    output.avgTenureDays = toFixed2(readFloat(aggregateRow.avg_tenure_days));
+
+    const bucketRows = ((bucketResult as any)?.result?.[0]?.results ?? []) as Array<Record<string, unknown>>;
+    output.buckets = bucketRows.map((row) => {
+      const count = readInt(row.bucket_count);
+      return {
+        key: String(row.bucket_key ?? ''),
+        label: String(row.bucket_label ?? ''),
+        count,
+        share: toRate(count, output.sampleUsers),
+      };
+    });
+
+    const distributionRows = ((distributionResult as any)?.result?.[0]?.results ?? []) as Array<Record<string, unknown>>;
+    const histogram = distributionRows.map((row) => ({
+      value: readInt(row.tenure_days),
+      count: readInt(row.bucket_count),
+    })).filter((row) => row.count > 0);
+
+    output.medianTenureDays = quantileFromHistogram(histogram, 0.5);
+    output.p90TenureDays = quantileFromHistogram(histogram, 0.9);
+    output.activityTrackingOk = useActivityTable;
+  };
+
+  try {
+    await runQuery(true);
+  } catch (error) {
+    if (!isMissingActivityTableError(error)) {
+      console.error('[AdminUserAnalytics] 读取活跃构成失败:', error);
+      return output;
+    }
+    try {
+      await runQuery(false);
+    } catch (fallbackError) {
+      console.error('[AdminUserAnalytics] 活跃构成回退失败:', fallbackError);
       return output;
     }
   }

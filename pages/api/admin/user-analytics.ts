@@ -1,6 +1,8 @@
 import {
   getAdminUserAnalyticsFrequency,
+  getAdminUserAnalyticsComposition,
   getAdminUserAnalyticsOverview,
+  getAdminUserAnalyticsRetention,
   type AdminFrequencySample,
   type AdminUserAnalyticsSection,
 } from '@/lib/database/admin-user-analytics';
@@ -18,6 +20,8 @@ const parseLookbackDays = (value: string | null): number => {
 const parseSection = (value: string | null): AdminUserAnalyticsSection => {
   if (value === 'overview') return 'overview';
   if (value === 'frequency') return 'frequency';
+  if (value === 'retention') return 'retention';
+  if (value === 'composition') return 'composition';
   return 'all';
 };
 
@@ -25,6 +29,12 @@ const parseSample = (value: string | null): AdminFrequencySample => {
   if (value === 'all') return 'all';
   if (value === 'tracked') return 'tracked';
   return 'active7d';
+};
+
+const parseActiveWindowDays = (value: string | null): number => {
+  const parsed = Number.parseInt((value || '').trim(), 10);
+  if (!Number.isFinite(parsed)) return 7;
+  return Math.max(1, Math.min(180, parsed));
 };
 
 export default async function handler(req: NextRequest) {
@@ -36,10 +46,11 @@ export default async function handler(req: NextRequest) {
   const section = parseSection(url.searchParams.get('section'));
   const lookbackDays = parseLookbackDays(url.searchParams.get('lookbackDays'));
   const frequencySample = parseSample(url.searchParams.get('frequencySample'));
+  const activeWindowDays = parseActiveWindowDays(url.searchParams.get('activeWindowDays'));
   const frequencyProfile = 'v20260209';
 
   const ttlSeconds = section === 'overview' ? 60 : 120;
-  const cacheKey = `https://admin-user-analytics.internal/${section}?lookbackDays=${lookbackDays}&frequencySample=${frequencySample}&frequencyProfile=${frequencyProfile}`;
+  const cacheKey = `https://admin-user-analytics.internal/${section}?lookbackDays=${lookbackDays}&frequencySample=${frequencySample}&activeWindowDays=${activeWindowDays}&frequencyProfile=${frequencyProfile}`;
 
   return withEdgeCache(
     req,
@@ -78,21 +89,49 @@ export default async function handler(req: NextRequest) {
           );
         }
 
-        const [overview, frequency] = await Promise.all([
+        if (section === 'retention') {
+          const retention = await getAdminUserAnalyticsRetention();
+          return new Response(
+            JSON.stringify({
+              success: true,
+              section,
+              stats: retention,
+              meta: { generatedAt },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        if (section === 'composition') {
+          const composition = await getAdminUserAnalyticsComposition(activeWindowDays);
+          return new Response(
+            JSON.stringify({
+              success: true,
+              section,
+              stats: composition,
+              meta: { generatedAt, activeWindowDays },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        const [overview, frequency, retention, composition] = await Promise.all([
           getAdminUserAnalyticsOverview(lookbackDays),
           getAdminUserAnalyticsFrequency({
             sample: frequencySample,
             profile: frequencyProfile,
             lookbackDays,
           }),
+          getAdminUserAnalyticsRetention(),
+          getAdminUserAnalyticsComposition(activeWindowDays),
         ]);
 
         return new Response(
           JSON.stringify({
             success: true,
             section,
-            stats: { overview, frequency },
-            meta: { generatedAt, lookbackDays, frequencySample, frequencyProfile },
+            stats: { overview, frequency, retention, composition },
+            meta: { generatedAt, lookbackDays, frequencySample, activeWindowDays, frequencyProfile },
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );

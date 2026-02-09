@@ -47,17 +47,58 @@ type FrequencyStats = {
   activityTrackingOk: boolean;
 };
 
+type RetentionPoint = {
+  key: 'd1' | 'd7' | 'd30' | 'd90';
+  label: string;
+  days: number;
+  eligible: number;
+  retained: number;
+  rate: number;
+};
+
+type RetentionStats = {
+  totalUsers: number;
+  avgObservedRetentionDays: number;
+  medianObservedRetentionDays: number;
+  p90ObservedRetentionDays: number;
+  points: RetentionPoint[];
+  activityTrackingOk: boolean;
+};
+
+type CompositionBucket = {
+  key: string;
+  label: string;
+  count: number;
+  share: number;
+};
+
+type CompositionStats = {
+  activeWindowDays: number;
+  sampleUsers: number;
+  newUsers: number;
+  oldUsers: number;
+  newUsersShare: number;
+  avgTenureDays: number;
+  medianTenureDays: number;
+  p90TenureDays: number;
+  buckets: CompositionBucket[];
+  activityTrackingOk: boolean;
+};
+
 type ApiResponse = {
   success: boolean;
   section: 'all';
   stats: {
     overview: OverviewStats;
     frequency: FrequencyStats;
+    retention: RetentionStats;
+    composition: CompositionStats;
   };
   meta: {
     generatedAt: string;
     lookbackDays: number;
     frequencySample: 'active7d' | 'tracked' | 'all';
+    activeWindowDays: number;
     frequencyProfile: 'v20260209';
   };
   error?: string;
@@ -93,6 +134,7 @@ const StatCard: React.FC<{ title: string; value: string; note?: string; icon: Re
 
 const UserAnalyticsPage: React.FC = () => {
   const [lookbackDays, setLookbackDays] = useState<number>(30);
+  const [activeWindowDays, setActiveWindowDays] = useState<number>(7);
   const [frequencySample, setFrequencySample] = useState<FrequencySample>('active7d');
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -104,10 +146,11 @@ const UserAnalyticsPage: React.FC = () => {
       section: 'all',
       lookbackDays: String(lookbackDays),
       frequencySample,
+      activeWindowDays: String(activeWindowDays),
       frequencyProfile: 'v20260209',
     });
     return `/api/admin/user-analytics?${params.toString()}`;
-  }, [lookbackDays, frequencySample]);
+  }, [lookbackDays, frequencySample, activeWindowDays]);
 
   const fetchData = useCallback(async (showRefreshing: boolean) => {
     if (!showRefreshing) setLoading(true);
@@ -138,6 +181,8 @@ const UserAnalyticsPage: React.FC = () => {
 
   const overview = data?.stats.overview;
   const frequency = data?.stats.frequency;
+  const retention = data?.stats.retention;
+  const composition = data?.stats.composition;
   const generatedAt = data?.meta.generatedAt;
 
   return (
@@ -166,7 +211,7 @@ const UserAnalyticsPage: React.FC = () => {
             <p className="mt-1 text-sm text-gray-500">
               当前支持活跃概览与高频生成分层（profile: <code>v20260209</code>）
             </p>
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
               <label className="text-sm text-gray-700">
                 统计窗口
                 <select
@@ -190,6 +235,19 @@ const UserAnalyticsPage: React.FC = () => {
                   <option value="active7d">最近 7 天活跃用户</option>
                   <option value="tracked">有活跃记录用户</option>
                   <option value="all">全体用户</option>
+                </select>
+              </label>
+              <label className="text-sm text-gray-700">
+                活跃样本窗口
+                <select
+                  value={activeWindowDays}
+                  onChange={(e) => setActiveWindowDays(Number.parseInt(e.target.value, 10))}
+                  className="mt-1 block w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+                >
+                  <option value={1}>近 1 天</option>
+                  <option value={7}>近 7 天</option>
+                  <option value={30}>近 30 天</option>
+                  <option value={90}>近 90 天</option>
                 </select>
               </label>
               <div className="text-sm text-gray-700">
@@ -340,6 +398,110 @@ const UserAnalyticsPage: React.FC = () => {
                   提示：`user_last_activity` 未就绪，`active7d/tracked` 口径会退化为低可用状态。
                 </p>
               ) : null}
+            </div>
+          ) : null}
+
+          {retention ? (
+            <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-gray-800">留存概览（累计回访口径）</h2>
+                <p className="text-xs text-gray-500">
+                  样本总量 {formatNumber(retention.totalUsers)} · 口径 {retention.activityTrackingOk ? 'last_activity + last_login' : 'last_login 回退'}
+                </p>
+              </div>
+
+              <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">平均留存时长</p>
+                  <p className="mt-1 text-xl font-semibold text-gray-800">{retention.avgObservedRetentionDays.toFixed(2)} 天</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">中位留存时长</p>
+                  <p className="mt-1 text-xl font-semibold text-gray-800">{retention.medianObservedRetentionDays} 天</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">P90 留存时长</p>
+                  <p className="mt-1 text-xl font-semibold text-gray-800">{retention.p90ObservedRetentionDays} 天</p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-600">
+                    <tr>
+                      <th className="px-4 py-3">窗口</th>
+                      <th className="px-4 py-3">可观测用户</th>
+                      <th className="px-4 py-3">已达到阈值</th>
+                      <th className="px-4 py-3">留存率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {retention.points.map((point) => (
+                      <tr key={point.key} className="border-t border-gray-100">
+                        <td className="px-4 py-3 text-gray-700">{point.label}</td>
+                        <td className="px-4 py-3 text-gray-800">{formatNumber(point.eligible)}</td>
+                        <td className="px-4 py-3 text-gray-800">{formatNumber(point.retained)}</td>
+                        <td className="px-4 py-3 text-gray-800">{formatPercent(point.rate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          {composition ? (
+            <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-gray-800">活跃用户构成</h2>
+                <p className="text-xs text-gray-500">
+                  活跃窗口 {composition.activeWindowDays} 天 · 样本 {formatNumber(composition.sampleUsers)}
+                </p>
+              </div>
+
+              <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">新用户（≤30天）</p>
+                  <p className="mt-1 text-xl font-semibold text-gray-800">
+                    {formatNumber(composition.newUsers)} · {formatPercent(composition.newUsersShare)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">老用户（&gt;30天）</p>
+                  <p className="mt-1 text-xl font-semibold text-gray-800">{formatNumber(composition.oldUsers)}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">平均注册时长</p>
+                  <p className="mt-1 text-xl font-semibold text-gray-800">{composition.avgTenureDays.toFixed(2)} 天</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">中位 / P90 注册时长</p>
+                  <p className="mt-1 text-xl font-semibold text-gray-800">
+                    {composition.medianTenureDays} / {composition.p90TenureDays} 天
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-600">
+                    <tr>
+                      <th className="px-4 py-3">注册时长分层</th>
+                      <th className="px-4 py-3">人数</th>
+                      <th className="px-4 py-3">占比</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {composition.buckets.map((bucket) => (
+                      <tr key={bucket.key} className="border-t border-gray-100">
+                        <td className="px-4 py-3 text-gray-700">{bucket.label}</td>
+                        <td className="px-4 py-3 text-gray-800">{formatNumber(bucket.count)}</td>
+                        <td className="px-4 py-3 text-gray-800">{formatPercent(bucket.share)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : null}
         </div>
