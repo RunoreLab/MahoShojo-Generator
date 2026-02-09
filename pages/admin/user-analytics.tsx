@@ -136,6 +136,86 @@ const formatNumber = (value: number): string => {
   return Math.round(value).toLocaleString('zh-CN');
 };
 
+const formatDateToIso = (date: Date): string => {
+  const year = date.getUTCFullYear();
+  const month = `${date.getUTCMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getUTCDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getCohortGranularityZhLabel = (granularity: CohortGranularity): string => (
+  granularity === 'week' ? '注册周 Cohort' : '注册月 Cohort'
+);
+
+type CohortDisplayMeta = {
+  keyWithDateRange: string;
+  periodZh: string;
+  dateRange: string;
+};
+
+const buildCohortDisplayMeta = (granularity: CohortGranularity, cohortKey: string): CohortDisplayMeta => {
+  const fallback: CohortDisplayMeta = {
+    keyWithDateRange: cohortKey,
+    periodZh: cohortKey,
+    dateRange: '-',
+  };
+
+  if (granularity === 'month') {
+    const monthMatch = cohortKey.match(/^(\d{4})-(\d{2})$/);
+    if (!monthMatch) return fallback;
+
+    const year = Number.parseInt(monthMatch[1], 10);
+    const month = Number.parseInt(monthMatch[2], 10);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return fallback;
+
+    const monthStart = new Date(Date.UTC(year, month - 1, 1));
+    const monthEnd = new Date(Date.UTC(year, month, 0));
+    const dateRange = `${formatDateToIso(monthStart)} ~ ${formatDateToIso(monthEnd)}`;
+
+    return {
+      keyWithDateRange: `${cohortKey}（${dateRange}）`,
+      periodZh: `${year} 年 ${month} 月`,
+      dateRange,
+    };
+  }
+
+  const weekMatch = cohortKey.match(/^(\d{4})-W(\d{2})$/);
+  if (!weekMatch) return fallback;
+
+  const year = Number.parseInt(weekMatch[1], 10);
+  const weekNumber = Number.parseInt(weekMatch[2], 10);
+  if (!Number.isFinite(year) || !Number.isFinite(weekNumber) || weekNumber < 0 || weekNumber > 53) return fallback;
+
+  const jan1 = new Date(Date.UTC(year, 0, 1));
+  const jan1Weekday = jan1.getUTCDay();
+  const firstMondayOffsetDays = (8 - jan1Weekday) % 7;
+  const firstMonday = new Date(Date.UTC(year, 0, 1 + firstMondayOffsetDays));
+
+  let weekStart: Date;
+  let weekEnd: Date;
+
+  if (weekNumber === 0) {
+    weekStart = jan1;
+    weekEnd = firstMondayOffsetDays === 0
+      ? jan1
+      : new Date(firstMonday.getTime() - 24 * 60 * 60 * 1000);
+  } else {
+    weekStart = new Date(firstMonday.getTime() + (weekNumber - 1) * 7 * 24 * 60 * 60 * 1000);
+    weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
+  }
+
+  const dateRange = `${formatDateToIso(weekStart)} ~ ${formatDateToIso(weekEnd)}`;
+  const periodZh = weekNumber === 0
+    ? `${year} 年第 0 周（年初残周）`
+    : `${year} 年第 ${weekNumber} 周`;
+
+  return {
+    keyWithDateRange: `${cohortKey}（${dateRange}）`,
+    periodZh,
+    dateRange,
+  };
+};
+
 const escapeCsvCell = (value: string): string => {
   if (/[",\n]/.test(value)) {
     return `"${value.replace(/"/g, '""')}"`;
@@ -241,6 +321,8 @@ const UserAnalyticsPage: React.FC = () => {
       rows.push([
         'retention_point',
         point.label,
+        '',
+        '',
         point.days,
         point.eligible,
         point.retained,
@@ -251,9 +333,12 @@ const UserAnalyticsPage: React.FC = () => {
     });
 
     retention.cohorts.forEach((cohortRow) => {
+      const cohortMeta = buildCohortDisplayMeta(retention.cohortGranularity, cohortRow.cohortKey);
       rows.push([
         'retention_cohort',
-        cohortRow.cohortKey,
+        cohortMeta.keyWithDateRange,
+        cohortMeta.periodZh,
+        cohortMeta.dateRange,
         '',
         cohortRow.cohortSize,
         '',
@@ -265,7 +350,7 @@ const UserAnalyticsPage: React.FC = () => {
 
     downloadCsv(
       `retention_${retention.cohortGranularity}_${retention.cohortLookbackDays}d.csv`,
-      ['type', 'label_or_cohort', 'days', 'eligible_or_size', 'retained', 'rate_percent', 'd7', 'd30'],
+      ['type', 'label_or_cohort', 'cohort_period_zh', 'cohort_date_range', 'days', 'eligible_or_size', 'retained', 'rate_percent', 'd7', 'd30'],
       rows,
     );
   }, [retention]);
@@ -278,6 +363,8 @@ const UserAnalyticsPage: React.FC = () => {
       rows.push([
         'tenure_bucket',
         bucket.label,
+        '',
+        '',
         bucket.count,
         (bucket.share * 100).toFixed(2),
         '',
@@ -286,9 +373,12 @@ const UserAnalyticsPage: React.FC = () => {
     });
 
     composition.cohorts.forEach((cohortRow) => {
+      const cohortMeta = buildCohortDisplayMeta(composition.cohortGranularity, cohortRow.cohortKey);
       rows.push([
         'composition_cohort',
-        cohortRow.cohortKey,
+        cohortMeta.keyWithDateRange,
+        cohortMeta.periodZh,
+        cohortMeta.dateRange,
         cohortRow.sampleUsers,
         '',
         cohortRow.newUsers,
@@ -298,7 +388,7 @@ const UserAnalyticsPage: React.FC = () => {
 
     downloadCsv(
       `composition_${composition.cohortGranularity}_${composition.cohortLookbackDays}d.csv`,
-      ['type', 'label_or_cohort', 'sample_users_or_count', 'share_percent', 'new_users', 'new_users_share_percent'],
+      ['type', 'label_or_cohort', 'cohort_period_zh', 'cohort_date_range', 'sample_users_or_count', 'share_percent', 'new_users', 'new_users_share_percent'],
       rows,
     );
   }, [composition]);
@@ -536,7 +626,7 @@ const UserAnalyticsPage: React.FC = () => {
                 <div>
                   <h2 className="text-lg font-semibold text-gray-800">留存概览（累计回访口径）</h2>
                   <p className="text-xs text-gray-500">
-                    样本总量 {formatNumber(retention.totalUsers)} · 口径 {retention.activityTrackingOk ? 'last_activity + last_login' : 'last_login 回退'} · cohort {retention.cohortGranularity}
+                    样本总量 {formatNumber(retention.totalUsers)} · 口径 {retention.activityTrackingOk ? 'last_activity + last_login' : 'last_login 回退'} · 分群粒度 {getCohortGranularityZhLabel(retention.cohortGranularity)}
                   </p>
                 </div>
                 <button
@@ -590,25 +680,31 @@ const UserAnalyticsPage: React.FC = () => {
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-600">
                     <tr>
-                      <th className="px-4 py-3">Cohort</th>
+                      <th className="px-4 py-3">注册分群</th>
                       <th className="px-4 py-3">用户数</th>
                       <th className="px-4 py-3">D7 留存</th>
                       <th className="px-4 py-3">D30 留存</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {retention.cohorts.map((row) => (
-                      <tr key={row.cohortKey} className="border-t border-gray-100">
-                        <td className="px-4 py-3 text-gray-700">{row.cohortKey}</td>
-                        <td className="px-4 py-3 text-gray-800">{formatNumber(row.cohortSize)}</td>
-                        <td className="px-4 py-3 text-gray-800">
-                          {formatNumber(row.d7Retained)} / {formatNumber(row.d7Eligible)}（{formatPercent(row.d7Rate)}）
-                        </td>
-                        <td className="px-4 py-3 text-gray-800">
-                          {formatNumber(row.d30Retained)} / {formatNumber(row.d30Eligible)}（{formatPercent(row.d30Rate)}）
-                        </td>
-                      </tr>
-                    ))}
+                    {retention.cohorts.map((row) => {
+                      const cohortMeta = buildCohortDisplayMeta(retention.cohortGranularity, row.cohortKey);
+                      return (
+                        <tr key={row.cohortKey} className="border-t border-gray-100">
+                          <td className="px-4 py-3 text-gray-700">
+                            <div>{cohortMeta.keyWithDateRange}</div>
+                            <div className="mt-0.5 text-xs text-gray-500">{cohortMeta.periodZh}</div>
+                          </td>
+                          <td className="px-4 py-3 text-gray-800">{formatNumber(row.cohortSize)}</td>
+                          <td className="px-4 py-3 text-gray-800">
+                            {formatNumber(row.d7Retained)} / {formatNumber(row.d7Eligible)}（{formatPercent(row.d7Rate)}）
+                          </td>
+                          <td className="px-4 py-3 text-gray-800">
+                            {formatNumber(row.d30Retained)} / {formatNumber(row.d30Eligible)}（{formatPercent(row.d30Rate)}）
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -621,7 +717,7 @@ const UserAnalyticsPage: React.FC = () => {
                 <div>
                   <h2 className="text-lg font-semibold text-gray-800">活跃用户构成</h2>
                   <p className="text-xs text-gray-500">
-                    活跃窗口 {composition.activeWindowDays} 天 · 样本 {formatNumber(composition.sampleUsers)} · cohort {composition.cohortGranularity}
+                    活跃窗口 {composition.activeWindowDays} 天 · 样本 {formatNumber(composition.sampleUsers)} · 分群粒度 {getCohortGranularityZhLabel(composition.cohortGranularity)}
                   </p>
                 </div>
                 <button
@@ -681,7 +777,7 @@ const UserAnalyticsPage: React.FC = () => {
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-600">
                     <tr>
-                      <th className="px-4 py-3">Cohort</th>
+                      <th className="px-4 py-3">注册分群</th>
                       <th className="px-4 py-3">样本用户</th>
                       <th className="px-4 py-3">新用户（≤30天）</th>
                       <th className="px-4 py-3">新用户占比</th>
@@ -689,15 +785,21 @@ const UserAnalyticsPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {composition.cohorts.map((row) => (
-                      <tr key={row.cohortKey} className="border-t border-gray-100">
-                        <td className="px-4 py-3 text-gray-700">{row.cohortKey}</td>
-                        <td className="px-4 py-3 text-gray-800">{formatNumber(row.sampleUsers)}</td>
-                        <td className="px-4 py-3 text-gray-800">{formatNumber(row.newUsers)}</td>
-                        <td className="px-4 py-3 text-gray-800">{formatPercent(row.newUsersShare)}</td>
-                        <td className="px-4 py-3 text-gray-800">{row.avgTenureDays.toFixed(2)} 天</td>
-                      </tr>
-                    ))}
+                    {composition.cohorts.map((row) => {
+                      const cohortMeta = buildCohortDisplayMeta(composition.cohortGranularity, row.cohortKey);
+                      return (
+                        <tr key={row.cohortKey} className="border-t border-gray-100">
+                          <td className="px-4 py-3 text-gray-700">
+                            <div>{cohortMeta.keyWithDateRange}</div>
+                            <div className="mt-0.5 text-xs text-gray-500">{cohortMeta.periodZh}</div>
+                          </td>
+                          <td className="px-4 py-3 text-gray-800">{formatNumber(row.sampleUsers)}</td>
+                          <td className="px-4 py-3 text-gray-800">{formatNumber(row.newUsers)}</td>
+                          <td className="px-4 py-3 text-gray-800">{formatPercent(row.newUsersShare)}</td>
+                          <td className="px-4 py-3 text-gray-800">{row.avgTenureDays.toFixed(2)} 天</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
