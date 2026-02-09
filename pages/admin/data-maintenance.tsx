@@ -1177,6 +1177,9 @@ export default function AdminDataMaintenancePage() {
                   value={batchSize}
                   onChange={(e) => setBatchSize(Math.max(1, Math.min(5000, Number(e.target.value || 1))))}
                 />
+                <span className="mt-1 block text-xs text-gray-500">
+                  若单条 SQL 参数过多，后端会自动拆分批次以避免 D1 报错。
+                </span>
               </label>
               {hasDeleteRowsAction ? (
                 <label className="text-sm">

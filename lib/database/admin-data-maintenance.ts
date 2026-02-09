@@ -194,6 +194,45 @@ export type AdminDataCleanupJobDetail = AdminDataCleanupJobListRow & {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SAFE_KEYWORD_RE = /^[a-zA-Z0-9_\-:.]+$/;
 
+const isTooManySqlVariablesError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes('too many sql variables');
+};
+
+const withSqlVariableFallbackForNumericResult = async (
+  ids: Array<string | number>,
+  run: (safeIds: Array<string | number>) => Promise<number>,
+): Promise<number> => {
+  if (ids.length <= 0) return 0;
+  try {
+    return await run(ids);
+  } catch (error) {
+    if (!isTooManySqlVariablesError(error) || ids.length <= 1) throw error;
+    const mid = Math.floor(ids.length / 2);
+    if (mid <= 0 || mid >= ids.length) throw error;
+    const left = await withSqlVariableFallbackForNumericResult(ids.slice(0, mid), run);
+    const right = await withSqlVariableFallbackForNumericResult(ids.slice(mid), run);
+    return left + right;
+  }
+};
+
+const withSqlVariableFallbackForRows = async <T>(
+  ids: Array<string | number>,
+  run: (safeIds: Array<string | number>) => Promise<T[]>,
+): Promise<T[]> => {
+  if (ids.length <= 0) return [];
+  try {
+    return await run(ids);
+  } catch (error) {
+    if (!isTooManySqlVariablesError(error) || ids.length <= 1) throw error;
+    const mid = Math.floor(ids.length / 2);
+    if (mid <= 0 || mid >= ids.length) throw error;
+    const left = await withSqlVariableFallbackForRows(ids.slice(0, mid), run);
+    const right = await withSqlVariableFallbackForRows(ids.slice(mid), run);
+    return [...left, ...right];
+  }
+};
+
 const cleanupTargetDefinitions: Record<AdminDataCleanupTarget, CleanupTargetDefinition> = {
   battle_report_generations: {
     target: 'battle_report_generations',
@@ -887,20 +926,22 @@ const applyFieldActionForIds = async (
   action: AdminDataCleanupFieldAction,
 ): Promise<number> => {
   if (ids.length <= 0) return 0;
-  const placeholders = ids.map(() => '?').join(', ');
 
   if (action.op === 'truncate') {
     const maxChars = action.maxChars ?? 0;
     if (maxChars <= 0) return 0;
-    const sql = `
-      UPDATE ${targetDefinition.table}
-      SET ${action.field} = SUBSTR(${action.field}, 1, ?)
-      WHERE ${targetDefinition.idColumn} IN (${placeholders})
-        AND ${action.field} IS NOT NULL
-        AND LENGTH(${action.field}) > ?;
-    `;
-    const result = await queryFromD1(sql, [maxChars, ...ids, maxChars]);
-    return readChanges(result);
+    return await withSqlVariableFallbackForNumericResult(ids, async (safeIds) => {
+      const placeholders = safeIds.map(() => '?').join(', ');
+      const sql = `
+        UPDATE ${targetDefinition.table}
+        SET ${action.field} = SUBSTR(${action.field}, 1, ?)
+        WHERE ${targetDefinition.idColumn} IN (${placeholders})
+          AND ${action.field} IS NOT NULL
+          AND LENGTH(${action.field}) > ?;
+      `;
+      const result = await queryFromD1(sql, [maxChars, ...safeIds, maxChars]);
+      return readChanges(result);
+    });
   }
 
   const fieldDefinition = targetDefinition.fieldDefinitions.find((item) => item.field === action.field);
@@ -910,17 +951,20 @@ const applyFieldActionForIds = async (
       ? (fieldDefinition?.defaultValue ?? null)
       : null;
 
-  const sql = `
-    UPDATE ${targetDefinition.table}
-    SET ${action.field} = ?
-    WHERE ${targetDefinition.idColumn} IN (${placeholders})
-      AND (
-        ${action.field} IS NOT ?
-        OR (${action.field} IS NULL AND ? IS NOT NULL)
-      );
-  `;
-  const result = await queryFromD1(sql, [nextValue, ...ids, nextValue, nextValue]);
-  return readChanges(result);
+  return await withSqlVariableFallbackForNumericResult(ids, async (safeIds) => {
+    const placeholders = safeIds.map(() => '?').join(', ');
+    const sql = `
+      UPDATE ${targetDefinition.table}
+      SET ${action.field} = ?
+      WHERE ${targetDefinition.idColumn} IN (${placeholders})
+        AND (
+          ${action.field} IS NOT ?
+          OR (${action.field} IS NULL AND ? IS NOT NULL)
+        );
+    `;
+    const result = await queryFromD1(sql, [nextValue, ...safeIds, nextValue, nextValue]);
+    return readChanges(result);
+  });
 };
 
 const deleteRowsForIds = async (
@@ -928,17 +972,21 @@ const deleteRowsForIds = async (
   ids: Array<string | number>,
 ): Promise<number> => {
   if (ids.length <= 0) return 0;
-  const placeholders = ids.map(() => '?').join(', ');
-  const sql = `DELETE FROM ${targetDefinition.table} WHERE ${targetDefinition.idColumn} IN (${placeholders});`;
-  const result = await queryFromD1(sql, ids);
-  return readChanges(result);
+  return await withSqlVariableFallbackForNumericResult(ids, async (safeIds) => {
+    const placeholders = safeIds.map(() => '?').join(', ');
+    const sql = `DELETE FROM ${targetDefinition.table} WHERE ${targetDefinition.idColumn} IN (${placeholders});`;
+    const result = await queryFromD1(sql, safeIds);
+    return readChanges(result);
+  });
 };
 
 const deleteR2ObjectsForLargeObjectIds = async (ids: Array<string | number>): Promise<{ ok: number; failed: number }> => {
   if (ids.length <= 0) return { ok: 0, failed: 0 };
-  const placeholders = ids.map(() => '?').join(', ');
-  const sql = `SELECT r2_key FROM large_objects WHERE id IN (${placeholders})`;
-  const rows = readRows<{ r2_key: string }>(await queryFromD1(sql, ids));
+  const rows = await withSqlVariableFallbackForRows(ids, async (safeIds) => {
+    const placeholders = safeIds.map(() => '?').join(', ');
+    const sql = `SELECT r2_key FROM large_objects WHERE id IN (${placeholders})`;
+    return readRows<{ r2_key: string }>(await queryFromD1(sql, safeIds));
+  });
 
   let ok = 0;
   let failed = 0;
