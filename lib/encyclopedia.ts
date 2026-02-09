@@ -162,6 +162,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['ModelScope', '401', '鉴权失败', 'Token', '立绘', 'request id'],
   },
   {
+    slug: 'liblib-auth-401',
+    title: 'LibLib 立绘 401（签名/鉴权失败）排查',
+    summary: '立绘生成提示 LibLib 401 或“签名验证失败”时，如何核查 Access Key / Secret Key 与签名时效。',
+    markdownPath: '/encyclopedia/liblib-auth-401.md',
+    categoryId: 'troubleshooting',
+    keywords: ['LibLib', '401', '签名验证失败', 'Access Key', 'Secret Key', '立绘'],
+  },
+  {
     slug: 'ai-errors',
     title: 'AI 生成失败：常见原因与自救',
     summary: '高峰期/配置/额度/输入过长等导致的生成失败排查与恢复建议。',

@@ -1,6 +1,12 @@
 import { getSignedUrl } from "@/lib/tachie/liblib/utils";
 import type { StatusResponse } from "@/lib/tachie/liblib/types";
 import {
+  buildLibLibErrorPayload,
+  extractLibLibCode,
+  inferLibLibHttpStatus,
+  parseLibLibJsonSafe,
+} from "@/lib/tachie/liblib/error";
+import {
   buildModelScopeErrorPayload,
   extractModelScopeMessage,
   extractModelScopeOutputImages,
@@ -113,19 +119,57 @@ export default async function handler(req: Request) {
       body: JSON.stringify({ generateUuid }),
     });
 
+    const raw = await response.text();
+    const upstream = parseLibLibJsonSafe(raw);
+
     if (!response.ok) {
       return new Response(
-        JSON.stringify({ error: `LibLib API error: ${response.status}` }),
+        JSON.stringify(buildLibLibErrorPayload({
+          status: response.status,
+          payload: upstream,
+          requestIdHeader: response.headers.get("x-request-id"),
+        })),
         { status: response.status, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    const result: StatusResponse = await response.json();
-
-    if (result.code !== 0) {
+    const code = extractLibLibCode(upstream);
+    if (code === null) {
       return new Response(
-        JSON.stringify({ error: `LibLib API error: ${result.msg}` }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
+        JSON.stringify(buildLibLibErrorPayload({
+          status: 502,
+          payload: upstream,
+          fallbackError: "LibLib 返回结果异常：缺少 code",
+          requestIdHeader: response.headers.get("x-request-id"),
+        })),
+        { status: 502, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    if (code !== 0) {
+      const status = inferLibLibHttpStatus(code, 400);
+      return new Response(
+        JSON.stringify(buildLibLibErrorPayload({
+          status,
+          payload: upstream,
+          fallbackError: "LibLib 立绘状态查询失败",
+          requestIdHeader: response.headers.get("x-request-id"),
+        })),
+        { status, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const result = upstream as Partial<StatusResponse>;
+    const hasData = result.data && typeof result.data === "object";
+    if (!hasData) {
+      return new Response(
+        JSON.stringify(buildLibLibErrorPayload({
+          status: 502,
+          payload: upstream,
+          fallbackError: "LibLib 返回结果异常：缺少 data",
+          requestIdHeader: response.headers.get("x-request-id"),
+        })),
+        { status: 502, headers: { "Content-Type": "application/json" } }
       );
     }
 

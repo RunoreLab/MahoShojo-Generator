@@ -1,5 +1,7 @@
 import type { GenerateResponse, StatusResponse } from "./types";
 import { GenerateStatus, getStatusDescription } from "./types";
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from "@/lib/client/apiError";
+import { formatHttpErrorMessage } from "@/lib/client/httpError";
 
 export type LibLibTachieMode = 'tachie' | 'illustration';
 
@@ -10,6 +12,12 @@ export type LibLibTachieGenerateOptions = {
   promptNodeId?: number;
   negativePrompt?: string;
   negativePromptNodeId?: number;
+};
+
+const readErrorFromResponse = async (response: Response, fallback: string): Promise<string> => {
+  const { payload } = await readJsonOrTextFromResponse(response);
+  const serverMessage = resolveApiErrorMessage({ payload, fallback });
+  return formatHttpErrorMessage({ serverMessage, status: response.status, fallback });
 };
 
 /**
@@ -40,12 +48,15 @@ export const generateText2Image = async (
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    throw new Error(await readErrorFromResponse(response, 'LibLib 立绘生成失败'));
   }
 
   const result: GenerateResponse = await response.json();
-  return result.data.generateUuid;
+  const generateUuid = result?.data?.generateUuid;
+  if (typeof generateUuid !== 'string' || !generateUuid.trim()) {
+    throw new Error('LibLib 返回任务 ID 为空');
+  }
+  return generateUuid.trim();
 };
 
 /**
@@ -73,11 +84,13 @@ export const getGenerateStatus = async (
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    throw new Error(await readErrorFromResponse(response, 'LibLib 任务状态查询失败'));
   }
 
   const result: StatusResponse = await response.json();
+  if (!result || typeof result !== 'object' || !result.data || typeof result.data !== 'object') {
+    throw new Error('LibLib 任务状态返回异常');
+  }
   return result.data;
 };
 

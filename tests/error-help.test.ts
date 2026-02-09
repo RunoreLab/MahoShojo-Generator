@@ -57,6 +57,14 @@ describe('error-help', () => {
     ).toBe('modelscope-auth-401');
   });
 
+  test('infer liblib auth by signature error message', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: 'LibLib 立绘任务提交失败（HTTP 401）：签名验证失败',
+      }),
+    ).toBe('liblib-auth-401');
+  });
+
   test('infer by message: data card', () => {
     expect(inferEncyclopediaSlugForError({ message: 'JSON 解析失败：Unexpected token' })).toBe('data-card-errors');
   });
@@ -109,6 +117,14 @@ describe('error-help', () => {
     expect(
       inferErrorCategoryForError({
         message: 'ModelScope 任务查询失败：Authentication failed, invalid token',
+      })?.id,
+    ).toBe('auth');
+  });
+
+  test('category: liblib auth', () => {
+    expect(
+      inferErrorCategoryForError({
+        message: 'LibLib 立绘任务提交失败（HTTP 401）：签名验证失败',
       })?.id,
     ).toBe('auth');
   });

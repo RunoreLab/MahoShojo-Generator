@@ -144,6 +144,23 @@ const MODELSCOPE_AUTH_MESSAGE_HINTS = [
   'api token',
 ] as const;
 
+const LIBLIB_MESSAGE_HINTS = [
+  'liblib',
+  'liblibai',
+  'openapi.liblibai.cloud',
+] as const;
+
+const LIBLIB_AUTH_MESSAGE_HINTS = [
+  '签名验证失败',
+  'invalid signature',
+  'signature invalid',
+  'signature',
+  'access key',
+  'secret key',
+  'accesskey',
+  'secretkey',
+] as const;
+
 function normalizeMessage(message: string) {
   return message
     .trim()
@@ -179,6 +196,15 @@ function isModelScopeAuthError(message: string, status: number | null) {
   return includesAny(message, MODELSCOPE_AUTH_MESSAGE_HINTS);
 }
 
+function isLibLibAuthError(message: string, status: number | null) {
+  const hasLibLibHint = includesAny(message, LIBLIB_MESSAGE_HINTS);
+  const hasAuthHint = includesAny(message, LIBLIB_AUTH_MESSAGE_HINTS);
+  if (message.includes('签名验证失败')) return true;
+  if (!hasLibLibHint) return false;
+  if (status === 401) return true;
+  return hasAuthHint;
+}
+
 export function inferErrorCategoryForError(input: ErrorHelpInput): ErrorCategory | null {
   const rawMessage = typeof input.message === 'string' ? input.message : '';
   const message = rawMessage.trim() ? normalizeMessage(rawMessage) : '';
@@ -204,6 +230,7 @@ export function inferErrorCategoryForError(input: ErrorHelpInput): ErrorCategory
   if (!message) return null;
 
   if (isModelScopeAuthError(message, status)) return { id: 'auth', label: '鉴权失败 / API Key 问题' };
+  if (isLibLibAuthError(message, status)) return { id: 'auth', label: '鉴权失败 / API Key 问题' };
   if (includesAny(message, NETWORK_MESSAGE_HINTS)) return { id: 'network', label: '网络连接问题' };
   if (includesAny(message, RATE_LIMIT_MESSAGE_HINTS)) return { id: 'rate_limit', label: '请求过于频繁 / 限流' };
   if (message.includes('cloudflare') || message.includes('cf-ray') || message.includes('52x') || message.includes('5xx')) {
@@ -233,6 +260,7 @@ export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | n
   const statusFromMessage = rawMessage.trim() ? extractHttpStatusFromMessage(rawMessage) : null;
   const status = statusInput ?? statusFromMessage;
   if (message && isModelScopeAuthError(message, status)) return 'modelscope-auth-401';
+  if (message && isLibLibAuthError(message, status)) return 'liblib-auth-401';
 
   if (status === 524) return 'cloudflare-524-timeout';
   if (status === 429) return 'rate-limit-429';
