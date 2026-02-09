@@ -91,6 +91,8 @@ export interface AdminBattleReportGenerationDetail {
   combatants: AdminBattleReportGenerationCombatantRow[];
 }
 
+const DEFAULT_EXPORT_MAX_ROWS = 5_000;
+
 const sortableColumns: Record<NonNullable<AdminBattleReportGenerationListFilters['sortBy']>, string> = {
   started_at: 'brg.started_at',
   duration_ms: 'brg.duration_ms',
@@ -335,7 +337,7 @@ export async function exportAdminBattleReportGenerations(params: {
   maxRows?: number;
 }): Promise<{ rows: any[]; total: number; truncated: boolean }> {
   const includeCombatants = params.includeCombatants !== false;
-  const maxRows = Math.max(1, Math.min(50_000, params.maxRows ?? 20_000));
+  const maxRows = Math.max(1, Math.min(50_000, params.maxRows ?? DEFAULT_EXPORT_MAX_ROWS));
 
   let baseRows: any[] = [];
   let total = 0;
@@ -434,4 +436,3 @@ export async function exportAdminBattleReportGenerations(params: {
 
   return { rows: merged, total, truncated };
 }
-

@@ -61,6 +61,8 @@ type BattleReportOutputCandidate = {
   downloadUrl: string;
 };
 
+const DEFAULT_EXPORT_MAX_ROWS = 5000;
+
 type BattleReportOutputPresignResponse =
   | {
       success: true;
@@ -134,7 +136,7 @@ export default function BattleReportGenerationAdminPage() {
   const [outputLinks, setOutputLinks] = useState<Extract<BattleReportOutputPresignResponse, { success: true }> | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportIncludeCombatants, setExportIncludeCombatants] = useState(true);
-  const [exportMaxRows, setExportMaxRows] = useState(20000);
+  const [exportMaxRows, setExportMaxRows] = useState(DEFAULT_EXPORT_MAX_ROWS);
 
   const buildListParams = (page: number, f: typeof filters) => {
     const params = new URLSearchParams();
@@ -597,7 +599,7 @@ export default function BattleReportGenerationAdminPage() {
                   min={1}
                   max={50000}
                   value={exportMaxRows}
-                  onChange={(e) => setExportMaxRows(parseInt(e.target.value || '0', 10) || 20000)}
+                  onChange={(e) => setExportMaxRows(parseInt(e.target.value || '0', 10) || DEFAULT_EXPORT_MAX_ROWS)}
                   className="w-28 px-2 py-1 border border-gray-300 rounded"
                 />
               </div>
