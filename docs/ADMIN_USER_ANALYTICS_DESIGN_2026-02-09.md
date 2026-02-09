@@ -510,6 +510,7 @@ CREATE INDEX IF NOT EXISTS idx_user_activity_daily_date_user
 - 增加行为价值模块（创作/PVP/生成）
 - 增加导出与筛选（窗口、cohort 粒度）
 - 导出文件补充 Cohort 中文周期信息与日期范围字段
+- 导出 CSV 文件名附带 UTC 时间戳（如 `20260209_153045Z`），文件内容使用 UTF-8 BOM 并写入 `data_generated_at_utc` / `exported_at_utc` 元信息行
 - 加入口径说明与指标帮助提示
 
 ### Phase 3（数据基础升级，2~3 次迭代）

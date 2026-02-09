@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { BarChart3, Clock, Users, Activity, RefreshCw } from 'lucide-react';
+import { buildCohortDisplayMeta, getCohortGranularityZhLabel, type CohortGranularity } from '@/lib/admin/user-analytics-display';
+import { downloadCsvWithBom, formatTimestampForFilename } from '@/lib/client/csv-export';
 
 type OverviewStats = {
   totalUsers: number;
@@ -127,7 +129,6 @@ type ApiResponse = {
 };
 
 type FrequencySample = 'active7d' | 'tracked' | 'all';
-type CohortGranularity = 'week' | 'month';
 
 const formatPercent = (value: number): string => `${(Math.max(0, Math.min(1, value)) * 100).toFixed(1)}%`;
 
@@ -136,107 +137,10 @@ const formatNumber = (value: number): string => {
   return Math.round(value).toLocaleString('zh-CN');
 };
 
-const formatDateToIso = (date: Date): string => {
-  const year = date.getUTCFullYear();
-  const month = `${date.getUTCMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getUTCDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const getCohortGranularityZhLabel = (granularity: CohortGranularity): string => (
-  granularity === 'week' ? '注册周 Cohort' : '注册月 Cohort'
-);
-
-type CohortDisplayMeta = {
-  keyWithDateRange: string;
-  periodZh: string;
-  dateRange: string;
-};
-
-const buildCohortDisplayMeta = (granularity: CohortGranularity, cohortKey: string): CohortDisplayMeta => {
-  const fallback: CohortDisplayMeta = {
-    keyWithDateRange: cohortKey,
-    periodZh: cohortKey,
-    dateRange: '-',
-  };
-
-  if (granularity === 'month') {
-    const monthMatch = cohortKey.match(/^(\d{4})-(\d{2})$/);
-    if (!monthMatch) return fallback;
-
-    const year = Number.parseInt(monthMatch[1], 10);
-    const month = Number.parseInt(monthMatch[2], 10);
-    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return fallback;
-
-    const monthStart = new Date(Date.UTC(year, month - 1, 1));
-    const monthEnd = new Date(Date.UTC(year, month, 0));
-    const dateRange = `${formatDateToIso(monthStart)} ~ ${formatDateToIso(monthEnd)}`;
-
-    return {
-      keyWithDateRange: `${cohortKey}（${dateRange}）`,
-      periodZh: `${year} 年 ${month} 月`,
-      dateRange,
-    };
-  }
-
-  const weekMatch = cohortKey.match(/^(\d{4})-W(\d{2})$/);
-  if (!weekMatch) return fallback;
-
-  const year = Number.parseInt(weekMatch[1], 10);
-  const weekNumber = Number.parseInt(weekMatch[2], 10);
-  if (!Number.isFinite(year) || !Number.isFinite(weekNumber) || weekNumber < 0 || weekNumber > 53) return fallback;
-
-  const jan1 = new Date(Date.UTC(year, 0, 1));
-  const jan1Weekday = jan1.getUTCDay();
-  const firstMondayOffsetDays = (8 - jan1Weekday) % 7;
-  const firstMonday = new Date(Date.UTC(year, 0, 1 + firstMondayOffsetDays));
-
-  let weekStart: Date;
-  let weekEnd: Date;
-
-  if (weekNumber === 0) {
-    weekStart = jan1;
-    weekEnd = firstMondayOffsetDays === 0
-      ? jan1
-      : new Date(firstMonday.getTime() - 24 * 60 * 60 * 1000);
-  } else {
-    weekStart = new Date(firstMonday.getTime() + (weekNumber - 1) * 7 * 24 * 60 * 60 * 1000);
-    weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
-  }
-
-  const dateRange = `${formatDateToIso(weekStart)} ~ ${formatDateToIso(weekEnd)}`;
-  const periodZh = weekNumber === 0
-    ? `${year} 年第 0 周（年初残周）`
-    : `${year} 年第 ${weekNumber} 周`;
-
-  return {
-    keyWithDateRange: `${cohortKey}（${dateRange}）`,
-    periodZh,
-    dateRange,
-  };
-};
-
-const escapeCsvCell = (value: string): string => {
-  if (/[",\n]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
-};
-
-const downloadCsv = (filename: string, headers: string[], rows: Array<Array<string | number>>): void => {
-  const lines = [
-    headers.map((header) => escapeCsvCell(String(header))).join(','),
-    ...rows.map((row) => row.map((cell) => escapeCsvCell(String(cell))).join(',')),
-  ];
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+const normalizeIsoTimestamp = (value?: string): string => {
+  if (!value) return '';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
 };
 
 const StatCard: React.FC<{ title: string; value: string; note?: string; icon: React.ElementType; color: string }> = ({
@@ -316,6 +220,9 @@ const UserAnalyticsPage: React.FC = () => {
   const handleExportRetentionCsv = useCallback(() => {
     if (!retention) return;
     const rows: Array<Array<string | number>> = [];
+    const exportedAt = new Date();
+    const exportTimestamp = formatTimestampForFilename(exportedAt);
+    const dataGeneratedAtIso = normalizeIsoTimestamp(generatedAt);
 
     retention.points.forEach((point) => {
       rows.push([
@@ -348,16 +255,23 @@ const UserAnalyticsPage: React.FC = () => {
       ]);
     });
 
-    downloadCsv(
-      `retention_${retention.cohortGranularity}_${retention.cohortLookbackDays}d.csv`,
+    downloadCsvWithBom(
+      `retention_${retention.cohortGranularity}_${retention.cohortLookbackDays}d_${exportTimestamp}.csv`,
       ['type', 'label_or_cohort', 'cohort_period_zh', 'cohort_date_range', 'days', 'eligible_or_size', 'retained', 'rate_percent', 'd7', 'd30'],
       rows,
+      [
+        { key: 'data_generated_at_utc', value: dataGeneratedAtIso || 'unknown' },
+        { key: 'exported_at_utc', value: exportedAt.toISOString() },
+      ],
     );
-  }, [retention]);
+  }, [generatedAt, retention]);
 
   const handleExportCompositionCsv = useCallback(() => {
     if (!composition) return;
     const rows: Array<Array<string | number>> = [];
+    const exportedAt = new Date();
+    const exportTimestamp = formatTimestampForFilename(exportedAt);
+    const dataGeneratedAtIso = normalizeIsoTimestamp(generatedAt);
 
     composition.buckets.forEach((bucket) => {
       rows.push([
@@ -386,12 +300,16 @@ const UserAnalyticsPage: React.FC = () => {
       ]);
     });
 
-    downloadCsv(
-      `composition_${composition.cohortGranularity}_${composition.cohortLookbackDays}d.csv`,
+    downloadCsvWithBom(
+      `composition_${composition.cohortGranularity}_${composition.cohortLookbackDays}d_${exportTimestamp}.csv`,
       ['type', 'label_or_cohort', 'cohort_period_zh', 'cohort_date_range', 'sample_users_or_count', 'share_percent', 'new_users', 'new_users_share_percent'],
       rows,
+      [
+        { key: 'data_generated_at_utc', value: dataGeneratedAtIso || 'unknown' },
+        { key: 'exported_at_utc', value: exportedAt.toISOString() },
+      ],
     );
-  }, [composition]);
+  }, [composition, generatedAt]);
 
   return (
     <>
