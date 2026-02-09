@@ -1,3 +1,7 @@
+import { readJsonOrTextFromResponse, resolveApiErrorMessage } from "@/lib/client/apiError";
+import { formatHttpErrorMessage } from "@/lib/client/httpError";
+import { normalizeModelScopeToken } from "@/lib/tachie/modelscope/error";
+
 export interface ModelScopeGenerateOptions {
   model?: string;
   size?: string;
@@ -10,18 +14,10 @@ export interface ModelScopeTaskStatus {
   errorMessage?: string;
 }
 
-const readErrorFromResponse = async (response: Response): Promise<string> => {
-  const payload = await response.json().catch(() => null);
-  if (payload && typeof payload === "object") {
-    const record = payload as Record<string, unknown>;
-    const candidates = [record.error, record.message, record.msg, record.detail];
-    for (const candidate of candidates) {
-      if (typeof candidate === "string" && candidate.trim()) {
-        return candidate.trim();
-      }
-    }
-  }
-  return `HTTP error! status: ${response.status}`;
+const readErrorFromResponse = async (response: Response, fallback: string): Promise<string> => {
+  const { payload } = await readJsonOrTextFromResponse(response);
+  const serverMessage = resolveApiErrorMessage({ payload, fallback });
+  return formatHttpErrorMessage({ serverMessage, status: response.status, fallback });
 };
 
 export const generateModelScopeText2Image = async (
@@ -29,6 +25,11 @@ export const generateModelScopeText2Image = async (
   prompt: string,
   options?: ModelScopeGenerateOptions,
 ): Promise<string> => {
+  const token = normalizeModelScopeToken(modelscopeToken);
+  if (!token) {
+    throw new Error("ModelScope Token 不能为空，请粘贴有效 Token（支持自动去除 Bearer 前缀）");
+  }
+
   const response = await fetch("/api/tachie/generate", {
     method: "POST",
     headers: {
@@ -36,7 +37,7 @@ export const generateModelScopeText2Image = async (
     },
     body: JSON.stringify({
       source: "modelscope",
-      modelscopeToken,
+      modelscopeToken: token,
       prompt,
       modelscopeModel: options?.model,
       modelscopeSize: options?.size,
@@ -44,7 +45,7 @@ export const generateModelScopeText2Image = async (
   });
 
   if (!response.ok) {
-    throw new Error(await readErrorFromResponse(response));
+    throw new Error(await readErrorFromResponse(response, "ModelScope 立绘生成失败"));
   }
 
   const payload = await response.json();
@@ -53,12 +54,15 @@ export const generateModelScopeText2Image = async (
   }
 
   const record = payload as Record<string, unknown>;
-  const data = record.data;
-  if (!data || typeof data !== "object") {
+  const data = record.data && typeof record.data === "object"
+    ? (record.data as Record<string, unknown>)
+    : null;
+
+  if (!data) {
     throw new Error("ModelScope 返回任务 ID 为空");
   }
 
-  const taskId = (data as Record<string, unknown>).generateUuid;
+  const taskId = data.generateUuid;
   if (typeof taskId !== "string" || !taskId.trim()) {
     throw new Error("ModelScope 返回任务 ID 为空");
   }
@@ -70,6 +74,11 @@ export const getModelScopeTaskStatus = async (
   modelscopeToken: string,
   taskId: string,
 ): Promise<ModelScopeTaskStatus> => {
+  const token = normalizeModelScopeToken(modelscopeToken);
+  if (!token) {
+    throw new Error("ModelScope Token 不能为空，请粘贴有效 Token（支持自动去除 Bearer 前缀）");
+  }
+
   const response = await fetch("/api/tachie/status", {
     method: "POST",
     headers: {
@@ -77,13 +86,13 @@ export const getModelScopeTaskStatus = async (
     },
     body: JSON.stringify({
       source: "modelscope",
-      modelscopeToken,
+      modelscopeToken: token,
       generateUuid: taskId,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(await readErrorFromResponse(response));
+    throw new Error(await readErrorFromResponse(response, "ModelScope 任务状态查询失败"));
   }
 
   const payload = await response.json();

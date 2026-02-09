@@ -154,6 +154,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['429', '限流', '冷却', 'API Key'],
   },
   {
+    slug: 'tachie-auth-errors',
+    title: '立绘渠道鉴权与常见错误排查（LibLib / ModelScope）',
+    summary: '统一排查立绘 401 与常见错误：凭据、签名、Token、限流、任务状态、反馈模板。',
+    markdownPath: '/encyclopedia/tachie-auth-errors.md',
+    categoryId: 'troubleshooting',
+    keywords: ['立绘', '401', '鉴权失败', '签名验证失败', 'LibLib', 'ModelScope', 'Token', 'Access Key', 'Secret Key'],
+  },
+  {
     slug: 'ai-errors',
     title: 'AI 生成失败：常见原因与自救',
     summary: '高峰期/配置/额度/输入过长等导致的生成失败排查与恢复建议。',
@@ -405,7 +413,8 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
 
 export const getEncyclopediaEntry = (slug: string | undefined) => {
   if (!slug) return null;
-  return encyclopediaEntryBySlug.get(slug) ?? null;
+  const normalizedSlug = encyclopediaSlugAliasMap.get(slug) ?? slug;
+  return encyclopediaEntryBySlug.get(normalizedSlug) ?? null;
 };
 
 export const getEncyclopediaCategory = (id: EncyclopediaCategoryId | undefined) => {
@@ -443,3 +452,8 @@ export const groupEncyclopediaEntries = (entries: EncyclopediaEntry[]) => {
 const encyclopediaEntryBySlug = new Map<string, EncyclopediaEntry>(
   encyclopediaEntries.map((entry) => [entry.slug, entry]),
 );
+
+const encyclopediaSlugAliasMap = new Map<string, string>([
+  ['modelscope-auth-401', 'tachie-auth-errors'],
+  ['liblib-auth-401', 'tachie-auth-errors'],
+]);

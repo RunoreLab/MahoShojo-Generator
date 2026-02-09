@@ -41,6 +41,38 @@ describe('error-help', () => {
     expect(inferEncyclopediaSlugForError({ message: 'TypeError: Failed to fetch' })).toBe('network-errors');
   });
 
+  test('infer modelscope auth by HTTP 401 message', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: 'ModelScope 鉴权失败（HTTP 401）：Authentication failed, please make sure that a valid ModelScope token is supplied.',
+      }),
+    ).toBe('tachie-auth-errors');
+  });
+
+  test('infer modelscope auth by message without explicit status', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: 'ModelScope 任务查询失败：Authentication failed, invalid token',
+      }),
+    ).toBe('tachie-auth-errors');
+  });
+
+  test('infer modelscope auth by alibaba binding message', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: 'ModelScope 鉴权失败（HTTP 401）：Please bind your Alibaba Cloud account before use.',
+      }),
+    ).toBe('tachie-auth-errors');
+  });
+
+  test('infer liblib auth by signature error message', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: 'LibLib 立绘任务提交失败（HTTP 401）：签名验证失败',
+      }),
+    ).toBe('tachie-auth-errors');
+  });
+
   test('infer by message: data card', () => {
     expect(inferEncyclopediaSlugForError({ message: 'JSON 解析失败：Unexpected token' })).toBe('data-card-errors');
   });
@@ -87,5 +119,21 @@ describe('error-help', () => {
 
   test('category: network', () => {
     expect(inferErrorCategoryForError({ message: 'TypeError: Failed to fetch' })?.id).toBe('network');
+  });
+
+  test('category: modelscope auth', () => {
+    expect(
+      inferErrorCategoryForError({
+        message: 'ModelScope 任务查询失败：Authentication failed, invalid token',
+      })?.id,
+    ).toBe('auth');
+  });
+
+  test('category: liblib auth', () => {
+    expect(
+      inferErrorCategoryForError({
+        message: 'LibLib 立绘任务提交失败（HTTP 401）：签名验证失败',
+      })?.id,
+    ).toBe('auth');
   });
 });
