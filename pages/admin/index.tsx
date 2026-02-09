@@ -557,18 +557,6 @@ const AdminHomePage: React.FC = () => {
                 </a>
               </Link>
 
-              <Link href="/admin/user-analytics" legacyBehavior>
-                <a className="admin-card bg-indigo-50 border-indigo-200 hover:border-indigo-400">
-                  <div className="flex items-center text-indigo-700 mb-3">
-                    <BarChart3 className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">用户统计分析</h2>
-                  </div>
-                  <p className="text-gray-600 text-sm">
-                    查看活跃覆盖、生成频次分层与高频用户占比，支持 active7d / tracked / all 多口径切换。
-                  </p>
-                </a>
-              </Link>
-
               <Link href="/admin/character-management" legacyBehavior>
                 <a className="admin-card bg-pink-50 border-pink-200 hover:border-pink-400">
                   <div className="flex items-center text-pink-700 mb-3">
@@ -593,14 +581,14 @@ const AdminHomePage: React.FC = () => {
                 </a>
               </Link>
 
-              <Link href="/admin/battle-report-generations" legacyBehavior>
-                <a className="admin-card bg-orange-50 border-orange-200 hover:border-orange-400">
-                  <div className="flex items-center text-orange-700 mb-3">
-                    <FileText className="w-8 h-8" />
-                    <h2 className="text-xl font-semibold ml-3">战报生成记录</h2>
+              <Link href="/admin/user-analytics" legacyBehavior>
+                <a className="admin-card bg-indigo-50 border-indigo-200 hover:border-indigo-400">
+                  <div className="flex items-center text-indigo-700 mb-3">
+                    <BarChart3 className="w-8 h-8" />
+                    <h2 className="text-xl font-semibold ml-3">用户统计分析</h2>
                   </div>
                   <p className="text-gray-600 text-sm">
-                    浏览、筛选、检索并导出战报生成记录，快速跳转到相关用户与角色卡的管理页面。
+                    查看活跃覆盖、生成频次分层与高频用户占比，支持 active7d / tracked / all 多口径切换。
                   </p>
                 </a>
               </Link>
@@ -625,6 +613,18 @@ const AdminHomePage: React.FC = () => {
                   </div>
                   <p className="text-gray-600 text-sm">
                     管理 tags / tag_aliases：新增、编辑、停用标签，以及维护同义词别名。
+                  </p>
+                </a>
+              </Link>
+
+              <Link href="/admin/battle-report-generations" legacyBehavior>
+                <a className="admin-card bg-orange-50 border-orange-200 hover:border-orange-400">
+                  <div className="flex items-center text-orange-700 mb-3">
+                    <FileText className="w-8 h-8" />
+                    <h2 className="text-xl font-semibold ml-3">战报生成记录</h2>
+                  </div>
+                  <p className="text-gray-600 text-sm">
+                    浏览、筛选、检索并导出战报生成记录，快速跳转到相关用户与角色卡的管理页面。
                   </p>
                 </a>
               </Link>
