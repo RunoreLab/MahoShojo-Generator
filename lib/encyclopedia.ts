@@ -154,20 +154,12 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     keywords: ['429', '限流', '冷却', 'API Key'],
   },
   {
-    slug: 'modelscope-auth-401',
-    title: 'ModelScope 立绘 401（鉴权失败）排查',
-    summary: '立绘生成提示 ModelScope 401 时，如何核查 Token、权限、模型访问与 request id。',
-    markdownPath: '/encyclopedia/modelscope-auth-401.md',
+    slug: 'tachie-auth-errors',
+    title: '立绘渠道鉴权与常见错误排查（LibLib / ModelScope）',
+    summary: '统一排查立绘 401 与常见错误：凭据、签名、Token、限流、任务状态、反馈模板。',
+    markdownPath: '/encyclopedia/tachie-auth-errors.md',
     categoryId: 'troubleshooting',
-    keywords: ['ModelScope', '401', '鉴权失败', 'Token', '立绘', 'request id'],
-  },
-  {
-    slug: 'liblib-auth-401',
-    title: 'LibLib 立绘 401（签名/鉴权失败）排查',
-    summary: '立绘生成提示 LibLib 401 或“签名验证失败”时，如何核查 Access Key / Secret Key 与签名时效。',
-    markdownPath: '/encyclopedia/liblib-auth-401.md',
-    categoryId: 'troubleshooting',
-    keywords: ['LibLib', '401', '签名验证失败', 'Access Key', 'Secret Key', '立绘'],
+    keywords: ['立绘', '401', '鉴权失败', '签名验证失败', 'LibLib', 'ModelScope', 'Token', 'Access Key', 'Secret Key'],
   },
   {
     slug: 'ai-errors',
@@ -421,7 +413,8 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
 
 export const getEncyclopediaEntry = (slug: string | undefined) => {
   if (!slug) return null;
-  return encyclopediaEntryBySlug.get(slug) ?? null;
+  const normalizedSlug = encyclopediaSlugAliasMap.get(slug) ?? slug;
+  return encyclopediaEntryBySlug.get(normalizedSlug) ?? null;
 };
 
 export const getEncyclopediaCategory = (id: EncyclopediaCategoryId | undefined) => {
@@ -459,3 +452,8 @@ export const groupEncyclopediaEntries = (entries: EncyclopediaEntry[]) => {
 const encyclopediaEntryBySlug = new Map<string, EncyclopediaEntry>(
   encyclopediaEntries.map((entry) => [entry.slug, entry]),
 );
+
+const encyclopediaSlugAliasMap = new Map<string, string>([
+  ['modelscope-auth-401', 'tachie-auth-errors'],
+  ['liblib-auth-401', 'tachie-auth-errors'],
+]);

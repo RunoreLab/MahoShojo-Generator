@@ -46,7 +46,7 @@ describe('error-help', () => {
       inferEncyclopediaSlugForError({
         message: 'ModelScope 鉴权失败（HTTP 401）：Authentication failed, please make sure that a valid ModelScope token is supplied.',
       }),
-    ).toBe('modelscope-auth-401');
+    ).toBe('tachie-auth-errors');
   });
 
   test('infer modelscope auth by message without explicit status', () => {
@@ -54,7 +54,7 @@ describe('error-help', () => {
       inferEncyclopediaSlugForError({
         message: 'ModelScope 任务查询失败：Authentication failed, invalid token',
       }),
-    ).toBe('modelscope-auth-401');
+    ).toBe('tachie-auth-errors');
   });
 
   test('infer liblib auth by signature error message', () => {
@@ -62,7 +62,7 @@ describe('error-help', () => {
       inferEncyclopediaSlugForError({
         message: 'LibLib 立绘任务提交失败（HTTP 401）：签名验证失败',
       }),
-    ).toBe('liblib-auth-401');
+    ).toBe('tachie-auth-errors');
   });
 
   test('infer by message: data card', () => {

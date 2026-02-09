@@ -259,8 +259,8 @@ export function inferEncyclopediaSlugForError(input: ErrorHelpInput): string | n
   const statusInput = typeof input.status === 'number' ? input.status : null;
   const statusFromMessage = rawMessage.trim() ? extractHttpStatusFromMessage(rawMessage) : null;
   const status = statusInput ?? statusFromMessage;
-  if (message && isModelScopeAuthError(message, status)) return 'modelscope-auth-401';
-  if (message && isLibLibAuthError(message, status)) return 'liblib-auth-401';
+  if (message && isModelScopeAuthError(message, status)) return 'tachie-auth-errors';
+  if (message && isLibLibAuthError(message, status)) return 'tachie-auth-errors';
 
   if (status === 524) return 'cloudflare-524-timeout';
   if (status === 429) return 'rate-limit-429';
