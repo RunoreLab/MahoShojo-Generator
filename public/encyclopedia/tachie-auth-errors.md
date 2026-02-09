@@ -45,6 +45,21 @@
 - 若你是手动拼 `Bearer xxx`，请改为只填 Token 本体
 - 账号权限、模型访问权限变化，也可能导致鉴权/权限错误
 
+#### ModelScope 重点子场景：`Please bind your Alibaba Cloud account before use.`
+
+当你看到这句提示时，通常不是 Token 拼写问题，而是**ModelScope 账号尚未绑定阿里云账号**。  
+这类报错常表现为：
+
+- `ModelScope 鉴权失败（HTTP 401）`
+- `message: Please bind your Alibaba Cloud account before use.`
+
+建议操作：
+
+1. 登录 ModelScope 控制台，按页面提示完成阿里云账号绑定
+2. 若页面还要求实名认证/协议确认，请一并完成
+3. 绑定完成后等待 1~3 分钟，再用同一 Token 重试
+4. 若仍失败，重新生成 Token 再测试一次
+
 ### B. LibLib（Access Key / Secret Key）
 
 - 两个 Key 必须来自同一账号、同一应用配置

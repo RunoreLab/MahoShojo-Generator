@@ -135,6 +135,12 @@ const MODELSCOPE_MESSAGE_HINTS = [
 const MODELSCOPE_AUTH_MESSAGE_HINTS = [
   'authentication failed',
   'unauthorized',
+  'bind your alibaba cloud account',
+  'alibaba cloud account',
+  'please bind your alibaba cloud account before use',
+  '未绑定阿里云',
+  '阿里云账号',
+  '绑定阿里云',
   'token 无效',
   'token invalid',
   'invalid token',

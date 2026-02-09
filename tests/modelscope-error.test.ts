@@ -27,6 +27,17 @@ describe('modelscope error helpers', () => {
     expect(payload.details).toContain('request id: abc-request-id');
   });
 
+  test('recognizes alibaba account binding requirement', () => {
+    const upstream = parseModelScopeJsonSafe(
+      '{"errors":{"message":"Please bind your Alibaba Cloud account before use."},"request_id":"bind-request-id"}',
+    );
+    const payload = buildModelScopeErrorPayload({ status: 401, payload: upstream });
+
+    expect(payload.error).toBe('ModelScope 鉴权失败：请先绑定阿里云账号后再使用（HTTP 401）');
+    expect(payload.message).toBe('Please bind your Alibaba Cloud account before use.');
+    expect(payload.details).toContain('request id: bind-request-id');
+  });
+
   test('extract task fields from nested payload', () => {
     const upstream = parseModelScopeJsonSafe(
       '{"data":{"task_id":"task-123","task_status":"running","output_images":["https://a.png","https://a.png","https://b.png"]}}',

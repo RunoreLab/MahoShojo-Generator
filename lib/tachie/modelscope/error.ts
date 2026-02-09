@@ -118,6 +118,15 @@ const TASK_STATUS_KEYS = ['task_status', 'taskStatus', 'status'] as const;
 
 const OUTPUT_IMAGES_KEYS = ['output_images', 'outputImages', 'images', 'output_image', 'outputImage'] as const;
 
+const MODELSCOPE_ALIBABA_BIND_HINTS = [
+  'please bind your alibaba cloud account before use',
+  'bind your alibaba cloud account',
+  'alibaba cloud account',
+  '未绑定阿里云',
+  '阿里云账号',
+  '绑定阿里云',
+] as const;
+
 export const parseModelScopeJsonSafe = (raw: string): UnknownRecord => {
   if (!raw) return {};
   try {
@@ -193,6 +202,13 @@ const getDefaultModelScopeError = (status: number): string => {
   return `ModelScope API error（HTTP ${status}）`;
 };
 
+const detectModelScopeAlibabaBindingIssue = (message: string | null): boolean => {
+  if (!message) return false;
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) return false;
+  return MODELSCOPE_ALIBABA_BIND_HINTS.some((hint) => normalized.includes(hint));
+};
+
 export const buildModelScopeErrorPayload = (params: {
   status: number;
   payload: UnknownRecord;
@@ -204,7 +220,11 @@ export const buildModelScopeErrorPayload = (params: {
   const upstreamCode = extractModelScopeCode(params.payload);
   const requestId = extractModelScopeRequestId(params.payload) || trimString(params.requestIdHeader);
   const fallbackError = trimString(params.fallbackError);
-  const error = fallbackError || getDefaultModelScopeError(status);
+  const error = fallbackError || (
+    status === 401 && detectModelScopeAlibabaBindingIssue(upstreamMessage)
+      ? 'ModelScope 鉴权失败：请先绑定阿里云账号后再使用（HTTP 401）'
+      : getDefaultModelScopeError(status)
+  );
 
   const detailsParts: string[] = [];
   if (upstreamCode) detailsParts.push(`code: ${upstreamCode}`);

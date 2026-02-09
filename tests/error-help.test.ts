@@ -57,6 +57,14 @@ describe('error-help', () => {
     ).toBe('tachie-auth-errors');
   });
 
+  test('infer modelscope auth by alibaba binding message', () => {
+    expect(
+      inferEncyclopediaSlugForError({
+        message: 'ModelScope 鉴权失败（HTTP 401）：Please bind your Alibaba Cloud account before use.',
+      }),
+    ).toBe('tachie-auth-errors');
+  });
+
   test('infer liblib auth by signature error message', () => {
     expect(
       inferEncyclopediaSlugForError({
