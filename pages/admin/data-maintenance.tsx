@@ -293,6 +293,53 @@ const fieldActionToRequest = (action: ActionDraftField) => {
   };
 };
 
+const buildScopePayload = (
+  rawScope: ScopeState,
+  targetSchema: TargetSchema | null,
+): Record<string, unknown> => {
+  const payload: Record<string, unknown> = {};
+  if (rawScope.dateFrom) payload.dateFrom = rawScope.dateFrom;
+  if (rawScope.dateTo) payload.dateTo = rawScope.dateTo;
+
+  const statuses = parseStatusIn(rawScope.statusInText);
+  if (statuses.length > 0) payload.statusIn = statuses;
+
+  if (rawScope.queue) payload.queue = rawScope.queue;
+  if (rawScope.kind.trim()) payload.kind = rawScope.kind.trim();
+  if (targetSchema?.supportsPvpOnly) payload.pvpOnly = rawScope.pvpOnly;
+  return payload;
+};
+
+const buildActionsPayload = (actionList: ActionDraft[]) => {
+  return actionList.map((action) => {
+    if (action.type === 'delete_rows') {
+      return { type: 'delete_rows' as const, deleteR2: action.deleteR2 };
+    }
+    return fieldActionToRequest(action);
+  });
+};
+
+const normalizeScopeForCompare = (rawScope: ScopeState): ScopeState => {
+  return {
+    dateFrom: rawScope.dateFrom.trim(),
+    dateTo: rawScope.dateTo.trim(),
+    statusInText: parseStatusIn(rawScope.statusInText).sort().join(','),
+    queue: rawScope.queue,
+    kind: rawScope.kind.trim(),
+    pvpOnly: rawScope.pvpOnly,
+  };
+};
+
+const actionToSignature = (action: ActionDraft): string => {
+  if (action.type === 'delete_rows') {
+    return `delete_rows(deleteR2=${action.deleteR2 ? 'true' : 'false'})`;
+  }
+  if (action.op === 'truncate') {
+    return `${action.field}:truncate:${Math.max(1, Math.floor(action.maxChars || 1))}`;
+  }
+  return `${action.field}:set_null_or_default:${action.setMode}`;
+};
+
 export default function AdminDataMaintenancePage() {
   const [schemas, setSchemas] = useState<TargetSchema[]>([]);
   const [loadingSchemas, setLoadingSchemas] = useState(true);
@@ -335,7 +382,7 @@ export default function AdminDataMaintenancePage() {
     setExecutePrecheckWarnings([]);
   };
 
-  const createDefaultActionForTarget = (nextTarget: CleanupTarget, schemaList: TargetSchema[]): ActionDraft[] => {
+  const createDefaultActionForTarget = useCallback((nextTarget: CleanupTarget, schemaList: TargetSchema[]): ActionDraft[] => {
     const found = schemaList.find((item) => item.target === nextTarget);
     if (!found) return [];
     if (found.fieldDefinitions.length <= 0) {
@@ -350,9 +397,9 @@ export default function AdminDataMaintenancePage() {
         setMode: 'null',
       },
     ];
-  };
+  }, []);
 
-  const normalizeScopeFromDetail = (
+  const normalizeScopeFromDetail = useCallback((
     rawScope: Record<string, unknown>,
     targetSchema: TargetSchema | null,
   ): ScopeState => {
@@ -375,12 +422,15 @@ export default function AdminDataMaintenancePage() {
       kind: typeof rawScope.kind === 'string' ? rawScope.kind.trim() : '',
       pvpOnly: rawScope.pvpOnly === true,
     };
-  };
+  }, []);
 
-  const normalizeActionsFromDetail = (
+  const normalizeActionsFromDetail = useCallback((
     rawActions: unknown[],
     targetSchema: TargetSchema | null,
     targetValue: CleanupTarget,
+    options?: {
+      fallbackToDefault?: boolean;
+    },
   ): ActionDraft[] => {
     const fieldSet = new Set((targetSchema?.fieldDefinitions ?? []).map((item) => item.field));
     const nextActions: ActionDraft[] = [];
@@ -423,8 +473,11 @@ export default function AdminDataMaintenancePage() {
     if (nextActions.length > 0) {
       return nextActions;
     }
+    if (options?.fallbackToDefault === false) {
+      return [];
+    }
     return createDefaultActionForTarget(targetValue, schemas);
-  };
+  }, [createDefaultActionForTarget, schemas]);
 
   useEffect(() => {
     void (async () => {
@@ -452,7 +505,7 @@ export default function AdminDataMaintenancePage() {
         setLoadingSchemas(false);
       }
     })();
-  }, []);
+  }, [createDefaultActionForTarget]);
 
   const loadJobs = useCallback(async (statusFilter: JobStatusFilter = jobStatusFilter) => {
     setJobsLoading(true);
@@ -482,29 +535,18 @@ export default function AdminDataMaintenancePage() {
   }, [jobStatusFilter, loadJobs]);
 
   const scopePayload = useMemo(() => {
-    const payload: Record<string, unknown> = {};
-    if (scope.dateFrom) payload.dateFrom = scope.dateFrom;
-    if (scope.dateTo) payload.dateTo = scope.dateTo;
-
-    const statuses = parseStatusIn(scope.statusInText);
-    if (statuses.length > 0) payload.statusIn = statuses;
-
-    if (scope.queue) payload.queue = scope.queue;
-    if (scope.kind.trim()) payload.kind = scope.kind.trim();
-    if (selectedSchema?.supportsPvpOnly) payload.pvpOnly = scope.pvpOnly;
-    return payload;
-  }, [scope, selectedSchema?.supportsPvpOnly]);
+    return buildScopePayload(scope, selectedSchema);
+  }, [scope, selectedSchema]);
 
   const actionsPayload = useMemo(() => {
-    return actions.map((action) => {
-      if (action.type === 'delete_rows') {
-        return { type: 'delete_rows' as const, deleteR2: action.deleteR2 };
-      }
-      return fieldActionToRequest(action);
-    });
+    return buildActionsPayload(actions);
   }, [actions]);
 
-  const doPreview = async () => {
+  const requestPreview = useCallback(async (input: {
+    nextTarget: CleanupTarget;
+    nextScopePayload: Record<string, unknown>;
+    nextActionsPayload: ReturnType<typeof buildActionsPayload>;
+  }) => {
     setPreviewLoading(true);
     setPreviewError(null);
     setExecuteError(null);
@@ -514,9 +556,9 @@ export default function AdminDataMaintenancePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          target,
-          scope: scopePayload,
-          actions: actionsPayload,
+          target: input.nextTarget,
+          scope: input.nextScopePayload,
+          actions: input.nextActionsPayload,
         }),
       });
       const json = await response.json().catch(() => ({})) as PreviewResponse;
@@ -530,6 +572,14 @@ export default function AdminDataMaintenancePage() {
     } finally {
       setPreviewLoading(false);
     }
+  }, []);
+
+  const doPreview = async () => {
+    await requestPreview({
+      nextTarget: target,
+      nextScopePayload: scopePayload,
+      nextActionsPayload: actionsPayload,
+    });
   };
 
   const doExecute = async () => {
@@ -584,11 +634,19 @@ export default function AdminDataMaintenancePage() {
     }
   };
 
-  const applyJobDetailToForm = (detail: JobDetail) => {
+  const applyJobDetailToForm = (
+    detail: JobDetail,
+    options?: {
+      autoPreview?: boolean;
+    },
+  ) => {
     const targetSchema = schemas.find((item) => item.target === detail.target) ?? null;
+    const nextScope = normalizeScopeFromDetail(detail.scope, targetSchema);
+    const nextActions = normalizeActionsFromDetail(detail.actions, targetSchema, detail.target);
+
     setTarget(detail.target);
-    setScope(normalizeScopeFromDetail(detail.scope, targetSchema));
-    setActions(normalizeActionsFromDetail(detail.actions, targetSchema, detail.target));
+    setScope(nextScope);
+    setActions(nextActions);
 
     const suggestedMaxRows = detail.selectedRows > 0 ? detail.selectedRows : detail.totalMatchedRows;
     if (suggestedMaxRows > 0) {
@@ -597,8 +655,70 @@ export default function AdminDataMaintenancePage() {
     const suggestedBatchSize = detail.selectedRows > 0 ? Math.min(500, detail.selectedRows) : 200;
     setBatchSize(Math.max(1, Math.min(5000, suggestedBatchSize)));
     setConfirmText('');
+    if (options?.autoPreview) {
+      const nextScopePayload = buildScopePayload(nextScope, targetSchema);
+      const nextActionsPayload = buildActionsPayload(nextActions);
+      void requestPreview({
+        nextTarget: detail.target,
+        nextScopePayload,
+        nextActionsPayload,
+      });
+      return;
+    }
     invalidateRunState();
   };
+
+  const selectedJobDiffMessages = useMemo(() => {
+    if (!selectedJobDetail) return [] as string[];
+    const detailSchema = schemas.find((item) => item.target === selectedJobDetail.target) ?? null;
+    const detailScope = normalizeScopeForCompare(normalizeScopeFromDetail(selectedJobDetail.scope, detailSchema));
+    const currentScope = normalizeScopeForCompare(scope);
+    const detailActions = normalizeActionsFromDetail(
+      selectedJobDetail.actions,
+      detailSchema,
+      selectedJobDetail.target,
+      { fallbackToDefault: false },
+    );
+
+    const messages: string[] = [];
+    if (target !== selectedJobDetail.target) {
+      messages.push(`目标不同：当前=${target}，历史=${selectedJobDetail.target}`);
+    }
+
+    const scopeDiffMap: Array<{ label: string; currentValue: string; detailValue: string }> = [
+      { label: 'dateFrom', currentValue: currentScope.dateFrom, detailValue: detailScope.dateFrom },
+      { label: 'dateTo', currentValue: currentScope.dateTo, detailValue: detailScope.dateTo },
+      { label: 'statusIn', currentValue: currentScope.statusInText, detailValue: detailScope.statusInText },
+      { label: 'queue', currentValue: currentScope.queue, detailValue: detailScope.queue },
+      { label: 'kind', currentValue: currentScope.kind, detailValue: detailScope.kind },
+      {
+        label: 'pvpOnly',
+        currentValue: currentScope.pvpOnly ? 'true' : 'false',
+        detailValue: detailScope.pvpOnly ? 'true' : 'false',
+      },
+    ];
+    scopeDiffMap.forEach((item) => {
+      if (item.currentValue !== item.detailValue) {
+        messages.push(`范围差异 ${item.label}：当前=${item.currentValue || '(空)'}，历史=${item.detailValue || '(空)'}`);
+      }
+    });
+
+    const currentActionSignatures = actions.map(actionToSignature);
+    const detailActionSignatures = detailActions.map(actionToSignature);
+    if (currentActionSignatures.length !== detailActionSignatures.length) {
+      messages.push(`动作数量不同：当前=${currentActionSignatures.length}，历史=${detailActionSignatures.length}`);
+    }
+
+    const maxActionRows = Math.max(currentActionSignatures.length, detailActionSignatures.length);
+    for (let i = 0; i < maxActionRows; i += 1) {
+      const currentSig = currentActionSignatures[i] ?? '(无)';
+      const detailSig = detailActionSignatures[i] ?? '(无)';
+      if (currentSig !== detailSig) {
+        messages.push(`动作 #${i + 1} 不同：当前=${currentSig}，历史=${detailSig}`);
+      }
+    }
+    return messages;
+  }, [selectedJobDetail, schemas, target, scope, actions, normalizeActionsFromDetail, normalizeScopeFromDetail]);
 
   const applyPreset = (preset: CleanupPreset) => {
     const next = preset.build();
@@ -1229,6 +1349,13 @@ export default function AdminDataMaintenancePage() {
                     >
                       复用此任务配置
                     </button>
+                    <button
+                      type="button"
+                      className="rounded-md border border-indigo-300 bg-indigo-50 px-2 py-1 font-medium text-indigo-700 hover:bg-indigo-100"
+                      onClick={() => applyJobDetailToForm(selectedJobDetail, { autoPreview: true })}
+                    >
+                      复用并立即预览
+                    </button>
                     <span className="rounded bg-gray-100 px-2 py-1">target: {selectedJobDetail.target}</span>
                     <span className="rounded bg-gray-100 px-2 py-1">status: {selectedJobDetail.status}</span>
                     <span className="rounded bg-gray-100 px-2 py-1">risk: {selectedJobDetail.riskLevel ?? '-'}</span>
@@ -1257,6 +1384,17 @@ export default function AdminDataMaintenancePage() {
                       ))}
                     </div>
                   ) : null}
+
+                  <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 p-2 text-xs text-gray-700">
+                    <div className="mb-1 font-semibold text-gray-800">与当前表单的差异</div>
+                    {selectedJobDiffMessages.length > 0 ? (
+                      selectedJobDiffMessages.map((item, idx) => (
+                        <div key={idx}>- {item}</div>
+                      ))
+                    ) : (
+                      <div className="text-emerald-700">当前表单与该历史任务配置一致。</div>
+                    )}
+                  </div>
 
                   <div className="mt-2 grid gap-2 md:grid-cols-2">
                     <div>
