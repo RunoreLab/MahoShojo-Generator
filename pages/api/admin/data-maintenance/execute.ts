@@ -1,6 +1,14 @@
 import type { NextRequest } from 'next/server';
 
-import { executeAdminDataCleanup } from '@/lib/database/admin-data-maintenance';
+import { getUserByAuthKey } from '@/lib/d1';
+import {
+  appendAdminDataCleanupJobLog,
+  completeAdminDataCleanupJob,
+  createAdminDataCleanupJob,
+  executeAdminDataCleanup,
+  failAdminDataCleanupJob,
+  previewAdminDataCleanup,
+} from '@/lib/database/admin-data-maintenance';
 
 export const runtime = 'edge';
 
@@ -23,19 +31,85 @@ export default async function handler(req: NextRequest) {
       confirmText?: unknown;
     };
 
-    const result = await executeAdminDataCleanup({
-      plan: {
-        target: body.target,
-        scope: body.scope,
-        actions: body.actions,
-      },
-      planHash: body.planHash,
-      maxRows: body.maxRows,
-      batchSize: body.batchSize,
-      confirmText: body.confirmText,
-    });
+    const plan = {
+      target: body.target,
+      scope: body.scope,
+      actions: body.actions,
+    };
 
-    return new Response(JSON.stringify({ success: true, result }), {
+    const preview = await previewAdminDataCleanup(plan);
+    const planHash = typeof body.planHash === 'string' ? body.planHash.trim() : '';
+    if (!planHash || planHash !== preview.planHash) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'planHash 不匹配，请先重新预览。',
+          previewPlanHash: preview.planHash,
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }
+
+    let createdByUserId: number | null = null;
+    try {
+      const authHeader = req.headers.get('authorization') ?? '';
+      if (authHeader.startsWith('Bearer ')) {
+        const authKey = authHeader.substring('Bearer '.length).trim();
+        if (authKey) {
+          const user = await getUserByAuthKey(authKey);
+          if (user && typeof user.id === 'number' && Number.isFinite(user.id)) {
+            createdByUserId = Math.floor(user.id);
+          }
+        }
+      }
+    } catch {
+      createdByUserId = null;
+    }
+
+    const precheckWarnings: string[] = [];
+    let jobId: string | null = null;
+    const createdJob = await createAdminDataCleanupJob({
+      plan,
+      planHash: preview.planHash,
+      preview,
+      createdByUserId,
+    });
+    if (createdJob.ok && createdJob.jobId) {
+      jobId = createdJob.jobId;
+    } else if (createdJob.warning) {
+      precheckWarnings.push(createdJob.warning);
+    }
+
+    let result: Awaited<ReturnType<typeof executeAdminDataCleanup>>;
+    try {
+      result = await executeAdminDataCleanup({
+        plan,
+        planHash: preview.planHash,
+        maxRows: body.maxRows,
+        batchSize: body.batchSize,
+        confirmText: body.confirmText,
+        onBatchCompleted: jobId
+          ? async (progress) => {
+              await appendAdminDataCleanupJobLog(jobId as string, progress);
+            }
+          : undefined,
+      });
+    } catch (error) {
+      if (jobId) {
+        const message = error instanceof Error ? error.message : String(error || '执行失败');
+        await failAdminDataCleanupJob(jobId, message);
+      }
+      throw error;
+    }
+
+    if (jobId) {
+      await completeAdminDataCleanupJob(jobId, result);
+    }
+
+    return new Response(JSON.stringify({ success: true, jobId, precheckWarnings, result }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

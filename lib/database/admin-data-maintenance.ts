@@ -144,6 +144,53 @@ export type AdminDataCleanupExecutionResult = {
   dependencyImpact: Record<string, number>;
 };
 
+export type AdminDataCleanupBatchProgress = {
+  batchNo: number;
+  batchSize: number;
+  affectedRows: number;
+  cellChanges: number;
+  mode: 'delete_rows' | 'field_update';
+  note: string;
+};
+
+export type AdminDataCleanupJobStatus = 'running' | 'completed' | 'failed';
+
+export type AdminDataCleanupJobListRow = {
+  id: string;
+  target: AdminDataCleanupTarget;
+  status: AdminDataCleanupJobStatus;
+  riskLevel: AdminDataCleanupRiskLevel | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  totalMatchedRows: number;
+  selectedRows: number;
+  affectedRows: number;
+  cellChanges: number;
+  r2Deleted: number;
+  r2DeleteFailed: number;
+  warningCount: number;
+  errorText: string | null;
+};
+
+export type AdminDataCleanupJobLogRow = {
+  id: number;
+  batchNo: number;
+  affectedRows: number;
+  cellChanges: number;
+  note: string | null;
+  createdAt: string;
+};
+
+export type AdminDataCleanupJobDetail = AdminDataCleanupJobListRow & {
+  planHash: string;
+  scope: Record<string, unknown>;
+  actions: unknown[];
+  preview: Record<string, unknown> | null;
+  warnings: string[];
+  logs: AdminDataCleanupJobLogRow[];
+};
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SAFE_KEYWORD_RE = /^[a-zA-Z0-9_\-:.]+$/;
 
@@ -221,6 +268,113 @@ const cleanupTargetDefinitions: Record<AdminDataCleanupTarget, CleanupTargetDefi
     fieldDefinitions: [],
     sizeEstimateFields: [],
   },
+};
+
+let ensureCleanupAuditTablesPromise: Promise<boolean> | null = null;
+
+const parseJsonRecord = (value: unknown): Record<string, unknown> | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const parseJsonArray = (value: unknown): unknown[] => {
+  if (typeof value !== 'string') return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const newCleanupJobId = (): string => {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return `cleanup_${crypto.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
+  return `cleanup_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const ensureCleanupAuditTables = async (): Promise<boolean> => {
+  if (ensureCleanupAuditTablesPromise) return ensureCleanupAuditTablesPromise;
+
+  ensureCleanupAuditTablesPromise = (async () => {
+    try {
+      await queryFromD1(
+        `CREATE TABLE IF NOT EXISTS admin_cleanup_jobs (
+          id TEXT PRIMARY KEY NOT NULL,
+          target TEXT NOT NULL,
+          plan_hash TEXT NOT NULL,
+          scope_json TEXT,
+          actions_json TEXT,
+          preview_json TEXT,
+          risk_level TEXT,
+          status TEXT NOT NULL,
+          total_matched_rows INTEGER DEFAULT 0,
+          selected_rows INTEGER DEFAULT 0,
+          affected_rows INTEGER DEFAULT 0,
+          cell_changes INTEGER DEFAULT 0,
+          batch_count INTEGER DEFAULT 0,
+          r2_deleted INTEGER DEFAULT 0,
+          r2_delete_failed INTEGER DEFAULT 0,
+          warnings_json TEXT,
+          error_text TEXT,
+          created_by_user_id INTEGER,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          finished_at TEXT,
+          updated_at TEXT NOT NULL
+        );`,
+      );
+
+      await queryFromD1(
+        `CREATE INDEX IF NOT EXISTS idx_admin_cleanup_jobs_created_at
+         ON admin_cleanup_jobs(created_at DESC);`,
+      );
+      await queryFromD1(
+        `CREATE INDEX IF NOT EXISTS idx_admin_cleanup_jobs_status_created_at
+         ON admin_cleanup_jobs(status, created_at DESC);`,
+      );
+
+      await queryFromD1(
+        `CREATE TABLE IF NOT EXISTS admin_cleanup_job_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          job_id TEXT NOT NULL,
+          batch_no INTEGER NOT NULL,
+          affected_rows INTEGER DEFAULT 0,
+          cell_changes INTEGER DEFAULT 0,
+          note TEXT,
+          created_at TEXT NOT NULL
+        );`,
+      );
+      await queryFromD1(
+        `CREATE INDEX IF NOT EXISTS idx_admin_cleanup_job_logs_job_id_batch
+         ON admin_cleanup_job_logs(job_id, batch_no);`,
+      );
+
+      return true;
+    } catch (error) {
+      console.warn('[data-maintenance] 初始化审计表失败（降级继续执行）:', error);
+      return false;
+    }
+  })();
+
+  return ensureCleanupAuditTablesPromise;
 };
 
 const readRows = <T>(result: unknown): T[] => {
@@ -810,6 +964,328 @@ export const getAdminDataCleanupTargetSchemas = () => {
   }));
 };
 
+export async function createAdminDataCleanupJob(input: {
+  plan: AdminDataCleanupPlanInput;
+  planHash: string;
+  preview: AdminDataCleanupPreviewResult;
+  createdByUserId?: number | null;
+}): Promise<{ ok: boolean; jobId: string | null; warning?: string }> {
+  const ready = await ensureCleanupAuditTables();
+  if (!ready) {
+    return { ok: false, jobId: null, warning: '审计表不可用，本次执行不会记录历史。' };
+  }
+
+  try {
+    const normalizedPlan = normalizePlan(input.plan);
+    const nowIso = new Date().toISOString();
+    const jobId = newCleanupJobId();
+    const result = await queryFromD1(
+      `INSERT INTO admin_cleanup_jobs (
+        id, target, plan_hash, scope_json, actions_json, preview_json, risk_level, status,
+        total_matched_rows, selected_rows, affected_rows, cell_changes, batch_count,
+        r2_deleted, r2_delete_failed, warnings_json, error_text,
+        created_by_user_id, created_at, started_at, finished_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        jobId,
+        normalizedPlan.target,
+        input.planHash,
+        JSON.stringify(normalizedPlan.scope),
+        JSON.stringify(normalizedPlan.actions),
+        JSON.stringify({
+          affectedRows: input.preview.affectedRows,
+          estimatedBytesBefore: input.preview.estimatedBytesBefore,
+          estimatedBytesAfter: input.preview.estimatedBytesAfter,
+          estimatedBytesSaved: input.preview.estimatedBytesSaved,
+          dependencyImpact: input.preview.dependencyImpact,
+          sampleCount: input.preview.samples.length,
+        }),
+        input.preview.riskLevel,
+        'running',
+        input.preview.affectedRows,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        JSON.stringify(input.preview.warnings ?? []),
+        null,
+        typeof input.createdByUserId === 'number' && Number.isFinite(input.createdByUserId) && input.createdByUserId > 0
+          ? Math.floor(input.createdByUserId)
+          : null,
+        nowIso,
+        nowIso,
+        null,
+        nowIso,
+      ],
+    );
+
+    if (readChanges(result) <= 0) {
+      return { ok: false, jobId: null, warning: '写入任务记录失败（未影响行）。' };
+    }
+    return { ok: true, jobId };
+  } catch (error) {
+    console.warn('[data-maintenance] 创建任务记录失败（降级继续执行）:', error);
+    return { ok: false, jobId: null, warning: error instanceof Error ? error.message : '任务记录写入失败' };
+  }
+}
+
+export async function appendAdminDataCleanupJobLog(
+  jobId: string,
+  progress: AdminDataCleanupBatchProgress,
+): Promise<void> {
+  const safeJobId = String(jobId || '').trim();
+  if (!safeJobId) return;
+  const ready = await ensureCleanupAuditTables();
+  if (!ready) return;
+
+  try {
+    const nowIso = new Date().toISOString();
+    await queryFromD1(
+      `INSERT INTO admin_cleanup_job_logs (job_id, batch_no, affected_rows, cell_changes, note, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        safeJobId,
+        progress.batchNo,
+        progress.affectedRows,
+        progress.cellChanges,
+        progress.note,
+        nowIso,
+      ],
+    );
+  } catch (error) {
+    console.warn('[data-maintenance] 任务日志写入失败:', error);
+  }
+}
+
+export async function completeAdminDataCleanupJob(
+  jobId: string,
+  result: AdminDataCleanupExecutionResult,
+): Promise<void> {
+  const safeJobId = String(jobId || '').trim();
+  if (!safeJobId) return;
+  const ready = await ensureCleanupAuditTables();
+  if (!ready) return;
+
+  try {
+    const nowIso = new Date().toISOString();
+    await queryFromD1(
+      `UPDATE admin_cleanup_jobs
+       SET
+         status = 'completed',
+         selected_rows = ?,
+         affected_rows = ?,
+         cell_changes = ?,
+         batch_count = ?,
+         r2_deleted = ?,
+         r2_delete_failed = ?,
+         warnings_json = ?,
+         error_text = NULL,
+         finished_at = ?,
+         updated_at = ?
+       WHERE id = ?`,
+      [
+        result.selectedRows,
+        result.affectedRows,
+        result.cellChanges,
+        result.batchCount,
+        result.r2Deleted,
+        result.r2DeleteFailed,
+        JSON.stringify(result.warnings ?? []),
+        nowIso,
+        nowIso,
+        safeJobId,
+      ],
+    );
+  } catch (error) {
+    console.warn('[data-maintenance] 任务完成写回失败:', error);
+  }
+}
+
+export async function failAdminDataCleanupJob(jobId: string, errorText: string): Promise<void> {
+  const safeJobId = String(jobId || '').trim();
+  if (!safeJobId) return;
+  const ready = await ensureCleanupAuditTables();
+  if (!ready) return;
+
+  try {
+    const nowIso = new Date().toISOString();
+    await queryFromD1(
+      `UPDATE admin_cleanup_jobs
+       SET status = 'failed', error_text = ?, finished_at = ?, updated_at = ?
+       WHERE id = ?`,
+      [String(errorText || '未知错误').slice(0, 500), nowIso, nowIso, safeJobId],
+    );
+  } catch (error) {
+    console.warn('[data-maintenance] 任务失败写回失败:', error);
+  }
+}
+
+export async function listAdminDataCleanupJobs(
+  limit = 20,
+  status?: AdminDataCleanupJobStatus | 'all',
+): Promise<AdminDataCleanupJobListRow[]> {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 20;
+  const statusFilter = status === 'running' || status === 'completed' || status === 'failed' ? status : null;
+  const ready = await ensureCleanupAuditTables();
+  if (!ready) return [];
+
+  try {
+    const rows = readRows<{
+      id: string;
+      target: string;
+      status: string;
+      risk_level: string | null;
+      created_at: string;
+      started_at: string | null;
+      finished_at: string | null;
+      total_matched_rows: number | string;
+      selected_rows: number | string;
+      affected_rows: number | string;
+      cell_changes: number | string;
+      r2_deleted: number | string;
+      r2_delete_failed: number | string;
+      warnings_json: string | null;
+      error_text: string | null;
+    }>(
+      await queryFromD1(
+        `SELECT
+          id, target, status, risk_level, created_at, started_at, finished_at,
+          total_matched_rows, selected_rows, affected_rows, cell_changes, r2_deleted, r2_delete_failed,
+          warnings_json, error_text
+         FROM admin_cleanup_jobs
+         ${statusFilter ? 'WHERE status = ?' : ''}
+         ORDER BY created_at DESC
+         LIMIT ?`,
+        statusFilter ? [statusFilter, safeLimit] : [safeLimit],
+      ),
+    );
+
+    return rows.map((row) => ({
+      id: row.id,
+      target: (row.target as AdminDataCleanupTarget),
+      status: (row.status as AdminDataCleanupJobStatus),
+      riskLevel:
+        row.risk_level === 'low' || row.risk_level === 'medium' || row.risk_level === 'high'
+          ? row.risk_level
+          : null,
+      createdAt: row.created_at,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      totalMatchedRows: toInt(row.total_matched_rows),
+      selectedRows: toInt(row.selected_rows),
+      affectedRows: toInt(row.affected_rows),
+      cellChanges: toInt(row.cell_changes),
+      r2Deleted: toInt(row.r2_deleted),
+      r2DeleteFailed: toInt(row.r2_delete_failed),
+      warningCount: parseJsonArray(row.warnings_json).length,
+      errorText: typeof row.error_text === 'string' && row.error_text.trim() ? row.error_text : null,
+    }));
+  } catch (error) {
+    console.warn('[data-maintenance] 读取任务列表失败:', error);
+    return [];
+  }
+}
+
+export async function getAdminDataCleanupJobDetail(jobId: string): Promise<AdminDataCleanupJobDetail | null> {
+  const safeJobId = String(jobId || '').trim();
+  if (!safeJobId) return null;
+  const ready = await ensureCleanupAuditTables();
+  if (!ready) return null;
+
+  try {
+    const row = readRows<{
+      id: string;
+      target: string;
+      status: string;
+      risk_level: string | null;
+      plan_hash: string;
+      scope_json: string | null;
+      actions_json: string | null;
+      preview_json: string | null;
+      warnings_json: string | null;
+      error_text: string | null;
+      created_at: string;
+      started_at: string | null;
+      finished_at: string | null;
+      total_matched_rows: number | string;
+      selected_rows: number | string;
+      affected_rows: number | string;
+      cell_changes: number | string;
+      r2_deleted: number | string;
+      r2_delete_failed: number | string;
+    }>(
+      await queryFromD1(
+        `SELECT
+          id, target, status, risk_level, plan_hash, scope_json, actions_json, preview_json,
+          warnings_json, error_text, created_at, started_at, finished_at,
+          total_matched_rows, selected_rows, affected_rows, cell_changes, r2_deleted, r2_delete_failed
+         FROM admin_cleanup_jobs
+         WHERE id = ?
+         LIMIT 1`,
+        [safeJobId],
+      ),
+    )[0];
+
+    if (!row) return null;
+
+    const logs = readRows<{
+      id: number | string;
+      batch_no: number | string;
+      affected_rows: number | string;
+      cell_changes: number | string;
+      note: string | null;
+      created_at: string;
+    }>(
+      await queryFromD1(
+        `SELECT id, batch_no, affected_rows, cell_changes, note, created_at
+         FROM admin_cleanup_job_logs
+         WHERE job_id = ?
+         ORDER BY batch_no ASC, id ASC`,
+        [safeJobId],
+      ),
+    ).map((logRow) => ({
+      id: toInt(logRow.id),
+      batchNo: toInt(logRow.batch_no),
+      affectedRows: toInt(logRow.affected_rows),
+      cellChanges: toInt(logRow.cell_changes),
+      note: typeof logRow.note === 'string' ? logRow.note : null,
+      createdAt: logRow.created_at,
+    }));
+
+    return {
+      id: row.id,
+      target: row.target as AdminDataCleanupTarget,
+      status: row.status as AdminDataCleanupJobStatus,
+      riskLevel:
+        row.risk_level === 'low' || row.risk_level === 'medium' || row.risk_level === 'high'
+          ? row.risk_level
+          : null,
+      createdAt: row.created_at,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      totalMatchedRows: toInt(row.total_matched_rows),
+      selectedRows: toInt(row.selected_rows),
+      affectedRows: toInt(row.affected_rows),
+      cellChanges: toInt(row.cell_changes),
+      r2Deleted: toInt(row.r2_deleted),
+      r2DeleteFailed: toInt(row.r2_delete_failed),
+      warningCount: parseJsonArray(row.warnings_json).length,
+      errorText: typeof row.error_text === 'string' && row.error_text.trim() ? row.error_text : null,
+      planHash: row.plan_hash,
+      scope: parseJsonRecord(row.scope_json) ?? {},
+      actions: parseJsonArray(row.actions_json),
+      preview: parseJsonRecord(row.preview_json),
+      warnings: parseJsonArray(row.warnings_json).filter((item): item is string => typeof item === 'string'),
+      logs,
+    };
+  } catch (error) {
+    console.warn('[data-maintenance] 读取任务详情失败:', error);
+    return null;
+  }
+}
+
 export async function previewAdminDataCleanup(input: AdminDataCleanupPlanInput): Promise<AdminDataCleanupPreviewResult> {
   const normalizedPlan = normalizePlan(input);
   const targetDefinition = cleanupTargetDefinitions[normalizedPlan.target];
@@ -873,6 +1349,7 @@ export async function executeAdminDataCleanup(input: {
   maxRows?: unknown;
   batchSize?: unknown;
   confirmText?: unknown;
+  onBatchCompleted?: ((progress: AdminDataCleanupBatchProgress) => Promise<void> | void) | undefined;
 }): Promise<AdminDataCleanupExecutionResult> {
   const normalizedPlan = normalizePlan(input.plan);
   const targetDefinition = cleanupTargetDefinitions[normalizedPlan.target];
@@ -922,8 +1399,14 @@ export async function executeAdminDataCleanup(input: {
     const batches = chunk(selectedIds, batchSize);
     batchCount = batches.length;
 
-    for (const idBatch of batches) {
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const idBatch = batches[batchIndex]!;
       if (idBatch.length <= 0) continue;
+      const batchNo = batchIndex + 1;
+      let batchAffectedRows = 0;
+      let batchCellChanges = 0;
+      let batchMode: AdminDataCleanupBatchProgress['mode'] = 'field_update';
+      let batchNote = '';
 
       if (hasDeleteRows) {
         const deleteAction = normalizedPlan.actions.find(
@@ -938,17 +1421,49 @@ export async function executeAdminDataCleanup(input: {
         const changes = await deleteRowsForIds(targetDefinition, idBatch);
         affectedRows += changes;
         cellChanges += changes;
+        batchAffectedRows = changes;
+        batchCellChanges = changes;
+        batchMode = 'delete_rows';
+        batchNote =
+          targetDefinition.target === 'large_objects' && deleteAction?.deleteR2
+            ? 'delete_rows（含 R2 删除）'
+            : 'delete_rows';
+        if (input.onBatchCompleted) {
+          await input.onBatchCompleted({
+            batchNo,
+            batchSize: idBatch.length,
+            affectedRows: batchAffectedRows,
+            cellChanges: batchCellChanges,
+            mode: batchMode,
+            note: batchNote,
+          });
+        }
         continue;
       }
 
       const fieldActions = normalizedPlan.actions.filter(
         (item): item is AdminDataCleanupFieldAction => item.type === 'field',
       );
+      const actionNotes: string[] = [];
       for (const action of fieldActions) {
         const changes = await applyFieldActionForIds(targetDefinition, idBatch, action);
         cellChanges += changes;
+        batchCellChanges += changes;
+        actionNotes.push(`${action.field}:${action.op}`);
       }
       affectedRows += idBatch.length;
+      batchAffectedRows = idBatch.length;
+      batchNote = `field_update[${actionNotes.join(', ')}]`;
+      if (input.onBatchCompleted) {
+        await input.onBatchCompleted({
+          batchNo,
+          batchSize: idBatch.length,
+          affectedRows: batchAffectedRows,
+          cellChanges: batchCellChanges,
+          mode: batchMode,
+          note: batchNote,
+        });
+      }
     }
   }
 

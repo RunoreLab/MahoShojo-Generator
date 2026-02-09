@@ -671,3 +671,48 @@ CREATE TABLE IF NOT EXISTS data_card_tags (
 
 CREATE INDEX IF NOT EXISTS idx_data_card_tags_tag_id ON data_card_tags(tag_id);
 CREATE INDEX IF NOT EXISTS idx_data_card_tags_data_card_id ON data_card_tags(data_card_id);
+
+-- =================================================================
+-- Admin Data Maintenance（v0.7.x）
+-- =================================================================
+CREATE TABLE IF NOT EXISTS admin_cleanup_jobs (
+  id TEXT PRIMARY KEY NOT NULL,
+  target TEXT NOT NULL,
+  plan_hash TEXT NOT NULL,
+  scope_json TEXT,
+  actions_json TEXT,
+  preview_json TEXT,
+  risk_level TEXT,
+  status TEXT NOT NULL, -- running / completed / failed
+  total_matched_rows INTEGER DEFAULT 0,
+  selected_rows INTEGER DEFAULT 0,
+  affected_rows INTEGER DEFAULT 0,
+  cell_changes INTEGER DEFAULT 0,
+  batch_count INTEGER DEFAULT 0,
+  r2_deleted INTEGER DEFAULT 0,
+  r2_delete_failed INTEGER DEFAULT 0,
+  warnings_json TEXT,
+  error_text TEXT,
+  created_by_user_id INTEGER,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_cleanup_jobs_created_at ON admin_cleanup_jobs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_cleanup_jobs_status_created_at ON admin_cleanup_jobs(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS admin_cleanup_job_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL,
+  batch_no INTEGER NOT NULL,
+  affected_rows INTEGER DEFAULT 0,
+  cell_changes INTEGER DEFAULT 0,
+  note TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (job_id) REFERENCES admin_cleanup_jobs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_cleanup_job_logs_job_id_batch ON admin_cleanup_job_logs(job_id, batch_no);
