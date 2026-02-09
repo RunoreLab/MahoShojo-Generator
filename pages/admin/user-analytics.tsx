@@ -61,6 +61,18 @@ type RetentionStats = {
   avgObservedRetentionDays: number;
   medianObservedRetentionDays: number;
   p90ObservedRetentionDays: number;
+  cohortGranularity: 'week' | 'month';
+  cohortLookbackDays: number;
+  cohorts: Array<{
+    cohortKey: string;
+    cohortSize: number;
+    d7Eligible: number;
+    d7Retained: number;
+    d7Rate: number;
+    d30Eligible: number;
+    d30Retained: number;
+    d30Rate: number;
+  }>;
   points: RetentionPoint[];
   activityTrackingOk: boolean;
 };
@@ -74,6 +86,8 @@ type CompositionBucket = {
 
 type CompositionStats = {
   activeWindowDays: number;
+  cohortGranularity: 'week' | 'month';
+  cohortLookbackDays: number;
   sampleUsers: number;
   newUsers: number;
   oldUsers: number;
@@ -82,6 +96,13 @@ type CompositionStats = {
   medianTenureDays: number;
   p90TenureDays: number;
   buckets: CompositionBucket[];
+  cohorts: Array<{
+    cohortKey: string;
+    sampleUsers: number;
+    newUsers: number;
+    newUsersShare: number;
+    avgTenureDays: number;
+  }>;
   activityTrackingOk: boolean;
 };
 
@@ -99,18 +120,43 @@ type ApiResponse = {
     lookbackDays: number;
     frequencySample: 'active7d' | 'tracked' | 'all';
     activeWindowDays: number;
+    cohort: 'week' | 'month';
     frequencyProfile: 'v20260209';
   };
   error?: string;
 };
 
 type FrequencySample = 'active7d' | 'tracked' | 'all';
+type CohortGranularity = 'week' | 'month';
 
 const formatPercent = (value: number): string => `${(Math.max(0, Math.min(1, value)) * 100).toFixed(1)}%`;
 
 const formatNumber = (value: number): string => {
   if (!Number.isFinite(value)) return '0';
   return Math.round(value).toLocaleString('zh-CN');
+};
+
+const escapeCsvCell = (value: string): string => {
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+};
+
+const downloadCsv = (filename: string, headers: string[], rows: Array<Array<string | number>>): void => {
+  const lines = [
+    headers.map((header) => escapeCsvCell(String(header))).join(','),
+    ...rows.map((row) => row.map((cell) => escapeCsvCell(String(cell))).join(',')),
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 };
 
 const StatCard: React.FC<{ title: string; value: string; note?: string; icon: React.ElementType; color: string }> = ({
@@ -136,6 +182,7 @@ const UserAnalyticsPage: React.FC = () => {
   const [lookbackDays, setLookbackDays] = useState<number>(30);
   const [activeWindowDays, setActiveWindowDays] = useState<number>(7);
   const [frequencySample, setFrequencySample] = useState<FrequencySample>('active7d');
+  const [cohort, setCohort] = useState<CohortGranularity>('week');
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -147,10 +194,11 @@ const UserAnalyticsPage: React.FC = () => {
       lookbackDays: String(lookbackDays),
       frequencySample,
       activeWindowDays: String(activeWindowDays),
+      cohort,
       frequencyProfile: 'v20260209',
     });
     return `/api/admin/user-analytics?${params.toString()}`;
-  }, [lookbackDays, frequencySample, activeWindowDays]);
+  }, [lookbackDays, frequencySample, activeWindowDays, cohort]);
 
   const fetchData = useCallback(async (showRefreshing: boolean) => {
     if (!showRefreshing) setLoading(true);
@@ -185,6 +233,76 @@ const UserAnalyticsPage: React.FC = () => {
   const composition = data?.stats.composition;
   const generatedAt = data?.meta.generatedAt;
 
+  const handleExportRetentionCsv = useCallback(() => {
+    if (!retention) return;
+    const rows: Array<Array<string | number>> = [];
+
+    retention.points.forEach((point) => {
+      rows.push([
+        'retention_point',
+        point.label,
+        point.days,
+        point.eligible,
+        point.retained,
+        (point.rate * 100).toFixed(2),
+        '',
+        '',
+      ]);
+    });
+
+    retention.cohorts.forEach((cohortRow) => {
+      rows.push([
+        'retention_cohort',
+        cohortRow.cohortKey,
+        '',
+        cohortRow.cohortSize,
+        '',
+        '',
+        `${cohortRow.d7Retained}/${cohortRow.d7Eligible} (${(cohortRow.d7Rate * 100).toFixed(2)}%)`,
+        `${cohortRow.d30Retained}/${cohortRow.d30Eligible} (${(cohortRow.d30Rate * 100).toFixed(2)}%)`,
+      ]);
+    });
+
+    downloadCsv(
+      `retention_${retention.cohortGranularity}_${retention.cohortLookbackDays}d.csv`,
+      ['type', 'label_or_cohort', 'days', 'eligible_or_size', 'retained', 'rate_percent', 'd7', 'd30'],
+      rows,
+    );
+  }, [retention]);
+
+  const handleExportCompositionCsv = useCallback(() => {
+    if (!composition) return;
+    const rows: Array<Array<string | number>> = [];
+
+    composition.buckets.forEach((bucket) => {
+      rows.push([
+        'tenure_bucket',
+        bucket.label,
+        bucket.count,
+        (bucket.share * 100).toFixed(2),
+        '',
+        '',
+      ]);
+    });
+
+    composition.cohorts.forEach((cohortRow) => {
+      rows.push([
+        'composition_cohort',
+        cohortRow.cohortKey,
+        cohortRow.sampleUsers,
+        '',
+        cohortRow.newUsers,
+        (cohortRow.newUsersShare * 100).toFixed(2),
+      ]);
+    });
+
+    downloadCsv(
+      `composition_${composition.cohortGranularity}_${composition.cohortLookbackDays}d.csv`,
+      ['type', 'label_or_cohort', 'sample_users_or_count', 'share_percent', 'new_users', 'new_users_share_percent'],
+      rows,
+    );
+  }, [composition]);
+
   return (
     <>
       <Head>
@@ -209,9 +327,9 @@ const UserAnalyticsPage: React.FC = () => {
           <div className="mb-5 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
             <h1 className="text-2xl font-bold text-gray-800">用户统计分析</h1>
             <p className="mt-1 text-sm text-gray-500">
-              当前支持活跃概览与高频生成分层（profile: <code>v20260209</code>）
+              当前支持活跃概览、高频分层、留存与活跃构成（profile: <code>v20260209</code>）
             </p>
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
               <label className="text-sm text-gray-700">
                 统计窗口
                 <select
@@ -248,6 +366,17 @@ const UserAnalyticsPage: React.FC = () => {
                   <option value={7}>近 7 天</option>
                   <option value={30}>近 30 天</option>
                   <option value={90}>近 90 天</option>
+                </select>
+              </label>
+              <label className="text-sm text-gray-700">
+                Cohort 粒度
+                <select
+                  value={cohort}
+                  onChange={(e) => setCohort(e.target.value as CohortGranularity)}
+                  className="mt-1 block w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+                >
+                  <option value="week">按周</option>
+                  <option value="month">按月</option>
                 </select>
               </label>
               <div className="text-sm text-gray-700">
@@ -404,10 +533,19 @@ const UserAnalyticsPage: React.FC = () => {
           {retention ? (
             <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-gray-800">留存概览（累计回访口径）</h2>
-                <p className="text-xs text-gray-500">
-                  样本总量 {formatNumber(retention.totalUsers)} · 口径 {retention.activityTrackingOk ? 'last_activity + last_login' : 'last_login 回退'}
-                </p>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-800">留存概览（累计回访口径）</h2>
+                  <p className="text-xs text-gray-500">
+                    样本总量 {formatNumber(retention.totalUsers)} · 口径 {retention.activityTrackingOk ? 'last_activity + last_login' : 'last_login 回退'} · cohort {retention.cohortGranularity}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportRetentionCsv}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
+                >
+                  导出留存 CSV
+                </button>
               </div>
 
               <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -447,16 +585,52 @@ const UserAnalyticsPage: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+
+              <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-600">
+                    <tr>
+                      <th className="px-4 py-3">Cohort</th>
+                      <th className="px-4 py-3">用户数</th>
+                      <th className="px-4 py-3">D7 留存</th>
+                      <th className="px-4 py-3">D30 留存</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {retention.cohorts.map((row) => (
+                      <tr key={row.cohortKey} className="border-t border-gray-100">
+                        <td className="px-4 py-3 text-gray-700">{row.cohortKey}</td>
+                        <td className="px-4 py-3 text-gray-800">{formatNumber(row.cohortSize)}</td>
+                        <td className="px-4 py-3 text-gray-800">
+                          {formatNumber(row.d7Retained)} / {formatNumber(row.d7Eligible)}（{formatPercent(row.d7Rate)}）
+                        </td>
+                        <td className="px-4 py-3 text-gray-800">
+                          {formatNumber(row.d30Retained)} / {formatNumber(row.d30Eligible)}（{formatPercent(row.d30Rate)}）
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : null}
 
           {composition ? (
             <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-gray-800">活跃用户构成</h2>
-                <p className="text-xs text-gray-500">
-                  活跃窗口 {composition.activeWindowDays} 天 · 样本 {formatNumber(composition.sampleUsers)}
-                </p>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-800">活跃用户构成</h2>
+                  <p className="text-xs text-gray-500">
+                    活跃窗口 {composition.activeWindowDays} 天 · 样本 {formatNumber(composition.sampleUsers)} · cohort {composition.cohortGranularity}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportCompositionCsv}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100"
+                >
+                  导出构成 CSV
+                </button>
               </div>
 
               <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
@@ -497,6 +671,31 @@ const UserAnalyticsPage: React.FC = () => {
                         <td className="px-4 py-3 text-gray-700">{bucket.label}</td>
                         <td className="px-4 py-3 text-gray-800">{formatNumber(bucket.count)}</td>
                         <td className="px-4 py-3 text-gray-800">{formatPercent(bucket.share)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-600">
+                    <tr>
+                      <th className="px-4 py-3">Cohort</th>
+                      <th className="px-4 py-3">样本用户</th>
+                      <th className="px-4 py-3">新用户（≤30天）</th>
+                      <th className="px-4 py-3">新用户占比</th>
+                      <th className="px-4 py-3">平均注册时长</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {composition.cohorts.map((row) => (
+                      <tr key={row.cohortKey} className="border-t border-gray-100">
+                        <td className="px-4 py-3 text-gray-700">{row.cohortKey}</td>
+                        <td className="px-4 py-3 text-gray-800">{formatNumber(row.sampleUsers)}</td>
+                        <td className="px-4 py-3 text-gray-800">{formatNumber(row.newUsers)}</td>
+                        <td className="px-4 py-3 text-gray-800">{formatPercent(row.newUsersShare)}</td>
+                        <td className="px-4 py-3 text-gray-800">{row.avgTenureDays.toFixed(2)} 天</td>
                       </tr>
                     ))}
                   </tbody>

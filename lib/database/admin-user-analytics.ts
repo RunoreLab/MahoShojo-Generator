@@ -3,6 +3,7 @@ import { queryFromD1 } from './core';
 export type AdminUserAnalyticsSection = 'overview' | 'frequency' | 'retention' | 'composition' | 'all';
 export type AdminFrequencySample = 'active7d' | 'tracked' | 'all';
 export type AdminFrequencyProfile = 'v20260209';
+export type AdminCohortGranularity = 'week' | 'month';
 
 export type AdminUserAnalyticsOverview = {
   totalUsers: number;
@@ -62,6 +63,18 @@ export type AdminUserAnalyticsRetention = {
   avgObservedRetentionDays: number;
   medianObservedRetentionDays: number;
   p90ObservedRetentionDays: number;
+  cohortGranularity: AdminCohortGranularity;
+  cohortLookbackDays: number;
+  cohorts: Array<{
+    cohortKey: string;
+    cohortSize: number;
+    d7Eligible: number;
+    d7Retained: number;
+    d7Rate: number;
+    d30Eligible: number;
+    d30Retained: number;
+    d30Rate: number;
+  }>;
   points: AdminUserAnalyticsRetentionPoint[];
   activityTrackingOk: boolean;
 };
@@ -75,6 +88,8 @@ export type AdminUserAnalyticsCompositionBucket = {
 
 export type AdminUserAnalyticsComposition = {
   activeWindowDays: number;
+  cohortGranularity: AdminCohortGranularity;
+  cohortLookbackDays: number;
   sampleUsers: number;
   newUsers: number;
   oldUsers: number;
@@ -83,6 +98,13 @@ export type AdminUserAnalyticsComposition = {
   medianTenureDays: number;
   p90TenureDays: number;
   buckets: AdminUserAnalyticsCompositionBucket[];
+  cohorts: Array<{
+    cohortKey: string;
+    sampleUsers: number;
+    newUsers: number;
+    newUsersShare: number;
+    avgTenureDays: number;
+  }>;
   activityTrackingOk: boolean;
 };
 
@@ -130,6 +152,11 @@ const normalizeSample = (sample?: string): AdminFrequencySample => {
   if (sample === 'all') return 'all';
   if (sample === 'tracked') return 'tracked';
   return 'active7d';
+};
+
+const normalizeCohortGranularity = (input?: string): AdminCohortGranularity => {
+  if (input === 'month') return 'month';
+  return 'week';
 };
 
 const toRate = (part: number, total: number): number => {
@@ -396,20 +423,28 @@ export const getAdminUserAnalyticsFrequency = async (options?: {
   return output;
 };
 
-const buildRetentionSql = (useActivityTable: boolean): {
+const buildRetentionSql = (
+  useActivityTable: boolean,
+  cohortGranularity: AdminCohortGranularity,
+): {
   aggregateSql: string;
   distributionSql: string;
-  paramsBuilder: (nowIso: string) => unknown[];
+  cohortSql: string;
+  paramsBuilder: (nowIso: string, cohortLookbackDays: number) => unknown[];
 } => {
   const activityJoinSql = useActivityTable ? 'LEFT JOIN user_last_activity ula ON ula.user_id = u.id' : '';
   const observedAtExpr = useActivityTable
     ? 'COALESCE(ula.last_seen_at, u.last_login_at, u.created_at)'
     : 'COALESCE(u.last_login_at, u.created_at)';
+  const cohortExpr = cohortGranularity === 'month'
+    ? "strftime('%Y-%m', created_at)"
+    : "strftime('%Y-W%W', created_at)";
 
   const baseCte = `
     WITH base AS (
       SELECT
         u.id,
+        u.created_at,
         CASE
           WHEN (julianday(?) - julianday(u.created_at)) < 0 THEN 0
           ELSE CAST((julianday(?) - julianday(u.created_at)) AS INTEGER)
@@ -447,20 +482,45 @@ const buildRetentionSql = (useActivityTable: boolean): {
     ORDER BY retention_days ASC;
   `;
 
+  const cohortSql = `
+    ${baseCte}
+    SELECT
+      ${cohortExpr} AS cohort_key,
+      COUNT(1) AS cohort_size,
+      COALESCE(SUM(CASE WHEN user_age_days >= 7 THEN 1 ELSE 0 END), 0) AS d7_eligible,
+      COALESCE(SUM(CASE WHEN user_age_days >= 7 AND retention_days >= 7 THEN 1 ELSE 0 END), 0) AS d7_retained,
+      COALESCE(SUM(CASE WHEN user_age_days >= 30 THEN 1 ELSE 0 END), 0) AS d30_eligible,
+      COALESCE(SUM(CASE WHEN user_age_days >= 30 AND retention_days >= 30 THEN 1 ELSE 0 END), 0) AS d30_retained
+    FROM base
+    WHERE user_age_days <= ?
+    GROUP BY cohort_key
+    ORDER BY cohort_key DESC
+    LIMIT 120;
+  `;
+
   return {
     aggregateSql,
     distributionSql,
-    paramsBuilder: (nowIso: string) => [nowIso, nowIso],
+    cohortSql,
+    paramsBuilder: (nowIso: string, cohortLookbackDays: number) => [nowIso, nowIso, cohortLookbackDays],
   };
 };
 
-export const getAdminUserAnalyticsRetention = async (): Promise<AdminUserAnalyticsRetention> => {
+export const getAdminUserAnalyticsRetention = async (options?: {
+  cohort?: string;
+  lookbackDays?: number;
+}): Promise<AdminUserAnalyticsRetention> => {
   const nowIso = new Date().toISOString();
+  const cohortGranularity = normalizeCohortGranularity(options?.cohort);
+  const cohortLookbackDays = clampLookbackDays(options?.lookbackDays ?? 180);
   const output: AdminUserAnalyticsRetention = {
     totalUsers: 0,
     avgObservedRetentionDays: 0,
     medianObservedRetentionDays: 0,
     p90ObservedRetentionDays: 0,
+    cohortGranularity,
+    cohortLookbackDays,
+    cohorts: [],
     points: [
       { key: 'd1', label: 'D1', days: 1, eligible: 0, retained: 0, rate: 0 },
       { key: 'd7', label: 'D7', days: 7, eligible: 0, retained: 0, rate: 0 },
@@ -471,11 +531,12 @@ export const getAdminUserAnalyticsRetention = async (): Promise<AdminUserAnalyti
   };
 
   const runQuery = async (useActivityTable: boolean): Promise<void> => {
-    const { aggregateSql, distributionSql, paramsBuilder } = buildRetentionSql(useActivityTable);
-    const params = paramsBuilder(nowIso);
-    const [aggregateResult, distributionResult] = await Promise.all([
-      queryFromD1(aggregateSql, params),
-      queryFromD1(distributionSql, params),
+    const { aggregateSql, distributionSql, cohortSql, paramsBuilder } = buildRetentionSql(useActivityTable, cohortGranularity);
+    const params = paramsBuilder(nowIso, cohortLookbackDays);
+    const [aggregateResult, distributionResult, cohortResult] = await Promise.all([
+      queryFromD1(aggregateSql, params.slice(0, 2)),
+      queryFromD1(distributionSql, params.slice(0, 2)),
+      queryFromD1(cohortSql, params),
     ]);
 
     const aggregateRow = readFirstRow(aggregateResult);
@@ -505,6 +566,25 @@ export const getAdminUserAnalyticsRetention = async (): Promise<AdminUserAnalyti
 
     output.medianObservedRetentionDays = quantileFromHistogram(histogram, 0.5);
     output.p90ObservedRetentionDays = quantileFromHistogram(histogram, 0.9);
+
+    const cohortRows = ((cohortResult as any)?.result?.[0]?.results ?? []) as Array<Record<string, unknown>>;
+    output.cohorts = cohortRows.map((row) => {
+      const cohortSize = readInt(row.cohort_size);
+      const d7Eligible = readInt(row.d7_eligible);
+      const d7Retained = readInt(row.d7_retained);
+      const d30Eligible = readInt(row.d30_eligible);
+      const d30Retained = readInt(row.d30_retained);
+      return {
+        cohortKey: String(row.cohort_key ?? ''),
+        cohortSize,
+        d7Eligible,
+        d7Retained,
+        d7Rate: toRate(d7Retained, d7Eligible),
+        d30Eligible,
+        d30Retained,
+        d30Rate: toRate(d30Retained, d30Eligible),
+      };
+    });
     output.activityTrackingOk = useActivityTable;
   };
 
@@ -526,21 +606,29 @@ export const getAdminUserAnalyticsRetention = async (): Promise<AdminUserAnalyti
   return output;
 };
 
-const buildCompositionSql = (useActivityTable: boolean): {
+const buildCompositionSqlWithCohort = (
+  useActivityTable: boolean,
+  cohortGranularity: AdminCohortGranularity,
+): {
+  cohortSql: string;
   aggregateSql: string;
   bucketSql: string;
   distributionSql: string;
-  paramsBuilder: (nowIso: string, sinceActiveIso: string) => unknown[];
+  paramsBuilder: (nowIso: string, sinceActiveIso: string, cohortLookbackDays: number) => unknown[];
 } => {
   const activityJoinSql = useActivityTable ? 'LEFT JOIN user_last_activity ula ON ula.user_id = u.id' : '';
   const activityWhereSql = useActivityTable
     ? 'ula.last_seen_at IS NOT NULL AND julianday(ula.last_seen_at) >= julianday(?)'
     : 'u.last_login_at IS NOT NULL AND julianday(u.last_login_at) >= julianday(?)';
+  const cohortExpr = cohortGranularity === 'month'
+    ? "strftime('%Y-%m', created_at)"
+    : "strftime('%Y-W%W', created_at)";
 
   const baseCte = `
     WITH active_sample AS (
       SELECT
         u.id,
+        u.created_at,
         CASE
           WHEN (julianday(?) - julianday(u.created_at)) < 0 THEN 0
           ELSE CAST((julianday(?) - julianday(u.created_at)) AS INTEGER)
@@ -601,22 +689,50 @@ const buildCompositionSql = (useActivityTable: boolean): {
     ORDER BY tenure_days ASC;
   `;
 
+  const cohortSql = `
+    ${baseCte}
+    SELECT
+      ${cohortExpr} AS cohort_key,
+      COUNT(1) AS sample_users,
+      COALESCE(SUM(CASE WHEN tenure_days <= 30 THEN 1 ELSE 0 END), 0) AS new_users,
+      COALESCE(AVG(tenure_days), 0) AS avg_tenure_days
+    FROM active_sample
+    WHERE tenure_days <= ?
+    GROUP BY cohort_key
+    ORDER BY cohort_key DESC
+    LIMIT 120;
+  `;
+
   return {
+    cohortSql,
     aggregateSql,
     bucketSql,
     distributionSql,
-    paramsBuilder: (nowIso: string, sinceActiveIso: string) => [nowIso, nowIso, sinceActiveIso],
+    paramsBuilder: (nowIso: string, sinceActiveIso: string, cohortLookbackDays: number) => [
+      nowIso,
+      nowIso,
+      sinceActiveIso,
+      cohortLookbackDays,
+    ],
   };
 };
 
-export const getAdminUserAnalyticsComposition = async (activeWindowDaysInput?: number): Promise<AdminUserAnalyticsComposition> => {
-  const activeWindowDays = clampActiveWindowDays(activeWindowDaysInput);
+export const getAdminUserAnalyticsComposition = async (options?: {
+  activeWindowDays?: number;
+  cohort?: string;
+  lookbackDays?: number;
+}): Promise<AdminUserAnalyticsComposition> => {
+  const activeWindowDays = clampActiveWindowDays(options?.activeWindowDays);
+  const cohortGranularity = normalizeCohortGranularity(options?.cohort);
+  const cohortLookbackDays = clampLookbackDays(options?.lookbackDays ?? 180);
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
   const sinceActiveIso = new Date(now - activeWindowDays * 24 * 60 * 60 * 1000).toISOString();
 
   const output: AdminUserAnalyticsComposition = {
     activeWindowDays,
+    cohortGranularity,
+    cohortLookbackDays,
     sampleUsers: 0,
     newUsers: 0,
     oldUsers: 0,
@@ -625,16 +741,22 @@ export const getAdminUserAnalyticsComposition = async (activeWindowDaysInput?: n
     medianTenureDays: 0,
     p90TenureDays: 0,
     buckets: [],
+    cohorts: [],
     activityTrackingOk: false,
   };
 
   const runQuery = async (useActivityTable: boolean): Promise<void> => {
-    const { aggregateSql, bucketSql, distributionSql, paramsBuilder } = buildCompositionSql(useActivityTable);
-    const params = paramsBuilder(nowIso, sinceActiveIso);
-    const [aggregateResult, bucketResult, distributionResult] = await Promise.all([
-      queryFromD1(aggregateSql, params),
-      queryFromD1(bucketSql, params),
-      queryFromD1(distributionSql, params),
+    const { cohortSql, aggregateSql, bucketSql, distributionSql, paramsBuilder } = buildCompositionSqlWithCohort(
+      useActivityTable,
+      cohortGranularity,
+    );
+    const params = paramsBuilder(nowIso, sinceActiveIso, cohortLookbackDays);
+    const coreParams = params.slice(0, 3);
+    const [aggregateResult, bucketResult, distributionResult, cohortResult] = await Promise.all([
+      queryFromD1(aggregateSql, coreParams),
+      queryFromD1(bucketSql, coreParams),
+      queryFromD1(distributionSql, coreParams),
+      queryFromD1(cohortSql, params),
     ]);
 
     const aggregateRow = readFirstRow(aggregateResult);
@@ -663,6 +785,19 @@ export const getAdminUserAnalyticsComposition = async (activeWindowDaysInput?: n
 
     output.medianTenureDays = quantileFromHistogram(histogram, 0.5);
     output.p90TenureDays = quantileFromHistogram(histogram, 0.9);
+
+    const cohortRows = ((cohortResult as any)?.result?.[0]?.results ?? []) as Array<Record<string, unknown>>;
+    output.cohorts = cohortRows.map((row) => {
+      const sampleUsers = readInt(row.sample_users);
+      const newUsers = readInt(row.new_users);
+      return {
+        cohortKey: String(row.cohort_key ?? ''),
+        sampleUsers,
+        newUsers,
+        newUsersShare: toRate(newUsers, sampleUsers),
+        avgTenureDays: toFixed2(readFloat(row.avg_tenure_days)),
+      };
+    });
     output.activityTrackingOk = useActivityTable;
   };
 
