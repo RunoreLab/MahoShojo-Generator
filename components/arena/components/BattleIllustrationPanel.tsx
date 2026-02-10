@@ -233,9 +233,6 @@ export function BattleIllustrationPanel({
               onChange={handleUploadFile}
               className="w-full text-sm"
             />
-            <p className="text-xs text-gray-500 mt-1">
-              若选择上传图并插入战报卡片，卡片内会自动标注“用户自行上传”。
-            </p>
             {uploadError && <p className="text-xs text-red-500 mt-1">{uploadError}</p>}
           </div>
 
