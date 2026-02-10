@@ -35,7 +35,11 @@ export interface BattleIllustrationPromptResult {
 const DEFAULT_TAIL_MAX_CHARS = 260;
 const DEFAULT_PROMPT_MAX_CHARS = 3_000;
 const PER_LINE_MAX_CHARS = 320;
-const REPORT_TAIL_FALLBACK = '（本次战报正文较短，可按需要手动补充关键情节）';
+const REPORT_TAIL_FALLBACK = '余波逐渐平息，双方在高低差空间中短暂停手对峙。';
+const VISUAL_MOMENT_MAX_CHARS = 180;
+const APPEARANCE_BLOCK_MAX_CHARS = 1_000;
+const STATE_BLOCK_MAX_CHARS = 500;
+const IMPACT_BLOCK_MAX_CHARS = 500;
 
 const toSafeText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
@@ -49,6 +53,43 @@ const truncateByCodePoints = (text: string, maxChars: number): string => {
 
 const normalizeWhitespace = (text: string): string => {
   return text.replace(/\s+/g, ' ').trim();
+};
+
+const toCompactInlineText = (text: string): string => {
+  return normalizeWhitespace(text)
+    .replace(/[\n\r\t]+/g, ' ')
+    .replace(/[【】\[\]{}（）()]/g, '')
+    .replace(/[：:]+/g, '，')
+    .replace(/[；;]+/g, '，')
+    .replace(/\s*,\s*/g, '，')
+    .replace(/，{2,}/g, '，')
+    .trim();
+};
+
+const joinSummaryLines = (lines: string[], maxChars: number): string => {
+  const merged = lines.map((line) => toCompactInlineText(line)).filter(Boolean).join('；');
+  return truncateByCodePoints(merged, maxChars);
+};
+
+const extractVisualMoment = (raw: string, maxChars: number): string => {
+  const normalized = toCompactInlineText(raw);
+  if (!normalized) return REPORT_TAIL_FALLBACK;
+
+  const sentenceCandidates = normalized
+    .split(/[。！？!?]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 6)
+    .filter(
+      (item) =>
+        !/^(胜利者|获胜者|优胜者|最终结果|官方通报|记者点评|故事引导|角色行动引导|随机判定记录|随机判定结果)/.test(item)
+    );
+
+  if (sentenceCandidates.length === 0) {
+    return truncateByCodePoints(normalized, maxChars);
+  }
+
+  const keyMoment = sentenceCandidates.slice(-2).join(' ');
+  return truncateByCodePoints(keyMoment, maxChars);
 };
 
 const normalizeNameToken = (name: string): string => {
@@ -275,20 +316,21 @@ export const buildBattleIllustrationPrompt = (input: BattleIllustrationPromptInp
     maxChars: input.tailMaxChars,
   });
 
+  const appearanceSummary = joinSummaryLines(appearanceLines, APPEARANCE_BLOCK_MAX_CHARS);
+  const currentStateSummary = joinSummaryLines(currentStateLines, STATE_BLOCK_MAX_CHARS);
+  const impactSummary = joinSummaryLines(impactLines, IMPACT_BLOCK_MAX_CHARS);
+  const visualMoment = extractVisualMoment(reportTail, VISUAL_MOMENT_MAX_CHARS);
+
   const sections: string[] = [];
-  sections.push('主题：故事插图，二次元，剧情插画，画面干净，无水印，无文字。');
-  if (headline) sections.push(`战报标题：${headline}`);
-  if (appearanceLines.length > 0) {
-    sections.push(`角色外观：\n${appearanceLines.map((line) => `- ${line}`).join('\n')}`);
-  }
-  sections.push(`故事片段：\n${reportTail}`);
-  if (currentStateLines.length > 0) {
-    sections.push(`当前状态：\n${currentStateLines.map((line) => `- ${line}`).join('\n')}`);
-  }
-  if (impactLines.length > 0) {
-    sections.push(`历战记录：\n${impactLines.map((line) => `- ${line}`).join('\n')}`);
-  }
-  sections.push('构图建议：突出故事结尾的情景，保留视觉焦点与景深层次，适合作为配图。');
+  sections.push('风格标签：Xiabanmo，二次元，魔法少女，剧情插画，视觉小说关键帧，cinematic lighting，高质量，干净画面。');
+  sections.push('硬性约束：单张插画，禁止出现任何文字、字母、数字、水印、Logo、字幕、对话框、UI 面板、海报排版、漫画分格。');
+  if (headline) sections.push(`情绪关键词：${toCompactInlineText(headline)}`);
+  if (appearanceSummary) sections.push(`角色外观：${appearanceSummary}`);
+  sections.push(`关键瞬间：${visualMoment}`);
+  if (currentStateSummary) sections.push(`角色情绪与姿态：${currentStateSummary}`);
+  if (impactSummary) sections.push(`关系与气质暗示：${impactSummary}`);
+  sections.push('镜头构图：突出故事结尾的动作停顿与情景，保留前后景和景深层次，视觉焦点集中在角色上。');
+  sections.push('输出要求：仅输出插画画面，不要任何可读文本。');
 
   const joinedPrompt = sections.join('\n\n').trim();
   const prompt = truncateByCodePoints(joinedPrompt, promptMaxChars);
