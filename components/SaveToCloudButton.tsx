@@ -302,6 +302,7 @@ export default function SaveToCloudButton({
         isOpen={showSaveModal}
         onClose={() => setShowSaveModal(false)}
         onSave={handleSave}
+        data={effectiveData}
         name={cardName}
         description={cardDescription}
         isPublic={isPublic}
@@ -321,6 +322,7 @@ export default function SaveToCloudButton({
         targetType={cardType ?? (isScenarioData(effectiveData) ? 'scenario' : 'character')}
         onConfirm={handleReplaceConfirm}
         isSaving={isReplacing}
+        data={effectiveData}
       />
     </>
   );

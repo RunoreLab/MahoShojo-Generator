@@ -16,6 +16,7 @@ import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
 import { ThemeImage } from '@/components/shared/ThemeImage';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { MainColor } from '@/lib/main-color';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, authStorage } from '@/lib/auth';
@@ -2017,13 +2018,20 @@ const CharacterManagerPage: React.FC = () => {
                                 <div className="mt-8 pt-4 border-t space-y-2">
                                     {isAuthenticated && characterData && (
                                         validationResult?.success ? (
-                                            <button
-                                                onClick={handleSaveAsDataCard}
-                                                className="generate-button w-full"
-                                                style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
-                                            >
-                                                保存到云端
-                                            </button>
+                                            <div className="space-y-2">
+                                                <button
+                                                    onClick={handleSaveAsDataCard}
+                                                    className="generate-button w-full"
+                                                    style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
+                                                >
+                                                    保存到云端
+                                                </button>
+                                                <JsonSizeIndicator
+                                                    data={characterData}
+                                                    className="mt-0"
+                                                    warningText="⚠️ 接近云端 300KB 上限，保存可能失败，请先精简数据。"
+                                                />
+                                            </div>
                                         ) : validationResult?.error && (
                                             <div className="w-full p-3 bg-red-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm text-center">
                                                 该文件疑似包含额外字段，暂时不可上传云端 <br /> {validationResult?.error}
@@ -2355,17 +2363,18 @@ const CharacterManagerPage: React.FC = () => {
                     setIsSavingCard(false);
                 }}
                 onSave={handleConfirmSaveCard}
-            name={newCardForm.name}
-            description={newCardForm.description}
-            isPublic={newCardForm.isPublic}
-            onNameChange={(value) => setNewCardForm({ ...newCardForm, name: value })}
-            onDescriptionChange={(value) => setNewCardForm({ ...newCardForm, description: value })}
-            onPublicChange={(value) => setNewCardForm({ ...newCardForm, isPublic: value })}
-            error={saveCardError}
-            isSaving={isSavingCard}
-            currentCardCount={userDataCards.length}
-            userCapacity={userCapacity}
-          />
+                data={characterData}
+                name={newCardForm.name}
+                description={newCardForm.description}
+                isPublic={newCardForm.isPublic}
+                onNameChange={(value) => setNewCardForm({ ...newCardForm, name: value })}
+                onDescriptionChange={(value) => setNewCardForm({ ...newCardForm, description: value })}
+                onPublicChange={(value) => setNewCardForm({ ...newCardForm, isPublic: value })}
+                error={saveCardError}
+                isSaving={isSavingCard}
+                currentCardCount={userDataCards.length}
+                userCapacity={userCapacity}
+            />
 
         </>
     );

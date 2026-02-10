@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDateTime } from '@/lib/constants';
 import { buildTitleDisplay } from '@/lib/text';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 
 interface ReplaceCardModalProps {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface ReplaceCardModalProps {
   targetType: 'character' | 'scenario' | 'history' | 'questionnaire';
   onConfirm: (cardId: string, opts: { name?: string; description?: string; isPublic?: number }) => Promise<void>;
   isSaving?: boolean;
+  data?: unknown;
 }
 
 export default function ReplaceCardModal({
@@ -18,7 +20,8 @@ export default function ReplaceCardModal({
   cards,
   targetType,
   onConfirm,
-  isSaving = false
+  isSaving = false,
+  data
 }: ReplaceCardModalProps) {
   const filteredCards = useMemo(() => cards.filter((c) => c.type === targetType), [cards, targetType]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -145,6 +148,14 @@ export default function ReplaceCardModal({
                   </label>
                 </div>
               </div>
+            )}
+
+            {data !== undefined && data !== null && (
+              <JsonSizeIndicator
+                data={data}
+                className="mt-0 mb-4"
+                warningText="⚠️ 接近云端 300KB 上限，替换可能失败，请先精简数据。"
+              />
             )}
 
             <div className="flex justify-end gap-2">
