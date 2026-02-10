@@ -35,6 +35,7 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
@@ -2340,6 +2341,12 @@ const DetailsPage: React.FC = () => {
                       </>
                     )}
                   </div>
+                  {resolvedResultPayload && (
+                    <JsonSizeIndicator
+                      data={resolvedResultPayload}
+                      warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                    />
+                  )}
                   {/* 新增：前往竞技场的入口 */}
                   <div className="mt-2 pt-6 border-t border-gray-200">
                     <p className="text-sm text-gray-600 mb-2">
