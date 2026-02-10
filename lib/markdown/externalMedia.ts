@@ -2,6 +2,15 @@ export type ExternalMediaKind = 'image' | 'video' | 'audio';
 
 // 统一的可信外链域名白名单（后续可按媒体类型拆分）
 const BASE_TRUSTED_MEDIA_HOSTS = [
+  // 模型生图（ModelScope / LibLib 常见产物域）
+  'modelscope.cn',
+  'liblibai.cloud',
+  'liblib.art',
+  'liblib.ai',
+  'liblib.cloud',
+  // 常见对象存储 CDN（用于生图结果直链）
+  'aliyuncs.com',
+  'alicdn.com',
   // 知乎
   'zhihu.com',
   'zhimg.com',

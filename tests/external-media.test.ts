@@ -7,6 +7,8 @@ describe('external media whitelist', () => {
     expect(
       isAllowedExternalMediaUrl('https://pic3.zhimg.com/80/v2-83fa1f698669f7b1dbfab8cbcae152fc_qhd.webp', 'image'),
     ).toBe(true);
+    expect(isAllowedExternalMediaUrl('https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/demo.png', 'image')).toBe(true);
+    expect(isAllowedExternalMediaUrl('https://cdn.liblibai.cloud/images/demo.jpg', 'image')).toBe(true);
   });
 
   it('阻止非白名单的图片域名', () => {

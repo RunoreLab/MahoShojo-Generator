@@ -552,7 +552,8 @@ ${adjudicationMarkdown}
                 src={illustrationImageUrl}
                 alt={`${headline} 插图`}
                 className="w-full max-h-[560px] object-contain rounded-lg border border-white/15 bg-black/15"
-                loading="lazy"
+                loading="eager"
+                decoding="async"
               />
               {uploadedIllustrationNote && (
                 <p className="mt-2 text-[11px] text-gray-300 text-right">

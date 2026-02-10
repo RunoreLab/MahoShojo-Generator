@@ -6,6 +6,8 @@ import TachieGenerator from '@/components/TachieGenerator';
 import type { BattleReportIllustrationAsset } from '@/components/BattleReportCard';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
 import { buildBattleIllustrationPrompt } from '@/lib/arena/battle-illustration-prompt';
+import { downloadBlob } from '@/lib/client/blobUrl';
+import { isAllowedExternalMediaUrl } from '@/lib/markdown/externalMedia';
 import type { BattleAiImpact, CombatantData } from '../types';
 
 type IllustrationChoice = 'none' | 'generated' | 'uploaded';
@@ -36,6 +38,32 @@ const readFileAsDataUrl = (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
+const isSpecialImageUrl = (value: string): boolean => /^data:|^blob:|^about:blank$/i.test(value);
+
+const resolveProxyImageUrl = (value: string): string => {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || isSpecialImageUrl(raw)) return raw;
+
+  if (!/^https?:\/\//i.test(raw) && !raw.startsWith('//')) {
+    return raw;
+  }
+
+  const normalized = raw.startsWith('//') ? `https:${raw}` : raw;
+  if (!isAllowedExternalMediaUrl(normalized, 'image')) {
+    return raw;
+  }
+  return `/api/media-proxy?url=${encodeURIComponent(normalized)}`;
+};
+
+const getFileExtensionFromMime = (mime: string): string => {
+  const lowered = mime.toLowerCase();
+  if (lowered.includes('png')) return 'png';
+  if (lowered.includes('jpeg') || lowered.includes('jpg')) return 'jpg';
+  if (lowered.includes('webp')) return 'webp';
+  if (lowered.includes('gif')) return 'gif';
+  return 'png';
+};
+
 export function BattleIllustrationPanel({
   headline,
   reportBody,
@@ -51,6 +79,8 @@ export function BattleIllustrationPanel({
   const [choice, setChoice] = useState<IllustrationChoice>('none');
   const [copyState, setCopyState] = useState<'idle' | 'ok' | 'error'>('idle');
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadingKind, setDownloadingKind] = useState<'generated' | 'uploaded' | null>(null);
 
   const suggested = useMemo(
     () =>
@@ -78,7 +108,7 @@ export function BattleIllustrationPanel({
     const asset = (() => {
       if (choice === 'generated' && generatedImageUrl) {
         return {
-          imageUrl: generatedImageUrl,
+          imageUrl: resolveProxyImageUrl(generatedImageUrl),
           source: 'generated',
         } satisfies BattleReportIllustrationAsset;
       }
@@ -125,6 +155,53 @@ export function BattleIllustrationPanel({
       setUploadError(error instanceof Error ? error.message : '上传失败，请重试。');
     } finally {
       event.target.value = '';
+    }
+  };
+
+  const sanitizeFilename = (value: string): string => {
+    const trimmed = value.trim();
+    const safe = trimmed.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_');
+    return safe || '战报插图';
+  };
+
+  const handleSaveIllustration = async (kind: 'generated' | 'uploaded') => {
+    const sourceUrl = kind === 'generated' ? generatedImageUrl : uploadedImageUrl;
+    if (!sourceUrl) return;
+
+    setDownloadError(null);
+    setDownloadingKind(kind);
+
+    try {
+      const normalizedSource = sourceUrl.startsWith('//') ? `https:${sourceUrl}` : sourceUrl;
+      const fetchTarget =
+        /^https?:\/\//i.test(normalizedSource) && isAllowedExternalMediaUrl(normalizedSource, 'image')
+          ? resolveProxyImageUrl(normalizedSource)
+          : normalizedSource;
+
+      const response = await fetch(fetchTarget, { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error(`下载失败（HTTP ${response.status}）`);
+      }
+      const blob = await response.blob();
+      const extension = getFileExtensionFromMime(blob.type || '');
+      const titlePart = headline ? sanitizeFilename(headline) : '未命名战报';
+      const suffix = kind === 'generated' ? '生成插图' : '上传插图';
+      const filename = `战报_${titlePart}_${suffix}.${extension}`;
+      downloadBlob(blob, filename);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '下载失败，请重试。';
+      setDownloadError(message);
+      try {
+        const anchor = document.createElement('a');
+        anchor.href = sourceUrl;
+        anchor.target = '_blank';
+        anchor.rel = 'noopener noreferrer';
+        anchor.click();
+      } catch {
+        // ignore
+      }
+    } finally {
+      setDownloadingKind(null);
     }
   };
 
@@ -242,15 +319,34 @@ export function BattleIllustrationPanel({
                 <div className="rounded-lg border border-gray-200 bg-white p-2">
                   <div className="text-xs font-medium text-gray-600 mb-2">生成图预览</div>
                   <img src={generatedImageUrl} alt="生成插图预览" className="w-full rounded-lg border border-gray-100" />
+                  <button
+                    type="button"
+                    onClick={() => handleSaveIllustration('generated')}
+                    disabled={downloadingKind !== null}
+                    className="mt-2 w-full px-3 py-2 text-xs font-semibold rounded-lg border border-pink-200 text-pink-600 hover:bg-pink-50 disabled:opacity-60"
+                  >
+                    {downloadingKind === 'generated' ? '保存中...' : '💾 单独保存生成插图'}
+                  </button>
                 </div>
               )}
               {uploadedImageUrl && (
                 <div className="rounded-lg border border-gray-200 bg-white p-2">
                   <div className="text-xs font-medium text-gray-600 mb-2">上传图预览</div>
                   <img src={uploadedImageUrl} alt="上传插图预览" className="w-full rounded-lg border border-gray-100" />
+                  <button
+                    type="button"
+                    onClick={() => handleSaveIllustration('uploaded')}
+                    disabled={downloadingKind !== null}
+                    className="mt-2 w-full px-3 py-2 text-xs font-semibold rounded-lg border border-pink-200 text-pink-600 hover:bg-pink-50 disabled:opacity-60"
+                  >
+                    {downloadingKind === 'uploaded' ? '保存中...' : '💾 单独保存上传插图'}
+                  </button>
                 </div>
               )}
             </div>
+          )}
+          {downloadError && (
+            <div className="text-xs text-red-500">{downloadError}</div>
           )}
 
           <div className="pt-1">
