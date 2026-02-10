@@ -8,8 +8,8 @@ import Footer from '@/components/Footer';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
+import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
-import TachieGenerator from '@/components/TachieGenerator';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 
 import { useAuth } from '@/lib/useAuth';
@@ -18,6 +18,7 @@ import { randomUUID } from '@/lib/crypto';
 import { COLOR_GRADIENTS, MainColor } from '@/lib/main-color';
 import { inferTemplate, TEMPLATE_LABELS, type InferableTemplate } from '@/lib/data-card-converter';
 import { mergeTeamDataCards, type TeamMergeOutputTemplate } from '@/lib/team/merge-team-cards';
+import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 type Notice = { type: 'success' | 'error' | 'info'; text: string } | null;
 
@@ -136,6 +137,7 @@ export default function CharacterPartyPage() {
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
 
   const [isTachieVisible, setIsTachieVisible] = useState(false);
+  const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
   const hasNonEmptySignature = (data: Record<string, unknown>): boolean =>
     typeof data.signature === 'string' && data.signature.trim().length > 0;
@@ -168,6 +170,7 @@ export default function CharacterPartyPage() {
     const displayName = (label && label.trim()) ? label.trim() : getDisplayNameFromData(payload);
 
     const shouldVerifyNative = hasNonEmptySignature(payload);
+    setCharacterPortraitAsset(null);
     setMembers((prev) => [
       ...prev,
       {
@@ -440,6 +443,7 @@ export default function CharacterPartyPage() {
       return;
     }
     if (!cardId) return;
+    setCharacterPortraitAsset(null);
     setMembers((prev) => prev.filter((item) => item.dataCardId !== cardId));
     const displayName = typeof cardData?._cardName === 'string' ? cardData._cardName.trim() : '';
     setNotice({ type: 'info', text: displayName ? `已从队伍移除：${displayName}` : '已从队伍移除角色' });
@@ -569,7 +573,10 @@ export default function CharacterPartyPage() {
                       type="button"
                       className="rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                       disabled={members.length === 0}
-                      onClick={() => setMembers([])}
+                      onClick={() => {
+                        setCharacterPortraitAsset(null);
+                        setMembers([]);
+                      }}
                     >
                       清空队伍
                     </button>
@@ -638,7 +645,10 @@ export default function CharacterPartyPage() {
                                   <button
                                     type="button"
                                     className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
-                                    onClick={() => setMembers((prev) => prev.filter((item) => item.id !== member.id))}
+                                    onClick={() => {
+                                      setCharacterPortraitAsset(null);
+                                      setMembers((prev) => prev.filter((item) => item.id !== member.id));
+                                    }}
                                   >
                                     移除
                                   </button>
@@ -693,16 +703,19 @@ export default function CharacterPartyPage() {
                       magicalGirl={mergedData as any}
                       gradientStyle={gradientStyle}
                       onSaveImage={handleSaveImageCallback}
+                      portraitAsset={characterPortraitAsset}
                     />
                   ) : mergedTemplate === 'canshou' ? (
                     <CanshouCard
                       canshou={mergedData as any}
                       onSaveImage={handleSaveImageCallback}
+                      portraitAsset={characterPortraitAsset}
                     />
                   ) : (
                     <GeneralCharacterCard
                       general={mergedData as any}
                       onSaveImage={handleSaveImageCallback}
+                      portraitAsset={characterPortraitAsset}
                     />
                   )}
                 </div>
@@ -768,12 +781,15 @@ export default function CharacterPartyPage() {
                   <summary
                     className="cursor-pointer text-sm font-semibold text-pink-700"
                   >
-                    {isTachieVisible ? '▼' : '▶'} 生成立绘（LibLib / ModelScope，可选）
+                    {isTachieVisible ? '▼' : '▶'} 生成立绘并插入角色卡（可选）
                   </summary>
                   {isTachieVisible ? (
                     <div className="mt-3">
                       {tachiePrompt.trim() ? (
-                        <TachieGenerator prompt={tachiePrompt} />
+                        <CharacterPortraitAssetPanel
+                          prompt={tachiePrompt}
+                          onPortraitAssetChange={setCharacterPortraitAsset}
+                        />
                       ) : (
                         <div className="text-sm text-gray-600">未能从当前队伍卡中提取立绘提示词（通常需要外观字段）。</div>
                       )}
