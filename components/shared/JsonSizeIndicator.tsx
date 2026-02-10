@@ -69,7 +69,7 @@ export function JsonSizeIndicator({
   const shouldWarn = bytes >= warnThreshold;
 
   return (
-    <div className={['mt-2', className].filter(Boolean).join(' ')}>
+    <div className={['mt-2', 'w-full', 'max-w-sm', 'mx-auto', className].filter(Boolean).join(' ')}>
       <div className="flex items-center justify-center gap-2">
         <div className="h-2 w-40 bg-gray-200 rounded-full overflow-hidden" title="按 UTF-8 字节估算，接近云端写入大小">
           <div className={`h-full ${barColor}`} style={{ width: `${Math.round(ratio * 100)}%` }} />
