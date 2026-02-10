@@ -38,6 +38,17 @@ describe('modelscope error helpers', () => {
     expect(payload.details).toContain('request id: bind-request-id');
   });
 
+  test('recognizes aliyun real-name verification requirement', () => {
+    const upstream = parseModelScopeJsonSafe(
+      '{"errors":{"message":"To use API-Inference,please make sure your associated Aliyun account is real name verified. You can do so at your account setting page https://www.modelscope.cn/my/accountsettings."},"request_id":"realname-request-id"}',
+    );
+    const payload = buildModelScopeErrorPayload({ status: 403, payload: upstream });
+
+    expect(payload.error).toBe('ModelScope 权限不足：请先完成阿里云账号实名认证（HTTP 403）');
+    expect(payload.message).toContain('associated Aliyun account is real name verified');
+    expect(payload.details).toContain('request id: realname-request-id');
+  });
+
   test('extract task fields from nested payload', () => {
     const upstream = parseModelScopeJsonSafe(
       '{"data":{"task_id":"task-123","task_status":"running","output_images":["https://a.png","https://a.png","https://b.png"]}}',

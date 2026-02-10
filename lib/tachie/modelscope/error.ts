@@ -127,6 +127,15 @@ const MODELSCOPE_ALIBABA_BIND_HINTS = [
   '绑定阿里云',
 ] as const;
 
+const MODELSCOPE_ALIYUN_REALNAME_HINTS = [
+  'real name verified',
+  'real-name verified',
+  'aliyun account',
+  'associated aliyun account',
+  '实名认证',
+  '实名',
+] as const;
+
 export const parseModelScopeJsonSafe = (raw: string): UnknownRecord => {
   if (!raw) return {};
   try {
@@ -209,6 +218,13 @@ const detectModelScopeAlibabaBindingIssue = (message: string | null): boolean =>
   return MODELSCOPE_ALIBABA_BIND_HINTS.some((hint) => normalized.includes(hint));
 };
 
+const detectModelScopeAliyunRealNameIssue = (message: string | null): boolean => {
+  if (!message) return false;
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) return false;
+  return MODELSCOPE_ALIYUN_REALNAME_HINTS.some((hint) => normalized.includes(hint));
+};
+
 export const buildModelScopeErrorPayload = (params: {
   status: number;
   payload: UnknownRecord;
@@ -223,6 +239,8 @@ export const buildModelScopeErrorPayload = (params: {
   const error = fallbackError || (
     status === 401 && detectModelScopeAlibabaBindingIssue(upstreamMessage)
       ? 'ModelScope 鉴权失败：请先绑定阿里云账号后再使用（HTTP 401）'
+      : status === 403 && detectModelScopeAliyunRealNameIssue(upstreamMessage)
+        ? 'ModelScope 权限不足：请先完成阿里云账号实名认证（HTTP 403）'
       : getDefaultModelScopeError(status)
   );
 
