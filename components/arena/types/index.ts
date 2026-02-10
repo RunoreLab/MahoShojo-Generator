@@ -139,6 +139,14 @@ export interface BattleApiResponse {
   adjudicationResults?: AdjudicationResult[];
   /** 本次战报生成记录 ID（用于排位结算查询等增强功能）。 */
   generationId?: string;
+  /** AI 原始 impacts（用于战报插图提示词，来源必须为本次 AI 输出）。 */
+  impacts?: BattleAiImpact[];
+}
+
+export interface BattleAiImpact {
+  characterName: string;
+  impact?: string;
+  currentStateSummary?: string;
 }
 
 export interface BattleStoreState {
@@ -161,6 +169,7 @@ export interface BattleStoreState {
   streamNarrativeHistoryReadCount: number | null;
   streamReasoning: AIReasoningEnvelope | null;
   streamUpdateMetaDebug: StreamUpdateMetaDebug | null;
+  latestAiImpacts: BattleAiImpact[] | null;
   storyLength: StoryLengthOption;
   selectedLevel: string;
   selectedLanguage: string;
@@ -192,6 +201,7 @@ export interface BattleStoreState {
   setStreamNarrativeHistoryReadCount: (count: number | null) => void;
   setStreamReasoning: (reasoning: AIReasoningEnvelope | null) => void;
   setStreamUpdateMetaDebug: (debug: StreamUpdateMetaDebug | null) => void;
+  setLatestAiImpacts: (impacts: BattleAiImpact[] | null) => void;
   setStoryLength: (length: StoryLengthOption) => void;
   setSelectedLevel: (level: string) => void;
   setSelectedLanguage: (language: string) => void;

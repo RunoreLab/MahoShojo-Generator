@@ -1,10 +1,10 @@
 'use client';
 
 import SaveToCloudButton from '@/components/SaveToCloudButton';
-import BattleReportCard, { NewsReport } from '@/components/BattleReportCard';
+import BattleReportCard, { NewsReport, type BattleReportIllustrationAsset } from '@/components/BattleReportCard';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
 import { getCombatantDisplayName } from '../utils/characterValidator';
@@ -12,9 +12,10 @@ import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
 import { inferTemplate } from '@/lib/data-card-converter';
 import { precheckBattleReportForRedo } from '@/lib/arena/redo-updates';
 import { AdjudicationResult } from '@/types/arena';
-import { BattleStoreState, UpdatedCombatantData } from '../types';
+import { BattleStoreState, CombatantData, UpdatedCombatantData } from '../types';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { BattleIllustrationPanel } from './BattleIllustrationPanel';
 
 interface BattleResultProps {
   onSaveImage: (imageUrl: string) => void;
@@ -36,10 +37,14 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   const streamReasoning = useBattleSelector((state) => state.streamReasoning);
   const streamUpdateMetaDebug = useBattleSelector((state) => state.streamUpdateMetaDebug);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
+  const combatants = useBattleSelector((state) => state.combatants);
   const updatedCombatants = useBattleSelector((state) => state.updatedCombatants);
+  const latestAiImpacts = useBattleSelector((state) => state.latestAiImpacts);
+  const lastGenerationId = useBattleSelector((state) => state.lastGenerationId);
   const settings = useBattleSelector((state) => state.settings);
   const battleMode = useBattleSelector((state) => state.battleMode);
   const scenario = useBattleSelector((state) => state.scenario);
+  const [illustrationAsset, setIllustrationAsset] = useState<BattleReportIllustrationAsset | null>(null);
 
   const scenarioDisplayName = useMemo(() => {
     if (battleMode !== 'scenario') return undefined;
@@ -51,6 +56,16 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   }, [battleMode, scenario.content, scenario.fileName]);
 
   const hasBattleReport = generationMode === 'stream' ? Boolean(streamingMarkdown) : Boolean(newsReport);
+  const shouldShowIllustrationPanel = hasBattleReport && !isGenerating;
+  const illustrationPanelKey = `${generationMode}:${lastGenerationId ?? 'no-id'}:${
+    generationMode === 'stream'
+      ? (streamingMarkdown ?? '').slice(0, 80)
+      : (newsReport?.headline ?? '')
+  }`;
+  const promptCombatants = useMemo(
+    () => combatants.filter((item): item is CombatantData => 'data' in item),
+    [combatants]
+  );
   const canWriteUpdates = settings.writeArenaHistory || settings.writeCurrentState;
   const reportMarkdownForRedo =
     generationMode === 'stream'
@@ -86,6 +101,16 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
+
+  useEffect(() => {
+    setIllustrationAsset(null);
+  }, [lastGenerationId]);
+
+  useEffect(() => {
+    if (!hasBattleReport) {
+      setIllustrationAsset(null);
+    }
+  }, [hasBattleReport]);
 
   return (
     <>
@@ -148,6 +173,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
               narrativeHistoryReadCount={streamNarrativeHistoryReadCount}
               aiReasoning={streamReasoning}
               isStreaming={isGenerating}
+              illustrationAsset={illustrationAsset}
             />
           </div>
         ) : null
@@ -157,8 +183,21 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
             report={newsReport as NewsReport}
             onSaveImage={onSaveImage}
             mode={battleMode}
+            illustrationAsset={illustrationAsset}
           />
         )
+      )}
+
+      {shouldShowIllustrationPanel && (
+        <BattleIllustrationPanel
+          key={illustrationPanelKey}
+          headline={generationMode === 'stream' ? null : (newsReport?.headline ?? null)}
+          reportBody={generationMode === 'stream' ? null : (newsReport?.article?.body ?? null)}
+          reportMarkdown={generationMode === 'stream' ? (streamingMarkdown ?? null) : null}
+          combatants={promptCombatants}
+          aiImpacts={latestAiImpacts}
+          onIllustrationAssetChange={setIllustrationAsset}
+        />
       )}
 
       {hasBattleReport && canWriteUpdates && (

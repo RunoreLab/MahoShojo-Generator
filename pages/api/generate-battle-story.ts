@@ -55,7 +55,14 @@ interface BattleApiResponse {
     updatedCombatants: any[];
     adjudicationResults?: AdjudicationResult[];
     generationId?: string;
+    impacts?: BattleAiImpact[];
 }
+
+type BattleAiImpact = {
+    characterName: string;
+    impact?: string;
+    currentStateSummary?: string;
+};
 
 type RequestQuestionnaire = {
     id: string;
@@ -692,8 +699,20 @@ async function handler(req: NextRequest): Promise<Response> {
         const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 
         // 组合成完整的前端报告对象
-        const impactsFromAI = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
+        const impactsFromAI: BattleAiImpact[] = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
             ? (aiResult as any).impacts
+                .map((item: any) => {
+                    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                    if (!characterName) return null;
+                    const impact = typeof item?.impact === 'string' ? item.impact.trim() : '';
+                    const currentStateSummary = typeof item?.currentStateSummary === 'string' ? item.currentStateSummary.trim() : '';
+                    return {
+                        characterName,
+                        ...(impact ? { impact } : {}),
+                        ...(currentStateSummary ? { currentStateSummary } : {}),
+                    } satisfies BattleAiImpact;
+                })
+                .filter((item: BattleAiImpact | null): item is BattleAiImpact => Boolean(item))
             : [];
 
         const report: NewsReport = {
@@ -746,6 +765,7 @@ async function handler(req: NextRequest): Promise<Response> {
             updatedCombatants,
             adjudicationResults: adjudicationResults || undefined, // v0.4.0 新增
             generationId: recordId,
+            impacts: impactsFromAI.length > 0 ? impactsFromAI : undefined,
         };
 
         const endedAtMs = Date.now();

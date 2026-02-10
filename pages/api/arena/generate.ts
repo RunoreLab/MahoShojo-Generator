@@ -55,7 +55,14 @@ interface BattleApiResponse {
     report: NewsReport;
     updatedCombatants: any[];
     adjudicationResults?: AdjudicationResult[];
+    impacts?: BattleAiImpact[];
 }
+
+type BattleAiImpact = {
+    characterName: string;
+    impact?: string;
+    currentStateSummary?: string;
+};
 
 type RequestQuestionnaire = {
     id: string;
@@ -508,8 +515,20 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const narrativeHistoryReadCount = resolvedReadNarrativeHistory ? (narrativeHistoryForPrompt?.length ?? 0) : undefined;
 
         // 组合成完整的前端报告对象
-        const impactsFromAI = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
+        const impactsFromAI: BattleAiImpact[] = shouldRequestImpacts && Array.isArray((aiResult as any).impacts)
             ? (aiResult as any).impacts
+                .map((item: any) => {
+                    const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
+                    if (!characterName) return null;
+                    const impact = typeof item?.impact === 'string' ? item.impact.trim() : '';
+                    const currentStateSummary = typeof item?.currentStateSummary === 'string' ? item.currentStateSummary.trim() : '';
+                    return {
+                        characterName,
+                        ...(impact ? { impact } : {}),
+                        ...(currentStateSummary ? { currentStateSummary } : {}),
+                    } satisfies BattleAiImpact;
+                })
+                .filter((item: BattleAiImpact | null): item is BattleAiImpact => Boolean(item))
             : [];
 
         const report: NewsReport = {
@@ -558,7 +577,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const apiResponse: BattleApiResponse = {
             report,
             updatedCombatants,
-            adjudicationResults: adjudicationResults || undefined // v0.4.0 新增
+            adjudicationResults: adjudicationResults || undefined, // v0.4.0 新增
+            impacts: impactsFromAI.length > 0 ? impactsFromAI : undefined,
         };
 
         // 生成成功：异步写入战报生成记录，不阻塞响应

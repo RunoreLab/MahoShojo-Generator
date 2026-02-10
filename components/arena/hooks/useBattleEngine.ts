@@ -9,7 +9,7 @@ import { useCooldown } from '@/lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleApiResponse, BattleStoreState, CombatantData } from '../types';
+import { BattleAiImpact, BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
@@ -46,6 +46,47 @@ const isStreamInterruptedError = (error: unknown): boolean => {
 const buildStreamInterruptedMessage = (details?: string): string => {
   const tail = typeof details === 'string' && details.trim() ? `：${details.trim()}` : '';
   return `⚠️ 战报流中断${tail}，请稍后再试。`;
+};
+
+const normalizeBattleAiImpacts = (input: unknown): BattleAiImpact[] => {
+  if (!Array.isArray(input)) return [];
+
+  const normalized = input
+    .map((raw) => {
+      if (!raw || typeof raw !== 'object') return null;
+      const record = raw as Record<string, unknown>;
+      const characterName = typeof record.characterName === 'string' ? record.characterName.trim() : '';
+      if (!characterName) return null;
+
+      const impact = typeof record.impact === 'string' ? record.impact.trim() : '';
+      const currentStateSummary =
+        typeof record.currentStateSummary === 'string' ? record.currentStateSummary.trim() : '';
+
+      return {
+        characterName: sanitizeTextByShieldWords(characterName),
+        ...(impact ? { impact: sanitizeTextByShieldWords(impact) } : {}),
+        ...(currentStateSummary ? { currentStateSummary: sanitizeTextByShieldWords(currentStateSummary) } : {}),
+      } satisfies BattleAiImpact;
+    })
+    .filter((item): item is BattleAiImpact => Boolean(item));
+
+  if (normalized.length === 0) return [];
+
+  const deduped = new Map<string, BattleAiImpact>();
+  for (const item of normalized) {
+    if (!deduped.has(item.characterName)) {
+      deduped.set(item.characterName, item);
+      continue;
+    }
+    const previous = deduped.get(item.characterName)!;
+    deduped.set(item.characterName, {
+      characterName: item.characterName,
+      impact: item.impact ?? previous.impact,
+      currentStateSummary: item.currentStateSummary ?? previous.currentStateSummary,
+    });
+  }
+
+  return Array.from(deduped.values());
 };
 
 const isServerInterruptedPayload = (payload: any, fallbackMessage: string): boolean => {
@@ -311,6 +352,7 @@ export const useBattleEngine = () => {
   const setStreamNarrativeHistoryReadCount = useBattleSelector((state) => state.setStreamNarrativeHistoryReadCount);
   const setStreamReasoning = useBattleSelector((state) => state.setStreamReasoning);
   const setStreamUpdateMetaDebug = useBattleSelector((state) => state.setStreamUpdateMetaDebug);
+  const setLatestAiImpacts = useBattleSelector((state) => state.setLatestAiImpacts);
   const setLastGenerationId = useBattleSelector((state) => state.setLastGenerationId);
   const setCombatants = useBattleSelector((state) => state.setCombatants);
   const isGenerating = useBattleSelector((state) => state.isGenerating);
@@ -390,6 +432,7 @@ export const useBattleEngine = () => {
     setStreamNarrativeHistoryReadCount(null);
     setStreamReasoning(null);
     setStreamUpdateMetaDebug(null);
+    setLatestAiImpacts(null);
     setLastGenerationId(null);
 
     try {
@@ -580,6 +623,8 @@ export const useBattleEngine = () => {
         }
 
         setNewsReport(reportWithScenario);
+        const normalizedImpacts = normalizeBattleAiImpacts(result.impacts);
+        setLatestAiImpacts(normalizedImpacts.length > 0 ? normalizedImpacts : null);
         setUpdatedCombatants(result.updatedCombatants);
         if (result.adjudicationResults) {
           setAdjudicationResults(result.adjudicationResults);
@@ -1003,10 +1048,14 @@ export const useBattleEngine = () => {
               if (event === 'meta') {
                 if (payload?.parseOk && payload?.meta && typeof payload.meta === 'object') {
                   const meta = payload.meta as any;
+                  const impacts = normalizeBattleAiImpacts(meta.impacts);
                   metaOverrideFromSse = {
                     ...(meta.report ? { report: meta.report } : {}),
-                    ...(Array.isArray(meta.impacts) && meta.impacts.length > 0 ? { impacts: meta.impacts } : {}),
+                    ...(impacts.length > 0 ? { impacts } : {}),
                   };
+                  if (impacts.length > 0) {
+                    setLatestAiImpacts(impacts);
+                  }
                   setStreamUpdateMetaDebug({
                     source: 'sse',
                     parseOk: true,
@@ -1275,10 +1324,14 @@ export const useBattleEngine = () => {
               if (allowStreamMeta) {
                 const extracted = await extractStreamUpdateMeta(markdownForUi);
                 if (extracted?.meta && (extracted.meta.report || (extracted.meta.impacts && extracted.meta.impacts.length > 0))) {
+                  const impacts = normalizeBattleAiImpacts(extracted.meta.impacts);
                   metaOverride = {
                     ...(extracted.meta.report ? { report: extracted.meta.report } : {}),
-                    ...(extracted.meta.impacts && extracted.meta.impacts.length > 0 ? { impacts: extracted.meta.impacts } : {}),
+                    ...(impacts.length > 0 ? { impacts } : {}),
                   };
+                  if (impacts.length > 0) {
+                    setLatestAiImpacts(impacts);
+                  }
                   const rawMax = 8_000;
                   const raw = extracted.rawComment ?? '';
                   setStreamUpdateMetaDebug({
@@ -1487,6 +1540,7 @@ export const useBattleEngine = () => {
 	    setStreamNarrativeHistoryReadCount,
       setStreamReasoning,
       setStreamUpdateMetaDebug,
+      setLatestAiImpacts,
       setLastGenerationId,
 		    setCombatants,
 		    handleResolveRandomPlaceholders,

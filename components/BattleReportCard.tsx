@@ -69,15 +69,24 @@ export interface NewsReport {
   adjudicationResults?: AdjudicationResult[];
 }
 
+export type BattleReportIllustrationSource = 'generated' | 'uploaded';
+
+export interface BattleReportIllustrationAsset {
+  imageUrl: string;
+  source: BattleReportIllustrationSource;
+  note?: string;
+}
+
 interface BattleReportCardProps {
   report: NewsReport;
   onSaveImage?: (imageUrl: string) => void;
   // 战斗模式，设为可选以兼容旧功能
   mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
   liveBody?: string;
+  illustrationAsset?: BattleReportIllustrationAsset | null;
 }
 
-const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody }) => {
+const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage, mode, liveBody, illustrationAsset }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isSavingImage, setIsSavingImage] = useState(false);
 
@@ -89,6 +98,11 @@ const BattleReportCard: React.FC<BattleReportCardProps> = ({ report, onSaveImage
   const officialWinner = (report.officialReport?.winner ?? '').trim();
   const officialConclusion = (report.officialReport?.conclusion ?? '').trimEnd();
   const reportReasoning = report.aiReasoning ?? null;
+  const illustrationImageUrl = typeof illustrationAsset?.imageUrl === 'string' ? illustrationAsset.imageUrl.trim() : '';
+  const uploadedIllustrationNote =
+    illustrationAsset?.source === 'uploaded'
+      ? (typeof illustrationAsset.note === 'string' && illustrationAsset.note.trim() ? illustrationAsset.note.trim() : '用户自行上传')
+      : '';
 
   const aiModel = typeof report.aiModel === 'string' ? report.aiModel.trim() : '';
   const aiUsage = report.aiUsage;
@@ -528,6 +542,25 @@ ${adjudicationMarkdown}
             compact
             defaultExpanded={false}
           />
+        )}
+
+        {illustrationImageUrl && (
+          <div className="result-item" style={{ borderLeft: '4px solid #f9a8d4', background: 'rgba(0,0,0,0.2)' }}>
+            <div className="result-label">🎨 战报插图</div>
+            <div className="result-value">
+              <img
+                src={illustrationImageUrl}
+                alt={`${headline} 插图`}
+                className="w-full max-h-[560px] object-contain rounded-lg border border-white/15 bg-black/15"
+                loading="lazy"
+              />
+              {uploadedIllustrationNote && (
+                <p className="mt-2 text-[11px] text-gray-300 text-right">
+                  注：{uploadedIllustrationNote}
+                </p>
+              )}
+            </div>
+          </div>
         )}
 
         <div className="result-item">
