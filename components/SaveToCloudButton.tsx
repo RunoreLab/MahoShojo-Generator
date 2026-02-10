@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/useAuth';
 import { dataCardApi } from '@/lib/auth';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { config } from '@/lib/config';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 
 interface SaveToCloudButtonProps {
   data: any;
@@ -240,46 +241,62 @@ export default function SaveToCloudButton({
 
   const effectiveData = preparedData ?? data;
   const canOperate = Boolean(data || getData);
+  const containerClassName = [
+    'inline-flex flex-col gap-2',
+    /\bflex-1\b/.test(className) ? 'flex-1' : '',
+    /\bw-full\b/.test(className) ? 'w-full' : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <>
-      <button
-        onClick={() => void handleSaveClick()}
-        className={className}
-        style={style}
-        disabled={!canOperate || isPreparing} // 如果没有数据且无法动态准备，则禁用
-      >
-        {isPreparing ? '准备中...' : buttonText}
-      </button>
-      <button
-        onClick={() => {
-          if (!isAuthenticated) {
-            alert('请先登录后再替换到云端');
-            return;
-          }
-          void (async () => {
-            let hadResolveError = false;
-            const resolvedData = await resolveData().catch((error) => {
-              hadResolveError = true;
-              console.error("准备替换数据失败:", error);
-              alert(error instanceof Error ? error.message : '准备替换数据失败。');
-              return null;
-            });
-            if (!resolvedData) {
-              if (!hadResolveError) {
-                alert('没有可替换的数据。');
+      <div className={containerClassName}>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void handleSaveClick()}
+            className={className}
+            style={style}
+            disabled={!canOperate || isPreparing} // 如果没有数据且无法动态准备，则禁用
+          >
+            {isPreparing ? '准备中...' : buttonText}
+          </button>
+          <button
+            onClick={() => {
+              if (!isAuthenticated) {
+                alert('请先登录后再替换到云端');
+                return;
               }
-              return;
-            }
-            setShowReplaceModal(true);
-          })();
-        }}
-        className={`${className} ml-2`}
-        style={{ ...style, backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #f97316)' }}
-        disabled={!canOperate || isPreparing}
-      >
-        替换已有
-      </button>
+              void (async () => {
+                let hadResolveError = false;
+                const resolvedData = await resolveData().catch((error) => {
+                  hadResolveError = true;
+                  console.error("准备替换数据失败:", error);
+                  alert(error instanceof Error ? error.message : '准备替换数据失败。');
+                  return null;
+                });
+                if (!resolvedData) {
+                  if (!hadResolveError) {
+                    alert('没有可替换的数据。');
+                  }
+                  return;
+                }
+                setShowReplaceModal(true);
+              })();
+            }}
+            className={className}
+            style={{ ...style, backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #f97316)' }}
+            disabled={!canOperate || isPreparing}
+          >
+            替换已有
+          </button>
+        </div>
+        {effectiveData && (
+          <JsonSizeIndicator
+            data={effectiveData}
+            className="mt-0"
+            warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+          />
+        )}
+      </div>
 
       <SaveCardModal
         isOpen={showSaveModal}
