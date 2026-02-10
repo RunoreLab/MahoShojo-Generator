@@ -1,12 +1,13 @@
 // components/CanshouCard.tsx
 import React, { useRef, useState } from 'react';
-import { snapdom } from '@zumer/snapdom';
 import { ArenaHistory, ArenaHistoryEntry, CharacterCurrentState } from '@/types/arena';
 import { CurrentStatePanel } from '@/components/CurrentStatePanel';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
-import { getSnapdomProxyUrl } from '@/lib/client/snapdomCapture';
+import { capturePngBlob } from '@/lib/client/snapdomCapture';
+import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import { InlineField } from '@/components/shared/InlineField';
+import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 export interface CanshouDetails {
   name: string;
@@ -30,13 +31,20 @@ interface CanshouCardProps {
   onSaveImage?: (imageUrl: string) => void;
   imageSaveMode?: 'auto' | 'modal' | 'download';
   saveButtonLabel?: string;
+  portraitAsset?: CharacterCardPortraitAsset | null;
 }
 
-const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSaveMode = 'auto', saveButtonLabel }) => {
+const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSaveMode = 'auto', saveButtonLabel, portraitAsset = null }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   // 新增：用于控制历战记录可见性的状态
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
+  const [isSavingImage, setIsSavingImage] = useState(false);
   const labelClassName = 'text-sm opacity-90';
+  const portraitImageUrl = typeof portraitAsset?.imageUrl === 'string' ? portraitAsset.imageUrl.trim() : '';
+  const uploadedPortraitNote =
+    portraitAsset?.source === 'uploaded'
+      ? (typeof portraitAsset.note === 'string' && portraitAsset.note.trim() ? portraitAsset.note.trim() : '用户自行上传')
+      : '';
 
   /**
    * 截图残兽档案，并根据 imageSaveMode 决定保存方式。
@@ -44,29 +52,31 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
    */
   const handleSaveImage = async () => {
     if (!cardRef.current) return;
+    if (isSavingImage) return;
 
+    const saveButton = cardRef.current.querySelector('.save-button') as HTMLElement;
+    const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
     try {
-      // 截图前隐藏按钮和显示Logo
-      const saveButton = cardRef.current.querySelector('.save-button') as HTMLElement;
-      const logoPlaceholder = cardRef.current.querySelector('.logo-placeholder') as HTMLElement;
-
+      setIsSavingImage(true);
       if (saveButton) saveButton.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, { scale: 1, useProxy: getSnapdomProxyUrl() });
-
-      // 截图后恢复按钮和隐藏Logo
-      if (saveButton) saveButton.style.display = 'block';
-      if (logoPlaceholder) logoPlaceholder.style.display = 'none';
-
-      const imgElement = await result.toPng();
-      const imageUrl = imgElement.src;
+      const blob = await capturePngBlob(cardRef.current, {
+        scale: 1,
+        dprMax: 2,
+        fast: false,
+        exclude: ['audio', 'video'],
+        excludeMode: 'remove',
+      });
 
       const resolvedMode: 'modal' | 'download' = imageSaveMode === 'modal' || imageSaveMode === 'download'
         ? imageSaveMode
         : (/Mobi/i.test(window.navigator.userAgent) ? 'modal' : 'download');
+      const sanitizedTitle = canshou.name.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
+      const filename = `残兽档案_${sanitizedTitle}.png`;
 
       if (resolvedMode === 'modal') {
+        const imageUrl = createBlobUrl(blob);
         if (onSaveImage) {
           onSaveImage(imageUrl);
         } else {
@@ -76,23 +86,15 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
           }
         }
       } else {
-        const downloadLink = document.createElement('a');
-        downloadLink.href = imageUrl;
-        const sanitizedTitle = canshou.name.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_');
-        downloadLink.download = `残兽档案_${sanitizedTitle}.png`;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
+        downloadBlob(blob, filename);
       }
     } catch (err) {
       alert('生成图片失败，请重试');
       console.error("Image generation failed:", err);
-      // 确保在出错时也恢复按钮
-      const saveButton = cardRef.current?.querySelector('.save-button') as HTMLElement;
-      const logoPlaceholder = cardRef.current?.querySelector('.logo-placeholder') as HTMLElement;
-
+    } finally {
       if (saveButton) saveButton.style.display = 'block';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';
+      setIsSavingImage(false);
     }
   };
 
@@ -106,6 +108,26 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
 	            className="w-72 mb-4"
 	          />
 	        </div>
+
+          {portraitImageUrl && (
+            <div className="result-item" style={{ borderLeft: '4px solid #f9a8d4', background: 'rgba(0,0,0,0.2)' }}>
+              <div className="result-label">🖼️ 角色立绘</div>
+              <div className="result-value">
+                <img
+                  src={portraitImageUrl}
+                  alt={`${canshou.name || '角色'} 立绘`}
+                  className="w-full max-h-[560px] object-contain rounded-lg border border-white/15 bg-black/15"
+                  loading="eager"
+                  decoding="async"
+                />
+                {uploadedPortraitNote && (
+                  <p className="mt-2 text-[11px] text-gray-300 text-right">
+                    注：{uploadedPortraitNote}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
 
 	        <div className="result-item">
             <InlineField label="名称" content={canshou.name} labelClassName={labelClassName} />
@@ -240,8 +262,8 @@ const CanshouCard: React.FC<CanshouCardProps> = ({ canshou, onSaveImage, imageSa
           </div>
         )}
 
-        <button onClick={handleSaveImage} className="save-button mt-4">
-          {saveButtonLabel ?? '📱 保存为图片'}
+        <button onClick={handleSaveImage} className="save-button mt-4" disabled={isSavingImage}>
+          {isSavingImage ? '生成中...' : (saveButtonLabel ?? '📱 保存为图片')}
         </button>
 
         {/* 【核心修改】新增：用于截图的Logo占位符，默认隐藏 */}

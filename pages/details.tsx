@@ -8,7 +8,6 @@ import GeneralCharacterCard from '../components/GeneralCharacterCard';
 import { useCooldown } from '../lib/cooldown';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import Link from 'next/link';
-import TachieGenerator from '../components/TachieGenerator';
 import { generateRandomMagicalGirl } from '../lib/random-character-generator';
 import SaveToCloudButton from '../components/SaveToCloudButton';
 import Footer from '../components/Footer';
@@ -48,7 +47,9 @@ import {
   QuestionnaireQuestionPanel,
 } from '@/components/questionnaire/QuestionnaireQuestionPanel';
 import { QuestionnaireAnswerExportPanel } from '@/components/questionnaire/QuestionnaireAnswerExportPanel';
+import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
+import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 type QuestionnaireSelectionSource = 'preset' | 'upload' | 'database';
 
@@ -266,6 +267,7 @@ const DetailsPage: React.FC = () => {
   const [streamedGeneralCard, setStreamedGeneralCard] = useState<any | null>(null);
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
+  const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
@@ -436,6 +438,15 @@ const DetailsPage: React.FC = () => {
     });
     return card;
   }, [generationMode, streamingMarkdown, streamedGeneralCard, answerItems]);
+
+  const streamPortraitPrompt = useMemo(() => {
+    if (generationMode !== 'stream') return '';
+    const name = typeof streamedGeneralCardForDisplay?.name === 'string' ? streamedGeneralCardForDisplay.name.trim() : '';
+    const contentRaw = (streamingMarkdown ?? streamedGeneralCard?.content ?? '').trim();
+    const contentHead = contentRaw.length > 800 ? contentRaw.slice(0, 800) : contentRaw;
+    const prefix = [name, contentHead].filter(Boolean).join(', ');
+    return `${prefix ? `${prefix}, ` : ''}Xiabanmo, 二次元, 角色立绘`;
+  }, [generationMode, streamedGeneralCardForDisplay, streamingMarkdown, streamedGeneralCard]);
 
   useEffect(() => {
     fetch('/languages.json')
@@ -1287,6 +1298,7 @@ const DetailsPage: React.FC = () => {
     setStreamedGeneralCard(null);
     setStreamingReasoning(null);
     setNonStreamReasoning(null);
+    setCharacterPortraitAsset(null);
 
     const safetyText = finalAnswerItems.map((item) => item.answer).join('');
     console.log('检查敏感词:', safetyText);
@@ -1672,6 +1684,7 @@ const DetailsPage: React.FC = () => {
                         // 直接同步调用，移除 await
                         const data = generateRandomMagicalGirl();
                         setMagicalGirlDetails(data);
+                        setCharacterPortraitAsset(null);
                         setShowIntroduction(false);
                       } catch (err) {
                         console.error('随机生成失败: ', err);
@@ -2136,8 +2149,18 @@ const DetailsPage: React.FC = () => {
                     onSaveImage={handleSaveImage}
                     imageSaveMode={imageSaveMode}
                     saveButtonLabel={imageSaveButtonLabel}
+                    portraitAsset={characterPortraitAsset}
                   />
                   <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
+                  <div className="card" style={{ marginTop: '1rem' }}>
+                    <div className="text-center">
+                      <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>生成立绘</h3>
+                      <CharacterPortraitAssetPanel
+                        prompt={streamPortraitPrompt}
+                        onPortraitAssetChange={setCharacterPortraitAsset}
+                      />
+                    </div>
+                  </div>
                 </>
               )}
 
@@ -2187,6 +2210,7 @@ const DetailsPage: React.FC = () => {
                 onSaveImage={handleSaveImage}
                 imageSaveMode={imageSaveMode}
                 saveButtonLabel={imageSaveButtonLabel}
+                portraitAsset={characterPortraitAsset}
               />
               {nonStreamReasoning && (
                 <AiReasoningPanel
@@ -2332,8 +2356,9 @@ const DetailsPage: React.FC = () => {
               <div className="card" style={{ marginTop: '1rem' }}>
                 <div className="text-center">
                   <h3 className="text-lg font-medium text-blue-900" style={{ marginBottom: '1rem' }}>生成立绘</h3>
-                  <TachieGenerator
+                  <CharacterPortraitAssetPanel
                     prompt={`${JSON.stringify(magicalGirlDetails.appearance)} , Xiabanmo, 二次元, 魔法少女`}
+                    onPortraitAssetChange={setCharacterPortraitAsset}
                   />
                 </div>
               </div>

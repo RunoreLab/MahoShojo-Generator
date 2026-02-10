@@ -9,12 +9,12 @@ import { randomChooseOneHanaName } from '@/lib/random-choose-hana-name';
 import { config } from '@/lib/config';
 import { validateDataCard, ValidationResult } from '@/lib/schemas';
 import { randomUUID } from '@/lib/crypto';
-import TachieGenerator from '../components/TachieGenerator';
 import Footer from '../components/Footer';
 // 【新增】导入卡片组件和颜色配置
 import MagicalGirlCard from '../components/MagicalGirlCard';
 import CanshouCard from '../components/CanshouCard';
 import GeneralCharacterCard from '../components/GeneralCharacterCard';
+import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { MainColor } from '@/lib/main-color';
@@ -43,6 +43,7 @@ import {
     type DataCardTemplate,
     type InferableTemplate
 	} from '@/lib/data-card-converter';
+import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 
 
 // 定义允许保持原生性的可编辑字段 (顶级键) (SRS 3.7.3)
@@ -804,6 +805,7 @@ const CharacterManagerPage: React.FC = () => {
     // [SRS 3.3] 立绘生成器相关状态
     const [isTachieVisible, setIsTachieVisible] = useState(false);
     const [tachiePrompt, setTachiePrompt] = useState('');
+    const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
     // [SRS 3.3.3] 动态生成立绘提示词
     useEffect(() => {
@@ -951,6 +953,7 @@ const CharacterManagerPage: React.FC = () => {
         setIsLoading(true);
         setMessage(null);
         setHasLostNativeness(false);
+        setCharacterPortraitAsset(null);
 
         try {
             const data = JSON.parse(jsonText);
@@ -1051,6 +1054,7 @@ const CharacterManagerPage: React.FC = () => {
         const targetTemplate = value as DataCardTemplate;
 
         try {
+            setCharacterPortraitAsset(null);
             if (!characterData) {
                 const blank = createBlankDataCard(targetTemplate);
                 setCharacterData(blank);
@@ -2044,7 +2048,7 @@ const CharacterManagerPage: React.FC = () => {
                                     <button onClick={() => handleSaveChanges('copy')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
                                         {isLoading ? '处理中...' : copiedStatus ? '已复制！' : '复制到剪贴板'}
                                     </button>
-                                    <button onClick={() => { setCharacterData(null); setPastedJson('') }} className="footer-link mt-4 w-full text-center">
+                                    <button onClick={() => { setCharacterData(null); setCharacterPortraitAsset(null); setPastedJson('') }} className="footer-link mt-4 w-full text-center">
                                         加载其他数据
                                     </button>
                                 </div>
@@ -2213,16 +2217,19 @@ const CharacterManagerPage: React.FC = () => {
                                         return `linear-gradient(135deg, ${colors.first} 0%, ${colors.second} 100%)`;
                                     })()}
                                     onSaveImage={handleSaveImageCallback}
+                                    portraitAsset={characterPortraitAsset}
                                 />
                             ) : currentTemplate === 'canshou' ? (
                                 <CanshouCard
                                     canshou={characterData}
                                     onSaveImage={handleSaveImageCallback}
+                                    portraitAsset={characterPortraitAsset}
                                 />
                             ) : (
                                 <GeneralCharacterCard
                                     general={characterData}
                                     onSaveImage={handleSaveImageCallback}
+                                    portraitAsset={characterPortraitAsset}
                                 />
                             )}
                         </div>
@@ -2239,7 +2246,10 @@ const CharacterManagerPage: React.FC = () => {
                             </button>
                             {isTachieVisible && characterData && (
                                 <div className="mt-4 pt-4 border-t">
-                                    <TachieGenerator prompt={tachiePrompt} />
+                                    <CharacterPortraitAssetPanel
+                                        prompt={tachiePrompt}
+                                        onPortraitAssetChange={setCharacterPortraitAsset}
+                                    />
                                 </div>
                             )}
                         </div>
