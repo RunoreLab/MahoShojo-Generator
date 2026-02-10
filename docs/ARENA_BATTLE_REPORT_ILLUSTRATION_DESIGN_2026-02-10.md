@@ -210,7 +210,7 @@ interface BattleApiResponse {
   - `appearance`（字符串）+ 可选 `materialAndSkin/featuresAndAppendages`
 - 通用角色：
   - 优先 `appearance` 或 `content` 的短摘要
-- 每个角色限制长度（如 160~220 字符），防止爆词。
+- 每个角色不限制长度（毕竟用户可以自行修改提示词），仅保留高上限安全阈值。
 
 ## 7.2 战报尾段（正文来源）
 
