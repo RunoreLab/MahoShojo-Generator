@@ -2189,6 +2189,10 @@ const DetailsPage: React.FC = () => {
                           复制到剪贴板
                         </button>
                       </div>
+                      <JsonSizeIndicator
+                        data={streamedGeneralCard}
+                        warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                      />
                       <div className="mt-2 pt-6 border-t border-gray-200">
                         <p className="text-sm text-gray-600 mb-2">保存好你的档案了吗？</p>
                         <Link href="/battle" className="footer-link text-lg text-purple-600">

@@ -8,6 +8,7 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import DataCardsModal from '@/components/CharManager/DataCardsModal';
 import RecycleBinModal from '@/components/CharManager/RecycleBinModal';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import {
   DEFAULT_QUESTIONNAIRE_LOGO_BY_KIND,
   QUESTIONNAIRE_LOGO_PRESETS,
@@ -1719,6 +1720,10 @@ const QuestionnaireEditorPage: React.FC = () => {
               />
               <Link href="/" className="footer-link text-sm">返回首页</Link>
             </div>
+            <JsonSizeIndicator
+              data={questionnaireData}
+              warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+            />
 
             {(editorError || jsonError) && <ErrorMessage message={editorError || jsonError || '问卷格式错误'} />}
             <p className="mt-4 text-xs text-slate-400">提示：原生许可由管理员评估标记；自建问卷默认非原生。</p>

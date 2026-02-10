@@ -9,6 +9,7 @@ import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { DatabaseSelector } from '@/components/arena/components/DatabaseSelector';
 
@@ -765,6 +766,12 @@ export default function CharacterPartyPage() {
                         复制到剪贴板
                       </button>
                     </div>
+                    {members.length > 0 && (
+                      <JsonSizeIndicator
+                        data={mergedData}
+                        warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                      />
+                    )}
                     <details className="mt-4 rounded-xl border border-gray-200 bg-white/70 p-3 text-left">
                       <summary className="cursor-pointer text-sm font-semibold text-gray-700">查看合并后的 JSON（预览不含原生签名）</summary>
                       <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">

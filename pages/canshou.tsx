@@ -20,6 +20,7 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import {
   CANSHOU_QUESTIONNAIRE_THEME,
@@ -1944,6 +1945,10 @@ const CanshouPage: React.FC = () => {
                             复制到剪贴板
                           </button>
                         </div>
+                        <JsonSizeIndicator
+                          data={streamedGeneralCard}
+                          warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                        />
                         <button
                           onClick={handleRegenerate}
                           disabled={submitting || isCooldown}
@@ -2061,6 +2066,12 @@ const CanshouPage: React.FC = () => {
                             </>
                           )}
                         </div>
+                        {resolvedResultPayload && (
+                          <JsonSizeIndicator
+                            data={resolvedResultPayload}
+                            warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                          />
+                        )}
                         <button
                           onClick={handleRegenerate}
                           disabled={submitting || isCooldown}

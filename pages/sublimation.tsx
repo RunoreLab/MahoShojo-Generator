@@ -24,6 +24,7 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { ThemeImage } from '@/components/shared/ThemeImage';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { readTextAndReasoningStreamFromResponse } from '@/lib/stream/read-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
@@ -1851,6 +1852,10 @@ const SublimationPage: React.FC = () => {
                                             前往竞技场
                                         </Link>
                                     </div>
+                                    <JsonSizeIndicator
+                                        data={streamedGeneralCard}
+                                        warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                                    />
                                 </div>
                             )}
                         </>
@@ -1898,6 +1903,10 @@ const SublimationPage: React.FC = () => {
                                         前往竞技场
                                     </Link>
                                 </div>
+                                <JsonSizeIndicator
+                                    data={resultData.sublimatedData}
+                                    warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                                />
                             </div>
                         </>
                     )}

@@ -11,6 +11,7 @@ import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
@@ -613,27 +614,33 @@ export default function FreeGeneratorPage() {
     const fileName = `${kind === 'scenario' ? '数据卡_情景' : '数据卡_角色'}_${safeBase}.json`;
 
     return (
-      <div className="flex flex-col sm:flex-row gap-3 justify-center">
-        <button
-          onClick={() => downloadJson(data, fileName)}
-          className="generate-button flex-1"
-        >
-          下载 JSON
-        </button>
-        <SaveToCloudButton
+      <div className="space-y-2">
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          <button
+            onClick={() => downloadJson(data, fileName)}
+            className="generate-button flex-1"
+          >
+            下载 JSON
+          </button>
+          <SaveToCloudButton
+            data={data}
+            cardType={kind}
+            buttonText="保存到云端"
+            className="generate-button flex-1"
+            style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+          />
+          <button
+            onClick={() => void copyToClipboard(data, kind === 'scenario' ? '情景卡' : '角色卡')}
+            className="generate-button flex-1"
+            style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+          >
+            复制到剪贴板
+          </button>
+        </div>
+        <JsonSizeIndicator
           data={data}
-          cardType={kind}
-          buttonText="保存到云端"
-          className="generate-button flex-1"
-          style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+          warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
         />
-        <button
-          onClick={() => void copyToClipboard(data, kind === 'scenario' ? '情景卡' : '角色卡')}
-          className="generate-button flex-1"
-          style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
-        >
-          复制到剪贴板
-        </button>
       </div>
     );
   };

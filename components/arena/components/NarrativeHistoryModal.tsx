@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { formatDateTime } from '@/lib/constants';
 import { randomUUID } from '@/lib/crypto';
 import { quickCheck } from '@/lib/sensitive-word-filter';
@@ -500,6 +501,12 @@ export function NarrativeHistoryModal({ isOpen, onClose }: Props) {
                       backgroundColor: '#22c55e',
                       backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)',
                     }}
+                  />
+                </div>
+                <div className="w-full">
+                  <JsonSizeIndicator
+                    data={historyCardData}
+                    warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
                   />
                 </div>
                 <input

@@ -15,6 +15,7 @@ import { AdjudicationResult } from '@/types/arena';
 import { BattleStoreState, CombatantData, UpdatedCombatantData } from '../types';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { BattleIllustrationPanel } from './BattleIllustrationPanel';
 
 interface BattleResultProps {
@@ -322,6 +323,11 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
                         style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
                       />
                     </div>
+                    <JsonSizeIndicator
+                      data={character}
+                      className="mt-2"
+                      warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                    />
                   </CollapsibleSection>
                 );
               })}
