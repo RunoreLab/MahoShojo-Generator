@@ -107,6 +107,41 @@ describe('structured-json', () => {
     expect(result.telemetry.keyNormalization.succeeded).toBe(true);
   });
 
+  it('maps close key names by schema and removes original unknown key', () => {
+    const schema = z
+      .object({
+        current_state: z.object({
+          summary: z.string(),
+        }),
+      })
+      .strict();
+    const text = '{"current_stage":"普通人/未觉醒"}';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data).toEqual({ current_state: { summary: '普通人/未觉醒' } });
+    expect(result.telemetry.keyNormalization.attempted).toBe(true);
+    expect(result.telemetry.schemaCoercion.attempted).toBe(true);
+    expect(result.telemetry.schemaCoercion.succeeded).toBe(true);
+  });
+
+  it('coerces nested object field from string using schema shape', () => {
+    const schema = z.object({
+      analysis: z.object({
+        background: z.object({
+          belief: z.string(),
+          bonds: z.string(),
+        }),
+      }),
+    });
+    const text = '{"analysis":{"background":"我会为伙伴战斗到底"}}';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data.analysis.background).toEqual({
+      belief: '我会为伙伴战斗到底',
+      bonds: '',
+    });
+    expect(result.telemetry.schemaCoercion.attempted).toBe(true);
+    expect(result.telemetry.schemaCoercion.succeeded).toBe(true);
+  });
+
   it('builds a compact schema guide with optional markers', () => {
     const schema = z.object({
       a: z.string(),
