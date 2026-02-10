@@ -41,6 +41,20 @@ describe('structured-json', () => {
     expect(result.data).toEqual({ ok: true, reason: null });
   });
 
+  it('repairs truncated root JSON tail after partially closed nested objects', () => {
+    const schema = z.object({
+      codename: z.string(),
+      analysis: z.object({ background: z.string() }),
+    });
+    const text =
+      '```json\n' +
+      '{"codename":"雪绒","magicConstruct":{},"wonderlandRule":{},"blooming":{},"analysis":{"background":"千日红在竞技场';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data.codename).toBe('雪绒');
+    expect(result.data.analysis.background).toContain('千日红');
+    expect(result.telemetry.usedJsonRepair).toBe(true);
+  });
+
   it('chooses the first candidate that passes schema validation', () => {
     const schema = z.object({ a: z.number() });
     const text = '{"wrong": 1}\n{"a": 2}';

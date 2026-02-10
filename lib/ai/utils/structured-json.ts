@@ -204,42 +204,47 @@ const buildMissingRootObjectCandidates = (raw: string, schema: z.ZodTypeAny): Js
 const extractJsonCandidates = (raw: string): JsonCandidate[] => {
   const text = normalizeJsonishText(raw);
   const candidates: JsonCandidate[] = [];
+  const seen = new Set<string>();
+
+  const pushCandidate = (startIndex: number, endIndex: number) => {
+    if (startIndex < 0 || endIndex < startIndex) return;
+    const jsonText = text.slice(startIndex, endIndex + 1).trim();
+    if (!jsonText) return;
+    const key = `${startIndex}:${endIndex}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push({ jsonText, startIndex, endIndex });
+  };
+
   let cursor = 0;
 
   for (let i = 0; i < 10; i++) {
     const span = findJsonishSpan(text, cursor);
     if (!span) break;
-    candidates.push({
-      jsonText: text.slice(span.start, span.end + 1).trim(),
-      startIndex: span.start,
-      endIndex: span.end,
-    });
+    pushCandidate(span.start, span.end);
     cursor = span.end + 1;
   }
 
-  // 兜底：尽量取首尾括号之间的大片段（有时配对扫描会被前置噪声干扰）
-  if (candidates.length === 0) {
-    const firstObj = text.indexOf('{');
-    const firstArr = text.indexOf('[');
-    const start =
-      firstObj === -1 ? firstArr : firstArr === -1 ? firstObj : Math.min(firstObj, firstArr);
+  const firstObj = text.indexOf('{');
+  const firstArr = text.indexOf('[');
+  const start =
+    firstObj === -1 ? firstArr : firstArr === -1 ? firstObj : Math.min(firstObj, firstArr);
 
-    const lastObj = text.lastIndexOf('}');
-    const lastArr = text.lastIndexOf(']');
-    const end = Math.max(lastObj, lastArr);
+  // 兜底 1：尽量取首尾括号之间的大片段（有时配对扫描会被前置噪声干扰）
+  const lastObj = text.lastIndexOf('}');
+  const lastArr = text.lastIndexOf(']');
+  const end = Math.max(lastObj, lastArr);
+  if (start !== -1 && end !== -1 && end > start) {
+    pushCandidate(start, end);
+  }
 
-    if (start !== -1 && end !== -1 && end > start) {
-      candidates.push({
-        jsonText: text.slice(start, end + 1).trim(),
-        startIndex: start,
-        endIndex: end,
-      });
-    } else if (start !== -1) {
-      candidates.push({
-        jsonText: text.slice(start).trim(),
-        startIndex: start,
-        endIndex: text.length - 1,
-      });
+  // 兜底 2：始终补一个“从首括号到文本末尾”的候选，覆盖：
+  // - 根对象尾部被截断，但前面已有部分子对象闭合（lastObj 可用但不代表根对象完整）
+  // - Markdown 围栏未闭合、尾部中断等场景
+  if (start !== -1) {
+    const tailEnd = text.length - 1;
+    if (tailEnd >= start && (end === -1 || tailEnd > end)) {
+      pushCandidate(start, tailEnd);
     }
   }
 
