@@ -282,6 +282,13 @@ const QuestionnaireAnswerItemSchema = z.object({
   questionnaireTitle: z.string().optional(),
 });
 
+// 仅用于“升华生成”阶段的输出约束：
+// 避免使用 z.record(...)，否则在 Gemini 的 response_schema 中会生成空 properties 的 OBJECT，触发 400。
+const SublimationUserAnswersSchema = z.union([
+  z.array(z.string()),
+  z.array(QuestionnaireAnswerItemSchema),
+]);
+
 const FullMagicalGirlSublimationPayloadSchemaFactory = (allowReshapeNames: boolean) => z.object({
   codename: z.string().describe("角色的新代号，必须包含原始代号并在后面加上一个「称号」。例如，如果原始代号是'代号'，新代号可以是'代号「称号」'。"),
   appearance: z.object({
@@ -331,21 +338,7 @@ const FullMagicalGirlSublimationPayloadSchemaFactory = (allowReshapeNames: boole
       bonds: z.string().describe("角色情感羁绊的变化。"),
     }).describe("角色背景故事的演进。")
   }).describe("对角色分析的全面更新。"),
-  userAnswers: z.union([
-    z.array(z.string()),
-    z.array(QuestionnaireAnswerItemSchema),
-    z.record(z.union([
-      z.string(),
-      z.object({
-        question: z.string().optional(),
-        answer: z.string().optional(),
-        value: z.string().optional(),
-        questionId: z.string().optional(),
-        questionnaireId: z.string().optional(),
-        questionnaireTitle: z.string().optional(),
-      }),
-    ])),
-  ]).optional().describe("根据角色的成长，对问卷问题的全新回答。"),
+  userAnswers: SublimationUserAnswersSchema.optional().describe("根据角色的成长，对问卷问题的全新回答。"),
   current_state: CurrentStateUpdateSchema,
 });
 
@@ -353,7 +346,7 @@ const FullMagicalGirlSublimationPayloadSchemaFactory = (allowReshapeNames: boole
  * @description “完全体”的残兽Schema。
  */
 const FullCanshouSublimationPayloadSchema = z.object({
-  name: z.string().describe("残兽的新名称，必须包含原始名称并在后面加上一个「称号」。例如，如果原始名称是'名称'，新名称可以是'名称「称号」'。"),
+  name: z.string().describe("角色的新名称，必须包含原始名称并在后面加上一个「称号」。例如，如果原始名称是'名称'，新名称可以是'名称「称号」'。"),
   coreConcept: z.string(),
   coreEmotion: z.string(),
   evolutionStage: z.string(),
@@ -365,21 +358,7 @@ const FullCanshouSublimationPayloadSchema = z.object({
   origin: z.string(),
   birthEnvironment: z.string(),
   researcherNotes: z.string().describe("研究员对这次升华的补充笔记。"),
-  userAnswers: z.union([
-    z.array(z.string()),
-    z.array(QuestionnaireAnswerItemSchema),
-    z.record(z.union([
-      z.string(),
-      z.object({
-        question: z.string().optional(),
-        answer: z.string().optional(),
-        value: z.string().optional(),
-        questionId: z.string().optional(),
-        questionnaireId: z.string().optional(),
-        questionnaireTitle: z.string().optional(),
-      }),
-    ])),
-  ]).optional().describe("根据残兽的成长，对问卷问题的全新回答。"),
+  userAnswers: SublimationUserAnswersSchema.optional().describe("根据角色的成长，对问卷问题的全新回答。"),
   current_state: CurrentStateUpdateSchema,
 });
 
