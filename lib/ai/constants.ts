@@ -56,6 +56,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
             {
+                value: 'glm-5',
+                label: 'GLM-5',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
+            },
+            {
                 value: 'glm-4.7',
                 label: 'GLM-4.7',
                 description: '智谱旗下通用模型的更新版本，适合复杂指令、多轮对话与综合写作场景。'
@@ -145,6 +150,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'grok-4',
                 label: 'Grok 4',
                 description: 'xAI 旗下通用模型，适合头脑风暴、创意发散与快速问答。'
+            },
+            {
+                value: 'glm-5',
+                label: 'GLM-5',
+                description: '智谱旗下新一代通用模型，综合能力更强，适合复杂指令、多轮对话与高质量创作。'
             },
             {
                 value: 'glm-4.5',
@@ -309,6 +319,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'xAI 旗下通用模型，适合头脑风暴、创意发散与快速问答。'
             },
             {
+                value: 'glm-5',
+                label: 'GLM-5',
+                description: '智谱新一代通用模型，适合中文对话、总结与结构化输出。'
+            },
+            {
                 value: 'glm-4.6',
                 label: 'GLM-4.6',
                 description: '通用指令模型，适合中文对话、总结与结构化输出。'
@@ -333,6 +348,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
                 label: '通义千问 3 235B',
                 description: '旗舰级指令模型，擅长中文对话、写作与复杂指令，适合长文本与结构化任务。'
+            },
+            {
+                value: 'ZhipuAI/GLM-5',
+                label: 'GLM-5',
+                description: '面向中文场景的新一代通用模型，适合复杂对话、改写与信息整理。'
             },
             {
                 value: 'ZhipuAI/GLM-4.6',
@@ -457,6 +477,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'deepseek-ai/DeepSeek-R1',
                 label: 'DeepSeek R1',
                 description: '偏推理的思考模型，适合复杂规划、多步分析与高约束任务。'
+            },
+            {
+                value: 'zai-org/GLM-5',
+                label: 'GLM-5',
+                description: '中文场景综合能力更强，适合复杂指令、结构化输出与多轮对话。'
             },
             {
                 value: 'zai-org/GLM-4.6',

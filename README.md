@@ -106,7 +106,7 @@ AI_PROVIDERS_CONFIG='[
     "name": "siliconflow_provider",
     "apiKey": "your_siliconflow_api_key_here",
     "baseUrl": "https://api.siliconflow.cn/v1",
-    "model": ["deepseek-ai/DeepSeek-V3.2", "zai-org/GLM-4.6", "Qwen/Qwen3-32B", "moonshotai/Kimi-K2-Instruct-0905"],
+    "model": ["deepseek-ai/DeepSeek-V3.2", "zai-org/GLM-5", "zai-org/GLM-4.6", "Qwen/Qwen3-32B", "moonshotai/Kimi-K2-Instruct-0905"],
     "type": "openai"
   }
 ]'

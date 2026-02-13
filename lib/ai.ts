@@ -89,7 +89,7 @@ const shouldForceTextJsonFallback = (modelId: string): boolean => {
   // 但仍可通过纯文本输出 JSON + 本地解析/修复 的方式完成结构化任务。
   if (normalized.includes('gemma')) return true;
 
-  // GLM 系列目前也倾向于不支持 JSON mode（如 glm-4.x / ZhipuAI/GLM-4.x / chatglm），
+  // GLM 系列目前也倾向于不支持 JSON mode（如 glm-4.x / glm-5.x / ZhipuAI/GLM-*.x / chatglm），
   // 统一走“文本 JSON + 本地解析/修复”以避免硬错误与重复请求。
   if (normalized.includes('glm')) return true;
 
