@@ -1541,12 +1541,21 @@ const SublimationPage: React.FC = () => {
                             <div className="flex flex-wrap items-center gap-2">
                                 <input
                                     id="user-guidance"
+                                    name="maho-sublimation-guidance"
                                     type="text"
                                     value={userGuidance}
                                     onChange={(e) => setUserGuidance(e.target.value)}
                                     className="input-field flex-1 min-w-[12rem]"
                                     placeholder="输入关键词或一句话 (最多30字)"
                                     maxLength={30}
+                                    autoComplete="off"
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    spellCheck={false}
+                                    data-form-type="other"
+                                    data-lpignore="true"
+                                    data-1p-ignore="true"
+                                    data-bwignore="true"
                                     disabled={isGenerating}
                                 />
                                 {userGuidance.trim() ? (

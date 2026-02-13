@@ -1220,6 +1220,18 @@ const CharacterManagerPage: React.FC = () => {
 
         return sortedKeys.map(key => {
             const currentPath = path ? `${path}.${key}` : key;
+            const fieldId = `editor-field-${currentPath.replace(/\./g, '__').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+            const nonCredentialInputProps = {
+                name: 'maho-editor-field',
+                autoComplete: 'off',
+                autoCorrect: 'off',
+                autoCapitalize: 'off',
+                spellCheck: false,
+                'data-form-type': 'other',
+                'data-lpignore': 'true',
+                'data-1p-ignore': 'true',
+                'data-bwignore': 'true',
+            };
             // 过滤掉不应在表单中编辑的字段
             if (key.startsWith('_')) return null;
             if (key === 'signature' || key === 'isPreset' || key === 'arena_history' || key === 'current_state' || key === 'adjudicationEvents') return null;
@@ -1250,14 +1262,15 @@ const CharacterManagerPage: React.FC = () => {
                 if (isStringArray) {
                     return (
                         <div key={currentPath} className="mt-4">
-                            <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
+                            <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
                             <textarea
-                                id={currentPath}
+                                id={fieldId}
                                 value={value.join('\n')}
                                 onChange={(e) => handleFieldChange(currentPath, e.target.value.split('\n'))}
                                 rows={Math.max(3, value.length)} // 动态调整高度
                                 className={inputClassName}
                                 placeholder="每行输入一个项目"
+                                {...nonCredentialInputProps}
                             />
                             <p className="text-xs text-gray-500 mt-1">此字段为列表，请每行输入一个项目。</p>
                             {issueHint}
@@ -1267,9 +1280,9 @@ const CharacterManagerPage: React.FC = () => {
                 // 对于其他类型的数组（如对象数组），暂时以只读JSON形式显示，防止数据结构被破坏
                 return (
                     <div key={currentPath} className="mt-4">
-                        <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')} (只读)</label>
+                        <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')} (只读)</label>
                         <textarea
-                            id={currentPath}
+                            id={fieldId}
                             value={JSON.stringify(value, null, 2)}
                             readOnly
                             rows={5}
@@ -1294,15 +1307,16 @@ const CharacterManagerPage: React.FC = () => {
                 const rows = Math.min(30, Math.max(10, lineCount + 2));
                 return (
                     <div key={currentPath}>
-                        <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
+                        <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
                         <textarea
-                            id={currentPath}
+                            id={fieldId}
                             value={value}
                             onChange={(e) => handleFieldChange(currentPath, e.target.value)}
                             rows={rows}
                             className={inputClassName}
                             style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word' }}
                             wrap="soft"
+                            {...nonCredentialInputProps}
                         />
                         {issueHint}
                     </div>
@@ -1311,19 +1325,20 @@ const CharacterManagerPage: React.FC = () => {
 
             return (
                 <div key={currentPath}>
-                    <label htmlFor={currentPath} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
+                    <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
                     <div className="mt-1 flex items-center">
                         {typeof value === 'string' && value.length > 80 ?
-                            <textarea id={currentPath} value={value as string} onChange={(e) => handleFieldChange(currentPath, e.target.value)} rows={3} className={inputClassName} />
+                            <textarea id={fieldId} value={value as string} onChange={(e) => handleFieldChange(currentPath, e.target.value)} rows={3} className={inputClassName} {...nonCredentialInputProps} />
                             :
                             <input
                                 type="text"
-                                id={currentPath}
+                                id={fieldId}
                                 value={value as any}
                                 onChange={(e) => handleFieldChange(currentPath, e.target.value)}
                                 className={inputClassName}
                                 // 当字段为 codename 或 name 时，限制最大长度为20
                                 maxLength={(key === 'codename' || key === 'name') ? 20 : undefined}
+                                {...nonCredentialInputProps}
                             />
                         }
                         {currentPath === 'codename' && (

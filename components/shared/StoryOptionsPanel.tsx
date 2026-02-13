@@ -101,10 +101,19 @@ export function StoryOptionsPanel({
           <div className="flex flex-wrap items-center gap-2">
             <input
               id="user-guidance"
+              name="maho-story-guidance"
               type="text"
               className="input-field flex-1 min-w-[12rem]"
               placeholder="输入关键词或一句话 (最多200字)"
               maxLength={200}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-form-type="other"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
               disabled={isGenerating}
               value={userGuidance}
               onChange={(e) => onUserGuidanceChange(e.target.value)}
