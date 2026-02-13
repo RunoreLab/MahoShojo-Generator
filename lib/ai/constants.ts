@@ -142,9 +142,19 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: 'OpenAI 的新一代通用旗舰模型，适合高质量内容生成与复杂任务。'
             },
             {
-                value: 'claude-sonnet-4-5',
+                value: 'claude-haiku-4-5-20251001',
+                label: 'Claude Haiku 4.5',
+                description: 'Anthropic 旗下最快且最聪慧的 Haiku 模型，具有接近前沿的性能。第一个支持扩展思考的 Haiku 模型。'
+            },
+            {
+                value: 'claude-sonnet-4-5-20250929',
                 label: 'Claude Sonnet 4.5',
                 description: 'Anthropic 旗下主力模型之一，写作、推理与长文本表现稳定。'
+            },
+            {
+                value: 'claude-opus-4-6',
+                label: 'Claude Opus 4.6',
+                description: 'Anthropic 旗下旗舰模型，非常适合复杂的专业任务和高级代理。'
             },
             {
                 value: 'grok-4',

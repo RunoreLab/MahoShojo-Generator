@@ -22,4 +22,3 @@ describe('ranked-model-policy: strict ranked', () => {
     }
   });
 });
-
