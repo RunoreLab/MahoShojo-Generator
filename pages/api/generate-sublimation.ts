@@ -274,20 +274,9 @@ const CurrentStateUpdateSchema = z.object({
   summary: z.string().describe('角色当前状态的摘要，1-2句话描述角色身体状况、心境或想法等。')
 }).partial().optional();
 
-const QuestionnaireAnswerItemSchema = z.object({
-  question: z.string(),
-  answer: z.string(),
-  questionId: z.string().optional(),
-  questionnaireId: z.string().optional(),
-  questionnaireTitle: z.string().optional(),
-});
-
 // 仅用于“升华生成”阶段的输出约束：
 // 避免使用 z.record(...)，否则在 Gemini 的 response_schema 中会生成空 properties 的 OBJECT，触发 400。
-const SublimationUserAnswersSchema = z.union([
-  z.array(z.string()),
-  z.array(QuestionnaireAnswerItemSchema),
-]);
+const SublimationUserAnswersSchema = z.array(z.string());
 
 const FullMagicalGirlSublimationPayloadSchemaFactory = (allowReshapeNames: boolean) => z.object({
   codename: z.string().describe("角色的新代号，必须包含原始代号并在后面加上一个「称号」。例如，如果原始代号是'代号'，新代号可以是'代号「称号」'。"),

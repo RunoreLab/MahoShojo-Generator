@@ -560,6 +560,28 @@ const coerceValueBySchema = (
   if (typeName === z.ZodFirstPartyTypeKind.ZodString) {
     if (typeof value === 'string') return { value, changed: false };
     if (typeof value === 'number' || typeof value === 'boolean') return { value: String(value), changed: true };
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>;
+      const candidates = ['answer', 'value', 'text', 'content', 'summary', 'message'];
+      for (const key of candidates) {
+        const candidate = record[key];
+        if (typeof candidate === 'string' && candidate.trim()) {
+          return { value: candidate, changed: true };
+        }
+      }
+      try {
+        return { value: JSON.stringify(value), changed: true };
+      } catch {
+        return { value, changed: false };
+      }
+    }
+    if (Array.isArray(value)) {
+      const asString = value
+        .map((item) => (typeof item === 'string' ? item : typeof item === 'number' || typeof item === 'boolean' ? String(item) : ''))
+        .filter((item) => item.length > 0)
+        .join(' / ');
+      if (asString) return { value: asString, changed: true };
+    }
     return { value, changed: false };
   }
 

@@ -142,6 +142,17 @@ describe('structured-json', () => {
     expect(result.telemetry.schemaCoercion.succeeded).toBe(true);
   });
 
+  it('coerces array<object> into array<string> by extracting answer/value', () => {
+    const schema = z.object({
+      userAnswers: z.array(z.string()),
+    });
+    const text = '{"userAnswers":[{"question":"Q1","answer":"A1"},{"value":"A2"}]}';
+    const result = parseStructuredJsonWithSchema(text, schema);
+    expect(result.data.userAnswers).toEqual(['A1', 'A2']);
+    expect(result.telemetry.schemaCoercion.attempted).toBe(true);
+    expect(result.telemetry.schemaCoercion.succeeded).toBe(true);
+  });
+
   it('builds a compact schema guide with optional markers', () => {
     const schema = z.object({
       a: z.string(),

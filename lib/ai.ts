@@ -426,13 +426,7 @@ export async function generateWithAI<T, I = string>(
           });
         };
 
-        // 0) 预判：某些模型（如 Gemma / GLM）不支持 JSON mode，直接走“文本 JSON + 本地解析”避免硬错误与二次请求
-        if (shouldForceTextJsonFallback(selectedModel)) {
-          log.warn('检测到模型可能不支持 JSON mode，直接启用兼容回退（文本生成 JSON + 本地解析）', {
-            provider: provider.name,
-            model: selectedModel,
-          });
-
+        const runTextJsonFallback = async (label: string): Promise<T> => {
           const guidedPrompt =
             `${systemPrompt}\n\n` +
             buildStructuredJsonInstructionFromZodSchema(generationConfig.schema);
@@ -449,7 +443,7 @@ export async function generateWithAI<T, I = string>(
             taskName: generationConfig.taskName,
           });
 
-          log.info('兼容回退解析成功（预判直达）', {
+          log.info(`兼容回退解析成功（${label}）`, {
             provider: provider.name,
             model: selectedModel,
             usedJsonRepair: parsed.telemetry.usedJsonRepair,
@@ -463,6 +457,15 @@ export async function generateWithAI<T, I = string>(
           }
 
           return parsed.data as T;
+        };
+
+        // 0) 预判：某些模型（如 Gemma / GLM）不支持 JSON mode，直接走“文本 JSON + 本地解析”避免硬错误与二次请求
+        if (shouldForceTextJsonFallback(selectedModel)) {
+          log.warn('检测到模型可能不支持 JSON mode，直接启用兼容回退（文本生成 JSON + 本地解析）', {
+            provider: provider.name,
+            model: selectedModel,
+          });
+          return await runTextJsonFallback('预判直达');
         }
 
         let object: unknown;
@@ -498,7 +501,12 @@ export async function generateWithAI<T, I = string>(
 
               return repaired.data as T;
             } catch {
-              // ignore，继续走后续回退策略
+              // 本地修复失败时，再尝试一次“文本 JSON 回退重试”
+              try {
+                return await runTextJsonFallback('NoObjectGeneratedError 分支');
+              } catch {
+                // ignore，继续走后续回退策略
+              }
             }
           }
 
@@ -511,37 +519,7 @@ export async function generateWithAI<T, I = string>(
               model: selectedModel,
               error: enhancedError.message,
             });
-
-            const guidedPrompt =
-              `${systemPrompt}\n\n` +
-              buildStructuredJsonInstructionFromZodSchema(generationConfig.schema);
-
-            const textResult = await generateText({
-              model,
-              prompt: buildPromptMessages(guidedPrompt),
-              temperature: generationConfig.temperature,
-              maxRetries: 0,
-              ...maxOutputTokensOption,
-            });
-
-            const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
-              taskName: generationConfig.taskName,
-            });
-
-            log.info('兼容回退解析成功', {
-              provider: provider.name,
-              model: selectedModel,
-              usedJsonRepair: parsed.telemetry.usedJsonRepair,
-              unwrap: parsed.telemetry.unwrapAttempt,
-            });
-
-            if (options?.telemetry) {
-              options.telemetry.usage = textResult.usage;
-              options.telemetry.finishReason = textResult.finishReason;
-              options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
-            }
-
-            return parsed.data as T;
+            return await runTextJsonFallback('JSON 模式不支持分支');
           }
 
           // 3) 部分供应商在 JSON schema / response_format 路径会直接报 APICallError（甚至是 5xx），
@@ -560,36 +538,7 @@ export async function generateWithAI<T, I = string>(
             });
 
             try {
-              const guidedPrompt =
-                `${systemPrompt}\n\n` +
-                buildStructuredJsonInstructionFromZodSchema(generationConfig.schema);
-
-              const textResult = await generateText({
-                model,
-                prompt: buildPromptMessages(guidedPrompt),
-                temperature: generationConfig.temperature,
-                maxRetries: 0,
-                ...maxOutputTokensOption,
-              });
-
-              const parsed = parseStructuredJsonWithSchema(textResult.text, generationConfig.schema, {
-                taskName: generationConfig.taskName,
-              });
-
-              log.info('兜底兼容回退解析成功（APICallError 分支）', {
-                provider: provider.name,
-                model: selectedModel,
-                usedJsonRepair: parsed.telemetry.usedJsonRepair,
-                unwrap: parsed.telemetry.unwrapAttempt,
-              });
-
-              if (options?.telemetry) {
-                options.telemetry.usage = textResult.usage;
-                options.telemetry.finishReason = textResult.finishReason;
-                options.telemetry.reasoning = buildNonStreamReasoningEnvelope(textResult.reasoningText, textResult.usage);
-              }
-
-              return parsed.data as T;
+              return await runTextJsonFallback('APICallError 分支');
             } catch {
               // ignore，继续抛出增强后的错误
             }
