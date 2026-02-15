@@ -110,6 +110,34 @@ const hasScheme = (value: string) => /^[a-z][a-z0-9+.-]*:/i.test(value);
 const isHttpScheme = (value: string) => /^https?:/i.test(value);
 const isExternalHttp = (value: string) => /^https?:\/\//i.test(value) || value.startsWith('//');
 
+const NETEASE_MUSIC_HOST = 'music.163.com';
+const NETEASE_OUTCHAIN_PLAYER_PATH = '/outchain/player';
+const NETEASE_OUTER_AUDIO_PATH = '/song/media/outer/url';
+
+const normalizeNeteaseSongId = (value: string | null | undefined) => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(\d+)(?:\.mp3)?$/i);
+  return match ? match[1] : null;
+};
+
+const getNeteaseSongIdFromOutchain = (url: URL) => {
+  if (!isHostnameAllowed(url.hostname, [NETEASE_MUSIC_HOST])) return null;
+  if (url.pathname !== NETEASE_OUTCHAIN_PLAYER_PATH) return null;
+  const playerType = (url.searchParams.get('type') ?? '').trim();
+  if (playerType !== '2') return null;
+  return normalizeNeteaseSongId(url.searchParams.get('id'));
+};
+
+const getNeteaseSongIdFromOuterUrl = (url: URL) => {
+  if (!isHostnameAllowed(url.hostname, [NETEASE_MUSIC_HOST])) return null;
+  if (url.pathname !== NETEASE_OUTER_AUDIO_PATH) return null;
+  return normalizeNeteaseSongId(url.searchParams.get('id'));
+};
+
+const buildNeteaseOuterAudioUrl = (songId: string) => `https://${NETEASE_MUSIC_HOST}${NETEASE_OUTER_AUDIO_PATH}?id=${songId}.mp3`;
+
 export const isAllowedExternalMediaUrl = (value: string | null | undefined, kind: ExternalMediaKind = 'image') => {
   if (typeof value !== 'string') return false;
   const trimmed = value.trim();
@@ -133,6 +161,41 @@ export const isAllowedExternalMediaUrl = (value: string | null | undefined, kind
   }
 };
 
+export const resolveExternalMediaUrl = (value: string | null | undefined, kind: ExternalMediaKind = 'image') => {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  if (!isExternalHttp(trimmed)) {
+    return trimmed;
+  }
+
+  try {
+    const url = new URL(trimmed.startsWith('//') ? `https:${trimmed}` : trimmed);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return trimmed;
+
+    if (kind === 'audio') {
+      const songIdFromOutchain = getNeteaseSongIdFromOutchain(url);
+      if (songIdFromOutchain) {
+        return buildNeteaseOuterAudioUrl(songIdFromOutchain);
+      }
+      const songIdFromOuterUrl = getNeteaseSongIdFromOuterUrl(url);
+      if (songIdFromOuterUrl) {
+        return buildNeteaseOuterAudioUrl(songIdFromOuterUrl);
+      }
+    }
+
+    // HTTPS 页面内播放外链媒体时，优先升级已在白名单中的 http 资源，避免 mixed content 被浏览器拦截。
+    if (url.protocol === 'http:' && isHostnameAllowed(url.hostname, MEDIA_HOST_WHITELIST[kind])) {
+      url.protocol = 'https:';
+    }
+
+    return url.toString();
+  } catch {
+    return trimmed.startsWith('//') ? `https:${trimmed}` : trimmed;
+  }
+};
+
 export const isLikelyAudioUrl = (value: string | null | undefined) => {
   if (typeof value !== 'string') return false;
   const trimmed = value.trim();
@@ -140,7 +203,23 @@ export const isLikelyAudioUrl = (value: string | null | undefined) => {
   const lowered = trimmed.toLowerCase();
   const normalized = lowered.startsWith('//') ? `https:${lowered}` : lowered;
   const withoutQuery = normalized.split('?')[0]?.split('#')[0] ?? normalized;
-  return AUDIO_FILE_EXTENSIONS.some((ext) => withoutQuery.endsWith(ext));
+  if (AUDIO_FILE_EXTENSIONS.some((ext) => withoutQuery.endsWith(ext))) {
+    return true;
+  }
+
+  if (!isExternalHttp(normalized)) {
+    return false;
+  }
+
+  try {
+    const url = new URL(normalized);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    if (getNeteaseSongIdFromOutchain(url)) return true;
+    if (getNeteaseSongIdFromOuterUrl(url)) return true;
+    return false;
+  } catch {
+    return false;
+  }
 };
 
 export const isLikelyVideoUrl = (value: string | null | undefined) => {

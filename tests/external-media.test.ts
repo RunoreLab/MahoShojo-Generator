@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { isAllowedExternalMediaUrl, isLikelyVideoUrl } from '@/lib/markdown/externalMedia';
+import { isAllowedExternalMediaUrl, isLikelyAudioUrl, isLikelyVideoUrl, resolveExternalMediaUrl } from '@/lib/markdown/externalMedia';
 
 describe('external media whitelist', () => {
   it('允许白名单内的图片域名', () => {
@@ -28,6 +28,22 @@ describe('external media whitelist', () => {
     expect(isAllowedExternalMediaUrl('https://music.migu.cn/v3/music/song/123456', 'audio')).toBe(true);
     expect(isAllowedExternalMediaUrl('https://www.kugou.com/song/#hash=abc', 'audio')).toBe(true);
     expect(isAllowedExternalMediaUrl('https://www.ximalaya.com/track/123456789', 'audio')).toBe(true);
+  });
+
+  it('识别网易云常见外链格式为音频', () => {
+    expect(isLikelyAudioUrl('http://music.163.com/song/media/outer/url?id=2026565329.mp3')).toBe(true);
+    expect(isLikelyAudioUrl('//music.163.com/outchain/player?type=2&id=33051559&auto=1&height=32')).toBe(true);
+    expect(isLikelyAudioUrl('//music.163.com/outchain/player?type=1&id=33051559')).toBe(false);
+  });
+
+  it('规范化网易云外链为可播放地址', () => {
+    expect(
+      resolveExternalMediaUrl('//music.163.com/outchain/player?type=2&id=33051559&auto=1&height=32', 'audio'),
+    ).toBe('https://music.163.com/song/media/outer/url?id=33051559.mp3');
+
+    expect(
+      resolveExternalMediaUrl('http://music.163.com/song/media/outer/url?id=2026565329.mp3', 'audio'),
+    ).toBe('https://music.163.com/song/media/outer/url?id=2026565329.mp3');
   });
 
   it('阻止非白名单的音频域名', () => {

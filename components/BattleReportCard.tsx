@@ -13,6 +13,7 @@ import {
   isAllowedExternalMediaUrl,
   isLikelyAudioUrl,
   isLikelyVideoUrl,
+  resolveExternalMediaUrl,
 } from '@/lib/markdown/externalMedia';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
 import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
@@ -276,6 +277,8 @@ ${adjudicationMarkdown}
       const normalizedHref = rawHref.startsWith('//') ? `https:${rawHref}` : rawHref;
       const isAudioAllowed = isAudioLink && isAllowedExternalMediaUrl(rawHref, 'audio');
       const isVideoAllowed = isVideoLink && isAllowedExternalMediaUrl(rawHref, 'video');
+      const resolvedAudioHref = isAudioLink ? resolveExternalMediaUrl(rawHref, 'audio') : normalizedHref;
+      const resolvedVideoHref = isVideoLink ? resolveExternalMediaUrl(rawHref, 'video') : normalizedHref;
       const linkText =
         typeof children === 'string'
           ? children
@@ -294,9 +297,9 @@ ${adjudicationMarkdown}
 
         return (
           <span className="inline-flex max-w-full flex-col gap-1 align-middle">
-            <audio controls preload="none" src={normalizedHref} className="h-8 max-w-full" />
+            <audio controls preload="none" src={resolvedAudioHref} className="h-8 max-w-full" />
             <a
-              href={normalizedHref}
+              href={resolvedAudioHref}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[11px] underline underline-offset-2 text-blue-200"
@@ -320,9 +323,9 @@ ${adjudicationMarkdown}
 
         return (
           <span className="inline-flex max-w-full flex-col gap-1 align-middle">
-            <video controls preload="metadata" playsInline src={normalizedHref} className="my-2 max-w-full rounded-md border border-white/15" />
+            <video controls preload="metadata" playsInline src={resolvedVideoHref} className="my-2 max-w-full rounded-md border border-white/15" />
             <a
-              href={normalizedHref}
+              href={resolvedVideoHref}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[11px] underline underline-offset-2 text-blue-200"
@@ -408,7 +411,7 @@ ${adjudicationMarkdown}
       const isVideoLink = Boolean(rawSrc && isLikelyVideoUrl(rawSrc));
       if (isAudioLink) {
         const isAudioAllowed = isAllowedExternalMediaUrl(rawSrc, 'audio');
-        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'audio');
         const audioLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放音频';
 
         if (!isAudioAllowed) {
@@ -436,7 +439,7 @@ ${adjudicationMarkdown}
 
       if (isVideoLink) {
         const isVideoAllowed = isAllowedExternalMediaUrl(rawSrc, 'video');
-        const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc;
+        const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'video');
         const videoLabel = typeof alt === 'string' && alt.trim() ? alt.trim() : '播放视频';
 
         if (!isVideoAllowed) {
@@ -463,6 +466,7 @@ ${adjudicationMarkdown}
       }
 
       const isAllowed = isAllowedExternalMediaUrl(rawSrc, 'image');
+      const normalizedSrc = resolveExternalMediaUrl(rawSrc, 'image');
       if (!isAllowed) {
         return (
           <code className="font-mono text-xs bg-black/30 px-1 py-0.5 rounded text-pink-200 break-all">
@@ -473,7 +477,7 @@ ${adjudicationMarkdown}
 
       return (
         <img
-          src={src}
+          src={normalizedSrc}
           alt={typeof alt === 'string' ? alt : ''}
           title={typeof title === 'string' ? title : undefined}
           className="my-2 max-w-full rounded-md border border-white/15"
