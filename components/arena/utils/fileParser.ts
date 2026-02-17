@@ -9,7 +9,7 @@ import {
   validateMagicalGirlData,
 } from './characterValidator';
 
-import { MAX_COMBATANTS, CombatantData } from '../types';
+import { isCombatantLimitReached, MAX_COMBATANTS, CombatantData } from '../types';
 
 export interface ParseOptions {
   existingCount: number;
@@ -32,7 +32,7 @@ export const parseCombatantsFromText = async (text: string, options: ParseOption
   const parsed = readJsonArray(text);
   const dataArray = Array.isArray(parsed) ? parsed : [parsed];
 
-  if (dataArray.length + options.existingCount > MAX_COMBATANTS) {
+  if (isCombatantLimitReached(dataArray.length + options.existingCount, MAX_COMBATANTS)) {
     throw new Error(`队伍将超出 ${MAX_COMBATANTS} 位上限！`);
   }
 

@@ -45,7 +45,6 @@ import { deriveSeasonStrictRules } from '@/lib/seasons';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 
 const log = getLogger('api-gen-battle-story');
-const MAX_COMBATANTS = 10;
 
 export const config = {
     runtime: 'edge',
@@ -331,8 +330,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
             : [baseModelOverride];
 
         const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
-        if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > MAX_COMBATANTS) {
-            const errorMessage = `该模式需要 ${minParticipants} 到 ${MAX_COMBATANTS} 位角色`;
+        if (!Array.isArray(combatants) || combatants.length < minParticipants) {
+            const errorMessage = `该模式至少需要 ${minParticipants} 位角色`;
             return new Response(JSON.stringify({ error: errorMessage }), { status: 400 });
         }
 

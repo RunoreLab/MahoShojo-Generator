@@ -12,6 +12,7 @@ import { computeTechIndex } from '@/lib/metrics/techIndex';
 
 import { useBattleActions } from '../hooks/useBattleActions';
 import { useBattleStore } from '../stores/useBattleStore';
+import { formatCombatantCount, isCombatantLimitReached } from '../types';
 import type { BattleStoreState, Combatant, CombatantData } from '../types';
 import { getCombatantDisplayName } from '../utils/characterValidator';
 
@@ -212,6 +213,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
   const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
   const [editingTeamName, setEditingTeamName] = useState<string>('');
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
+  const isCombatantCapReached = isCombatantLimitReached(combatants.length);
 
   const teamNameMap = useMemo(() => {
     const map = new Map<number, string>();
@@ -718,7 +720,7 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
   return (
     <div className="mb-4 p-3 bg-gray-200 rounded-lg">
       <div className="flex justify-between items-center m-0 top-0 right-0">
-        <p className="font-semibold text-sm text-gray-700">已选角色 ({combatants.length}/10):</p>
+        <p className="font-semibold text-sm text-gray-700">已选角色 ({formatCombatantCount(combatants.length)}):</p>
         <button
           onClick={handleClearRoster}
           disabled={isGenerating}
@@ -731,14 +733,14 @@ export function CombatantList({ onShowDetails }: CombatantListProps) {
       <div className="flex gap-2 mt-3">
         <button
           onClick={() => handleAddRandomPlaceholder('random-magical-girl')}
-          disabled={isGenerating || combatants.length >= 10}
+          disabled={isGenerating || isCombatantCapReached}
           className="text-xs flex-1 bg-pink-100 text-pink-700 px-3 py-1.5 rounded-lg hover:bg-pink-200 disabled:opacity-50"
         >
           + 添加随机魔法少女
         </button>
         <button
           onClick={() => handleAddRandomPlaceholder('random-canshou')}
-          disabled={isGenerating || combatants.length >= 10}
+          disabled={isGenerating || isCombatantCapReached}
           className="text-xs flex-1 bg-red-100 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-200 disabled:opacity-50"
         >
           + 添加随机残兽

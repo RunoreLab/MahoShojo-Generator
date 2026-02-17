@@ -31,7 +31,14 @@ import { GenerationModeSwitcher } from './components/GenerationModeSwitcher';
 import { ArenaStatistics } from './components/ArenaStatistics';
 import { RankingQuickActions } from './components/RankingQuickActions';
 import { useBattleStore } from './stores/useBattleStore';
-import { BattleStoreState, CombatantData, MAX_AUX_SCENARIOS, MAX_COMBATANTS } from './types';
+import {
+  BattleStoreState,
+  CombatantData,
+  formatCombatantCount,
+  hasCombatantLimit,
+  MAX_AUX_SCENARIOS,
+  MAX_COMBATANTS,
+} from './types';
 import { useBattleActions } from './hooks/useBattleActions';
 import { usePresetQuery, useLanguagesQuery, useStatsQuery } from './hooks/useArenaData';
 import { ArenaRankingModal } from './components/ArenaRankingModal';
@@ -63,6 +70,7 @@ export function ArenaPage() {
     () => combatants.filter((item) => 'data' in item && (item as CombatantData).isPreset).length,
     [combatants],
   );
+  const characterMaxSelected = hasCombatantLimit(MAX_COMBATANTS) ? MAX_COMBATANTS : undefined;
 
   const scenarioSummary = useMemo(() => {
     if (battleMode !== 'scenario') return '当前未启用情景模式';
@@ -166,7 +174,7 @@ export function ArenaPage() {
 
             <CollapsibleSection
               title="🎴 预设角色（内置）"
-              description={`已选 ${presetCombatantCount}/${MAX_COMBATANTS}（可选项，常用可展开）`}
+              description={`已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}（可选项，常用可展开）`}
               defaultOpen={false}
               disabled={isGenerating}
               storageKey="arena.section.presetCharacters.open"
@@ -177,7 +185,7 @@ export function ArenaPage() {
 
             <CollapsibleSection
               title="🌐 在线角色库 / 随机匹配"
-              description={`当前已选 ${combatants.length}/${MAX_COMBATANTS}`}
+              description={`当前已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
               defaultOpen
               disabled={isGenerating}
               storageKey="arena.section.characterDatabase.open"
@@ -212,7 +220,7 @@ export function ArenaPage() {
 
             <CollapsibleSection
               title="👥 已选角色 / 分队"
-              description={`已选 ${combatants.length}/${MAX_COMBATANTS}`}
+              description={`已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
               defaultOpen
               disabled={isGenerating}
               keepMounted
@@ -438,7 +446,7 @@ export function ArenaPage() {
             ? combatants.length
             : (dataModalType === 'auxScenario' ? auxScenarios.length : undefined)
         }
-        maxSelected={dataModalType === 'character' ? MAX_COMBATANTS : (dataModalType === 'auxScenario' ? MAX_AUX_SCENARIOS : undefined)}
+        maxSelected={dataModalType === 'character' ? characterMaxSelected : (dataModalType === 'auxScenario' ? MAX_AUX_SCENARIOS : undefined)}
       />
 
       {selectedCombatant && (

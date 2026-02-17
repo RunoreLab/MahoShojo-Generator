@@ -6,6 +6,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import {
   BattleStoreState,
   BattleSettings,
+  isCombatantLimitReached,
   MAX_COMBATANTS,
   ScenarioState,
   MAX_AUX_SCENARIOS,
@@ -114,7 +115,7 @@ export const useBattleStore = create<BattleStoreState>()(
 
       addCombatant: (combatant) =>
         set((state) => {
-          if (state.combatants.length >= MAX_COMBATANTS) {
+          if (isCombatantLimitReached(state.combatants.length, MAX_COMBATANTS)) {
             return state;
           }
           return { combatants: [...state.combatants, combatant] };

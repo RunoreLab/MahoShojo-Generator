@@ -10,6 +10,7 @@ import {
   AuxiliaryScenarioState,
   BattleStoreState,
   CombatantData,
+  isCombatantLimitReached,
   MAX_AUX_SCENARIOS,
   MAX_COMBATANTS,
   RandomCombatantPlaceholder,
@@ -174,7 +175,8 @@ export const useBattleActions = () => {
 
   const handleAddRandomPlaceholder = useCallback(
     (type: 'random-magical-girl' | 'random-canshou') => {
-      if (combatants.length >= MAX_COMBATANTS || isGenerating) {
+      if (isGenerating) return;
+      if (isCombatantLimitReached(combatants.length, MAX_COMBATANTS)) {
         setError(`最多只能选择 ${MAX_COMBATANTS} 位参战者。`);
         return;
       }
@@ -246,7 +248,7 @@ export const useBattleActions = () => {
           return;
         }
 
-        if (combatants.length >= MAX_COMBATANTS) {
+        if (isCombatantLimitReached(combatants.length, MAX_COMBATANTS)) {
           setError(`❌ 最多只能添加 ${MAX_COMBATANTS} 位角色。`);
           return;
         }
@@ -288,7 +290,7 @@ export const useBattleActions = () => {
 
   const handleRandomMatch = useCallback(
     async (type: 'character' | 'scenario') => {
-      if (type === 'character' && combatants.length >= MAX_COMBATANTS) {
+      if (type === 'character' && isCombatantLimitReached(combatants.length, MAX_COMBATANTS)) {
         setError(`最多只能选择 ${MAX_COMBATANTS} 位参战者。`);
         return;
       }

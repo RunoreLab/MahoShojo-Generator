@@ -403,8 +403,8 @@ export const useBattleEngine = () => {
     // 计算总角色数（包括占位符，因为它们会被解析为真实角色）
     const totalCombatants = combatants.length;
 
-    if (totalCombatants < minParticipants || totalCombatants > 10) {
-      setError(`⚠️ 该模式需要 ${minParticipants} 到 10 位角色。`);
+    if (totalCombatants < minParticipants) {
+      setError(`⚠️ 该模式至少需要 ${minParticipants} 位角色。`);
       return;
     }
 

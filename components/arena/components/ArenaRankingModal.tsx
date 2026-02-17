@@ -19,7 +19,7 @@ import { formatSeasonTitle, getCurrentSeason } from '@/lib/seasons';
 import { useBattleActions } from '../hooks/useBattleActions';
 import { usePresetQuery } from '../hooks/useArenaData';
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState, CombatantData, MAX_COMBATANTS } from '../types';
+import { BattleStoreState, CombatantData, formatCombatantCount, isCombatantLimitReached, MAX_COMBATANTS } from '../types';
 import { validateCanshouData, validateMagicalGirlData } from '../utils/characterValidator';
 
 type Queue = 'strict' | 'free';
@@ -399,7 +399,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
     if (addingKey) return;
 
     const existingCombatantsCount = combatants.filter((c) => 'data' in c).length;
-    if (existingCombatantsCount >= MAX_COMBATANTS) {
+    if (isCombatantLimitReached(existingCombatantsCount, MAX_COMBATANTS)) {
       setError(`❌ 最多只能选择 ${MAX_COMBATANTS} 位参战者。`);
       return;
     }
@@ -967,7 +967,7 @@ export function ArenaRankingModal(props: { isOpen: boolean; onClose: () => void 
 
           <div className="mt-4 flex items-center justify-between gap-3 flex-wrap text-sm">
             <div className="text-gray-500">
-              已选择参战者：{combatants.filter((c) => 'data' in c).length}/{MAX_COMBATANTS}
+              已选择参战者：{formatCombatantCount(combatants.filter((c) => 'data' in c).length)}
             </div>
             <div className="flex items-center gap-2">
               <button

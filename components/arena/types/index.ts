@@ -7,9 +7,19 @@ import type { NormalizedStreamUpdateMeta } from '@/lib/arena/stream-meta';
 import type { QuestionnaireDefinition } from '@/lib/questionnaires';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
-export const MAX_COMBATANTS = 10;
+/** 参战角色上限；为 null 代表不限制数量。 */
+export const MAX_COMBATANTS: number | null = null;
 export const MAX_AUX_SCENARIOS = 10;
 export const ARENA_STATE_PREF_KEY = 'arena-history-state-preferences-v1';
+
+export const hasCombatantLimit = (limit: number | null = MAX_COMBATANTS): limit is number =>
+  typeof limit === 'number' && Number.isFinite(limit) && limit > 0;
+
+export const isCombatantLimitReached = (count: number, limit: number | null = MAX_COMBATANTS): boolean =>
+  hasCombatantLimit(limit) && count >= limit;
+
+export const formatCombatantCount = (count: number, limit: number | null = MAX_COMBATANTS): string =>
+  hasCombatantLimit(limit) ? `${count}/${limit}` : `${count}/无限制`;
 
 export type CombatantType = 'magical-girl' | 'canshou' | 'general-character';
 export type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';

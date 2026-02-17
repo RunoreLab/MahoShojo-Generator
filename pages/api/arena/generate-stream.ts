@@ -59,7 +59,6 @@ import { deleteObject } from '@/lib/r2';
 	import { extractStreamUpdateMeta, findStreamUpdateMetaStart } from '@/lib/arena/stream-meta';
 
 const log = getLogger('api-gen-battle-stream');
-const MAX_COMBATANTS = 10;
 
 const isInterruptedStreamError = (error: unknown): boolean => {
     if (error instanceof StreamReadTimeoutError) return true;
@@ -367,8 +366,8 @@ async function handler(req: NextRequest): Promise<Response> {
             : {};
 
         const minParticipants = (mode === 'daily' || mode === 'scenario') ? 1 : 2;
-        if (!Array.isArray(combatants) || combatants.length < minParticipants || combatants.length > MAX_COMBATANTS) {
-            const errorMessage = `该模式需要 ${minParticipants} 到 ${MAX_COMBATANTS} 位角色`;
+        if (!Array.isArray(combatants) || combatants.length < minParticipants) {
+            const errorMessage = `该模式至少需要 ${minParticipants} 位角色`;
             return new Response(JSON.stringify({ error: errorMessage }), { status: 400 });
         }
 

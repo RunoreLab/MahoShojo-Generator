@@ -5,7 +5,7 @@ import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { DisclosureButton } from '@/components/shared/CollapsibleSection';
 
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState, MAX_COMBATANTS } from '../types';
+import { BattleStoreState, isCombatantLimitReached, MAX_COMBATANTS } from '../types';
 import { useBattleActions } from '../hooks/useBattleActions';
 
 export function RosterUploader() {
@@ -93,7 +93,12 @@ export function RosterUploader() {
             />
             <button
               onClick={onPaste}
-              disabled={!pastedJson.trim() || isGenerating || isPasting || combatants.length >= MAX_COMBATANTS}
+              disabled={
+                !pastedJson.trim() ||
+                isGenerating ||
+                isPasting ||
+                isCombatantLimitReached(combatants.length, MAX_COMBATANTS)
+              }
               className="generate-button mt-2 mb-0"
             >
               从文本添加角色
