@@ -482,14 +482,19 @@ async function handler(req: NextRequest): Promise<Response> {
       log.info('问卷答案超过字数上限，已取消原生签名', overLimitAnswer);
     }
 
-	    // 安全检查：检查用户输入是否包含敏感词
-	    const answersString = normalizedAnswers.map((item) => item.answer).join(' ');
-	    const safetyResponse = await enforceTextSafety({
-	      text: answersString,
-	      log,
-	      enableAiSafetyCheck: false,
-	    });
-	    if (safetyResponse) return safetyResponse;
+	    // 安全检查：逐题检查，避免跨题拼接误伤（例如上一题末尾+下一题开头拼成敏感词）
+	    for (const answerItem of normalizedAnswers) {
+	      const safetyResponse = await enforceTextSafety({
+	        text: answerItem.answer,
+	        log,
+	        logMeta: {
+	          questionId: answerItem.questionId,
+	          questionnaireId: answerItem.questionnaireId,
+	        },
+	        enableAiSafetyCheck: false,
+	      });
+	      if (safetyResponse) return safetyResponse;
+	    }
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;

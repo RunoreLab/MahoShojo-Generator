@@ -195,14 +195,19 @@ async function handler(req: NextRequest): Promise<Response> {
       });
     }
 
-    const answersString = normalizedAnswers.map((item) => item.answer).join(' ');
-    const safetyResponse = await enforceTextSafety({
-      text: answersString,
-      log,
-      enableAiSafetyCheck: false,
-      sensitiveWordReason: '在残兽问卷中使用了危险符文',
-    });
-    if (safetyResponse) return safetyResponse;
+    for (const answerItem of normalizedAnswers) {
+      const safetyResponse = await enforceTextSafety({
+        text: answerItem.answer,
+        log,
+        logMeta: {
+          questionId: answerItem.questionId,
+          questionnaireId: answerItem.questionnaireId,
+        },
+        enableAiSafetyCheck: false,
+        sensitiveWordReason: '在残兽问卷中使用了危险符文',
+      });
+      if (safetyResponse) return safetyResponse;
+    }
 
     let customProviderOverride: AIProvider | null = null;
     let customProviderId: string | null = null;

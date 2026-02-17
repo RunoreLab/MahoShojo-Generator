@@ -1161,6 +1161,17 @@ const DetailsPage: React.FC = () => {
     return false;
   }
 
+  const checkSensitiveWordsForAnswers = async (items: QuestionnaireAnswerItem[]): Promise<boolean> => {
+    for (const item of items) {
+      const answer = item.answer?.trim();
+      if (!answer) continue;
+      if (await checkSensitiveWords(answer)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const handleClearDraft = () => {
     if (window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) {
       localStorage.removeItem(LOCAL_STORAGE_KEY);
@@ -1301,9 +1312,7 @@ const DetailsPage: React.FC = () => {
     setNonStreamReasoning(null);
     setCharacterPortraitAsset(null);
 
-    const safetyText = finalAnswerItems.map((item) => item.answer).join('');
-    console.log('检查敏感词:', safetyText);
-    if (await checkSensitiveWords(safetyText)) return;
+    if (await checkSensitiveWordsForAnswers(finalAnswerItems)) return;
 
     try {
       console.log('提交答案:', finalAnswerItems);
