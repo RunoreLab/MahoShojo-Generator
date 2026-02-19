@@ -89,6 +89,78 @@ const normalizeBattleAiImpacts = (input: unknown): BattleAiImpact[] => {
   return Array.from(deduped.values());
 };
 
+const normalizeNameTokenForImpact = (name: string): string => {
+  return name
+    .trim()
+    .replace(/^[“”"'「」『』《》【】\[\]（）()]+|[“”"'「」『』《》【】\[\]（）()]+$/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+};
+
+const getUniqueRosterNames = (roster: CombatantData[]): string[] => {
+  const names = roster
+    .map((item) => (item?.data?.codename || item?.data?.name || '').toString().trim())
+    .filter(Boolean);
+  return Array.from(new Set(names));
+};
+
+const validateManualMetaImpacts = (
+  impacts: BattleAiImpact[],
+  roster: CombatantData[],
+  settings: { writeArenaHistory: boolean }
+): string | null => {
+  if (!Array.isArray(impacts) || impacts.length === 0) {
+    return '未解析到有效 impacts，请至少提供包含 characterName 的 impacts 数组。';
+  }
+
+  const rosterNames = getUniqueRosterNames(roster);
+  if (rosterNames.length === 0) {
+    return '当前没有可更新的参战角色。';
+  }
+
+  const rosterTokenToName = new Map<string, string>();
+  for (const name of rosterNames) {
+    const token = normalizeNameTokenForImpact(name);
+    if (token) rosterTokenToName.set(token, name);
+  }
+
+  const impactTokenToImpact = new Map<string, BattleAiImpact>();
+  const unknownNames: string[] = [];
+
+  for (const impact of impacts) {
+    const token = normalizeNameTokenForImpact(impact.characterName);
+    if (!token) continue;
+    if (!rosterTokenToName.has(token)) {
+      unknownNames.push(impact.characterName);
+      continue;
+    }
+    if (!impactTokenToImpact.has(token)) {
+      impactTokenToImpact.set(token, impact);
+    }
+  }
+
+  const missingNames = rosterNames.filter((name) => !impactTokenToImpact.has(normalizeNameTokenForImpact(name)));
+  if (missingNames.length > 0) {
+    return `impacts 未覆盖全部参战角色，缺少：${missingNames.join('、')}。`;
+  }
+
+  if (unknownNames.length > 0) {
+    const uniqueUnknownNames = Array.from(new Set(unknownNames));
+    return `impacts 包含不在本场参战名单中的角色：${uniqueUnknownNames.join('、')}。`;
+  }
+
+  if (settings.writeArenaHistory) {
+    const missingImpactText = Array.from(impactTokenToImpact.values())
+      .filter((item) => !item.impact || !item.impact.trim())
+      .map((item) => item.characterName);
+    if (missingImpactText.length > 0) {
+      return `已开启历战写入时，每位角色都必须提供 impact，缺少：${missingImpactText.join('、')}。`;
+    }
+  }
+
+  return null;
+};
+
 const isServerInterruptedPayload = (payload: any, fallbackMessage: string): boolean => {
   const status = typeof payload?.status === 'string' ? payload.status.trim().toLowerCase() : '';
   if (status === 'aborted' || status === 'interrupted') return true;
@@ -1674,9 +1746,107 @@ export const useBattleEngine = () => {
     startCooldown,
   ]);
 
+  const handleApplyManualMetaUpdates = useCallback(async (manualMetaInput: string): Promise<boolean> => {
+    const input = typeof manualMetaInput === 'string' ? manualMetaInput.trim() : '';
+    if (!input) {
+      setError('⚠️ 请先输入可解析的 meta 数据。');
+      return false;
+    }
+
+    const shouldUseScenario = battleMode === 'scenario' && Boolean(scenario.content);
+    const roster = useBattleStore.getState().combatants.filter((item): item is CombatantData => 'data' in item);
+
+    if (roster.length === 0) {
+      setError('⚠️ 没有可更新的参战角色。');
+      return false;
+    }
+
+    if (!(settings.writeArenaHistory || settings.writeCurrentState)) {
+      setError('⚠️ 已关闭历战记录/当前状态写入，本次无需应用手动更新。');
+      return false;
+    }
+
+    const state = useBattleStore.getState();
+    const reportMarkdown =
+      generationMode === 'stream'
+        ? (state.streamingMarkdown ?? '').trim()
+        : (state.newsReport ? toBattleReportMarkdown(state.newsReport) : '').trim();
+
+    setIsRedoingUpdates(true);
+    setError(null);
+
+    try {
+      const wrappedInput = `<!-- MAHOSHOJO_ARENA_META ${input} -->`;
+      const extracted = await extractStreamUpdateMeta(wrappedInput);
+      if (!extracted?.meta) {
+        throw new Error('无法解析输入内容，请确认是 JSON 对象/数组或 MAHOSHOJO_ARENA_META 注释。');
+      }
+
+      const impacts = normalizeBattleAiImpacts(extracted.meta.impacts);
+      const impactsValidationError = validateManualMetaImpacts(impacts, roster, {
+        writeArenaHistory: settings.writeArenaHistory,
+      });
+      if (impactsValidationError) {
+        throw new Error(impactsValidationError);
+      }
+
+      const metaOverride = {
+        ...(extracted.meta.report ? { report: extracted.meta.report } : {}),
+        impacts,
+      };
+
+      await updateFromMarkdown(
+        reportMarkdown,
+        roster,
+        battleMode,
+        {
+          userGuidance: settings.userGuidance,
+          writeArenaHistory: settings.writeArenaHistory,
+          writeCurrentState: settings.writeCurrentState,
+        },
+        shouldUseScenario ? scenario.content : null,
+        metaOverride
+      );
+
+      const rawMax = 8_000;
+      setStreamUpdateMetaDebug({
+        source: 'inline',
+        parseOk: true,
+        error: null,
+        meta: {
+          ...extracted.meta,
+          impacts,
+        },
+        raw: input.length > rawMax ? input.slice(0, rawMax) : input,
+        rawTruncated: input.length > rawMax,
+      });
+      setLatestAiImpacts(impacts);
+
+      return true;
+    } catch (error) {
+      setError(`⚠️ 手动应用更新失败：${error instanceof Error ? error.message : '发生未知错误，请重试。'}`);
+      return false;
+    } finally {
+      setIsRedoingUpdates(false);
+    }
+  }, [
+    battleMode,
+    generationMode,
+    scenario.content,
+    settings.userGuidance,
+    settings.writeArenaHistory,
+    settings.writeCurrentState,
+    setError,
+    setIsRedoingUpdates,
+    setLatestAiImpacts,
+    setStreamUpdateMetaDebug,
+    updateFromMarkdown,
+  ]);
+
   return {
     handleGenerate,
     handleRedoUpdates,
+    handleApplyManualMetaUpdates,
     isGenerating,
     isRedoingUpdates,
     isCooldown,
