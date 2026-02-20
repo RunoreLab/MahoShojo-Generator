@@ -107,6 +107,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'json',
         models: [
             {
+                value: 'gemini-3.1-pro-preview',
+                label: 'Gemini 3.1 Pro (预览版)',
+                description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。'
+            },
+            {
                 value: 'gemini-3-pro-preview',
                 label: 'Gemini 3.0 Pro (预览版)',
                 description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。'
@@ -233,6 +238,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 description: '高级模型（Pro/Pro+）。擅长长文本写作与稳健推理。'
             },
             {
+                value: 'gemini-3.1-pro-preview',
+                label: 'Gemini 3.1 Pro（高级）',
+                description: '高级模型（Pro/Pro+）。在复杂指令与高难度创作上相较 3.0 Pro 更强。'
+            },
+            {
                 value: 'gemini-3-pro',
                 label: 'Gemini 3 Pro（高级）',
                 description: '高级模型（Pro/Pro+）。适合复杂指令与高难度创作。'
@@ -284,8 +294,13 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         mode: 'json',
         models: [
             {
+                value: 'gemini-3.1-pro-preview',
+                label: 'Gemini 3.1 Pro (预览版)',
+                description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。'
+            },
+            {
                 value: 'gemini-3-pro-preview',
-                label: 'Gemini 3.0 Pro (测试)',
+                label: 'Gemini 3.0 Pro (预览版)',
                 description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。'
             },
             {
@@ -394,6 +409,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         baseUrl: 'https://gateway.ai.cloudflare.com/v1/5e2c3572782d87ae449e050ac15d6c5d/mhsj-custom/google-ai-studio/v1beta',
         type: 'google',
         models: [
+            {
+                value: 'gemini-3.1-pro-preview',
+                label: 'Gemini 3.1 Pro (预览版)',
+                description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。'
+            },
             {
                 value: 'gemini-3-pro-preview',
                 label: 'Gemini 3.0 Pro (预览版)',
@@ -529,6 +549,7 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
         type: 'openai',
         mode: 'auto',
         models: [
+            { value: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (预览版)', description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。' },
             { value: 'google/gemini-3-pro-preview', label: 'Gemini 3.0 Pro (预览版)', description: 'Google 迄今为止最智能的模型系列，以先进的推理和联网搜索能力为基础。' },
             { value: 'google/gemini-3-flash-preview', label: 'Gemini 3.0 Flash (预览版)', description: 'Google 旗下最新一代的先进模型，现已提供尝鲜使用。' },
             { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Google 旗下上一代的最先进模型系列，性能很棒棒。' },
@@ -559,6 +580,11 @@ export const AI_PROVIDER_CATALOG: AIProviderOption[] = [
                 value: 'gemini-2.5-flash-lite',
                 label: 'Gemini 2.5 Flash Lite',
                 description: 'Google 旗下上一代的最先进模型系列，性能略差但是速度很快，是魔法少女生成器默认使用的轻量模型。'
+            },
+            {
+                value: 'gemini-3.1-pro-preview',
+                label: 'Gemini 3.1 Pro (预览版)',
+                description: 'Google 最新一代的 Gemini 3.1 Pro 预览模型。'
             },
             {
                 value: 'gemini-3-pro',

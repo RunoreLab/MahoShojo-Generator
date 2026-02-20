@@ -159,12 +159,14 @@ const pickNonBlacklistedModelForProvider = (providerId: string): string | null =
     'gemini-2.0-flash-lite',
     'gemini-2.0-flash',
     'gemini-3-flash-preview',
+    'gemini-3.1-pro-preview',
     'gemini-3-pro-preview',
     'google/gemini-2.5-flash-lite',
     'google/gemini-2.5-flash',
     'google/gemini-2.0-flash-lite',
     'google/gemini-2.0-flash',
     'google/gemini-3-flash-preview',
+    'google/gemini-3.1-pro-preview',
     'google/gemini-3-pro-preview',
   ];
 
