@@ -1537,18 +1537,18 @@ const SublimationPage: React.FC = () => {
 
                         {/* 成长方向引导输入框 */}
                         <div className="input-group">
-                            <label htmlFor="user-guidance" className="input-label">成长方向引导 (可选)</label>
+                            <label htmlFor="sublimation-story-guidance" className="input-label">成长方向引导 (可选)</label>
                             <div className="flex flex-wrap items-center gap-2">
                                 <input
-                                    id="user-guidance"
-                                    name="maho-sublimation-guidance"
+                                    id="sublimation-story-guidance"
+                                    name="sublimation_story_guidance"
                                     type="text"
                                     value={userGuidance}
                                     onChange={(e) => setUserGuidance(e.target.value)}
                                     className="input-field flex-1 min-w-[12rem]"
                                     placeholder="输入关键词或一句话 (最多30字)"
                                     maxLength={30}
-                                    autoComplete="off"
+                                    autoComplete="new-password"
                                     autoCorrect="off"
                                     autoCapitalize="off"
                                     spellCheck={false}

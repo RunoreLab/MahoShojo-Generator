@@ -95,18 +95,23 @@ export function StoryOptionsPanel({
 
       {enableUserGuidance && (
         <div className="input-group">
-          <label htmlFor="user-guidance" className="input-label">
+          <label htmlFor="arena-story-guidance" className="input-label">
             故事方向引导 (可选)
           </label>
+          {/* 诱饵字段：优先吸收部分浏览器/系统的账号自动填充，避免误填到业务输入框 */}
+          <div className="sr-only" aria-hidden="true">
+            <input type="text" name="username" autoComplete="username" tabIndex={-1} readOnly />
+            <input type="password" name="password" autoComplete="current-password" tabIndex={-1} readOnly />
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <input
-              id="user-guidance"
-              name="maho-story-guidance"
+              id="arena-story-guidance"
+              name="arena_story_guidance"
               type="text"
               className="input-field flex-1 min-w-[12rem]"
               placeholder="输入关键词或一句话 (最多200字)"
               maxLength={200}
-              autoComplete="off"
+              autoComplete="new-password"
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
