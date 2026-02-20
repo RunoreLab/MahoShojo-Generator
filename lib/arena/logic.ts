@@ -243,7 +243,8 @@ export const createPromptBuilder = (
     adjudicationResults: AdjudicationResult[] | null,
     storyLength: string | undefined,
     narrativeHistory?: NarrativeHistoryEntry[] | null,
-    loreText?: string | null
+    loreText?: string | null,
+    includeQuestionnaireAnswers: boolean = true
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const allNames = combatants.map(c => c.data.codename || c.data.name);
@@ -284,12 +285,16 @@ export const createPromptBuilder = (
             }
 
             profileString += `// 核心设定\n${JSON.stringify(restOfProfile, null, 2)}\n`;
-            const userAnswersText = formatUserAnswersForPrompt(userAnswers, fallbackQuestions);
+            const userAnswersText = includeQuestionnaireAnswers
+                ? formatUserAnswersForPrompt(userAnswers, fallbackQuestions)
+                : '';
             if (userAnswersText) profileString += userAnswersText;
         } else {
             if (type === 'general-character' && typeof data.content === 'string') {
                 profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
-                profileString += formatUserAnswersForPrompt((data as any).userAnswers, fallbackQuestions);
+                if (includeQuestionnaireAnswers) {
+                    profileString += formatUserAnswersForPrompt((data as any).userAnswers, fallbackQuestions);
+                }
             } else {
                 let fallbackData: unknown = data;
                 if (typeof fallbackData === 'object' && fallbackData !== null) {
@@ -432,7 +437,8 @@ export const createStreamPromptBuilder = (
     adjudicationResults: AdjudicationResult[] | null,
     storyLength: string | undefined,
     narrativeHistory?: NarrativeHistoryEntry[] | null,
-    loreText?: string | null
+    loreText?: string | null,
+    includeQuestionnaireAnswers: boolean = true
 ) => (input: { combatants: any[] }): string => {
     const { combatants } = input;
     const allNames = combatants.map(c => c.data.codename || c.data.name);
@@ -473,12 +479,16 @@ export const createStreamPromptBuilder = (
             }
 
             profileString += `// 核心设定\n${JSON.stringify(restOfProfile, null, 2)}\n`;
-            const userAnswersText = formatUserAnswersForPrompt(userAnswers, fallbackQuestions);
+            const userAnswersText = includeQuestionnaireAnswers
+                ? formatUserAnswersForPrompt(userAnswers, fallbackQuestions)
+                : '';
             if (userAnswersText) profileString += userAnswersText;
         } else {
             if (type === 'general-character' && typeof data.content === 'string') {
                 profileString += `// 通用角色设定（Markdown）\n${data.content}\n`;
-                profileString += formatUserAnswersForPrompt((data as any).userAnswers, fallbackQuestions);
+                if (includeQuestionnaireAnswers) {
+                    profileString += formatUserAnswersForPrompt((data as any).userAnswers, fallbackQuestions);
+                }
             } else {
                 let fallbackData: unknown = data;
                 if (typeof fallbackData === 'object' && fallbackData !== null) {

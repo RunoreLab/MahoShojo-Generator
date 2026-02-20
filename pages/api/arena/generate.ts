@@ -322,6 +322,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
             && Array.isArray(combatants)
             && combatants.length === 2
             && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
+        const includeQuestionnaireAnswersInPrompt = !isStrictRankedMatchRequest;
         const shouldPreferLiteModelInStrict =
             isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
         const baseModelOverride = customModelOverride ?? (isDowngrade ? 'gemini-2.5-flash-lite' : undefined);
@@ -473,7 +474,8 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
                 adjudicationResults,
                 storyLength,
                 narrativeHistoryForPrompt,
-                loreText
+                loreText,
+                includeQuestionnaireAnswersInPrompt
             ),
             schema: battleReportSchema,
             taskName: `生成${mode}模式故事`,

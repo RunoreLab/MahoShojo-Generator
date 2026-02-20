@@ -568,10 +568,25 @@ async function handler(req: NextRequest): Promise<Response> {
 	            default: magicalGirlFallbackQuestions,
 	        };
 
-        const prompt = createStreamPromptBuilder(
-            fallbackQuestions,
-            finalUserGuidance,
-            finalInternalGuidance,
+	        const isStrictRankedMatchRequest =
+	            mode === 'classic'
+	            && String(language ?? '').trim() === 'zh-CN'
+	            && !String(selectedLevel ?? '').trim()
+	            && !String(userGuidance ?? '').trim()
+	            && !hasQuestionnaireLore
+	            && resolvedReadArenaHistory === false
+	            && resolvedReadCurrentState === false
+	            && resolvedReadNarrativeHistory === false
+	            && (!Array.isArray(adjudicationEvents) || adjudicationEvents.length === 0)
+	            && Array.isArray(combatants)
+	            && combatants.length === 2
+	            && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
+	        const includeQuestionnaireAnswersInPrompt = !isStrictRankedMatchRequest;
+
+	        const prompt = createStreamPromptBuilder(
+	            fallbackQuestions,
+	            finalUserGuidance,
+	            finalInternalGuidance,
             needsWorldviewWarning,
             language,
             selectedLevel,
@@ -586,11 +601,12 @@ async function handler(req: NextRequest): Promise<Response> {
             resolvedWriteArenaHistory,
             resolvedWriteCurrentState,
             shouldForceStreamMeta,
-            adjudicationResults,
-            storyLength,
-            narrativeHistoryForPrompt,
-            loreText,
-        )({ combatants });
+	            adjudicationResults,
+	            storyLength,
+	            narrativeHistoryForPrompt,
+	            loreText,
+	            includeQuestionnaireAnswersInPrompt,
+	        )({ combatants });
 
         const aiTelemetry: NonNullable<GenerateWithAIOptions['telemetry']> = {};
         const reasoningEventQueue: RawReasoningStreamEvent[] = [];
@@ -607,21 +623,8 @@ async function handler(req: NextRequest): Promise<Response> {
                 }
                 : {}),
         };
-        const isStrictRankedMatchRequest =
-            mode === 'classic'
-            && String(language ?? '').trim() === 'zh-CN'
-            && !String(selectedLevel ?? '').trim()
-            && !String(userGuidance ?? '').trim()
-            && !hasQuestionnaireLore
-            && resolvedReadArenaHistory === false
-            && resolvedReadCurrentState === false
-            && resolvedReadNarrativeHistory === false
-            && (!Array.isArray(adjudicationEvents) || adjudicationEvents.length === 0)
-            && Array.isArray(combatants)
-            && combatants.length === 2
-            && combatants.every((c: any) => !String(c?.characterGuidance ?? '').trim());
-        const shouldPreferLiteModelInStrict =
-            isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
+	        const shouldPreferLiteModelInStrict =
+	            isStrictRankedMatchRequest && !customProviderOverride && !shouldDisablePolling && !customModelOverride;
         const modelOverrideFallbacks: Array<string | undefined> = customModelOverride
             ? [customModelOverride]
             : (shouldPreferLiteModelInStrict
