@@ -19,6 +19,22 @@
 - 审阅方式：静态代码审查 + 路由/调用点统计 + 官方文档交叉验证（Better Auth / Drizzle / Cloudflare / OWASP / MDN）。
 - 注意：本结论不包含线上真实流量与攻击日志，仅基于仓库当前状态。
 
+### 1.1 参考模板复查（2026-02-25 二次核验）
+
+按你的要求，我对同级项目 `~/code/opennext-cloudflare-starter-template` 做了重新核验，确认可用并提炼到以下结论：
+
+1. 模板确实落地了 Better Auth + Drizzle + D1 Binding：  
+   - `src/server/auth/auth.ts`（`betterAuth` + `drizzleAdapter`）  
+   - `src/server/db/index.ts`（`drizzle(env.DB)`）  
+   - `src/server/db/schema/auth.ts`（`user/session/account/verification`）  
+2. 模板的 auth 路由是 App Router 形态：  
+   - `src/app/api/auth/[...all]/route.ts`（`toNextJsHandler(auth)`）  
+3. 你当前项目仍是 Pages Router（`pages/api/*`），因此应做“等价迁移”，不能直接复制 route 文件。  
+4. 该模板的迁移与运维实践可直接借鉴：  
+   - `wrangler.jsonc` 的 D1 `migrations_dir` 管理  
+   - `scripts/db-migrate.js` 的 local/remote 一键迁移  
+   - `scripts/generate-better-auth-key.js` 的密钥生成流程
+
 ---
 
 ## 2. 当前仓库现状（与本次决策直接相关）

@@ -1,4 +1,4 @@
-# Better Auth + Drizzle 落地实施手册（v1，2026-02-25）
+# Better Auth + Drizzle 落地实施手册（v2，2026-02-25）
 
 > 配套阅读：`docs/AUTH_DB_ISOLATION_DRIZZLE_RESEARCH_2026-02-25.md`  
 > 目标：把“建议”细化为可执行工程步骤，适配当前仓库（Next.js Pages Router + Edge Runtime + Cloudflare D1）。
@@ -19,18 +19,23 @@
 
 ---
 
-## 2. 关于 `opennext-cloudflare-starter-template` 的核验结果
+## 2. 关于 `opennext-cloudflare-starter-template` 的复查结论（已更新）
 
-你建议参考同级项目 `/opennext-cloudflare-starter-template`。本地核验结果：
+你提示已重新 clone 后，我对同级项目做了二次核验，结论如下：
 
-1. 目录结构完整，但绝大多数业务文件为 `0` 字节。  
-2. `.git` 状态异常（`HEAD`/index 不可读），无法从本地仓库提取可用实现。  
-3. 结论：**当前本地副本不可作为代码级参考样板**。
+1. 模板可用，包含完整的 Better Auth + Drizzle + D1 Binding 代码。  
+2. 该模板基于 **Next.js App Router + OpenNext Cloudflare**，与你当前仓库的 **Pages Router + next-on-pages** 在路由层存在差异。  
+3. 结论：**可以作为“架构与实现模式”参考，但不能直接逐文件复制。**
 
-可执行建议：
+已确认可复用的关键实践（对应文件）：
 
-1. 如果你有该模板的完整可用版本，建议重新拉取后再做“逐文件对齐”。  
-2. 目前先按 Better Auth / Drizzle 官方文档落地，后续再吸收模板细节。
+1. Better Auth 主配置：`~/code/opennext-cloudflare-starter-template/src/server/auth/auth.ts`  
+2. App Router auth 聚合路由：`~/code/opennext-cloudflare-starter-template/src/app/api/auth/[...all]/route.ts`  
+3. Better Auth Drizzle 表结构：`~/code/opennext-cloudflare-starter-template/src/server/db/schema/auth.ts`  
+4. D1 Binding + Drizzle 连接：`~/code/opennext-cloudflare-starter-template/src/server/db/index.ts`  
+5. Wrangler D1 migrations_dir 绑定：`~/code/opennext-cloudflare-starter-template/wrangler.jsonc`  
+6. Drizzle migration 执行脚本：`~/code/opennext-cloudflare-starter-template/scripts/db-migrate.js`  
+7. Better Auth Secret 生成脚本：`~/code/opennext-cloudflare-starter-template/scripts/generate-better-auth-key.js`
 
 ---
 
@@ -97,13 +102,14 @@
 
 - `pages/api/auth/[...all].ts`
 
-按 Better Auth Next.js 文档，采用 `toNodeHandler` 适配，并关闭 bodyParser（仅示意）：
+模板在 App Router 中采用 `toNextJsHandler(auth)`（见 `src/app/api/auth/[...all]/route.ts`）。  
+当前仓库是 Pages Router，因此要做“等价适配层”，并关闭 bodyParser（仅示意）：
 
 ```ts
 // pseudocode
 export const config = { api: { bodyParser: false } };
 
-const handler = toNodeHandler(auth.handler);
+const handler = createBetterAuthPagesHandler(auth); // 伪函数：封装 Better Auth 到 NextApiHandler
 export default async function route(req, res) {
   return handler(req, res);
 }
@@ -175,6 +181,12 @@ export default async function route(req, res) {
 3. `lib/db/schema/business.ts`（逐步承接现有业务表）  
 4. `lib/db/repositories/*`（仓储层）
 
+补充（来自参考模板的可复用点）：
+
+1. D1 连接优先走 Binding（不是 REST Token）：`drizzle(env.DB, { schema })`  
+2. 在开发模式通过 OpenNext 注入 Cloudflare context（模板用 `getCloudflareContext()`）。  
+3. Schema 由 `drizzle.config.ts` 指向统一入口，再生成到 `drizzle/` 目录。
+
 ## 8.2 迁移机制
 
 建议采用：
@@ -182,6 +194,11 @@ export default async function route(req, res) {
 1. 开发：Drizzle migration 生成 SQL。  
 2. 部署：通过 Wrangler D1 migrations 执行。  
 3. 原则：数据库结构变更必须先落 migration，再上业务代码。
+
+补充建议（参考模板脚本实践）：
+
+1. 保留 `scripts/db-migrate.js` 这种“读取 wrangler 配置并自动选 local/remote”的脚本层，降低误操作。  
+2. 将 `migrations_dir` 固定为同一目录，避免多人协作时 migration 漂移。
 
 ## 8.3 SQL 直连管控
 
@@ -197,6 +214,11 @@ export default async function route(req, res) {
 1. 保留 `lib/auth.ts` 接口形状，内部逐步转为“会话探测 + 服务端登录态”。  
 2. `useAuth` 保持调用方式，底层从 `authKey` 驱动过渡到 cookie 会话驱动。  
 3. `AuthModal` 文案从“登录密钥”逐步迁移为“密码/邮箱”。
+
+补充（参考模板客户端用法）：
+
+1. 模板通过 `createAuthClient` 暴露 `signIn/signUp/useSession`，可作为你们后续 `useAuth` 的重构目标形态。  
+2. 会话读取应以服务端 `getSession` 为准，前端只做状态展示与交互。
 
 ## 9.2 中期（切换期）
 
@@ -270,4 +292,3 @@ https://orm.drizzle.team/docs/connect-cloudflare-d1
 https://developers.cloudflare.com/workers/runtime-apis/bindings/
 7. Cloudflare D1 Migrations：  
 https://developers.cloudflare.com/d1/reference/migrations/
-
