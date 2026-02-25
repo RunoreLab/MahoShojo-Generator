@@ -1,5 +1,5 @@
-import { getUserByAuthKey } from '@/lib/d1';
 import { issueActivityToken } from '@/lib/auth/activity-token';
+import { requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';
 
@@ -12,26 +12,12 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    const authHeader = req.headers.get('authorization');
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return new Response(JSON.stringify({ error: '未提供认证信息' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
+    const auth = await requireAuthUser(req);
+    if ('response' in auth) {
+      return auth.response;
     }
 
-    const authKey = authHeader.substring(7);
-
-    // 根据认证密钥查找用户
-    const user = await getUserByAuthKey(authKey);
-
-    if (!user) {
-      return new Response(JSON.stringify({ error: '认证失败' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    const user = auth.user;
 
     const activityToken = await issueActivityToken(user.id);
 

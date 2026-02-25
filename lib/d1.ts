@@ -23,6 +23,7 @@ export {
 // 重新导出用户相关功能
 export {
   createUser,
+  getUserById,
   getUserByUsername,
   getUserByEmail,
   getUserByAuthKey,

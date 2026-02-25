@@ -54,6 +54,24 @@ export async function getUserByEmail(email: string): Promise<any> {
   }
 }
 
+// 根据用户 ID 查找用户
+export async function getUserById(userId: number): Promise<any> {
+  try {
+    const result = await queryFromD1(
+      'SELECT * FROM users WHERE id = ? LIMIT 1',
+      [userId]
+    ) as any;
+
+    if (result.success && result.result && result.result[0]?.results?.length > 0) {
+      return result.result[0].results[0];
+    }
+    return null;
+  } catch (error) {
+    console.error('根据用户ID查找用户失败:', error);
+    return null;
+  }
+}
+
 // 根据认证密钥查找用户
 export async function getUserByAuthKey(authKey: string): Promise<any> {
   try {
