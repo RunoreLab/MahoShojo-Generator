@@ -1,5 +1,7 @@
 # 用户系统正规化、数据库隔离与 Drizzle/认证方案研究（2026-02-25）
 
+> 实施细化版请见：`docs/BETTER_AUTH_DRIZZLE_IMPLEMENTATION_PLAYBOOK_2026-02-25.md`
+
 ## 0. 结论先行
 
 基于当前仓库实现，我的建议是：
