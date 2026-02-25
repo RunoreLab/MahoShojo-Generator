@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { users } from '@/lib/db/schema/business';
 
 const unixEpochNow = sql`(unixepoch())`;
@@ -87,5 +87,27 @@ export const userAuthLinks = sqliteTable(
   (table) => ({
     authUserIdUnique: uniqueIndex('user_auth_links_auth_user_id_unique').on(table.authUserId),
     businessUserIdUnique: uniqueIndex('user_auth_links_business_user_id_unique').on(table.businessUserId),
+  }),
+);
+
+export const authPasswordResetTokens = sqliteTable(
+  'auth_password_reset_tokens',
+  {
+    id: text('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    consumedAt: integer('consumed_at'),
+    requestedIp: text('requested_ip'),
+    requestedUserAgent: text('requested_user_agent'),
+    createdAt: integer('created_at').notNull().default(unixEpochNow),
+    updatedAt: integer('updated_at').notNull().default(unixEpochNow),
+  },
+  (table) => ({
+    tokenHashUnique: uniqueIndex('auth_password_reset_tokens_token_hash_unique').on(table.tokenHash),
+    userIdExpiresAtIndex: index('auth_password_reset_tokens_user_id_expires_at_idx').on(table.userId, table.expiresAt),
+    expiresAtIndex: index('auth_password_reset_tokens_expires_at_idx').on(table.expiresAt),
   }),
 );

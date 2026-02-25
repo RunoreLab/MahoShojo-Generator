@@ -154,6 +154,8 @@
 19. `lib/auth/server-app.ts` 新增 `getAuthUserForApp`，用于复用 App Router 统一鉴权链路（`requireAuthUserForApp` 改为在其基础上做封禁判定）。  
 20. 本轮改造已在当前仓库通过 `bun run lint`、`bun run build` 与 `bun test`。  
 21. 补齐 Better Auth 登录/注册兼容闭环：当业务用户 `users.auth_key` 为空时，登录/注册桥接会自动补写兼容密钥并返回，避免“密码登录成功但 legacy 兼容链路断裂”的灰度期故障（`app/api/auth/login`、`app/api/auth/register`、`lib/auth/user-auth-linking.ts`、`lib/db/repositories/business-users.ts`）。  
+22. 已完成高频受保护接口 ORM 化（首轮）：`pages/api/data-card-meta.ts` 与 `pages/api/data-card-meta-batch.ts` 改为优先走 `lib/db/repositories/data-card-meta.ts`（Drizzle），并补齐 `data_cards / data_card_metrics / arena_ratings` 业务域 schema 映射。  
+23. `app/api/auth/recover` 已从“重置并回发 legacy key”升级为“一次性重置令牌”流程：新增 `auth_password_reset_tokens`（`drizzle/0002_auth_password_reset_tokens.sql`）、`app/api/auth/recover/reset` 消费接口与 `pages/password-recovery.tsx` 二段式重置 UI。  
 
 受限项（当前本地环境）：
 
@@ -165,3 +167,4 @@
 1. 在测试库补齐凭据后执行 `backfill:user-auth-links:dry` → `backfill:user-auth-links:write`，并沉淀真实冲突样例（`skip-ambiguous-email`、`skip-ambiguous-username`、`skip-business-already-linked`）。  
 2. 完成端到端联调：密码登录/注册（Cookie 会话）与 legacy 密钥路径并行验证，并补录请求/响应样例。  
 3. 对齐部署侧 D1 Binding 与 migration 执行规范（`wrangler` 配置、local/remote 流程）。  
+4. 继续迁移仍直接 `queryFromD1` 的高频受保护接口（建议下一批：`pages/api/me/profile-card.ts`、`pages/api/arena/strict-preflight.ts`）。  
