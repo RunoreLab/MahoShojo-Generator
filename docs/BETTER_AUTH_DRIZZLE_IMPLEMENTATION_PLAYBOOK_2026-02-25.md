@@ -1,6 +1,7 @@
 # Better Auth + Drizzle 落地实施手册（v2，2026-02-25）
 
 > 配套阅读：`docs/AUTH_DB_ISOLATION_DRIZZLE_RESEARCH_2026-02-25.md`  
+> 决策更新：`docs/AUTH_ORM_DUAL_TRACK_APP_ROUTER_EXECUTION_2026-02-25.md`（App Router 终态 + 双轨渐进迁移）  
 > 目标：把“建议”细化为可执行工程步骤，适配当前仓库（Next.js Pages Router + Edge Runtime + Cloudflare D1）。
 
 ## 1. 范围与决策

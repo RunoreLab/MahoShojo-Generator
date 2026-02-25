@@ -237,17 +237,19 @@ export const authApi = {
     activityToken?: string | null;
   }> {
     const authHeader = await authStorage.getAuthHeader();
-    if (!authHeader) {
-      return { success: false };
-    }
 
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (authHeader) {
+        headers.Authorization = authHeader;
+      }
+
       const response = await fetch('/api/auth/verify', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': authHeader
-        }
+        headers,
+        credentials: 'include',
       });
 
       const data = await response.json();

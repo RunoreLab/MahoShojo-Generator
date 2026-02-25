@@ -29,24 +29,24 @@ export function useAuth() {
   // 初始化时验证登录状态
   useEffect(() => {
     const checkAuth = async () => {
-      const auth = await authStorage.getAuth();
-      if (auth) {
-        const result = await authApi.verify();
-        if (result.success && result.user) {
-          setUser(result.user);
-          if (Array.isArray(result.badges)) {
-            setUserBadges(result.badges);
-            setBadgesLoading(false);
-          } else {
-            await loadUserBadges();
-          }
+      const legacyAuth = await authStorage.getAuth();
+      const result = await authApi.verify();
+
+      if (result.success && result.user) {
+        setUser(result.user);
+        if (Array.isArray(result.badges)) {
+          setUserBadges(result.badges);
+          setBadgesLoading(false);
         } else {
+          await loadUserBadges();
+        }
+      } else {
+        if (legacyAuth) {
           authStorage.clearAuth();
         }
-      }
-      if (!auth) {
         setBadgesLoading(false);
       }
+
       setLoading(false);
     };
 

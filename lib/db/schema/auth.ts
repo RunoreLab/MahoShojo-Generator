@@ -1,0 +1,91 @@
+import { sql } from 'drizzle-orm';
+import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { users } from '@/lib/db/schema/business';
+
+const unixEpochNow = sql`(unixepoch())`;
+
+/**
+ * Better Auth 用户域（并行子域）
+ * - 表名前缀 ba_，避免与既有 users 冲突
+ * - 通过 user_auth_links 与业务 users 关联
+ */
+export const baUsers = sqliteTable(
+  'ba_user',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    email: text('email').notNull(),
+    emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
+    image: text('image'),
+    createdAt: integer('created_at').notNull().default(unixEpochNow),
+    updatedAt: integer('updated_at').notNull().default(unixEpochNow),
+  },
+  (table) => ({
+    emailUnique: uniqueIndex('ba_user_email_unique').on(table.email),
+  }),
+);
+
+export const baSessions = sqliteTable(
+  'ba_session',
+  {
+    id: text('id').primaryKey(),
+    expiresAt: integer('expires_at').notNull(),
+    token: text('token').notNull(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    userId: text('user_id')
+      .notNull()
+      .references(() => baUsers.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at').notNull().default(unixEpochNow),
+    updatedAt: integer('updated_at').notNull().default(unixEpochNow),
+  },
+  (table) => ({
+    tokenUnique: uniqueIndex('ba_session_token_unique').on(table.token),
+  }),
+);
+
+export const baAccounts = sqliteTable('ba_account', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  providerId: text('provider_id').notNull(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => baUsers.id, { onDelete: 'cascade' }),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  idToken: text('id_token'),
+  accessTokenExpiresAt: integer('access_token_expires_at'),
+  refreshTokenExpiresAt: integer('refresh_token_expires_at'),
+  scope: text('scope'),
+  password: text('password'),
+  createdAt: integer('created_at').notNull().default(unixEpochNow),
+  updatedAt: integer('updated_at').notNull().default(unixEpochNow),
+});
+
+export const baVerifications = sqliteTable('ba_verification', {
+  id: text('id').primaryKey(),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: integer('created_at').notNull().default(unixEpochNow),
+  updatedAt: integer('updated_at').notNull().default(unixEpochNow),
+});
+
+export const userAuthLinks = sqliteTable(
+  'user_auth_links',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    authUserId: text('auth_user_id')
+      .notNull()
+      .references(() => baUsers.id, { onDelete: 'cascade' }),
+    businessUserId: integer('business_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at').notNull().default(unixEpochNow),
+    updatedAt: integer('updated_at').notNull().default(unixEpochNow),
+  },
+  (table) => ({
+    authUserIdUnique: uniqueIndex('user_auth_links_auth_user_id_unique').on(table.authUserId),
+    businessUserIdUnique: uniqueIndex('user_auth_links_business_user_id_unique').on(table.businessUserId),
+  }),
+);

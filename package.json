@@ -10,6 +10,7 @@
         "preview": "npm run build:cf && wrangler pages dev .vercel/output/static",
         "start": "next start",
         "lint": "next lint",
+        "db:generate": "drizzle-kit generate --config drizzle.config.ts",
         "test": "bun test",
         "test:watch": "bun test --watch"
     },
@@ -63,6 +64,7 @@
         "@types/react": "^19",
         "@types/react-dom": "^19",
         "@typescript-eslint/typescript-estree": "^8.43.0",
+        "drizzle-kit": "^0.31.9",
         "eslint": "^9",
         "eslint-config-next": "15.3.2",
         "shadcn": "^3.5.2",
