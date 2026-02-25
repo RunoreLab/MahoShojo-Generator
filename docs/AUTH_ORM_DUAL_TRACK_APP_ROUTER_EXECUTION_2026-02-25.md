@@ -145,10 +145,14 @@
 10. `lib/auth/server-app.ts` 已升级为“映射表优先 + 自愈补链 + legacy 查询兜底”解析路径。  
 11. `app/api/auth/[...all]` 增加 D1 绑定可用性检查，缺失时返回 `BETTER_AUTH_DB_UNAVAILABLE`（503），便于定位部署配置问题。  
 12. 本轮改造已通过 `npm run lint` 与 `npm run build`。  
+13. `app/api/auth/login`、`app/api/auth/register` 已接入 Better Auth 原生 `sign-in/sign-up` 桥接（保留 Turnstile 校验与 legacy 密钥兜底）。  
+14. 前端认证交互已升级为“密码登录（Better Auth）/旧密钥登录（legacy）”双模式，并保留 legacy 兼容展示层（`AuthModal` + `useAuth` + `lib/auth.ts`）。  
+15. 新增 `scripts/backfill-user-auth-links.ts`，按“email 优先、username 兜底”规则回填 `user_auth_links`，支持 dry-run/断点续跑。  
+16. 已完成首批受保护 Pages API 统一鉴权迁移：`decks`、`deck-cards`、`deck-favorites`、`favorites`、`public-decks`、`user-capacity`、`redeem-code`、`badges/user`、`badges/equip`、`data-cards`、`data-card-recycle`、`data-card-tags`、`data-card-meta`、`data-card-meta-batch`、`arena/strict-preflight` 全部改为复用 `lib/auth/server` 的统一鉴权入口。  
+17. 增补回填脚本命令：`package.json` 新增 `backfill:user-auth-links:dry` / `backfill:user-auth-links:write`，便于测试库演练与生产执行。  
 
 待继续：
 
-1. 前端登录/注册入口从 legacy `auth_key` 逐步切换到 Better Auth 原生 `sign-in/sign-up`（保留兼容窗口）。  
-2. 批次迁移受保护业务 API（19 个 legacy Bearer 路由）到统一鉴权与仓储层。  
-3. 完成 `user_auth_links` 回填脚本与灰度切流方案（覆盖存量用户）。  
-4. 对齐部署侧 D1 Binding 与 migration 执行规范（`wrangler` 配置、local/remote 流程）。  
+1. 继续迁移剩余大型受保护生成接口到统一鉴权与仓储层：`pages/api/arena/generate.ts`、`pages/api/arena/generate-stream.ts`、`pages/api/generate-battle-story.ts`。  
+2. 在测试库执行 `user_auth_links` 回填 dry-run / write-run，并完成灰度切流与冲突处理手册。  
+3. 对齐部署侧 D1 Binding 与 migration 执行规范（`wrangler` 配置、local/remote 流程）。  

@@ -1,17 +1,7 @@
-import { addCardsToDeck, getDeckById, getDeckCardsWithAccess, getUserByAuthKey, pruneDeckInaccessibleCards, removeCardsFromDeck } from '@/lib/d1';
+import { addCardsToDeck, getDeckById, getDeckCardsWithAccess, pruneDeckInaccessibleCards, removeCardsFromDeck } from '@/lib/d1';
+import { getAuthUser, requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';
-
-type AuthenticatedUser = { id: number; username: string };
-
-async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-
-  const authKey = authHeader.substring(7);
-  const user = await getUserByAuthKey(authKey);
-  return user;
-}
 
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === 'GET') {
@@ -25,7 +15,7 @@ export default async function handler(req: Request): Promise<Response> {
         });
       }
 
-      const viewer = await getUserFromAuth(req);
+      const viewer = (await getAuthUser(req))?.user ?? null;
       const deck = await getDeckById(deckId);
       if (!deck) {
         return new Response(JSON.stringify({ error: '卡组不存在' }), {
@@ -64,13 +54,9 @@ export default async function handler(req: Request): Promise<Response> {
     }
   }
 
-  const user = await getUserFromAuth(req);
-  if (!user) {
-    return new Response(JSON.stringify({ error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
+  const user = auth.user;
 
   if (req.method === 'POST') {
     try {

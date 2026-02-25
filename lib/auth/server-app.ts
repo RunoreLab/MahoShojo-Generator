@@ -41,6 +41,25 @@ const toPositiveInteger = (value: unknown): number | null => {
   return null;
 };
 
+const toOptionalInteger = (value: unknown): number | undefined => {
+  if (value == null) return undefined;
+
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) return undefined;
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!/^-?\d+$/.test(trimmed)) return undefined;
+    const parsed = Number(trimmed);
+    if (!Number.isSafeInteger(parsed)) return undefined;
+    return parsed;
+  }
+
+  return undefined;
+};
+
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 
@@ -58,6 +77,8 @@ const toAuthenticatedUser = (raw: unknown): AuthenticatedUser | null => {
     username: record.username.trim(),
     prefix: typeof record.prefix === 'string' || record.prefix === null ? (record.prefix as string | null) : undefined,
     is_banned: typeof bannedField === 'string' || bannedField === null ? (bannedField as string | null) : undefined,
+    is_admin: toOptionalInteger(record.is_admin),
+    is_review_exempt: toOptionalInteger(record.is_review_exempt),
   };
 };
 

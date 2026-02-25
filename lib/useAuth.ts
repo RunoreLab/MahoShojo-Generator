@@ -54,8 +54,8 @@ export function useAuth() {
   }, []);
 
   // 注册
-  const register = async (username: string, email: string, turnstileToken: string) => {
-    const result = await authApi.register(username, email, turnstileToken);
+  const register = async (username: string, email: string, turnstileToken: string, password?: string) => {
+    const result = await authApi.register(username, email, turnstileToken, password);
     if (result.success) {
       // 注册成功后自动验证登录
       const verifyResult = await authApi.verify();
@@ -72,8 +72,13 @@ export function useAuth() {
   };
 
   // 登录
-  const login = async (username: string, authKey: string, turnstileToken: string) => {
-    const result = await authApi.login(username, authKey, turnstileToken);
+  const login = async (
+    identifier: string,
+    credential: string,
+    turnstileToken: string,
+    mode: 'password' | 'legacy' = 'password',
+  ) => {
+    const result = await authApi.login(identifier, credential, turnstileToken, mode);
     if (result.success && result.user) {
       setUser(result.user);
       // 加载用户徽章

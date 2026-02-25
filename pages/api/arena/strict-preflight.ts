@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
-import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
+import { queryFromD1 } from '@/lib/d1';
+import { getAuthUser } from '@/lib/auth/server';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { buildPairKey, getStrictDailyUsage, INITIAL_RATING, STRICT_DEDUP_WINDOW_MS, STRICT_DAILY_LIMIT } from '@/lib/database/arena-ratings';
 import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
@@ -175,9 +176,7 @@ export default async function handler(req: NextRequest) {
     const customProvider = body?.customProvider && typeof body.customProvider === 'object' ? body.customProvider : null;
     const customModelId = trimString(customProvider?.modelId);
 
-    const authHeader = req.headers.get('authorization');
-    const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-    const user = authKey ? await getUserByAuthKey(authKey) : null;
+    const user = (await getAuthUser(req))?.user ?? null;
 
     const reasons: string[] = [];
     let range: ApiSuccessResponse['range'] = null;

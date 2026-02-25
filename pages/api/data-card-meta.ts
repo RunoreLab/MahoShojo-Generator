@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
-import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
+import { queryFromD1 } from '@/lib/d1';
+import { getAuthUser } from '@/lib/auth/server';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
 import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
@@ -94,24 +95,14 @@ export default async function handler(req: NextRequest) {
 
     const isPublicReadable = cardRow.is_public === 1 && cardRow.review_status === 'approved';
     if (!isPublicReadable) {
-      const authHeader = req.headers.get('authorization') ?? '';
-      const authKey = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : '';
-      if (!authKey) {
+      const auth = await getAuthUser(req);
+      if (!auth) {
         return new Response(JSON.stringify({ error: '未授权' }), {
           status: 401,
           headers: { 'Content-Type': 'application/json' },
         });
       }
-
-      const user = await getUserByAuthKey(authKey);
-      if (!user) {
-        return new Response(JSON.stringify({ error: '未授权' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      if (user.id !== cardRow.user_id) {
+      if (auth.user.id !== cardRow.user_id) {
         return new Response(JSON.stringify({ error: '无权访问该数据卡' }), {
           status: 403,
           headers: { 'Content-Type': 'application/json' },

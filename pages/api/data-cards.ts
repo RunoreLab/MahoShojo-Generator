@@ -1,5 +1,4 @@
 import { 
-  getUserByAuthKey, 
   createDataCardWithAuthor, 
   getUserDataCards, 
   updateDataCard, 
@@ -10,6 +9,7 @@ import {
   getDataCardById,
   getUserUsedSlots
 } from '@/lib/d1';
+import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { queryFromD1 } from '@/lib/d1';
@@ -24,29 +24,6 @@ import {
 } from '@/lib/review/auto-data-card-review';
 
 export const runtime = 'edge';
-
-// [v0.4.2] 扩展 User 类型以包含新字段
-interface AuthenticatedUser {
-  id: number;
-  username: string;
-  is_review_exempt: number; // 0 or 1
-  is_admin: number; // 0 or 1
-}
-
-// 辅助函数：从请求头获取用户认证信息
-async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
-  const authHeader = req.headers.get('authorization');
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const authKey = authHeader.substring(7);
-  // getUserByAuthKey 返回 user 表的所有字段，所以这里能直接获取到 is_review_exempt
-  const user = await getUserByAuthKey(authKey);
-  
-  return user;
-}
 
 async function getDataCardUpdatedAt(dataCardId: string): Promise<string | null> {
   try {
@@ -89,14 +66,9 @@ async function computeAndUpsertMetrics(dataCardId: string, dataJsonString: strin
 }
 
 export default async function handler(req: Request): Promise<Response> {
-  // 验证用户身份
-  const user = await getUserFromAuth(req);
-  if (!user) {
-    return new Response(JSON.stringify({ error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
+  const user = auth.user;
 
   const userId = user.id;
 

@@ -1,35 +1,16 @@
-import { countUserDecks, createDeck, deleteDeck, getUserByAuthKey, getUserDataCardCapacity, getUserDecks, updateDeck } from '@/lib/d1';
+import { countUserDecks, createDeck, deleteDeck, getUserDataCardCapacity, getUserDecks, updateDeck } from '@/lib/d1';
+import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 
 export const runtime = 'edge';
 
-interface AuthenticatedUser {
-  id: number;
-  username: string;
-  is_admin?: number;
-}
-
-async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-
-  const authKey = authHeader.substring(7);
-  const user = await getUserByAuthKey(authKey);
-  return user;
-}
-
 export default async function handler(req: Request): Promise<Response> {
-  const user = await getUserFromAuth(req);
-  if (!user) {
-    return new Response(JSON.stringify({ error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
 
-  const userId = user.id;
-  const isAdmin = user.is_admin === 1;
+  const userId = auth.user.id;
+  const isAdmin = auth.user.is_admin === 1;
 
   if (req.method === 'GET') {
     try {

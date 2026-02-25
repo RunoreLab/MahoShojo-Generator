@@ -403,24 +403,42 @@ const CharacterManagerPage: React.FC = () => {
     }, [isAuthenticated, loadUserBadges]);
 
     // 处理注册
-    const handleRegister = async (username: string, email: string, turnstileToken: string) => {
+    const handleRegister = async (username: string, email: string, turnstileToken: string, password?: string) => {
         setAuthMessage(null);
-        const result = await register(username, email, turnstileToken);
-        if (result.success && result.authKey) {
+        setGeneratedAuthKey(null);
+        const result = await register(username, email, turnstileToken, password);
+        if (!result.success) {
+            setAuthMessage({ type: 'error', text: result.error || '注册失败' });
+            return;
+        }
+
+        const isLegacyRegister =
+            result.authMode === 'legacy' || (result.authMode == null && typeof result.authKey === 'string' && result.authKey.trim().length > 0);
+
+        if (isLegacyRegister && typeof result.authKey === 'string' && result.authKey.trim().length > 0) {
             setGeneratedAuthKey(result.authKey);
             setAuthMessage({ type: 'success', text: '注册成功！请复制并保存您的登录密钥。' });
-        } else {
-            setAuthMessage({ type: 'error', text: result.error || '注册失败' });
+            return;
         }
+
+        setShowAuthModal(false);
+        setMessage({ type: 'success', text: result.message || '注册成功，已自动登录！' });
+        loadUserDataCards();
+        loadUserBadges();
     };
 
     // 处理登录
-    const handleLogin = async (username: string, authKey: string, turnstileToken: string) => {
+    const handleLogin = async (
+        identifier: string,
+        credential: string,
+        turnstileToken: string,
+        mode: 'password' | 'legacy',
+    ) => {
         setAuthMessage(null);
-        const result = await login(username, authKey, turnstileToken);
+        const result = await login(identifier, credential, turnstileToken, mode);
         if (result.success) {
             setShowAuthModal(false);
-            setMessage({ type: 'success', text: '登录成功！' });
+            setMessage({ type: 'success', text: mode === 'legacy' ? '登录成功！' : '密码登录成功！' });
             loadUserDataCards();
             loadUserBadges();
         } else {

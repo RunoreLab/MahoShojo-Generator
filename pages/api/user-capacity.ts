@@ -1,21 +1,8 @@
-import { getUserByAuthKey, getUserDataCardCapacity, getUserUsedSlots } from '@/lib/d1';
+import { getUserDataCardCapacity, getUserUsedSlots } from '@/lib/d1';
+import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 
 export const runtime = 'edge';
-
-// 辅助函数：从请求头获取用户认证信息
-async function getUserFromAuth(req: Request): Promise<{ id: number; username: string } | null> {
-  const authHeader = req.headers.get('authorization');
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const authKey = authHeader.substring(7);
-  const user = await getUserByAuthKey(authKey);
-  
-  return user;
-}
 
 export default async function handler(req: Request): Promise<Response> {
   // 只支持 GET 请求
@@ -27,19 +14,14 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   // 验证用户身份
-  const user = await getUserFromAuth(req);
-  if (!user) {
-    return new Response(JSON.stringify({ error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
 
   try {
     // 获取用户数据卡容量
     const [capacity, usedSlots] = await Promise.all([
-      getUserDataCardCapacity(user.id, config.DEFAULT_DATA_CARD_CAPACITY),
-      getUserUsedSlots(user.id)
+      getUserDataCardCapacity(auth.user.id, config.DEFAULT_DATA_CARD_CAPACITY),
+      getUserUsedSlots(auth.user.id)
     ]);
     
     return new Response(JSON.stringify({ 

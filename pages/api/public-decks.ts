@@ -1,20 +1,10 @@
-import { getDeckById, getDeckCardsWithAccess, getPublicDecks, getUserByAuthKey } from '@/lib/d1';
+import { getDeckById, getDeckCardsWithAccess, getPublicDecks } from '@/lib/d1';
+import { getAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';
 
 const MAX_LIMIT = 100;
 const MAX_SEARCH_LENGTH = 200;
-
-type AuthenticatedUser = { id: number; username: string };
-
-async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-
-  const authKey = authHeader.substring(7);
-  const user = await getUserByAuthKey(authKey);
-  return user;
-}
 
 const readIntParam = (value: string | null, fallback: number) => {
   if (value == null) return fallback;
@@ -40,7 +30,7 @@ export default async function handler(req: Request): Promise<Response> {
     const limit = clamp(readIntParam(url.searchParams.get('limit'), 12), 1, MAX_LIMIT);
     const offset = Math.max(0, readIntParam(url.searchParams.get('offset'), 0));
 
-    const viewer = await getUserFromAuth(req);
+    const viewer = (await getAuthUser(req))?.user ?? null;
     const search = typeof searchRaw === 'string' ? searchRaw.trim() : '';
 
     if (search.length > MAX_SEARCH_LENGTH) {

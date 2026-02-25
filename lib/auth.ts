@@ -5,7 +5,7 @@ const ENCRYPTION_KEY = 'mahoshojo_2024_secret_encryption_key';
 
 export interface AuthData {
   username: string;
-  authKey: string;
+  authKey?: string;
   userId?: number;
   activityToken?: string;
 }
@@ -140,7 +140,8 @@ export const authStorage = {
   // 获取认证头
   async getAuthHeader(): Promise<string | null> {
     const auth = await this.getAuth();
-    return auth ? `Bearer ${auth.authKey}` : null;
+    const authKey = typeof auth?.authKey === 'string' ? auth.authKey.trim() : '';
+    return authKey ? `Bearer ${authKey}` : null;
   },
 
   // 获取“活跃统计”头（不依赖额外 D1 读取）
@@ -162,9 +163,10 @@ export const authStorage = {
 // API 请求工具函数
 export const authApi = {
   // 注册
-  async register(username: string, email: string, turnstileToken: string): Promise<{
+  async register(username: string, email: string, turnstileToken: string, password?: string): Promise<{
     success: boolean;
     authKey?: string;
+    authMode?: 'better-auth' | 'legacy';
     message?: string;
     error?: string;
     user?: { id: number; username: string; prefix?: string | null };
@@ -174,18 +176,23 @@ export const authApi = {
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, email, turnstileToken })
+        body: JSON.stringify({ username, email, password, turnstileToken })
       });
 
       const data = await response.json();
       
       if (response.ok && data.success) {
-        await authStorage.setAuth({
-          username,
-          authKey: data.authKey,
-          userId: typeof data.user?.id === 'number' ? data.user.id : undefined,
-          activityToken: typeof data.activityToken === 'string' ? data.activityToken : undefined,
-        });
+        const nextAuthKey = typeof data.authKey === 'string' && data.authKey.trim().length > 0 ? data.authKey.trim() : null;
+        if (nextAuthKey) {
+          await authStorage.setAuth({
+            username: typeof data.user?.username === 'string' ? data.user.username : username,
+            authKey: nextAuthKey,
+            userId: typeof data.user?.id === 'number' ? data.user.id : undefined,
+            activityToken: typeof data.activityToken === 'string' ? data.activityToken : undefined,
+          });
+        } else {
+          authStorage.clearAuth();
+        }
         return data;
       }
       
@@ -197,8 +204,15 @@ export const authApi = {
   },
 
   // 登录
-  async login(username: string, authKey: string, turnstileToken: string): Promise<{
+  async login(
+    identifier: string,
+    credential: string,
+    turnstileToken: string,
+    mode: 'password' | 'legacy' = 'password',
+  ): Promise<{
     success: boolean;
+    authMode?: 'better-auth' | 'legacy';
+    authKey?: string;
     user?: { id: number; username: string; prefix?: string | null };
     activityToken?: string | null;
     error?: string;
@@ -207,18 +221,31 @@ export const authApi = {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, authKey, turnstileToken })
+        body: JSON.stringify({ identifier, credential, mode, turnstileToken })
       });
 
       const data = await response.json();
       
       if (response.ok && data.success) {
-        await authStorage.setAuth({
-          username,
-          authKey,
-          userId: typeof data.user?.id === 'number' ? data.user.id : undefined,
-          activityToken: typeof data.activityToken === 'string' ? data.activityToken : undefined,
-        });
+        const fromServerAuthKey = typeof data.authKey === 'string' && data.authKey.trim().length > 0 ? data.authKey.trim() : null;
+        const fallbackLegacyKey = mode === 'legacy' && credential.trim().length > 0 ? credential.trim() : null;
+        const persistedAuthKey = fromServerAuthKey ?? fallbackLegacyKey;
+
+        if (persistedAuthKey) {
+          await authStorage.setAuth({
+            username:
+              typeof data.user?.username === 'string'
+                ? data.user.username
+                : mode === 'legacy'
+                  ? identifier
+                  : '',
+            authKey: persistedAuthKey,
+            userId: typeof data.user?.id === 'number' ? data.user.id : undefined,
+            activityToken: typeof data.activityToken === 'string' ? data.activityToken : undefined,
+          });
+        } else {
+          authStorage.clearAuth();
+        }
         return data;
       }
       

@@ -1,21 +1,8 @@
-import { getUserByAuthKey, increaseUserSlotCount, grantBadgeToUser, userHasBadge } from '@/lib/d1';
+import { increaseUserSlotCount, grantBadgeToUser, userHasBadge } from '@/lib/d1';
+import { requireAuthUser } from '@/lib/auth/server';
 import { validateAndConsumeRedemptionCode } from '@/lib/database/redemption-codes';
 
 export const runtime = 'edge';
-
-// 辅助函数：从请求头获取用户认证信息
-async function getUserFromAuth(req: Request): Promise<{ id: number; username: string } | null> {
-  const authHeader = req.headers.get('authorization');
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const authKey = authHeader.substring(7);
-  const user = await getUserByAuthKey(authKey);
-
-  return user;
-}
 
 export default async function handler(req: Request): Promise<Response> {
   // 只支持 POST 请求
@@ -27,13 +14,8 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   // 验证用户身份
-  const user = await getUserFromAuth(req);
-  if (!user) {
-    return new Response(JSON.stringify({ error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
 
   try {
     const { code } = await req.json();
@@ -56,7 +38,7 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     // 增加用户槽位
-    const success = await increaseUserSlotCount(user.id, slotCount);
+    const success = await increaseUserSlotCount(auth.user.id, slotCount);
 
     if (!success) {
       return new Response(JSON.stringify({ error: '兑换失败，请稍后重试' }), {
@@ -65,8 +47,8 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    if (!(await userHasBadge(user.id, 'sponsor'))) {
-      const badgeGranted = await grantBadgeToUser(user.id, 'sponsor');
+    if (!(await userHasBadge(auth.user.id, 'sponsor'))) {
+      const badgeGranted = await grantBadgeToUser(auth.user.id, 'sponsor');
       if (!badgeGranted) {
         return new Response(JSON.stringify({ error: '兑换成功但徽章发放失败，请联系管理员处理' }), {
           status: 500,

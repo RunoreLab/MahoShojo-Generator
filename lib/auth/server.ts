@@ -6,6 +6,8 @@ export interface AuthenticatedUser {
   username: string;
   prefix?: string | null;
   is_banned?: string | null;
+  is_admin?: number | null;
+  is_review_exempt?: number | null;
 }
 
 export type AuthUserSource = 'better-auth-session' | 'legacy-bearer';
@@ -43,6 +45,25 @@ const toPositiveInteger = (value: unknown): number | null => {
   return null;
 };
 
+const toOptionalInteger = (value: unknown): number | undefined => {
+  if (value == null) return undefined;
+
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) return undefined;
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    if (!/^-?\d+$/.test(normalized)) return undefined;
+    const parsed = Number(normalized);
+    if (!Number.isSafeInteger(parsed)) return undefined;
+    return parsed;
+  }
+
+  return undefined;
+};
+
 const toAuthenticatedUser = (raw: unknown): AuthenticatedUser | null => {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -61,6 +82,16 @@ const toAuthenticatedUser = (raw: unknown): AuthenticatedUser | null => {
 
   if (record.is_banned == null || typeof record.is_banned === 'string') {
     user.is_banned = record.is_banned as string | null | undefined;
+  }
+
+  const isAdmin = toOptionalInteger(record.is_admin);
+  if (isAdmin !== undefined) {
+    user.is_admin = isAdmin;
+  }
+
+  const isReviewExempt = toOptionalInteger(record.is_review_exempt);
+  if (isReviewExempt !== undefined) {
+    user.is_review_exempt = isReviewExempt;
   }
 
   return user;

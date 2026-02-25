@@ -1,26 +1,11 @@
-import { addDeckFavorite, getUserByAuthKey, getUserDeckFavoriteIds, getUserDeckFavorites, removeDeckFavorite } from '@/lib/d1';
+import { addDeckFavorite, getUserDeckFavoriteIds, getUserDeckFavorites, removeDeckFavorite } from '@/lib/d1';
+import { requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';
 
-type AuthenticatedUser = { id: number; username: string };
-
-async function getUserFromAuth(req: Request): Promise<AuthenticatedUser | null> {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-
-  const authKey = authHeader.substring(7);
-  const user = await getUserByAuthKey(authKey);
-  return user;
-}
-
 export default async function handler(req: Request): Promise<Response> {
-  const user = await getUserFromAuth(req);
-  if (!user) {
-    return new Response(JSON.stringify({ error: '未授权' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
 
   if (req.method === 'GET') {
     try {
@@ -28,14 +13,14 @@ export default async function handler(req: Request): Promise<Response> {
       const idsOnly = url.searchParams.get('idsOnly') === '1';
 
       if (idsOnly) {
-        const ids = await getUserDeckFavoriteIds(user.id);
+        const ids = await getUserDeckFavoriteIds(auth.user.id);
         return new Response(JSON.stringify({ success: true, ids }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
         });
       }
 
-      const decks = await getUserDeckFavorites(user.id);
+      const decks = await getUserDeckFavorites(auth.user.id);
       return new Response(JSON.stringify({ success: true, decks }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
@@ -60,7 +45,7 @@ export default async function handler(req: Request): Promise<Response> {
         });
       }
 
-      const result = await addDeckFavorite(user.id, id);
+      const result = await addDeckFavorite(auth.user.id, id);
       if (!result.success) {
         return new Response(JSON.stringify({ error: result.notFound ? '卡组不存在或不可收藏' : (result.error || '收藏失败') }), {
           status: result.notFound ? 404 : 500,
@@ -92,7 +77,7 @@ export default async function handler(req: Request): Promise<Response> {
         });
       }
 
-      const result = await removeDeckFavorite(user.id, id);
+      const result = await removeDeckFavorite(auth.user.id, id);
       if (!result.success) {
         return new Response(JSON.stringify({ error: result.notFound ? '未收藏该卡组' : (result.error || '取消收藏失败') }), {
           status: result.notFound ? 404 : 500,

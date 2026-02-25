@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
-import { getUserByAuthKey, queryFromD1 } from '@/lib/d1';
+import { queryFromD1 } from '@/lib/d1';
+import { getAuthUser } from '@/lib/auth/server';
 import { getDataCardMetricsByIds, upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
@@ -79,10 +80,7 @@ export default async function handler(req: NextRequest): Promise<Response> {
     });
   }
 
-  const authHeader = req.headers.get('authorization') ?? '';
-  const authKey = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : '';
-  const authUser = authKey ? await getUserByAuthKey(authKey) : null;
-  const authUserId = typeof (authUser as any)?.id === 'number' ? (authUser as any).id : null;
+  const authUserId = (await getAuthUser(req))?.user.id ?? null;
 
   const items: Record<string, ApiMetaBatchItem> = Object.fromEntries(
     requestedIds.map((id) => [id, { metrics: null, strict: null }]),
