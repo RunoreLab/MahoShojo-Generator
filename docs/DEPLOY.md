@@ -132,3 +132,57 @@
 3.  现在你应该能看到魔法少女生成器的首页了！
 
 至此，你已成功在本地部署了该项目。祝你玩得开心！
+
+-----
+
+#### 第 7 步：配置 Cloudflare D1 Binding（Auth/ORM 必需）
+
+如果你要启用 Better Auth 与 Drizzle（推荐），需要在 `wrangler.toml` 中配置 `DB` 绑定。
+
+1. 打开 `wrangler.toml`，确认存在以下结构（仓库已提供模板）：
+
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "ifmahoushoujo"
+database_id = "replace_with_production_d1_database_id"
+preview_database_id = "replace_with_preview_d1_database_id"
+migrations_dir = "drizzle"
+```
+
+2. 将 `database_id` / `preview_database_id` 替换成你在 Cloudflare D1 控制台中的真实 ID。
+
+3. 如果你使用 `env.production` / `env.preview`，请同步替换对应区块里的 `d1_databases` 配置。
+
+> 说明：当前项目里 Better Auth 路由（`/api/auth/[...all]`）在没有 `DB` 绑定时会直接返回 `BETTER_AUTH_DB_UNAVAILABLE`（503）。
+
+-----
+
+#### 第 8 步：执行 Drizzle Migration（本地/远端）
+
+1. 生成迁移（如有 schema 改动）：
+
+```bash
+bun run db:generate
+```
+
+2. 应用到本地 D1（生产环境配置）：
+
+```bash
+bun run db:migrate:local:prod
+```
+
+3. 应用到远端 D1（生产）：
+
+```bash
+bun run db:migrate:remote:prod
+```
+
+4. 预览环境可使用：
+
+```bash
+bun run db:migrate:local:preview
+bun run db:migrate:remote:preview
+```
+
+> 补充：`scripts/backfill-user-auth-links.ts` 仍依赖 `CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID` 这组 HTTP API 凭据，请在 `.env.local` 中同时配置。

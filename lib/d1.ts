@@ -28,6 +28,7 @@ export {
   getUserByEmail,
   getUserByAuthKey,
   verifyUserLogin,
+  updateUserAuthKey,
   getUserProfileByUserId,
   getUserProfileCardRowByUserId,
   updateUserAvatarWebpBase64,

@@ -13,6 +13,10 @@
         "db:generate": "drizzle-kit generate --config drizzle.config.ts",
         "backfill:user-auth-links:dry": "bun scripts/backfill-user-auth-links.ts --dry-run true --batch 200",
         "backfill:user-auth-links:write": "bun scripts/backfill-user-auth-links.ts --write --batch 200",
+        "db:migrate:local:prod": "wrangler d1 migrations apply ifmahoushoujo --local --env production",
+        "db:migrate:remote:prod": "wrangler d1 migrations apply ifmahoushoujo --remote --env production",
+        "db:migrate:local:preview": "wrangler d1 migrations apply ifmahoushoujo-preview --local --env preview",
+        "db:migrate:remote:preview": "wrangler d1 migrations apply ifmahoushoujo-preview --remote --env preview",
         "test": "bun test",
         "test:watch": "bun test --watch"
     },

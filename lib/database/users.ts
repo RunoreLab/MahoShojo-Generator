@@ -113,6 +113,27 @@ export async function verifyUserLogin(username: string, authKey: string): Promis
   }
 }
 
+// 重置用户登录密钥（用于找回流程）
+export async function updateUserAuthKey(userId: number, nextAuthKey: string): Promise<boolean> {
+  try {
+    const normalizedKey = typeof nextAuthKey === 'string' ? nextAuthKey.trim() : '';
+    if (!Number.isSafeInteger(userId) || userId <= 0 || !normalizedKey) {
+      return false;
+    }
+
+    const result = await queryFromD1(
+      'UPDATE users SET auth_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [normalizedKey, userId]
+    ) as any;
+
+    const changes = result?.result?.[0]?.meta?.changes ?? 0;
+    return Boolean(result?.success && changes > 0);
+  } catch (error) {
+    console.error('更新用户登录密钥失败:', error);
+    return false;
+  }
+}
+
 export type UserProfileRow = {
   signature: string | null;
   avatar_webp_base64: string | null;

@@ -14,7 +14,7 @@ const PasswordRecoveryPage = () => {
   const [message, setMessage] = useState<RecoveryMessage | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const turnstileRef = useRef<TurnstileRef>(null);
-  const successHint = '如果您输入的内容正确，密码则会发送到您的邮箱中。 \n 如果输入的内容不正确，则不会有密码发送。';
+  const successHint = '如果您输入的信息正确，系统会向邮箱发送新的登录密钥，旧密钥将自动失效。';
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -72,15 +72,15 @@ const PasswordRecoveryPage = () => {
   return (
     <>
       <Head>
-        <title>找回密码 - MahoShojo Generator</title>
+        <title>重置登录密钥 - MahoShojo Generator</title>
       </Head>
       <div className="magic-background-white min-h-screen">
         <div className="container py-12">
           <div className="card max-w-lg mx-auto">
-            <h1 className="text-2xl font-bold text-center mb-4">找回密码</h1>
+            <h1 className="text-2xl font-bold text-center mb-4">重置登录密钥</h1>
             {!isSuccess && (
               <p className="text-sm text-gray-600 text-center mb-6">
-                请输入您注册时使用的用户名、邮箱，并完成验证码验证。
+                请输入注册用户名和邮箱，系统会发送新的登录密钥（旧密钥会失效）。
               </p>
             )}
 
@@ -157,7 +157,7 @@ const PasswordRecoveryPage = () => {
                   disabled={isSubmitting || !turnstileToken}
                   className={`w-full generate-button ${isSubmitting || !turnstileToken ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  {isSubmitting ? '提交中...' : '发送找回邮件'}
+                  {isSubmitting ? '提交中...' : '发送重置邮件'}
                 </button>
               </form>
             )}
