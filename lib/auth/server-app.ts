@@ -1,5 +1,8 @@
 import { getUserByEmail, getUserById, getUserByUsername } from '@/lib/d1';
 import { getBetterAuthInstance } from '@/lib/auth/better-auth-app';
+import { ensureAuthUserLink, getLinkedBusinessUserByAuthUserId } from '@/lib/auth/user-auth-linking';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import { getBusinessUserByEmail, getBusinessUserByUsername } from '@/lib/db/repositories/business-users';
 import { requireAuthUser as requireLegacyAuthUser, type AuthUserSource, type AuthenticatedUser } from '@/lib/auth/server';
 
 type BetterAuthSession = {
@@ -48,17 +51,92 @@ const toAuthenticatedUser = (raw: unknown): AuthenticatedUser | null => {
   const id = toPositiveInteger(record.id);
   if (!id || !isNonEmptyString(record.username)) return null;
 
+  const bannedField = record.is_banned ?? record.isBanned ?? null;
+
   return {
     id,
     username: record.username.trim(),
     prefix: typeof record.prefix === 'string' || record.prefix === null ? (record.prefix as string | null) : undefined,
-    is_banned:
-      typeof record.is_banned === 'string' || record.is_banned === null ? (record.is_banned as string | null) : undefined,
+    is_banned: typeof bannedField === 'string' || bannedField === null ? (bannedField as string | null) : undefined,
   };
 };
 
 const isBannedUser = (user: AuthenticatedUser): boolean =>
   typeof user.is_banned === 'string' && user.is_banned.trim().length > 0;
+
+const normalizeSessionAuthUserId = (session: BetterAuthSession): string | null => {
+  const candidate = session.session?.userId ?? session.user?.id;
+  if (typeof candidate === 'number') return String(candidate);
+  if (typeof candidate !== 'string') return null;
+  const trimmed = candidate.trim();
+  if (!trimmed) return null;
+  return trimmed;
+};
+
+const normalizeSessionEmail = (session: BetterAuthSession): string | null => {
+  if (!isNonEmptyString(session.user?.email)) return null;
+  return session.user.email.trim().toLowerCase();
+};
+
+const normalizeSessionName = (session: BetterAuthSession): string | null => {
+  if (!isNonEmptyString(session.user?.name)) return null;
+  return session.user.name.trim();
+};
+
+const getSessionAuthUserFromDrizzle = async (session: BetterAuthSession): Promise<AuthenticatedUser | null> => {
+  const db = getDrizzleDbFromRuntime();
+  if (!db) return null;
+
+  const authUserId = normalizeSessionAuthUserId(session);
+  if (authUserId) {
+    const linked = toAuthenticatedUser(await getLinkedBusinessUserByAuthUserId(authUserId));
+    if (linked) return linked;
+
+    const linkedAfterHeal = toAuthenticatedUser(
+      await ensureAuthUserLink({
+        authUserId,
+        email: normalizeSessionEmail(session),
+        name: normalizeSessionName(session),
+      }),
+    );
+    if (linkedAfterHeal) return linkedAfterHeal;
+  }
+
+  const sessionEmail = normalizeSessionEmail(session);
+  if (sessionEmail) {
+    const byEmail = toAuthenticatedUser(await getBusinessUserByEmail(db, sessionEmail));
+    if (byEmail) return byEmail;
+  }
+
+  const sessionName = normalizeSessionName(session);
+  if (sessionName) {
+    const byName = toAuthenticatedUser(await getBusinessUserByUsername(db, sessionName));
+    if (byName) return byName;
+  }
+
+  return null;
+};
+
+const getSessionAuthUserFromLegacyRead = async (session: BetterAuthSession): Promise<AuthenticatedUser | null> => {
+  const sessionUser = session.user;
+  const userId = toPositiveInteger(session.session?.userId ?? sessionUser?.id);
+  if (userId) {
+    const byId = toAuthenticatedUser(await getUserById(userId));
+    if (byId) return byId;
+  }
+
+  if (isNonEmptyString(sessionUser?.email)) {
+    const byEmail = toAuthenticatedUser(await getUserByEmail(sessionUser.email.trim()));
+    if (byEmail) return byEmail;
+  }
+
+  if (isNonEmptyString(sessionUser?.name)) {
+    const byName = toAuthenticatedUser(await getUserByUsername(sessionUser.name.trim()));
+    if (byName) return byName;
+  }
+
+  return null;
+};
 
 const getSessionAuthUser = async (req: Request): Promise<AuthenticatedUser | null> => {
   const auth = getBetterAuthInstance();
@@ -71,24 +149,10 @@ const getSessionAuthUser = async (req: Request): Promise<AuthenticatedUser | nul
 
     if (!session) return null;
 
-    const sessionUser = session.user;
-    const userId = toPositiveInteger(session.session?.userId ?? sessionUser?.id);
-    if (userId) {
-      const byId = toAuthenticatedUser(await getUserById(userId));
-      if (byId) return byId;
-    }
+    const fromDrizzle = await getSessionAuthUserFromDrizzle(session);
+    if (fromDrizzle) return fromDrizzle;
 
-    if (isNonEmptyString(sessionUser?.email)) {
-      const byEmail = toAuthenticatedUser(await getUserByEmail(sessionUser.email.trim()));
-      if (byEmail) return byEmail;
-    }
-
-    if (isNonEmptyString(sessionUser?.name)) {
-      const byName = toAuthenticatedUser(await getUserByUsername(sessionUser.name.trim()));
-      if (byName) return byName;
-    }
-
-    return null;
+    return getSessionAuthUserFromLegacyRead(session);
   } catch (error) {
     console.error('[auth][app] Better Auth session 解析失败:', error);
     return null;

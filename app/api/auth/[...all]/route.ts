@@ -1,5 +1,5 @@
 import { getBetterAuthBootstrapStatus } from '@/lib/auth/better-auth';
-import { getBetterAuthRouteHandlers } from '@/lib/auth/better-auth-app';
+import { getBetterAuthRouteHandlers, hasBetterAuthDatabaseBinding } from '@/lib/auth/better-auth-app';
 
 export const runtime = 'nodejs';
 
@@ -47,6 +47,16 @@ const handle = async (req: Request): Promise<Response> => {
   const handlers = getBetterAuthRouteHandlers();
   if (!handlers) {
     return notReady();
+  }
+
+  if (!hasBetterAuthDatabaseBinding()) {
+    return json(
+      {
+        error: 'Better Auth 运行所需的 D1 绑定不可用',
+        code: 'BETTER_AUTH_DB_UNAVAILABLE',
+      },
+      503,
+    );
   }
 
   const method = (req.method || '').toUpperCase() as keyof typeof handlers;

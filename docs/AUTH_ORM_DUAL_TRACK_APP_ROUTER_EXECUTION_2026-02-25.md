@@ -139,9 +139,16 @@
 4. 前端登录态探测改为“请求 `/api/auth/verify` + Cookie 优先、legacy Header 兜底”。  
 5. 新增 Drizzle 基建骨架：`lib/db/schema/*`、`lib/db/drizzle.ts`、`lib/db/repositories/*`、`drizzle.config.ts`。  
 6. 新增 Auth 子域初始化迁移草案：`drizzle/0000_auth_domain_bootstrap.sql`。  
+7. Better Auth 已改为 `drizzleAdapter` 挂载，Auth 子域显式映射到 `ba_user/ba_session/ba_account/ba_verification`。  
+8. 新增 Cloudflare Request Context 下的 D1 绑定解析与运行时 Drizzle 获取能力（`lib/db/drizzle.ts`）。  
+9. 新增 `user_auth_links` 自动建链闭环：Better Auth `databaseHooks.user.create.after` 会自动建立 `ba_user -> users` 映射，必要时创建业务用户（含 legacy `auth_key`）。  
+10. `lib/auth/server-app.ts` 已升级为“映射表优先 + 自愈补链 + legacy 查询兜底”解析路径。  
+11. `app/api/auth/[...all]` 增加 D1 绑定可用性检查，缺失时返回 `BETTER_AUTH_DB_UNAVAILABLE`（503），便于定位部署配置问题。  
+12. 本轮改造已通过 `npm run lint` 与 `npm run build`。  
 
 待继续：
 
-1. 将 Better Auth 与 Drizzle 适配器正式连通（当前为 Session 读取优先 + 业务用户映射骨架，仍待持久化策略闭环）。  
-2. 批次迁移受保护业务 API（19 个 legacy Bearer 路由）。  
-3. 完成 `user_auth_links` 回填脚本与灰度切流方案。  
+1. 前端登录/注册入口从 legacy `auth_key` 逐步切换到 Better Auth 原生 `sign-in/sign-up`（保留兼容窗口）。  
+2. 批次迁移受保护业务 API（19 个 legacy Bearer 路由）到统一鉴权与仓储层。  
+3. 完成 `user_auth_links` 回填脚本与灰度切流方案（覆盖存量用户）。  
+4. 对齐部署侧 D1 Binding 与 migration 执行规范（`wrangler` 配置、local/remote 流程）。  
