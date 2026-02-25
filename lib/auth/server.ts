@@ -1,4 +1,5 @@
 import { getUserByAuthKey } from '@/lib/d1';
+import { ACTIVITY_TOKEN_HEADER, ACTIVITY_USER_ID_HEADER } from '@/lib/auth/activity-token';
 import { hasBetterAuthSessionCookie } from '@/lib/auth/better-auth';
 
 export interface AuthenticatedUser {
@@ -47,6 +48,10 @@ const toPositiveInteger = (value: unknown): number | null => {
 
 const toOptionalInteger = (value: unknown): number | undefined => {
   if (value == null) return undefined;
+
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0;
+  }
 
   if (typeof value === 'number') {
     if (!Number.isSafeInteger(value)) return undefined;
@@ -97,10 +102,55 @@ const toAuthenticatedUser = (raw: unknown): AuthenticatedUser | null => {
   return user;
 };
 
+const parseVerifiedUser = (payload: unknown): AuthenticatedUser | null => {
+  if (!payload || typeof payload !== 'object') return null;
+  const userRecord = (payload as { user?: unknown }).user;
+  return toAuthenticatedUser(userRecord);
+};
+
+const copyHeader = (source: Headers, target: Headers, key: string): void => {
+  const value = source.get(key);
+  if (value && value.trim().length > 0) {
+    target.set(key, value);
+  }
+};
+
 const getSessionAuthUser = async (req: Request): Promise<AuthenticatedUser | null> => {
   if (!hasBetterAuthSessionCookie(req)) return null;
-  // 阶段 A：仅预留会话探测入口。真正的 Better Auth Session 校验会在后续适配中接入。
-  return null;
+
+  try {
+    const requestUrl = new URL(req.url);
+    if (requestUrl.pathname === '/api/auth/verify') return null;
+
+    const verifyUrl = new URL('/api/auth/verify', requestUrl.origin);
+    const headers = new Headers({
+      'Content-Type': 'application/json',
+    });
+
+    copyHeader(req.headers, headers, 'cookie');
+    copyHeader(req.headers, headers, 'authorization');
+    copyHeader(req.headers, headers, 'origin');
+    copyHeader(req.headers, headers, 'referer');
+    copyHeader(req.headers, headers, 'user-agent');
+    copyHeader(req.headers, headers, 'x-forwarded-for');
+    copyHeader(req.headers, headers, 'x-real-ip');
+    copyHeader(req.headers, headers, 'cf-connecting-ip');
+    copyHeader(req.headers, headers, ACTIVITY_TOKEN_HEADER);
+    copyHeader(req.headers, headers, ACTIVITY_USER_ID_HEADER);
+
+    const response = await fetch(verifyUrl.toString(), {
+      method: 'POST',
+      headers,
+    });
+
+    if (!response.ok) return null;
+
+    const payload = await response.json().catch(() => null);
+    return parseVerifiedUser(payload);
+  } catch (error) {
+    console.error('[auth][server] 会话探测失败:', error);
+    return null;
+  }
 };
 
 const getBearerAuthKey = (req: Request): string | null => {
@@ -112,7 +162,7 @@ const getBearerAuthKey = (req: Request): string | null => {
   return authKey;
 };
 
-const getLegacyBearerAuthUser = async (req: Request): Promise<AuthenticatedUser | null> => {
+export const getLegacyBearerAuthUser = async (req: Request): Promise<AuthenticatedUser | null> => {
   const authKey = getBearerAuthKey(req);
   if (!authKey) return null;
   return toAuthenticatedUser(await getUserByAuthKey(authKey));

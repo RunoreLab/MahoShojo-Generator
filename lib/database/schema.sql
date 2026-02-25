@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   last_login_at DATETIME,
   is_banned TEXT,
+  is_admin INTEGER NOT NULL DEFAULT 0,
+  is_review_exempt INTEGER NOT NULL DEFAULT 0,
   slot_count INTEGER,
   registration_ip TEXT,
   prefix TEXT,

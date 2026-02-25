@@ -3,7 +3,7 @@ import { getBetterAuthInstance } from '@/lib/auth/better-auth-app';
 import { ensureAuthUserLink, getLinkedBusinessUserByAuthUserId } from '@/lib/auth/user-auth-linking';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserByEmail, getBusinessUserByUsername } from '@/lib/db/repositories/business-users';
-import { getAuthUser as getLegacyAuthUser, type AuthUserContext, type AuthenticatedUser } from '@/lib/auth/server';
+import { getLegacyBearerAuthUser, type AuthUserContext, type AuthenticatedUser } from '@/lib/auth/server';
 
 type BetterAuthSession = {
   user?: {
@@ -43,6 +43,10 @@ const toPositiveInteger = (value: unknown): number | null => {
 
 const toOptionalInteger = (value: unknown): number | undefined => {
   if (value == null) return undefined;
+
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0;
+  }
 
   if (typeof value === 'number') {
     if (!Number.isSafeInteger(value)) return undefined;
@@ -201,5 +205,10 @@ export const getAuthUserForApp = async (req: Request): Promise<AuthUserContext |
     return { user: sessionUser, source: 'better-auth-session' };
   }
 
-  return getLegacyAuthUser(req);
+  const legacyUser = await getLegacyBearerAuthUser(req);
+  if (legacyUser) {
+    return { user: legacyUser, source: 'legacy-bearer' };
+  }
+
+  return null;
 };

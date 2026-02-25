@@ -27,6 +27,10 @@ const toPositiveInteger = (value: unknown): number | null => {
 const toOptionalInteger = (value: unknown): number | undefined => {
   if (value == null) return undefined;
 
+  if (typeof value === 'boolean') {
+    return value ? 1 : 0;
+  }
+
   if (typeof value === 'number') {
     if (!Number.isSafeInteger(value)) return undefined;
     return value;
@@ -112,12 +116,12 @@ const hasSessionAuthHint = (req: Request): boolean => {
 };
 
 const resolveRequestAuthUser = async (req: Request): Promise<AuthenticatedUser | null> => {
-  const legacy = await getAuthUser(req);
-  if (legacy) {
-    return legacy.user;
+  const context = await getAuthUser(req);
+  if (context) {
+    return context.user;
   }
 
-  if (!hasSessionAuthHint(req)) {
+  if (!hasSessionAuthHint(req) || hasBetterAuthSessionCookie(req)) {
     return null;
   }
 
