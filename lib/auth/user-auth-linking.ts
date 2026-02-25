@@ -5,6 +5,7 @@ import {
   getBusinessUserByEmail,
   getBusinessUserById,
   getBusinessUserByUsername,
+  updateBusinessUserAuthKey,
   type BusinessUserRow,
 } from '@/lib/db/repositories/business-users';
 import { getUserAuthLinkByAuthUserId, upsertUserAuthLink } from '@/lib/db/repositories/user-auth-links';
@@ -134,4 +135,17 @@ export const ensureAuthUserLink = async (input: EnsureAuthUserLinkInput): Promis
   });
 
   return businessUser;
+};
+
+export const ensureBusinessUserLegacyAuthKey = async (
+  businessUser: BusinessUserRow,
+): Promise<BusinessUserRow | null> => {
+  const existingAuthKey = toNonEmptyString(businessUser.authKey);
+  if (existingAuthKey) return businessUser;
+
+  const db = getDrizzleDbFromRuntime();
+  if (!db) return null;
+
+  const nextAuthKey = generateLegacyAuthKey();
+  return updateBusinessUserAuthKey(db, businessUser.id, nextAuthKey);
 };

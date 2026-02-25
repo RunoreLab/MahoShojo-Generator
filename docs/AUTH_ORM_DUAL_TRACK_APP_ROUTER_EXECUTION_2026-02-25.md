@@ -144,7 +144,7 @@
 9. 新增 `user_auth_links` 自动建链闭环：Better Auth `databaseHooks.user.create.after` 会自动建立 `ba_user -> users` 映射，必要时创建业务用户（含 legacy `auth_key`）。  
 10. `lib/auth/server-app.ts` 已升级为“映射表优先 + 自愈补链 + legacy 查询兜底”解析路径。  
 11. `app/api/auth/[...all]` 增加 D1 绑定可用性检查，缺失时返回 `BETTER_AUTH_DB_UNAVAILABLE`（503），便于定位部署配置问题。  
-12. 本轮改造已通过 `npm run lint` 与 `npm run build`。  
+12. 本轮改造已通过 `bun run lint` 与 `bun run build`。  
 13. `app/api/auth/login`、`app/api/auth/register` 已接入 Better Auth 原生 `sign-in/sign-up` 桥接（保留 Turnstile 校验与 legacy 密钥兜底）。  
 14. 前端认证交互已升级为“密码登录（Better Auth）/旧密钥登录（legacy）”双模式，并保留 legacy 兼容展示层（`AuthModal` + `useAuth` + `lib/auth.ts`）。  
 15. 新增 `scripts/backfill-user-auth-links.ts`，按“email 优先、username 兜底”规则回填 `user_auth_links`，支持 dry-run/断点续跑。  
@@ -152,11 +152,12 @@
 17. 增补回填脚本命令：`package.json` 新增 `backfill:user-auth-links:dry` / `backfill:user-auth-links:write`，便于测试库演练与生产执行。  
 18. 已完成第二批大型生成接口统一鉴权改造：`pages/api/arena/generate.ts`、`pages/api/arena/generate-stream.ts`、`pages/api/generate-battle-story.ts` 改为复用 `createRequestAuthUserResolver`（请求级缓存，统一走“`/api/auth/verify` 会话链路 + legacy Bearer 兜底”）并消除三处以上重复手写 Bearer 解析片段。  
 19. `lib/auth/server-app.ts` 新增 `getAuthUserForApp`，用于复用 App Router 统一鉴权链路（`requireAuthUserForApp` 改为在其基础上做封禁判定）。  
-20. 本轮改造已在当前仓库通过 `npm run lint` 与 `npm run build`。  
+20. 本轮改造已在当前仓库通过 `bun run lint`、`bun run build` 与 `bun test`。  
+21. 补齐 Better Auth 登录/注册兼容闭环：当业务用户 `users.auth_key` 为空时，登录/注册桥接会自动补写兼容密钥并返回，避免“密码登录成功但 legacy 兼容链路断裂”的灰度期故障（`app/api/auth/login`、`app/api/auth/register`、`lib/auth/user-auth-linking.ts`、`lib/db/repositories/business-users.ts`）。  
 
 受限项（当前本地环境）：
 
-1. `backfill:user-auth-links:dry` / `backfill:user-auth-links:write` 在当前环境无法执行：`bun` 缺失，改用 `npx tsx` 执行后因 `CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID` 未配置而中止。  
+1. `backfill:user-auth-links:dry` / `backfill:user-auth-links:write` 在当前环境仍无法执行：`bun` 已可用，但缺少 `CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID`。  
 2. 密码登录/注册与 legacy 密钥并行联调未能在本地完成：当前环境同时缺少可用的 D1 访问凭据与 Turnstile 可用配置。  
 
 待继续：

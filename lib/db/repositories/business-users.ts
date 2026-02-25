@@ -45,3 +45,18 @@ export const createBusinessUser = async (
 
   return getBusinessUserByEmail(db, input.email);
 };
+
+export const updateBusinessUserAuthKey = async (
+  db: AppDrizzleDb,
+  userId: number,
+  authKey: string,
+): Promise<BusinessUserRow | null> => {
+  await db
+    .update(users)
+    .set({
+      authKey,
+    })
+    .where(eq(users.id, userId));
+
+  return getBusinessUserById(db, userId);
+};

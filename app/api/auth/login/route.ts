@@ -5,7 +5,11 @@ import {
   invokeBetterAuthJsonEndpoint,
   readJsonSafely,
 } from '@/lib/auth/better-auth-bridge';
-import { ensureAuthUserLink, getLinkedBusinessUserByAuthUserId } from '@/lib/auth/user-auth-linking';
+import {
+  ensureAuthUserLink,
+  ensureBusinessUserLegacyAuthKey,
+  getLinkedBusinessUserByAuthUserId,
+} from '@/lib/auth/user-auth-linking';
 import { verifyUserLogin } from '@/lib/d1';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
@@ -117,7 +121,12 @@ const loginWithBetterAuthPassword = async (req: Request, email: string, password
     return json({ error: '登录成功，但用户映射尚未建立，请联系管理员处理。' }, 409);
   }
 
-  const activityToken = await issueActivityToken(businessUser.id);
+  const businessUserWithAuthKey = await ensureBusinessUserLegacyAuthKey(businessUser);
+  if (!businessUserWithAuthKey) {
+    return json({ error: '登录成功，但用户兼容凭证初始化失败，请稍后重试。' }, 500);
+  }
+
+  const activityToken = await issueActivityToken(businessUserWithAuthKey.id);
 
   const headers = new Headers();
   appendSetCookieHeaders(headers, bridge.response.headers);
@@ -126,11 +135,11 @@ const loginWithBetterAuthPassword = async (req: Request, email: string, password
     {
       success: true,
       authMode: 'better-auth',
-      authKey: businessUser.authKey ?? null,
+      authKey: businessUserWithAuthKey.authKey ?? null,
       user: {
-        id: businessUser.id,
-        username: businessUser.username,
-        prefix: businessUser.prefix ?? null,
+        id: businessUserWithAuthKey.id,
+        username: businessUserWithAuthKey.username,
+        prefix: businessUserWithAuthKey.prefix ?? null,
       },
       activityToken: activityToken ?? null,
     },
