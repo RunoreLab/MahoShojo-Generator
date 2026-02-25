@@ -150,9 +150,17 @@
 15. 新增 `scripts/backfill-user-auth-links.ts`，按“email 优先、username 兜底”规则回填 `user_auth_links`，支持 dry-run/断点续跑。  
 16. 已完成首批受保护 Pages API 统一鉴权迁移：`decks`、`deck-cards`、`deck-favorites`、`favorites`、`public-decks`、`user-capacity`、`redeem-code`、`badges/user`、`badges/equip`、`data-cards`、`data-card-recycle`、`data-card-tags`、`data-card-meta`、`data-card-meta-batch`、`arena/strict-preflight` 全部改为复用 `lib/auth/server` 的统一鉴权入口。  
 17. 增补回填脚本命令：`package.json` 新增 `backfill:user-auth-links:dry` / `backfill:user-auth-links:write`，便于测试库演练与生产执行。  
+18. 已完成第二批大型生成接口统一鉴权改造：`pages/api/arena/generate.ts`、`pages/api/arena/generate-stream.ts`、`pages/api/generate-battle-story.ts` 改为复用 `createRequestAuthUserResolver`（请求级缓存，统一走“`/api/auth/verify` 会话链路 + legacy Bearer 兜底”）并消除三处以上重复手写 Bearer 解析片段。  
+19. `lib/auth/server-app.ts` 新增 `getAuthUserForApp`，用于复用 App Router 统一鉴权链路（`requireAuthUserForApp` 改为在其基础上做封禁判定）。  
+20. 本轮改造已在当前仓库通过 `npm run lint` 与 `npm run build`。  
+
+受限项（当前本地环境）：
+
+1. `backfill:user-auth-links:dry` / `backfill:user-auth-links:write` 在当前环境无法执行：`bun` 缺失，改用 `npx tsx` 执行后因 `CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID` 未配置而中止。  
+2. 密码登录/注册与 legacy 密钥并行联调未能在本地完成：当前环境同时缺少可用的 D1 访问凭据与 Turnstile 可用配置。  
 
 待继续：
 
-1. 继续迁移剩余大型受保护生成接口到统一鉴权与仓储层：`pages/api/arena/generate.ts`、`pages/api/arena/generate-stream.ts`、`pages/api/generate-battle-story.ts`。  
-2. 在测试库执行 `user_auth_links` 回填 dry-run / write-run，并完成灰度切流与冲突处理手册。  
+1. 在测试库补齐凭据后执行 `backfill:user-auth-links:dry` → `backfill:user-auth-links:write`，并沉淀真实冲突样例（`skip-ambiguous-email`、`skip-ambiguous-username`、`skip-business-already-linked`）。  
+2. 完成端到端联调：密码登录/注册（Cookie 会话）与 legacy 密钥路径并行验证，并补录请求/响应样例。  
 3. 对齐部署侧 D1 Binding 与 migration 执行规范（`wrangler` 配置、local/remote 流程）。  

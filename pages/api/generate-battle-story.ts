@@ -25,7 +25,6 @@ import {
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
     updateBattleReportGenerationOutputPreview,
-    getUserByAuthKey
 } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
@@ -42,6 +41,7 @@ import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-re
 import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
 import { deriveSeasonStrictRules } from '@/lib/seasons';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
+import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 
 const log = getLogger('api-gen-battle-story');
 
@@ -114,6 +114,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
     const startedAtMs = Date.now();
     const startedAtIso = new Date(startedAtMs).toISOString();
+    const authUserResolver = createRequestAuthUserResolver(req);
 
     // 用于在异常/提前返回时补齐 battle_report_generations 记录（避免“失败没有记录”）。
     let snapshotMode: string = 'classic';
@@ -229,9 +230,7 @@ async function handler(req: NextRequest): Promise<Response> {
             const durationMs = Math.max(0, endedAtMs - startedAtMs);
             const ip = getClientIpFromHeaders(req.headers);
             const ipAnonymized = anonymizeIp(ip);
-            const authHeader = req.headers.get('authorization');
-            const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-            const user = authKey ? await getUserByAuthKey(authKey) : null;
+            const user = await authUserResolver.getUser();
 
             const recordId = await createBattleReportGenerationRecord({
                 startedAt: startedAtIso,
@@ -529,12 +528,9 @@ async function handler(req: NextRequest): Promise<Response> {
                 const durationMs = Math.max(0, endedAtMs - startedAtMs);
                 const ip = getClientIpFromHeaders(req.headers);
                 const ipAnonymized = anonymizeIp(ip);
-                const authHeader = req.headers.get('authorization');
-                const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
                 const recordPromise = (async () => {
                     try {
-                        const user = authKey ? await getUserByAuthKey(authKey) : null;
+                        const user = await authUserResolver.getUser();
                         const recordId = await createBattleReportGenerationRecord({
                             startedAt: startedAtIso,
                             endedAt: endedAtIso,
@@ -775,9 +771,6 @@ async function handler(req: NextRequest): Promise<Response> {
 
         const ip = getClientIpFromHeaders(req.headers);
         const ipAnonymized = anonymizeIp(ip);
-        const authHeader = req.headers.get('authorization');
-        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
         const reportJson = JSON.stringify(report);
         const outputBytes = new TextEncoder().encode(reportJson).length;
         const outputPreview = buildOutputPreviewForStorage(reportJson);
@@ -795,7 +788,7 @@ async function handler(req: NextRequest): Promise<Response> {
         const inputBytes = new TextEncoder().encode(inputJson).length;
 
         const recordPromise = (async () => {
-            const user = authKey ? await getUserByAuthKey(authKey) : null;
+            const user = await authUserResolver.getUser();
             const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
             const seasonStrictRules = deriveSeasonStrictRules(currentSeason);
 
@@ -1008,12 +1001,9 @@ async function handler(req: NextRequest): Promise<Response> {
         const durationMs = Math.max(0, endedAtMs - startedAtMs);
         const ip = getClientIpFromHeaders(req.headers);
         const ipAnonymized = anonymizeIp(ip);
-        const authHeader = req.headers.get('authorization');
-        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
         const recordPromise = (async () => {
             try {
-                const user = authKey ? await getUserByAuthKey(authKey) : null;
+                const user = await authUserResolver.getUser();
                 const recordId = await createBattleReportGenerationRecord({
                     startedAt: startedAtIso,
                     endedAt: endedAtIso,

@@ -35,8 +35,7 @@ import {
     updateBattleReportGenerationCombatantsWriteResult,
     updateBattleReportGenerationOutputPreview,
     upsertLargeObjectByOwnerRef,
-    generateUUID,
-    getUserByAuthKey
+    generateUUID
 } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
@@ -56,6 +55,7 @@ import { createOutputPreviewCollector } from '@/lib/arena/output-preview';
 import { settleArenaRatingsForGeneration } from '@/lib/database/arena-ratings';
 import { storeBattleReportGenerationOutputStreamToR2 } from '@/lib/arena/battle-report-output-storage';
 import { deleteObject } from '@/lib/r2';
+import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 	import { extractStreamUpdateMeta, findStreamUpdateMetaStart } from '@/lib/arena/stream-meta';
 
 const log = getLogger('api-gen-battle-stream');
@@ -128,6 +128,7 @@ async function handler(req: NextRequest): Promise<Response> {
 
 	    const startedAtMs = Date.now();
 	    const startedAtIso = new Date(startedAtMs).toISOString();
+    const authUserResolver = createRequestAuthUserResolver(req);
     const requestUrl = new URL(req.url);
     const wantsSse =
         requestUrl.searchParams.get('format') === 'sse' ||
@@ -461,12 +462,9 @@ async function handler(req: NextRequest): Promise<Response> {
 	                const durationMs = Math.max(0, endedAtMs - startedAtMs);
 	                const ip = getClientIpFromHeaders(req.headers);
 	                const ipAnonymized = anonymizeIp(ip);
-	                const authHeader = req.headers.get('authorization');
-	                const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
 	                const recordPromise = (async () => {
 	                    try {
-	                        const user = authKey ? await getUserByAuthKey(authKey) : null;
+	                        const user = await authUserResolver.getUser();
 	                        await createBattleReportGenerationRecord({
 	                            startedAt: startedAtIso,
 	                            endedAt: endedAtIso,
@@ -703,8 +701,6 @@ async function handler(req: NextRequest): Promise<Response> {
         // 包装流：一边转发给客户端，一边收集少量预览与统计信息；在完成/中断后异步写入 battle_report_generations。
         const ip = getClientIpFromHeaders(req.headers);
         const ipAnonymized = anonymizeIp(ip);
-        const authHeader = req.headers.get('authorization');
-        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
         let r2UploadPromise: Promise<Awaited<ReturnType<typeof storeBattleReportGenerationOutputStreamToR2>>> | null = null;
 
         let outputBytes = 0;
@@ -739,7 +735,7 @@ async function handler(req: NextRequest): Promise<Response> {
             const previewSource = outputPreview;
 
             const recordPromise = (async () => {
-                const user = authKey ? await getUserByAuthKey(authKey) : null;
+                const user = await authUserResolver.getUser();
                 const usage = await resolvedUsagePromise;
                 const finishReason = await resolvedFinishReasonPromise;
                 const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
@@ -1543,12 +1539,9 @@ async function handler(req: NextRequest): Promise<Response> {
             const statusForRecord: 'aborted' | 'failed' = isInterruptedStreamError(error) ? 'aborted' : 'failed';
 	        const ip = getClientIpFromHeaders(req.headers);
 	        const ipAnonymized = anonymizeIp(ip);
-	        const authHeader = req.headers.get('authorization');
-	        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
 	        const recordPromise = (async () => {
 	            try {
-	                const user = authKey ? await getUserByAuthKey(authKey) : null;
+	                const user = await authUserResolver.getUser();
 	                await createBattleReportGenerationRecord({
 	                    startedAt: startedAtIso,
 	                    endedAt: endedAtIso,

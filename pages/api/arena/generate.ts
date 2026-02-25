@@ -26,7 +26,6 @@ import {
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
     updateBattleReportGenerationOutputPreview,
-    getUserByAuthKey
 } from '@/lib/d1';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
@@ -43,6 +42,7 @@ import { storeBattleReportGenerationOutputTextToR2 } from '@/lib/arena/battle-re
 import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
 import { deriveSeasonStrictRules } from '@/lib/seasons';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
+import { createRequestAuthUserResolver } from '@/lib/auth/request-auth-user';
 
 const log = getLogger('api-gen-battle-story');
 
@@ -114,6 +114,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 
 	    const startedAtMs = Date.now();
 	    const startedAtIso = new Date(startedAtMs).toISOString();
+    const authUserResolver = createRequestAuthUserResolver(req);
 
 	    try {
 	        const normalizeOptionalString = (value: unknown): string | null => {
@@ -589,9 +590,6 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
 
         const ip = getClientIpFromHeaders(req.headers);
         const ipAnonymized = anonymizeIp(ip);
-        const authHeader = req.headers.get('authorization');
-        const authKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
         const reportJson = JSON.stringify(report);
         const outputBytes = new TextEncoder().encode(reportJson).length;
         const outputPreview = buildOutputPreviewForStorage(reportJson);
@@ -609,7 +607,7 @@ const buildQuestionnaireLoreText = (questionnaires: RequestQuestionnaire[]): str
         const inputBytes = new TextEncoder().encode(inputJson).length;
 
         const recordPromise = (async () => {
-            const user = authKey ? await getUserByAuthKey(authKey) : null;
+            const user = await authUserResolver.getUser();
             const recordId = generateUUID();
             const currentSeason = await fetchCurrentSeasonFromOrigin(new URL(req.url).origin);
             const seasonStrictRules = deriveSeasonStrictRules(currentSeason);

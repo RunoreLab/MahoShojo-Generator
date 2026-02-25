@@ -3,7 +3,7 @@ import { getBetterAuthInstance } from '@/lib/auth/better-auth-app';
 import { ensureAuthUserLink, getLinkedBusinessUserByAuthUserId } from '@/lib/auth/user-auth-linking';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserByEmail, getBusinessUserByUsername } from '@/lib/db/repositories/business-users';
-import { requireAuthUser as requireLegacyAuthUser, type AuthUserSource, type AuthenticatedUser } from '@/lib/auth/server';
+import { getAuthUser as getLegacyAuthUser, type AuthUserContext, type AuthenticatedUser } from '@/lib/auth/server';
 
 type BetterAuthSession = {
   user?: {
@@ -182,15 +182,24 @@ const getSessionAuthUser = async (req: Request): Promise<AuthenticatedUser | nul
 
 export const requireAuthUserForApp = async (
   req: Request,
-): Promise<{ user: AuthenticatedUser; source: AuthUserSource } | { response: Response }> => {
+): Promise<AuthUserContext | { response: Response }> => {
+  const context = await getAuthUserForApp(req);
+  if (!context) {
+    return { response: json({ error: '未授权' }, 401) };
+  }
+
+  if (isBannedUser(context.user)) {
+    return { response: json({ error: '账号已被封禁' }, 403) };
+  }
+
+  return context;
+};
+
+export const getAuthUserForApp = async (req: Request): Promise<AuthUserContext | null> => {
   const sessionUser = await getSessionAuthUser(req);
   if (sessionUser) {
-    if (isBannedUser(sessionUser)) {
-      return { response: json({ error: '账号已被封禁' }, 403) };
-    }
-
     return { user: sessionUser, source: 'better-auth-session' };
   }
 
-  return requireLegacyAuthUser(req);
+  return getLegacyAuthUser(req);
 };
