@@ -1,7 +1,9 @@
 import type { NextRequest } from 'next/server';
 
-import { queryFromD1 } from '@/lib/d1';
-import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
+import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import { getPresetArenaRatingsByEntityId } from '@/lib/db/repositories/arena-read';
+import { queryArenaPublicQueenEntityByQueue } from '@/lib/db/repositories/data-card-meta';
 
 export const config = {
   runtime: 'edge',
@@ -37,11 +39,19 @@ export default async function handler(req: NextRequest) {
   }
 
   try {
+    const db = getDrizzleDbFromRuntime();
+    if (!db) {
+      return new Response(JSON.stringify({ error: '数据库绑定不可用，请检查 Cloudflare D1 配置' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const queenByQueue = await (async () => {
       try {
         const [strictQueen, freeQueen] = await Promise.all([
-          queryArenaPublicQueenEntity(queryFromD1, 'strict'),
-          queryArenaPublicQueenEntity(queryFromD1, 'free'),
+          queryArenaPublicQueenEntityByQueue(db, 'strict'),
+          queryArenaPublicQueenEntityByQueue(db, 'free'),
         ]);
         return { strict: strictQueen, free: freeQueen };
       } catch (error) {
@@ -51,23 +61,7 @@ export default async function handler(req: NextRequest) {
     })();
 
     const ratings: { strict: ApiRating | null; free: ApiRating | null } = { strict: null, free: null };
-    const res = (await queryFromD1(
-      `SELECT queue, rating, games, wins, losses, draws
-       FROM arena_ratings
-       WHERE entity_type = 'preset'
-         AND entity_id = ?
-         AND queue IN ('strict', 'free')`,
-      [entityId],
-    )) as any;
-
-    const rows = (res?.result?.[0]?.results ?? []) as Array<{
-      queue: Queue;
-      rating: number;
-      games: number;
-      wins: number;
-      losses: number;
-      draws: number;
-    }>;
+    const rows = await getPresetArenaRatingsByEntityId(db, entityId);
 
     for (const row of rows) {
       const queue = row.queue === 'free' ? 'free' : 'strict';

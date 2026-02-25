@@ -50,6 +50,13 @@ export const dataCardMetrics = sqliteTable('data_card_metrics', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const dataCardTags = sqliteTable('data_card_tags', {
+  dataCardId: text('data_card_id').notNull(),
+  tagId: text('tag_id').notNull(),
+  createdByUserId: integer('created_by_user_id'),
+  createdAt: text('created_at').notNull(),
+});
+
 export const arenaRatings = sqliteTable('arena_ratings', {
   entityType: text('entity_type').$type<ArenaRatingEntityType>().notNull(),
   entityId: text('entity_id').notNull(),
@@ -67,9 +74,44 @@ export const arenaRatings = sqliteTable('arena_ratings', {
 
 export const arenaRatingEvents = sqliteTable('arena_rating_events', {
   id: text('id').primaryKey(),
+  generationId: text('generation_id').notNull(),
   queue: text('queue').$type<ArenaRatingQueue>().notNull(),
   status: text('status').$type<ArenaRatingEventStatus>().notNull(),
+  skipReason: text('skip_reason'),
   userId: integer('user_id'),
+  ipAnonymized: text('ip_anonymized'),
   pairKey: text('pair_key').notNull(),
+  aEntityType: text('a_entity_type').$type<ArenaRatingEntityType>().notNull(),
+  aEntityId: text('a_entity_id').notNull(),
+  bEntityType: text('b_entity_type').$type<ArenaRatingEntityType>().notNull(),
+  bEntityId: text('b_entity_id').notNull(),
+  winnerSlot: integer('winner_slot').notNull(),
+  aBeforeRating: integer('a_before_rating'),
+  aAfterRating: integer('a_after_rating'),
+  aDelta: integer('a_delta'),
+  aBeforeGames: integer('a_before_games'),
+  aAfterGames: integer('a_after_games'),
+  bBeforeRating: integer('b_before_rating'),
+  bAfterRating: integer('b_after_rating'),
+  bDelta: integer('b_delta'),
+  bBeforeGames: integer('b_before_games'),
+  bAfterGames: integer('b_after_games'),
+  detailsJson: text('details_json'),
+  createdAt: text('created_at').notNull(),
+  appliedAt: text('applied_at'),
+});
+
+export const characters = sqliteTable('characters', {
+  name: text('name').primaryKey(),
+  isPreset: integer('is_preset', { mode: 'boolean' }).notNull(),
+  wins: integer('wins').notNull(),
+  losses: integer('losses').notNull(),
+  participations: integer('participations').notNull(),
+});
+
+export const battles = sqliteTable('battles', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  winnerName: text('winner_name').notNull(),
+  participantsJson: text('participants_json').notNull(),
   createdAt: text('created_at').notNull(),
 });

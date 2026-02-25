@@ -158,7 +158,9 @@
 23. `app/api/auth/recover` 已从“重置并回发 legacy key”升级为“一次性重置令牌”流程：新增 `auth_password_reset_tokens`（`drizzle/0002_auth_password_reset_tokens.sql`）、`app/api/auth/recover/reset` 消费接口与 `pages/password-recovery.tsx` 二段式重置 UI。  
 24. 已完成第二轮受保护接口 ORM 化：`pages/api/me/profile-card.ts` 与 `pages/api/arena/strict-preflight.ts` 已移除接口内全部 `queryFromD1` 直连，改为走 `lib/db/repositories/*`（新增 `arena-strict-preflight` 仓储，并补齐 `arena_rating_events` schema 映射）。  
 25. 已完成 `pages/api/data-cards.ts` 余留直连 SQL 清理：`getDataCardUpdatedAt` 与“更新 data 字段”改为走 Drizzle 仓储（新增 `data-cards-write` 仓储）。  
-26. 当前 `pages/api` 中直接 `queryFromD1` 调用点已从 `17` 处下降至 `8` 处。  
+26. 已完成剩余公开排行与统计接口 ORM 化：`pages/api/arena/leaderboard.ts`、`pages/api/arena/leaderboard/search.ts`、`pages/api/arena/generation-ranking.ts`、`pages/api/arena/entity-rating.ts`、`pages/api/arena/preset-meta.ts`、`pages/api/get-stats.ts` 均移除接口内 `queryFromD1` 直连。  
+27. 新增 `lib/db/repositories/arena-read.ts`，统一承载公开榜单、搜索、局内排位事件读取与统计聚合查询；并补齐 `lib/db/schema/business.ts` 的 `data_card_tags / characters / battles` 与 `arena_rating_events` 字段映射。  
+28. 当前 `pages/api` 中直接 `queryFromD1` 调用点已从 `17` 处下降至 `0` 处。  
 
 受限项（当前本地环境）：
 
@@ -170,4 +172,4 @@
 1. 在测试库补齐凭据后执行 `backfill:user-auth-links:dry` → `backfill:user-auth-links:write`，并沉淀真实冲突样例（`skip-ambiguous-email`、`skip-ambiguous-username`、`skip-business-already-linked`）。  
 2. 完成端到端联调：密码登录/注册（Cookie 会话）与 legacy 密钥路径并行验证，并补录请求/响应样例。  
 3. 对齐部署侧 D1 Binding 与 migration 执行规范（`wrangler` 配置、local/remote 流程）。  
-4. 继续迁移剩余 `queryFromD1` 调用点（当前主要集中在公开排行与统计接口：`arena/leaderboard*`、`arena/generation-ranking`、`arena/entity-rating`、`arena/preset-meta`、`get-stats`）。  
+4. 继续推进业务域深层 SQL 迁移（`lib/database/*`、`lib/review/*`、`lib/arena/*` 等模块）到 Drizzle 仓储，降低后续 App Router 切换与测试成本。  

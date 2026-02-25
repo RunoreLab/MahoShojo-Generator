@@ -1,8 +1,10 @@
 import type { NextRequest } from 'next/server';
 
-import { queryFromD1 } from '@/lib/d1';
-import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
+import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import { getArenaRatingEventsByIds, getArenaRatingsByEntities, type ArenaRatingEventReadRow } from '@/lib/db/repositories/arena-read';
+import { getDataCardMetricsByDataCardIds, queryArenaPublicQueenEntityByQueue } from '@/lib/db/repositories/data-card-meta';
 import { getBattleReportGenerationCombatantsByGenerationId, type BattleReportGenerationCombatantRow } from '@/lib/database/battle-report-generation-combatants';
 import {
   buildArenaRatingEventId,
@@ -240,11 +242,6 @@ const buildFreeIneligibleReasons = (snapshot: ArenaEligibilitySnapshot): string[
   return reasons;
 };
 
-const readRows = <T,>(result: any): T[] => {
-  const rows = result?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as T[]) : [];
-};
-
 const buildDefaultQueueResult = (eligible: boolean, ineligibleReasons: string[]): ApiQueueResult => ({
   eligible,
   ineligibleReasons,
@@ -278,6 +275,14 @@ export default async function handler(req: NextRequest) {
   }
 
   try {
+    const db = getDrizzleDbFromRuntime();
+    if (!db) {
+      return new Response(JSON.stringify({ success: false, generationId, error: '数据库绑定不可用，请检查 Cloudflare D1 配置' } satisfies ApiResponse), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const snapshot = await getArenaEligibilitySnapshotByGenerationId(generationId);
     if (!snapshot) {
       const res: ApiResponse = {
@@ -333,79 +338,18 @@ export default async function handler(req: NextRequest) {
       .map((p) => (typeof p.dataCardId === 'string' ? p.dataCardId.trim() : ''))
       .filter(Boolean);
     if (dataCardIds.length > 0) {
-      const metricsRows = readRows<{ data_card_id: string; tech_score: number; tech_level: string }>(
-        await queryFromD1(
-          `SELECT data_card_id, tech_score, tech_level
-           FROM data_card_metrics
-           WHERE data_card_id IN (${dataCardIds.map(() => '?').join(', ')})`,
-          dataCardIds,
-        ),
-      );
-      const byId = new Map<string, { techScore: number | null; techLevel: string | null }>();
-      metricsRows.forEach((row) => {
-        if (!row) return;
-        const id = typeof row.data_card_id === 'string' ? row.data_card_id : '';
-        if (!id) return;
-        byId.set(id, {
-          techScore: typeof row.tech_score === 'number' ? row.tech_score : null,
-          techLevel: typeof row.tech_level === 'string' ? row.tech_level : null,
-        });
-      });
+      const byId = await getDataCardMetricsByDataCardIds(db, dataCardIds);
       participants.forEach((p) => {
         if (!p.dataCardId) return;
         const meta = byId.get(p.dataCardId);
         if (!meta) return;
-        p.techScore = meta.techScore;
-        p.techLevel = meta.techLevel;
+        p.techScore = typeof meta.techScore === 'number' ? meta.techScore : null;
+        p.techLevel = typeof meta.techLevel === 'string' ? meta.techLevel : null;
       });
     }
 
-    const readEventRows = async () =>
-      readRows<{
-      queue: ApiQueue;
-      status: 'pending' | 'applied' | 'skipped' | 'failed';
-      skip_reason: string | null;
-      details_json: string | null;
-      a_entity_type: 'data_card' | 'preset';
-      a_entity_id: string;
-      b_entity_type: 'data_card' | 'preset';
-      b_entity_id: string;
-      a_before_rating: number | null;
-      a_after_rating: number | null;
-      a_delta: number | null;
-      a_before_games: number | null;
-      a_after_games: number | null;
-      b_before_rating: number | null;
-      b_after_rating: number | null;
-      b_delta: number | null;
-      b_before_games: number | null;
-      b_after_games: number | null;
-    }>(
-        await queryFromD1(
-          `SELECT
-            queue,
-            status,
-            skip_reason,
-            details_json,
-            a_entity_type,
-            a_entity_id,
-            b_entity_type,
-            b_entity_id,
-            a_before_rating,
-            a_after_rating,
-            a_delta,
-            a_before_games,
-            a_after_games,
-            b_before_rating,
-            b_after_rating,
-            b_delta,
-            b_before_games,
-            b_after_games
-          FROM arena_rating_events
-          WHERE id IN (?, ?)`,
-          [buildArenaRatingEventId(generationId, 'strict'), buildArenaRatingEventId(generationId, 'free')],
-        ),
-      );
+    const readEventRows = async (): Promise<ArenaRatingEventReadRow[]> =>
+      getArenaRatingEventsByIds(db, [buildArenaRatingEventId(generationId, 'strict'), buildArenaRatingEventId(generationId, 'free')]);
 
     // 读取事件（可能尚未插入）
     let eventRows = await readEventRows();
@@ -438,23 +382,7 @@ export default async function handler(req: NextRequest) {
     const entitiesForRatings: ArenaEntity[] = participantEntities.filter((e): e is ArenaEntity => Boolean(e));
 
     // 读取当前分数（用于展示当前段位/分数；同时可在 pending/缺事件时作为回退）
-    const ratingRows = readRows<{
-      queue: ApiQueue;
-      entity_type: 'data_card' | 'preset';
-      entity_id: string;
-      rating: number;
-      games: number;
-    }>(
-      await queryFromD1(
-        `SELECT queue, entity_type, entity_id, rating, games
-         FROM arena_ratings
-         WHERE queue IN ('strict', 'free')
-           AND (
-             ${entitiesForRatings.map(() => `(entity_type = ? AND entity_id = ?)`).join(' OR ') || '1=0'}
-           )`,
-        entitiesForRatings.flatMap((e) => [e.entityType, e.entityId]),
-      ),
-    );
+    const ratingRows = await getArenaRatingsByEntities(db, entitiesForRatings, ['strict', 'free']);
 
     const ratingByKey = new Map<string, { queue: ApiQueue; rating: number; games: number; tier: string }>();
     ratingRows.forEach((row) => {
@@ -538,11 +466,11 @@ export default async function handler(req: NextRequest) {
     applyEventToParticipants('free');
 
     const [strictQueen, freeQueen] = await Promise.all([
-      queryArenaPublicQueenEntity(queryFromD1, 'strict').catch((error) => {
+      queryArenaPublicQueenEntityByQueue(db, 'strict').catch((error) => {
         console.warn('读取女王段位失败（降级为无女王）:', error);
         return null;
       }),
-      queryArenaPublicQueenEntity(queryFromD1, 'free').catch((error) => {
+      queryArenaPublicQueenEntityByQueue(db, 'free').catch((error) => {
         console.warn('读取女王段位失败（降级为无女王）:', error);
         return null;
       }),
