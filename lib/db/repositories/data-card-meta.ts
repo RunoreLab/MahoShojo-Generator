@@ -52,6 +52,20 @@ export type DataCardArenaRatingRow = {
   lastAppliedAt: string | null;
 };
 
+export type TopRatedCharacterCardRow = {
+  id: string;
+  type: 'character' | 'scenario' | 'history' | 'questionnaire';
+  name: string;
+  description: string | null;
+  is_public: boolean;
+  review_status: 'pending' | 'approved' | 'rejected' | null;
+  usage_count: number | null;
+  like_count: number | null;
+  favorite_count: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
 const QUEEN_CACHE_TTL_MS = 30_000;
 const queenCache = new Map<ArenaQueue, { value: ArenaEntityRef | null; expiresAt: number }>();
 
@@ -227,6 +241,53 @@ export const getStrictArenaRatingsByDataCardIds = async (
     );
 };
 
+export const getTopRatedCharacterCardByUserId = async (
+  db: AppDrizzleDb,
+  userId: number,
+): Promise<TopRatedCharacterCardRow | null> => {
+  const rows = await db
+    .select({
+      id: dataCards.id,
+      type: dataCards.type,
+      name: dataCards.name,
+      description: dataCards.description,
+      is_public: dataCards.isPublic,
+      review_status: dataCards.reviewStatus,
+      usage_count: dataCards.usageCount,
+      like_count: dataCards.likeCount,
+      favorite_count: dataCards.favoriteCount,
+      created_at: dataCards.createdAt,
+      updated_at: dataCards.updatedAt,
+    })
+    .from(dataCards)
+    .innerJoin(
+      arenaRatings,
+      and(
+        eq(arenaRatings.entityType, 'data_card'),
+        eq(arenaRatings.entityId, dataCards.id),
+        eq(arenaRatings.queue, 'strict'),
+      ),
+    )
+    .where(and(eq(dataCards.userId, userId), eq(dataCards.type, 'character'), isNull(dataCards.deletedAt)))
+    .orderBy(
+      desc(arenaRatings.rating),
+      desc(arenaRatings.games),
+      desc(arenaRatings.updatedAt),
+      desc(dataCards.updatedAt),
+      asc(dataCards.id),
+    )
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+
+  return {
+    ...row,
+    type: asDataCardType(row.type),
+    review_status: asDataCardReviewStatus(row.review_status),
+  };
+};
+
 const buildStrictPublicSinceClause = (): SQL =>
   sql`(
     ${dataCards.publicSince} IS NULL
@@ -313,4 +374,53 @@ export const queryArenaPublicQueenEntityByQueue = async (
   };
   queenCache.set(queue, { value, expiresAt: now + QUEEN_CACHE_TTL_MS });
   return value;
+};
+
+export const getStrictTopDataCardRankMap = async (
+  db: AppDrizzleDb,
+  limit: number = 300,
+): Promise<Map<string, number>> => {
+  const map = new Map<string, number>();
+  const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
+
+  const rows = await db
+    .select({
+      entityType: arenaRatings.entityType,
+      entityId: arenaRatings.entityId,
+    })
+    .from(arenaRatings)
+    .leftJoin(dataCards, and(eq(arenaRatings.entityType, 'data_card'), eq(dataCards.id, arenaRatings.entityId)))
+    .where(
+      and(
+        eq(arenaRatings.queue, 'strict'),
+        or(
+          eq(arenaRatings.entityType, 'preset'),
+          and(
+            isNotNull(dataCards.id),
+            eq(dataCards.type, 'character'),
+            eq(dataCards.isPublic, true),
+            eq(dataCards.reviewStatus, 'approved'),
+            isNull(dataCards.deletedAt),
+            buildStrictPublicSinceClause(),
+          ),
+        ),
+      ),
+    )
+    .orderBy(
+      desc(arenaRatings.rating),
+      desc(arenaRatings.games),
+      desc(arenaRatings.updatedAt),
+      asc(arenaRatings.entityType),
+      asc(arenaRatings.entityId),
+    )
+    .limit(safeLimit);
+
+  rows.forEach((row, index) => {
+    if (row.entityType !== 'data_card') return;
+    const entityId = typeof row.entityId === 'string' ? row.entityId.trim() : '';
+    if (!entityId) return;
+    map.set(entityId, index + 1);
+  });
+
+  return map;
 };

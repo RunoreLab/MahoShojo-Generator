@@ -48,6 +48,7 @@ export {
   getUserTopDataCardsByEngagement,
   getUserProfileCardDataStats,
   updateDataCard,
+  updateDataCardContentByIdAndUser,
   deleteDataCard,
   getUserRecycleBinCards,
   restoreDataCard,

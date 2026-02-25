@@ -7,12 +7,17 @@ import {
   pruneUserRecycleBin,
   upsertDataCardUpdate,
   getDataCardById,
-  getUserUsedSlots
+  getUserUsedSlots,
+  updateDataCardContentByIdAndUser as updateDataCardContentByIdAndUserLegacy,
 } from '@/lib/d1';
 import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
-import { queryFromD1 } from '@/lib/d1';
+import { getDrizzleDbFromRuntime, type AppDrizzleDb } from '@/lib/db/drizzle';
+import {
+  getDataCardUpdatedAtById,
+  updateDataCardContentByIdAndUser as updateDataCardContentByIdAndUserOrm,
+} from '@/lib/db/repositories/data-cards-write';
 import { formatKilobytes, getUtf8ByteLength, MAX_DATA_CARD_BYTES } from '@/lib/data-card-size';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { verifySignature } from '@/lib/signature';
@@ -25,18 +30,21 @@ import {
 
 export const runtime = 'edge';
 
-async function getDataCardUpdatedAt(dataCardId: string): Promise<string | null> {
+async function getDataCardUpdatedAt(db: AppDrizzleDb | null, dataCardId: string): Promise<string | null> {
+  if (!db) return null;
   try {
-    const result = await queryFromD1('SELECT updated_at FROM data_cards WHERE id = ?', [dataCardId]) as any;
-    const row = result?.result?.[0]?.results?.[0];
-    return typeof row?.updated_at === 'string' ? row.updated_at : null;
+    return await getDataCardUpdatedAtById(db, dataCardId);
   } catch (error) {
     console.error('读取 data_cards.updated_at 失败:', error);
     return null;
   }
 }
 
-async function computeAndUpsertMetrics(dataCardId: string, dataJsonString: string): Promise<void> {
+async function computeAndUpsertMetrics(
+  db: AppDrizzleDb | null,
+  dataCardId: string,
+  dataJsonString: string,
+): Promise<void> {
   try {
     const jsonValue = JSON.parse(dataJsonString) as unknown;
     const tech = computeTechIndex(jsonValue);
@@ -44,7 +52,7 @@ async function computeAndUpsertMetrics(dataCardId: string, dataJsonString: strin
     const hasSignatureKey = Boolean(process.env.SIGNATURE_SECRET_KEY);
     const isNative = hasSignatureKey ? await verifySignature(jsonValue as any) : null;
 
-    const updatedAt = await getDataCardUpdatedAt(dataCardId);
+    const updatedAt = await getDataCardUpdatedAt(db, dataCardId);
     if (!updatedAt) return;
 
     await upsertDataCardMetrics({
@@ -69,6 +77,7 @@ export default async function handler(req: Request): Promise<Response> {
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
   const user = auth.user;
+  const db = getDrizzleDbFromRuntime();
 
   const userId = user.id;
 
@@ -199,7 +208,7 @@ export default async function handler(req: Request): Promise<Response> {
         }
 
         if (result.id) {
-          const tasks: Promise<unknown>[] = [computeAndUpsertMetrics(result.id, dataWithAuthorString)];
+          const tasks: Promise<unknown>[] = [computeAndUpsertMetrics(db, result.id, dataWithAuthorString)];
           const shouldAutoReview =
             config.DATA_CARD_AUTO_REVIEW?.enabled && normalizedPublic === 1 && reviewStatus === 'pending';
           if (shouldAutoReview) {
@@ -339,12 +348,19 @@ export default async function handler(req: Request): Promise<Response> {
 
           // 如果带 data，一并更新
           if (dataChanged) {
-            await queryFromD1(
-              'UPDATE data_cards SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
-              [dataString!, id, userId]
-            );
+            if (db) {
+              await updateDataCardContentByIdAndUserOrm(db, id, userId, dataString!);
+            } else {
+              const updatedByLegacy = await updateDataCardContentByIdAndUserLegacy(id, userId, dataString!);
+              if (!updatedByLegacy) {
+                return new Response(JSON.stringify({ error: '数据卡不存在或无权访问' }), {
+                  status: 404,
+                  headers: { 'Content-Type': 'application/json' }
+                });
+              }
+            }
 
-            const metricsPromise = computeAndUpsertMetrics(id, dataString!);
+            const metricsPromise = computeAndUpsertMetrics(db, id, dataString!);
             const resetStrictPromise =
               currentCard.type === 'character'
                 ? resetStrictArenaRatingForDataCard(id)

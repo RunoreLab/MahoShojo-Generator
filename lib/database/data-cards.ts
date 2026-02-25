@@ -211,6 +211,26 @@ export async function updateDataCard(
   }
 }
 
+// 仅更新数据卡 data 字段（兼容路径）
+export async function updateDataCardContentByIdAndUser(
+  id: string,
+  userId: number,
+  dataJsonString: string,
+): Promise<boolean> {
+  try {
+    const result = (await queryFromD1(
+      'UPDATE data_cards SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
+      [dataJsonString, id, userId],
+    )) as any;
+
+    const changes = result?.result?.[0]?.meta?.changes ?? 0;
+    return Boolean(result?.success && changes > 0);
+  } catch (error) {
+    console.error('更新数据卡内容失败:', error);
+    return false;
+  }
+}
+
 // 新增/更新暂存表中的卡片更新记录
 export async function upsertDataCardUpdate(
   dataCardId: string,

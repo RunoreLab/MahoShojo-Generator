@@ -1,11 +1,13 @@
 import type { NextRequest } from 'next/server';
 
-import { queryFromD1 } from '@/lib/d1';
 import { getAuthUser } from '@/lib/auth/server';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import { buildPairKey, getStrictDailyUsage, INITIAL_RATING, STRICT_DEDUP_WINDOW_MS, STRICT_DAILY_LIMIT } from '@/lib/database/arena-ratings';
 import { computeArenaBaseTier, type ArenaBaseTier } from '@/lib/arena/tier';
 import { shouldEnforceStrictRangeLimit } from '@/lib/arena/strict-range';
+import { getDrizzleDbFromRuntime, type AppDrizzleDb } from '@/lib/db/drizzle';
+import { getDataCardMetaCardsByIds } from '@/lib/db/repositories/data-card-meta';
+import { getStrictArenaRatingsByEntities, hasAppliedStrictEventForUserPairSince } from '@/lib/db/repositories/arena-strict-preflight';
 import { fetchCurrentSeasonFromOrigin } from '@/lib/seasons-config';
 import { deriveSeasonStrictRules } from '@/lib/seasons';
 
@@ -73,11 +75,6 @@ const parseArenaEntityFromCombatant = (value: unknown): ArenaEntity | null => {
   return { entityType: 'data_card', entityId: dataCardId };
 };
 
-const readRows = <T,>(result: unknown): T[] => {
-  const rows = (result as any)?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as T[]) : [];
-};
-
 const STRICT_MAX_ABS_DIFF_BY_TIER: Record<ArenaBaseTier, number> = {
   '无牌': 2000,
   '白牌': 1000,
@@ -93,25 +90,13 @@ const getStrictMaxAbsDiffForRatings = (a: { rating: number; games: number }, b: 
   return STRICT_MAX_ABS_DIFF_BY_TIER[pick] ?? 1000;
 };
 
-const validateStrictPublicDataCards = async (entities: ArenaEntity[]): Promise<
+const validateStrictPublicDataCards = async (db: AppDrizzleDb, entities: ArenaEntity[]): Promise<
   { ok: true } | { ok: false; reason: 'strict-not-public' | 'strict-not-approved' | 'strict-not-character' | 'strict-card-missing' }
 > => {
   const ids = entities.filter((e) => e.entityType === 'data_card').map((e) => e.entityId).filter(Boolean);
   if (ids.length <= 0) return { ok: true };
   try {
-    const result = await queryFromD1(
-      `SELECT id, type, is_public as isPublic, review_status as reviewStatus, deleted_at as deletedAt
-       FROM data_cards
-       WHERE id IN (${ids.map(() => '?').join(', ')})`,
-      ids
-    );
-    const rows = readRows<{
-      id: string;
-      type: string;
-      isPublic: number | boolean | null;
-      reviewStatus: string | null;
-      deletedAt: string | null;
-    }>(result);
+    const rows = await getDataCardMetaCardsByIds(db, ids);
     const byId = new Map<string, (typeof rows)[number]>();
     rows.forEach((row) => {
       const id = typeof row?.id === 'string' ? row.id.trim() : '';
@@ -121,10 +106,9 @@ const validateStrictPublicDataCards = async (entities: ArenaEntity[]): Promise<
 
     for (const id of ids) {
       const row = byId.get(id);
-      if (!row || row.deletedAt) return { ok: false, reason: 'strict-card-missing' };
+      if (!row) return { ok: false, reason: 'strict-card-missing' };
       if (row.type !== 'character') return { ok: false, reason: 'strict-not-character' };
-      const isPublic = row.isPublic === 1 || row.isPublic === true;
-      if (!isPublic) return { ok: false, reason: 'strict-not-public' };
+      if (!row.isPublic) return { ok: false, reason: 'strict-not-public' };
       if (row.reviewStatus !== 'approved') return { ok: false, reason: 'strict-not-approved' };
     }
 
@@ -145,6 +129,7 @@ export default async function handler(req: NextRequest) {
 
   try {
     const body = (await req.json()) as any;
+    const db = getDrizzleDbFromRuntime();
 
     const battleMode = trimString(body?.battleMode ?? body?.mode);
     const selectedLevel = readString(body?.selectedLevel);
@@ -241,25 +226,16 @@ export default async function handler(req: NextRequest) {
       const entities = (combatants as unknown[]).map(parseArenaEntityFromCombatant);
       if (entities.some((e) => e == null)) {
         reasons.push('combatants-unrankable');
+      } else if (!db) {
+        reasons.push('strict-check-failed');
       } else {
         const [a, b] = entities as [ArenaEntity, ArenaEntity];
-        const strictCardOk = await validateStrictPublicDataCards([a, b]);
+        const strictCardOk = await validateStrictPublicDataCards(db, [a, b]);
         if (!strictCardOk.ok) {
           reasons.push(strictCardOk.reason);
         } else {
           try {
-            const ratingResult = await queryFromD1(
-              `SELECT entity_type as entityType, entity_id as entityId, rating, games
-               FROM arena_ratings
-               WHERE queue = 'strict'
-                 AND (
-                   (entity_type = ? AND entity_id = ?)
-                   OR
-                   (entity_type = ? AND entity_id = ?)
-                 )`,
-              [a.entityType, a.entityId, b.entityType, b.entityId]
-            );
-            const ratingRows = readRows<{ entityType: 'data_card' | 'preset'; entityId: string; rating: number; games: number }>(ratingResult);
+            const ratingRows = await getStrictArenaRatingsByEntities(db, a, b);
             const aRow = ratingRows.find((r) => r.entityType === a.entityType && r.entityId === a.entityId);
             const bRow = ratingRows.find((r) => r.entityType === b.entityType && r.entityId === b.entityId);
             const aRating = typeof aRow?.rating === 'number' ? aRow.rating : INITIAL_RATING;
@@ -291,18 +267,8 @@ export default async function handler(req: NextRequest) {
             if (typeof user?.id === 'number') {
               const sinceIso = new Date(Date.now() - STRICT_DEDUP_WINDOW_MS).toISOString();
               const pairKey = buildPairKey(a, b);
-              const dedupResult = await queryFromD1(
-                `SELECT 1
-                 FROM arena_rating_events
-                 WHERE queue = 'strict'
-                   AND status = 'applied'
-                   AND user_id = ?
-                   AND pair_key = ?
-                   AND created_at >= ?
-                 LIMIT 1`,
-                [user.id, pairKey, sinceIso]
-              );
-              if (readRows<unknown>(dedupResult).length > 0) {
+              const hasRecentDedup = await hasAppliedStrictEventForUserPairSince(db, user.id, pairKey, sinceIso);
+              if (hasRecentDedup) {
                 reasons.push('dedup-user-pair');
               }
             }

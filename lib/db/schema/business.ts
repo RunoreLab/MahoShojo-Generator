@@ -4,6 +4,7 @@ export type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire
 export type DataCardReviewStatus = 'pending' | 'approved' | 'rejected';
 export type ArenaRatingEntityType = 'data_card' | 'preset';
 export type ArenaRatingQueue = 'strict' | 'free';
+export type ArenaRatingEventStatus = 'pending' | 'applied' | 'skipped' | 'failed';
 
 /**
  * 业务主用户表（映射现有 users）
@@ -29,6 +30,9 @@ export const dataCards = sqliteTable('data_cards', {
   data: text('data').notNull(),
   isPublic: integer('is_public', { mode: 'boolean' }).notNull(),
   publicSince: text('public_since'),
+  usageCount: integer('usage_count'),
+  likeCount: integer('like_count'),
+  favoriteCount: integer('favorite_count'),
   reviewStatus: text('review_status').$type<DataCardReviewStatus | null>(),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
@@ -59,4 +63,13 @@ export const arenaRatings = sqliteTable('arena_ratings', {
   lastAppliedAt: text('last_applied_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
+});
+
+export const arenaRatingEvents = sqliteTable('arena_rating_events', {
+  id: text('id').primaryKey(),
+  queue: text('queue').$type<ArenaRatingQueue>().notNull(),
+  status: text('status').$type<ArenaRatingEventStatus>().notNull(),
+  userId: integer('user_id'),
+  pairKey: text('pair_key').notNull(),
+  createdAt: text('created_at').notNull(),
 });

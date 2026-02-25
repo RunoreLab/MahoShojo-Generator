@@ -9,11 +9,19 @@ import {
   getUserProfileCardRowByUserId,
   getUserProfileCardDataStats,
   getUserTopDataCardsByEngagement,
-  queryFromD1,
   type PvpMatchRoundOutcomeSummary,
   type UserTopDataCardRow,
 } from '@/lib/d1';
-import { applyQueenTier, computeArenaBaseTier, queryArenaPublicQueenEntity } from '@/lib/arena/tier';
+import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
+import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
+import {
+  getDataCardMetricsByDataCardIds,
+  getStrictArenaRatingsByDataCardIds,
+  getStrictTopDataCardRankMap,
+  getTopRatedCharacterCardByUserId,
+  queryArenaPublicQueenEntityByQueue,
+  type TopRatedCharacterCardRow,
+} from '@/lib/db/repositories/data-card-meta';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { UserBadge } from '@/types/badge';
 
@@ -117,16 +125,12 @@ function normalizeRoundSummary(row: PvpMatchRoundOutcomeSummary): { total: numbe
   return { total, wins, losses, draws };
 }
 
-const readRows = <T,>(result: any): T[] => {
-  const rows = result?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as T[]) : [];
-};
-
 export default withPvpErrorBoundary(async function handler(req: Request): Promise<Response> {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, { status: 405 });
 
   const auth = await requireAuthUser(req);
   if ('response' in auth) return auth.response;
+  const db = getDrizzleDbFromRuntime();
 
   const sinceIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -176,34 +180,27 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
     playersByMatchId.set(row.match_id, list);
   }
 
+  const normalizeTopRatedRow = (row: TopRatedCharacterCardRow): UserTopDataCardRow => ({
+    id: row.id,
+    type: row.type,
+    name: row.name,
+    description: row.description,
+    is_public: row.is_public ? 1 : 0,
+    review_status: row.review_status,
+    usage_count: typeof row.usage_count === 'number' ? row.usage_count : 0,
+    like_count: typeof row.like_count === 'number' ? row.like_count : 0,
+    favorite_count: typeof row.favorite_count === 'number' ? row.favorite_count : 0,
+    created_at: row.created_at ?? '',
+    updated_at: row.updated_at ?? '',
+  });
+
   const getTopRatedCharacterRow = async (): Promise<UserTopDataCardRow | null> => {
-    const baseSql = `SELECT
-        dc.id,
-        dc.type,
-        dc.name,
-        dc.description,
-        dc.is_public,
-        dc.review_status,
-        dc.usage_count,
-        dc.like_count,
-        dc.favorite_count,
-        dc.created_at,
-        dc.updated_at
-      FROM data_cards dc
-      JOIN arena_ratings ar
-        ON ar.entity_type = 'data_card'
-       AND ar.entity_id = dc.id
-       AND ar.queue = ?
-      WHERE dc.user_id = ?
-        AND dc.type = 'character'
-        AND dc.deleted_at IS NULL
-      ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, dc.updated_at DESC, dc.id ASC
-      LIMIT 1`;
+    if (!db) return null;
 
     try {
-      const strictResult = (await queryFromD1(baseSql, ['strict', auth.user.id])) as any;
-      const strictRow = readRows<UserTopDataCardRow>(strictResult)[0];
-      return strictRow?.id ? strictRow : null;
+      const strictRow = await getTopRatedCharacterCardByUserId(db, auth.user.id);
+      if (!strictRow?.id || strictRow.type !== 'character') return null;
+      return normalizeTopRatedRow(strictRow);
     } catch (error) {
       console.warn('读取最高排位角色卡失败（降级为 null）:', error);
       return null;
@@ -247,20 +244,12 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
   const characterHighlightIds = Array.from(new Set(characterHighlightRows.map((r) => r.id).filter(Boolean)));
 
   const metricsById = new Map<string, CardMetricsLite>();
-  if (characterHighlightIds.length > 0) {
+  if (characterHighlightIds.length > 0 && db) {
     try {
-      const placeholders = characterHighlightIds.map(() => '?').join(', ');
-      const metricsResult = (await queryFromD1(
-        `SELECT data_card_id as id, tech_score as techScore, tech_level as techLevel
-         FROM data_card_metrics
-         WHERE data_card_id IN (${placeholders})`,
-        characterHighlightIds,
-      )) as any;
-      const rows = readRows<{ id: string; techScore: number; techLevel: string }>(metricsResult);
-      rows.forEach((row) => {
-        if (!row?.id) return;
+      const metricsMap = await getDataCardMetricsByDataCardIds(db, characterHighlightIds);
+      metricsMap.forEach((row, id) => {
         if (typeof row.techScore !== 'number' || typeof row.techLevel !== 'string') return;
-        metricsById.set(row.id, { techScore: row.techScore, techLevel: row.techLevel });
+        metricsById.set(id, { techScore: row.techScore, techLevel: row.techLevel });
       });
     } catch (error) {
       console.warn('读取角色卡技术值失败（降级为 null）:', error);
@@ -276,28 +265,20 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
   };
 
   const ratingsById = new Map<string, { strict?: RatingRow }>();
-  if (characterHighlightIds.length > 0) {
+  if (characterHighlightIds.length > 0 && db) {
     try {
-      const placeholders = characterHighlightIds.map(() => '?').join(', ');
-      const ratingsResult = (await queryFromD1(
-        `SELECT
-          entity_id as dataCardId,
-          queue,
-          rating,
-          games,
-          updated_at as updatedAt
-         FROM arena_ratings
-         WHERE entity_type = 'data_card'
-           AND entity_id IN (${placeholders})
-           AND queue = 'strict'`,
-        characterHighlightIds,
-      )) as any;
-      const rows = readRows<RatingRow>(ratingsResult);
+      const rows = await getStrictArenaRatingsByDataCardIds(db, characterHighlightIds);
       rows.forEach((row) => {
         if (!row?.dataCardId) return;
         if (row.queue !== 'strict') return;
         const entry = ratingsById.get(row.dataCardId) ?? {};
-        entry[row.queue] = row;
+        entry.strict = {
+          dataCardId: row.dataCardId,
+          queue: 'strict',
+          rating: row.rating,
+          games: row.games,
+          updatedAt: row.updatedAt,
+        };
         ratingsById.set(row.dataCardId, entry);
       });
     } catch (error) {
@@ -307,55 +288,20 @@ export default withPvpErrorBoundary(async function handler(req: Request): Promis
 
   const strictTop300RankByDataCardId = await (async () => {
     const map = new Map<string, number>();
-    if (characterHighlightIds.length === 0) return map;
+    if (characterHighlightIds.length === 0 || !db) return map;
 
     try {
-      const result = (await queryFromD1(
-        `SELECT ar.entity_type as entityType, ar.entity_id as entityId
-         FROM arena_ratings ar
-         LEFT JOIN data_cards dc
-           ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-         WHERE ar.queue = 'strict'
-           AND (
-             ar.entity_type = 'preset'
-             OR (
-                dc.id IS NOT NULL
-                AND dc.type = 'character'
-                AND dc.is_public = 1
-                AND dc.review_status = 'approved'
-                AND dc.deleted_at IS NULL
-               AND (
-                 dc.public_since IS NULL
-                 OR dc.public_since <= datetime('now', '-3 days')
-                 OR (
-                   dc.created_at IS NOT NULL
-                   AND dc.public_since IS NOT NULL
-                   AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
-                 )
-               )
-              )
-            )
-         ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC
-         LIMIT 300`,
-      )) as any;
-      const rows = readRows<{ entityType: unknown; entityId: unknown }>(result);
-      rows.forEach((row, index) => {
-        const entityType = row?.entityType === 'data_card' ? 'data_card' : row?.entityType === 'preset' ? 'preset' : null;
-        if (entityType !== 'data_card') return;
-        const entityId = typeof row?.entityId === 'string' ? row.entityId.trim() : '';
-        if (!entityId) return;
-        map.set(entityId, index + 1);
-      });
+      return await getStrictTopDataCardRankMap(db, 300);
     } catch {
       return map;
     }
-
-    return map;
   })();
-  const strictQueen = await queryArenaPublicQueenEntity(queryFromD1, 'strict').catch((error) => {
-    console.warn('读取女王段位失败（降级为无女王）:', error);
-    return null;
-  });
+  const strictQueen = db
+    ? await queryArenaPublicQueenEntityByQueue(db, 'strict').catch((error) => {
+        console.warn('读取女王段位失败（降级为无女王）:', error);
+        return null;
+      })
+    : null;
 
   const buildRating = (row: RatingRow | undefined): CardRatingLite => {
     if (!row) return null;

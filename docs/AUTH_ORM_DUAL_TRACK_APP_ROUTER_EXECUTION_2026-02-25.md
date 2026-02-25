@@ -156,6 +156,9 @@
 21. 补齐 Better Auth 登录/注册兼容闭环：当业务用户 `users.auth_key` 为空时，登录/注册桥接会自动补写兼容密钥并返回，避免“密码登录成功但 legacy 兼容链路断裂”的灰度期故障（`app/api/auth/login`、`app/api/auth/register`、`lib/auth/user-auth-linking.ts`、`lib/db/repositories/business-users.ts`）。  
 22. 已完成高频受保护接口 ORM 化（首轮）：`pages/api/data-card-meta.ts` 与 `pages/api/data-card-meta-batch.ts` 改为优先走 `lib/db/repositories/data-card-meta.ts`（Drizzle），并补齐 `data_cards / data_card_metrics / arena_ratings` 业务域 schema 映射。  
 23. `app/api/auth/recover` 已从“重置并回发 legacy key”升级为“一次性重置令牌”流程：新增 `auth_password_reset_tokens`（`drizzle/0002_auth_password_reset_tokens.sql`）、`app/api/auth/recover/reset` 消费接口与 `pages/password-recovery.tsx` 二段式重置 UI。  
+24. 已完成第二轮受保护接口 ORM 化：`pages/api/me/profile-card.ts` 与 `pages/api/arena/strict-preflight.ts` 已移除接口内全部 `queryFromD1` 直连，改为走 `lib/db/repositories/*`（新增 `arena-strict-preflight` 仓储，并补齐 `arena_rating_events` schema 映射）。  
+25. 已完成 `pages/api/data-cards.ts` 余留直连 SQL 清理：`getDataCardUpdatedAt` 与“更新 data 字段”改为走 Drizzle 仓储（新增 `data-cards-write` 仓储）。  
+26. 当前 `pages/api` 中直接 `queryFromD1` 调用点已从 `17` 处下降至 `8` 处。  
 
 受限项（当前本地环境）：
 
@@ -167,4 +170,4 @@
 1. 在测试库补齐凭据后执行 `backfill:user-auth-links:dry` → `backfill:user-auth-links:write`，并沉淀真实冲突样例（`skip-ambiguous-email`、`skip-ambiguous-username`、`skip-business-already-linked`）。  
 2. 完成端到端联调：密码登录/注册（Cookie 会话）与 legacy 密钥路径并行验证，并补录请求/响应样例。  
 3. 对齐部署侧 D1 Binding 与 migration 执行规范（`wrangler` 配置、local/remote 流程）。  
-4. 继续迁移仍直接 `queryFromD1` 的高频受保护接口（建议下一批：`pages/api/me/profile-card.ts`、`pages/api/arena/strict-preflight.ts`）。  
+4. 继续迁移剩余 `queryFromD1` 调用点（当前主要集中在公开排行与统计接口：`arena/leaderboard*`、`arena/generation-ranking`、`arena/entity-rating`、`arena/preset-meta`、`get-stats`）。  
