@@ -6,9 +6,9 @@ compatibility_flags = ["nodejs_compat"]
 # 请在部署前替换下列 database_id 占位值。
 [[d1_databases]]
 binding = "DB"
-database_name = "ifmahoushoujo"
-database_id = "replace_with_production_d1_database_id"
-preview_database_id = "replace_with_preview_d1_database_id"
+database_name = "mhsj-d1-test"
+database_id = "3836f44c-4e49-4356-9b33-6080278e4448"
+preview_database_id = "3836f44c-4e49-4356-9b33-6080278e4448"
 migrations_dir = "drizzle"
 
 [env.production]
@@ -18,9 +18,9 @@ compatibility_flags = ["nodejs_compat"]
 
 [[env.production.d1_databases]]
 binding = "DB"
-database_name = "ifmahoushoujo"
-database_id = "replace_with_production_d1_database_id"
-preview_database_id = "replace_with_preview_d1_database_id"
+database_name = "mhsj-d1-test"
+database_id = "3836f44c-4e49-4356-9b33-6080278e4448"
+preview_database_id = "3836f44c-4e49-4356-9b33-6080278e4448"
 migrations_dir = "drizzle"
 
 [env.preview]
@@ -30,7 +30,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [[env.preview.d1_databases]]
 binding = "DB"
-database_name = "ifmahoushoujo-preview"
-database_id = "replace_with_preview_d1_database_id"
-preview_database_id = "replace_with_preview_d1_database_id"
+database_name = "mhsj-d1-test-preview"
+database_id = "3836f44c-4e49-4356-9b33-6080278e4448"
+preview_database_id = "3836f44c-4e49-4356-9b33-6080278e4448"
 migrations_dir = "drizzle"
