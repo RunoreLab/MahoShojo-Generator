@@ -1,6 +1,15 @@
-import { queryFromD1 } from '@/lib/database/core';
+import { loadEnvConfig } from '@next/env';
+
+import { getRuntimeD1Client } from '@/lib/db/drizzle';
 
 const run = async () => {
+  loadEnvConfig(process.cwd(), process.env.NODE_ENV !== 'production');
+
+  const d1 = getRuntimeD1Client();
+  if (!d1) {
+    throw new Error('缺少可用 D1 连接，请检查 Cloudflare D1 配置或运行时绑定');
+  }
+
   const statements = [
     `CREATE TABLE IF NOT EXISTS large_objects (
       id TEXT PRIMARY KEY NOT NULL,
@@ -23,8 +32,7 @@ const run = async () => {
   ];
 
   for (const sql of statements) {
-    // D1 API 一次只建议跑一条语句
-    await queryFromD1(sql, []);
+    await d1.prepare(sql).run();
   }
 };
 

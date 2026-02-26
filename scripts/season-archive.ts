@@ -3,6 +3,10 @@ import { dirname, resolve } from 'node:path';
 
 import { loadEnvConfig } from '@next/env';
 
+import {
+  countSeasonArchiveEligibleRows,
+  listSeasonArchiveLeaderboardRows,
+} from '@/lib/database/season-archive';
 import type {
   SeasonArchiveEntity,
   SeasonArchiveEntityRef,
@@ -15,8 +19,6 @@ import type {
 import { formatSeasonTitle, isSafeSeasonId } from '../lib/seasons';
 
 type Queue = 'strict' | 'free';
-
-type QueryFromD1 = (sql: string, params?: unknown[]) => Promise<unknown>;
 
 type LeaderboardRow = {
   entityType: 'data_card' | 'preset';
@@ -54,11 +56,6 @@ const readJson = <T>(path: string): T => {
 const writeJson = (path: string, data: unknown) => {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
-};
-
-const readRows = <T>(result: unknown): T[] => {
-  const rows = (result as any)?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as T[]) : [];
 };
 
 const parseArgs = (argv: string[]) => {
@@ -104,104 +101,6 @@ const formatSeasonIdList = (seasons: SeasonMeta[]): string => {
     .map((s) => (typeof s?.id === 'string' ? s.id.trim() : ''))
     .filter(Boolean)
     .join(', ');
-};
-
-const buildLeaderboardBaseSql = (queue: Queue) => {
-  const strictPublicSinceClause =
-    queue === 'strict'
-      ? `AND (
-        dc.public_since IS NULL
-        OR dc.public_since <= datetime('now', '-3 days')
-        OR (
-          dc.created_at IS NOT NULL
-          AND dc.public_since IS NOT NULL
-          AND ABS(strftime('%s', dc.public_since) - strftime('%s', dc.created_at)) <= 600
-        )
-      )`
-      : '';
-
-  const whereSql = `WHERE ar.queue = ?
-    AND (
-      ar.entity_type = 'preset'
-      OR (
-        dc.id IS NOT NULL
-        AND dc.type = 'character'
-        AND dc.is_public = 1
-        AND dc.review_status = 'approved'
-        AND dc.deleted_at IS NULL
-        ${strictPublicSinceClause}
-      )
-    )`;
-
-  const selectSql = `
-    SELECT
-      ar.entity_type as entityType,
-      ar.entity_id as entityId,
-      ar.rating as rating,
-      ar.games as games,
-      ar.wins as wins,
-      ar.losses as losses,
-      ar.draws as draws,
-      MAX(ar.updated_at) as ratingUpdatedAt,
-      MAX(dc.name) as dataCardName,
-      MAX(dc.description) as dataCardDescription,
-      MAX(dc.user_id) as authorId,
-      MAX(u.username) as authorName,
-      MAX(dc.usage_count) as usageCount,
-      MAX(dc.like_count) as likeCount,
-      MAX(dc.favorite_count) as favoriteCount,
-      MAX(dc.created_at) as dataCardCreatedAt,
-      MAX(dc.updated_at) as dataCardUpdatedAt,
-      MAX(dcm.tech_score) as techScore,
-      MAX(dcm.tech_level) as techLevel,
-      MAX(dcm.is_native) as isNative,
-      group_concat(DISTINCT dct.tag_id) as tagIds
-    FROM arena_ratings ar
-    LEFT JOIN data_cards dc
-      ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-    LEFT JOIN users u
-      ON dc.user_id = u.id
-    LEFT JOIN data_card_metrics dcm
-      ON ar.entity_type = 'data_card' AND dcm.data_card_id = ar.entity_id
-    LEFT JOIN data_card_tags dct
-      ON ar.entity_type = 'data_card' AND dct.data_card_id = ar.entity_id
-    ${whereSql}
-    GROUP BY ar.entity_type, ar.entity_id, ar.queue
-  `;
-
-  const countSql = `
-    SELECT COUNT(*) as count
-    FROM (
-      SELECT ar.entity_type, ar.entity_id
-      FROM arena_ratings ar
-      LEFT JOIN data_cards dc
-        ON ar.entity_type = 'data_card' AND dc.id = ar.entity_id
-      ${whereSql}
-      GROUP BY ar.entity_type, ar.entity_id, ar.queue
-    ) t;
-  `;
-
-  return { whereSql, selectSql, countSql };
-};
-
-const queryLeaderboardCount = async (queryFromD1: QueryFromD1, queue: Queue): Promise<number> => {
-  const { countSql } = buildLeaderboardBaseSql(queue);
-  const result = await queryFromD1(countSql, [queue]);
-  const row = readRows<{ count: number }>(result)[0];
-  return typeof row?.count === 'number' && Number.isFinite(row.count) ? Math.max(0, Math.floor(row.count)) : 0;
-};
-
-const queryLeaderboardRows = async (
-  queryFromD1: QueryFromD1,
-  queue: Queue,
-  orderBy: string,
-  limit: number,
-  offset = 0,
-): Promise<LeaderboardRow[]> => {
-  const { selectSql } = buildLeaderboardBaseSql(queue);
-  const sql = `${selectSql}\n${orderBy}\nLIMIT ? OFFSET ?;`;
-  const result = await queryFromD1(sql, [queue, limit, offset]);
-  return readRows<LeaderboardRow>(result);
 };
 
 const buildEntityKey = (ref: SeasonArchiveEntityRef): string => `${ref.entityType}:${ref.entityId}`;
@@ -353,7 +252,6 @@ const ingestRows = async (
 };
 
 const archiveQueue = async (
-  queryFromD1: QueryFromD1,
   queue: Queue,
   options: {
     snapshotPolicy: SeasonArchiveSnapshotPolicy;
@@ -361,13 +259,17 @@ const archiveQueue = async (
     presetNameByFilename: Map<string, string>;
   },
 ): Promise<{ totalEligible: number }> => {
-  const total = await queryLeaderboardCount(queryFromD1, queue);
+  const total = await countSeasonArchiveEligibleRows(queue);
 
   if (options.snapshotPolicy.mode === 'full') {
-    const orderBy = 'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC';
     const pageSize = 1_000;
     for (let offset = 0; offset < total; offset += pageSize) {
-      const rows = await queryLeaderboardRows(queryFromD1, queue, orderBy, Math.min(pageSize, total - offset), offset);
+      const rows = await listSeasonArchiveLeaderboardRows({
+        queue,
+        sort: 'rating_desc',
+        limit: Math.min(pageSize, total - offset),
+        offset,
+      });
       if (rows.length === 0) break;
       await ingestRows(rows, {
         queue,
@@ -383,21 +285,19 @@ const archiveQueue = async (
   const bottom = Math.max(0, Math.floor(options.snapshotPolicy.bottom));
 
   const topRows = top > 0
-    ? await queryLeaderboardRows(
-        queryFromD1,
+    ? await listSeasonArchiveLeaderboardRows({
         queue,
-        'ORDER BY ar.rating DESC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC',
-        top,
-      )
+        sort: 'rating_desc',
+        limit: top,
+      })
     : [];
 
   const bottomRows = bottom > 0
-    ? await queryLeaderboardRows(
-        queryFromD1,
+    ? await listSeasonArchiveLeaderboardRows({
         queue,
-        'ORDER BY ar.rating ASC, ar.games DESC, ar.updated_at DESC, ar.entity_type ASC, ar.entity_id ASC',
-        bottom,
-      )
+        sort: 'rating_asc',
+        limit: bottom,
+      })
     : [];
 
   await ingestRows(topRows, {
@@ -498,16 +398,15 @@ const main = async () => {
     if (requireDb) throw new Error('缺少 D1 配置（CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID）');
     console.warn('[season-archive] 未检测到 D1 配置，将生成空的归档文件（仅用于本地/CI 验证）。');
   } else {
-    const { queryFromD1 } = await import('../lib/d1');
     const { PRESET_LIST } = await import('../lib/presets');
     const presetNameByFilename = new Map(PRESET_LIST.map((preset) => [preset.filename, preset.name]));
     const entityByKey = new Map<string, SeasonArchiveEntity>();
-    const strict = await archiveQueue(queryFromD1, 'strict', {
+    const strict = await archiveQueue('strict', {
       snapshotPolicy,
       entityByKey,
       presetNameByFilename,
     });
-    const free = await archiveQueue(queryFromD1, 'free', {
+    const free = await archiveQueue('free', {
       snapshotPolicy,
       entityByKey,
       presetNameByFilename,

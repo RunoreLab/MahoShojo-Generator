@@ -48,6 +48,16 @@ export type PvpRoomBrowseRow = PvpRoomRow & {
   player_count: number;
 };
 
+export type PvpRoomEphemeralCleanupCandidateRow = {
+  id: string;
+  status: string;
+  phase: string;
+  rules_json: string;
+  expires_at: string | null;
+  last_activity_at: string | null;
+  updated_at: string | null;
+};
+
 export type PvpRoundStatus = 'pending' | 'resolving' | 'completed' | 'aborted';
 
 export interface CreatePvpRoomInput {
@@ -89,6 +99,14 @@ type PvpRoomCoreRepoBundle = {
       offset?: number;
     },
   ) => Promise<PvpRoomBrowseRow[]>;
+  listPvpRoomEphemeralCleanupCandidates: (
+    db: unknown,
+    input: { nowIso: string; limit: number },
+  ) => Promise<PvpRoomEphemeralCleanupCandidateRow[]>;
+  updatePvpRoomRulesJsonById: (
+    db: unknown,
+    input: { roomId: string; rulesJson: string; updatedAt: string },
+  ) => Promise<number>;
   insertPvpRoomPlayerIgnore: (
     db: unknown,
     payload: {
@@ -186,6 +204,10 @@ const readPvpRoomCoreRepoBundle = async (): Promise<PvpRoomCoreRepoBundle | null
       listPvpRoomPlayersByRole: repo.listPvpRoomPlayersByRole as PvpRoomCoreRepoBundle['listPvpRoomPlayersByRole'],
       listPvpRoomMembers: repo.listPvpRoomMembers as PvpRoomCoreRepoBundle['listPvpRoomMembers'],
       listPvpRoomBrowseRows: repo.listPvpRoomBrowseRows as PvpRoomCoreRepoBundle['listPvpRoomBrowseRows'],
+      listPvpRoomEphemeralCleanupCandidates:
+        repo.listPvpRoomEphemeralCleanupCandidates as PvpRoomCoreRepoBundle['listPvpRoomEphemeralCleanupCandidates'],
+      updatePvpRoomRulesJsonById:
+        repo.updatePvpRoomRulesJsonById as PvpRoomCoreRepoBundle['updatePvpRoomRulesJsonById'],
       insertPvpRoomPlayerIgnore: repo.insertPvpRoomPlayerIgnore as PvpRoomCoreRepoBundle['insertPvpRoomPlayerIgnore'],
       updatePvpRoomMember: repo.updatePvpRoomMember as PvpRoomCoreRepoBundle['updatePvpRoomMember'],
       deletePvpRoomPlayer: repo.deletePvpRoomPlayer as PvpRoomCoreRepoBundle['deletePvpRoomPlayer'],
@@ -419,6 +441,40 @@ export async function getPvpRoomBrowseRows(input: {
   } catch (error) {
     console.error('读取 pvp_rooms 浏览列表失败:', error);
     return [];
+  }
+}
+
+export async function listPvpRoomEphemeralCleanupCandidates(input: {
+  nowIso: string;
+  limit: number;
+}): Promise<PvpRoomEphemeralCleanupCandidateRow[]> {
+  try {
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpRoomEphemeralCleanupCandidates(bundle.db, input);
+  } catch (error) {
+    console.error('读取 PVP 清理候选房间失败:', error);
+    return [];
+  }
+}
+
+export async function updatePvpRoomRulesJson(input: {
+  roomId: string;
+  rulesJson: string;
+  updatedAt?: string;
+}): Promise<boolean> {
+  try {
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
+    const changed = await bundle.updatePvpRoomRulesJsonById(bundle.db, {
+      roomId: input.roomId,
+      rulesJson: input.rulesJson,
+      updatedAt: input.updatedAt ?? new Date().toISOString(),
+    });
+    return changed > 0;
+  } catch (error) {
+    console.error('更新 PVP 房间 rules_json 失败:', error);
+    return false;
   }
 }
 

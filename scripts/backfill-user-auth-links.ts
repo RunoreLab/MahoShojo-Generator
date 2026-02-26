@@ -2,7 +2,13 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/database/core';
+import {
+  getExistingLinkByBusinessUserId,
+  listBusinessUsersByEmailInsensitive,
+  listBusinessUsersByUsernameInsensitive,
+  listUnlinkedAuthUsers,
+  upsertUserAuthLink,
+} from '@/lib/database/user-auth-links-backfill';
 
 type CliOptions = {
   dryRun: boolean;
@@ -29,10 +35,6 @@ type ExistingBusinessLinkRow = {
   business_user_id: number;
 };
 
-type D1RowsResult<T> = {
-  result?: Array<{ results?: T[] }>;
-};
-
 type Stats = {
   scanned: number;
   linked: number;
@@ -44,11 +46,6 @@ type Stats = {
   skippedAlreadyLinkedBusiness: number;
   skippedInvalid: number;
   errors: number;
-};
-
-const readRows = <T,>(result: unknown): T[] => {
-  const rows = (result as D1RowsResult<T>)?.result?.[0]?.results;
-  return Array.isArray(rows) ? rows : [];
 };
 
 const hasD1Config = (): boolean => {
@@ -120,79 +117,6 @@ const normalizeUsername = (value: unknown): string | null => {
   const username = toNonEmptyString(value);
   if (!username) return null;
   return username;
-};
-
-const fetchUnlinkedAuthUsers = async (afterId: string, batchSize: number): Promise<AuthUserRow[]> => {
-  const result = await queryFromD1(
-    `
-      SELECT u.id, u.email, u.name
-      FROM ba_user u
-      LEFT JOIN user_auth_links l ON l.auth_user_id = u.id
-      WHERE l.id IS NULL
-        AND u.id > ?
-      ORDER BY u.id ASC
-      LIMIT ?
-    `,
-    [afterId, batchSize],
-  );
-
-  return readRows<AuthUserRow>(result);
-};
-
-const findBusinessUsersByEmail = async (email: string): Promise<BusinessUserRow[]> => {
-  const result = await queryFromD1(
-    `
-      SELECT id, username, email
-      FROM users
-      WHERE lower(email) = lower(?)
-      ORDER BY id ASC
-      LIMIT 2
-    `,
-    [email],
-  );
-  return readRows<BusinessUserRow>(result);
-};
-
-const findBusinessUsersByUsername = async (username: string): Promise<BusinessUserRow[]> => {
-  const result = await queryFromD1(
-    `
-      SELECT id, username, email
-      FROM users
-      WHERE lower(username) = lower(?)
-      ORDER BY id ASC
-      LIMIT 2
-    `,
-    [username],
-  );
-  return readRows<BusinessUserRow>(result);
-};
-
-const getExistingLinkByBusinessUserId = async (businessUserId: number): Promise<ExistingBusinessLinkRow | null> => {
-  const result = await queryFromD1(
-    `
-      SELECT auth_user_id, business_user_id
-      FROM user_auth_links
-      WHERE business_user_id = ?
-      LIMIT 1
-    `,
-    [businessUserId],
-  );
-
-  const rows = readRows<ExistingBusinessLinkRow>(result);
-  return rows[0] ?? null;
-};
-
-const upsertUserAuthLink = async (authUserId: string, businessUserId: number): Promise<void> => {
-  await queryFromD1(
-    `
-      INSERT INTO user_auth_links (auth_user_id, business_user_id, created_at, updated_at)
-      VALUES (?, ?, unixepoch(), unixepoch())
-      ON CONFLICT(auth_user_id) DO UPDATE SET
-        business_user_id = excluded.business_user_id,
-        updated_at = unixepoch()
-    `,
-    [authUserId, businessUserId],
-  );
 };
 
 const logVerbose = (enabled: boolean, message: string, data?: unknown) => {
@@ -267,7 +191,7 @@ Options：
     if (remaining === 0) break;
 
     const batchSize = Math.min(options.batchSize, remaining);
-    const authUsers = await fetchUnlinkedAuthUsers(cursor, batchSize);
+    const authUsers = (await listUnlinkedAuthUsers(cursor, batchSize)) as AuthUserRow[];
     if (authUsers.length === 0) break;
 
     for (const authUser of authUsers) {
@@ -288,7 +212,7 @@ Options：
       let matchedBy: 'email' | 'username' | null = null;
 
       if (email) {
-        const emailCandidates = await findBusinessUsersByEmail(email);
+        const emailCandidates = (await listBusinessUsersByEmailInsensitive(email, 2)) as BusinessUserRow[];
         if (emailCandidates.length > 1) {
           stats.skippedAmbiguous += 1;
           logVerbose(options.verbose, '[skip-ambiguous-email]', { authUserId, email, candidates: emailCandidates.map((c) => c.id) });
@@ -301,7 +225,7 @@ Options：
       }
 
       if (!selected && username) {
-        const usernameCandidates = await findBusinessUsersByUsername(username);
+        const usernameCandidates = (await listBusinessUsersByUsernameInsensitive(username, 2)) as BusinessUserRow[];
         if (usernameCandidates.length > 1) {
           stats.skippedAmbiguous += 1;
           logVerbose(options.verbose, '[skip-ambiguous-username]', {

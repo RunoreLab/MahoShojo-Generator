@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   gt,
+  lt,
   inArray,
   isNotNull,
   isNull,
@@ -60,6 +61,16 @@ export type PvpRoomBrowseDbRow = PvpRoomDbRow & {
   host_username: string;
   host_prefix: string | null;
   player_count: number;
+};
+
+export type PvpRoomEphemeralCleanupCandidateDbRow = {
+  id: string;
+  status: string;
+  phase: string;
+  rules_json: string;
+  expires_at: string | null;
+  last_activity_at: string | null;
+  updated_at: string | null;
 };
 
 export type PvpRoomSubmissionDbRow = {
@@ -384,6 +395,62 @@ export const listPvpRoomBrowseRows = async (
     host_prefix: typeof row.hostPrefix === 'string' ? row.hostPrefix : null,
     player_count: toInt(row.playerCount, 0),
   }));
+};
+
+export const listPvpRoomEphemeralCleanupCandidates = async (
+  db: AppDrizzleDb,
+  input: { nowIso: string; limit: number },
+): Promise<PvpRoomEphemeralCleanupCandidateDbRow[]> => {
+  const limit = Number.isFinite(input.limit) ? Math.max(1, Math.min(5000, Math.floor(input.limit))) : 500;
+
+  const rows = await db
+    .select({
+      id: pvpRooms.id,
+      status: pvpRooms.status,
+      phase: pvpRooms.phase,
+      rulesJson: pvpRooms.rulesJson,
+      expiresAt: pvpRooms.expiresAt,
+      lastActivityAt: pvpRooms.lastActivityAt,
+      updatedAt: pvpRooms.updatedAt,
+    })
+    .from(pvpRooms)
+    .where(
+      or(
+        eq(pvpRooms.status, 'closed'),
+        inArray(pvpRooms.phase, ['finished', 'closed', 'aborted']),
+        and(isNotNull(pvpRooms.expiresAt), lt(pvpRooms.expiresAt, input.nowIso)),
+      ),
+    )
+    .orderBy(asc(sql`COALESCE(${pvpRooms.lastActivityAt}, ${pvpRooms.updatedAt})`))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    id: row.id,
+    status: typeof row.status === 'string' ? row.status : '',
+    phase: typeof row.phase === 'string' ? row.phase : '',
+    rules_json: typeof row.rulesJson === 'string' ? row.rulesJson : '',
+    expires_at: typeof row.expiresAt === 'string' ? row.expiresAt : null,
+    last_activity_at: typeof row.lastActivityAt === 'string' ? row.lastActivityAt : null,
+    updated_at: typeof row.updatedAt === 'string' ? row.updatedAt : null,
+  }));
+};
+
+export const updatePvpRoomRulesJsonById = async (
+  db: AppDrizzleDb,
+  input: { roomId: string; rulesJson: string; updatedAt: string },
+): Promise<number> => {
+  const rows = await db
+    .update(pvpRooms)
+    .set({
+      rulesJson: input.rulesJson,
+      updatedAt: input.updatedAt,
+    })
+    .where(eq(pvpRooms.id, input.roomId))
+    .returning({
+      id: pvpRooms.id,
+    });
+
+  return rows.length;
 };
 
 export const insertPvpRoomPlayerIgnore = async (

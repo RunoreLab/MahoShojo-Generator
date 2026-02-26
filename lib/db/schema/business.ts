@@ -428,6 +428,16 @@ export const tags = sqliteTable('tags', {
   categoryIndex: index('idx_tags_category').on(table.category),
 }));
 
+export const tagAliases = sqliteTable('tag_aliases', {
+  alias: text('alias').primaryKey(),
+  tagId: text('tag_id')
+    .notNull()
+    .references(() => tags.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').notNull(),
+}, (table) => ({
+  tagIdIndex: index('idx_tag_aliases_tag_id').on(table.tagId),
+}));
+
 export const userLastActivity = sqliteTable('user_last_activity', {
   userId: integer('user_id').primaryKey(),
   lastSeenAt: text('last_seen_at').notNull(),

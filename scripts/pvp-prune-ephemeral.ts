@@ -1,13 +1,11 @@
-import { queryFromD1 } from '@/lib/database/core';
-import { clearPvpRoomEphemeralState } from '@/lib/database/pvp';
+import {
+  clearPvpRoomEphemeralState,
+  listPvpRoomEphemeralCleanupCandidates,
+  updatePvpRoomRulesJson,
+} from '@/lib/database/pvp';
 import { clearPvpRoomRuntimeFromRulesJson } from '@/lib/pvp/bot/room';
 
 type RoomRow = { id: string; status: string; phase: string; rules_json: string; expires_at: string | null; last_activity_at: string | null; updated_at: string | null };
-
-const readRows = (result: any): RoomRow[] => {
-  const rows = result?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as RoomRow[]) : [];
-};
 
 const main = async () => {
   const dryRun = process.argv.includes('--dry-run');
@@ -15,18 +13,7 @@ const main = async () => {
   const limit = limitArg ? Math.max(1, Math.min(5000, Number(limitArg.split('=')[1] || 0))) : 500;
 
   const nowIso = new Date().toISOString();
-  const result = await queryFromD1(
-    `SELECT id, status, phase, rules_json, expires_at, last_activity_at, updated_at
-     FROM pvp_rooms
-     WHERE
-       status = 'closed'
-       OR phase IN ('finished', 'closed', 'aborted')
-       OR (expires_at IS NOT NULL AND expires_at < ?)
-     ORDER BY COALESCE(last_activity_at, updated_at) ASC
-     LIMIT ?`,
-    [nowIso, limit]
-  );
-  const rooms = readRows(result);
+  const rooms = (await listPvpRoomEphemeralCleanupCandidates({ nowIso, limit })) as RoomRow[];
 
   console.log(`候选房间数：${rooms.length}（limit=${limit}）`);
   if (rooms.length <= 0) return;
@@ -45,11 +32,11 @@ const main = async () => {
   for (const room of rooms) {
     const compact = clearPvpRoomRuntimeFromRulesJson(room.rules_json);
     if (compact !== room.rules_json) {
-      await queryFromD1(
-        'UPDATE pvp_rooms SET rules_json = ?, updated_at = ? WHERE id = ?',
-        [compact, new Date().toISOString(), room.id]
-      );
-      runtimeCompacted += 1;
+      const updated = await updatePvpRoomRulesJson({
+        roomId: room.id,
+        rulesJson: compact,
+      });
+      if (updated) runtimeCompacted += 1;
     }
 
     const ok = await clearPvpRoomEphemeralState(room.id);
