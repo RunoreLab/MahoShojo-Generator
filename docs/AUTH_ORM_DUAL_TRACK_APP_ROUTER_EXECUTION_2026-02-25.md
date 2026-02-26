@@ -169,6 +169,8 @@
 34. 已完成 `decks` 相关路由的 Drizzle 仓储导入迁移：`pages/api/decks.ts`、`pages/api/deck-cards.ts`、`pages/api/deck-favorites.ts`、`pages/api/favorites.ts`、`pages/api/public-decks.ts` 已移除 `@/lib/d1` 依赖，改为直接从 `lib/database/*` 访问 Drizzle 封装层；当前 `pages/api` 中残余 `@/lib/d1` 直接引用为 `44` 处（本地工作区统计）。  
 35. 已完成第二批低风险导入迁移：`pages/api/generate-canshou.ts`、`pages/api/generate-sublimation.ts`、`pages/api/generate-magical-girl-details.ts`、`pages/api/public-data-cards.ts`、`pages/api/me/beta-access.ts`、`pages/api/me/profile-card.ts` 已移除 `@/lib/d1` 依赖；当前 `pages/api` 中残余 `@/lib/d1` 直接引用为 `38` 处（本地工作区统计）。  
 36. 已完成第三批数据卡域导入迁移：`pages/api/data-cards.ts`、`pages/api/data-card-recycle.ts`、`pages/api/data-card-tags.ts` 已移除 `@/lib/d1` 依赖，改为直连 `lib/database/data-cards` 与 `lib/database/users`；当前 `pages/api` 中残余 `@/lib/d1` 直接引用为 `35` 处（本地工作区统计）。  
+37. 已完成第四批大规模 API 去聚合层迁移：`pages/api/pvp/*`、`pages/api/me/pvp*`、`pages/api/me/battle-reports*`、`pages/api/arena/generate*.ts`、`pages/api/generate-battle-story.ts` 全部改为直连 `lib/database/*` 对应子域（`pvp`、`battle-report-generations`、`battle-report-generation-combatants`、`large-objects`、`core`、`badges`、`users`、`data-cards`）；当前 `pages/api` 中 `@/lib/d1` 直接引用已降至 `0` 处（本地工作区统计）。  
+38. 已完成仓库级去聚合层清理：`lib/auth/*`、`lib/pvp/*`、`lib/arena/*`、`app/api/auth/*`、`scripts/*`、`tests/*` 中剩余 `@/lib/d1` 引用已迁至对应 `lib/database/*` 子域；当前仓库中 `@/lib/d1` 直接引用全局检索为 `0` 处（本地工作区统计）。  
 
 受限项（当前本地环境）：
 

@@ -1,4 +1,4 @@
-import type { PvpRoomPhase, PvpRoomStatus } from '@/lib/d1';
+import type { PvpRoomPhase, PvpRoomStatus } from '@/lib/database/pvp';
 
 export function canJoinPvpRoomFromBrowse(input: { status: PvpRoomStatus; phase: PvpRoomPhase; slotsLeft: number }): boolean {
   if (input.status !== 'open') return false;

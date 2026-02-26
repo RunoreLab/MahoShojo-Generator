@@ -10,7 +10,7 @@ import {
   ensureBusinessUserLegacyAuthKey,
   getLinkedBusinessUserByAuthUserId,
 } from '@/lib/auth/user-auth-linking';
-import { verifyUserLogin } from '@/lib/d1';
+import { verifyUserLogin } from '@/lib/database/users';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
 export const runtime = 'nodejs';

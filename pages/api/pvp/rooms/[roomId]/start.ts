@@ -3,11 +3,9 @@ import {
   createPvpMatch,
   createPvpMatchPlayers,
   createPvpRound,
-  generateUUID,
   getPvpCardSnapshotById,
   getPvpEligibleDataCard,
   getPvpEligibleScenarioDataCard,
-  getRandomPublicCardExcluding,
   getPvpRoomById,
   getPvpRoomHands,
   getPvpRoomPlayers,
@@ -16,7 +14,9 @@ import {
   updatePvpRoomMember,
   updatePvpRoomCas,
   upsertPvpRoomHand,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
+import { getRandomPublicCardExcluding } from '@/lib/database/data-cards';
+import { generateUUID } from '@/lib/database/core';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { isPvpCombatantTypeAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';

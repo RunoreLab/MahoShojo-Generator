@@ -1,4 +1,4 @@
-import { getPvpUserSummariesByUserIds } from '@/lib/d1';
+import { getPvpUserSummariesByUserIds } from '@/lib/database/pvp';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
 export const runtime = 'edge';

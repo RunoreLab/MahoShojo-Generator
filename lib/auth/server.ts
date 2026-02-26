@@ -1,4 +1,4 @@
-import { getUserByAuthKey } from '@/lib/d1';
+import { getUserByAuthKey } from '@/lib/database/users';
 import { ACTIVITY_TOKEN_HEADER, ACTIVITY_USER_ID_HEADER } from '@/lib/auth/activity-token';
 import { hasBetterAuthSessionCookie } from '@/lib/auth/better-auth';
 

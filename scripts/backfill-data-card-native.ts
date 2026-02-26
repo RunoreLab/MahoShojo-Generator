@@ -2,7 +2,7 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/d1';
+import { queryFromD1 } from '@/lib/database/core';
 import { verifySignature } from '@/lib/signature';
 
 type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';

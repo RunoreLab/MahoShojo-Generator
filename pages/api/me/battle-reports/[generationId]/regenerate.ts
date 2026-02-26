@@ -1,9 +1,9 @@
 import {
   getBattleReportGenerationByIdLite,
-  getLargeObjectByOwnerRef,
-  isUserInPvpMatch,
   updateBattleReportGenerationOutputHasSensitiveWords,
-} from '@/lib/d1';
+} from '@/lib/database/battle-report-generations';
+import { getLargeObjectByOwnerRef } from '@/lib/database/large-objects';
+import { isUserInPvpMatch } from '@/lib/database/pvp';
 import { hydrateBattleReportCardFromGenerationRecord } from '@/lib/arena/battle-report-card-fallback';
 import { json, readJson, requireAuthUser } from '@/lib/pvp/server';
 import { getObjectText } from '@/lib/r2';

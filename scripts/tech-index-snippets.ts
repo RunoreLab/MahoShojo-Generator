@@ -2,7 +2,7 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/d1';
+import { queryFromD1 } from '@/lib/database/core';
 
 type D1RowsResult<T> = {
   result?: Array<{ results?: T[] }>;

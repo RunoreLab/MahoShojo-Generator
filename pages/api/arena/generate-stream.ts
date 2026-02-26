@@ -30,13 +30,13 @@ import {
 import { getRandomJournalist } from '@/lib/random-choose-journalist';
 import {
     createBattleReportGenerationRecord,
-    createBattleReportGenerationCombatants,
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
     updateBattleReportGenerationOutputPreview,
-    upsertLargeObjectByOwnerRef,
-    generateUUID
-} from '@/lib/d1';
+} from '@/lib/database/battle-report-generations';
+import { createBattleReportGenerationCombatants } from '@/lib/database/battle-report-generation-combatants';
+import { upsertLargeObjectByOwnerRef } from '@/lib/database/large-objects';
+import { generateUUID } from '@/lib/database/core';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,

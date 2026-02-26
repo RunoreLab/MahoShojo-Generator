@@ -1,4 +1,5 @@
-import { clearPvpRoomEphemeralState, queryFromD1 } from '@/lib/d1';
+import { queryFromD1 } from '@/lib/database/core';
+import { clearPvpRoomEphemeralState } from '@/lib/database/pvp';
 import { clearPvpRoomRuntimeFromRulesJson } from '@/lib/pvp/bot/room';
 
 type RoomRow = { id: string; status: string; phase: string; rules_json: string; expires_at: string | null; last_activity_at: string | null; updated_at: string | null };

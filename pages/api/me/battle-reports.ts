@@ -2,7 +2,7 @@ import {
   countBattleReportGenerationsByUserId,
   getBattleReportGenerationsByUserIdLite,
   type BattleReportGenerationsListFilter,
-} from '@/lib/d1';
+} from '@/lib/database/battle-report-generations';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 
 export const runtime = 'edge';

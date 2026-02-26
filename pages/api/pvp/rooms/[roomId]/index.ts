@@ -9,8 +9,8 @@ import {
   getLatestPvpRoundByMatch,
   getPvpRoundsByMatch,
   updatePvpRoomCas,
-  getUserEquippedBadges,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
+import { getUserEquippedBadges } from '@/lib/database/badges';
 import { botUserIdForClient, parsePvpRoomBotRoster, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { getPvpScenarioTitle, parsePvpScenarioSelection } from '@/lib/pvp/scenario';

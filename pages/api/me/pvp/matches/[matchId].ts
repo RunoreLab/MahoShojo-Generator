@@ -1,4 +1,4 @@
-import { getPvpMatchById, getPvpMatchPlayersByMatchId, getPvpRoundsByMatch, isUserInPvpMatch } from '@/lib/d1';
+import { getPvpMatchById, getPvpMatchPlayersByMatchId, getPvpRoundsByMatch, isUserInPvpMatch } from '@/lib/database/pvp';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 
 export const runtime = 'edge';

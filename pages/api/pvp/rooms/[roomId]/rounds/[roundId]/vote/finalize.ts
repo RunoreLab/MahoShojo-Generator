@@ -5,7 +5,7 @@ import {
   getPvpRoundById,
   updatePvpRoomCas,
   updatePvpRound,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { canForcePendingAction, computeLastPendingVoteAction } from '@/lib/pvp/pending-action';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';

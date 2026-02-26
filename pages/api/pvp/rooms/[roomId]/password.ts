@@ -1,4 +1,4 @@
-import { getPvpRoomById, updatePvpRoomCas } from '@/lib/d1';
+import { getPvpRoomById, updatePvpRoomCas } from '@/lib/database/pvp';
 import { generateSaltHex, hashJoinCode } from '@/lib/pvp/crypto';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';

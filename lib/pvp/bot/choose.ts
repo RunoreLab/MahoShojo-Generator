@@ -1,4 +1,5 @@
-import { getDataCardStatsByIds, getPvpUserSummariesByUserIds } from '@/lib/d1';
+import { getDataCardStatsByIds } from '@/lib/database/data-cards';
+import { getPvpUserSummariesByUserIds } from '@/lib/database/pvp';
 import type { PvpCardRef } from '@/lib/pvp/types';
 
 import { getBotStrategyById } from './strategies';

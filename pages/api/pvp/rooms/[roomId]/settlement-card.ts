@@ -6,10 +6,14 @@ import {
   getPvpRoomSubmissions,
   getPvpRoundsByMatch,
   getPvpUserSummariesByUserIds,
+} from '@/lib/database/pvp';
+import {
   getUserBadges,
   getUserEquippedBadges,
+} from '@/lib/database/badges';
+import {
   getUserProfileByUserId,
-} from '@/lib/d1';
+} from '@/lib/database/users';
 import { botUserIdForClient, parsePvpRoomBotRoster, parsePvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { formatPvpDisplayName } from '@/lib/pvp/displayName';
 import { getRoomIdFromRequestUrl } from '@/lib/pvp/route';

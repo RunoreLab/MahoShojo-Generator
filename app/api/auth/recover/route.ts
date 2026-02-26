@@ -5,7 +5,7 @@ import {
   consumePasswordResetTokenById,
   createPasswordResetToken,
 } from '@/lib/db/repositories/password-reset-tokens';
-import { getUserByUsername } from '@/lib/d1';
+import { getUserByUsername } from '@/lib/database/users';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
 export const runtime = 'nodejs';

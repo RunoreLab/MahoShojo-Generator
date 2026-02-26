@@ -1,4 +1,4 @@
-import { getPvpEligibleDataCard, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas, upsertPvpRoomSubmission } from '@/lib/d1';
+import { getPvpEligibleDataCard, getPvpRoomById, getPvpRoomPlayers, updatePvpRoomCas, upsertPvpRoomSubmission } from '@/lib/database/pvp';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { describePvpRoomCardRange, isPvpCombatantTypeAllowedByRange, isPvpDataCardStatsAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';
 import { inferPvpCombatantTypeFromJson } from '@/lib/pvp/logic';

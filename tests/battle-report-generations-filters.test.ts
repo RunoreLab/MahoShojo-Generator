@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { buildBattleReportGenerationsWhereClause } from '@/lib/d1';
+import { buildBattleReportGenerationsWhereClause } from '@/lib/database/battle-report-generations';
 
 describe('battle report generations list filters', () => {
   it('默认仅按 user_id 查询并按 started_at 倒序', () => {

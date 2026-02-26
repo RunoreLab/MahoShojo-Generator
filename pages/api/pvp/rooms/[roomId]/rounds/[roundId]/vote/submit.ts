@@ -5,7 +5,7 @@ import {
   getPvpRoundById,
   updatePvpRoomCas,
   updatePvpRound,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';

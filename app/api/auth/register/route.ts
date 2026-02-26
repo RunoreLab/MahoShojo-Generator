@@ -11,7 +11,7 @@ import {
   getLinkedBusinessUserByAuthUserId,
 } from '@/lib/auth/user-auth-linking';
 import { getSecureRandomValues } from '@/lib/crypto';
-import { createUser, getUserByEmail, getUserByUsername } from '@/lib/d1';
+import { createUser, getUserByEmail, getUserByUsername } from '@/lib/database/users';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { getBusinessUserByEmail, getBusinessUserByUsername } from '@/lib/db/repositories/business-users';
 import { quickCheck } from '@/lib/sensitive-word-filter';

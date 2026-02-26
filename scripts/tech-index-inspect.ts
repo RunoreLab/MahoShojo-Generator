@@ -2,7 +2,7 @@
 
 import { loadEnvConfig } from '@next/env';
 
-import { queryFromD1 } from '@/lib/d1';
+import { queryFromD1 } from '@/lib/database/core';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 
 type D1RowsResult<T> = {

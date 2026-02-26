@@ -1,4 +1,4 @@
-import { getPvpRoundById, getPvpRoomById, getPvpRoomHands, getPvpRoomPlayers, upsertPvpRoundChoice } from '@/lib/d1';
+import { getPvpRoundById, getPvpRoomById, getPvpRoomHands, getPvpRoomPlayers, upsertPvpRoundChoice } from '@/lib/database/pvp';
 import { getRoomIdFromRequestUrl, getRoundIdFromRequestUrl } from '@/lib/pvp/route';
 import { json, readJson, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 import type { PvpHandState, PvpSnapshotRef } from '@/lib/pvp/types';

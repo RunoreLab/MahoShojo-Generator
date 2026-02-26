@@ -1,4 +1,4 @@
-import { upsertLargeObjectByOwnerRef } from '@/lib/d1';
+import { upsertLargeObjectByOwnerRef } from '@/lib/database/large-objects';
 import { putObject } from '@/lib/r2';
 import { battleReportOutputPreviewConfig } from '@/config/battle-report';
 

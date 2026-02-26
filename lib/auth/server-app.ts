@@ -1,4 +1,4 @@
-import { getUserByEmail, getUserById, getUserByUsername } from '@/lib/d1';
+import { getUserByEmail, getUserById, getUserByUsername } from '@/lib/database/users';
 import { getBetterAuthInstance } from '@/lib/auth/better-auth-app';
 import { ensureAuthUserLink, getLinkedBusinessUserByAuthUserId } from '@/lib/auth/user-auth-linking';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';

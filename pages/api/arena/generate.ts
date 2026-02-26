@@ -21,12 +21,12 @@ import { createPromptBuilder, processAdjudicationChain } from '@/lib/arena/logic
 import { applyPostBattleUpdates, updateBattleStats } from '@/lib/arena/service';
 import {
     createBattleReportGenerationRecord,
-    createBattleReportGenerationCombatants,
-    generateUUID,
     updateBattleReportGenerationExtraJson,
     updateBattleReportGenerationCombatantsWriteResult,
     updateBattleReportGenerationOutputPreview,
-} from '@/lib/d1';
+} from '@/lib/database/battle-report-generations';
+import { createBattleReportGenerationCombatants } from '@/lib/database/battle-report-generation-combatants';
+import { generateUUID } from '@/lib/database/core';
 import { applyShieldWords } from '@/lib/shield-word-filter';
 import {
     anonymizeIp,

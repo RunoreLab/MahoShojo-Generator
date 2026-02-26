@@ -1,4 +1,4 @@
-import { getPvpRoomById, getPvpRoomPlayers, getPvpRoomSubmissions, updatePvpRoomCas } from '@/lib/d1';
+import { getPvpRoomById, getPvpRoomPlayers, getPvpRoomSubmissions, updatePvpRoomCas } from '@/lib/database/pvp';
 import { pickBotBaseName, buildBotUsername } from '@/lib/pvp/bot/names';
 import { parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { buildBotSubmissionPayload } from '@/lib/pvp/bot/submission';

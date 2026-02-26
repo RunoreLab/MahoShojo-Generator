@@ -1,6 +1,6 @@
 import { generateSignature, verifySignature } from '@/lib/signature';
 import { buildEntityKey, buildPairKey, type ArenaEntity } from '@/lib/database/arena-ratings';
-import { generateUUID } from '@/lib/d1';
+import { generateUUID } from '@/lib/database/core';
 
 export type RankedMatchQueue = 'strict';
 export type RankedMatchEntityType = 'data_card' | 'preset';

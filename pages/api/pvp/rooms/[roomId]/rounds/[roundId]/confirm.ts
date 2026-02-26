@@ -9,11 +9,11 @@ import {
   getPvpRoundById,
   getPvpRoundsByMatch,
   getPvpMatchById,
-  getRandomPublicCardExcluding,
   updatePvpMatch,
   updatePvpRoomCas,
   upsertPvpRoomHand,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
+import { getRandomPublicCardExcluding } from '@/lib/database/data-cards';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
 import { clearPvpRoomRuntimeFromRulesJson, parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';
 import { isPvpCombatantTypeAllowedByRange, normalizePvpRoomCardRange } from '@/lib/pvp/card-range';

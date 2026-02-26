@@ -4,7 +4,7 @@ import {
   consumePasswordResetTokenByHash,
   invalidateActivePasswordResetTokensByUserId,
 } from '@/lib/db/repositories/password-reset-tokens';
-import { updateUserAuthKey } from '@/lib/d1';
+import { updateUserAuthKey } from '@/lib/database/users';
 
 export const runtime = 'nodejs';
 

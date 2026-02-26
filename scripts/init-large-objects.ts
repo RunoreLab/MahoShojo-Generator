@@ -1,4 +1,4 @@
-import { queryFromD1 } from '@/lib/d1';
+import { queryFromD1 } from '@/lib/database/core';
 
 const run = async () => {
   const statements = [

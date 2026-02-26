@@ -2,7 +2,6 @@ import {
   clearPvpRoomEphemeralState,
   deletePvpRoomHand,
   deletePvpRoomSubmission,
-  generateUUID,
   getLatestPvpRoundByMatch,
   getPvpRoomById,
   getPvpRoomHands,
@@ -12,7 +11,8 @@ import {
   getPvpRoundChoices,
   removePvpRoomPlayer,
   updatePvpRoomCas,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
+import { generateUUID } from '@/lib/database/core';
 import { pickBotStrategyId } from '@/lib/pvp/bot/strategies';
 import { buildBotSubmissionPayload } from '@/lib/pvp/bot/submission';
 import { clearPvpRoomRuntimeFromRulesJson, parsePvpRoomInternalState, stringifyPvpRoomInternalState } from '@/lib/pvp/bot/room';

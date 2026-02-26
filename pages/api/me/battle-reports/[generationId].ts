@@ -1,9 +1,9 @@
 import {
   getBattleReportGenerationByIdLite,
-  getBattleReportGenerationCombatantsByGenerationId,
-  isUserInPvpMatch,
   updateBattleReportGenerationOutputHasSensitiveWords,
-} from '@/lib/d1';
+} from '@/lib/database/battle-report-generations';
+import { getBattleReportGenerationCombatantsByGenerationId } from '@/lib/database/battle-report-generation-combatants';
+import { isUserInPvpMatch } from '@/lib/database/pvp';
 import { json, requireAuthUser } from '@/lib/pvp/server';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 

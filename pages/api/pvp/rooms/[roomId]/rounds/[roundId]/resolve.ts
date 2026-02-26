@@ -10,7 +10,7 @@ import {
   updatePvpRoomCas,
   updatePvpRound,
   upsertPvpRoomHand,
-} from '@/lib/d1';
+} from '@/lib/database/pvp';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { CustomProviderSchema } from '@/lib/arena/schemas';
 import { pickBotChoiceSnapshotId } from '@/lib/pvp/bot/choose';
