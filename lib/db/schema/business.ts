@@ -115,6 +115,226 @@ export const deckFavorites = sqliteTable(
   }),
 );
 
+export const pvpRooms = sqliteTable(
+  'pvp_rooms',
+  {
+    id: text('id').primaryKey(),
+    hostUserId: integer('host_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').notNull(),
+    phase: text('phase').notNull(),
+    rulesJson: text('rules_json').notNull(),
+    currentMatchId: text('current_match_id'),
+    joinCodeHash: text('join_code_hash'),
+    joinCodeSalt: text('join_code_salt'),
+    version: integer('version').notNull(),
+    expiresAt: text('expires_at'),
+    lastActivityAt: text('last_activity_at'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    statusIndex: index('idx_pvp_rooms_status').on(table.status),
+    updatedAtIndex: index('idx_pvp_rooms_updated_at').on(table.updatedAt),
+    currentMatchIdIndex: index('idx_pvp_rooms_current_match_id').on(table.currentMatchId),
+  }),
+);
+
+export const pvpRoomPlayers = sqliteTable(
+  'pvp_room_players',
+  {
+    roomId: text('room_id')
+      .notNull()
+      .references(() => pvpRooms.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    seat: integer('seat'),
+    joinedAt: text('joined_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.roomId, table.userId] }),
+    roomIdIndex: index('idx_pvp_room_players_room_id').on(table.roomId),
+  }),
+);
+
+export const pvpRoomChatMessages = sqliteTable(
+  'pvp_room_chat_messages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => pvpRooms.id, { onDelete: 'cascade' }),
+    senderUserId: integer('sender_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    senderRole: text('sender_role').notNull(),
+    senderUsername: text('sender_username').notNull(),
+    senderPrefix: text('sender_prefix'),
+    contentJson: text('content_json').notNull(),
+    renderedText: text('rendered_text'),
+    stickerId: text('sticker_id'),
+    emojiText: text('emoji_text'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    roomIdIdIndex: index('idx_pvp_room_chat_messages_room_id_id').on(table.roomId, table.id),
+    roomIdCreatedAtIndex: index('idx_pvp_room_chat_messages_room_id_created_at').on(table.roomId, table.createdAt),
+    roomIdSenderUserIdIdIndex: index('idx_pvp_room_chat_messages_room_id_sender_user_id_id').on(
+      table.roomId,
+      table.senderUserId,
+      table.id,
+    ),
+  }),
+);
+
+export const pvpRoomSubmissions = sqliteTable(
+  'pvp_room_submissions',
+  {
+    roomId: text('room_id')
+      .notNull()
+      .references(() => pvpRooms.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    submissionJson: text('submission_json').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.roomId, table.userId] }),
+  }),
+);
+
+export const pvpRoomHands = sqliteTable(
+  'pvp_room_hands',
+  {
+    roomId: text('room_id')
+      .notNull()
+      .references(() => pvpRooms.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    handJson: text('hand_json').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.roomId, table.userId] }),
+  }),
+);
+
+export const pvpRoomCardSnapshots = sqliteTable(
+  'pvp_room_card_snapshots',
+  {
+    id: text('id').primaryKey(),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => pvpRooms.id, { onDelete: 'cascade' }),
+    ownerUserId: integer('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    refJson: text('ref_json').notNull(),
+    cardType: text('card_type').notNull(),
+    name: text('name').notNull(),
+    dataJson: text('data_json').notNull(),
+    sourceUpdatedAt: text('source_updated_at'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    roomIdIndex: index('idx_pvp_room_card_snapshots_room_id').on(table.roomId),
+  }),
+);
+
+export const pvpMatches = sqliteTable(
+  'pvp_matches',
+  {
+    id: text('id').primaryKey(),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => pvpRooms.id, { onDelete: 'cascade' }),
+    status: text('status').notNull(),
+    rulesJson: text('rules_json').notNull(),
+    participants: integer('participants').notNull(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    winnerUserId: integer('winner_user_id').references(() => users.id, { onDelete: 'set null' }),
+    resultJson: text('result_json'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    roomIdIndex: index('idx_pvp_matches_room_id').on(table.roomId),
+    statusIndex: index('idx_pvp_matches_status').on(table.status),
+    startedAtIndex: index('idx_pvp_matches_started_at').on(table.startedAt),
+  }),
+);
+
+export const pvpRounds = sqliteTable(
+  'pvp_rounds',
+  {
+    id: text('id').primaryKey(),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => pvpRooms.id, { onDelete: 'cascade' }),
+    matchId: text('match_id').references(() => pvpMatches.id, { onDelete: 'cascade' }),
+    roundIndex: integer('round_index').notNull(),
+    status: text('status').notNull(),
+    battleGenerationId: text('battle_generation_id'),
+    publicSnapshotJson: text('public_snapshot_json'),
+    resultJson: text('result_json'),
+    winnerUserId: integer('winner_user_id').references(() => users.id, { onDelete: 'set null' }),
+    winnerName: text('winner_name'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    roomIdIndex: index('idx_pvp_rounds_room_id').on(table.roomId),
+    matchIdIndex: index('idx_pvp_rounds_match_id').on(table.matchId),
+  }),
+);
+
+export const pvpMatchPlayers = sqliteTable(
+  'pvp_match_players',
+  {
+    matchId: text('match_id')
+      .notNull()
+      .references(() => pvpMatches.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    seat: integer('seat').notNull(),
+    username: text('username'),
+    userPrefix: text('user_prefix'),
+    joinedAt: text('joined_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.matchId, table.userId] }),
+    matchIdIndex: index('idx_pvp_match_players_match_id').on(table.matchId),
+    userIdIndex: index('idx_pvp_match_players_user_id').on(table.userId),
+  }),
+);
+
+export const pvpRoundChoices = sqliteTable(
+  'pvp_round_choices',
+  {
+    roundId: text('round_id')
+      .notNull()
+      .references(() => pvpRounds.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    choiceRefJson: text('choice_ref_json').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.roundId, table.userId] }),
+    roundIdIndex: index('idx_pvp_round_choices_round_id').on(table.roundId),
+  }),
+);
+
 export const dataCardUpdates = sqliteTable('data_card_updates', {
   id: text('id').primaryKey(),
   dataCardId: text('data_card_id').notNull(),

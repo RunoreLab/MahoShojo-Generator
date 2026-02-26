@@ -1,4 +1,4 @@
-import { generateUUID, queryFromD1 } from './core';
+import { generateUUID } from './core';
 
 export type PvpRoomStatus = 'open' | 'closed';
 export type PvpRoomPhase =
@@ -58,40 +58,320 @@ export interface CreatePvpRoomInput {
   expiresAt?: string | null;
 }
 
+type PvpRoomCoreRepoBundle = {
+  db: unknown;
+  insertPvpRoomWithHostPlayer: (
+    db: unknown,
+    payload: {
+      roomId: string;
+      hostUserId: number;
+      status: PvpRoomStatus;
+      phase: string;
+      rulesJson: string;
+      joinCodeHash?: string | null;
+      joinCodeSalt?: string | null;
+      expiresAt?: string | null;
+      nowIso: string;
+    },
+  ) => Promise<boolean>;
+  getPvpRoomByIdRow: (db: unknown, roomId: string) => Promise<PvpRoomRow | null>;
+  listPvpRoomPlayersByRole: (db: unknown, roomId: string, role: PvpRoomMemberRole) => Promise<PvpRoomPlayerRow[]>;
+  listPvpRoomMembers: (db: unknown, roomId: string) => Promise<PvpRoomPlayerRow[]>;
+  listPvpRoomBrowseRows: (
+    db: unknown,
+    input: {
+      query?: string;
+      mode?: string;
+      password?: 'any' | 'yes' | 'no';
+      phase?: 'any' | 'waiting' | 'submitting';
+      phaseScope?: 'joinable' | 'open';
+      limit?: number;
+      offset?: number;
+    },
+  ) => Promise<PvpRoomBrowseRow[]>;
+  insertPvpRoomPlayerIgnore: (
+    db: unknown,
+    payload: {
+      roomId: string;
+      userId: number;
+      seat: number | null;
+      role: PvpRoomMemberRole;
+      joinedAt: string;
+    },
+  ) => Promise<void>;
+  updatePvpRoomMember: (
+    db: unknown,
+    input: {
+      roomId: string;
+      userId: number;
+      role: PvpRoomMemberRole;
+      seat: number | null;
+    },
+  ) => Promise<number>;
+  deletePvpRoomPlayer: (db: unknown, roomId: string, userId: number) => Promise<void>;
+  updatePvpRoomByCas: (
+    db: unknown,
+    input: {
+      roomId: string;
+      expectedVersion: number;
+      patch: {
+        status?: string;
+        phase?: string;
+        rulesJson?: string;
+        currentMatchId?: string | null;
+        joinCodeHash?: string | null;
+        joinCodeSalt?: string | null;
+        expiresAt?: string | null;
+        lastActivityAt?: string | null;
+      };
+      nowIso: string;
+    },
+  ) => Promise<number>;
+  upsertPvpRoomSubmission: (
+    db: unknown,
+    input: {
+      roomId: string;
+      userId: number;
+      submissionJson: string;
+      nowIso: string;
+    },
+  ) => Promise<void>;
+  listPvpRoomSubmissionsByRoomId: (db: unknown, roomId: string) => Promise<PvpRoomSubmissionRow[]>;
+  deletePvpRoomSubmission: (db: unknown, roomId: string, userId: number) => Promise<void>;
+  getPvpEligibleDataCardById: (db: unknown, cardId: string, requestUserId: number) => Promise<PvpEligibleDataCardRow | null>;
+  getPvpEligibleScenarioDataCardById: (db: unknown, cardId: string, requestUserId: number) => Promise<PvpEligibleDataCardRow | null>;
+  clearPvpRoomMatchStateByRoomId: (db: unknown, roomId: string) => Promise<void>;
+  clearPvpRoomEphemeralStateByRoomId: (db: unknown, roomId: string) => Promise<void>;
+  upsertPvpRoomHand: (
+    db: unknown,
+    input: {
+      roomId: string;
+      userId: number;
+      handJson: string;
+      nowIso: string;
+    },
+  ) => Promise<void>;
+  deletePvpRoomHand: (db: unknown, roomId: string, userId: number) => Promise<void>;
+  listPvpRoomHandsByRoomId: (db: unknown, roomId: string) => Promise<PvpRoomHandRow[]>;
+  insertPvpCardSnapshot: (
+    db: unknown,
+    input: {
+      snapshotId: string;
+      roomId: string;
+      ownerUserId: number;
+      refJson: string;
+      cardType: string;
+      name: string;
+      dataJson: string;
+      sourceUpdatedAt?: string | null;
+      createdAt: string;
+    },
+  ) => Promise<boolean>;
+  listPvpCardSnapshotsByRoomId: (db: unknown, roomId: string) => Promise<PvpCardSnapshotRow[]>;
+};
+
+const readPvpRoomCoreRepoBundle = async (): Promise<PvpRoomCoreRepoBundle | null> => {
+  try {
+    const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
+      import('@/lib/db/drizzle'),
+      import('@/lib/db/repositories/pvp-room-core'),
+    ]);
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+
+    return {
+      db,
+      insertPvpRoomWithHostPlayer: repo.insertPvpRoomWithHostPlayer as PvpRoomCoreRepoBundle['insertPvpRoomWithHostPlayer'],
+      getPvpRoomByIdRow: repo.getPvpRoomByIdRow as PvpRoomCoreRepoBundle['getPvpRoomByIdRow'],
+      listPvpRoomPlayersByRole: repo.listPvpRoomPlayersByRole as PvpRoomCoreRepoBundle['listPvpRoomPlayersByRole'],
+      listPvpRoomMembers: repo.listPvpRoomMembers as PvpRoomCoreRepoBundle['listPvpRoomMembers'],
+      listPvpRoomBrowseRows: repo.listPvpRoomBrowseRows as PvpRoomCoreRepoBundle['listPvpRoomBrowseRows'],
+      insertPvpRoomPlayerIgnore: repo.insertPvpRoomPlayerIgnore as PvpRoomCoreRepoBundle['insertPvpRoomPlayerIgnore'],
+      updatePvpRoomMember: repo.updatePvpRoomMember as PvpRoomCoreRepoBundle['updatePvpRoomMember'],
+      deletePvpRoomPlayer: repo.deletePvpRoomPlayer as PvpRoomCoreRepoBundle['deletePvpRoomPlayer'],
+      updatePvpRoomByCas: repo.updatePvpRoomByCas as PvpRoomCoreRepoBundle['updatePvpRoomByCas'],
+      upsertPvpRoomSubmission: repo.upsertPvpRoomSubmission as PvpRoomCoreRepoBundle['upsertPvpRoomSubmission'],
+      listPvpRoomSubmissionsByRoomId: repo.listPvpRoomSubmissionsByRoomId as PvpRoomCoreRepoBundle['listPvpRoomSubmissionsByRoomId'],
+      deletePvpRoomSubmission: repo.deletePvpRoomSubmission as PvpRoomCoreRepoBundle['deletePvpRoomSubmission'],
+      getPvpEligibleDataCardById: repo.getPvpEligibleDataCardById as PvpRoomCoreRepoBundle['getPvpEligibleDataCardById'],
+      getPvpEligibleScenarioDataCardById: repo.getPvpEligibleScenarioDataCardById as PvpRoomCoreRepoBundle['getPvpEligibleScenarioDataCardById'],
+      clearPvpRoomMatchStateByRoomId: repo.clearPvpRoomMatchStateByRoomId as PvpRoomCoreRepoBundle['clearPvpRoomMatchStateByRoomId'],
+      clearPvpRoomEphemeralStateByRoomId: repo.clearPvpRoomEphemeralStateByRoomId as PvpRoomCoreRepoBundle['clearPvpRoomEphemeralStateByRoomId'],
+      upsertPvpRoomHand: repo.upsertPvpRoomHand as PvpRoomCoreRepoBundle['upsertPvpRoomHand'],
+      deletePvpRoomHand: repo.deletePvpRoomHand as PvpRoomCoreRepoBundle['deletePvpRoomHand'],
+      listPvpRoomHandsByRoomId: repo.listPvpRoomHandsByRoomId as PvpRoomCoreRepoBundle['listPvpRoomHandsByRoomId'],
+      insertPvpCardSnapshot: repo.insertPvpCardSnapshot as PvpRoomCoreRepoBundle['insertPvpCardSnapshot'],
+      listPvpCardSnapshotsByRoomId: repo.listPvpCardSnapshotsByRoomId as PvpRoomCoreRepoBundle['listPvpCardSnapshotsByRoomId'],
+    };
+  } catch {
+    return null;
+  }
+};
+
+type PvpMatchRoundChatRepoBundle = {
+  db: unknown;
+  insertPvpRound: (
+    db: unknown,
+    input: {
+      roundId: string;
+      roomId: string;
+      matchId?: string | null;
+      roundIndex: number;
+      status: PvpRoundStatus;
+      publicSnapshotJson?: string | null;
+      createdAt: string;
+    },
+  ) => Promise<boolean>;
+  getPvpRoundByIdRow: (db: unknown, roundId: string) => Promise<PvpRoundRow | null>;
+  getLatestPvpRoundByRoomId: (db: unknown, roomId: string) => Promise<PvpRoundRow | null>;
+  getLatestPvpRoundByMatchId: (db: unknown, matchId: string) => Promise<PvpRoundRow | null>;
+  listPvpRoundsByRoomId: (db: unknown, roomId: string) => Promise<PvpRoundRow[]>;
+  listPvpRoundsByMatchId: (db: unknown, matchId: string) => Promise<PvpRoundRow[]>;
+  updatePvpRoundPatch: (
+    db: unknown,
+    roundId: string,
+    patch: {
+      status?: PvpRoundStatus;
+      battleGenerationId?: string | null;
+      publicSnapshotJson?: string | null;
+      resultJson?: string | null;
+      winnerUserId?: number | null;
+      winnerName?: string | null;
+    },
+  ) => Promise<number>;
+  upsertPvpRoundChoice: (
+    db: unknown,
+    input: {
+      roundId: string;
+      userId: number;
+      choiceRefJson: string;
+      nowIso: string;
+    },
+  ) => Promise<void>;
+  listPvpRoundChoicesByRoundId: (db: unknown, roundId: string) => Promise<PvpRoundChoiceRow[]>;
+  getPvpCardSnapshotByIdRow: (db: unknown, snapshotId: string) => Promise<PvpCardSnapshotRow | null>;
+  listPvpUserSummariesByUserIds: (db: unknown, userIds: number[]) => Promise<PvpUserSummaryRow[]>;
+  listPvpMatchesByUserId: (db: unknown, userId: number, limit: number, offset: number) => Promise<PvpMatchRow[]>;
+  listPvpMatchPlayersByMatchIds: (db: unknown, matchIds: string[]) => Promise<PvpMatchPlayerRow[]>;
+  listPvpMatchRoundOutcomeSummariesByMatchIds: (
+    db: unknown,
+    matchIds: string[],
+    userId: number,
+  ) => Promise<PvpMatchRoundOutcomeSummary[]>;
+  countPvpMatchesByUserId: (db: unknown, userId: number) => Promise<number>;
+  hasPvpMatchPlayer: (db: unknown, matchId: string, userId: number) => Promise<boolean>;
+  listPvpMatchPlayersByMatchId: (db: unknown, matchId: string) => Promise<PvpMatchPlayerRow[]>;
+  insertPvpMatch: (
+    db: unknown,
+    input: {
+      id: string;
+      roomId: string;
+      rulesJson: string;
+      participants: number;
+      startedAt: string;
+      nowIso: string;
+    },
+  ) => Promise<boolean>;
+  upsertPvpMatchPlayers: (
+    db: unknown,
+    matchId: string,
+    players: Array<{ userId: number; seat: number; username: string | null; userPrefix: string | null; joinedAt: string }>,
+  ) => Promise<void>;
+  updatePvpMatchPatch: (
+    db: unknown,
+    matchId: string,
+    patch: { status?: PvpMatchStatus; endedAt?: string | null; winnerUserId?: number | null; resultJson?: string | null },
+    nowIso: string,
+  ) => Promise<number>;
+  getPvpMatchByIdRow: (db: unknown, matchId: string) => Promise<PvpMatchRow | null>;
+  listPvpRoomChatMessages: (
+    db: unknown,
+    input: { roomId: string; limit: number; afterId: number | null },
+  ) => Promise<PvpRoomChatMessageRow[]>;
+  getLatestPvpRoomChatMessageBySender: (
+    db: unknown,
+    input: { roomId: string; userId: number },
+  ) => Promise<{ id: number; created_at: string } | null>;
+  insertPvpRoomChatMessage: (
+    db: unknown,
+    input: {
+      roomId: string;
+      senderUserId: number;
+      senderRole: PvpRoomMemberRole;
+      senderUsername: string;
+      senderPrefix?: string | null;
+      contentJson: string;
+      renderedText?: string | null;
+      stickerId?: string | null;
+      emojiText?: string | null;
+      createdAt: string;
+    },
+  ) => Promise<number | null>;
+};
+
+const readPvpMatchRoundChatRepoBundle = async (): Promise<PvpMatchRoundChatRepoBundle | null> => {
+  try {
+    const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
+      import('@/lib/db/drizzle'),
+      import('@/lib/db/repositories/pvp-match-round-chat'),
+    ]);
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+
+    return {
+      db,
+      insertPvpRound: repo.insertPvpRound as PvpMatchRoundChatRepoBundle['insertPvpRound'],
+      getPvpRoundByIdRow: repo.getPvpRoundByIdRow as PvpMatchRoundChatRepoBundle['getPvpRoundByIdRow'],
+      getLatestPvpRoundByRoomId: repo.getLatestPvpRoundByRoomId as PvpMatchRoundChatRepoBundle['getLatestPvpRoundByRoomId'],
+      getLatestPvpRoundByMatchId: repo.getLatestPvpRoundByMatchId as PvpMatchRoundChatRepoBundle['getLatestPvpRoundByMatchId'],
+      listPvpRoundsByRoomId: repo.listPvpRoundsByRoomId as PvpMatchRoundChatRepoBundle['listPvpRoundsByRoomId'],
+      listPvpRoundsByMatchId: repo.listPvpRoundsByMatchId as PvpMatchRoundChatRepoBundle['listPvpRoundsByMatchId'],
+      updatePvpRoundPatch: repo.updatePvpRoundPatch as PvpMatchRoundChatRepoBundle['updatePvpRoundPatch'],
+      upsertPvpRoundChoice: repo.upsertPvpRoundChoice as PvpMatchRoundChatRepoBundle['upsertPvpRoundChoice'],
+      listPvpRoundChoicesByRoundId: repo.listPvpRoundChoicesByRoundId as PvpMatchRoundChatRepoBundle['listPvpRoundChoicesByRoundId'],
+      getPvpCardSnapshotByIdRow: repo.getPvpCardSnapshotByIdRow as PvpMatchRoundChatRepoBundle['getPvpCardSnapshotByIdRow'],
+      listPvpUserSummariesByUserIds: repo.listPvpUserSummariesByUserIds as PvpMatchRoundChatRepoBundle['listPvpUserSummariesByUserIds'],
+      listPvpMatchesByUserId: repo.listPvpMatchesByUserId as PvpMatchRoundChatRepoBundle['listPvpMatchesByUserId'],
+      listPvpMatchPlayersByMatchIds: repo.listPvpMatchPlayersByMatchIds as PvpMatchRoundChatRepoBundle['listPvpMatchPlayersByMatchIds'],
+      listPvpMatchRoundOutcomeSummariesByMatchIds: repo.listPvpMatchRoundOutcomeSummariesByMatchIds as PvpMatchRoundChatRepoBundle['listPvpMatchRoundOutcomeSummariesByMatchIds'],
+      countPvpMatchesByUserId: repo.countPvpMatchesByUserId as PvpMatchRoundChatRepoBundle['countPvpMatchesByUserId'],
+      hasPvpMatchPlayer: repo.hasPvpMatchPlayer as PvpMatchRoundChatRepoBundle['hasPvpMatchPlayer'],
+      listPvpMatchPlayersByMatchId: repo.listPvpMatchPlayersByMatchId as PvpMatchRoundChatRepoBundle['listPvpMatchPlayersByMatchId'],
+      insertPvpMatch: repo.insertPvpMatch as PvpMatchRoundChatRepoBundle['insertPvpMatch'],
+      upsertPvpMatchPlayers: repo.upsertPvpMatchPlayers as PvpMatchRoundChatRepoBundle['upsertPvpMatchPlayers'],
+      updatePvpMatchPatch: repo.updatePvpMatchPatch as PvpMatchRoundChatRepoBundle['updatePvpMatchPatch'],
+      getPvpMatchByIdRow: repo.getPvpMatchByIdRow as PvpMatchRoundChatRepoBundle['getPvpMatchByIdRow'],
+      listPvpRoomChatMessages: repo.listPvpRoomChatMessages as PvpMatchRoundChatRepoBundle['listPvpRoomChatMessages'],
+      getLatestPvpRoomChatMessageBySender: repo.getLatestPvpRoomChatMessageBySender as PvpMatchRoundChatRepoBundle['getLatestPvpRoomChatMessageBySender'],
+      insertPvpRoomChatMessage: repo.insertPvpRoomChatMessage as PvpMatchRoundChatRepoBundle['insertPvpRoomChatMessage'],
+    };
+  } catch {
+    return null;
+  }
+};
+
 export async function createPvpRoom(input: CreatePvpRoomInput): Promise<{ roomId: string } | null> {
   try {
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return null;
     const roomId = generateUUID();
     const now = new Date().toISOString();
     const status: PvpRoomStatus = 'open';
     const phase: PvpRoomPhase = 'waiting';
 
-    const result = await queryFromD1(
-      `INSERT INTO pvp_rooms (
-        id, host_user_id, status, phase, rules_json, current_match_id,
-        join_code_hash, join_code_salt,
-        version, expires_at, last_activity_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
-      [
-        roomId,
-        input.hostUserId,
-        status,
-        phase,
-        input.rulesJson,
-        null,
-        input.joinCodeHash ?? null,
-        input.joinCodeSalt ?? null,
-        input.expiresAt ?? null,
-        now,
-        now,
-        now,
-      ]
-    ) as any;
+    const ok = await bundle.insertPvpRoomWithHostPlayer(bundle.db, {
+      roomId,
+      hostUserId: input.hostUserId,
+      status,
+      phase,
+      rulesJson: input.rulesJson,
+      joinCodeHash: input.joinCodeHash ?? null,
+      joinCodeSalt: input.joinCodeSalt ?? null,
+      expiresAt: input.expiresAt ?? null,
+      nowIso: now,
+    });
 
-    if (result.success) {
-      await queryFromD1(
-        'INSERT OR IGNORE INTO pvp_room_players (room_id, user_id, seat, joined_at) VALUES (?, ?, ?, ?)',
-        [roomId, input.hostUserId, 0, now]
-      );
+    if (ok) {
       return { roomId };
     }
     return null;
@@ -103,11 +383,9 @@ export async function createPvpRoom(input: CreatePvpRoomInput): Promise<{ roomId
 
 export async function getPvpRoomById(roomId: string): Promise<PvpRoomRow | null> {
   try {
-    const result = await queryFromD1('SELECT * FROM pvp_rooms WHERE id = ?', [roomId]) as any;
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0] as PvpRoomRow;
-    }
-    return null;
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getPvpRoomByIdRow(bundle.db, roomId);
   } catch (error) {
     console.error('读取 pvp_rooms 失败:', error);
     return null;
@@ -116,19 +394,9 @@ export async function getPvpRoomById(roomId: string): Promise<PvpRoomRow | null>
 
 export async function getPvpRoomPlayers(roomId: string): Promise<PvpRoomPlayerRow[]> {
   try {
-    const result = await queryFromD1(
-      `SELECT p.*, u.username, u.prefix
-       FROM pvp_room_players p
-       JOIN users u ON u.id = p.user_id
-       WHERE p.room_id = ? AND p.role = 'player'
-       ORDER BY p.seat ASC, p.joined_at ASC`,
-      [roomId]
-    ) as any;
-
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpRoomPlayerRow[];
-    }
-    return [];
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpRoomPlayersByRole(bundle.db, roomId, 'player');
   } catch (error) {
     console.error('读取 pvp_room_players 失败:', error);
     return [];
@@ -145,68 +413,9 @@ export async function getPvpRoomBrowseRows(input: {
   offset?: number;
 }): Promise<PvpRoomBrowseRow[]> {
   try {
-    const where: string[] = [];
-    const params: any[] = [];
-
-    where.push('r.status = ?');
-    params.push('open');
-
-    const phaseScope = input.phaseScope ?? 'joinable';
-    const phase = input.phase ?? 'any';
-    if (phase === 'waiting' || phase === 'submitting') {
-      where.push('r.phase = ?');
-      params.push(phase);
-    } else if (phaseScope === 'joinable') {
-      where.push('r.phase IN (?, ?)');
-      params.push('waiting', 'submitting');
-    } else {
-      where.push('r.phase != ?');
-      params.push('closed');
-    }
-
-    const nowIso = new Date().toISOString();
-    where.push('(r.expires_at IS NULL OR r.expires_at > ?)');
-    params.push(nowIso);
-
-    const password = input.password ?? 'any';
-    if (password === 'yes') where.push('r.join_code_hash IS NOT NULL');
-    if (password === 'no') where.push('r.join_code_hash IS NULL');
-
-    const q = typeof input.query === 'string' ? input.query.trim() : '';
-    if (q) {
-      where.push('(r.id LIKE ? OR u.username LIKE ?)');
-      const like = `%${q}%`;
-      params.push(like, like);
-    }
-
-    const mode = typeof input.mode === 'string' ? input.mode.trim() : '';
-    if (mode && mode !== 'all') {
-      where.push('r.rules_json LIKE ?');
-      params.push(`%\"mode\":\"${mode}\"%`);
-    }
-
-    const limit = Number.isFinite(input.limit) ? Math.max(1, Math.min(200, Math.floor(input.limit as number))) : 50;
-    const offset = Number.isFinite(input.offset) ? Math.max(0, Math.floor(input.offset as number)) : 0;
-
-    const sql = `
-      SELECT
-        r.*,
-        u.username AS host_username,
-        u.prefix AS host_prefix,
-        COUNT(p.user_id) AS player_count
-      FROM pvp_rooms r
-      JOIN users u ON u.id = r.host_user_id
-      LEFT JOIN pvp_room_players p ON p.room_id = r.id AND p.role = 'player'
-      WHERE ${where.join(' AND ')}
-      GROUP BY r.id
-      ORDER BY COALESCE(r.last_activity_at, r.updated_at) DESC
-      LIMIT ? OFFSET ?`;
-
-    const result = await queryFromD1(sql, [...params, limit, offset]) as any;
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpRoomBrowseRow[];
-    }
-    return [];
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpRoomBrowseRows(bundle.db, input);
   } catch (error) {
     console.error('读取 pvp_rooms 浏览列表失败:', error);
     return [];
@@ -215,22 +424,9 @@ export async function getPvpRoomBrowseRows(input: {
 
 export async function getPvpRoomMembers(roomId: string): Promise<PvpRoomPlayerRow[]> {
   try {
-    const result = await queryFromD1(
-      `SELECT p.*, u.username, u.prefix
-       FROM pvp_room_players p
-       JOIN users u ON u.id = p.user_id
-       WHERE p.room_id = ?
-       ORDER BY
-         CASE WHEN p.role = 'player' THEN 0 ELSE 1 END ASC,
-         p.seat ASC,
-         p.joined_at ASC`,
-      [roomId]
-    ) as any;
-
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpRoomPlayerRow[];
-    }
-    return [];
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpRoomMembers(bundle.db, roomId);
   } catch (error) {
     console.error('读取 pvp_room_players(含观众) 失败:', error);
     return [];
@@ -244,12 +440,17 @@ export async function addPvpRoomPlayer(
   role: PvpRoomMemberRole = 'player'
 ): Promise<boolean> {
   try {
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
     const now = new Date().toISOString();
-    const result = await queryFromD1(
-      'INSERT OR IGNORE INTO pvp_room_players (room_id, user_id, role, seat, joined_at) VALUES (?, ?, ?, ?, ?)',
-      [roomId, userId, role, seat, now]
-    ) as any;
-    return Boolean(result.success);
+    await bundle.insertPvpRoomPlayerIgnore(bundle.db, {
+      roomId,
+      userId,
+      seat,
+      role,
+      joinedAt: now,
+    });
+    return true;
   } catch (error) {
     console.error('写入 pvp_room_players 失败:', error);
     return false;
@@ -263,11 +464,10 @@ export async function updatePvpRoomMember(input: {
   seat: number | null;
 }): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'UPDATE pvp_room_players SET role = ?, seat = ? WHERE room_id = ? AND user_id = ?',
-      [input.role, input.seat, input.roomId, input.userId]
-    ) as any;
-    return Boolean(result.success && result.result?.[0]?.meta?.changes > 0);
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
+    const changed = await bundle.updatePvpRoomMember(bundle.db, input);
+    return changed > 0;
   } catch (error) {
     console.error('更新 pvp_room_players 失败:', error);
     return false;
@@ -276,11 +476,10 @@ export async function updatePvpRoomMember(input: {
 
 export async function removePvpRoomPlayer(roomId: string, userId: number): Promise<boolean> {
   try {
-    const result = await queryFromD1(
-      'DELETE FROM pvp_room_players WHERE room_id = ? AND user_id = ?',
-      [roomId, userId]
-    ) as any;
-    return Boolean(result.success);
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
+    await bundle.deletePvpRoomPlayer(bundle.db, roomId, userId);
+    return true;
   } catch (error) {
     console.error('删除 pvp_room_players 失败:', error);
     return false;
@@ -297,58 +496,25 @@ export async function updatePvpRoomCas(
     >
   >
 ): Promise<boolean> {
-  const fields: string[] = [];
-  const params: any[] = [];
-
-  if (patch.status !== undefined) {
-    fields.push('status = ?');
-    params.push(patch.status);
-  }
-  if (patch.phase !== undefined) {
-    fields.push('phase = ?');
-    params.push(patch.phase);
-  }
-  if (patch.rules_json !== undefined) {
-    fields.push('rules_json = ?');
-    params.push(patch.rules_json);
-  }
-  if (patch.current_match_id !== undefined) {
-    fields.push('current_match_id = ?');
-    params.push(patch.current_match_id);
-  }
-  if (patch.join_code_hash !== undefined) {
-    fields.push('join_code_hash = ?');
-    params.push(patch.join_code_hash);
-  }
-  if (patch.join_code_salt !== undefined) {
-    fields.push('join_code_salt = ?');
-    params.push(patch.join_code_salt);
-  }
-  if (patch.expires_at !== undefined) {
-    fields.push('expires_at = ?');
-    params.push(patch.expires_at);
-  }
-  if (patch.last_activity_at !== undefined) {
-    fields.push('last_activity_at = ?');
-    params.push(patch.last_activity_at);
-  }
-
-  const now = new Date().toISOString();
-  fields.push('updated_at = ?');
-  params.push(now);
-
-  // 乐观锁 + version 自增
-  fields.push('version = version + 1');
-
-  if (fields.length <= 0) return false;
-
   try {
-    const result = await queryFromD1(
-      `UPDATE pvp_rooms SET ${fields.join(', ')} WHERE id = ? AND version = ?`,
-      [...params, roomId, expectedVersion]
-    ) as any;
-
-    return Boolean(result.success && result.result?.[0]?.meta?.changes > 0);
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
+    const changed = await bundle.updatePvpRoomByCas(bundle.db, {
+      roomId,
+      expectedVersion,
+      patch: {
+        status: patch.status,
+        phase: patch.phase,
+        rulesJson: patch.rules_json,
+        currentMatchId: patch.current_match_id,
+        joinCodeHash: patch.join_code_hash,
+        joinCodeSalt: patch.join_code_salt,
+        expiresAt: patch.expires_at,
+        lastActivityAt: patch.last_activity_at,
+      },
+      nowIso: new Date().toISOString(),
+    });
+    return changed > 0;
   } catch (error) {
     console.error('CAS 更新 pvp_rooms 失败:', error);
     return false;
@@ -357,16 +523,15 @@ export async function updatePvpRoomCas(
 
 export async function upsertPvpRoomSubmission(roomId: string, userId: number, submissionJson: string): Promise<boolean> {
   try {
-    const now = new Date().toISOString();
-    const result = await queryFromD1(
-      `INSERT INTO pvp_room_submissions (room_id, user_id, submission_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(room_id, user_id) DO UPDATE SET
-         submission_json = excluded.submission_json,
-         updated_at = excluded.updated_at`,
-      [roomId, userId, submissionJson, now, now]
-    ) as any;
-    return Boolean(result.success);
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
+    await bundle.upsertPvpRoomSubmission(bundle.db, {
+      roomId,
+      userId,
+      submissionJson,
+      nowIso: new Date().toISOString(),
+    });
+    return true;
   } catch (error) {
     console.error('写入 pvp_room_submissions 失败:', error);
     return false;
@@ -383,14 +548,9 @@ export interface PvpRoomSubmissionRow {
 
 export async function getPvpRoomSubmissions(roomId: string): Promise<PvpRoomSubmissionRow[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT * FROM pvp_room_submissions WHERE room_id = ? ORDER BY updated_at ASC',
-      [roomId]
-    ) as any;
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpRoomSubmissionRow[];
-    }
-    return [];
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpRoomSubmissionsByRoomId(bundle.db, roomId);
   } catch (error) {
     console.error('读取 pvp_room_submissions 失败:', error);
     return [];
@@ -399,8 +559,10 @@ export async function getPvpRoomSubmissions(roomId: string): Promise<PvpRoomSubm
 
 export async function deletePvpRoomSubmission(roomId: string, userId: number): Promise<boolean> {
   try {
-    const result = await queryFromD1('DELETE FROM pvp_room_submissions WHERE room_id = ? AND user_id = ?', [roomId, userId]) as any;
-    return Boolean(result?.success);
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
+    await bundle.deletePvpRoomSubmission(bundle.db, roomId, userId);
+    return true;
   } catch (error) {
     console.error('删除 pvp_room_submissions 失败:', error);
     return false;
@@ -429,28 +591,9 @@ export interface PvpEligibleDataCardRow {
 
 export async function getPvpEligibleDataCard(cardId: string, requestUserId: number): Promise<PvpEligibleDataCardRow | null> {
   try {
-    const result = await queryFromD1(
-      `SELECT
-        dc.*,
-        u.username,
-        u.prefix,
-        u.is_banned AS author_is_banned
-      FROM data_cards dc
-      JOIN users u ON u.id = dc.user_id
-      WHERE
-        dc.id = ?
-        AND dc.deleted_at IS NULL
-        AND dc.is_public != -1
-        AND dc.review_status IN ('approved', 'pending')
-        AND (dc.user_id = ? OR dc.is_public = 1)
-        AND (u.is_banned IS NULL OR u.is_banned = '')`,
-      [cardId, requestUserId]
-    ) as any;
-
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0] as PvpEligibleDataCardRow;
-    }
-    return null;
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getPvpEligibleDataCardById(bundle.db, cardId, requestUserId);
   } catch (error) {
     console.error('读取 PVP 可用 data_cards 失败:', error);
     return null;
@@ -467,29 +610,9 @@ export async function getPvpEligibleDataCard(cardId: string, requestUserId: numb
  */
 export async function getPvpEligibleScenarioDataCard(cardId: string, requestUserId: number): Promise<PvpEligibleDataCardRow | null> {
   try {
-    const result = await queryFromD1(
-      `SELECT
-        dc.*,
-        u.username,
-        u.prefix,
-        u.is_banned AS author_is_banned
-      FROM data_cards dc
-      JOIN users u ON u.id = dc.user_id
-      WHERE
-        dc.id = ?
-        AND dc.type = 'scenario'
-        AND dc.deleted_at IS NULL
-        AND dc.is_public != -1
-        AND dc.review_status = 'approved'
-        AND (dc.user_id = ? OR dc.is_public = 1)
-        AND (u.is_banned IS NULL OR u.is_banned = '')`,
-      [cardId, requestUserId]
-    ) as any;
-
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0] as PvpEligibleDataCardRow;
-    }
-    return null;
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getPvpEligibleScenarioDataCardById(bundle.db, cardId, requestUserId);
   } catch (error) {
     console.error('读取 PVP 可用 scenario data_card 失败:', error);
     return null;
@@ -498,10 +621,9 @@ export async function getPvpEligibleScenarioDataCard(cardId: string, requestUser
 
 export async function clearPvpRoomMatchState(roomId: string): Promise<boolean> {
   try {
-    await queryFromD1('DELETE FROM pvp_room_hands WHERE room_id = ?', [roomId]);
-    await queryFromD1('DELETE FROM pvp_room_submissions WHERE room_id = ?', [roomId]);
-    await queryFromD1('DELETE FROM pvp_room_card_snapshots WHERE room_id = ?', [roomId]);
-
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
+    await bundle.clearPvpRoomMatchStateByRoomId(bundle.db, roomId);
     return true;
   } catch (error) {
     console.error('清理 PVP 对局状态失败:', error);
@@ -520,14 +642,9 @@ export async function clearPvpRoomRuntimeState(roomId: string): Promise<boolean>
  */
 export async function clearPvpRoomEphemeralState(roomId: string): Promise<boolean> {
   try {
-    await queryFromD1('DELETE FROM pvp_room_hands WHERE room_id = ?', [roomId]);
-    await queryFromD1('DELETE FROM pvp_room_submissions WHERE room_id = ?', [roomId]);
-    await queryFromD1('DELETE FROM pvp_room_card_snapshots WHERE room_id = ?', [roomId]);
-    await queryFromD1('DELETE FROM pvp_room_chat_messages WHERE room_id = ?', [roomId]);
-    await queryFromD1(
-      'DELETE FROM pvp_round_choices WHERE round_id IN (SELECT id FROM pvp_rounds WHERE room_id = ?)',
-      [roomId]
-    );
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
+    await bundle.clearPvpRoomEphemeralStateByRoomId(bundle.db, roomId);
     return true;
   } catch (error) {
     console.error('清理 PVP 房间临时数据失败:', error);
@@ -537,16 +654,15 @@ export async function clearPvpRoomEphemeralState(roomId: string): Promise<boolea
 
 export async function upsertPvpRoomHand(roomId: string, userId: number, handJson: string): Promise<boolean> {
   try {
-    const now = new Date().toISOString();
-    const result = await queryFromD1(
-      `INSERT INTO pvp_room_hands (room_id, user_id, hand_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(room_id, user_id) DO UPDATE SET
-         hand_json = excluded.hand_json,
-         updated_at = excluded.updated_at`,
-      [roomId, userId, handJson, now, now]
-    ) as any;
-    return Boolean(result.success);
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
+    await bundle.upsertPvpRoomHand(bundle.db, {
+      roomId,
+      userId,
+      handJson,
+      nowIso: new Date().toISOString(),
+    });
+    return true;
   } catch (error) {
     console.error('写入 pvp_room_hands 失败:', error);
     return false;
@@ -555,8 +671,10 @@ export async function upsertPvpRoomHand(roomId: string, userId: number, handJson
 
 export async function deletePvpRoomHand(roomId: string, userId: number): Promise<boolean> {
   try {
-    const result = await queryFromD1('DELETE FROM pvp_room_hands WHERE room_id = ? AND user_id = ?', [roomId, userId]) as any;
-    return Boolean(result?.success);
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return false;
+    await bundle.deletePvpRoomHand(bundle.db, roomId, userId);
+    return true;
   } catch (error) {
     console.error('删除 pvp_room_hands 失败:', error);
     return false;
@@ -573,14 +691,9 @@ export interface PvpRoomHandRow {
 
 export async function getPvpRoomHands(roomId: string): Promise<PvpRoomHandRow[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT * FROM pvp_room_hands WHERE room_id = ?',
-      [roomId]
-    ) as any;
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpRoomHandRow[];
-    }
-    return [];
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpRoomHandsByRoomId(bundle.db, roomId);
   } catch (error) {
     console.error('读取 pvp_room_hands 失败:', error);
     return [];
@@ -599,25 +712,22 @@ export interface CreatePvpCardSnapshotInput {
 
 export async function createPvpCardSnapshot(input: CreatePvpCardSnapshotInput): Promise<string | null> {
   try {
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return null;
     const snapshotId = generateUUID();
     const now = new Date().toISOString();
-    const result = await queryFromD1(
-      `INSERT INTO pvp_room_card_snapshots (
-        id, room_id, owner_user_id, ref_json, card_type, name, data_json, source_updated_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        snapshotId,
-        input.roomId,
-        input.ownerUserId,
-        input.refJson,
-        input.cardType,
-        input.name,
-        input.dataJson,
-        input.sourceUpdatedAt ?? null,
-        now,
-      ]
-    ) as any;
-    return result.success ? snapshotId : null;
+    const ok = await bundle.insertPvpCardSnapshot(bundle.db, {
+      snapshotId,
+      roomId: input.roomId,
+      ownerUserId: input.ownerUserId,
+      refJson: input.refJson,
+      cardType: input.cardType,
+      name: input.name,
+      dataJson: input.dataJson,
+      sourceUpdatedAt: input.sourceUpdatedAt ?? null,
+      createdAt: now,
+    });
+    return ok ? snapshotId : null;
   } catch (error) {
     console.error('写入 pvp_room_card_snapshots 失败:', error);
     return null;
@@ -638,14 +748,9 @@ export interface PvpCardSnapshotRow {
 
 export async function getPvpCardSnapshots(roomId: string): Promise<PvpCardSnapshotRow[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT * FROM pvp_room_card_snapshots WHERE room_id = ? ORDER BY created_at ASC',
-      [roomId]
-    ) as any;
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpCardSnapshotRow[];
-    }
-    return [];
+    const bundle = await readPvpRoomCoreRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpCardSnapshotsByRoomId(bundle.db, roomId);
   } catch (error) {
     console.error('读取 pvp_room_card_snapshots 失败:', error);
     return [];
@@ -662,15 +767,21 @@ export interface CreatePvpRoundInput {
 
 export async function createPvpRound(input: CreatePvpRoundInput): Promise<string | null> {
   try {
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return null;
     const roundId = generateUUID();
     const now = new Date().toISOString();
     const status: PvpRoundStatus = input.status ?? 'pending';
-    const result = await queryFromD1(
-      `INSERT INTO pvp_rounds (id, room_id, match_id, round_index, status, public_snapshot_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [roundId, input.roomId, input.matchId ?? null, input.roundIndex, status, input.publicSnapshotJson ?? null, now]
-    ) as any;
-    return result.success ? roundId : null;
+    const ok = await bundle.insertPvpRound(bundle.db, {
+      roundId,
+      roomId: input.roomId,
+      matchId: input.matchId ?? null,
+      roundIndex: input.roundIndex,
+      status,
+      publicSnapshotJson: input.publicSnapshotJson ?? null,
+      createdAt: now,
+    });
+    return ok ? roundId : null;
   } catch (error) {
     console.error('写入 pvp_rounds 失败:', error);
     return null;
@@ -693,11 +804,9 @@ export interface PvpRoundRow {
 
 export async function getPvpRoundById(roundId: string): Promise<PvpRoundRow | null> {
   try {
-    const result = await queryFromD1('SELECT * FROM pvp_rounds WHERE id = ?', [roundId]) as any;
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0] as PvpRoundRow;
-    }
-    return null;
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getPvpRoundByIdRow(bundle.db, roundId);
   } catch (error) {
     console.error('读取 pvp_rounds 失败:', error);
     return null;
@@ -706,14 +815,9 @@ export async function getPvpRoundById(roundId: string): Promise<PvpRoundRow | nu
 
 export async function getLatestPvpRoundByRoom(roomId: string): Promise<PvpRoundRow | null> {
   try {
-    const result = await queryFromD1(
-      'SELECT * FROM pvp_rounds WHERE room_id = ? ORDER BY round_index DESC LIMIT 1',
-      [roomId]
-    ) as any;
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0] as PvpRoundRow;
-    }
-    return null;
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getLatestPvpRoundByRoomId(bundle.db, roomId);
   } catch (error) {
     console.error('读取 pvp_rounds(最新) 失败:', error);
     return null;
@@ -722,14 +826,9 @@ export async function getLatestPvpRoundByRoom(roomId: string): Promise<PvpRoundR
 
 export async function getLatestPvpRoundByMatch(matchId: string): Promise<PvpRoundRow | null> {
   try {
-    const result = await queryFromD1(
-      'SELECT * FROM pvp_rounds WHERE match_id = ? ORDER BY round_index DESC LIMIT 1',
-      [matchId]
-    ) as any;
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0] as PvpRoundRow;
-    }
-    return null;
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getLatestPvpRoundByMatchId(bundle.db, matchId);
   } catch (error) {
     console.error('读取 pvp_rounds(最新, match) 失败:', error);
     return null;
@@ -738,14 +837,9 @@ export async function getLatestPvpRoundByMatch(matchId: string): Promise<PvpRoun
 
 export async function getPvpRoundsByRoom(roomId: string): Promise<PvpRoundRow[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT * FROM pvp_rounds WHERE room_id = ? ORDER BY round_index ASC',
-      [roomId]
-    ) as any;
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpRoundRow[];
-    }
-    return [];
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpRoundsByRoomId(bundle.db, roomId);
   } catch (error) {
     console.error('读取 pvp_rounds(列表) 失败:', error);
     return [];
@@ -754,14 +848,9 @@ export async function getPvpRoundsByRoom(roomId: string): Promise<PvpRoundRow[]>
 
 export async function getPvpRoundsByMatch(matchId: string): Promise<PvpRoundRow[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT * FROM pvp_rounds WHERE match_id = ? ORDER BY round_index ASC',
-      [matchId]
-    ) as any;
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpRoundRow[];
-    }
-    return [];
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpRoundsByMatchId(bundle.db, matchId);
   } catch (error) {
     console.error('读取 pvp_rounds(列表, match) 失败:', error);
     return [];
@@ -778,42 +867,11 @@ export interface UpdatePvpRoundPatch {
 }
 
 export async function updatePvpRound(roundId: string, patch: UpdatePvpRoundPatch): Promise<boolean> {
-  const fields: string[] = [];
-  const params: any[] = [];
-
-  if (patch.status !== undefined) {
-    fields.push('status = ?');
-    params.push(patch.status);
-  }
-  if (patch.battleGenerationId !== undefined) {
-    fields.push('battle_generation_id = ?');
-    params.push(patch.battleGenerationId);
-  }
-  if (patch.publicSnapshotJson !== undefined) {
-    fields.push('public_snapshot_json = ?');
-    params.push(patch.publicSnapshotJson);
-  }
-  if (patch.resultJson !== undefined) {
-    fields.push('result_json = ?');
-    params.push(patch.resultJson);
-  }
-  if (patch.winnerUserId !== undefined) {
-    fields.push('winner_user_id = ?');
-    params.push(patch.winnerUserId);
-  }
-  if (patch.winnerName !== undefined) {
-    fields.push('winner_name = ?');
-    params.push(patch.winnerName);
-  }
-
-  if (fields.length <= 0) return false;
-
   try {
-    const result = await queryFromD1(
-      `UPDATE pvp_rounds SET ${fields.join(', ')} WHERE id = ?`,
-      [...params, roundId]
-    ) as any;
-    return Boolean(result.success && result.result?.[0]?.meta?.changes > 0);
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return false;
+    const changed = await bundle.updatePvpRoundPatch(bundle.db, roundId, patch);
+    return changed > 0;
   } catch (error) {
     console.error('更新 pvp_rounds 失败:', error);
     return false;
@@ -822,16 +880,15 @@ export async function updatePvpRound(roundId: string, patch: UpdatePvpRoundPatch
 
 export async function upsertPvpRoundChoice(roundId: string, userId: number, choiceRefJson: string): Promise<boolean> {
   try {
-    const now = new Date().toISOString();
-    const result = await queryFromD1(
-      `INSERT INTO pvp_round_choices (round_id, user_id, choice_ref_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(round_id, user_id) DO UPDATE SET
-         choice_ref_json = excluded.choice_ref_json,
-         updated_at = excluded.updated_at`,
-      [roundId, userId, choiceRefJson, now, now]
-    ) as any;
-    return Boolean(result.success);
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return false;
+    await bundle.upsertPvpRoundChoice(bundle.db, {
+      roundId,
+      userId,
+      choiceRefJson,
+      nowIso: new Date().toISOString(),
+    });
+    return true;
   } catch (error) {
     console.error('写入 pvp_round_choices 失败:', error);
     return false;
@@ -848,11 +905,9 @@ export interface PvpRoundChoiceRow {
 
 export async function getPvpRoundChoices(roundId: string): Promise<PvpRoundChoiceRow[]> {
   try {
-    const result = await queryFromD1('SELECT * FROM pvp_round_choices WHERE round_id = ?', [roundId]) as any;
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpRoundChoiceRow[];
-    }
-    return [];
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpRoundChoicesByRoundId(bundle.db, roundId);
   } catch (error) {
     console.error('读取 pvp_round_choices 失败:', error);
     return [];
@@ -861,11 +916,9 @@ export async function getPvpRoundChoices(roundId: string): Promise<PvpRoundChoic
 
 export async function getPvpCardSnapshotById(snapshotId: string): Promise<PvpCardSnapshotRow | null> {
   try {
-    const result = await queryFromD1('SELECT * FROM pvp_room_card_snapshots WHERE id = ?', [snapshotId]) as any;
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0] as PvpCardSnapshotRow;
-    }
-    return null;
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getPvpCardSnapshotByIdRow(bundle.db, snapshotId);
   } catch (error) {
     console.error('读取 pvp_room_card_snapshots(id) 失败:', error);
     return null;
@@ -909,30 +962,9 @@ export interface PvpUserSummaryRow {
 
 export async function getPvpUserSummariesByUserIds(userIds: number[]): Promise<PvpUserSummaryRow[]> {
   try {
-    const ids = [...new Set(userIds.filter((n) => Number.isFinite(n)).map((n) => Math.floor(n)))].filter((n) => n > 0);
-    if (ids.length <= 0) return [];
-
-    const placeholders = ids.map(() => '?').join(', ');
-    const result = await queryFromD1(
-      `SELECT
-        mp.user_id AS user_id,
-        SUM(CASE WHEN m.status = 'completed' THEN 1 ELSE 0 END) AS completed_matches,
-        SUM(CASE WHEN m.status = 'completed' AND m.winner_user_id = mp.user_id THEN 1 ELSE 0 END) AS wins,
-        SUM(CASE WHEN m.status = 'completed' AND m.winner_user_id IS NULL THEN 1 ELSE 0 END) AS draws,
-        SUM(CASE WHEN m.status = 'completed' AND m.winner_user_id IS NOT NULL AND m.winner_user_id != mp.user_id THEN 1 ELSE 0 END) AS losses,
-        SUM(CASE WHEN m.status = 'aborted' THEN 1 ELSE 0 END) AS aborted_matches,
-        MAX(m.started_at) AS last_played_at
-      FROM pvp_match_players mp
-      JOIN pvp_matches m ON m.id = mp.match_id
-      WHERE mp.user_id IN (${placeholders})
-      GROUP BY mp.user_id`,
-      ids
-    ) as any;
-
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpUserSummaryRow[];
-    }
-    return [];
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpUserSummariesByUserIds(bundle.db, userIds);
   } catch (error) {
     console.error('读取 PVP 用户战绩摘要失败:', error);
     return [];
@@ -945,34 +977,16 @@ export async function getPvpMatchesByUserId(
   offset = 0
 ): Promise<{ matches: PvpMatchRow[]; players: PvpMatchPlayerRow[] }> {
   try {
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return { matches: [], players: [] };
     const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
     const safeOffset = Math.max(0, Math.floor(offset));
-    const matchesResult = await queryFromD1(
-      `SELECT m.*
-       FROM pvp_match_players mp
-       JOIN pvp_matches m ON m.id = mp.match_id
-       WHERE mp.user_id = ?
-       ORDER BY m.started_at DESC
-       LIMIT ? OFFSET ?`,
-      [userId, safeLimit, safeOffset]
-    ) as any;
-
-    const matches = (matchesResult.success && matchesResult.result?.[0]?.results)
-      ? (matchesResult.result[0].results as PvpMatchRow[])
-      : [];
+    const matches = await bundle.listPvpMatchesByUserId(bundle.db, userId, safeLimit, safeOffset);
 
     if (matches.length <= 0) return { matches: [], players: [] };
 
     const matchIds = matches.map((m) => m.id);
-    const placeholders = matchIds.map(() => '?').join(', ');
-    const playersResult = await queryFromD1(
-      `SELECT * FROM pvp_match_players WHERE match_id IN (${placeholders}) ORDER BY match_id ASC, seat ASC`,
-      matchIds
-    ) as any;
-
-    const players = (playersResult.success && playersResult.result?.[0]?.results)
-      ? (playersResult.result[0].results as PvpMatchPlayerRow[])
-      : [];
+    const players = await bundle.listPvpMatchPlayersByMatchIds(bundle.db, matchIds);
 
     return { matches, players };
   } catch (error) {
@@ -994,27 +1008,9 @@ export async function getPvpMatchRoundOutcomeSummariesByMatchIds(
   userId: number
 ): Promise<PvpMatchRoundOutcomeSummary[]> {
   try {
-    const ids = [...new Set(matchIds.map((id) => String(id)).filter(Boolean))];
-    if (ids.length <= 0) return [];
-
-    const placeholders = ids.map(() => '?').join(', ');
-    const result = (await queryFromD1(
-      `SELECT
-        match_id,
-        COUNT(1) AS total_rounds,
-        SUM(CASE WHEN winner_user_id = ? THEN 1 ELSE 0 END) AS wins,
-        SUM(CASE WHEN winner_user_id IS NOT NULL AND winner_user_id != ? THEN 1 ELSE 0 END) AS losses,
-        SUM(CASE WHEN winner_user_id IS NULL THEN 1 ELSE 0 END) AS draws
-      FROM pvp_rounds
-      WHERE match_id IN (${placeholders}) AND status = 'completed'
-      GROUP BY match_id`,
-      [userId, userId, ...ids]
-    )) as any;
-
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpMatchRoundOutcomeSummary[];
-    }
-    return [];
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpMatchRoundOutcomeSummariesByMatchIds(bundle.db, matchIds, userId);
   } catch (error) {
     console.error('读取 PVP 回合胜负统计失败:', error);
     return [];
@@ -1023,13 +1019,9 @@ export async function getPvpMatchRoundOutcomeSummariesByMatchIds(
 
 export async function countPvpMatchesByUserId(userId: number): Promise<number> {
   try {
-    const result = (await queryFromD1(
-      'SELECT COUNT(1) AS total FROM pvp_match_players WHERE user_id = ?',
-      [userId]
-    )) as any;
-    const row = result?.result?.[0]?.results?.[0];
-    const total = typeof row?.total === 'number' ? row.total : Number(row?.total);
-    return Number.isFinite(total) ? Math.max(0, Math.floor(total)) : 0;
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return 0;
+    return await bundle.countPvpMatchesByUserId(bundle.db, userId);
   } catch (error) {
     console.error('统计 pvp_matches(user) 失败:', error);
     return 0;
@@ -1038,12 +1030,9 @@ export async function countPvpMatchesByUserId(userId: number): Promise<number> {
 
 export async function isUserInPvpMatch(matchId: string, userId: number): Promise<boolean> {
   try {
-    const result = (await queryFromD1(
-      'SELECT 1 AS ok FROM pvp_match_players WHERE match_id = ? AND user_id = ? LIMIT 1',
-      [matchId, userId]
-    )) as any;
-    const row = result?.result?.[0]?.results?.[0];
-    return Boolean(row?.ok === 1 || row?.ok === '1' || row?.ok === true);
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return false;
+    return await bundle.hasPvpMatchPlayer(bundle.db, matchId, userId);
   } catch (error) {
     console.error('检查 pvp_match_players 失败:', error);
     return false;
@@ -1052,14 +1041,9 @@ export async function isUserInPvpMatch(matchId: string, userId: number): Promise
 
 export async function getPvpMatchPlayersByMatchId(matchId: string): Promise<PvpMatchPlayerRow[]> {
   try {
-    const result = (await queryFromD1(
-      'SELECT * FROM pvp_match_players WHERE match_id = ? ORDER BY seat ASC',
-      [matchId]
-    )) as any;
-    if (result.success && result.result?.[0]?.results) {
-      return result.result[0].results as PvpMatchPlayerRow[];
-    }
-    return [];
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpMatchPlayersByMatchId(bundle.db, matchId);
   } catch (error) {
     console.error('读取 pvp_match_players(match) 失败:', error);
     return [];
@@ -1074,14 +1058,16 @@ export async function createPvpMatch(input: {
   startedAt: string;
 }): Promise<boolean> {
   try {
-    const now = new Date().toISOString();
-    const result = await queryFromD1(
-      `INSERT INTO pvp_matches (
-        id, room_id, status, rules_json, participants, started_at, ended_at, winner_user_id, result_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [input.id, input.roomId, 'active', input.rulesJson, input.participants, input.startedAt, null, null, null, now, now]
-    ) as any;
-    return Boolean(result?.success);
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return false;
+    return await bundle.insertPvpMatch(bundle.db, {
+      id: input.id,
+      roomId: input.roomId,
+      rulesJson: input.rulesJson,
+      participants: input.participants,
+      startedAt: input.startedAt,
+      nowIso: new Date().toISOString(),
+    });
   } catch (error) {
     console.error('写入 pvp_matches 失败:', error);
     return false;
@@ -1093,13 +1079,9 @@ export async function createPvpMatchPlayers(
   players: Array<{ userId: number; seat: number; username: string | null; userPrefix: string | null; joinedAt: string }>
 ): Promise<boolean> {
   try {
-    for (const p of players) {
-      await queryFromD1(
-        `INSERT OR REPLACE INTO pvp_match_players (match_id, user_id, seat, username, user_prefix, joined_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [matchId, p.userId, p.seat, p.username, p.userPrefix, p.joinedAt]
-      );
-    }
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return false;
+    await bundle.upsertPvpMatchPlayers(bundle.db, matchId, players);
     return true;
   } catch (error) {
     console.error('写入 pvp_match_players 失败:', error);
@@ -1108,32 +1090,11 @@ export async function createPvpMatchPlayers(
 }
 
 export async function updatePvpMatch(matchId: string, patch: { status?: PvpMatchStatus; endedAt?: string | null; winnerUserId?: number | null; resultJson?: string | null }): Promise<boolean> {
-  const fields: string[] = [];
-  const params: any[] = [];
-  if (patch.status !== undefined) {
-    fields.push('status = ?');
-    params.push(patch.status);
-  }
-  if (patch.endedAt !== undefined) {
-    fields.push('ended_at = ?');
-    params.push(patch.endedAt);
-  }
-  if (patch.winnerUserId !== undefined) {
-    fields.push('winner_user_id = ?');
-    params.push(patch.winnerUserId);
-  }
-  if (patch.resultJson !== undefined) {
-    fields.push('result_json = ?');
-    params.push(patch.resultJson);
-  }
-  if (fields.length <= 0) return false;
-
   try {
-    const now = new Date().toISOString();
-    fields.push('updated_at = ?');
-    params.push(now);
-    const result = await queryFromD1(`UPDATE pvp_matches SET ${fields.join(', ')} WHERE id = ?`, [...params, matchId]) as any;
-    return Boolean(result?.success && result.result?.[0]?.meta?.changes > 0);
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return false;
+    const changed = await bundle.updatePvpMatchPatch(bundle.db, matchId, patch, new Date().toISOString());
+    return changed > 0;
   } catch (error) {
     console.error('更新 pvp_matches 失败:', error);
     return false;
@@ -1142,11 +1103,9 @@ export async function updatePvpMatch(matchId: string, patch: { status?: PvpMatch
 
 export async function getPvpMatchById(matchId: string): Promise<PvpMatchRow | null> {
   try {
-    const result = await queryFromD1('SELECT * FROM pvp_matches WHERE id = ?', [matchId]) as any;
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0] as PvpMatchRow;
-    }
-    return null;
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getPvpMatchByIdRow(bundle.db, matchId);
   } catch (error) {
     console.error('读取 pvp_matches 失败:', error);
     return null;
@@ -1176,30 +1135,13 @@ export async function getPvpRoomChatMessages(input: {
   const afterId = Number.isFinite(input.afterId) ? Math.max(0, Math.floor(input.afterId as number)) : null;
 
   try {
-    if (afterId !== null && afterId > 0) {
-      const result = await queryFromD1(
-        `SELECT * FROM pvp_room_chat_messages
-         WHERE room_id = ? AND id > ?
-         ORDER BY id ASC
-         LIMIT ?`,
-        [input.roomId, afterId, limit]
-      ) as any;
-      if (result.success && result.result?.[0]?.results) return result.result[0].results as PvpRoomChatMessageRow[];
-      return [];
-    }
-
-    const result = await queryFromD1(
-      `SELECT * FROM pvp_room_chat_messages
-       WHERE room_id = ?
-       ORDER BY id DESC
-       LIMIT ?`,
-      [input.roomId, limit]
-    ) as any;
-    if (result.success && result.result?.[0]?.results) {
-      const rows = result.result[0].results as PvpRoomChatMessageRow[];
-      return rows.slice().reverse();
-    }
-    return [];
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listPvpRoomChatMessages(bundle.db, {
+      roomId: input.roomId,
+      limit,
+      afterId,
+    });
   } catch (error) {
     console.error('读取 pvp_room_chat_messages 失败:', error);
     return [];
@@ -1211,18 +1153,9 @@ export async function getLatestPvpRoomChatMessageBySender(input: {
   userId: number;
 }): Promise<{ id: number; created_at: string } | null> {
   try {
-    const result = await queryFromD1(
-      `SELECT id, created_at
-       FROM pvp_room_chat_messages
-       WHERE room_id = ? AND sender_user_id = ?
-       ORDER BY id DESC
-       LIMIT 1`,
-      [input.roomId, input.userId]
-    ) as any;
-    if (result.success && result.result?.[0]?.results?.length > 0) {
-      return result.result[0].results[0] as { id: number; created_at: string };
-    }
-    return null;
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return null;
+    return await bundle.getLatestPvpRoomChatMessageBySender(bundle.db, input);
   } catch (error) {
     console.error('读取 pvp_room_chat_messages(最新发送) 失败:', error);
     return null;
@@ -1241,29 +1174,20 @@ export async function createPvpRoomChatMessage(input: {
   emojiText?: string | null;
 }): Promise<number | null> {
   try {
-    const now = new Date().toISOString();
-    const result = await queryFromD1(
-      `INSERT INTO pvp_room_chat_messages (
-        room_id, sender_user_id, sender_role, sender_username, sender_prefix,
-        content_json, rendered_text, sticker_id, emoji_text, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        input.roomId,
-        input.senderUserId,
-        input.senderRole,
-        input.senderUsername,
-        input.senderPrefix ?? null,
-        input.contentJson,
-        input.renderedText ?? null,
-        input.stickerId ?? null,
-        input.emojiText ?? null,
-        now,
-      ]
-    ) as any;
-    if (result.success && result.result) {
-      return result.result[0]?.meta?.last_row_id ?? null;
-    }
-    return null;
+    const bundle = await readPvpMatchRoundChatRepoBundle();
+    if (!bundle) return null;
+    return await bundle.insertPvpRoomChatMessage(bundle.db, {
+      roomId: input.roomId,
+      senderUserId: input.senderUserId,
+      senderRole: input.senderRole,
+      senderUsername: input.senderUsername,
+      senderPrefix: input.senderPrefix ?? null,
+      contentJson: input.contentJson,
+      renderedText: input.renderedText ?? null,
+      stickerId: input.stickerId ?? null,
+      emojiText: input.emojiText ?? null,
+      createdAt: new Date().toISOString(),
+    });
   } catch (error) {
     console.error('写入 pvp_room_chat_messages 失败:', error);
     return null;

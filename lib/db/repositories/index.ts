@@ -15,3 +15,5 @@ export * from '@/lib/db/repositories/decks';
 export * from '@/lib/db/repositories/deck-cards';
 export * from '@/lib/db/repositories/favorites';
 export * from '@/lib/db/repositories/deck-favorites';
+export * from '@/lib/db/repositories/pvp-room-core';
+export * from '@/lib/db/repositories/pvp-match-round-chat';
