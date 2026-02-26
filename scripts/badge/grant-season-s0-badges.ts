@@ -19,7 +19,14 @@
 import { loadEnvConfig } from '@next/env';
 
 import { computeArenaBaseTier } from '@/lib/arena/tier';
-import { queryFromD1 } from '@/lib/database/core';
+import {
+  countBadgesById,
+  grantBadgeToUsersInChunks,
+  insertBadgeDefinition,
+  listRatedCharactersByQueue,
+  listUserIdsHavingBadge,
+  updateBadgeDefinition,
+} from '@/lib/database/badges-granting';
 
 type BadgeUpsertDefinition = {
   id: string;
@@ -82,79 +89,38 @@ const parseArgs = (argv: string[]) => {
   return args;
 };
 
-const readRows = <T,>(result: unknown): T[] => {
-  const rows = (result as any)?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as T[]) : [];
-};
-
-const readChanges = (result: unknown): number => {
-  const changes = (result as any)?.result?.[0]?.meta?.changes;
-  return typeof changes === 'number' && Number.isFinite(changes) ? Math.max(0, Math.floor(changes)) : 0;
-};
-
 const badgeExists = async (badgeId: string): Promise<boolean> => {
-  const res = await queryFromD1('SELECT COUNT(*) as count FROM badges WHERE id = ?', [badgeId]);
-  const row = readRows<{ count: number }>(res)[0];
-  return typeof row?.count === 'number' && Number(row.count) > 0;
+  return (await countBadgesById(badgeId)) > 0;
 };
 
 const insertBadge = async (def: BadgeUpsertDefinition): Promise<boolean> => {
-  const res = await queryFromD1(
-    `INSERT INTO badges (
-      id,
-      name,
-      description,
-      icon,
-      text_color,
-      background_color,
-      border_color,
-      rarity,
-      sort_order,
-      is_active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      def.id,
-      def.name,
-      def.description,
-      def.iconJson,
-      def.textColorJson,
-      def.backgroundColorJson,
-      def.borderColorJson ?? null,
-      def.rarity,
-      def.sortOrder,
-      def.isActive ? 1 : 0,
-    ],
-  );
-  return Boolean((res as any)?.success);
+  return insertBadgeDefinition({
+    id: def.id,
+    name: def.name,
+    description: def.description,
+    icon: def.iconJson,
+    textColor: def.textColorJson,
+    backgroundColor: def.backgroundColorJson,
+    borderColor: def.borderColorJson ?? null,
+    rarity: def.rarity,
+    sortOrder: def.sortOrder,
+    isActive: def.isActive,
+  });
 };
 
 const updateBadge = async (def: BadgeUpsertDefinition): Promise<boolean> => {
-  const res = await queryFromD1(
-    `UPDATE badges SET
-      name = ?,
-      description = ?,
-      icon = ?,
-      text_color = ?,
-      background_color = ?,
-      border_color = ?,
-      rarity = ?,
-      sort_order = ?,
-      is_active = ?
-    WHERE id = ?`,
-    [
-      def.name,
-      def.description,
-      def.iconJson,
-      def.textColorJson,
-      def.backgroundColorJson,
-      def.borderColorJson ?? null,
-      def.rarity,
-      def.sortOrder,
-      def.isActive ? 1 : 0,
-      def.id,
-    ],
-  );
-  return Boolean((res as any)?.success);
+  return updateBadgeDefinition({
+    id: def.id,
+    name: def.name,
+    description: def.description,
+    icon: def.iconJson,
+    textColor: def.textColorJson,
+    backgroundColor: def.backgroundColorJson,
+    borderColor: def.borderColorJson ?? null,
+    rarity: def.rarity,
+    sortOrder: def.sortOrder,
+    isActive: def.isActive,
+  });
 };
 
 type RatedCharacterRow = {
@@ -170,71 +136,11 @@ type RatedCharacterRow = {
 };
 
 const loadStrictRatedCharacters = async (): Promise<RatedCharacterRow[]> => {
-  const res = await queryFromD1(
-    `SELECT
-      dc.user_id AS userId,
-      u.username AS username,
-      dc.id AS dataCardId,
-      dc.name AS cardName,
-      dc.is_public AS isPublic,
-      dc.review_status AS reviewStatus,
-      dc.deleted_at AS deletedAt,
-      ar.rating AS rating,
-      ar.games AS games
-    FROM arena_ratings ar
-    JOIN data_cards dc ON dc.id = ar.entity_id
-    JOIN users u ON u.id = dc.user_id
-    WHERE ar.queue = 'strict'
-      AND ar.entity_type = 'data_card'
-      AND dc.type = 'character'`,
-    [],
-  );
-  const rows = readRows<any>(res);
-  return rows.map((row: any) => ({
-    userId: Number(row.userId ?? 0) || 0,
-    username: String(row.username ?? ''),
-    dataCardId: String(row.dataCardId ?? ''),
-    cardName: String(row.cardName ?? ''),
-    isPublic: row.isPublic ?? null,
-    reviewStatus: typeof row.reviewStatus === 'string' ? row.reviewStatus : null,
-    deletedAt: typeof row.deletedAt === 'string' ? row.deletedAt : null,
-    rating: Number(row.rating ?? 0) || 0,
-    games: Number(row.games ?? 0) || 0,
-  }));
+  return listRatedCharactersByQueue('strict');
 };
 
 const loadFreeRatedCharacters = async (): Promise<RatedCharacterRow[]> => {
-  const res = await queryFromD1(
-    `SELECT
-      dc.user_id AS userId,
-      u.username AS username,
-      dc.id AS dataCardId,
-      dc.name AS cardName,
-      dc.is_public AS isPublic,
-      dc.review_status AS reviewStatus,
-      dc.deleted_at AS deletedAt,
-      ar.rating AS rating,
-      ar.games AS games
-    FROM arena_ratings ar
-    JOIN data_cards dc ON dc.id = ar.entity_id
-    JOIN users u ON u.id = dc.user_id
-    WHERE ar.queue = 'free'
-      AND ar.entity_type = 'data_card'
-      AND dc.type = 'character'`,
-    [],
-  );
-  const rows = readRows<any>(res);
-  return rows.map((row: any) => ({
-    userId: Number(row.userId ?? 0) || 0,
-    username: String(row.username ?? ''),
-    dataCardId: String(row.dataCardId ?? ''),
-    cardName: String(row.cardName ?? ''),
-    isPublic: row.isPublic ?? null,
-    reviewStatus: typeof row.reviewStatus === 'string' ? row.reviewStatus : null,
-    deletedAt: typeof row.deletedAt === 'string' ? row.deletedAt : null,
-    rating: Number(row.rating ?? 0) || 0,
-    games: Number(row.games ?? 0) || 0,
-  }));
+  return listRatedCharactersByQueue('free');
 };
 
 const isPublicApprovedCharacter = (row: RatedCharacterRow): boolean => {
@@ -253,45 +159,19 @@ const listUserSamples = (userIds: number[], usernamesById: Map<number, string>, 
 };
 
 const loadUsersHavingBadge = async (badgeId: string): Promise<Set<number>> => {
-  const res = await queryFromD1(`SELECT user_id AS userId FROM user_badges WHERE badge_id = ?`, [badgeId]);
-  const rows = readRows<{ userId: number }>(res);
   const set = new Set<number>();
-  rows.forEach((row) => {
-    const id = typeof row?.userId === 'number' ? row.userId : Number(row?.userId);
-    if (Number.isFinite(id) && id > 0) set.add(Math.floor(id));
-  });
+  const rows = await listUserIdsHavingBadge(badgeId);
+  rows.forEach((id) => set.add(id));
   return set;
 };
 
-const chunk = <T,>(arr: T[], size: number): T[][] => {
-  const safe = Math.max(1, Math.floor(size));
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += safe) out.push(arr.slice(i, i + safe));
-  return out;
-};
-
 const grantBadgeBatch = async (badgeId: string, userIds: number[]): Promise<{ inserted: number; errors: number }> => {
-  let inserted = 0;
-  let errors = 0;
-  // Cloudflare D1 对单条 SQL 变量数量限制较严格（常见报错：too many SQL variables）。
-  // 这里保守控制每批次的 (user_id, badge_id) 参数对数量，避免 400。
-  const chunks = chunk(userIds, 40);
-  for (const ids of chunks) {
-    if (ids.length === 0) continue;
-    const placeholders = ids.map(() => '(?, ?)').join(', ');
-    const params: unknown[] = [];
-    ids.forEach((id) => {
-      params.push(id, badgeId);
-    });
-    try {
-      const res = await queryFromD1(`INSERT OR IGNORE INTO user_badges (user_id, badge_id) VALUES ${placeholders}`, params);
-      inserted += readChanges(res);
-    } catch (error) {
-      errors += ids.length;
-      console.error(`❌ 批量授予徽章失败：${badgeId}（batch size=${ids.length}）`, error);
-    }
-  }
-  return { inserted, errors };
+  const result = await grantBadgeToUsersInChunks({
+    badgeId,
+    userIds,
+    chunkSize: 40,
+  });
+  return { inserted: result.inserted, errors: result.errors };
 };
 
 async function main() {

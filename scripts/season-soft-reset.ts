@@ -8,24 +8,21 @@ import {
   type SeasonResetPolicy,
 } from '@/lib/arena/season-reset';
 import { deriveSeasonResetAutoTuning, type SeasonResetAutoTuningResult, type SeasonResetAutoTuningStats } from '@/lib/arena/season-reset-auto';
+import {
+  countSeasonSoftResetPlayedRows,
+  executeSeasonSoftResetQueueUpdate,
+  getSeasonSoftResetAutoSummary,
+  getSeasonSoftResetGamesValueAtOffset,
+  getSeasonSoftResetInactiveDaysValueAtOffset,
+  listSeasonSoftResetQueueStats,
+  listSeasonSoftResetRatingSamples,
+} from '@/lib/database/season-soft-reset';
 
 type Queue = 'strict' | 'free' | 'all';
 type ArenaQueue = 'strict' | 'free';
 
-type QueryFromD1 = (sql: string, params?: unknown[]) => Promise<unknown>;
-
 const hasD1Config = (): boolean => {
   return Boolean(process.env.D1_DATABASE_ID && process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID);
-};
-
-const readRows = <T>(result: unknown): T[] => {
-  const rows = (result as any)?.result?.[0]?.results;
-  return Array.isArray(rows) ? (rows as T[]) : [];
-};
-
-const readChanges = (result: unknown): number => {
-  const changes = (result as any)?.result?.[0]?.meta?.changes;
-  return typeof changes === 'number' && Number.isFinite(changes) ? Math.max(0, Math.floor(changes)) : 0;
 };
 
 const parseArgs = (argv: string[]) => {
@@ -84,16 +81,8 @@ const hasAnyFlag = (args: Map<string, string>, flags: string[]): boolean => {
   return false;
 };
 
-const queryQueueStats = async (queryFromD1: QueryFromD1, queue: Queue) => {
-  const where = queue === 'all' ? '' : 'WHERE queue = ?';
-  const params: unknown[] = queue === 'all' ? [] : [queue];
-  const sql = `SELECT queue, COUNT(*) as count, MIN(rating) as minRating, MAX(rating) as maxRating
-    FROM arena_ratings
-    ${where}
-    GROUP BY queue
-    ORDER BY queue ASC;`;
-  const result = await queryFromD1(sql, params);
-  return readRows<{ queue: string; count: number; minRating: number; maxRating: number }>(result);
+const queryQueueStats = async (queue: Queue) => {
+  return listSeasonSoftResetQueueStats(queue);
 };
 
 type RatingSampleRow = {
@@ -105,33 +94,13 @@ type RatingSampleRow = {
   updatedAt: string;
 };
 
-const queryRatingSamples = async (queryFromD1: QueryFromD1, queue: ArenaQueue, limit: number) => {
+const queryRatingSamples = async (queue: ArenaQueue, limit: number) => {
   const safeLimit = Number.isFinite(limit) ? Math.max(0, Math.min(50, Math.floor(limit))) : 0;
   if (safeLimit <= 0) return { top: [] as RatingSampleRow[], bottom: [] as RatingSampleRow[] };
 
-  const where = 'WHERE queue = ?';
-  const params: unknown[] = [queue];
-
-  const baseSql = `SELECT entity_type as entityType, entity_id as entityId, queue, rating, games, updated_at as updatedAt
-    FROM arena_ratings
-    ${where}`;
-
-  const topResult = await queryFromD1(
-    `${baseSql}
-     ORDER BY rating DESC, games DESC, updated_at DESC, entity_type ASC, entity_id ASC
-     LIMIT ?;`,
-    [...params, safeLimit]
-  );
-  const bottomResult = await queryFromD1(
-    `${baseSql}
-     ORDER BY rating ASC, games DESC, updated_at DESC, entity_type ASC, entity_id ASC
-     LIMIT ?;`,
-    [...params, safeLimit]
-  );
-
   return {
-    top: readRows<RatingSampleRow>(topResult),
-    bottom: readRows<RatingSampleRow>(bottomResult),
+    top: await listSeasonSoftResetRatingSamples({ queue, limit: safeLimit, order: 'desc' }),
+    bottom: await listSeasonSoftResetRatingSamples({ queue, limit: safeLimit, order: 'asc' }),
   };
 };
 
@@ -145,118 +114,74 @@ type AutoTuningSummaryRow = {
 };
 
 const queryAutoTuningSummary = async (
-  queryFromD1: QueryFromD1,
   queue: ArenaQueue,
   nowIso: string,
   maxStartRating: number
 ): Promise<AutoTuningSummaryRow> => {
-  const result = await queryFromD1(
-    `SELECT
-      (SELECT COUNT(*) FROM arena_ratings WHERE queue = ?) as total,
-      (SELECT COUNT(*) FROM arena_ratings WHERE queue = ? AND games > 0) as played,
-      (SELECT MAX(rating) FROM arena_ratings WHERE queue = ? AND games > 0) as maxRatingPlayed,
-      (SELECT AVG(rating) FROM (SELECT rating FROM arena_ratings WHERE queue = ? AND games > 0 ORDER BY rating DESC LIMIT 20)) as top20AvgRatingPlayed,
-      (SELECT COUNT(*) FROM arena_ratings WHERE queue = ? AND games > 0 AND rating >= ?) as aboveMaxStartPlayed,
-      (SELECT COUNT(*) FROM arena_ratings WHERE queue = ? AND games > 0 AND (julianday(?) - julianday(updated_at)) >= 30) as inactive30DaysPlayed`,
-    [queue, queue, queue, queue, queue, maxStartRating, queue, nowIso]
-  );
-  const row = readRows<AutoTuningSummaryRow>(result)[0];
-  return {
-    total: typeof row?.total === 'number' ? Math.max(0, Math.floor(row.total)) : 0,
-    played: typeof row?.played === 'number' ? Math.max(0, Math.floor(row.played)) : 0,
-    maxRatingPlayed: typeof row?.maxRatingPlayed === 'number' ? Math.max(0, Math.floor(row.maxRatingPlayed)) : null,
-    top20AvgRatingPlayed: typeof row?.top20AvgRatingPlayed === 'number' ? row.top20AvgRatingPlayed : null,
-    aboveMaxStartPlayed: typeof row?.aboveMaxStartPlayed === 'number' ? Math.max(0, Math.floor(row.aboveMaxStartPlayed)) : 0,
-    inactive30DaysPlayed: typeof row?.inactive30DaysPlayed === 'number' ? Math.max(0, Math.floor(row.inactive30DaysPlayed)) : 0,
-  };
+  return getSeasonSoftResetAutoSummary({
+    queue,
+    nowIso,
+    maxStartRating,
+  });
 };
 
 type QuantilesRow = { n: number; p25: number | null; p60: number | null };
 
-const queryPlayedGamesQuantiles = async (queryFromD1: QueryFromD1, queue: ArenaQueue): Promise<QuantilesRow> => {
-  const countResult = await queryFromD1(
-    `SELECT COUNT(*) as n
-     FROM arena_ratings
-     WHERE queue = ? AND games > 0;`,
-    [queue]
-  );
-  const countRow = readRows<{ n: number }>(countResult)[0];
-  const n = typeof countRow?.n === 'number' ? Math.max(0, Math.floor(countRow.n)) : 0;
+const queryPlayedGamesQuantiles = async (queue: ArenaQueue): Promise<QuantilesRow> => {
+  const n = await countSeasonSoftResetPlayedRows(queue);
   if (n <= 0) return { n: 0, p25: null, p60: null };
 
   const offset25 = Math.max(0, Math.floor((n - 1) * 0.25));
   const offset60 = Math.max(0, Math.floor((n - 1) * 0.6));
 
-  const p25Result = await queryFromD1(
-    `SELECT games as value
-     FROM arena_ratings
-     WHERE queue = ? AND games > 0
-     ORDER BY games ASC
-     LIMIT 1 OFFSET ?;`,
-    [queue, offset25]
-  );
-  const p60Result = await queryFromD1(
-    `SELECT games as value
-     FROM arena_ratings
-     WHERE queue = ? AND games > 0
-     ORDER BY games ASC
-     LIMIT 1 OFFSET ?;`,
-    [queue, offset60]
-  );
-
-  const p25Row = readRows<{ value: number }>(p25Result)[0];
-  const p60Row = readRows<{ value: number }>(p60Result)[0];
+  const [p25, p60] = await Promise.all([
+    getSeasonSoftResetGamesValueAtOffset({
+      queue,
+      offset: offset25,
+    }),
+    getSeasonSoftResetGamesValueAtOffset({
+      queue,
+      offset: offset60,
+    }),
+  ]);
 
   return {
     n,
-    p25: typeof p25Row?.value === 'number' ? Math.max(0, Math.floor(p25Row.value)) : null,
-    p60: typeof p60Row?.value === 'number' ? Math.max(0, Math.floor(p60Row.value)) : null,
+    p25: typeof p25 === 'number' ? Math.max(0, Math.floor(p25)) : null,
+    p60: typeof p60 === 'number' ? Math.max(0, Math.floor(p60)) : null,
   };
 };
 
 type InactiveQuantilesRow = { n: number; p85: number | null };
 
 const queryPlayedInactiveDaysP85 = async (
-  queryFromD1: QueryFromD1,
   queue: ArenaQueue,
   nowIso: string
 ): Promise<InactiveQuantilesRow> => {
-  const countResult = await queryFromD1(
-    `SELECT COUNT(*) as n
-     FROM arena_ratings
-     WHERE queue = ? AND games > 0;`,
-    [queue]
-  );
-  const countRow = readRows<{ n: number }>(countResult)[0];
-  const n = typeof countRow?.n === 'number' ? Math.max(0, Math.floor(countRow.n)) : 0;
+  const n = await countSeasonSoftResetPlayedRows(queue);
   if (n <= 0) return { n: 0, p85: null };
 
   const offset85 = Math.max(0, Math.floor((n - 1) * 0.85));
-  const valueResult = await queryFromD1(
-    `SELECT (julianday(?) - julianday(updated_at)) as inactiveDays
-     FROM arena_ratings
-     WHERE queue = ? AND games > 0
-     ORDER BY inactiveDays ASC
-     LIMIT 1 OFFSET ?;`,
-    [nowIso, queue, offset85]
-  );
-  const row = readRows<{ inactiveDays: number }>(valueResult)[0];
+  const p85 = await getSeasonSoftResetInactiveDaysValueAtOffset({
+    queue,
+    nowIso,
+    offset: offset85,
+  });
   return {
     n,
-    p85: typeof row?.inactiveDays === 'number' ? Math.max(0, row.inactiveDays) : null,
+    p85: typeof p85 === 'number' ? Math.max(0, p85) : null,
   };
 };
 
 const querySeasonResetAutoTuningStats = async (
-  queryFromD1: QueryFromD1,
   queue: ArenaQueue,
   nowIso: string,
   maxStartRating: number
 ): Promise<SeasonResetAutoTuningStats> => {
   const [summary, gamesQuantiles, inactiveQuantiles] = await Promise.all([
-    queryAutoTuningSummary(queryFromD1, queue, nowIso, maxStartRating),
-    queryPlayedGamesQuantiles(queryFromD1, queue),
-    queryPlayedInactiveDaysP85(queryFromD1, queue, nowIso),
+    queryAutoTuningSummary(queue, nowIso, maxStartRating),
+    queryPlayedGamesQuantiles(queue),
+    queryPlayedInactiveDaysP85(queue, nowIso),
   ]);
 
   return {
@@ -398,7 +323,6 @@ const main = async () => {
     return;
   }
 
-  const { queryFromD1 } = await import('../lib/d1');
   const nowIso = new Date().toISOString();
 
   const targetQueues: ArenaQueue[] = queue === 'all' ? ['strict', 'free'] : [queue];
@@ -428,10 +352,10 @@ const main = async () => {
     const needsAuto = shouldAutoGames || shouldAutoInactivity;
 
     const auto = needsAuto
-      ? deriveSeasonResetAutoTuning({
+          ? deriveSeasonResetAutoTuning({
           baseRating: base,
           maxStartRating: maxStart,
-          stats: await querySeasonResetAutoTuningStats(queryFromD1, q, nowIso, maxStart),
+          stats: await querySeasonResetAutoTuningStats(q, nowIso, maxStart),
         })
       : null;
 
@@ -443,7 +367,7 @@ const main = async () => {
 
   const resolved = await Promise.all(targetQueues.map(resolveAdvancedForQueue));
 
-  const before = await queryQueueStats(queryFromD1, queue);
+  const before = await queryQueueStats(queue);
   console.log('[season-soft-reset] 重置前：', before);
 
   if (dryRun) {
@@ -481,7 +405,7 @@ const main = async () => {
       };
 
       for (const q of targetQueues) {
-        const samples = await queryRatingSamples(queryFromD1, q, preview);
+        const samples = await queryRatingSamples(q, preview);
         print(`Top (${q})`, samples.top);
         print(`Bottom (${q})`, samples.bottom);
       }
@@ -603,36 +527,27 @@ END`,
   }
   for (const r of resolved) {
     const { expr: ratingExpr, params: ratingParams } = buildRatingExpr(r.gamesFactor, r.inactivityCap);
-    const params: unknown[] = [...ratingParams, nowIso, r.queue];
-    const updateSql = `UPDATE arena_ratings
-      SET rating = ${ratingExpr},
-          games = 0,
-          wins = 0,
-          losses = 0,
-          draws = 0,
-          last_delta = NULL,
-          last_applied_at = NULL,
-          updated_at = ?
-      WHERE queue = ?;`;
     try {
-      const updateResult = await queryFromD1(updateSql, params);
-      changes += readChanges(updateResult);
+      changes += await executeSeasonSoftResetQueueUpdate({
+        queue: r.queue,
+        ratingExpr,
+        ratingParams,
+        nowIso,
+        includeLegacyColumns: true,
+      });
     } catch (error) {
       console.warn('[season-soft-reset] 更新 last_delta / last_applied_at 失败（将回退到旧字段集）:', error);
-      const fallbackSql = `UPDATE arena_ratings
-        SET rating = ${ratingExpr},
-            games = 0,
-            wins = 0,
-            losses = 0,
-            draws = 0,
-            updated_at = ?
-        WHERE queue = ?;`;
-      const updateResult = await queryFromD1(fallbackSql, params);
-      changes += readChanges(updateResult);
+      changes += await executeSeasonSoftResetQueueUpdate({
+        queue: r.queue,
+        ratingExpr,
+        ratingParams,
+        nowIso,
+        includeLegacyColumns: false,
+      });
     }
   }
 
-  const after = await queryQueueStats(queryFromD1, queue);
+  const after = await queryQueueStats(queue);
   console.log('[season-soft-reset] 重置后：', after);
   console.log(
     `[season-soft-reset] 完成：changes=${changes} queue=${queue} policy=${policy} base=${base} factor=${factor} step=${step} minStart=${minStart} maxStart=${maxStart} auto=${autoEnabled ? 1 : 0}`
