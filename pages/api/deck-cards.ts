@@ -1,4 +1,10 @@
-import { addCardsToDeck, getDeckById, getDeckCardsWithAccess, pruneDeckInaccessibleCards, removeCardsFromDeck } from '@/lib/d1';
+import {
+  addCardsToDeck,
+  getDeckCardsWithAccess,
+  pruneDeckInaccessibleCards,
+  removeCardsFromDeck,
+} from '@/lib/database/deck-cards';
+import { getDeckById } from '@/lib/database/decks';
 import { getAuthUser, requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';

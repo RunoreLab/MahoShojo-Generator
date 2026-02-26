@@ -1,4 +1,9 @@
-import { addDeckFavorite, getUserDeckFavoriteIds, getUserDeckFavorites, removeDeckFavorite } from '@/lib/d1';
+import {
+  addDeckFavorite,
+  getUserDeckFavoriteIds,
+  getUserDeckFavorites,
+  removeDeckFavorite,
+} from '@/lib/database/deck-favorites';
 import { requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';

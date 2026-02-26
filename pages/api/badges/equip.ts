@@ -1,4 +1,4 @@
-import { updateEquippedBadges } from '@/lib/d1';
+import { updateEquippedBadges } from '@/lib/database/badges';
 import { requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';

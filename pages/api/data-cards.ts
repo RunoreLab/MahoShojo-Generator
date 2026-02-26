@@ -3,13 +3,13 @@ import {
   getUserDataCards, 
   updateDataCard, 
   deleteDataCard,
-  getUserDataCardCapacity,
   pruneUserRecycleBin,
   upsertDataCardUpdate,
   getDataCardById,
   getUserUsedSlots,
   updateDataCardContentByIdAndUser as updateDataCardContentByIdAndUserLegacy,
-} from '@/lib/d1';
+} from '@/lib/database/data-cards';
+import { getUserDataCardCapacity } from '@/lib/database/users';
 import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';

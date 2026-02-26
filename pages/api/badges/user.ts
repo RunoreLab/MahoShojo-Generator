@@ -1,4 +1,4 @@
-import { getUserBadges } from '@/lib/d1';
+import { getUserBadges } from '@/lib/database/badges';
 import { requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';

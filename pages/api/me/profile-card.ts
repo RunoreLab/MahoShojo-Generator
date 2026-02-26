@@ -2,16 +2,24 @@ import {
   getBattleReportGenerationsByUserIdLite,
   countBattleReportGenerationsByUserId,
   countBattleReportGenerationsByUserIdSince,
+} from '@/lib/database/battle-report-generations';
+import {
   getPvpMatchRoundOutcomeSummariesByMatchIds,
   getPvpMatchesByUserId,
   getPvpUserSummariesByUserIds,
+  type PvpMatchRoundOutcomeSummary,
+} from '@/lib/database/pvp';
+import {
   getUserBadges,
+} from '@/lib/database/badges';
+import {
   getUserProfileCardRowByUserId,
+} from '@/lib/database/users';
+import {
   getUserProfileCardDataStats,
   getUserTopDataCardsByEngagement,
-  type PvpMatchRoundOutcomeSummary,
   type UserTopDataCardRow,
-} from '@/lib/d1';
+} from '@/lib/database/data-cards';
 import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import {

@@ -1,4 +1,5 @@
-import { countUserDecks, createDeck, deleteDeck, getUserDataCardCapacity, getUserDecks, updateDeck } from '@/lib/d1';
+import { countUserDecks, createDeck, deleteDeck, getUserDecks, updateDeck } from '@/lib/database/decks';
+import { getUserDataCardCapacity } from '@/lib/database/users';
 import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';

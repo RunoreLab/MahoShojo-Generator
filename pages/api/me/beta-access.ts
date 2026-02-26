@@ -1,4 +1,4 @@
-import { getUserProfileCardDataStats } from '@/lib/d1';
+import { getUserProfileCardDataStats } from '@/lib/database/data-cards';
 import { json, requireAuthUser, withPvpErrorBoundary } from '@/lib/pvp/server';
 
 export const runtime = 'edge';

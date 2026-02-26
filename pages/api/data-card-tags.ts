@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 
-import { verifyCardOwnership } from '@/lib/d1';
+import { verifyCardOwnership } from '@/lib/database/data-cards';
 import { requireAuthUser } from '@/lib/auth/server';
 import { replaceUserTagsForDataCard } from '@/lib/database/tags';
 

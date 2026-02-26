@@ -1,4 +1,5 @@
-import { getDeckById, getDeckCardsWithAccess, getPublicDecks } from '@/lib/d1';
+import { getDeckCardsWithAccess } from '@/lib/database/deck-cards';
+import { getDeckById, getPublicDecks } from '@/lib/database/decks';
 import { getAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';

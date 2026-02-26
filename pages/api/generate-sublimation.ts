@@ -13,7 +13,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import type { GenerateWithAIOptions } from '@/lib/ai';
-import { getDataCardById } from '@/lib/d1';
+import { getDataCardById } from '@/lib/database/data-cards';
 import presetIndex from '@/public/questionnaires/presets/index.json';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import {

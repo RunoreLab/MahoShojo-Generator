@@ -1,10 +1,10 @@
 import {
   getUserDataCards,
-  getUserDataCardCapacity,
   getUserRecycleBinCards,
   restoreDataCard,
   permanentlyDeleteDataCards
-} from '@/lib/d1';
+} from '@/lib/database/data-cards';
+import { getUserDataCardCapacity } from '@/lib/database/users';
 import { requireAuthUser } from '@/lib/auth/server';
 import { config } from '@/lib/config';
 

@@ -10,7 +10,7 @@ import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limit
 import { AI_PROVIDER_CATALOG } from '@/lib/ai/constants';
 import { buildJsonResponseWithOptionalAiMeta } from '@/lib/ai/meta-response';
 import { type AIProvider } from '@/lib/config';
-import { getDataCardById } from '@/lib/d1';
+import { getDataCardById } from '@/lib/database/data-cards';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import presetIndex from '@/public/questionnaires/presets/index.json';
 

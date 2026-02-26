@@ -11,7 +11,7 @@ import { enforceTextSafety } from '@/lib/content-safety/server';
 import { CANSHOU_LORE } from '@/lib/canshou-lore';
 import { compactQuestionnaireAnswerItems, formatQuestionnaireAnswers, normalizeUserAnswers, type QuestionnaireAnswerItem } from '@/lib/questionnaires';
 import { getAnswerLimitInfo, isAnswerOverLimit } from '@/lib/questionnaire-limits';
-import { getDataCardById } from '@/lib/d1';
+import { getDataCardById } from '@/lib/database/data-cards';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
 import presetIndex from '@/public/questionnaires/presets/index.json';
 

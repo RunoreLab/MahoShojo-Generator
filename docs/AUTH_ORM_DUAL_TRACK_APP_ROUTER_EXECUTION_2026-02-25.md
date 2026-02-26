@@ -166,6 +166,9 @@
 31. 进一步完善用户槽位发放一致性：`lib/db/repositories/business-users.ts` 新增 `increaseBusinessUserSlotCountById`（数据库原子自增），`lib/database/users.ts` 的 `increaseUserSlotCount` 已切换为该原子路径，降低并发覆盖风险。  
 32. 已将用户资料与容量接口改为直接复用 Drizzle 仓储能力：`pages/api/me/profile.ts`、`pages/api/me/profile/avatar.ts`、`pages/api/user-capacity.ts` 不再依赖 `lib/d1` 包装层。  
 33. 已修复 `pages/api/redeem-code.ts` 的一致性缺陷：兑换流程改为单事务（消费兑换码 + 槽位发放 + sponsor 徽章授予）原子提交，避免“兑换码已消费但发放失败”的中间态。  
+34. 已完成 `decks` 相关路由的 Drizzle 仓储导入迁移：`pages/api/decks.ts`、`pages/api/deck-cards.ts`、`pages/api/deck-favorites.ts`、`pages/api/favorites.ts`、`pages/api/public-decks.ts` 已移除 `@/lib/d1` 依赖，改为直接从 `lib/database/*` 访问 Drizzle 封装层；当前 `pages/api` 中残余 `@/lib/d1` 直接引用为 `44` 处（本地工作区统计）。  
+35. 已完成第二批低风险导入迁移：`pages/api/generate-canshou.ts`、`pages/api/generate-sublimation.ts`、`pages/api/generate-magical-girl-details.ts`、`pages/api/public-data-cards.ts`、`pages/api/me/beta-access.ts`、`pages/api/me/profile-card.ts` 已移除 `@/lib/d1` 依赖；当前 `pages/api` 中残余 `@/lib/d1` 直接引用为 `38` 处（本地工作区统计）。  
+36. 已完成第三批数据卡域导入迁移：`pages/api/data-cards.ts`、`pages/api/data-card-recycle.ts`、`pages/api/data-card-tags.ts` 已移除 `@/lib/d1` 依赖，改为直连 `lib/database/data-cards` 与 `lib/database/users`；当前 `pages/api` 中残余 `@/lib/d1` 直接引用为 `35` 处（本地工作区统计）。  
 
 受限项（当前本地环境）：
 

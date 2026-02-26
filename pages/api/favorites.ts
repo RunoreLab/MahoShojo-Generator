@@ -3,7 +3,7 @@ import {
   removeFavorite,
   getUserFavorites,
   getUserFavoriteIds
-} from '@/lib/d1';
+} from '@/lib/database/favorites';
 import { requireAuthUser } from '@/lib/auth/server';
 
 export const runtime = 'edge';
