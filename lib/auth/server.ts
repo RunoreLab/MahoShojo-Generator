@@ -1,6 +1,7 @@
 import { getUserByAuthKey } from '@/lib/database/users';
 import { ACTIVITY_TOKEN_HEADER, ACTIVITY_USER_ID_HEADER } from '@/lib/auth/activity-token';
 import { hasBetterAuthSessionCookie } from '@/lib/auth/better-auth';
+import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 export interface AuthenticatedUser {
   id: number;
@@ -126,6 +127,11 @@ const getSessionAuthUser = async (req: Request): Promise<AuthenticatedUser | nul
     const headers = new Headers({
       'Content-Type': 'application/json',
     });
+
+    const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
+    for (const [key, value] of Object.entries(subrequestAuthHeaders)) {
+      headers.set(key, value);
+    }
 
     copyHeader(req.headers, headers, 'cookie');
     copyHeader(req.headers, headers, 'authorization');

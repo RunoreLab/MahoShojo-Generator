@@ -2,6 +2,7 @@ import type { AuthenticatedUser } from '@/lib/auth/server';
 import { getAuthUser } from '@/lib/auth/server';
 import { hasBetterAuthSessionCookie } from '@/lib/auth/better-auth';
 import { ACTIVITY_TOKEN_HEADER, ACTIVITY_USER_ID_HEADER } from '@/lib/auth/activity-token';
+import { buildSubrequestAuthHeaders } from '@/lib/subrequest-auth';
 
 type RequestAuthUserResolver = {
   getUser: () => Promise<AuthenticatedUser | null>;
@@ -85,6 +86,11 @@ const getSessionAuthUserFromVerifyRoute = async (req: Request): Promise<Authenti
   const requestUrl = new URL(req.url);
   const verifyUrl = new URL('/api/auth/verify', requestUrl.origin);
   const headers = new Headers();
+
+  const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
+  for (const [key, value] of Object.entries(subrequestAuthHeaders)) {
+    headers.set(key, value);
+  }
 
   copyHeader(req.headers, headers, 'cookie');
   copyHeader(req.headers, headers, 'authorization');
