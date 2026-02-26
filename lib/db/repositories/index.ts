@@ -11,3 +11,7 @@ export * from '@/lib/db/repositories/arena-ratings-write';
 export * from '@/lib/db/repositories/data-card-metrics';
 export * from '@/lib/db/repositories/battle-report-generation-combatants';
 export * from '@/lib/db/repositories/battle-report-generations';
+export * from '@/lib/db/repositories/decks';
+export * from '@/lib/db/repositories/deck-cards';
+export * from '@/lib/db/repositories/favorites';
+export * from '@/lib/db/repositories/deck-favorites';

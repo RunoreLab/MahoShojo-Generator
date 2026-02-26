@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
 export type DataCardReviewStatus = 'pending' | 'approved' | 'rejected';
@@ -38,6 +38,82 @@ export const dataCards = sqliteTable('data_cards', {
   updatedAt: text('updated_at'),
   deletedAt: text('deleted_at'),
 });
+
+export const favorites = sqliteTable(
+  'favorites',
+  {
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    dataCardId: text('data_card_id')
+      .notNull()
+      .references(() => dataCards.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at'),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.dataCardId] }),
+    dataCardIdIndex: index('idx_favorites_data_card_id').on(table.dataCardId),
+  }),
+);
+
+export const decks = sqliteTable(
+  'decks',
+  {
+    id: text('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    isPublic: integer('is_public').notNull(),
+    likeCount: integer('like_count'),
+    favoriteCount: integer('favorite_count'),
+    createdAt: text('created_at'),
+    updatedAt: text('updated_at'),
+  },
+  (table) => ({
+    userIdIndex: index('idx_decks_user_id').on(table.userId),
+    isPublicIndex: index('idx_decks_is_public').on(table.isPublic),
+    likeCountIndex: index('idx_decks_like_count').on(table.likeCount),
+    favoriteCountIndex: index('idx_decks_favorite_count').on(table.favoriteCount),
+  }),
+);
+
+export const deckCards = sqliteTable(
+  'deck_cards',
+  {
+    deckId: text('deck_id')
+      .notNull()
+      .references(() => decks.id, { onDelete: 'cascade' }),
+    dataCardId: text('data_card_id').notNull(),
+    cardNameSnapshot: text('card_name_snapshot'),
+    cardTypeSnapshot: text('card_type_snapshot'),
+    sortOrder: integer('sort_order').notNull(),
+    createdAt: text('created_at'),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.deckId, table.dataCardId] }),
+    deckIdIndex: index('idx_deck_cards_deck_id').on(table.deckId),
+    deckIdSortOrderIndex: index('idx_deck_cards_sort_order').on(table.deckId, table.sortOrder),
+  }),
+);
+
+export const deckFavorites = sqliteTable(
+  'deck_favorites',
+  {
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    deckId: text('deck_id')
+      .notNull()
+      .references(() => decks.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at'),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.deckId] }),
+    deckIdIndex: index('idx_deck_favorites_deck_id').on(table.deckId),
+  }),
+);
 
 export const dataCardUpdates = sqliteTable('data_card_updates', {
   id: text('id').primaryKey(),

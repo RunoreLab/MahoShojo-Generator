@@ -1,5 +1,3 @@
-import { queryFromD1 } from './core';
-
 interface FavoriteOperationResult {
   success: boolean;
   alreadyExists?: boolean;
@@ -7,54 +5,69 @@ interface FavoriteOperationResult {
   error?: string;
 }
 
+type FavoriteCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
+
+type FavoritesRepoBundle = {
+  db: unknown;
+  isDataCardFavoritable: (db: unknown, cardId: string) => Promise<boolean>;
+  hasFavoriteRecord: (db: unknown, userId: number, cardId: string) => Promise<boolean>;
+  insertFavoriteIgnore: (db: unknown, userId: number, cardId: string) => Promise<boolean>;
+  incrementDataCardFavoriteCount: (db: unknown, cardId: string) => Promise<void>;
+  deleteFavoriteRecord: (db: unknown, userId: number, cardId: string) => Promise<number>;
+  decrementDataCardFavoriteCount: (db: unknown, cardId: string) => Promise<void>;
+  listUserFavoritesWithCards: (db: unknown, userId: number, type?: FavoriteCardType) => Promise<any[]>;
+  listUserFavoriteCardIds: (db: unknown, userId: number, type?: FavoriteCardType) => Promise<string[]>;
+};
+
+const readFavoritesRepoBundle = async (): Promise<FavoritesRepoBundle | null> => {
+  try {
+    const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
+      import('@/lib/db/drizzle'),
+      import('@/lib/db/repositories/favorites'),
+    ]);
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+
+    return {
+      db,
+      isDataCardFavoritable: repo.isDataCardFavoritable as FavoritesRepoBundle['isDataCardFavoritable'],
+      hasFavoriteRecord: repo.hasFavoriteRecord as FavoritesRepoBundle['hasFavoriteRecord'],
+      insertFavoriteIgnore: repo.insertFavoriteIgnore as FavoritesRepoBundle['insertFavoriteIgnore'],
+      incrementDataCardFavoriteCount: repo.incrementDataCardFavoriteCount as FavoritesRepoBundle['incrementDataCardFavoriteCount'],
+      deleteFavoriteRecord: repo.deleteFavoriteRecord as FavoritesRepoBundle['deleteFavoriteRecord'],
+      decrementDataCardFavoriteCount: repo.decrementDataCardFavoriteCount as FavoritesRepoBundle['decrementDataCardFavoriteCount'],
+      listUserFavoritesWithCards: repo.listUserFavoritesWithCards as FavoritesRepoBundle['listUserFavoritesWithCards'],
+      listUserFavoriteCardIds: repo.listUserFavoriteCardIds as FavoritesRepoBundle['listUserFavoriteCardIds'],
+    };
+  } catch {
+    return null;
+  }
+};
+
 /**
  * 添加收藏记录并维护数据卡的收藏计数。
  * 只允许收藏公开且审核通过的卡片。
  */
 export async function addFavorite(userId: number, cardId: string): Promise<FavoriteOperationResult> {
   try {
-    const insertResult = await queryFromD1(
-      `INSERT OR IGNORE INTO favorites (user_id, data_card_id, created_at)
-       SELECT ?, ?, CURRENT_TIMESTAMP
-       FROM data_cards
-       WHERE id = ?
-         AND is_public = 1
-         AND review_status = 'approved'
-         AND deleted_at IS NULL`,
-      [userId, cardId, cardId]
-    ) as any;
+    const bundle = await readFavoritesRepoBundle();
+    if (!bundle) return { success: false, error: '收藏失败' };
 
-    if (!(insertResult?.success)) {
-      return { success: false, error: '收藏失败' };
-    }
-
-    const changes = insertResult.result?.[0]?.meta?.changes ?? 0;
-
-    if (changes === 0) {
-      // 需要区分是重复收藏还是卡片无效
-      const existingFavorite = await queryFromD1(
-        'SELECT 1 FROM favorites WHERE user_id = ? AND data_card_id = ? LIMIT 1',
-        [userId, cardId]
-      ) as any;
-
-      const favoriteExists = !!existingFavorite?.result?.[0]?.results?.length;
-      if (favoriteExists) {
-        return { success: true, alreadyExists: true };
+    const favoritable = await bundle.isDataCardFavoritable(bundle.db, cardId);
+    if (favoritable) {
+      const inserted = await bundle.insertFavoriteIgnore(bundle.db, userId, cardId);
+      if (inserted) {
+        await bundle.incrementDataCardFavoriteCount(bundle.db, cardId);
+        return { success: true };
       }
-
-      return { success: false, notFound: true };
     }
 
-    const updateResult = await queryFromD1(
-      'UPDATE data_cards SET favorite_count = favorite_count + 1 WHERE id = ?',
-      [cardId]
-    ) as any;
-
-    if (!(updateResult?.success)) {
-      return { success: false, error: '更新收藏计数失败' };
+    const favoriteExists = await bundle.hasFavoriteRecord(bundle.db, userId, cardId);
+    if (favoriteExists) {
+      return { success: true, alreadyExists: true };
     }
 
-    return { success: true };
+    return { success: false, notFound: true };
   } catch (error) {
     console.error('添加收藏失败:', error);
     return { success: false, error: '服务器内部错误' };
@@ -66,26 +79,15 @@ export async function addFavorite(userId: number, cardId: string): Promise<Favor
  */
 export async function removeFavorite(userId: number, cardId: string): Promise<FavoriteOperationResult> {
   try {
-    const deleteResult = await queryFromD1(
-      'DELETE FROM favorites WHERE user_id = ? AND data_card_id = ?',
-      [userId, cardId]
-    ) as any;
+    const bundle = await readFavoritesRepoBundle();
+    if (!bundle) return { success: false, error: '取消收藏失败' };
 
-    if (!(deleteResult?.success)) {
-      return { success: false, error: '取消收藏失败' };
-    }
-
-    const changes = deleteResult.result?.[0]?.meta?.changes ?? 0;
-    if (changes === 0) {
+    const changes = await bundle.deleteFavoriteRecord(bundle.db, userId, cardId);
+    if (changes <= 0) {
       return { success: false, notFound: true };
     }
 
-    await queryFromD1(
-      `UPDATE data_cards
-       SET favorite_count = CASE WHEN favorite_count > 0 THEN favorite_count - 1 ELSE 0 END
-       WHERE id = ?`,
-      [cardId]
-    );
+    await bundle.decrementDataCardFavoriteCount(bundle.db, cardId);
 
     return { success: true };
   } catch (error) {
@@ -99,48 +101,20 @@ export async function removeFavorite(userId: number, cardId: string): Promise<Fa
  */
 export async function getUserFavorites(
   userId: number,
-  type?: 'character' | 'scenario' | 'history' | 'questionnaire'
+  type?: FavoriteCardType
 ): Promise<any[]> {
   try {
-    let sql = `
-      SELECT dc.*, u.username, f.created_at AS favorited_at,
-             (
-               SELECT group_concat(DISTINCT dct.tag_id)
-               FROM data_card_tags dct
-               WHERE dct.data_card_id = dc.id
-             ) AS tag_ids
-      FROM favorites f
-      JOIN data_cards dc ON f.data_card_id = dc.id
-      JOIN users u ON dc.user_id = u.id
-      WHERE f.user_id = ?
-        AND dc.is_public = 1
-        AND dc.review_status = 'approved'
-        AND dc.deleted_at IS NULL
-    `;
-    const params: any[] = [userId];
-
-    if (type) {
-      sql += ' AND dc.type = ?';
-      params.push(type);
-    }
-
-    sql += ' ORDER BY f.created_at DESC';
-
-    const result = await queryFromD1(sql, params) as any;
-
-    if (result?.success && result.result?.[0]?.results) {
-      const rows = result.result[0].results as any[];
-      return rows.map((row) => {
-        const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
-        const tagIds = raw
-          .split(',')
-          .map((id: string) => id.trim())
-          .filter(Boolean);
-        return { ...row, tagIds };
-      });
-    }
-
-    return [];
+    const bundle = await readFavoritesRepoBundle();
+    if (!bundle) return [];
+    const rows = await bundle.listUserFavoritesWithCards(bundle.db, userId, type);
+    return rows.map((row) => {
+      const raw = typeof row?.tag_ids === 'string' ? row.tag_ids : '';
+      const tagIds = raw
+        .split(',')
+        .map((id: string) => id.trim())
+        .filter(Boolean);
+      return { ...row, tagIds };
+    });
   } catch (error) {
     console.error('获取收藏列表失败:', error);
     return [];
@@ -152,30 +126,12 @@ export async function getUserFavorites(
  */
 export async function getUserFavoriteIds(
   userId: number,
-  type?: 'character' | 'scenario' | 'history' | 'questionnaire'
+  type?: FavoriteCardType
 ): Promise<string[]> {
   try {
-    let sql = 'SELECT f.data_card_id FROM favorites f';
-    const params: any[] = [userId];
-
-    if (type) {
-      sql += ' JOIN data_cards dc ON f.data_card_id = dc.id';
-    }
-
-    sql += ' WHERE f.user_id = ?';
-
-    if (type) {
-      sql += ' AND dc.type = ? AND dc.deleted_at IS NULL';
-      params.push(type);
-    }
-
-    const result = await queryFromD1(sql, params) as any;
-
-    if (result?.success && result.result?.[0]?.results) {
-      return result.result[0].results.map((row: { data_card_id: string }) => row.data_card_id);
-    }
-
-    return [];
+    const bundle = await readFavoritesRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listUserFavoriteCardIds(bundle.db, userId, type);
   } catch (error) {
     console.error('获取收藏 ID 失败:', error);
     return [];

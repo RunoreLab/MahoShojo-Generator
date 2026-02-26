@@ -1,5 +1,3 @@
-import { queryFromD1 } from './core';
-
 interface FavoriteOperationResult {
   success: boolean;
   alreadyExists?: boolean;
@@ -7,47 +5,64 @@ interface FavoriteOperationResult {
   error?: string;
 }
 
+type DeckFavoritesRepoBundle = {
+  db: unknown;
+  isDeckFavoritable: (db: unknown, deckId: string) => Promise<boolean>;
+  hasDeckFavoriteRecord: (db: unknown, userId: number, deckId: string) => Promise<boolean>;
+  insertDeckFavoriteIgnore: (db: unknown, userId: number, deckId: string) => Promise<boolean>;
+  incrementDeckFavoriteCount: (db: unknown, deckId: string) => Promise<void>;
+  deleteDeckFavoriteRecord: (db: unknown, userId: number, deckId: string) => Promise<number>;
+  decrementDeckFavoriteCount: (db: unknown, deckId: string) => Promise<void>;
+  listUserDeckFavoritesWithDeck: (db: unknown, userId: number) => Promise<any[]>;
+  listUserDeckFavoriteDeckIds: (db: unknown, userId: number) => Promise<string[]>;
+};
+
+const readDeckFavoritesRepoBundle = async (): Promise<DeckFavoritesRepoBundle | null> => {
+  try {
+    const [{ getDrizzleDbFromRuntime }, repo] = await Promise.all([
+      import('@/lib/db/drizzle'),
+      import('@/lib/db/repositories/deck-favorites'),
+    ]);
+    const db = getDrizzleDbFromRuntime();
+    if (!db) return null;
+
+    return {
+      db,
+      isDeckFavoritable: repo.isDeckFavoritable as DeckFavoritesRepoBundle['isDeckFavoritable'],
+      hasDeckFavoriteRecord: repo.hasDeckFavoriteRecord as DeckFavoritesRepoBundle['hasDeckFavoriteRecord'],
+      insertDeckFavoriteIgnore: repo.insertDeckFavoriteIgnore as DeckFavoritesRepoBundle['insertDeckFavoriteIgnore'],
+      incrementDeckFavoriteCount: repo.incrementDeckFavoriteCount as DeckFavoritesRepoBundle['incrementDeckFavoriteCount'],
+      deleteDeckFavoriteRecord: repo.deleteDeckFavoriteRecord as DeckFavoritesRepoBundle['deleteDeckFavoriteRecord'],
+      decrementDeckFavoriteCount: repo.decrementDeckFavoriteCount as DeckFavoritesRepoBundle['decrementDeckFavoriteCount'],
+      listUserDeckFavoritesWithDeck: repo.listUserDeckFavoritesWithDeck as DeckFavoritesRepoBundle['listUserDeckFavoritesWithDeck'],
+      listUserDeckFavoriteDeckIds: repo.listUserDeckFavoriteDeckIds as DeckFavoritesRepoBundle['listUserDeckFavoriteDeckIds'],
+    };
+  } catch {
+    return null;
+  }
+};
+
 /**
  * 收藏公开卡组并维护收藏计数。
  */
 export async function addDeckFavorite(userId: number, deckId: string): Promise<FavoriteOperationResult> {
   try {
-    const insertResult = await queryFromD1(
-      `INSERT OR IGNORE INTO deck_favorites (user_id, deck_id, created_at)
-       SELECT ?, ?, CURRENT_TIMESTAMP
-       FROM decks
-       WHERE id = ?
-         AND is_public = 1`,
-      [userId, deckId, deckId]
-    ) as any;
+    const bundle = await readDeckFavoritesRepoBundle();
+    if (!bundle) return { success: false, error: '收藏失败' };
 
-    if (!(insertResult?.success)) {
-      return { success: false, error: '收藏失败' };
+    const favoritable = await bundle.isDeckFavoritable(bundle.db, deckId);
+    if (favoritable) {
+      const inserted = await bundle.insertDeckFavoriteIgnore(bundle.db, userId, deckId);
+      if (inserted) {
+        await bundle.incrementDeckFavoriteCount(bundle.db, deckId);
+        return { success: true };
+      }
     }
 
-    const changes = insertResult.result?.[0]?.meta?.changes ?? 0;
-    if (changes === 0) {
-      const existing = await queryFromD1(
-        'SELECT 1 FROM deck_favorites WHERE user_id = ? AND deck_id = ? LIMIT 1',
-        [userId, deckId]
-      ) as any;
+    const alreadyExists = await bundle.hasDeckFavoriteRecord(bundle.db, userId, deckId);
+    if (alreadyExists) return { success: true, alreadyExists: true };
 
-      const alreadyExists = !!existing?.result?.[0]?.results?.length;
-      if (alreadyExists) return { success: true, alreadyExists: true };
-
-      return { success: false, notFound: true };
-    }
-
-    const update = await queryFromD1(
-      'UPDATE decks SET favorite_count = favorite_count + 1 WHERE id = ?',
-      [deckId]
-    ) as any;
-
-    if (!(update?.success)) {
-      return { success: false, error: '更新收藏计数失败' };
-    }
-
-    return { success: true };
+    return { success: false, notFound: true };
   } catch (error) {
     console.error('收藏卡组失败:', error);
     return { success: false, error: '服务器内部错误' };
@@ -59,26 +74,15 @@ export async function addDeckFavorite(userId: number, deckId: string): Promise<F
  */
 export async function removeDeckFavorite(userId: number, deckId: string): Promise<FavoriteOperationResult> {
   try {
-    const deleteResult = await queryFromD1(
-      'DELETE FROM deck_favorites WHERE user_id = ? AND deck_id = ?',
-      [userId, deckId]
-    ) as any;
+    const bundle = await readDeckFavoritesRepoBundle();
+    if (!bundle) return { success: false, error: '取消收藏失败' };
 
-    if (!(deleteResult?.success)) {
-      return { success: false, error: '取消收藏失败' };
-    }
-
-    const changes = deleteResult.result?.[0]?.meta?.changes ?? 0;
-    if (changes === 0) {
+    const changes = await bundle.deleteDeckFavoriteRecord(bundle.db, userId, deckId);
+    if (changes <= 0) {
       return { success: false, notFound: true };
     }
 
-    await queryFromD1(
-      `UPDATE decks
-       SET favorite_count = CASE WHEN favorite_count > 0 THEN favorite_count - 1 ELSE 0 END
-       WHERE id = ?`,
-      [deckId]
-    );
+    await bundle.decrementDeckFavoriteCount(bundle.db, deckId);
 
     return { success: true };
   } catch (error) {
@@ -92,21 +96,9 @@ export async function removeDeckFavorite(userId: number, deckId: string): Promis
  */
 export async function getUserDeckFavorites(userId: number): Promise<any[]> {
   try {
-    const result = await queryFromD1(
-      `SELECT d.*,
-              u.username,
-              f.created_at AS favorited_at,
-              (SELECT COUNT(*) FROM deck_cards dc WHERE dc.deck_id = d.id) AS card_count
-       FROM deck_favorites f
-       JOIN decks d ON f.deck_id = d.id
-       JOIN users u ON d.user_id = u.id
-       WHERE f.user_id = ?
-         AND d.is_public = 1
-       ORDER BY f.created_at DESC`,
-      [userId]
-    ) as any;
-
-    return result?.success && result.result?.[0]?.results ? result.result[0].results : [];
+    const bundle = await readDeckFavoritesRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listUserDeckFavoritesWithDeck(bundle.db, userId);
   } catch (error) {
     console.error('获取收藏卡组失败:', error);
     return [];
@@ -118,15 +110,9 @@ export async function getUserDeckFavorites(userId: number): Promise<any[]> {
  */
 export async function getUserDeckFavoriteIds(userId: number): Promise<string[]> {
   try {
-    const result = await queryFromD1(
-      'SELECT deck_id FROM deck_favorites WHERE user_id = ?',
-      [userId]
-    ) as any;
-
-    if (result?.success && result.result?.[0]?.results) {
-      return result.result[0].results.map((row: { deck_id: string }) => row.deck_id);
-    }
-    return [];
+    const bundle = await readDeckFavoritesRepoBundle();
+    if (!bundle) return [];
+    return await bundle.listUserDeckFavoriteDeckIds(bundle.db, userId);
   } catch (error) {
     console.error('获取收藏卡组ID失败:', error);
     return [];
