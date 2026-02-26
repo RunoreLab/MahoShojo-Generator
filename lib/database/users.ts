@@ -270,8 +270,8 @@ export async function updateUserSignature(userId: number, signature: string | nu
   try {
     const bundle = await readUsersRepoBundle();
     if (!bundle) return false;
-    await bundle.updateBusinessUserSignatureById(bundle.db, userId, signature);
-    return true;
+    const affected = await bundle.updateBusinessUserSignatureById(bundle.db, userId, signature);
+    return affected > 0;
   } catch (error) {
     console.error('更新用户签名失败:', error);
     return false;
@@ -282,8 +282,8 @@ export async function updateUserAvatarWebpBase64(userId: number, avatarWebpBase6
   try {
     const bundle = await readUsersRepoBundle();
     if (!bundle) return false;
-    await bundle.updateBusinessUserAvatarWebpBase64ById(bundle.db, userId, avatarWebpBase64);
-    return true;
+    const affected = await bundle.updateBusinessUserAvatarWebpBase64ById(bundle.db, userId, avatarWebpBase64);
+    return affected > 0;
   } catch (error) {
     console.error('更新用户头像失败:', error);
     return false;
@@ -319,8 +319,8 @@ export async function increaseUserSlotCount(userId: number, increaseBy: number):
     const currentSlotCount = toInteger(user.slotCount) ?? 0;
     const newSlotCount = currentSlotCount + increaseBy;
 
-    await bundle.updateBusinessUserSlotCountById(bundle.db, userId, newSlotCount);
-    return true;
+    const affected = await bundle.updateBusinessUserSlotCountById(bundle.db, userId, newSlotCount);
+    return affected > 0;
   } catch (error) {
     console.error('增加用户槽位数量失败:', error);
     return false;

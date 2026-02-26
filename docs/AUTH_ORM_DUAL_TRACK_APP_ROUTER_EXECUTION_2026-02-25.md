@@ -161,6 +161,8 @@
 26. 已完成剩余公开排行与统计接口 ORM 化：`pages/api/arena/leaderboard.ts`、`pages/api/arena/leaderboard/search.ts`、`pages/api/arena/generation-ranking.ts`、`pages/api/arena/entity-rating.ts`、`pages/api/arena/preset-meta.ts`、`pages/api/get-stats.ts` 均移除接口内 `queryFromD1` 直连。  
 27. 新增 `lib/db/repositories/arena-read.ts`，统一承载公开榜单、搜索、局内排位事件读取与统计聚合查询；并补齐 `lib/db/schema/business.ts` 的 `data_card_tags / characters / battles` 与 `arena_rating_events` 字段映射。  
 28. 当前 `pages/api` 中直接 `queryFromD1` 调用点已从 `17` 处下降至 `0` 处。  
+29. 修复用户资料相关“假成功”问题：`lib/database/users.ts` 的 `updateUserSignature`、`updateUserAvatarWebpBase64`、`increaseUserSlotCount` 现已按实际受影响行数返回结果，避免 0 行更新仍返回成功。  
+30. 补充 Auth 基础单测：新增 `tests/auth-recovery-and-cookie.test.ts`，覆盖恢复令牌格式/哈希稳定性与 Better Auth 会话 Cookie 识别。  
 
 受限项（当前本地环境）：
 
