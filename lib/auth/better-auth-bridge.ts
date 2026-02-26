@@ -1,5 +1,6 @@
 import { getBetterAuthBootstrapStatus } from '@/lib/auth/better-auth';
 import { getBetterAuthInstance, hasBetterAuthDatabaseBinding } from '@/lib/auth/better-auth-app';
+import { appendSetCookieHeaders } from '@/lib/auth/set-cookie';
 
 export type BetterAuthBridgeUnavailableCode =
   | 'BETTER_AUTH_DISABLED'
@@ -10,10 +11,6 @@ export type BetterAuthBridgeUnavailableCode =
 export type BetterAuthBridgeResult =
   | { ok: true; response: Response }
   | { ok: false; code: BetterAuthBridgeUnavailableCode; message: string };
-
-type HeadersWithSetCookie = Headers & {
-  getSetCookie?: () => string[];
-};
 
 const DEFAULT_BETTER_AUTH_BASE_URL = 'http://localhost:3000';
 
@@ -85,21 +82,7 @@ export const invokeBetterAuthJsonEndpoint = async (input: {
   }
 };
 
-export const appendSetCookieHeaders = (target: Headers, source: Headers): void => {
-  const maybeHeaders = source as HeadersWithSetCookie;
-  if (typeof maybeHeaders.getSetCookie === 'function') {
-    const cookies = maybeHeaders.getSetCookie();
-    for (const value of cookies) {
-      target.append('Set-Cookie', value);
-    }
-    return;
-  }
-
-  const raw = source.get('set-cookie');
-  if (raw && raw.trim().length > 0) {
-    target.append('Set-Cookie', raw);
-  }
-};
+export { appendSetCookieHeaders };
 
 export const readJsonSafely = async <T>(response: Response): Promise<T | null> => {
   try {
