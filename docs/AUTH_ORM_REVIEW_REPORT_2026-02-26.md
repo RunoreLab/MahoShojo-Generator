@@ -107,3 +107,19 @@
 1. 先做预发环境 Cloudflare 验证（优先级 P0）。
 2. 并行补迁移幂等与配置校验（优先级 P1）。
 3. 最后补自动化回归用例，作为合入生产分支前的门禁（优先级 P1）。
+
+---
+
+## 七、补充执行记录（2026-02-26 晚）
+
+已落地：
+
+1. 新增 `scripts/check-wrangler-d1-config.mjs`，部署前硬校验 `wrangler.toml` 的 D1 配置，阻断占位值与非法 UUID。
+2. 新增 `scripts/d1-migrate-safe.mjs`，替换默认迁移入口，对 `0001_users_admin_flags.sql` 增加“列存在兼容”策略，避免历史库重复迁移失败。
+3. `package.json` 的 `build:cf` 与全部 `db:migrate:*` 已接入上述校验/安全迁移脚本。
+4. 新增 `tests/auth-server.test.ts`，覆盖统一鉴权链路的 `session/bearer/ban/admin/exempt/unauthorized` 关键场景。
+5. `app/api/auth/*` 六个 App Router 路由已从 `runtime='nodejs'` 调整为 `runtime='edge'`，`bun run build:cf` 已可通过。
+
+仍需你在 Cloudflare 预发环境完成：
+
+1. 基于预发域名执行真实链路回归：登录/注册/verify/recover/reset、管理员/审核豁免权限路径验证。

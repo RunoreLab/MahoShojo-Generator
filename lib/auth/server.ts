@@ -19,6 +19,28 @@ export type AuthUserContext = {
   source: AuthUserSource;
 };
 
+type AuthServerDeps = {
+  fetchImpl: typeof fetch;
+  getUserByAuthKeyImpl: typeof getUserByAuthKey;
+  hasBetterAuthSessionCookieImpl: typeof hasBetterAuthSessionCookie;
+  buildSubrequestAuthHeadersImpl: typeof buildSubrequestAuthHeaders;
+};
+
+export type RequireAuthUserResult = { user: AuthenticatedUser; source: AuthUserSource } | { response: Response };
+
+export type AuthServerApi = {
+  getLegacyBearerAuthUser: (req: Request) => Promise<AuthenticatedUser | null>;
+  getAuthUser: (req: Request) => Promise<AuthUserContext | null>;
+  requireAuthUser: (req: Request) => Promise<RequireAuthUserResult>;
+};
+
+const defaultAuthServerDeps: AuthServerDeps = {
+  fetchImpl: fetch,
+  getUserByAuthKeyImpl: getUserByAuthKey,
+  hasBetterAuthSessionCookieImpl: hasBetterAuthSessionCookie,
+  buildSubrequestAuthHeadersImpl: buildSubrequestAuthHeaders,
+};
+
 const json = (payload: unknown, status = 200): Response =>
   new Response(JSON.stringify(payload), {
     status,
@@ -116,8 +138,8 @@ const copyHeader = (source: Headers, target: Headers, key: string): void => {
   }
 };
 
-const getSessionAuthUser = async (req: Request): Promise<AuthenticatedUser | null> => {
-  if (!hasBetterAuthSessionCookie(req)) return null;
+const getSessionAuthUser = async (req: Request, deps: AuthServerDeps): Promise<AuthenticatedUser | null> => {
+  if (!deps.hasBetterAuthSessionCookieImpl(req)) return null;
 
   try {
     const requestUrl = new URL(req.url);
@@ -128,7 +150,7 @@ const getSessionAuthUser = async (req: Request): Promise<AuthenticatedUser | nul
       'Content-Type': 'application/json',
     });
 
-    const subrequestAuthHeaders = buildSubrequestAuthHeaders(req);
+    const subrequestAuthHeaders = deps.buildSubrequestAuthHeadersImpl(req);
     for (const [key, value] of Object.entries(subrequestAuthHeaders)) {
       headers.set(key, value);
     }
@@ -144,7 +166,7 @@ const getSessionAuthUser = async (req: Request): Promise<AuthenticatedUser | nul
     copyHeader(req.headers, headers, ACTIVITY_TOKEN_HEADER);
     copyHeader(req.headers, headers, ACTIVITY_USER_ID_HEADER);
 
-    const response = await fetch(verifyUrl.toString(), {
+    const response = await deps.fetchImpl(verifyUrl.toString(), {
       method: 'POST',
       headers,
     });
@@ -168,22 +190,25 @@ const getBearerAuthKey = (req: Request): string | null => {
   return authKey;
 };
 
-export const getLegacyBearerAuthUser = async (req: Request): Promise<AuthenticatedUser | null> => {
-  const authKey = getBearerAuthKey(req);
-  if (!authKey) return null;
-  return toAuthenticatedUser(await getUserByAuthKey(authKey));
-};
-
 const isBannedUser = (user: AuthenticatedUser): boolean =>
   typeof user.is_banned === 'string' && user.is_banned.trim().length > 0;
 
-export const getAuthUser = async (req: Request): Promise<AuthUserContext | null> => {
-  const sessionUser = await getSessionAuthUser(req);
+const getLegacyBearerAuthUserWithDeps = async (
+  req: Request,
+  deps: AuthServerDeps,
+): Promise<AuthenticatedUser | null> => {
+  const authKey = getBearerAuthKey(req);
+  if (!authKey) return null;
+  return toAuthenticatedUser(await deps.getUserByAuthKeyImpl(authKey));
+};
+
+const getAuthUserWithDeps = async (req: Request, deps: AuthServerDeps): Promise<AuthUserContext | null> => {
+  const sessionUser = await getSessionAuthUser(req, deps);
   if (sessionUser) {
     return { user: sessionUser, source: 'better-auth-session' };
   }
 
-  const legacyUser = await getLegacyBearerAuthUser(req);
+  const legacyUser = await getLegacyBearerAuthUserWithDeps(req, deps);
   if (legacyUser) {
     return { user: legacyUser, source: 'legacy-bearer' };
   }
@@ -191,8 +216,8 @@ export const getAuthUser = async (req: Request): Promise<AuthUserContext | null>
   return null;
 };
 
-export const requireAuthUser = async (req: Request): Promise<{ user: AuthenticatedUser; source: AuthUserSource } | { response: Response }> => {
-  const context = await getAuthUser(req);
+const requireAuthUserWithDeps = async (req: Request, deps: AuthServerDeps): Promise<RequireAuthUserResult> => {
+  const context = await getAuthUserWithDeps(req, deps);
   if (!context) {
     return { response: json({ error: '未授权' }, 401) };
   }
@@ -203,3 +228,26 @@ export const requireAuthUser = async (req: Request): Promise<{ user: Authenticat
 
   return context;
 };
+
+export const createAuthServer = (overrides: Partial<AuthServerDeps> = {}): AuthServerApi => {
+  const deps: AuthServerDeps = {
+    ...defaultAuthServerDeps,
+    ...overrides,
+  };
+
+  return {
+    getLegacyBearerAuthUser: (req) => getLegacyBearerAuthUserWithDeps(req, deps),
+    getAuthUser: (req) => getAuthUserWithDeps(req, deps),
+    requireAuthUser: (req) => requireAuthUserWithDeps(req, deps),
+  };
+};
+
+const defaultAuthServer = createAuthServer();
+
+export const getLegacyBearerAuthUser = async (req: Request): Promise<AuthenticatedUser | null> =>
+  defaultAuthServer.getLegacyBearerAuthUser(req);
+
+export const getAuthUser = async (req: Request): Promise<AuthUserContext | null> => defaultAuthServer.getAuthUser(req);
+
+export const requireAuthUser = async (req: Request): Promise<RequireAuthUserResult> =>
+  defaultAuthServer.requireAuthUser(req);

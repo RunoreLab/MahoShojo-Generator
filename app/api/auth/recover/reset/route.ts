@@ -6,7 +6,7 @@ import {
 } from '@/lib/db/repositories/password-reset-tokens';
 import { updateUserAuthKey } from '@/lib/database/users';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 
 const json = (payload: unknown, status = 200): Response =>
   new Response(JSON.stringify(payload), {

@@ -13,7 +13,7 @@ import {
 import { verifyUserLogin } from '@/lib/database/users';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 
 type LoginMode = 'password' | 'legacy';
 

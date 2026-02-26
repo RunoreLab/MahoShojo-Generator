@@ -1,7 +1,7 @@
 import { getBetterAuthBootstrapStatus } from '@/lib/auth/better-auth';
 import { getBetterAuthRouteHandlers, hasBetterAuthDatabaseBinding } from '@/lib/auth/better-auth-app';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 
 const json = (payload: unknown, status = 200): Response =>
   new Response(JSON.stringify(payload), {

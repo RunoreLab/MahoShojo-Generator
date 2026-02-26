@@ -8,7 +8,7 @@ import {
 import { getUserByUsername } from '@/lib/database/users';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 
 const GENERIC_MESSAGE = '如果您输入的信息正确，系统会向邮箱发送一次性重置链接，请在 15 分钟内完成重置。';
 

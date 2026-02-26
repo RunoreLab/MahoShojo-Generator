@@ -17,7 +17,7 @@ import { getBusinessUserByEmail, getBusinessUserByUsername } from '@/lib/db/repo
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 
 type RegisterPayload = {
   username?: string;

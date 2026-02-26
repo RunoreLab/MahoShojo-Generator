@@ -154,6 +154,12 @@ migrations_dir = "drizzle"
 
 3. 如果你使用 `env.production` / `env.preview`，请同步替换对应区块里的 `d1_databases` 配置。
 
+4. 部署前执行硬校验（会拦截占位值或非法 UUID）：
+
+```bash
+bun run check:wrangler:d1
+```
+
 > 说明：当前项目里 Better Auth 路由（`/api/auth/[...all]`）在没有 `DB` 绑定时会直接返回 `BETTER_AUTH_DB_UNAVAILABLE`（503）。
 
 -----
@@ -184,5 +190,12 @@ bun run db:migrate:remote:prod
 bun run db:migrate:local:preview
 bun run db:migrate:remote:preview
 ```
+
+> 说明：以上迁移命令已切换到 `scripts/d1-migrate-safe.mjs`，并内置以下保护：
+> - 自动初始化 `d1_migrations` 元表并按文件顺序执行。
+> - 对 `0001_users_admin_flags.sql` 采用“列存在检查 + 缺失补齐 + 迁移记录补写”，避免历史库因已存在列而中断。
+> - 所有迁移前会先执行 `check:wrangler:d1`，阻断错误 D1 配置。
+
+> 测试库建议：若仅在测试库验证，请额外带上 `--env-file env.test`（或在 shell 中先导入 `env.test`），避免误连生产配置。
 
 > 补充：`scripts/backfill-user-auth-links.ts` 仍依赖 `CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / D1_DATABASE_ID` 这组 HTTP API 凭据，请在 `.env.local` 中同时配置。

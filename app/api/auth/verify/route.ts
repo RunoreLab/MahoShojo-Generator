@@ -1,7 +1,7 @@
 import { issueActivityToken } from '@/lib/auth/activity-token';
 import { requireAuthUserForApp } from '@/lib/auth/server-app';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 
 export async function POST(req: Request): Promise<Response> {
   try {
