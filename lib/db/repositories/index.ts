@@ -18,3 +18,8 @@ export * from '@/lib/db/repositories/favorites';
 export * from '@/lib/db/repositories/deck-favorites';
 export * from '@/lib/db/repositories/pvp-room-core';
 export * from '@/lib/db/repositories/pvp-match-round-chat';
+export * from '@/lib/db/repositories/tags';
+export * from '@/lib/db/repositories/badges';
+export * from '@/lib/db/repositories/redemption-codes';
+export * from '@/lib/db/repositories/large-objects';
+export * from '@/lib/db/repositories/user-activity';

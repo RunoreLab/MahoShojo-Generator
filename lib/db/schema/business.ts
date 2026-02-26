@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export type DataCardType = 'character' | 'scenario' | 'history' | 'questionnaire';
 export type DataCardReviewStatus = 'pending' | 'approved' | 'rejected';
@@ -369,7 +369,91 @@ export const dataCardTags = sqliteTable('data_card_tags', {
   tagId: text('tag_id').notNull(),
   createdByUserId: integer('created_by_user_id'),
   createdAt: text('created_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.dataCardId, table.tagId] }),
+  tagIdIndex: index('idx_data_card_tags_tag_id').on(table.tagId),
+  dataCardIdIndex: index('idx_data_card_tags_data_card_id').on(table.dataCardId),
+}));
+
+export const redemptionCodes = sqliteTable('redemption_codes', {
+  code: text('code').primaryKey(),
+  slotCount: integer('slot_count').notNull(),
+  createdAt: text('created_at'),
 });
+
+export const badges = sqliteTable('badges', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  icon: text('icon').notNull(),
+  textColor: text('text_color').notNull(),
+  backgroundColor: text('background_color').notNull(),
+  borderColor: text('border_color'),
+  rarity: integer('rarity'),
+  sortOrder: integer('sort_order'),
+  isActive: integer('is_active', { mode: 'boolean' }),
+  createdAt: text('created_at'),
+}, (table) => ({
+  rarityIndex: index('idx_badges_rarity').on(table.rarity),
+  isActiveIndex: index('idx_badges_is_active').on(table.isActive),
+}));
+
+export const userBadges = sqliteTable('user_badges', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull(),
+  badgeId: text('badge_id').notNull(),
+  isEquipped: integer('is_equipped', { mode: 'boolean' }),
+  displayOrder: integer('display_order'),
+  obtainedAt: text('obtained_at'),
+}, (table) => ({
+  userIdIndex: index('idx_user_badges_user_id').on(table.userId),
+  isEquippedIndex: index('idx_user_badges_is_equipped').on(table.isEquipped),
+  userIdBadgeIdUnique: uniqueIndex('user_badges_user_id_badge_id_unique').on(table.userId, table.badgeId),
+}));
+
+export type TagScope = 'user' | 'system' | 'admin';
+
+export const tags = sqliteTable('tags', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  category: text('category'),
+  scope: text('scope').$type<TagScope>().notNull(),
+  isActive: integer('is_active', { mode: 'boolean' }).notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => ({
+  scopeIndex: index('idx_tags_scope').on(table.scope),
+  isActiveIndex: index('idx_tags_is_active').on(table.isActive),
+  categoryIndex: index('idx_tags_category').on(table.category),
+}));
+
+export const userLastActivity = sqliteTable('user_last_activity', {
+  userId: integer('user_id').primaryKey(),
+  lastSeenAt: text('last_seen_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => ({
+  lastSeenAtIndex: index('idx_user_last_activity_last_seen_at').on(table.lastSeenAt),
+}));
+
+export const largeObjects = sqliteTable('large_objects', {
+  id: text('id').primaryKey(),
+  kind: text('kind').notNull(),
+  ownerRefId: text('owner_ref_id').notNull(),
+  ownerUserId: integer('owner_user_id'),
+  r2Key: text('r2_key').notNull(),
+  bytes: integer('bytes').notNull(),
+  storedBytes: integer('stored_bytes'),
+  sha256: text('sha256'),
+  contentType: text('content_type'),
+  contentEncoding: text('content_encoding'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => ({
+  kindCreatedAtIndex: index('idx_large_objects_kind_created_at').on(table.kind, table.createdAt),
+  ownerUserIdCreatedAtIndex: index('idx_large_objects_owner_user_id_created_at').on(table.ownerUserId, table.createdAt),
+  kindOwnerRefUnique: uniqueIndex('large_objects_kind_owner_ref_unique').on(table.kind, table.ownerRefId),
+}));
 
 export const arenaRatings = sqliteTable('arena_ratings', {
   entityType: text('entity_type').$type<ArenaRatingEntityType>().notNull(),
